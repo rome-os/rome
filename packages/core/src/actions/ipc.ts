@@ -5,13 +5,14 @@
 //   - openStream() / onStream() for named one-shot or long-running streams
 //
 // Wire format (5 message types):
-//   - rpc_request  { reqId, method, params }
+//   - rpc_request  { reqId, method, params, traceCarrier? }
 //   - rpc_response { reqId, result?, error? }
 //   - stream_open  { channelId, name }
 //   - sent_event   { channelId, value }
 //   - stream_close { channelId, reason?, error? }
 
 import { randomUUID } from "node:crypto";
+import { context, propagation, ROOT_CONTEXT } from "@opentelemetry/api";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("ipc");
@@ -21,6 +22,12 @@ export interface IpcRequestMessage {
   reqId: string;
   method: string;
   params: unknown;
+  /**
+   * The caller's W3C trace context from `propagation.inject`. Absent when the
+   * caller had no span or runs without telemetry, and from older peers. The
+   * handler runs under exactly this context, or under none when it is absent.
+   */
+  traceCarrier?: Record<string, string>;
 }
 
 export interface IpcResponseMessage {
@@ -214,6 +221,10 @@ export class IpcRpc {
       throw new IpcRpcDisconnectError();
     }
     const reqId = randomUUID();
+    const carrier: Record<string, string> = {};
+    propagation.inject(context.active(), carrier);
+    const request: IpcRequestMessage = { type: "rpc_request", reqId, method, params };
+    if (Object.keys(carrier).length > 0) request.traceCarrier = carrier;
     const timeoutMs =
       options?.timeoutMs === null
         ? null
@@ -233,7 +244,7 @@ export class IpcRpc {
         method,
       });
       try {
-        this.transport.send({ type: "rpc_request", reqId, method, params });
+        this.transport.send(request);
       } catch (err) {
         if (timeout) clearTimeout(timeout);
         this.pending.delete(reqId);
@@ -323,11 +334,16 @@ export class IpcRpc {
     const ctx: IpcCallContext = {
       openStream: <T>(name: string): IpcOutboundStream<T> => this.openStream<T>(name),
     };
+    // Transport callbacks fire in the async context captured when the channel
+    // was created: for a pooled worker, the request that forked it. Extracting
+    // against ROOT_CONTEXT drops that context, so a request without a carrier
+    // runs under no span rather than under a finished span of another trace.
+    const callerContext = propagation.extract(ROOT_CONTEXT, message.traceCarrier ?? {});
     try {
       const invoke = () => handler(message.params, ctx);
-      const result = this.options.runInbound
-        ? await this.options.runInbound(invoke)
-        : await invoke();
+      const result = await context.with(callerContext, () =>
+        this.options.runInbound ? this.options.runInbound(invoke) : invoke(),
+      );
       this.transport.send({ type: "rpc_response", reqId: message.reqId, result });
     } catch (err) {
       this.transport.send({

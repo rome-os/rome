@@ -1530,6 +1530,8 @@ export class ActionEngine {
     // every later `message` callback on the reused worker re-enters that old
     // context. Worker IPC is an independent ingress boundary, so never let a
     // creator action's ALS state leak into a main-process service call.
+    // IpcRpc resets the OpenTelemetry context the same way and restores the
+    // calling worker's span from the request's traceCarrier.
     const rpc = new IpcRpc(createChildProcessTransport(worker.child), "main", {
       runInbound: async (callback) =>
         await replayContext.exit(() => actionExecutionContext.exit(callback)),

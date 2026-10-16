@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, it, expect, rs } from "@rstest/core";
+import { context, propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
 import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
 import { ActionEngine } from "./engine.js";
@@ -16,7 +17,17 @@ import {
   runWithHookInvocationContext,
 } from "../core/hook-recursion.js";
 import type { ActionResult } from "./types.js";
-import { createActionEngineRepos } from "../test/helpers.js";
+import type { ActionWorkerPayload } from "./worker-protocol.js";
+import {
+  ACTION_ROOT_DISPATCH_METHOD,
+  ActionWorkerCoordinator,
+  registerActionSubprocessHost,
+} from "./action-subprocess.js";
+import {
+  createActionEngineRepos,
+  installTestSpanHarness,
+  type SpanHarness,
+} from "../test/helpers.js";
 
 interface SubprocessEngine {
   executeInSubprocess(...args: unknown[]): Promise<ActionResult>;
@@ -715,6 +726,158 @@ describe("WorkerRpcServer events.publish", () => {
       rootExecutionId: "fresh-root",
       isRoot: true,
     });
+  });
+});
+
+describe("WorkerRpcServer trace context", () => {
+  class PooledWorker extends EventEmitter {
+    pid = 345_679;
+    connected = true;
+    exitCode: number | null = null;
+    signalCode: NodeJS.Signals | null = null;
+    sent: Array<{ type?: string; reqId?: string; result?: unknown }> = [];
+
+    send(message: { type?: string }, callback?: (error: Error | null) => void): boolean {
+      this.sent.push(message);
+      callback?.(null);
+      if (message.type === "shutdown") {
+        this.connected = false;
+        this.exitCode = 0;
+        queueMicrotask(() => this.emit("exit", 0, null));
+      }
+      return true;
+    }
+  }
+
+  // A main ActionEngine with one pooled fake worker. executeInSubprocess only
+  // accepts the root and reports success, so the span under test is main's own
+  // `action:*` span.
+  function mainWithPooledWorker(actionName: string) {
+    const worker = new PooledWorker();
+    const registry = new ActionRegistryImpl();
+    registry.register(buildAction(actionName));
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
+      processRole: "main",
+      workerWarmPoolSize: 1,
+      actionWorkerFork: () => worker as unknown as ChildProcess,
+      tracer: trace.getTracer("rome"),
+    });
+    rs.spyOn(engine as unknown as SubprocessEngine, "executeInSubprocess").mockImplementation(
+      async (...args: unknown[]) => {
+        const onRootAccepted = args[3] as (() => void) | undefined;
+        onRootAccepted?.();
+        return { status: "ok" };
+      },
+    );
+    return { worker, engine };
+  }
+
+  // Two spans from unrelated traces. `forkContext` holds an ended span, like
+  // the context main re-enters on every `message` callback of a pooled worker.
+  // `traceCarrier` names the span the worker is running when it calls main.
+  function forkAndWorkerSpans() {
+    const tracer = trace.getTracer("worker-rpc-test");
+    const forkSpan = tracer.startSpan("fork-time-request", undefined, ROOT_CONTEXT);
+    forkSpan.end();
+    const workerSpan = tracer.startSpan("worker-action", undefined, ROOT_CONTEXT);
+    const traceCarrier: Record<string, string> = {};
+    propagation.inject(trace.setSpan(ROOT_CONTEXT, workerSpan), traceCarrier);
+    workerSpan.end();
+    return {
+      forkContext: trace.setSpan(ROOT_CONTEXT, forkSpan),
+      workerSpan: workerSpan.spanContext(),
+      traceCarrier,
+    };
+  }
+
+  it("parents an event-triggered action span to the publishing worker's span", async () => {
+    const harness = installTestSpanHarness("node");
+    try {
+      const bus = new EventBus();
+      const { server } = makeServer({ eventBus: bus });
+      const { worker, engine } = mainWithPooledWorker("routine_action");
+      engine.setWorkerRpcServer(server);
+      let routineRun: Promise<unknown> | undefined;
+      bus.subscribe(() => {
+        routineRun = engine.run("routine_action", {}, { rootExecutionId: "fresh-root" });
+      });
+      const { forkContext, workerSpan, traceCarrier } = forkAndWorkerSpans();
+
+      engine.startWorkerWarmPool();
+      context.with(forkContext, () => {
+        worker.emit("message", {
+          type: "rpc_request",
+          reqId: "publish-traced",
+          method: "events.publish",
+          params: { name: "github.pull_request", source: "connector", payload: {} },
+          traceCarrier,
+        });
+      });
+      await rs.waitFor(() =>
+        expect(worker.sent.some((message) => message.reqId === "publish-traced")).toBe(true),
+      );
+      await rs.waitFor(() => expect(routineRun).toBeDefined());
+      await routineRun;
+      await engine.stopWorkerWarmPool();
+
+      const actionSpan = (await harness.finishedSpans()).find(
+        (span) => span.name === "action:routine_action",
+      );
+      expect(actionSpan?.spanContext().traceId).toBe(workerSpan.traceId);
+      expect(actionSpan?.parentSpanContext?.spanId).toBe(workerSpan.spanId);
+    } finally {
+      await harness.shutdown();
+    }
+  });
+
+  it("parents a detached root's action span to the dispatching worker's span", async () => {
+    const harness = installTestSpanHarness("node");
+    try {
+      const { worker, engine } = mainWithPooledWorker("detached_action");
+      const coordinator = new ActionWorkerCoordinator(engine);
+      engine.setAgentSessionBridge({
+        attach: (rpc, child) => registerActionSubprocessHost(rpc, coordinator, child),
+      });
+      const { forkContext, workerSpan, traceCarrier } = forkAndWorkerSpans();
+      const payload: ActionWorkerPayload = {
+        actionName: "detached_action",
+        args: {},
+        context: {
+          actionName: "detached_action",
+          executionId: "detached-root",
+          rootExecutionId: "detached-root",
+        },
+      };
+
+      engine.startWorkerWarmPool();
+      context.with(forkContext, () => {
+        worker.emit("message", {
+          type: "rpc_request",
+          reqId: "dispatch-traced",
+          method: ACTION_ROOT_DISPATCH_METHOD,
+          params: { payload },
+          traceCarrier,
+        });
+      });
+      await rs.waitFor(() =>
+        expect(worker.sent.find((message) => message.reqId === "dispatch-traced")).toMatchObject({
+          result: { executionId: "detached-root" },
+        }),
+      );
+      let actionSpan: Awaited<ReturnType<SpanHarness["finishedSpans"]>>[number] | undefined;
+      await rs.waitFor(async () => {
+        actionSpan = (await harness.finishedSpans()).find(
+          (span) => span.name === "action:detached_action",
+        );
+        expect(actionSpan).toBeDefined();
+      });
+      await engine.stopWorkerWarmPool();
+
+      expect(actionSpan?.spanContext().traceId).toBe(workerSpan.traceId);
+      expect(actionSpan?.parentSpanContext?.spanId).toBe(workerSpan.spanId);
+    } finally {
+      await harness.shutdown();
+    }
   });
 });
 
