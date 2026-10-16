@@ -7,6 +7,7 @@ import { ConversationSettingsRepository } from "../../conversation-settings/repo
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema.js";
 import {
+  INTERRUPTED_TURN_ERROR,
   WebChatRepository,
   channelConversationId,
   sessionAwaitingGuardian,
@@ -312,6 +313,70 @@ describe("WebChatRepository", () => {
       { id: "first", turnId: "turn-a" },
       { id: "second", turnId: "turn-b" },
     ]);
+  });
+
+  it("ends the turns a stopped process left open, from the last day only", async () => {
+    const start = (turnId: string) => ({ type: "turn_start", turnId, agent: "main" });
+    const end = (turnId: string) => ({
+      type: "turn_end",
+      turnId,
+      status: "completed",
+      durationMs: 1,
+    });
+    const trace = (sessionId: string, messageId: string, blocks: unknown[]) =>
+      repo.appendTraceBlocks({ messageId, sessionId, turnId: messageId, startSeq: 0, blocks });
+    for (const id of ["sess-crashed", "sess-done", "sess-second", "sess-old"]) {
+      await repo.createSession(id, id);
+    }
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      rs.setSystemTime(new Date("2026-10-10T12:00:00Z"));
+      await trace("sess-old", "trace-old", [start("turn-old"), { type: "text", content: "…" }]);
+      rs.setSystemTime(new Date("2026-10-15T11:00:00Z"));
+      await trace("sess-crashed", "trace-crashed", [
+        start("turn-crashed"),
+        { type: "tool_use", id: "tu-1", tool: "execute_action", input: {} },
+      ]);
+      await trace("sess-done", "trace-done", [start("turn-done"), end("turn-done")]);
+      await trace("sess-second", "trace-second", [start("turn-1"), end("turn-1"), start("turn-2")]);
+    } finally {
+      rs.useRealTimers();
+    }
+
+    const now = new Date("2026-10-15T12:00:00Z");
+    const since = new Date("2026-10-14T12:00:00Z");
+    await expect(repo.endInterruptedTurns(now, since)).resolves.toBe(2);
+
+    const blocks = async (sessionId: string) =>
+      JSON.parse((await repo.getTraceContents(sessionId))[0]!.content) as Record<string, unknown>[];
+    expect((await blocks("sess-crashed")).slice(-2)).toEqual([
+      { type: "error", error: INTERRUPTED_TURN_ERROR, agent: "main" },
+      {
+        type: "turn_end",
+        turnId: "turn-crashed",
+        status: "error",
+        durationMs: 60 * 60 * 1000,
+        agent: "main",
+      },
+    ]);
+    expect((await blocks("sess-second")).at(-1)).toMatchObject({
+      type: "turn_end",
+      turnId: "turn-2",
+      status: "error",
+    });
+    expect(await blocks("sess-done")).toHaveLength(2);
+    expect(await blocks("sess-old")).toHaveLength(2);
+
+    const failed = Object.fromEntries(
+      (await repo.listSessions()).map((row) => [row.id, row.lastTurnFailed]),
+    );
+    expect(failed).toMatchObject({
+      "sess-crashed": true,
+      "sess-second": true,
+      "sess-done": false,
+      "sess-old": false,
+    });
+    await expect(repo.endInterruptedTurns(now, since)).resolves.toBe(0);
   });
 
   it("lists sessions with message counts and project names", async () => {
