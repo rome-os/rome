@@ -74,11 +74,11 @@ export interface MessageHandlerInput {
   /** Optional project working directory for this dedicated chat session. */
   workingDir?: string;
   /** The conversation's agent choice (`routing.agentName`), which the
-   *  conversation stores. Ignored when `linkedAgentName` is set. */
+   *  conversation stores. It wins over `linkedAgentName`. */
   routedAgentName?: string;
   /** Canonical id of the agent linked to the account the message arrived on.
-   *  It answers whatever the conversation stores or chose, and the
-   *  conversation never stores it. When that agent is not loaded, nothing
+   *  It answers a conversation that stores no agent choice of its own, and
+   *  the conversation never stores it. When that agent is not loaded, nothing
    *  answers. Absent on an account that takes no link. */
   linkedAgentName?: string;
 }

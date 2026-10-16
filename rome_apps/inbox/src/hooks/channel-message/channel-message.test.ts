@@ -464,7 +464,7 @@ describe("ChannelMessageHook", () => {
       expect.anything(),
     ];
 
-    it("passes the linked agent read per message, and drops the group's choice", async () => {
+    it("passes the linked agent read per message, with the group's choice", async () => {
       await harness.emit(FEISHU_2_ID, message({ messageId: "m-1" }));
       linked = "support:agent";
       await harness.emit(FEISHU_2_ID, message({ messageId: "m-2" }));
@@ -472,11 +472,11 @@ describe("ChannelMessageHook", () => {
 
       expect(harness.run).toHaveBeenNthCalledWith(
         1,
-        ...passed({ linkedAgentName: "sales:agent", routedAgentName: undefined }),
+        ...passed({ linkedAgentName: "sales:agent", routedAgentName: "override" }),
       );
       expect(harness.run).toHaveBeenNthCalledWith(
         2,
-        ...passed({ linkedAgentName: "support:agent", routedAgentName: undefined }),
+        ...passed({ linkedAgentName: "support:agent", routedAgentName: "override" }),
       );
       expect(harness.run).toHaveBeenNthCalledWith(
         3,

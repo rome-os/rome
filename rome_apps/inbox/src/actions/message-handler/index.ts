@@ -653,9 +653,7 @@ export function createMessageHandlerAction(
           typeof args.routedAgentName === "string" && args.routedAgentName.trim()
             ? args.routedAgentName.trim()
             : "main";
-        // A conversation on a linked account stores no agent of its own.
-        const initialAgent =
-          answeringAgent === undefined ? await resolveAgent(deps, requestedAgent, "main") : "main";
+        const initialAgent = await resolveAgent(deps, requestedAgent, "main");
         const parentThreadId =
           typeof args.parentThreadId === "string" && args.parentThreadId
             ? args.parentThreadId
@@ -670,11 +668,15 @@ export function createMessageHandlerAction(
           projectName: selectedProjectName,
           projectPath: selectedProjectPath,
         });
-        // The linked agent answers whatever the conversation stores, and is
-        // never stored, so a relink takes effect on the next message.
-        // Elsewhere root conversations retain their persisted override, and
-        // native thread sessions are refreshed from their parent's.
-        const targetAgent = answeringAgent ?? conversation.agentName ?? "main";
+        // Root conversations retain their persisted override, and native
+        // thread sessions are refreshed from their parent's. An override wins
+        // over the account's linked agent, which answers the rest and is never
+        // stored, so a relink takes effect on the next message.
+        const override =
+          conversation.agentName && !isCoreMainAgentId(conversation.agentName)
+            ? conversation.agentName
+            : undefined;
+        const targetAgent = override ?? answeringAgent ?? "main";
         const platformMessageId =
           typeof args.messageId === "string" && args.messageId
             ? args.messageId

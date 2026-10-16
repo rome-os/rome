@@ -965,7 +965,8 @@ describe("per-channel agent routing (trusted path)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The account's linked agent answers when the conversation has no override.
+// A conversation's own agent choice wins. The account's linked agent answers
+// the rest.
 // An account whose linked agent is not loaded answers nothing.
 // ---------------------------------------------------------------------------
 
@@ -1035,28 +1036,28 @@ describe("linked agent", () => {
     expect(agentRunner.calls[0].agentName).toBe("main");
   });
 
-  it("answers with the linked agent over a group's choice and a stored agent", async () => {
-    const { deps, agentRunner, conversations } = guardianDeps([
-      "main",
-      "sentinel",
-      "envoy",
-      "sales:agent",
-      "pm:assistant",
-    ]);
-    conversations.ensureChannelConversation.mockImplementation(async () => ({
-      id: "channel:feishu-2:group-1",
-      agentName: "pm:assistant",
-    }));
-    const action = createAction(actionConfig, deps);
+  it("answers with a conversation's stored agent over the linked agent, main included", async () => {
+    for (const linkedAgentName of ["sales:agent", "core:main"]) {
+      const { deps, agentRunner, conversations } = guardianDeps([
+        "main",
+        "sentinel",
+        "envoy",
+        "sales:agent",
+        "pm:assistant",
+      ]);
+      conversations.ensureChannelConversation.mockImplementation(async () => ({
+        id: "channel:feishu-2:group-1",
+        agentName: "pm:assistant",
+      }));
+      const action = createAction(actionConfig, deps);
 
-    await action.execute(
-      inbound({ routedAgentName: "pm:assistant", linkedAgentName: "sales:agent" }),
-    );
+      await action.execute(inbound({ linkedAgentName }));
 
-    expect(agentRunner.calls[0].agentName).toBe("sales:agent");
+      expect(agentRunner.calls[0].agentName).toBe("pm:assistant");
+    }
   });
 
-  it("stores no group choice on a linked account's conversation", async () => {
+  it("stores a group's choice on a linked account's conversation", async () => {
     const { deps, conversations } = guardianDeps([
       "main",
       "sentinel",
@@ -1071,7 +1072,7 @@ describe("linked agent", () => {
     );
 
     expect(conversations.ensureChannelConversation).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: "feishu-2", agentName: "main" }),
+      expect.objectContaining({ channel: "feishu-2", agentName: "pm:assistant" }),
     );
   });
 

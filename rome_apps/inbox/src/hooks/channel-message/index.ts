@@ -139,14 +139,10 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       return;
     }
 
-    let enabled = true;
-    let routedAgentName: string | undefined;
     const snapshot = await this.conversationSettings.get(ref);
-    enabled = snapshot.effective.enabled;
-    // On an account that takes a link, the linked agent answers every
-    // conversation, so a per-group agent choice does not apply.
-    routedAgentName =
-      linkedAgent === undefined ? (snapshot.effective.routing.agentName ?? undefined) : undefined;
+    const enabled = snapshot.effective.enabled;
+    // A group's own agent choice, which wins over the account's linked agent.
+    const routedAgentName = snapshot.effective.routing.agentName ?? undefined;
     if (!enabled) {
       log.debug("conversation disabled", { connectionId, conversationId: message.conversationId });
       return;

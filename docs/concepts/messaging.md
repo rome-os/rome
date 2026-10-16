@@ -43,7 +43,7 @@ A channel is one of Rome's presences on a platform, where Rome and a person can 
 - Channel connection setup is uniform: enabling any channel drives the same server-owned setup protocol — there is no bespoke per-service connect flow ([channel invariants](../architecture/channels.md#invariants)).
 - Per-channel credentials are kept separate and are revoked independently.
 - A channel's name is its identity, and links and stored messages name the channel. The first channel of a service is named after the service, and later ones get an opaque id. A name never passes to another service. One platform can carry several channels, such as the `telegram` bot, a second Telegram bot and the `telegram_user` signed-in user. A second presence is always a second channel ([ADR](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-10-15-several-connections-per-service)).
-- A channel has at most one *linked agent*, the agent that answers in its conversations, and main is linked like any other agent. A channel that can be linked but has no linked agent answers nothing. On one platform an agent other than main is linked to at most one channel ([Linked agents](../architecture/channels.md#linked-agents)).
+- A channel has at most one *linked agent*, the agent that answers in its conversations unless one chose its own, and main is linked like any other agent. A channel that can be linked but has no linked agent answers nothing. On one platform an agent other than main is linked to at most one channel ([Linked agents](../architecture/channels.md#linked-agents)).
 
 **Not to be confused with:**
 
