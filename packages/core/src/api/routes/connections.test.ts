@@ -516,7 +516,7 @@ describe("guardian links across Connections of one service", () => {
     const second = await registry.connectAnother("telegram");
     await registry.importCredential(first.id, "bot", fixture.validCredential());
     await registry.importCredential(second.id, "bot", fixture.validCredential());
-    const personMappingRepo = new PersonMappingRepository(db);
+    const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
     await personMappingRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",
@@ -524,7 +524,7 @@ describe("guardian links across Connections of one service", () => {
     });
     const app = makeApp(registry, personMappingRepo, {
       db,
-      approvalsRepo: new ApprovalsRepository(db),
+      approvalsRepo: new ApprovalsRepository(db, personMappingRepo),
     });
     const del = (path: string) => app.request(path, { method: "DELETE", headers: SAME_ORIGIN });
     return { registry, personMappingRepo, first, second, del };
@@ -562,7 +562,7 @@ describe("guardian links across Connections of one service", () => {
     registry.register(makeZeroGrantTalk().descriptor);
     const first = await registry.connect("fake-webchat");
     await registry.connectAnother("fake-webchat");
-    const personMappingRepo = new PersonMappingRepository(db);
+    const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
     await personMappingRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",
@@ -570,7 +570,7 @@ describe("guardian links across Connections of one service", () => {
     });
     const app = makeApp(registry, personMappingRepo, {
       db,
-      approvalsRepo: new ApprovalsRepository(db),
+      approvalsRepo: new ApprovalsRepository(db, personMappingRepo),
     });
 
     const removed = await app.request(`/connections/${first.id}`, {
