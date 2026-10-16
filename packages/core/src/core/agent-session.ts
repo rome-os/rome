@@ -39,6 +39,7 @@ import type {
   RomeSessionType,
   StreamAgentEvent,
   TurnMiddlewareContext,
+  TurnOutcome,
   ConversationId,
   ConversationRef,
   ProviderSessionResetPolicy,
@@ -1920,8 +1921,20 @@ interface TurnSink {
   pendingSubagentToolUses: Map<string, Extract<AgentEvent, { type: "tool_use" }>>;
   emittedSubagentStarts: Set<string>;
   subagentLinksCleared: boolean;
-  /** A schema-bound turn is terminal-only and cannot be resumed after a parked action. */
-  outputSchemaSuspended: boolean;
+  /**
+   * A tool result suspended the turn: it parked on a card that waits for the
+   * guardian, or it submitted an approval. A schema-bound turn is
+   * terminal-only, so its result then fails the schema.
+   */
+  suspended: boolean;
+  /**
+   * A tool result parked the turn on a card that waits for the guardian (a
+   * question or a handoff). An approval submission doesn't park it: the model
+   * carries on with its turn. This is what the turn outcome reports.
+   */
+  parked: boolean;
+  /** The status the turn_end bracket reported, once it is published. */
+  endStatus?: TurnOutcome["status"];
   /**
    * The model session's `lastProviderTurnId` when the turn took the turn
    * mutex. A turn that never reached the provider leaves it unchanged, so an
@@ -1938,12 +1951,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+const SUSPENDING_FLAG_PATTERN = /"(?:pendingInteraction|pendingApproval|handoff)"/;
+
 /**
- * True when a tool result parked the turn on a pending interaction, approval,
- * or handoff. Facade results may reach us directly, JSON-encoded, or wrapped
- * in an MCP text-content array, so normalize all three shapes.
+ * How a tool result suspends the turn: `parked` on a pending interaction or
+ * handoff, `approval` for an approval submission, or null. Facade results may
+ * reach us directly, JSON-encoded, or wrapped in an MCP text-content array, so
+ * normalize all three shapes. Every session runs this on every tool result, so
+ * text without one of the flag names is rejected before it is parsed.
  */
-function toolResultSuspendsTurn(output: unknown): boolean {
+function toolResultSuspension(output: unknown): "parked" | "approval" | null {
   let value: unknown = output;
   if (isRecord(value) && Array.isArray(value.content)) value = value.content;
   if (Array.isArray(value)) {
@@ -1954,16 +1971,37 @@ function toolResultSuspendsTurn(output: unknown): boolean {
     value = textBlock?.text;
   }
   if (typeof value === "string") {
+    if (!SUSPENDING_FLAG_PATTERN.test(value)) return null;
     try {
       value = JSON.parse(value);
     } catch {
-      return false;
+      return null;
     }
   }
-  return (
-    isRecord(value) &&
-    (value.pendingInteraction === true || value.pendingApproval === true || value.handoff === true)
-  );
+  if (!isRecord(value)) return null;
+  if (value.pendingInteraction === true || value.handoff === true) return "parked";
+  return value.pendingApproval === true ? "approval" : null;
+}
+
+function noteSuspension(sink: TurnSink, msg: AgentEvent): void {
+  if (sink.parked || msg.type !== "tool_result") return;
+  const suspension = toolResultSuspension(msg.output);
+  if (suspension) sink.suspended = true;
+  if (suspension === "parked") sink.parked = true;
+}
+
+/**
+ * The status the turn_end bracket reports for `terminal`. Same precedence as
+ * classifyAgentTurnStatus: a user stop is reported as `interrupted` even when
+ * the provider surfaced the abort as an error block, so consumers can tell a
+ * graceful stop from a true failure without peeking back into the terminal's
+ * accounting.
+ */
+function turnEndStatus(sink: TurnSink, terminal: AgentEvent): TurnOutcome["status"] {
+  const accounting =
+    terminal.type === "result" || terminal.type === "error" ? terminal.accounting : undefined;
+  if (sink.lifecycleInterrupted || isInterruptedAccounting(accounting)) return "interrupted";
+  return terminal.type === "error" ? "error" : "completed";
 }
 
 function validateProviderStructuredResult(
@@ -2333,13 +2371,7 @@ class AgentSessionImpl implements AgentSession {
         // translator runs on terminal and needs the full block stream to
         // reconstruct rounds and tool pairs.
         sink.blocks.push({ block: msg, tsMs: Date.now() });
-        if (
-          this.structuredOutputValidator &&
-          msg.type === "tool_result" &&
-          toolResultSuspendsTurn(msg.output)
-        ) {
-          sink.outputSchemaSuspended = true;
-        }
+        noteSuspension(sink, msg);
         this.trackTurnMetrics(msg);
         await this.deps.sessionsRepo.touch(this.sessionId);
 
@@ -2377,7 +2409,7 @@ class AgentSessionImpl implements AgentSession {
         let outbound: AgentEvent = validateProviderStructuredResult(
           msg,
           this.structuredOutputValidator,
-          sink.outputSchemaSuspended,
+          sink.suspended,
         );
 
         if (outbound.type === "error" && outbound.code === "auth_revoked") {
@@ -2465,18 +2497,16 @@ class AgentSessionImpl implements AgentSession {
   private publishTurnEnd(sink: TurnSink, terminal: AgentEvent): void {
     // Turns that fail before dispatchTurnStarted have no start timestamp;
     // report 0 rather than a since-epoch wall clock.
+    // A turn ends once. A late failure on a closed sink, such as a provider
+    // send that rejects after the model's terminal, publishes nothing, so it
+    // must not change the status the outcome reports either.
+    if (sink.done) return;
     const startMs = sink.lifecycleStartedAtMs;
-    // Same precedence as classifyAgentTurnStatus: a user stop is reported as
-    // `interrupted` even when the provider surfaced the abort as an error
-    // block, so consumers can tell a graceful stop from a true failure
-    // without peeking back into the terminal's accounting.
-    const accounting =
-      terminal.type === "result" || terminal.type === "error" ? terminal.accounting : undefined;
-    const interrupted = sink.lifecycleInterrupted || isInterruptedAccounting(accounting);
+    sink.endStatus = turnEndStatus(sink, terminal);
     this.publishOutbound(sink, {
       type: "turn_end",
       turnId: sink.turnId,
-      status: interrupted ? "interrupted" : terminal.type === "error" ? "error" : "completed",
+      status: sink.endStatus,
       durationMs: startMs === undefined ? 0 : Date.now() - startMs,
     });
   }
@@ -3089,7 +3119,7 @@ class AgentSessionImpl implements AgentSession {
           if (
             this.structuredOutputValidator &&
             msg.type === "tool_result" &&
-            toolResultSuspendsTurn(msg.output)
+            toolResultSuspension(msg.output) !== null
           ) {
             outputSchemaSuspended = true;
           }
@@ -3301,7 +3331,8 @@ class AgentSessionImpl implements AgentSession {
       pendingSubagentToolUses: new Map(),
       emittedSubagentStarts: new Set(),
       subagentLinksCleared: false,
-      outputSchemaSuspended: false,
+      suspended: false,
+      parked: false,
       usageRecorded: false,
     };
     const events = this.buildTurnEvents(sink);
@@ -3570,17 +3601,11 @@ class AgentSessionImpl implements AgentSession {
             }
             return;
           }
-          if (
-            this.structuredOutputValidator &&
-            event.type === "tool_result" &&
-            toolResultSuspendsTurn(event.output)
-          ) {
-            sink.outputSchemaSuspended = true;
-          }
+          noteSuspension(sink, event);
           const outbound = validateProviderStructuredResult(
             event,
             this.structuredOutputValidator,
-            sink.outputSchemaSuspended,
+            sink.suspended,
           );
           if (outbound.type === "result" || outbound.type === "error") {
             emittedTerminal = outbound;
@@ -3662,10 +3687,35 @@ class AgentSessionImpl implements AgentSession {
         await waitForSinkClose();
       };
 
+      // The terminal a turn that never reached the model ends on: the one a
+      // middleware emitted, else a synthesized empty result, checked against
+      // the output schema. An interrupted turn publishes none, so it skips the
+      // check.
+      const shortCircuitTerminal = (): TurnResultEvent | TurnErrorEvent => {
+        if (emittedTerminal) return emittedTerminal;
+        const empty: TurnResultEvent = { type: "result", content: "" };
+        if (sink.lifecycleInterrupted) return empty;
+        return validateProviderStructuredResult(
+          empty,
+          this.structuredOutputValidator,
+          sink.suspended,
+        ) as TurnResultEvent | TurnErrorEvent;
+      };
+
+      // What a middleware's next() resolves with: the status turn_end reports.
+      // The chain reads it once every layer inside has finished, including one
+      // an inner middleware started without awaiting next().
+      const readOutcome = (): TurnOutcome => {
+        return {
+          status: sink.endStatus ?? turnEndStatus(sink, shortCircuitTerminal()),
+          suspended: sink.parked,
+        };
+      };
+
       const chain = this.deps.turnMiddleware;
       if (chain) {
         try {
-          await chain.run(mwCtx, runModelTerminal);
+          await chain.run(mwCtx, runModelTerminal, readOutcome);
         } catch (err) {
           // A fail-closed throw after the terminal, or after next() started
           // the model, cannot change the outcome, so the turn ends on the
@@ -3697,19 +3747,11 @@ class AgentSessionImpl implements AgentSession {
             turnId,
           );
         }
-        let terminal: TurnResultEvent | TurnErrorEvent = emittedTerminal ?? {
-          type: "result",
-          content: "",
-        };
+        const terminal = shortCircuitTerminal();
         // A middleware that short-circuits without a terminal, such as a turn
         // parked on a question card, still publishes one. An interrupted turn
         // publishes none, as an interrupt before the model starts does.
         if (!emittedTerminal && !sink.lifecycleInterrupted) {
-          terminal = validateProviderStructuredResult(
-            terminal,
-            this.structuredOutputValidator,
-            sink.outputSchemaSuspended,
-          ) as TurnResultEvent | TurnErrorEvent;
           this.publishOutbound(sink, terminal);
         }
         this.finalizeTurn(sink, terminal);

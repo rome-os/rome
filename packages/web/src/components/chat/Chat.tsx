@@ -43,7 +43,8 @@ import {
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
-import { prettyAgentName } from "@/lib/agent-name";
+import { useInvalidateSettings } from "@/hooks/use-settings";
+import { isMainAgentName, prettyAgentName } from "@/lib/agent-name";
 import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
@@ -377,11 +378,20 @@ export function Chat({
     pinnedAgentMention: identityAgentMention,
     archivedAt,
     pinnedAt,
+    presentsAsMain,
   } = useSessionIdentity(mainSessionId);
+  // An agent that speaks as the main agent (onboarding) can rename the main
+  // agent during a turn, and messages are labelled with the cached name, so
+  // its turns refresh settings when they end.
+  const invalidateSettings = useInvalidateSettings();
+  const refreshSettingsAfterTurnRef = useRef<(() => void) | null>(null);
+  refreshSettingsAfterTurnRef.current = presentsAsMain ? () => void invalidateSettings() : null;
   // The agent a draft's first send picked stands in until the new session's
   // identity loads, so its chip does not drop out when the composer locks.
   const [createdAgentMention, setCreatedAgentMention] = useState<AgentMention | null>(null);
-  const pinnedAgentMention = identityAgentMention ?? createdAgentMention;
+  // An agent that speaks as the main agent has no mention, so the draft's pick
+  // stops standing in once its identity loads.
+  const pinnedAgentMention = presentsAsMain ? null : (identityAgentMention ?? createdAgentMention);
   // Local override so archive/unarchive from the navbar flips the read-only
   // composer immediately; `undefined` defers to the session read (`archivedAt`).
   const [archivedOverride, setArchivedOverride] = useState<boolean | undefined>(undefined);
@@ -452,20 +462,25 @@ export function Chat({
   // of any open handoff. The whole merge / index / floor / identity derivation
   // lives in the pure `buildChatView`; here we just memoize it on the message
   // map, so a streaming turn (which never touches `messages`) never recomputes.
+  const mainAgentIdentity = useMemo<AgentIdentity>(
+    () => ({ name: mainAgentDisplayName?.trim() || t("roles.agent"), iconUrl: null }),
+    [mainAgentDisplayName, t],
+  );
   const mainIdentity = useMemo<AgentIdentity>(
-    () => ({
-      name: pinnedAgentMention
-        ? prettyAgentName(pinnedAgentMention.agentName)
-        : mainAgentDisplayName?.trim() || t("roles.agent"),
-      iconUrl: pinnedAgentMention?.iconUrl ?? null,
-    }),
-    [mainAgentDisplayName, pinnedAgentMention, t],
+    () =>
+      pinnedAgentMention
+        ? {
+            name: prettyAgentName(pinnedAgentMention.agentName),
+            iconUrl: pinnedAgentMention.iconUrl ?? null,
+          }
+        : mainAgentIdentity,
+    [mainAgentIdentity, pinnedAgentMention],
   );
   // A draft builds from the empty id: the view is empty and its floor is falsy,
   // which every session-keyed effect below already skips.
   const view = useMemo(
-    () => buildChatView(messages, mainSessionId ?? "", mainIdentity),
-    [messages, mainSessionId, mainIdentity],
+    () => buildChatView(messages, mainSessionId ?? "", mainIdentity, mainAgentIdentity),
+    [messages, mainSessionId, mainIdentity, mainAgentIdentity],
   );
   const { displayMessages, handoffList, floorSessionId, identityBySession, interactionResults } =
     view;
@@ -788,15 +803,16 @@ export function Chat({
     for (const h of handoffList) loadMessages(h.childSessionId);
   }, [handoffList, loadMessages]);
 
-  // Subscribe to the main session and the floor (the only one streaming): a
-  // handoff's child streams while it holds the floor; the main session streams
-  // again once it resumes. Each child holds one subscription through useLiveEvents.
+  // Subscribe to the main session, the floor (the only one streaming), and every
+  // handoff child in the transcript: a message can still land in a child after
+  // its handoff closed, such as one an app posts there. Each session holds one
+  // subscription through useLiveEvents.
   const sessionEventIds = useMemo(
     () =>
-      Array.from(new Set([mainSessionId, floorSessionId])).filter((id): id is string =>
-        Boolean(id),
-      ),
-    [mainSessionId, floorSessionId],
+      Array.from(
+        new Set([mainSessionId, floorSessionId, ...handoffList.map((h) => h.childSessionId)]),
+      ).filter((id): id is string => Boolean(id)),
+    [mainSessionId, floorSessionId, handoffList],
   );
   const handleMessageInsert = useCallback(
     (sid: string, message: ChatMessage) => {
@@ -1120,6 +1136,7 @@ export function Chat({
       if (!isMountedRef.current) return;
       await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
       endSessionStream(sessionId, turnId);
+      refreshSettingsAfterTurnRef.current?.();
     },
     [
       consumeStream,
@@ -1590,13 +1607,15 @@ export function Chat({
   );
 
   // The composer's pinned chip = the floor agent (the specialist during a
-  // handoff, the main agent otherwise).
+  // handoff, the main agent otherwise). Its icon is the floor's identity, so a
+  // handoff to the main agent shows the main agent's name and avatar.
   const floorAgentMention: AgentMention | null = floorHandoff
     ? {
         appId: floorHandoff.appId,
         appLabel: floorHandoff.agentLabel,
         agentName: floorHandoff.agentName ?? floorHandoff.agentLabel,
-        iconUrl: `/api/apps/${encodeURIComponent(floorHandoff.appId)}/icon`,
+        iconUrl: floorIdentity.iconUrl,
+        ...(isMainAgentName(floorHandoff.agentName) ? { label: floorIdentity.name } : {}),
       }
     : pinnedAgentMention;
   // The floor's own (raw, chronological) messages drive the approve /
@@ -1711,8 +1730,15 @@ export function Chat({
       onSubmitAppComponent: handleSubmitAppComponent,
       onDismissAppComponent: handleDismissAppComponent,
       interactionResults,
+      mainAgentName: mainAgentIdentity.name,
     }),
-    [refreshActiveSession, handleSubmitAppComponent, handleDismissAppComponent, interactionResults],
+    [
+      refreshActiveSession,
+      handleSubmitAppComponent,
+      handleDismissAppComponent,
+      interactionResults,
+      mainAgentIdentity.name,
+    ],
   );
 
   // Keyed by (session, turn) so dismissal naturally clears when the turn

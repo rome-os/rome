@@ -1,4 +1,4 @@
-import type { TurnMiddlewareContext, TurnMiddlewareHook } from "@rome-os/app-runtime";
+import type { TurnMiddlewareContext, TurnMiddlewareHook, TurnOutcome } from "@rome-os/app-runtime";
 import type { ArtifactRef } from "../apps/state.js";
 import type { RomeAppRuntimeServices } from "../apps/context.js";
 import {
@@ -19,7 +19,7 @@ import {
  */
 export const TURN_MIDDLEWARE_HOOK_NAME = "turn-middleware";
 
-export type TurnMiddlewareChain = MiddlewareChain<TurnMiddlewareContext>;
+export type TurnMiddlewareChain = MiddlewareChain<TurnMiddlewareContext, TurnOutcome>;
 export type TurnMiddlewareLoadFailure = MiddlewareLoadFailure;
 /** The innermost terminal layer of the onion: running the real model for this
  *  turn. Reached when every app middleware calls `next()`. */
@@ -32,7 +32,7 @@ export interface TurnMiddlewareChainOptions {
 export function createTurnMiddlewareChain(
   options: TurnMiddlewareChainOptions = {},
 ): TurnMiddlewareChain {
-  return createMiddlewareChain<TurnMiddlewareContext>({
+  return createMiddlewareChain<TurnMiddlewareContext, TurnOutcome>({
     hookName: TURN_MIDDLEWARE_HOOK_NAME,
     assert: assertTurnMiddleware,
     appRuntimeServices: options.appRuntimeServices,
@@ -42,7 +42,7 @@ export function createTurnMiddlewareChain(
 function assertTurnMiddleware(
   hook: unknown,
   artifact: ArtifactRef,
-): asserts hook is Middleware<TurnMiddlewareContext> {
+): asserts hook is Middleware<TurnMiddlewareContext, TurnOutcome> {
   const mw = hook as TurnMiddlewareHook;
   if (typeof mw?.handle !== "function") {
     throw new Error(

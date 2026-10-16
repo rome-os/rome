@@ -23,6 +23,12 @@ export function createAppDbSchema(tablePrefix: string = "welcome_to_rome") {
     // Whether the connect-AI step ended with a provider logged in. Decides
     // whether the later steps summon agents or show static content.
     aiConnected: integer("ai_connected", { mode: "boolean" }),
+    // The picked idea's kickoff prompt, which the build's first turn carries.
+    // Null until the guardian picks an idea.
+    buildPrompt: text("build_prompt"),
+    // The chat that builds the guardian's first app. Null until the build's
+    // first turn starts.
+    buildSessionId: text("build_session_id"),
     completedAt: text("completed_at"),
     updatedAt: text("updated_at").notNull(),
   });

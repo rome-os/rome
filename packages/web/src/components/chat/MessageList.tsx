@@ -32,6 +32,8 @@ export interface BlockActions {
   ) => void | Promise<void>;
   onDismissAppComponent: (sessionId: string, toolUseId: string) => void | Promise<void>;
   interactionResults: Map<string, Record<string, unknown>>;
+  /** The guardian's name for the main agent, shown on a handoff to it. */
+  mainAgentName?: string;
 }
 
 // The transient live preview of the floor session's in-flight turn — only the

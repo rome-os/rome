@@ -67,12 +67,17 @@ export interface AgentMention {
   // Owning app's icon for chip rendering. Optional because mentions are also
   // built from static config (starter chips) — absent falls back to the Rome mark.
   iconUrl?: string | null;
+  // Shown in place of the agent's own name, for a hand-off to the main agent,
+  // which speaks under the name the guardian chose.
+  label?: string;
 }
 
 export interface AgentCatalogEntry {
   name: string;
   localName?: string;
   description: string;
+  /** Shown as the guardian's main agent rather than as its owning app. */
+  presentAsMain?: boolean;
 }
 
 export interface AgentCatalogGroup {

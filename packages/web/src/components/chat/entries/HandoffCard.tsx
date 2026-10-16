@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { prettyAgentName } from "@/lib/agent-name";
+import { isMainAgentName, prettyAgentName } from "@/lib/agent-name";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import ChatMarkdown from "@/components/chat/ChatMarkdown";
 
@@ -14,6 +14,9 @@ export interface HandoffCardProps {
   appId: string;
   agentName?: string;
   agentLabel?: string;
+  // The guardian's current name for the main agent. A handoff to the main
+  // agent shows it in place of the label the calling app sent.
+  mainAgentName?: string;
   // The brief the calling agent handed off — shown as its @mention content.
   summary?: string;
   status: HandoffStatus;
@@ -29,8 +32,18 @@ const CLAMP_LINES = 6;
 // render as ordinary rows right below — there is no separate thread. (Cancelling
 // an open handoff lives in the composer, where the floor is.) The chip is a
 // header line; the brief renders as markdown beneath it (clamped to CLAMP_LINES).
-export function HandoffCard({ appId, agentName, agentLabel, summary, status }: HandoffCardProps) {
-  const label = agentLabel || prettyAgentName(agentName ?? appId);
+export function HandoffCard({
+  appId,
+  agentName,
+  agentLabel,
+  mainAgentName,
+  summary,
+  status,
+}: HandoffCardProps) {
+  const label =
+    (isMainAgentName(agentName) && mainAgentName) ||
+    agentLabel ||
+    prettyAgentName(agentName ?? appId);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   // maxHeight is the clamp ceiling (CLAMP_LINES line-heights); overflowing is
@@ -64,7 +77,11 @@ export function HandoffCard({ appId, agentName, agentLabel, summary, status }: H
       <span className="inline-flex items-center gap-1 rounded-8 bg-primary/15 px-2 py-1 text-badge text-primary">
         @
         <AgentAvatar
-          iconUrl={`/api/apps/${encodeURIComponent(appId)}/icon`}
+          // A handoff to the main agent shows the main agent's avatar, as its
+          // messages do, not the calling app's icon.
+          iconUrl={
+            isMainAgentName(agentName) ? null : `/api/apps/${encodeURIComponent(appId)}/icon`
+          }
           label={label}
           className="size-4 shrink-0"
         />

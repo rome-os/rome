@@ -1,6 +1,6 @@
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { orderChatMessages } from "@/lib/chat-message-ordering";
-import { prettyAgentName } from "@/lib/agent-name";
+import { isMainAgentName, prettyAgentName } from "@/lib/agent-name";
 import { parseEntries, parseMessageEntries } from "@/components/chat/entries/parse-entries";
 
 // Pure derivation: many flat per-session message lists → one renderable view.
@@ -218,10 +218,17 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
   return map;
 }
 
+/**
+ * `mainIdentity` speaks for the root session, whichever agent it runs.
+ * `mainAgentIdentity` is the guardian's own main agent, which a handoff to it
+ * speaks as. Without it, such a handoff uses its own label and the main
+ * agent's avatar.
+ */
 export function buildChatView(
   messages: Map<string, ChatMessage[]>,
   mainSessionId: string,
   mainIdentity: AgentIdentity,
+  mainAgentIdentity?: AgentIdentity,
 ): ChatView {
   const messagesBySession = new Map<string, ChatMessage[]>();
   // Trace placement no longer needs a reorder: rows are grouped by turn and a
@@ -239,10 +246,14 @@ export function buildChatView(
     arr.push(h);
     handoffsByParent.set(h.parentSessionId, arr);
     if (h.summary) seedByChild.set(h.childSessionId, h.summary);
-    identityBySession.set(h.childSessionId, {
-      name: h.agentLabel,
-      iconUrl: `/api/apps/${encodeURIComponent(h.appId)}/icon`,
-    });
+    // A handoff to the main agent (onboarding's first-app build) is the
+    // guardian's own agent carrying on, so it speaks with the main identity.
+    identityBySession.set(
+      h.childSessionId,
+      isMainAgentName(h.agentName)
+        ? (mainAgentIdentity ?? { name: h.agentLabel, iconUrl: null })
+        : { name: h.agentLabel, iconUrl: `/api/apps/${encodeURIComponent(h.appId)}/icon` },
+    );
   }
 
   const floorSessionId = findFloorSession(mainSessionId, handoffsByParent);

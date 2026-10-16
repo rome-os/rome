@@ -29,6 +29,31 @@ export function emitComponent(
   });
 }
 
+// Hand the conversation to another agent IN THIS CHAT: the host mints a child
+// session for `agentName`, the dashboard posts `brief` as its opening turn and
+// renders the child's replies inline under an @mention of `agentLabel`. The
+// welcome turn stays parked until the handoff ends (the guardian cancels it from
+// the composer), which arrives as the next turn like any card result.
+export function emitHandoff(
+  emit: (event: AgentMessage) => void,
+  handoff: { agentName: string; agentLabel: string; brief: string },
+): void {
+  const toolUseId = randomUUID();
+  emit({ type: "tool_use", id: toolUseId, tool: "welcome_handoff", input: { ...handoff } });
+  const payload = {
+    handoff: true,
+    appId: APP_ID,
+    agentName: handoff.agentName,
+    payload: { summary: handoff.brief, agentLabel: handoff.agentLabel },
+  };
+  emit({
+    type: "tool_result",
+    toolUseId,
+    tool: "welcome_handoff",
+    output: [{ type: "text", text: JSON.stringify(payload) }],
+  });
+}
+
 // The host's BUILT-IN question card (not an app-owned component). webchat's drain
 // only trusts a `builtin: true` core card when the emitting tool is `ask_question`
 // and it resolves to `appId: "core"` / `componentId: "question-card"`
