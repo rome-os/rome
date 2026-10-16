@@ -1057,6 +1057,24 @@ describe("linked agent", () => {
     }
   });
 
+  it("answers with the linked agent when the stored agent is not loaded", async () => {
+    const { deps, agentRunner, conversations } = guardianDeps([
+      "main",
+      "sentinel",
+      "envoy",
+      "sales:agent",
+    ]);
+    conversations.ensureChannelConversation.mockImplementation(async () => ({
+      id: "channel:feishu-2:group-1",
+      agentName: "pm:assistant",
+    }));
+    const action = createAction(actionConfig, deps);
+
+    await action.execute(inbound({ linkedAgentName: "sales:agent" }));
+
+    expect(agentRunner.calls[0].agentName).toBe("sales:agent");
+  });
+
   it("answers a private chat with the linked agent over its stored agent", async () => {
     const { deps, agentRunner, conversations } = guardianDeps([
       "main",

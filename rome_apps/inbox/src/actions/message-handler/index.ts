@@ -678,7 +678,12 @@ export function createMessageHandlerAction(
             ? conversation.agentName
             : undefined;
         const override = answeringAgent && threadType === "private" ? undefined : storedAgent;
-        const targetAgent = override ?? answeringAgent ?? "main";
+        // An override whose app was removed falls back to the linked agent.
+        const targetAgent = !override
+          ? (answeringAgent ?? "main")
+          : answeringAgent
+            ? await resolveAgent(deps, override, answeringAgent)
+            : override;
         const platformMessageId =
           typeof args.messageId === "string" && args.messageId
             ? args.messageId
