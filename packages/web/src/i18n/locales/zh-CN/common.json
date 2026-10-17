@@ -18,7 +18,9 @@
     "collapseSidebarShortcut": "收起侧边栏（{{shortcut}}）",
     "expandSidebar": "展开侧边栏",
     "expandSidebarShortcut": "展开侧边栏（{{shortcut}}）",
-    "more": "更多操作"
+    "more": "更多操作",
+    "pairingRequests_one": "{{count}} 个配对请求",
+    "pairingRequests_other": "{{count}} 个配对请求"
   },
   "sidebar": {
     "aiApps": "AI 应用",

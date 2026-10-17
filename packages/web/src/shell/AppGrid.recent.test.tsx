@@ -7,6 +7,12 @@ import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { AppGrid, STORAGE_KEY } from "./AppGrid";
 
+// The pending pairing count is covered in `AppGrid.people-count.test.tsx`.
+rs.mock("@/hooks/use-approvals", () => {
+  const pending = { rows: [] };
+  return { usePendingPairings: () => pending };
+});
+
 const LAST_OPENED_KEY = "rome-app-last-opened";
 const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
 const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60_000).toISOString();

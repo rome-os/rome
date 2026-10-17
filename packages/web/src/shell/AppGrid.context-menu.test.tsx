@@ -7,6 +7,12 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
 import { AppGrid, STORAGE_KEY } from "./AppGrid";
 
+// The pending pairing count is covered in `AppGrid.people-count.test.tsx`.
+rs.mock("@/hooks/use-approvals", () => {
+  const pending = { rows: [] };
+  return { usePendingPairings: () => pending };
+});
+
 const apps = [
   {
     id: "recipe-box",

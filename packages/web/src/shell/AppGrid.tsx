@@ -44,6 +44,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -55,6 +56,7 @@ import { saveSetting } from "@/lib/chat-api";
 import { useAppCatalogChanges } from "@/hooks/use-app-catalog-events";
 import { hasSession, useAuthStateSnapshot } from "@/lib/auth-state";
 import { useApps, useInvalidateApps } from "@/hooks/use-apps";
+import { usePendingPairings } from "@/hooks/use-approvals";
 import { useRecentApps } from "@/hooks/use-recent-apps";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
 import {
@@ -228,9 +230,25 @@ interface AppGridProps {
   onSearch?: () => void;
 }
 
+/** What waits on the guardian behind a pinned entry. The number is drawn for
+ *  sight and spoken as a phrase, so a screen reader hears what it counts. */
+function NavCount({ count, className }: { count: number; className?: string }) {
+  const { t } = useTranslation("common");
+  return (
+    <Badge className={`bg-primary text-primary-foreground tabular-nums ${className ?? ""}`}>
+      <span aria-hidden>{count}</span>
+      <span className="sr-only">{`, ${t("nav.pairingRequests", { count })}`}</span>
+    </Badge>
+  );
+}
+
 export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProps = {}) {
   const { t } = useTranslation("common");
   const { t: tApps } = useTranslation("apps");
+  // People is the one entry with a count: a pairing request expires in
+  // minutes, so it shows from every page rather than only on People.
+  const pendingPairings = usePendingPairings().rows.length;
+  const entryCount = (entry: BuiltinNavEntry) => (entry.id === "people" ? pendingPairings : 0);
   const location = useLocation();
   const navigate = useNavigate();
   const [pins, setPins] = useState<PinnedEntry[]>(() =>
@@ -544,6 +562,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                 );
               }
               const active = isEntryActive(location.pathname, entry.href);
+              const count = entryCount(entry);
               return (
                 <Tooltip key={`builtin-${pin.id}`}>
                   {withBuiltinContextMenu(
@@ -551,10 +570,15 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                     <TooltipTrigger asChild>
                       <Link
                         to={entry.href}
-                        aria-label={label}
+                        aria-label={
+                          count > 0 ? `${label}, ${t("nav.pairingRequests", { count })}` : label
+                        }
                         className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
                       >
                         {renderBuiltinIcon(entry)}
+                        {count > 0 ? (
+                          <NavCount count={count} className="absolute -right-1 -top-1" />
+                        ) : null}
                       </Link>
                     </TooltipTrigger>,
                   )}
@@ -817,6 +841,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                   );
                 }
                 const active = isEntryActive(location.pathname, entry.href);
+                const count = entryCount(entry);
                 return (
                   <Fragment key={`builtin-${pin.id}`}>
                     {withBuiltinContextMenu(
@@ -828,6 +853,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                       >
                         {renderBuiltinIcon(entry)}
                         <span className="flex-1 truncate">{t(entry.labelKey)}</span>
+                        {count > 0 ? <NavCount count={count} /> : null}
                       </Link>,
                     )}
                   </Fragment>

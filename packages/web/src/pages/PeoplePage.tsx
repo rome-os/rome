@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { List } from "@/components/ui/list-row";
+import { PendingPairingApprovals } from "@/components/PairingApproval";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 import { DirectoryRow, StreamRow, levelLabelKey } from "./people/rows";
 import { DismissedEntry, UnknownEntry } from "./people/triage";
@@ -206,6 +207,10 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
             />
           }
         />
+
+        {/* Above both views and outside the roster read: a request expires in
+            minutes, so it must not wait behind a search, a chip or a page. */}
+        <PendingPairingApprovals />
 
         <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
           <Input

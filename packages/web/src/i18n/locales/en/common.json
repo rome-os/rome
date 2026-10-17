@@ -18,7 +18,9 @@
     "collapseSidebarShortcut": "Collapse sidebar ({{shortcut}})",
     "expandSidebar": "Expand sidebar",
     "expandSidebarShortcut": "Expand sidebar ({{shortcut}})",
-    "more": "More actions"
+    "more": "More actions",
+    "pairingRequests_one": "{{count}} pairing request",
+    "pairingRequests_other": "{{count}} pairing requests"
   },
   "sidebar": {
     "aiApps": "AI Apps",
