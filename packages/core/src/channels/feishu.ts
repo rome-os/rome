@@ -8,6 +8,7 @@ import {
   type NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
 import { isStopCommand } from "@rome-os/app-runtime";
+import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./linked-agents.js";
 import { preserveMentionOnlyText } from "./mention-only.js";
 import type { OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
@@ -17,6 +18,7 @@ import type {
   ConversationDescriptor,
   ConversationId,
   ConversationSettingsControl,
+  ConversationSettingsSnapshot,
   MessageAddressing,
   MessageReceipt,
 } from "@rome-os/app-runtime";
@@ -42,6 +44,9 @@ export interface FeishuConfig {
   };
   personMappingRepo?: PersonMappingRepository;
   listAgents?: () => string[];
+  /** The agent linked to this adapter's channel, as `linkedAgentResolver`
+   *  answers it. Absent, the channel reads as one that takes no link. */
+  linkedAgent?: () => string | null | undefined;
   /**
    * Optional fault seam the Talker wires in. Fires on a terminal
    * `error` event from the long connection so the Talker maps it (auth →
@@ -86,6 +91,8 @@ interface FeishuChannelConfig {
   requireMention?: boolean;
   autoThread?: boolean;
   agentName?: string;
+  /** The agent that answers the group, null when none does. */
+  answeringAgent?: string | null;
   updatedAt?: string;
   updatedBy?: string;
 }
@@ -124,6 +131,7 @@ export class FeishuAdapter {
   };
   private readonly personMappingRepo?: PersonMappingRepository;
   private readonly listAgents?: () => string[];
+  private readonly linkedAgent?: () => string | null | undefined;
   private readonly onFault?: (err: unknown) => void;
   private readonly observedConversations = new Map<
     string,
@@ -157,6 +165,7 @@ export class FeishuAdapter {
     this.conversationSettings = config.conversationSettings;
     this.personMappingRepo = config.personMappingRepo;
     this.listAgents = config.listAgents;
+    this.linkedAgent = config.linkedAgent;
     this.onFault = config.onFault;
   }
 
@@ -407,7 +416,14 @@ export class FeishuAdapter {
     const cfg = await this.getChannelConfig(chatId);
     await this.channel.send(
       chatId,
-      { card: buildGroupConfigCard(chatId, cfg, this.getAgentOptions(cfg.agentName), error) },
+      {
+        card: buildGroupConfigCard(
+          chatId,
+          cfg,
+          this.getAgentOptions(cfg.agentName ?? cfg.answeringAgent ?? undefined),
+          error,
+        ),
+      },
       {
         replyTo: replyToMessageId,
       },
@@ -446,6 +462,14 @@ export class FeishuAdapter {
       return;
     }
 
+    // The card preselects the answering agent, so saving it unchanged leaves
+    // a group with no choice following the link instead of pinning it.
+    if (patch?.agentName) {
+      const current = await this.getChannelConfig(evt.chatId);
+      if (current.agentName === undefined && patch.agentName === current.answeringAgent) {
+        delete patch.agentName;
+      }
+    }
     if (patch?.agentName) {
       const available = this.listAgents?.();
       if (available && !available.includes(patch.agentName)) {
@@ -538,8 +562,16 @@ export class FeishuAdapter {
       .slice(0, 20);
   }
 
+  private answeringAgentOf(
+    snapshot: Pick<ConversationSettingsSnapshot, "effective" | "overrides">,
+  ): string | null {
+    return answeringAgentOf(this.linkedAgent?.(), storedAgentChoice(snapshot), "group");
+  }
+
   private async getChannelConfig(chatId: string): Promise<FeishuChannelConfig> {
-    if (!this.conversationSettings || !this.connectionId) return {};
+    if (!this.conversationSettings || !this.connectionId) {
+      return { answeringAgent: answeringAgentOf(this.linkedAgent?.(), undefined, "group") };
+    }
     const observed = this.observedConversations.get(chatId);
     const descriptor: ConversationDescriptor = {
       ref: { connectionId: this.connectionId, conversationId: chatId as ConversationId },
@@ -555,6 +587,7 @@ export class FeishuAdapter {
       requireMention: snapshot.effective.activation.mode === "mention",
       autoThread: snapshot.effective.replies.placement === "thread",
       agentName: snapshot.effective.routing.agentName ?? undefined,
+      answeringAgent: this.answeringAgentOf(snapshot),
       updatedAt: snapshot.updatedAt,
       updatedBy: snapshot.updatedBy?.displayName ?? snapshot.updatedBy?.id,
     };
@@ -578,6 +611,7 @@ export class FeishuAdapter {
         requireMention: saved.effective.activation.mode === "mention",
         autoThread: saved.effective.replies.placement === "thread",
         agentName: saved.effective.routing.agentName ?? undefined,
+        answeringAgent: this.answeringAgentOf(saved),
       };
     }
     const set: import("@rome-os/app-runtime").PartialConversationSettings = {};
@@ -642,7 +676,7 @@ function buildGroupConfigCard(
   agentOptions: string[],
   error?: string,
 ): object {
-  const agent = cfg.agentName ?? "main";
+  const agent = cfg.agentName ?? cfg.answeringAgent ?? undefined;
   const groupPolicy = cfg.mode === "ignore" ? "disabled" : "active";
   const requireMention = cfg.requireMention ?? true;
   const autoThread = cfg.autoThread ?? true;
@@ -654,6 +688,16 @@ function buildGroupConfigCard(
       text: { tag: "plain_text", content: error },
     });
   }
+  if (cfg.answeringAgent === null) {
+    elements.push({
+      tag: "div",
+      text: {
+        tag: "plain_text",
+        content:
+          "No agent answers in this group: this bot has no linked agent, or it is not loaded.",
+      },
+    });
+  }
 
   elements.push({
     tag: "form",
@@ -663,7 +707,7 @@ function buildGroupConfigCard(
         tag: "select_static",
         name: "agentName",
         placeholder: { tag: "plain_text", content: "Route to agent" },
-        initial_option: agent,
+        ...(agent ? { initial_option: agent } : {}),
         options: agentOptions.map((name) => ({
           text: { tag: "plain_text", content: name },
           value: name,
@@ -770,7 +814,7 @@ function fieldRow(label: string, control: object): object {
 function formatGroupConfigConfirmation(cfg: FeishuChannelConfig): string {
   return [
     "Feishu group settings updated.",
-    `Agent: ${cfg.agentName ?? "main"}`,
+    `Agent: ${describeAnsweringAgent(cfg.answeringAgent ?? null)}`,
     `Group policy: ${cfg.mode === "ignore" ? "Disabled" : "Active"}`,
     `Reply trigger: ${(cfg.requireMention ?? true) ? "@ only" : "Every message"}`,
     `Reply placement: ${(cfg.autoThread ?? true) ? "Thread" : "Inline"}`,

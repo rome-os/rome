@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelRecord } from "../db/repositories/channel-records.js";
-import { linkedAgentResolver } from "./linked-agents.js";
+import { answeringAgentOf, linkedAgentResolver } from "./linked-agents.js";
 
 const warn = rs.hoisted(() => rs.fn());
 const info = rs.hoisted(() => rs.fn());
@@ -106,5 +106,18 @@ describe("linkedAgentResolver", () => {
     for (const name of ["webchat", "email", "agents", "whatsapp"]) {
       expect(linkedAgentOf(name)).toBeUndefined();
     }
+  });
+});
+
+describe("answeringAgentOf", () => {
+  it.each([
+    ["a group's non-main choice", "sales:agent", "support:agent", "group", "support:agent"],
+    ["a group pinned to main", "sales:agent", "main", "group", "main"],
+    ["a private chat with a choice", "sales:agent", "support:agent", "private", "sales:agent"],
+    ["no choice", "core:main", undefined, "group", "main"],
+    ["no linked agent", null, "support:agent", "group", null],
+    ["a service that takes no link", undefined, undefined, "private", "main"],
+  ] as const)("answers %s", (_case, linked, choice, threadType, expected) => {
+    expect(answeringAgentOf(linked, choice, threadType)).toBe(expected);
   });
 });

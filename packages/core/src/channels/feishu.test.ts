@@ -633,6 +633,68 @@ describe("FeishuAdapter", () => {
     expect(inputJson).toContain('"initial_option":"inline"');
   });
 
+  it("shows the linked agent and keeps it unpinned when the card saves it", async () => {
+    const conversationSettings = makeConversationSettings();
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        conversationSettings: conversationSettings.control,
+        personMappingRepo: guardianPersonRepo("ou_alice"),
+        listAgents: () => ["sales:agent"],
+        linkedAgent: () => "sales:agent",
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    await adapter.start();
+
+    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    expect(JSON.stringify(channel.sent[0].input)).toContain('"initial_option":"sales:agent"');
+
+    await channel.emitCardAction({
+      raw: {
+        action: {
+          value: { action: "configure_feishu_group", op: "save" },
+          form_value: { agentName: "sales:agent" },
+        },
+      },
+    });
+    expect(conversationSettings.update).toHaveBeenCalledWith(
+      expect.objectContaining({ set: {}, clear: [] }),
+    );
+    expect(JSON.stringify(channel.sent[1].input)).toContain("Agent: sales:agent");
+  });
+
+  it("says no agent answers a group whose bot has no linked agent", async () => {
+    const conversationSettings = makeConversationSettings();
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        conversationSettings: conversationSettings.control,
+        personMappingRepo: guardianPersonRepo("ou_alice"),
+        linkedAgent: () => null,
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    await adapter.start();
+
+    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    const card = JSON.stringify(channel.sent[0].input);
+    expect(card).toContain("No agent answers in this group");
+    expect(card).not.toContain('"initial_option":"main"');
+
+    await channel.emitCardAction({
+      action: { tag: "button", value: { action: "configure_feishu_group", op: "reset" } },
+      raw: { action: { value: { action: "configure_feishu_group", op: "reset" } } },
+    });
+    expect(JSON.stringify(channel.sent[1].input)).toContain("Agent: none");
+  });
+
   it("resolves @mention placeholders to display names", async () => {
     await channel.emit({
       content: "@_user_1 please review",

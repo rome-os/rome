@@ -1136,6 +1136,7 @@ async function main() {
   //
   // Register every built-in descriptor now (before load()/import), threading the
   // runtime deps the factories need from here where the repos/adapters exist.
+  const linkedAgentOf = linkedAgentResolver(channelRecords, agentLoader);
   const { RomeCloudMailProvider } = await import("./lib/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
@@ -1151,6 +1152,11 @@ async function main() {
       maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
     },
     listAgents: () => Array.from(agentLoader.getAll().keys()),
+    // A Connection with no channel record backs no channel, so nothing answers it.
+    linkedAgentOf: (connectionId) => {
+      const channel = channelRecords.idOf(connectionId);
+      return channel === null ? null : linkedAgentOf(channel);
+    },
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
       mapGuardianToChannel(personMappingRepo, "whatsapp", selfJid).catch((err) => {
@@ -1195,7 +1201,6 @@ async function main() {
   // The channel-message hook hears every channel through these, so each
   // inbound message it handles is traced and logged once.
   const hookChannels = withInboundSpans(channels, "channel-message");
-  const linkedAgentOf = linkedAgentResolver(channelRecords, agentLoader);
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
     .listArtifacts("hook")
