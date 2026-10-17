@@ -978,7 +978,7 @@ export class DiscordAdapter {
             "  `/channel bots none|mentions|all` — how to handle messages from other bots",
             "  `/channel quiet on|off` — stay silent when others are @mentioned",
             "  `/channel thread off|on` — disable/enable auto-thread for replies",
-            "  `/channel agent set <name>` — route this channel to a specific agent (default: the bot's linked agent)",
+            "  `/channel agent set <name>` — route this channel to a specific agent, or pin it to main (default: the bot's linked agent)",
             "  `/channel agent clear` — clear the agent binding for this channel",
             "  `/channel reset` — clear all overrides for this channel",
             "  `/channel status` — show current channel configuration",
@@ -1176,12 +1176,13 @@ export class DiscordAdapter {
               });
               return;
             }
-            // `set main` clears the binding rather than storing one, so the
-            // channel follows the bot's linked agent again.
+            // `set main` pins the channel to main, so it stops following the
+            // bot's linked agent. `clear` is how it follows the link again.
             if (isCoreMainAgentId(name)) {
-              await this.updateChannelConfig(channelId, { agentName: undefined, ...audit });
+              await this.updateChannelConfig(channelId, { agentName: "main", ...audit });
               await interaction.editReply({
-                content: `✓ ${mention} binding removed — ${answersLine(answering(undefined))}`,
+                content: `✓ ${mention} pinned to main — ${answersLine(answering("main"))}
+Use \`/channel agent clear\` to undo.`,
               });
               return;
             }
@@ -1199,8 +1200,9 @@ export class DiscordAdapter {
             const agent = answering(name);
             await interaction.editReply({
               content:
-                `✓ ${mention} now routes to agent \`${name}\`\n` +
-                (agent === name ? "" : `${answersLine(agent)}\n`) +
+                (agent === name
+                  ? `✓ ${mention} now routes to agent \`${name}\`\n`
+                  : `✓ ${mention} stored agent \`${name}\`, but ${answersLine(agent)}\n`) +
                 `Use \`/channel agent clear\` to undo.`,
             });
             return;

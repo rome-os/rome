@@ -66,13 +66,14 @@ function makeInteraction(input: {
   subcommand: string;
   subcommandGroup?: string | null;
   strings?: Record<string, string>;
+  guildId?: string | null;
 }) {
   const deferReply = rs.fn(async () => undefined);
   const editReply = rs.fn(async () => undefined);
   const interaction = {
     commandName: "channel",
     channelId: CHANNEL_ID,
-    guildId: "guild-1",
+    guildId: input.guildId === undefined ? "guild-1" : input.guildId,
     channel: { name: "general", isThread: () => false },
     guild: { name: "Rome" },
     user: { id: input.userId },
@@ -265,6 +266,63 @@ describe("Discord configuration command authorization", () => {
     await runCommand(adapter, interaction);
     expect(editReply).toHaveBeenCalledWith({
       content: expect.stringContaining("no agent answers here"),
+    });
+  });
+
+  it("pins a channel to main on `set main`", async () => {
+    const settings = makeConversationSettings();
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      conversationSettings: settings.control,
+      resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
+      linkedAgent: () => "sales:agent",
+    });
+    const { interaction, editReply } = makeInteraction({
+      userId: GUARDIAN_ID,
+      subcommandGroup: "agent",
+      subcommand: "set",
+      strings: { name: "main" },
+    });
+    await runCommand(adapter, interaction);
+    expect(settings.update).toHaveBeenCalledWith(
+      expect.objectContaining({ set: { routing: { agentName: "main" } } }),
+    );
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("pinned to main — messages now route to main"),
+    });
+  });
+
+  it("follows the linked agent in a DM, whatever agent is stored", async () => {
+    const settings = makeConversationSettings();
+    const snapshot = await settings.get();
+    snapshot.effective.routing.agentName = "pm-assistant";
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      conversationSettings: settings.control,
+      resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
+      linkedAgent: () => "sales:agent",
+      listAgents: () => ["pm-assistant", "sales:agent"],
+    });
+    const status = makeInteraction({ userId: GUARDIAN_ID, subcommand: "status", guildId: null });
+    await runCommand(adapter, status.interaction);
+    expect(status.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("agent: sales:agent"),
+    });
+
+    const set = makeInteraction({
+      userId: GUARDIAN_ID,
+      subcommandGroup: "agent",
+      subcommand: "set",
+      strings: { name: "pm-assistant" },
+      guildId: null,
+    });
+    await runCommand(adapter, set.interaction);
+    expect(set.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining(
+        "stored agent `pm-assistant`, but messages now route to sales:agent",
+      ),
     });
   });
 
