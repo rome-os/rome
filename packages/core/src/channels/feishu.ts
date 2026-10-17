@@ -47,6 +47,9 @@ export interface FeishuConfig {
   /** The agent linked to this adapter's channel, as `linkedAgentResolver`
    *  answers it. Absent, the channel reads as one that takes no link. */
   linkedAgent?: () => string | null | undefined;
+  /** Whether an agent is loaded, aliases included. Absent, every agent counts
+   *  as loaded. */
+  hasAgent?: (name: string) => boolean;
   /**
    * Optional fault seam the Talker wires in. Fires on a terminal
    * `error` event from the long connection so the Talker maps it (auth →
@@ -90,6 +93,8 @@ interface FeishuChannelConfig {
   mode?: "allow" | "ignore";
   requireMention?: boolean;
   autoThread?: boolean;
+  /** A patch key only. A read reports the agent in `storedAgent` and
+   *  `answeringAgent`, and only when asked for them. */
   agentName?: string;
   /** The group's stored agent, "main" for a pin to main. */
   storedAgent?: string;
@@ -134,6 +139,7 @@ export class FeishuAdapter {
   private readonly personMappingRepo?: PersonMappingRepository;
   private readonly listAgents?: () => string[];
   private readonly linkedAgent?: () => string | null | undefined;
+  private readonly hasAgent?: (name: string) => boolean;
   private readonly onFault?: (err: unknown) => void;
   private readonly observedConversations = new Map<
     string,
@@ -168,6 +174,7 @@ export class FeishuAdapter {
     this.personMappingRepo = config.personMappingRepo;
     this.listAgents = config.listAgents;
     this.linkedAgent = config.linkedAgent;
+    this.hasAgent = config.hasAgent;
     this.onFault = config.onFault;
   }
 
@@ -415,7 +422,7 @@ export class FeishuAdapter {
       return;
     }
 
-    const cfg = await this.getChannelConfig(chatId);
+    const cfg = await this.getChannelConfig(chatId, true);
     await this.channel.send(
       chatId,
       {
@@ -459,12 +466,9 @@ export class FeishuAdapter {
       return;
     }
 
-    // Saving the preselected agent unchanged leaves routing alone, so a group
-    // with no choice keeps following the link instead of pinning it.
-    if (patch?.agentName) {
-      const current = await this.getChannelConfig(evt.chatId);
-      if (patch.agentName === preselectedAgent(current)) delete patch.agentName;
-    }
+    // Saving the agent the card showed leaves routing alone, so a group with no
+    // choice keeps following the link, a relink since the card was sent included.
+    if (patch?.agentName && patch.agentName === value.shown) delete patch.agentName;
     if (patch?.agentName) {
       const available = this.listAgents?.();
       if (available && !available.includes(patch.agentName)) {
@@ -556,21 +560,23 @@ export class FeishuAdapter {
       .slice(0, 20);
   }
 
-  private answeringAgentOf(
+  private agentsOf(
     snapshot: Pick<ConversationSettingsSnapshot, "effective" | "overrides">,
-  ): string | null {
-    const loaded = this.listAgents?.();
-    return answeringAgentOf(
-      this.linkedAgent?.(),
-      storedAgentChoice(snapshot),
-      "group",
-      loaded ? (agent) => loaded.includes(agent) : undefined,
-    );
+  ): Pick<FeishuChannelConfig, "storedAgent" | "answeringAgent"> {
+    const storedAgent = storedAgentChoice(snapshot);
+    return {
+      storedAgent,
+      answeringAgent: answeringAgentOf(this.linkedAgent?.(), storedAgent, "group", this.hasAgent),
+    };
   }
 
-  private async getChannelConfig(chatId: string): Promise<FeishuChannelConfig> {
+  /** The group's settings. `withAgents` adds `storedAgent` and
+   *  `answeringAgent`, which read the link and the loaded agents. */
+  private async getChannelConfig(chatId: string, withAgents = false): Promise<FeishuChannelConfig> {
     if (!this.conversationSettings || !this.connectionId) {
-      return { answeringAgent: answeringAgentOf(this.linkedAgent?.(), undefined, "group") };
+      return withAgents
+        ? { answeringAgent: answeringAgentOf(this.linkedAgent?.(), undefined, "group") }
+        : {};
     }
     const observed = this.observedConversations.get(chatId);
     const descriptor: ConversationDescriptor = {
@@ -586,9 +592,7 @@ export class FeishuAdapter {
       mode: snapshot.effective.enabled ? "allow" : "ignore",
       requireMention: snapshot.effective.activation.mode === "mention",
       autoThread: snapshot.effective.replies.placement === "thread",
-      agentName: snapshot.effective.routing.agentName ?? undefined,
-      storedAgent: storedAgentChoice(snapshot),
-      answeringAgent: this.answeringAgentOf(snapshot),
+      ...(withAgents ? this.agentsOf(snapshot) : {}),
       updatedAt: snapshot.updatedAt,
       updatedBy: snapshot.updatedBy?.displayName ?? snapshot.updatedBy?.id,
     };
@@ -611,9 +615,7 @@ export class FeishuAdapter {
         mode: saved.effective.enabled ? "allow" : "ignore",
         requireMention: saved.effective.activation.mode === "mention",
         autoThread: saved.effective.replies.placement === "thread",
-        agentName: saved.effective.routing.agentName ?? undefined,
-        storedAgent: storedAgentChoice(saved),
-        answeringAgent: this.answeringAgentOf(saved),
+        ...this.agentsOf(saved),
       };
     }
     const set: import("@rome-os/app-runtime").PartialConversationSettings = {};
@@ -631,17 +633,15 @@ export class FeishuAdapter {
       if (patch.autoThread === false) (set.replies ??= {}).placement = "inline";
       else clear.push("replies.placement");
     }
-    if (owns("agentName")) {
-      if (patch.agentName) (set.routing ??= {}).agentName = patch.agentName;
-      else clear.push("routing.agentName");
-    }
+    // A patch carries an agent only to set one. Reset clears it.
+    if (patch.agentName) (set.routing ??= {}).agentName = patch.agentName;
     await this.conversationSettings.update({
       ref,
       set,
       clear,
       actor: { kind: "guardian", id: updatedBy ?? "feishu-card" },
     });
-    return this.getChannelConfig(chatId).then((saved) => ({ ...current, ...saved }));
+    return this.getChannelConfig(chatId, true).then((saved) => ({ ...current, ...saved }));
   }
 }
 
@@ -697,6 +697,15 @@ function buildGroupConfigCard(
         tag: "plain_text",
         content:
           "No agent answers in this group: this bot has no linked agent, or it is not loaded.",
+      },
+    });
+  } else if (cfg.storedAgent && cfg.storedAgent !== cfg.answeringAgent) {
+    // In a group, only a stored agent that is not loaded yields to the link.
+    elements.push({
+      tag: "div",
+      text: {
+        tag: "plain_text",
+        content: `${cfg.storedAgent} is not loaded, so ${cfg.answeringAgent} answers instead.`,
       },
     });
   }
@@ -769,7 +778,12 @@ function buildGroupConfigCard(
         name: "save_group_settings",
         type: "primary",
         text: { tag: "plain_text", content: "Save" },
-        value: { action: "configure_feishu_group", op: "save", chatId },
+        value: {
+          action: "configure_feishu_group",
+          op: "save",
+          chatId,
+          ...(agent ? { shown: agent } : {}),
+        },
       },
       {
         tag: "button",

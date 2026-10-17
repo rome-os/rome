@@ -639,6 +639,7 @@ describe("FeishuAdapter", () => {
 
   it("shows the linked agent and keeps it unpinned when the card saves it", async () => {
     const conversationSettings = makeConversationSettings();
+    let linked = "sales:agent";
     channel = new FakeLarkChannel();
     adapter = new FeishuAdapter(
       {
@@ -647,8 +648,8 @@ describe("FeishuAdapter", () => {
         connectionId: FEISHU_CONNECTION_ID,
         conversationSettings: conversationSettings.control,
         personMappingRepo: guardianPersonRepo("ou_alice"),
-        listAgents: () => ["sales:agent"],
-        linkedAgent: () => "sales:agent",
+        listAgents: () => ["sales:agent", "support:agent"],
+        linkedAgent: () => linked,
       },
       () => channel as unknown as LarkChannel,
     );
@@ -657,20 +658,21 @@ describe("FeishuAdapter", () => {
     await adapter.start();
 
     await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
-    expect(JSON.stringify(channel.sent[0].input)).toContain('"initial_option":"sales:agent"');
+    const card = JSON.stringify(channel.sent[0].input);
+    expect(card).toContain('"initial_option":"sales:agent"');
+    expect(card).toContain('"shown":"sales:agent"');
 
+    // A relink while the card is open does not turn its shown agent into a pin.
+    linked = "support:agent";
+    const value = { action: "configure_feishu_group", op: "save", shown: "sales:agent" };
     await channel.emitCardAction({
-      raw: {
-        action: {
-          value: { action: "configure_feishu_group", op: "save" },
-          form_value: { agentName: "sales:agent" },
-        },
-      },
+      action: { tag: "button", value },
+      raw: { action: { value, form_value: { agentName: "sales:agent" } } },
     });
     expect(conversationSettings.update).toHaveBeenCalledWith(
       expect.objectContaining({ set: {}, clear: [] }),
     );
-    expect(JSON.stringify(channel.sent[1].input)).toContain("Agent: sales:agent");
+    expect(JSON.stringify(channel.sent[1].input)).toContain("Agent: support:agent");
   });
 
   it("keeps a group's main pin on an unlinked bot when the card saves", async () => {
@@ -694,20 +696,43 @@ describe("FeishuAdapter", () => {
     await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
     expect(JSON.stringify(channel.sent[0].input)).toContain('"initial_option":"main"');
 
+    const value = { action: "configure_feishu_group", op: "save", shown: "main" };
     for (const formValue of [{ agentName: "main" }, {}]) {
       await channel.emitCardAction({
-        raw: {
-          action: {
-            value: { action: "configure_feishu_group", op: "save" },
-            form_value: formValue,
-          },
-        },
+        action: { tag: "button", value },
+        raw: { action: { value, form_value: formValue } },
       });
     }
     expect(conversationSettings.update).toHaveBeenCalledTimes(2);
     for (const [input] of conversationSettings.update.mock.calls) {
       expect(input).toMatchObject({ set: {}, clear: [] });
     }
+  });
+
+  it("says when a group's stored agent is not loaded and the linked agent answers", async () => {
+    const conversationSettings = makeConversationSettings({ routing: { agentName: "gone:agent" } });
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        conversationSettings: conversationSettings.control,
+        personMappingRepo: guardianPersonRepo("ou_alice"),
+        listAgents: () => ["sales:agent"],
+        hasAgent: (name) => name === "sales:agent",
+        linkedAgent: () => "sales:agent",
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    // The adapter drops every message until an inbound handler is registered.
+    adapter.onInbound(async () => {});
+    await adapter.start();
+
+    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    const card = JSON.stringify(channel.sent[0].input);
+    expect(card).toContain('"initial_option":"gone:agent"');
+    expect(card).toContain("gone:agent is not loaded, so sales:agent answers instead.");
   });
 
   it("says no agent answers a group whose bot has no linked agent", async () => {

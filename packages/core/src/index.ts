@@ -1152,6 +1152,7 @@ async function main() {
       maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
     },
     listAgents: () => Array.from(agentLoader.getAll().keys()),
+    hasAgent: (name) => agentLoader.has(name),
     // A Connection with no channel record backs no channel, so nothing answers it.
     linkedAgentOf: (connectionId) => {
       const channel = channelRecords.idOf(connectionId);

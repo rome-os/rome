@@ -137,6 +137,8 @@ export interface FeishuDescriptorDeps {
   /** The agent linked to a Connection's channel, as `linkedAgentResolver`
    *  answers it for that channel. */
   linkedAgentOf?: (connectionId: string) => string | null | undefined;
+  /** Whether an agent is loaded, aliases included. */
+  hasAgent?: (name: string) => boolean;
   createChannel?: CreateLarkChannel;
   /** Injectable setup seams so tests drive the ceremony without the
    *  network / SDK long connection. Production uses the defaults below. */
@@ -546,6 +548,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             personMappingRepo: deps.personMappingRepo,
             listAgents: deps.listAgents,
             linkedAgent: () => deps.linkedAgentOf?.(kit.connectionId),
+            hasAgent: deps.hasAgent,
             onFault: routeFault,
           };
           const adapter = new FeishuAdapter(config, createChannel);
