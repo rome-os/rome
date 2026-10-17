@@ -4,6 +4,8 @@ export {
   TRACE_VERSION,
   type Trace,
   type TraceChange,
+  type TraceCheck,
+  type TraceEvent,
   type TraceExchange,
   type TraceIndex,
   type TraceMessage,

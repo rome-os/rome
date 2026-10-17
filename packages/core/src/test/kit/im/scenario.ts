@@ -5,6 +5,8 @@ import type { TestChannel } from "./test-channel.js";
 import {
   TRACE_META_KEY,
   TRACE_VERSION,
+  type TraceCheck,
+  type TraceEvent,
   type TraceExchange,
   type TraceStep,
   traceSchema,
@@ -21,6 +23,10 @@ export interface ScenarioContext {
   /** Runs `run` as one labelled step and resolves with its result. A failing
    *  step fails the test with the step's label in the message. */
   step<T>(label: string, run: () => Promise<T> | T): Promise<T>;
+  /** Records what the agent emitted or what Rome did, now. */
+  note(lane: TraceEvent["lane"], label: string, detail?: unknown): void;
+  /** Records invariant verdicts, then throws naming every one that failed. */
+  check(results: TraceCheck[]): void;
 }
 
 /**
@@ -29,8 +35,9 @@ export interface ScenarioContext {
  *
  * When `ROME_CHANNEL_TRACES` names a directory, the scenario is also recorded:
  * each step and what the conversation shows after it, every message the
- * platform created or edited, and every request the platform answered, on one
- * clock. The trace is written under that directory and named in `task.meta`,
+ * platform created or edited, every request the platform answered, what the
+ * scenario noted and the invariants it checked, on one clock. The trace is
+ * written under that directory and named in `task.meta`,
  * whether the scenario passes or fails, for the reporter and the browser UI
  * (packages/channel-test-ui).
  */
@@ -42,10 +49,28 @@ export async function runScenario(
   const started = performance.now();
   const since = (time: number) => time - started;
   const steps: TraceStep[] = [];
+  const events: TraceEvent[] = [];
+  const checks: TraceCheck[] = [];
   let passed = false;
 
   try {
     await body({
+      note(lane, label, detail) {
+        events.push({
+          at: since(performance.now()),
+          lane,
+          label,
+          ...(detail === undefined ? {} : { detail }),
+        });
+      },
+      check(results) {
+        checks.push(...results);
+        const broken = results.filter((result) => !result.ok);
+        if (broken.length)
+          throw new Error(
+            `Invariants broken:\n${broken.map((result) => `  ${result.id}: ${result.detail}`).join("\n")}`,
+          );
+      },
       async step(label, run) {
         const startedAt = since(performance.now());
         const finish = (error?: string) =>
@@ -77,7 +102,7 @@ export async function runScenario(
     const directory = process.env.ROME_CHANNEL_TRACES;
     if (directory) {
       try {
-        await writeTrace(directory, task, channel, steps, started);
+        await writeTrace(directory, task, channel, { steps, events, checks }, started);
       } catch (error) {
         // A trace that cannot be written must not hide why the scenario failed.
         if (passed) throw error;
@@ -90,7 +115,7 @@ async function writeTrace(
   directory: string,
   task: ScenarioTask,
   channel: TestChannel,
-  steps: TraceStep[],
+  recorded: { steps: TraceStep[]; events: TraceEvent[]; checks: TraceCheck[] },
   started: number,
 ): Promise<void> {
   const since = (time: number) => time - started;
@@ -103,11 +128,13 @@ async function writeTrace(
     version: TRACE_VERSION,
     platform: channel.platform,
     conversation: channel.conversation,
-    steps,
+    steps: recorded.steps,
     exchanges,
     changes: channel.peer
       .changes(channel.conversation)
       .map((change) => ({ at: since(change.at), message: change.message })),
+    events: recorded.events,
+    checks: recorded.checks,
   });
   const file = resolve(directory, "traces", `${task.id.replace(/[^\w.-]/g, "_")}.json`);
   await mkdir(dirname(file), { recursive: true });

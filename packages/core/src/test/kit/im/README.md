@@ -61,9 +61,33 @@ Where platforms differ, the test states the difference in a table keyed by platf
 
 ## Traces
 
-When `ROME_CHANNEL_TRACES` names a directory, `runScenario` writes a **trace** of the scenario there. A trace holds each step with what the conversation showed after it, every message change the peer applied, and every request the peer answered once the scenario started, on one clock. `trace.ts` defines the format. The reporter in `trace-reporter.ts` writes an `index.json` of the run beside the traces.
+When `ROME_CHANNEL_TRACES` names a directory, `runScenario` writes a **trace** of the scenario there. A trace records these on one clock:
+
+- Each step, with what the conversation showed after it.
+- Every message change the peer applied.
+- Every request the peer answered once the scenario started.
+- What the scenario noted about the agent and Rome.
+- The invariants the scenario checked.
+
+`trace.ts` defines the format. The reporter in `trace-reporter.ts` writes an `index.json` of the run beside the traces.
 
 `pnpm test:channels` runs this directory's tests with traces on, into `.channel-traces/`. `pnpm channels:ui` serves a browser UI over them, described in [`packages/channel-test-ui`](../../../../../channel-test-ui/README.md).
+
+## Streaming replies
+
+A test channel can carry `delivery`, the platform's reply delivery transport from `src/channels/delivery/transports/`. A scenario streams a scripted agent reply through `ReplyDelivery` and that transport, so the platform's real SDK writes the messages the peer shows. Only Telegram has a transport. The streaming scenario skips the other platforms and its table row says so.
+
+A scenario fills the agent and Rome lanes of a trace with `note`: `note("agent", ...)` for each event the agent emits, and `note("rome", ...)` for each write the engine makes. `check(checkDelivery(...))` runs the rules in `invariants.ts`, records each verdict, and fails the step naming every rule that broke.
+
+Each rule reads what the peer shows, not what the engine believes. A platform may trim the whitespace at a message's edges, so a rule that compares text tolerates that and nothing more.
+
+| Id | Rule |
+|---|---|
+| `final-text-is-the-reply` | A delivered reply's messages, in order, make up the reply's text |
+| `one-message-per-part` | The platform shows one message per accepted part, so no create was repeated |
+| `receipts-name-what-is-shown` | Every receipt names a message that shows the part's text |
+| `every-message-fits` | No message exceeds the platform's limit |
+| `text-never-goes-back` | Each edit of a message extends the text it showed before. Holds when the complete text is what streamed, so a caller whose run revised the stream passes `revised` and the rule leaves it out |
 
 ## Add a platform
 

@@ -165,6 +165,50 @@ describe("runScenario", () => {
     expect((await readTrace()).steps).toMatchObject([{ label: "The user writes" }]);
   });
 
+  it("records what the scenario noted and the invariants it checked, on the steps' clock", async () => {
+    await runScenario(task(), channel, async ({ step, note, check }) => {
+      await step("Rome streams", () => {
+        note("agent", "text_delta", { content: "hi" });
+        note("rome", "create part 0.0: accepted");
+        check([{ id: "one-message-per-part", ok: true }]);
+      });
+    });
+
+    const { events, checks, steps } = await readTrace();
+    expect(events).toEqual([
+      { at: expect.any(Number), lane: "agent", label: "text_delta", detail: { content: "hi" } },
+      { at: expect.any(Number), lane: "rome", label: "create part 0.0: accepted" },
+    ]);
+    expect(checks).toEqual([{ id: "one-message-per-part", ok: true }]);
+    const [only] = steps;
+    for (const event of events) {
+      expect(event.at).toBeGreaterThanOrEqual(only?.startedAt ?? Infinity);
+      expect(event.at).toBeLessThanOrEqual((only?.startedAt ?? 0) + (only?.durationMs ?? 0));
+    }
+  });
+
+  it("fails the step naming every invariant that broke, and still records them all", async () => {
+    await expect(
+      runScenario(task(), channel, async ({ step, check }) => {
+        await step("Rome answers", () =>
+          check([
+            { id: "held", ok: true },
+            { id: "first", ok: false, detail: "went wrong" },
+            { id: "second", ok: false, detail: "also wrong" },
+          ]),
+        );
+      }),
+    ).rejects.toThrow(
+      /Step "Rome answers": Invariants broken:\n {2}first: went wrong\n {2}second: also wrong/,
+    );
+
+    expect((await readTrace()).checks.map((check) => [check.id, check.ok])).toEqual([
+      ["held", true],
+      ["first", false],
+      ["second", false],
+    ]);
+  });
+
   describe("when the trace cannot be written", () => {
     beforeEach(async () => {
       // A directory cannot be made under a file.
