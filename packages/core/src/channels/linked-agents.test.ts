@@ -120,4 +120,14 @@ describe("answeringAgentOf", () => {
   ] as const)("answers %s", (_case, linked, choice, threadType, expected) => {
     expect(answeringAgentOf(linked, choice, threadType)).toBe(expected);
   });
+
+  it("answers the linked agent in place of a choice that is not loaded", () => {
+    const isLoaded = (agent: string) => agent === "support:agent";
+    expect(answeringAgentOf("sales:agent", "gone:agent", "group", isLoaded)).toBe("sales:agent");
+    expect(answeringAgentOf("sales:agent", "support:agent", "group", isLoaded)).toBe(
+      "support:agent",
+    );
+    expect(answeringAgentOf("sales:agent", "main", "group", isLoaded)).toBe("main");
+    expect(answeringAgentOf(undefined, "gone:agent", "group", isLoaded)).toBe("gone:agent");
+  });
 });

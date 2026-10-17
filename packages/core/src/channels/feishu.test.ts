@@ -169,7 +169,11 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
       } satisfies ConversationDescriptor),
     supportedFields: ["enabled", "activation.mode", "replies.placement", "routing.agentName"],
     effective: structuredClone(effective),
-    overrides: {},
+    // A pin to main is a null override, until an update stores an agent.
+    overrides:
+      initial.routing?.agentName === null && effective.routing.agentName === null
+        ? { routing: { agentName: null } }
+        : {},
   });
   const get = rs.fn(async (ref: { conversationId: ConversationId }) =>
     makeSnapshot(ref.conversationId),
@@ -665,6 +669,41 @@ describe("FeishuAdapter", () => {
       expect.objectContaining({ set: {}, clear: [] }),
     );
     expect(JSON.stringify(channel.sent[1].input)).toContain("Agent: sales:agent");
+  });
+
+  it("keeps a group's main pin on an unlinked bot when the card saves", async () => {
+    const conversationSettings = makeConversationSettings({ routing: { agentName: null } });
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        conversationSettings: conversationSettings.control,
+        personMappingRepo: guardianPersonRepo("ou_alice"),
+        linkedAgent: () => null,
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    await adapter.start();
+
+    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    expect(JSON.stringify(channel.sent[0].input)).toContain('"initial_option":"main"');
+
+    for (const formValue of [{ agentName: "main" }, {}]) {
+      await channel.emitCardAction({
+        raw: {
+          action: {
+            value: { action: "configure_feishu_group", op: "save" },
+            form_value: formValue,
+          },
+        },
+      });
+    }
+    expect(conversationSettings.update).toHaveBeenCalledTimes(2);
+    for (const [input] of conversationSettings.update.mock.calls) {
+      expect(input).toMatchObject({ set: {}, clear: [] });
+    }
   });
 
   it("says no agent answers a group whose bot has no linked agent", async () => {

@@ -56,16 +56,22 @@ export function linkedAgentResolver(
  * docs/architecture/channels.md#linked-agents, or null when none does. `linked`
  * is the {@link linkedAgentResolver} answer for the conversation's channel, and
  * `choice` the conversation's stored agent, "main" for a pin to main. Main reads
- * as "main". A choice whose agent is not loaded still reads as the choice.
+ * as "main". On a linked channel, a choice that `isLoaded` rejects reads as the
+ * linked agent, as the message handler falls back to it. Without `isLoaded`,
+ * every choice counts as loaded.
  */
 export function answeringAgentOf(
   linked: string | null | undefined,
   choice: string | undefined,
   threadType: "private" | "group",
+  isLoaded?: (agent: string) => boolean,
 ): string | null {
   if (linked === null) return null;
-  const agent =
-    (linked !== undefined && threadType === "private" ? undefined : choice) ?? linked ?? "main";
+  const followsLink =
+    linked !== undefined &&
+    (threadType === "private" ||
+      (choice !== undefined && !isCoreMainAgentId(choice) && isLoaded?.(choice) === false));
+  const agent = (followsLink ? undefined : choice) ?? linked ?? "main";
   return isCoreMainAgentId(agent) ? "main" : agent;
 }
 

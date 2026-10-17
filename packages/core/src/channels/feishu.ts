@@ -91,6 +91,8 @@ interface FeishuChannelConfig {
   requireMention?: boolean;
   autoThread?: boolean;
   agentName?: string;
+  /** The group's stored agent, "main" for a pin to main. */
+  storedAgent?: string;
   /** The agent that answers the group, null when none does. */
   answeringAgent?: string | null;
   updatedAt?: string;
@@ -417,12 +419,7 @@ export class FeishuAdapter {
     await this.channel.send(
       chatId,
       {
-        card: buildGroupConfigCard(
-          chatId,
-          cfg,
-          this.getAgentOptions(cfg.agentName ?? cfg.answeringAgent ?? undefined),
-          error,
-        ),
+        card: buildGroupConfigCard(chatId, cfg, this.getAgentOptions(preselectedAgent(cfg)), error),
       },
       {
         replyTo: replyToMessageId,
@@ -462,13 +459,11 @@ export class FeishuAdapter {
       return;
     }
 
-    // The card preselects the answering agent, so saving it unchanged leaves
-    // a group with no choice following the link instead of pinning it.
+    // Saving the preselected agent unchanged leaves routing alone, so a group
+    // with no choice keeps following the link instead of pinning it.
     if (patch?.agentName) {
       const current = await this.getChannelConfig(evt.chatId);
-      if (current.agentName === undefined && patch.agentName === current.answeringAgent) {
-        delete patch.agentName;
-      }
+      if (patch.agentName === preselectedAgent(current)) delete patch.agentName;
     }
     if (patch?.agentName) {
       const available = this.listAgents?.();
@@ -489,7 +484,7 @@ export class FeishuAdapter {
       mode: next.mode ?? "allow",
       requireMention: next.requireMention ?? true,
       autoThread: next.autoThread ?? true,
-      agentName: next.agentName ?? "main",
+      answeringAgent: next.answeringAgent ?? null,
       operator: evt.operator.openId,
     });
     await this.sendGroupConfigStatus(
@@ -520,11 +515,10 @@ export class FeishuAdapter {
     return person?.bondLevel === "guardian";
   }
 
+  /** An empty or missing select leaves routing alone. Reset clears it. */
   private buildAgentPatch(agentName: unknown): Partial<FeishuChannelConfig> {
     const requestedAgent = typeof agentName === "string" ? agentName.trim() : "";
-    return {
-      agentName: requestedAgent || undefined,
-    };
+    return requestedAgent ? { agentName: requestedAgent } : {};
   }
 
   private buildGroupConfigPatch(
@@ -565,7 +559,13 @@ export class FeishuAdapter {
   private answeringAgentOf(
     snapshot: Pick<ConversationSettingsSnapshot, "effective" | "overrides">,
   ): string | null {
-    return answeringAgentOf(this.linkedAgent?.(), storedAgentChoice(snapshot), "group");
+    const loaded = this.listAgents?.();
+    return answeringAgentOf(
+      this.linkedAgent?.(),
+      storedAgentChoice(snapshot),
+      "group",
+      loaded ? (agent) => loaded.includes(agent) : undefined,
+    );
   }
 
   private async getChannelConfig(chatId: string): Promise<FeishuChannelConfig> {
@@ -587,6 +587,7 @@ export class FeishuAdapter {
       requireMention: snapshot.effective.activation.mode === "mention",
       autoThread: snapshot.effective.replies.placement === "thread",
       agentName: snapshot.effective.routing.agentName ?? undefined,
+      storedAgent: storedAgentChoice(snapshot),
       answeringAgent: this.answeringAgentOf(snapshot),
       updatedAt: snapshot.updatedAt,
       updatedBy: snapshot.updatedBy?.displayName ?? snapshot.updatedBy?.id,
@@ -611,6 +612,7 @@ export class FeishuAdapter {
         requireMention: saved.effective.activation.mode === "mention",
         autoThread: saved.effective.replies.placement === "thread",
         agentName: saved.effective.routing.agentName ?? undefined,
+        storedAgent: storedAgentChoice(saved),
         answeringAgent: this.answeringAgentOf(saved),
       };
     }
@@ -676,7 +678,7 @@ function buildGroupConfigCard(
   agentOptions: string[],
   error?: string,
 ): object {
-  const agent = cfg.agentName ?? cfg.answeringAgent ?? undefined;
+  const agent = preselectedAgent(cfg);
   const groupPolicy = cfg.mode === "ignore" ? "disabled" : "active";
   const requireMention = cfg.requireMention ?? true;
   const autoThread = cfg.autoThread ?? true;
@@ -787,6 +789,12 @@ function buildGroupConfigCard(
     },
     elements,
   };
+}
+
+/** The agent the card's select starts on: the stored choice, or else the
+ *  answering agent. */
+function preselectedAgent(cfg: FeishuChannelConfig): string | undefined {
+  return cfg.storedAgent ?? cfg.answeringAgent ?? undefined;
 }
 
 function fieldRow(label: string, control: object): object {
