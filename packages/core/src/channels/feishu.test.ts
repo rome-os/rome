@@ -652,6 +652,8 @@ describe("FeishuAdapter", () => {
       },
       () => channel as unknown as LarkChannel,
     );
+    // The adapter drops every message until an inbound handler is registered.
+    adapter.onInbound(async () => {});
     await adapter.start();
 
     await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
@@ -685,6 +687,8 @@ describe("FeishuAdapter", () => {
       },
       () => channel as unknown as LarkChannel,
     );
+    // The adapter drops every message until an inbound handler is registered.
+    adapter.onInbound(async () => {});
     await adapter.start();
 
     await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
@@ -720,6 +724,8 @@ describe("FeishuAdapter", () => {
       },
       () => channel as unknown as LarkChannel,
     );
+    // The adapter drops every message until an inbound handler is registered.
+    adapter.onInbound(async () => {});
     await adapter.start();
 
     await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
