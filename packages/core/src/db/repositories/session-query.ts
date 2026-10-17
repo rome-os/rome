@@ -36,7 +36,6 @@ const turnEndBlockType = sql<string>`json_extract(${turnEndTraceBlocks.content},
 const turnEndBlockCondition = sql`${turnEndBlockType} = 'turn_end'`;
 const runStatus = sql<string | null>`json_extract(${turnEndTraceBlocks.content}, '$.status')`;
 
-// A null routing override is an explicit pin to main.
 const pinnedToMain = sql`coalesce(json_type(${romeSessions.channelSettings}, '$.overrides.routing.agentName') = 'null', 0) = 1`;
 
 /**
@@ -47,30 +46,26 @@ const pinnedToMain = sql`coalesce(json_type(${romeSessions.channelSettings}, '$.
 function answeringAgentName(linkedAgents?: Record<string, string>): SQL<string | null> {
   const links = Object.entries(linkedAgents ?? {});
   if (links.length === 0) return sql<string | null>`${romeSessions.agentName}`;
-  const followsLink = and(
+  const onLinkedChannel = and(
     sql`${romeSessionKind} = 'channel'`,
     inArray(
       romeSessions.sourceChannel,
       links.map(([channel]) => channel),
     ),
-    or(
-      sql`${romeSessions.sourceThreadType} IS 'private'`,
-      and(
-        sql`not ${pinnedToMain}`,
-        sql`coalesce(${romeSessions.agentName}, 'main') in ('main', 'core:main')`,
-      ),
-    ),
   );
-  const linkedAgent = sql.join(
+  const linkedAgent = sql`case ${romeSessions.sourceChannel} ${sql.join(
     links.map(
       ([channel, agent]) =>
         sql`when ${channel} then ${isCoreMainAgentId(agent) ? sql`null` : agent}`,
     ),
     sql` `,
-  );
-  return sql<
-    string | null
-  >`case when ${followsLink} then case ${romeSessions.sourceChannel} ${linkedAgent} end else ${romeSessions.agentName} end`;
+  )} end`;
+  // A null routing override is an explicit pin to main.
+  return sql<string | null>`case when ${onLinkedChannel} then case
+    when ${romeSessions.sourceThreadType} IS 'private' then ${linkedAgent}
+    when ${pinnedToMain} then null
+    when coalesce(${romeSessions.agentName}, 'main') in ('main', 'core:main') then ${linkedAgent}
+    else ${romeSessions.agentName} end else ${romeSessions.agentName} end`;
 }
 
 function normalizedAgentName(scope: SessionQueryStorageScope): SQL<string> {
@@ -210,7 +205,7 @@ function sessionPredicates(
       romeSessions.id,
       romeSessions.sourceThreadName,
       romeSessions.sourceThreadId,
-      romeSessions.agentName,
+      answeringAgentName(scope.linkedAgents),
       romeSessions.triggerName,
       romeSessions.triggerActionName,
       romeSessions.triggerExecutionId,

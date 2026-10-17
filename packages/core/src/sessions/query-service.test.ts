@@ -531,6 +531,14 @@ describe("SessionQueryService", () => {
       "code-review:skill_review",
     ],
     ["a group pinned to main stays main", "telegram", "group", "main", true, null],
+    [
+      "a group pinned to main with its own choice stays main",
+      "telegram",
+      "group",
+      "code-review-agent",
+      true,
+      null,
+    ],
     ["a channel linked to main reads as main", "feishu", "group", "main", false, null],
     [
       "a silent channel keeps the stored agent",
@@ -603,5 +611,41 @@ describe("SessionQueryService", () => {
     expect(metrics.projections[0]?.groups.map((group) => group.key)).toEqual([
       `agent:${expected ?? "main"}`,
     ]);
+  });
+
+  it("finds a channel conversation by the name of the agent that answers it", async () => {
+    const follows = await webchat.ensureChannelConversation({
+      channel: "telegram",
+      threadId: "thread-1",
+      threadType: "group",
+      agentName: "main",
+    });
+    const keeps = await webchat.ensureChannelConversation({
+      channel: "telegram",
+      threadId: "thread-2",
+      threadType: "group",
+      agentName: "code-review-agent",
+    });
+    for (const [index, sessionId] of [follows.id, keeps.id].entries()) {
+      await seedRun({
+        messageId: `channel-run-${index}`,
+        sessionId,
+        turnId: `channel-turn-${index}`,
+        createdAt: "2026-07-15T10:00:00.000Z",
+        provider: "openai",
+        model: "gpt-5.4",
+        inputTokens: 1,
+        outputTokens: 1,
+        status: "completed",
+      });
+    }
+
+    const page = await service.querySessions({
+      scope: { time: { kind: "all" }, timeZone: "UTC" },
+      search: "skill_review",
+      page: { offset: 0, limit: 10 },
+    });
+
+    expect(page.sessions.map((session) => session.id)).toEqual([follows.id]);
   });
 });
