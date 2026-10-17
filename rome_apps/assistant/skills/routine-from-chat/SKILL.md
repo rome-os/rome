@@ -57,13 +57,19 @@ want it on a schedule or to run it by hand, ask.
    or `kind: "manual"` plus the human summary and the machine spec. A confirm
    card renders; the guardian turns it on. For `manual`, set `watchLabel` to
    something like "Run on demand" and omit all trigger fields.
-   **Add `activate: true`** when the guardian explicitly asked for this exact
-   routine — they named the trigger or cadence, what to run and its arguments
-   (e.g. "run `feedback-triage:check` every 12 hours") — so a second click adds
-   nothing. Leave it off when you inferred any of those, or when the routine
-   would send, post or spend on their behalf in a way they didn't ask for.
+   **Add `activate: true`** when the guardian clearly asked for this routine:
+   they said what to watch for or when it runs, what should happen, and, if it
+   tells anyone, who (e.g. "run `feedback-triage:check` every 12 hours", "tell me
+   when this game drops below $30 on Steam"). A second click adds nothing then.
+   Details you chose to carry it out don't count against this: a check time
+   they didn't give, the prompt wording, the action that does it. Leave it off
+   when you guessed what to watch, the condition or threshold, or the
+   recipient, or when the routine would send, post or spend on their behalf
+   beyond what they asked.
 5. **Close.** After `propose_routine`, reply with one short line confirming what
    you drafted (or what is now on), then stop. Do not call any create action.
+   If you chose a detail they didn't give, such as the check time, name it and
+   say they can change it.
 
 ## Event routines from a connector (Gmail, GitHub, Slack, …)
 
@@ -101,8 +107,9 @@ watching their third-party account:
    routine if one fits, otherwise stop.
 
 Then `propose_routine` with `eventName` set to exactly what subscribe returned.
-(The confirmation above arms the *event source*; this card is a separate, lighter
-step that turns the *routine* on — keep them distinct, don't collapse them.)
+(The confirmation above arms the *event source*. Whether the *routine* goes on
+right away or waits on the card is a separate call, made by step 4's rule —
+keep them distinct, don't treat the subscribe yes as that call.)
 
 **Prerequisites — sign-in, *then* connection.** Subscribe needs Composio sign-in
 *and* the toolkit connected. These are two separate gates, handled in order — a
@@ -225,9 +232,12 @@ propose_routine({
   eventName: "provider:event:gmail.gmail_new_gmail_message",
   filter: [{ field: "from.email", equals: "dana@example.com" }],
   actionName: "system:summon",
-  args: { agentName: "core:main", prompt: "A new email arrived from the guardian's landlord (dana@example.com). Read it and send the guardian a short summary." }
+  args: { agentName: "core:main", prompt: "A new email arrived from the guardian's landlord (dana@example.com). Read it and send the guardian a short summary." },
+  activate: true
 })
 ```
+
+Their answers settled the sender and what counts, so it goes on right away.
 
 ## Example — schedule
 
@@ -247,9 +257,44 @@ propose_routine({
   localTime: "09:00",
   rrule: "FREQ=WEEKLY;BYDAY=FR",
   actionName: "system:summon",
-  args: { agentName: "core:main", prompt: "Remind the guardian to send their weekly update, in a short friendly message." }
+  args: { agentName: "core:main", prompt: "Remind the guardian to send their weekly update, in a short friendly message." },
+  activate: true
 })
 ```
+
+They named the cadence and what to do, so it goes on right away.
+
+## Example — watch until something happens
+
+Guardian: "Tell me when Hades II drops below $30 on Steam."
+
+1. Classify → schedule: there is no event for a price change, so check on a
+   cadence. They named what to watch, the threshold and the recipient
+   (themselves), but no check time. Pick one yourself, in the guardian's
+   timezone.
+2. One lookup and one comparison is a single judgement, so a summon fits (see
+   the litmus). "Tell me when" asks for one message, not a daily report: the
+   prompt messages only when the price is below the threshold. A run can't
+   delete its own routine, so that message tells them how to turn the watch off.
+3. Propose:
+
+```
+propose_routine({
+  kind: "schedule",
+  sentence: "Every day at <time>, Rome will check the Steam price of Hades II and tell you once it's below $30.",
+  name: "Hades II price watch",
+  watchLabel: "Every day at <time>",
+  thenSummary: "check the price and tell you when it's below $30",
+  tzid: "<the guardian's timezone>",
+  localTime: "<the time you picked, HH:mm>",
+  rrule: "FREQ=DAILY",
+  actionName: "system:summon",
+  args: { agentName: "core:main", prompt: "Look up the current Steam price of Hades II. If it is below $30, send the guardian the price and the store link, and say they can turn this watch off on the Routines page. Otherwise send nothing." },
+  activate: true
+})
+```
+
+In your reply, say which time you picked and that they can change it.
 
 ## Example — manual
 
@@ -272,4 +317,6 @@ propose_routine({
 })
 ```
 
-Then reply with one short line confirming what you drafted, and stop.
+No `activate` here: they didn't say what the briefing should contain, so *what
+should happen* is your guess, and they confirm it on the card. Then reply with
+one short line confirming what you drafted, and stop.
