@@ -199,6 +199,9 @@ export function buildApp(
     agentLoader: deps.agentLoader,
     appCatalog: deps.appCatalog,
     linkedAgentOf: (channel) => readLinkedAgent(sessionChannelRecords, deps.agentLoader, channel),
+    // A channel with no record answers no agent, so the records are every
+    // channel that can.
+    channelNames: () => sessionChannelRecords.all().map((record) => record.id),
   });
   api.route("/", sessionsRoutes(sessionQueries));
 

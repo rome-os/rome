@@ -56,6 +56,7 @@ describe("SessionQueryService", () => {
         ],
       },
       linkedAgentOf: (channel) => (channel in links ? links[channel] : undefined),
+      channelNames: () => Object.keys(links),
       now: () => new Date("2026-07-15T12:00:00.000Z"),
     });
   });
@@ -568,9 +569,39 @@ describe("SessionQueryService", () => {
         .where(eq(romeSessions.id, id));
     }
 
+    await seedRun({
+      messageId: "channel-run",
+      sessionId: id,
+      turnId: "channel-turn",
+      createdAt: "2026-07-15T10:00:00.000Z",
+      provider: "openai",
+      model: "gpt-5.4",
+      inputTokens: 1,
+      outputTokens: 1,
+      status: "completed",
+    });
+    const filtered = async (agentName: string) =>
+      (
+        await service.querySessions({
+          scope: { time: { kind: "all" }, timeZone: "UTC", sessions: { agentNames: [agentName] } },
+          page: { offset: 0, limit: 10 },
+        })
+      ).sessions.map((session) => session.id);
+    const metrics = await service.queryMetrics({
+      scope: { time: { kind: "all" }, timeZone: "UTC" },
+      projections: [{ id: "agents", groupBy: "agent", interval: "none", rankBy: "runs" }],
+    });
+
     const detail = await service.getSession(id);
 
     expect(detail?.agentName).toBe(expected);
     expect(detail?.owner.label).toBe(expected?.startsWith("code-review") ? "Code Review" : "Rome");
+    expect(await filtered(expected ?? "main")).toEqual([id]);
+    for (const other of ["main", "code-review-agent", "code-review:skill_review"]) {
+      if (other !== (expected ?? "main")) expect(await filtered(other)).toEqual([]);
+    }
+    expect(metrics.projections[0]?.groups.map((group) => group.key)).toEqual([
+      `agent:${expected ?? "main"}`,
+    ]);
   });
 });

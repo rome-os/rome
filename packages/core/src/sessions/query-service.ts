@@ -70,6 +70,10 @@ export interface SessionQueryServiceOptions {
   /** The channel-message hook's `linkedAgentOf`, so a record names the agent
    *  that answers its conversation. Without it, records show the stored agent. */
   linkedAgentOf?: LinkedAgentOf;
+  /** Every channel `linkedAgentOf` may answer with an agent, so the agent
+   *  filter, search and metrics follow the link too. Without it, they read
+   *  the stored agent. */
+  channelNames?: () => Iterable<string>;
   now?: () => Date;
 }
 
@@ -395,11 +399,18 @@ export class SessionQueryService {
       }
     }
     const sources = scope.sessions?.sources;
+    const linkedAgentOf = this.linkedAgentLookup();
+    const linkedAgents: Record<string, string> = {};
+    for (const channel of this.options.channelNames?.() ?? []) {
+      const agent = linkedAgentOf(channel);
+      if (agent) linkedAgents[channel] = agent;
+    }
     return {
       ...time,
       sessionIds: scope.sessions?.ids,
       types: scope.sessions?.types,
       agentNames: scope.sessions?.agentNames,
+      linkedAgents,
       ownerAgentNames: scope.sessions?.owners ? Array.from(ownerAgentNames) : undefined,
       includeUninstalledOwners,
       knownAgentNames,
