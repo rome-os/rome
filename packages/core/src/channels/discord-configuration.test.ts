@@ -72,6 +72,7 @@ function makeInteraction(input: {
   const interaction = {
     commandName: "channel",
     channelId: CHANNEL_ID,
+    guildId: "guild-1",
     channel: { name: "general", isThread: () => false },
     guild: { name: "Rome" },
     user: { id: input.userId },
@@ -195,6 +196,75 @@ describe("Discord configuration command authorization", () => {
     );
     expect(editReply).toHaveBeenCalledWith({
       content: expect.stringContaining("now routes to agent `pm-assistant`"),
+    });
+  });
+
+  it("names the linked agent in status and after a clear", async () => {
+    const settings = makeConversationSettings();
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      conversationSettings: settings.control,
+      resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
+      linkedAgent: () => "sales:agent",
+    });
+    const status = makeInteraction({ userId: GUARDIAN_ID, subcommand: "status" });
+    await runCommand(adapter, status.interaction);
+    expect(status.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("agent: sales:agent"),
+    });
+
+    const clear = makeInteraction({
+      userId: GUARDIAN_ID,
+      subcommandGroup: "agent",
+      subcommand: "clear",
+    });
+    await runCommand(adapter, clear.interaction);
+    expect(clear.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("messages now route to sales:agent"),
+    });
+  });
+
+  it("names the linked agent in status when the stored agent is not loaded", async () => {
+    const settings = makeConversationSettings();
+    const snapshot = await settings.get();
+    snapshot.effective.routing.agentName = "gone:agent";
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      conversationSettings: settings.control,
+      resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
+      linkedAgent: () => "sales:agent",
+      hasAgent: (name) => name === "sales:agent",
+    });
+    const { interaction, editReply } = makeInteraction({
+      userId: GUARDIAN_ID,
+      subcommand: "status",
+    });
+    await runCommand(adapter, interaction);
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("agent: sales:agent"),
+    });
+  });
+
+  it("says no agent answers when the bot has no linked agent", async () => {
+    const settings = makeConversationSettings();
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      conversationSettings: settings.control,
+      resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
+      linkedAgent: () => null,
+    });
+    const { interaction, editReply } = makeInteraction({
+      userId: GUARDIAN_ID,
+      subcommandGroup: "agent",
+      subcommand: "set",
+      strings: { name: "main" },
+    });
+    await runCommand(adapter, interaction);
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("no agent answers here"),
     });
   });
 
