@@ -203,6 +203,12 @@ jobs:
       - if: steps.areas.outputs.core == 'true'
         run: pnpm install --frozen-lockfile
       - if: steps.areas.outputs.core == 'true'
+        name: Install ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ripgrep
+          rg --version
+      - if: steps.areas.outputs.core == 'true'
         run: pnpm test:unit:core
 
   # ──────────────────────────────────────────

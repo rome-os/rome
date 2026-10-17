@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   createReadStream,
   createWriteStream,
@@ -1785,6 +1785,80 @@ export function createHistoryHandler(scope: FileBrowserScope): Handler {
   };
 }
 
+function readSearchOutput(rootDir: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("rg", args, { cwd: rootDir, stdio: ["ignore", "pipe", "pipe"] });
+    const lines: string[] = [];
+    const maxOutputBytes = 1024 * 1024;
+    let outputBytes = 0;
+    let pending = "";
+    let stderr = "";
+    let failure: Error | undefined;
+    let stoppedAtLimit = false;
+
+    const fail = (error: Error) => {
+      failure ??= error;
+      child.kill("SIGKILL");
+    };
+    const appendLine = (line: string, newlineBytes: number) => {
+      if (!line) return;
+      outputBytes += Buffer.byteLength(line, "utf8") + newlineBytes;
+      if (outputBytes > maxOutputBytes) {
+        fail(new Error("Search results exceed the output limit"));
+      } else {
+        lines.push(line.endsWith("\r") ? line.slice(0, -1) : line);
+      }
+    };
+
+    // setEncoding retains UTF-8 sequences split across pipe chunks. The byte
+    // budget also bounds an unfinished line, not just completed results.
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      if (failure || lines.length === 100) return;
+      pending += chunk;
+      let newline: number;
+      while ((newline = pending.indexOf("\n")) !== -1) {
+        appendLine(pending.slice(0, newline), 1);
+        pending = pending.slice(newline + 1);
+        if (failure) return;
+        if (lines.length === 100) {
+          pending = "";
+          stoppedAtLimit = child.kill("SIGKILL");
+          return;
+        }
+      }
+      if (outputBytes + Buffer.byteLength(pending, "utf8") > maxOutputBytes) {
+        fail(new Error("Search results exceed the output limit"));
+      }
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr = (stderr + chunk).slice(0, 16 * 1024);
+    });
+    child.stdout.once("error", fail);
+    child.stderr.once("error", fail);
+    child.once("error", (error) => {
+      failure ??= error;
+    });
+    // Wait for close to reap rg and drain both pipes. Our limit signal is success
+    // only without diagnostics, so an observed rg error cannot become a match.
+    child.once("close", (code, signal) => {
+      if (!failure && pending && lines.length < 100) appendLine(pending, 0);
+      if (failure) {
+        reject(failure);
+      } else if (code === 0 || (stoppedAtLimit && signal === "SIGKILL" && !stderr)) {
+        resolve(lines.join("\n"));
+      } else {
+        reject(
+          Object.assign(new Error(stderr.trim() || `rg exited with ${signal ?? code}`), {
+            status: code,
+          }),
+        );
+      }
+    });
+  });
+}
+
 export function createSearchHandler(scope: FileBrowserScope): Handler {
   return async (c) => {
     const query = c.req.query("q");
@@ -1808,12 +1882,7 @@ export function createSearchHandler(scope: FileBrowserScope): Handler {
         query,
         ".",
       ];
-      const output = execFileSync("rg", args, {
-        cwd: scope.rootDir,
-        encoding: "utf-8",
-        maxBuffer: 1024 * 1024,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      const output = await readSearchOutput(scope.rootDir, args);
 
       const results = output
         .trim()

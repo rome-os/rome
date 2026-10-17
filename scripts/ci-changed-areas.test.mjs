@@ -279,12 +279,13 @@ test("each shard job guards its steps on its own detection output", async () => 
       assert.equal(key, shard, `the ${shard} job guards a step on steps.areas.outputs.${key}`);
     }
 
-    // pnpm/action-setup, setup-node, install, and the suite itself. A guard
-    // dropped from any of them runs that step on a shard meant to stay idle.
+    // A missing guard runs setup or tests on a shard meant to stay idle.
+    // Core also installs rg for tests that invoke the real binary.
+    const expectedGuards = shard === "core" ? 5 : 4;
     assert.equal(
       runGuards.length,
-      4,
-      `the ${shard} job has ${runGuards.length} guarded steps, want 4`,
+      expectedGuards,
+      `the ${shard} job has ${runGuards.length} guarded steps, want ${expectedGuards}`,
     );
 
     assert.ok(
