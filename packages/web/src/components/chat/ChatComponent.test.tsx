@@ -2,9 +2,17 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
-import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
+import { StrictMode, useState } from "react";
+import { MemoryRouter, useLocation, useNavigationType, useNavigate } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { DASHBOARD_IDENTITY_QUERY_KEY } from "@/hooks/use-dashboard-identity";
+import {
+  readNewChatDraft,
+  activateDraftOwner,
+  writeNewChatDraft,
+  emptyNewChatDraft,
+} from "@/lib/new-chat-draft-storage";
+import { useHostNavigation } from "@/hooks/use-host-navigation";
 import { romeNewsConfig } from "@/config/quick-entries";
 import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps, GREETING_ONLY_HOME_KEY } from "./ChatComponent";
@@ -95,6 +103,7 @@ afterEach(async () => {
   chatStub.enabled = false;
   romeNewsConfig.enabled = false;
   localStorage.clear();
+  sessionStorage.clear();
   rs.restoreAllMocks();
   rs.unstubAllGlobals();
   await i18n.changeLanguage("en");
@@ -151,11 +160,14 @@ function renderChatComponent(
     sessions: Array<Record<string, unknown>>;
     projects: Array<Record<string, unknown>>;
     newsFeed?: unknown;
-    createSession?: () => Response;
+    createSession?: () => Response | Promise<Response>;
+    postTurn?: () => Response | Promise<Response>;
+    settings?: Record<string, unknown>;
     // Holds the session list back until it resolves.
     sessionsGate?: Promise<void>;
   },
   initialEntry = "/chat",
+  routed = false,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -163,13 +175,19 @@ function renderChatComponent(
     },
   });
 
+  queryClient.setQueryData(DASHBOARD_IDENTITY_QUERY_KEY, {
+    kind: "guardian",
+    userId: "synthetic-guardian",
+  });
   const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
     const url = String(input);
+    if (url === "/api/auth/me")
+      return Response.json({ kind: "guardian", userId: "synthetic-guardian" });
     if (url === "/api/settings") {
-      return Response.json({ guardianName: "Ada", agentName: "Atlas" });
+      return Response.json({ guardianName: "Ada", agentName: "Atlas", ...homeData?.settings });
     }
     if (url === "/api/people") {
       return Response.json({
@@ -188,7 +206,9 @@ function renderChatComponent(
       return Response.json([]);
     }
     if (/\/api\/chat\/sessions\/[^/]+\/turns$/.test(url)) {
-      return init?.method === "POST" ? Response.json({ turnId: "turn-1" }) : Response.json([]);
+      return init?.method === "POST"
+        ? (homeData?.postTurn?.() ?? Response.json({ turnId: "turn-1" }))
+        : Response.json([]);
     }
     if (url === "/api/chat/projects") {
       return Response.json({
@@ -214,12 +234,18 @@ function renderChatComponent(
   const result = render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>
-        <ChatHost {...props} />
+        {routed ? (
+          <StrictMode>
+            <RoutedChatHost {...props} />
+          </StrictMode>
+        ) : (
+          <ChatHost {...props} />
+        )}
         <LocationProbe />
       </QueryClientProvider>
     </MemoryRouter>,
   );
-  return { ...result, fetchSpy };
+  return { ...result, fetchSpy, queryClient };
 }
 
 describe("ChatComponent draft file drops", () => {
@@ -592,6 +618,7 @@ describe("ChatComponent empty home", () => {
       },
     );
 
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "existing user draft" } });
     await user.click(await screen.findByRole("button", { name: "Cloud chat" }));
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Draft from Cloud");
 
@@ -607,6 +634,47 @@ describe("ChatComponent empty home", () => {
 });
 
 describe("ChatComponent first send", () => {
+  it("independent start quick-entry does not save its prompt over an unrelated draft", async () => {
+    romeNewsConfig.enabled = true;
+    const { fetchSpy } = renderChatComponent(
+      {},
+      {
+        sessions: [],
+        projects: [],
+        newsFeed: {
+          version: 1,
+          items: [
+            {
+              id: "synthetic-start",
+              type: "chat",
+              title: { en: "Start independently", "zh-CN": "独立开始" },
+              image: "https://example.com/synthetic.png",
+              prompt: { en: "independent prompt", "zh-CN": "独立提示" },
+              mode: "start",
+              skillName: "independent_skill",
+            },
+          ],
+        },
+      },
+    );
+    const raw = "  unrelated raw中文🙂\n  ";
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: raw } });
+    await userEvent.click(await screen.findByRole("button", { name: "Start independently" }));
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url, init]) => String(url).endsWith("/turns") && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    expect(readNewChatDraft("guardian:synthetic-guardian")?.value.text).toBe(raw);
+    const posted = fetchSpy.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/turns") && init?.method === "POST",
+    )!;
+    expect((posted[1]?.body as FormData).get("text")).toBe("independent prompt");
+    expect((posted[1]?.body as FormData).get("skillName")).toBe("independent_skill");
+  });
+
   it("keeps the focused composer through the session the first send creates", async () => {
     const user = userEvent.setup();
     const onSessionCreated = rs.fn();
@@ -649,5 +717,237 @@ describe("ChatComponent first send", () => {
     expect(screen.queryByTestId("message-list")).toBeNull();
     expect(onSessionCreated).not.toHaveBeenCalled();
     expect(fetchSpy.mock.calls.some(([url]) => String(url).endsWith("/turns"))).toBe(false);
+  });
+});
+
+function RoutedChatHost({ onSessionCreated, ...props }: Partial<ChatComponentProps>) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  useHostNavigation();
+  const sessionId = location.pathname.startsWith("/chat/") ? location.pathname.slice(6) : undefined;
+  return (
+    <>
+      <button onClick={() => navigate("/other")}>Other route</button>
+      <button onClick={() => navigate("/chat/existing")}>Existing session</button>
+      <button onClick={() => navigate("/chat")}>New chat route</button>
+      <button onClick={() => navigate(-1)}>Back</button>
+      {location.pathname !== "/other" && (
+        <ChatComponent
+          {...props}
+          sessionId={sessionId}
+          initialDraftText={(location.state as { draft?: string } | null)?.draft}
+          onSessionCreated={(id) => {
+            navigate(`/chat/${id}`);
+            onSessionCreated?.(id);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function deferredResponse() {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((yes) => {
+    resolve = yes;
+  });
+  return { promise, resolve };
+}
+
+describe("retained draft through the real Chat route and first-send path", () => {
+  it("unmounted failed create restores only an unedited remount, without late navigation", async () => {
+    const creation = deferredResponse();
+    const created = rs.fn();
+    renderChatComponent(
+      { onSessionCreated: created },
+      { sessions: [], projects: [], createSession: () => creation.promise },
+      "/chat",
+      true,
+    );
+    const raw = "  failed create中文🙂\n  ";
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: raw } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Other route" }));
+    fireEvent.click(screen.getByRole("button", { name: "New chat route" }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+    await act(async () =>
+      creation.resolve(Response.json({ error: "synthetic failure" }, { status: 500 })),
+    );
+    await waitFor(() =>
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(raw),
+    );
+    expect(created).not.toHaveBeenCalled();
+    expect(screen.getByTestId("chat-location").textContent).toContain("/chat ");
+  });
+
+  it("new remount typing then deletion survives old POST rejection", async () => {
+    const post = deferredResponse();
+    renderChatComponent(
+      {},
+      { sessions: [], projects: [], postTurn: () => post.promise },
+      "/chat",
+      true,
+    );
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "old A" } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-location").textContent).toContain("/chat/new-session"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Other route" }));
+    fireEvent.click(screen.getByRole("button", { name: "New chat route" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "new B" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "" } });
+    await act(async () => post.resolve(Response.json({ error: "rejected" }, { status: 500 })));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+    expect(readNewChatDraft("guardian:synthetic-guardian")?.value.text).toBe("");
+  });
+
+  it("public identity switch clears old content without refocusing a coarse pointer", async () => {
+    stubCoarsePointer();
+    activateDraftOwner("guardian:late");
+    const raw = "  later identity中文🙂\n  ";
+    writeNewChatDraft("guardian:late", { ...emptyNewChatDraft(), text: raw });
+    const { queryClient } = renderChatComponent({}, undefined, "/chat", true);
+    // Query identity changes are synthetic; there is no real account operation.
+    act(() =>
+      queryClient.setQueryData(DASHBOARD_IDENTITY_QUERY_KEY, { kind: "guardian", userId: "late" }),
+    );
+    // A confirmed identity switch intentionally clears old content, unlike first hydration.
+    await waitFor(() =>
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(""),
+    );
+    expect(document.activeElement).not.toBe(screen.getByRole("textbox"));
+  });
+
+  it.each([
+    "Existing session",
+    "Other route",
+  ])("restores the raw-end caret after %s and immediately appends typing", async (route) => {
+    const user = userEvent.setup();
+    renderChatComponent({}, undefined, "/chat", true);
+    const raw = "  中文🙂\n第二行\n  ";
+    const original = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.change(original, { target: { value: raw } });
+    original.setSelectionRange(2, 2);
+    fireEvent.click(screen.getByRole("button", { name: route }));
+    fireEvent.click(screen.getByRole("button", { name: "New chat route" }));
+    const restored = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(restored.value).toBe(raw);
+    expect(document.activeElement).toBe(restored);
+    expect([restored.selectionStart, restored.selectionEnd]).toEqual([raw.length, raw.length]);
+    await user.keyboard("追加🙂");
+    expect(restored.value).toBe(raw + "追加🙂");
+  });
+
+  it.each([
+    false,
+    true,
+  ])("positions seeded and restored content only on entry (coarse pointer: %s)", async (coarse) => {
+    if (coarse) stubCoarsePointer();
+    const user = userEvent.setup();
+    const { queryClient } = renderChatComponent({}, undefined, "/chat", true);
+    const raw = "  中文🙂\n第二行\n  ";
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("rome:host-navigate", { detail: { path: "/chat", state: { draft: raw } } }),
+      );
+    });
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea.value).toBe(raw);
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([raw.length, raw.length]);
+    if (coarse) expect(document.activeElement).not.toBe(textarea);
+
+    textarea.focus();
+    textarea.setSelectionRange(2, 4);
+    fireEvent.select(textarea);
+    act(() =>
+      queryClient.setQueryData(["settings"], { guardianName: "Updated name", agentName: "Atlas" }),
+    );
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([2, 4]);
+    fireEvent.compositionStart(textarea);
+    fireEvent.keyDown(textarea, { key: "Enter", isComposing: true });
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([2, 4]);
+    fireEvent.compositionEnd(textarea);
+    await user.keyboard("追加");
+    const edited = raw.slice(0, 2) + "追加" + raw.slice(4);
+    expect(textarea.value).toBe(edited);
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([4, 4]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Other route" }));
+    fireEvent.click(screen.getByRole("button", { name: "New chat route" }));
+    const restored = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect([restored.selectionStart, restored.selectionEnd]).toEqual([
+      edited.length,
+      edited.length,
+    ]);
+    if (coarse) expect(document.activeElement).not.toBe(restored);
+  });
+
+  it("preserves raw text on existing-session/other-route/repeated New chat and respects deletion", async () => {
+    renderChatComponent({}, undefined, "/chat", true);
+    const raw = "  中文\n第二行\n  ";
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: raw } });
+    fireEvent.click(screen.getByRole("button", { name: "Existing session" }));
+    fireEvent.click(screen.getByRole("button", { name: "New chat route" }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(raw);
+    fireEvent.click(screen.getByRole("button", { name: "Other route" }));
+    fireEvent.click(screen.getByRole("button", { name: "New chat route" }));
+    fireEvent.click(screen.getByRole("button", { name: "New chat route" }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(raw);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Other route" }));
+    fireEvent.click(screen.getByRole("button", { name: "New chat route" }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("keeps the same focused textarea and navigates before POST acceptance", async () => {
+    const post = deferredResponse();
+    const onSessionCreated = rs.fn();
+    renderChatComponent(
+      { onSessionCreated },
+      { sessions: [], projects: [], postTurn: () => post.promise },
+      "/chat",
+      true,
+    );
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: "first message" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(onSessionCreated).toHaveBeenCalledWith("new-session"));
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-location").textContent).toContain("/chat/new-session"),
+    );
+    expect(screen.getByRole("textbox")).toBe(textarea);
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.value).toBe("");
+    await act(async () => post.resolve(Response.json({ turnId: "turn-1" })));
+    // The synthetic stream read returns 404. An accepted input stays sent.
+    await waitFor(() => expect(textarea.value).toBe(""));
+    fireEvent.click(screen.getByRole("button", { name: "New chat route" }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("consumes each real navigation seed once, silently ignores conflicts, and allows a fresh seed after deletion", async () => {
+    renderChatComponent({}, undefined, "/chat", true);
+    const prefill = async (draft: string) =>
+      act(async () => {
+        window.dispatchEvent(
+          new CustomEvent("rome:host-navigate", { detail: { path: "/chat", state: { draft } } }),
+        );
+      });
+    await prefill("original seed");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "edited seed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Other route" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("edited seed");
+    await prefill("conflicting seed");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("edited seed");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Other route" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+    await prefill("fresh seed");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("fresh seed");
   });
 });

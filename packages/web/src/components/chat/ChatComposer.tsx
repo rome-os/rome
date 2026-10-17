@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type SetStateAction,
 } from "react";
 import { ArrowUp, Paperclip, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -54,6 +55,8 @@ import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandCh
 import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 import { useHorizontalScrollRail } from "./HorizontalScrollRail";
+import { useNewChatDraft, type NewChatSeed } from "@/hooks/use-new-chat-draft";
+import type { NewChatDraftData } from "@/lib/new-chat-draft-storage";
 import { randomUUID } from "@/lib/random-uuid";
 
 export interface ChatComposerSnapshot {
@@ -88,7 +91,7 @@ export interface ChatComposerSendControls {
 }
 
 export interface ChatComposerHandle {
-  focus: () => void;
+  focus: (options?: { caret?: "end"; focus?: boolean }) => void;
   insertText: (text: string, options?: { focus?: boolean }) => void;
   setSkillSelection: (skill: SkillSelection | null) => void;
   addFiles: (files: File[]) => void;
@@ -113,6 +116,8 @@ export interface ChatComposerHandle {
 }
 
 export interface ChatComposerProps {
+  persistNewChatDraft?: boolean;
+  draftSeed?: NewChatSeed;
   // Whether the project picker is shown (typically only in draft mode).
   showProjectSelector?: boolean;
   // Whether the large-model picker is shown (typically only in draft mode).
@@ -185,6 +190,8 @@ function clampTextareaHeight(el: HTMLTextAreaElement, maxHeight: number) {
 
 export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
   {
+    persistNewChatDraft = false,
+    draftSeed,
     showProjectSelector = false,
     showModelSelector = false,
     initialProjectName,
@@ -202,16 +209,24 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 ) {
   const { t } = useTranslation("chat");
 
-  const [inputText, setInputText] = useState("");
+  const draft = useNewChatDraft(persistNewChatDraft, draftSeed, {
+    projectPath: initialProjectName?.trim() || DEFAULT_PROJECT_NAME,
+    agentMention: initialAgentMention,
+  });
+  const field =
+    <K extends keyof NewChatDraftData>(key: K) =>
+    (action: SetStateAction<NewChatDraftData[K]>) =>
+      draft.change(key, action);
+  const inputText = draft.value.text;
+  const setInputText = field("text");
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [uploadInFlight, setUploadInFlight] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   // When `pinnedAgentMention` is set, the session is already bound to an
   // agent — the `@` menu and the local draftAgentMention are inert.
-  const [draftAgentMention, setDraftAgentMention] = useState<AgentMention | null>(
-    initialAgentMention,
-  );
+  const draftAgentMention = draft.value.agentMention;
+  const setDraftAgentMention = field("agentMention");
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
   // Index of the `@` that opened the menu. Used to splice the query out of
   // the textarea once the user picks an item.
@@ -224,7 +239,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const agentMentionLocked = pinnedAgentMention !== null || lockAgentMention;
   useEffect(() => {
     if (agentMentionLocked) {
-      setDraftAgentMention(null);
+      if (!sendInFlightRef.current) setDraftAgentMention(null);
       setMentionMenuOpen(false);
       setMentionAnchorIndex(null);
       setMentionQuery("");
@@ -238,7 +253,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // name-shape constraint applies. Expansion stays server-side.
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashQuery, setSlashQuery] = useState("");
-  const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(null);
+  const draftSkill = draft.value.skill;
+  const setDraftSkill = field("skill");
 
   const { data: settings } = useSettings();
   const { data: peopleData } = usePeople();
@@ -267,15 +283,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     }
     seededFromSettingsRef.current = true;
   }, [settings]);
-  const [selectedPersonId, setSelectedPersonId] = useState<string>("");
+  const selectedPersonId = draft.value.personaId;
+  const setSelectedPersonId = field("personaId");
 
   const [impersonationMenuOpen, setImpersonationMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
 
-  const [draftProjectName, setDraftProjectName] = useState(
-    initialProjectName?.trim() || DEFAULT_PROJECT_NAME,
-  );
+  const draftProjectName = draft.value.projectPath;
+  const setDraftProjectName = field("projectPath");
   const [projectCatalog, setProjectCatalog] = useState<ProjectCatalog | null>(null);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
@@ -294,6 +310,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const [pendingConnectPath, setPendingConnectPath] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mountedRef = useRef(true);
+  const sendInFlightRef = useRef(false);
+  const pendingEndSelectionRef = useRef<{
+    value: string | null;
+    activeElement: Element | null;
+  } | null>(null);
   const attachmentTrayRef = useRef<HTMLDivElement>(null);
   const [textareaMaxHeight, setTextareaMaxHeight] = useState(TEXTAREA_MAX_HEIGHT);
 
@@ -337,6 +359,19 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     clampTextareaHeight(el, textareaMaxHeight);
   }, [inputText, textareaMaxHeight]);
 
+  useLayoutEffect(() => {
+    const pending = pendingEndSelectionRef.current;
+    if (!pending || !draft.ready) return;
+    pendingEndSelectionRef.current = null;
+    const el = textareaRef.current;
+    if (
+      el &&
+      (pending.value === null || el.value === pending.value) &&
+      document.activeElement === pending.activeElement
+    )
+      el.setSelectionRange(el.value.length, el.value.length);
+  }, [inputText, draft.ready]);
+
   // Whether the textarea held focus when the current Send press began.
   const textareaFocusedAtPressRef = useRef(false);
 
@@ -359,10 +394,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // If impersonation gets disabled mid-session, drop any selection so the
   // composer doesn't carry a hidden persona id.
   useEffect(() => {
-    if (impersonationEnabled) return;
+    if (!settings || impersonationEnabled) return;
     setSelectedPersonId("");
     setImpersonationMenuOpen(false);
-  }, [impersonationEnabled]);
+  }, [settings, impersonationEnabled, selectedPersonId]);
 
   const updateLargeModelSelection = useCallback(
     async (next: string) => {
@@ -449,6 +484,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const invokeOnSend = useCallback(
     async (snapshot: ChatComposerSnapshot) => {
+      if (sendInFlightRef.current) return;
+      sendInFlightRef.current = true;
       const tracksUpload = snapshot.uploads.length > 0;
       const controller = new AbortController();
       if (tracksUpload) {
@@ -460,31 +497,33 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       try {
         await onSend(snapshot, {
           onUploadProgress: (progress) => {
-            if (!tracksUpload) return;
+            if (!tracksUpload || !mountedRef.current) return;
             setUploadProgress(progress === null ? null : Math.max(0, Math.min(1, progress)));
           },
           signal: controller.signal,
         });
       } finally {
+        sendInFlightRef.current = false;
         if (tracksUpload) {
           uploadInFlightRef.current = false;
           uploadAbortRef.current = null;
-          setUploadInFlight(false);
-          setUploadProgress(null);
+          if (mountedRef.current) {
+            setUploadInFlight(false);
+            setUploadProgress(null);
+          }
         }
       }
     },
     [onSend],
   );
 
-  // Unmounting mid-upload must not leave the request running behind a composer
-  // that no longer exists.
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
       uploadAbortRef.current?.abort();
-    },
-    [],
-  );
+    };
+  }, []);
 
   const cancelUpload = useCallback(() => {
     uploadAbortRef.current?.abort();
@@ -493,17 +532,27 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   useImperativeHandle(
     ref,
     () => ({
-      focus: () => textareaRef.current?.focus(),
+      focus: (options) => {
+        pendingEndSelectionRef.current = null;
+        const el = textareaRef.current;
+        if (!el) return;
+        if (options?.focus !== false) el.focus();
+        if (options?.caret !== "end") return;
+        const value = draft.ready ? draft.current.current.text : null;
+        if (value !== null && el.value === value)
+          el.setSelectionRange(el.value.length, el.value.length);
+        else pendingEndSelectionRef.current = { value, activeElement: document.activeElement };
+      },
       insertText: (text: string, options?: { focus?: boolean }) => {
         if (uploadInFlightRef.current) return;
         setInputText(text);
-        requestAnimationFrame(() => {
-          const el = textareaRef.current;
-          if (!el) return;
-          clampTextareaHeight(el, textareaMaxHeight);
+        const el = textareaRef.current;
+        if (el) {
           if (options?.focus !== false) el.focus();
-          el.setSelectionRange(text.length, text.length);
-        });
+          if (el.value === text) el.setSelectionRange(text.length, text.length);
+          else
+            pendingEndSelectionRef.current = { value: text, activeElement: document.activeElement };
+        }
       },
       setSkillSelection: (skill: SkillSelection | null) => {
         if (uploadInFlightRef.current) return;
@@ -513,13 +562,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       },
       addFiles: addPendingFiles,
       submit: (text: string, opts?: { skillName?: string }) => {
-        if (uploadInFlightRef.current) return;
+        if (sendInFlightRef.current || uploadInFlightRef.current) return;
         const trimmed = text.trim();
-        const skillName = opts?.skillName ?? draftSkill?.name;
-        if (!trimmed && pendingUploads.length === 0 && !skillName) return;
+        const skillName = opts?.skillName ?? (persistNewChatDraft ? undefined : draftSkill?.name);
+        if (!trimmed && (persistNewChatDraft || pendingUploads.length === 0) && !skillName) return;
         const snapshot: ChatComposerSnapshot = {
           text: trimmed,
-          uploads: pendingUploads,
+          uploads: persistNewChatDraft ? [] : pendingUploads,
           personaId: impersonationEnabled && selectedPersonId ? selectedPersonId : undefined,
           largeModelSelection:
             showModelSelector && modelSelectorEnabled ? largeModelSelection : undefined,
@@ -530,6 +579,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         };
         void invokeOnSend(snapshot)
           .then(() => {
+            if (!mountedRef.current) return;
             const sentIds = new Set(snapshot.uploads.map((upload) => upload.id));
             setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
           })
@@ -544,6 +594,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       }),
     }),
     [
+      draft.ready,
+      persistNewChatDraft,
       addPendingFiles,
       textareaMaxHeight,
       impersonationEnabled,
@@ -583,15 +635,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   );
 
   const runSend = useCallback(async () => {
-    if (uploadInFlight || uploadInFlightRef.current) return;
+    if (sendInFlightRef.current || uploadInFlight || uploadInFlightRef.current) return;
     // A skill chip alone is a sendable turn — the server-expanded prompt asks
     // the agent to read the skill and ask what to do with it.
     if (!inputText.trim() && pendingUploads.length === 0 && !draftSkill) return;
 
     const text = inputText.trim();
-    // The textarea holds the untrimmed value; compare against that when
-    // deciding whether the user edited the box during an upload.
-    const rawText = inputText;
     const uploads = pendingUploads;
     const skill = draftSkill;
     const failed = failedSendRef.current;
@@ -622,32 +671,21 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     // It clears only once the server has accepted the turn.
     const clearsOptimistically = uploads.length === 0;
     if (textareaRef.current && text) recordSendOrigin(inputId, textareaRef.current);
-    if (clearsOptimistically) {
-      setInputText("");
-      setPendingUploads([]);
-      setDraftSkill(null);
-    }
+    const submission = draft.beginSend(clearsOptimistically);
+    if (clearsOptimistically) setPendingUploads([]);
     try {
       await invokeOnSend(snapshot);
       failedSendRef.current = null;
-      if (!clearsOptimistically) {
+      submission.accept();
+      if (mountedRef.current && !clearsOptimistically) {
         const sentIds = new Set(uploads.map((upload) => upload.id));
         setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
-        setDraftSkill((current) => (current === skill ? null : current));
-        // Anything typed during the upload is newer than what was sent, so it
-        // survives; only the exact text that went out is cleared.
-        setInputText((current) => (current === rawText ? "" : current));
       }
     } catch {
       discardSendOrigin(inputId);
       failedSendRef.current = { inputId, text, uploads, skill };
-      if (clearsOptimistically) {
-        setInputText(text);
-        setPendingUploads(uploads);
-        setDraftSkill(skill);
-      }
-      // Nothing to restore otherwise — a cancelled or failed upload never
-      // cleared the text or the attachment tray in the first place.
+      if (submission.fail() && mountedRef.current && clearsOptimistically)
+        setPendingUploads((current) => (current.length ? current : uploads));
     }
   }, [
     inputText,
@@ -724,6 +762,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   );
 
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    pendingEndSelectionRef.current = null;
     if (uploadInFlightRef.current) return;
     const value = event.target.value;
     setInputText(value);
@@ -733,6 +772,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   };
 
   const handleTextareaSelect = (event: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    pendingEndSelectionRef.current = null;
     const el = event.currentTarget;
     const cursor = el.selectionEnd ?? el.value.length;
     reevaluateMentionContext(el.value, cursor);

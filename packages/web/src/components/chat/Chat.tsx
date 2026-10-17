@@ -279,6 +279,7 @@ export interface ChatProps {
    */
   centerDraftComposer?: boolean;
   /** Draft seeds for the composer, read when it mounts. */
+  draftSeed?: import("@/hooks/use-new-chat-draft").NewChatSeed;
   initialProjectName?: string;
   initialAgentMention?: AgentMention | null;
   /** Receives the composer's handle, for a host that seeds or focuses the draft. */
@@ -294,6 +295,7 @@ export function Chat({
   onSessionCreated,
   emptyState,
   centerDraftComposer = false,
+  draftSeed,
   initialProjectName,
   initialAgentMention,
   composerRef: hostComposerRef,
@@ -1273,6 +1275,7 @@ export function Chat({
       // the textarea (the original bug). So a failed submit rejects here; a
       // dropped stream never does.
       const result = await postTurn().catch((err: unknown) => {
+        if (!isMountedRef.current) throw err;
         // Transport failure posting the turn — a genuine failed submit.
         dropImmediateMessage();
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
@@ -1284,6 +1287,7 @@ export function Chat({
         throw err;
       });
       if (!result.ok) {
+        if (!isMountedRef.current) throw new Error(result.message || "post turn failed");
         dropImmediateMessage();
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
@@ -1301,6 +1305,7 @@ export function Chat({
         throw new Error(result.message || `post turn failed (${result.status})`);
       }
 
+      if (!isMountedRef.current) return;
       const createResp: CreateTurnResponse = result.data;
       const pendingTurnId = createResp.turnId;
       const turnsForSession = inflightTurnsRef.current.get(sendingSessionId) ?? new Set<string>();
@@ -1388,15 +1393,18 @@ export function Chat({
           });
           sendingSessionId = created.id;
         } catch (error) {
-          setStreamError(
-            error instanceof ChatApiError && error.message
-              ? error.message
-              : t("stream.errors.createChatFallback"),
-          );
+          if (isMountedRef.current)
+            setStreamError(
+              error instanceof ChatApiError && error.message
+                ? error.message
+                : t("stream.errors.createChatFallback"),
+            );
           throw error;
         } finally {
           creatingSessionRef.current = false;
         }
+        if (!isMountedRef.current || controls.signal.aborted)
+          throw new DOMException("Cancelled draft", "AbortError");
         // The refs normally follow the render that adopts the session. The turn
         // below starts before that render, and its stream reads them to decide
         // which session's end counts as read and which may move the workspace.
@@ -1404,9 +1412,10 @@ export function Chat({
         floorSessionIdRef.current = sendingSessionId;
         setCreatedAgentMention(snapshot.agentMention ?? null);
         setCreatedSessionId(sendingSessionId);
-        onSessionCreated?.(sendingSessionId);
+        if (isMountedRef.current) onSessionCreated?.(sendingSessionId);
         notifySessionsChanged();
       }
+      if (controls.signal.aborted) throw new DOMException("Cancelled draft", "AbortError");
       const baseOptimisticText = buildOptimisticUserText(snapshot.text, snapshot.uploads);
       // Mirror the server's persisted form for a structured skill turn
       // (`/<name> task`) so the optimistic row matches what the reload shows.
@@ -2036,6 +2045,8 @@ export function Chat({
                     </div>
                   ) : (
                     <ChatComposer
+                      persistNewChatDraft={!mainSessionId}
+                      draftSeed={draftSeed}
                       ref={composerRef}
                       // The box look lives on the composer now so the chip row can sit
                       // outside it; this mount adds the floating blur/translucency.

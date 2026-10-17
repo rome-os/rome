@@ -1,3 +1,4 @@
+import { useNewChatDraftCleanup } from "./hooks/use-new-chat-draft-cleanup";
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
@@ -59,6 +60,7 @@ const DevIndexPage = import.meta.env.DEV
   : () => null;
 
 export default function App() {
+  useNewChatDraftCleanup();
   // One root-level bridge turns SDK `navigateRome`/`startChat` events into
   // react-router navigations for every surface (shell, full-mode apps, auth).
   useHostNavigation();

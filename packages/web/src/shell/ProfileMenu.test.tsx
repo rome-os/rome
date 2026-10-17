@@ -1,4 +1,10 @@
 // @rstest-environment jsdom
+import {
+  activateDraftOwner,
+  emptyNewChatDraft,
+  readNewChatDraft,
+  writeNewChatDraft,
+} from "@/lib/new-chat-draft-storage";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -125,7 +131,13 @@ describe("ProfileMenu", () => {
       displayName: "Evan",
       avatarUrl: null,
     });
-    const assign = rs.fn();
+    activateDraftOwner("guardian:u1");
+    writeNewChatDraft("guardian:u1", { ...emptyNewChatDraft(), text: "private draft" });
+    sessionStorage.setItem("rome:pending-app-remix", "unrelated");
+    const assign = rs.fn(() => {
+      expect(readNewChatDraft("guardian:u1")).toBeNull();
+      expect(sessionStorage.getItem("rome:pending-app-remix")).toBe("unrelated");
+    });
     rs.stubGlobal("location", { ...window.location, assign });
     renderMenu();
 
