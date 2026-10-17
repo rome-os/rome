@@ -22,4 +22,6 @@ export interface CodexTurnRuntime {
   beforeTerminal?: (turn: { threadId: string; turnId: string }) => Promise<void>;
   /** Called once a turn on this runtime has a Codex turn id. */
   onProviderTurn?: (turnId: string) => void;
+  /** The owner's built-in tool check, read when a turn starts. */
+  isBuiltinToolAllowed?: (name: string) => boolean;
 }

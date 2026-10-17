@@ -2,6 +2,7 @@ import { context } from "@opentelemetry/api";
 import { describe, expect, it, rs } from "@rstest/core";
 import type { InputStatusEvent } from "@rome-os/app-runtime";
 import type { AgentTurnHandle, AgentTurnInput } from "./agent-session.js";
+import type { ThreadContext } from "./types.js";
 import type { ModelSession } from "./agent-runner.js";
 import { AgentInputQueue } from "./agent-input-queue.js";
 
@@ -24,10 +25,11 @@ function setup(steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolved
     () => ({ steerUserInput: steer }),
     errors,
   );
-  const submit = (inputId: string) =>
+  const submit = (inputId: string, threadContext?: ThreadContext) =>
     queue.submit(
       { inputId, prompt: inputId },
       {
+        threadContext,
         onTurn: (handle) => handles.push(handle),
         onInputStatus: (status) => {
           statuses.push(status);
@@ -54,6 +56,35 @@ describe("conversational input lane", () => {
     await tick();
     expect(s.steer.mock.calls.map(([input]) => input.inputId)).toEqual(["b", "c"]);
     expect(s.handles).toHaveLength(1);
+  });
+
+  it("keeps another sender's input queued for its own turn instead of steering it", async () => {
+    const s = setup();
+    const thread = (senderBondLevel: string): ThreadContext => ({
+      channel: "telegram",
+      threadId: "chat-1",
+      senderBondLevel,
+    });
+    s.submit("guardian-a", thread("guardian"));
+    s.queue.ready("turn-1");
+    const stranger = s.submit("stranger", thread("other"));
+    s.submit("guardian-b", thread("guardian"));
+    await tick();
+    expect(stranger.disposition).toBe("queued");
+    expect(s.steer).not.toHaveBeenCalled();
+
+    s.queue.finish("turn-1");
+    expect(s.started.map((input) => input.inputId)).toEqual(["guardian-a", "stranger"]);
+    s.queue.ready("turn-2");
+    await tick();
+    expect(s.steer).not.toHaveBeenCalled();
+
+    s.queue.finish("turn-2");
+    expect(s.started.map((input) => input.inputId)).toEqual([
+      "guardian-a",
+      "stranger",
+      "guardian-b",
+    ]);
   });
 
   it("adopts a provider-retained late input under a new turn and the same input id", async () => {

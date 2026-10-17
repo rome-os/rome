@@ -59,7 +59,7 @@ describe("PolicyEngine", () => {
     await seedPolicy({ type: "sender_specific", personId: "person-1" }, "allow", 100);
 
     const result = await engine.evaluate(makeContext());
-    expect(result).toEqual({ action: "allow" });
+    expect(result).toEqual({ action: "allow", matchedScope: "sender_specific" });
   });
 
   it("evaluate() falls back to thread-specific policy", async () => {
@@ -73,7 +73,7 @@ describe("PolicyEngine", () => {
         threadType: "group",
       }),
     );
-    expect(result).toEqual({ action: "allow" });
+    expect(result).toEqual({ action: "allow", matchedScope: "thread" });
   });
 
   it("evaluate() falls back to sender-tier policy", async () => {
@@ -81,14 +81,14 @@ describe("PolicyEngine", () => {
     await seedPolicy({ type: "sender", bondLevel: "acquaintance" }, "require_approval", 30);
 
     const result = await engine.evaluate(makeContext({ sender: null }));
-    expect(result).toEqual({ action: "require_approval" });
+    expect(result).toEqual({ action: "require_approval", matchedScope: "sender_tier" });
   });
 
   it("evaluate() falls back to channel policy", async () => {
     await seedPolicy({ type: "channel", channel: "telegram" }, "sentinel_review", 20);
 
     const result = await engine.evaluate(makeContext({ sender: null, bondLevel: "other" }));
-    expect(result).toEqual({ action: "sentinel_review" });
+    expect(result).toEqual({ action: "sentinel_review", matchedScope: "channel" });
   });
 
   it("evaluate() applies a service's channel policy to its later channels", async () => {
@@ -98,27 +98,33 @@ describe("PolicyEngine", () => {
     await seedPolicy({ type: "channel", channel: "telegram" }, "block", 20);
 
     const context = makeContext({ channel: LATER_TELEGRAM, sender: null, bondLevel: "other" });
-    await expect(engine.evaluate(context)).resolves.toEqual({ action: "block" });
+    await expect(engine.evaluate(context)).resolves.toEqual({
+      action: "block",
+      matchedScope: "channel",
+    });
 
     await seedPolicy({ type: "channel", channel: LATER_TELEGRAM }, "sentinel_review", 10);
-    await expect(engine.evaluate(context)).resolves.toEqual({ action: "sentinel_review" });
+    await expect(engine.evaluate(context)).resolves.toEqual({
+      action: "sentinel_review",
+      matchedScope: "channel",
+    });
   });
 
   it("evaluate() falls back to global policy", async () => {
     await seedPolicy({ type: "global" }, "block", 1);
 
     const result = await engine.evaluate(makeContext({ sender: null, bondLevel: "other" }));
-    expect(result).toEqual({ action: "block" });
+    expect(result).toEqual({ action: "block", matchedScope: "global" });
   });
 
   it('evaluate() returns "allow" when no policies match and bond level is trusted', async () => {
     const result = await engine.evaluate(makeContext({ bondLevel: "guardian" }));
-    expect(result).toEqual({ action: "allow" });
+    expect(result).toEqual({ action: "allow", matchedScope: "default" });
   });
 
   it('evaluate() defaults non-guardian bond levels to "sentinel_review"', async () => {
     const result = await engine.evaluate(makeContext({ bondLevel: "inner-circle" }));
-    expect(result).toEqual({ action: "sentinel_review" });
+    expect(result).toEqual({ action: "sentinel_review", matchedScope: "default" });
   });
 
   it("evaluate() lets scope specificity beat higher-priority broader scopes", async () => {
@@ -129,7 +135,7 @@ describe("PolicyEngine", () => {
     await seedPolicy({ type: "sender_specific", personId: "person-1" }, "allow", 1);
 
     const result = await engine.evaluate(makeContext());
-    expect(result).toEqual({ action: "allow" });
+    expect(result).toEqual({ action: "allow", matchedScope: "sender_specific" });
   });
 
   it("evaluate() picks the higher-priority policy within the same scope", async () => {
@@ -140,7 +146,7 @@ describe("PolicyEngine", () => {
     await seedPolicy({ type: "global" }, "require_approval", 99);
 
     const result = await engine.evaluate(makeContext({ sender: null, bondLevel: "other" }));
-    expect(result).toEqual({ action: "require_approval" });
+    expect(result).toEqual({ action: "require_approval", matchedScope: "global" });
   });
 
   it('evaluate() handles "block" action', async () => {
@@ -168,10 +174,12 @@ describe("PolicyEngine", () => {
 
     expect(await engine.evaluate(makeContext({ bondLevel: "other" }))).toEqual({
       action: "allow",
+      matchedScope: "default",
     });
     // The stored setting replaces the built-in trusted list entirely.
     expect(await engine.evaluate(makeContext({ bondLevel: "acquaintance" }))).toEqual({
       action: "sentinel_review",
+      matchedScope: "default",
     });
   });
 

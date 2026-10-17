@@ -200,6 +200,68 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("runs a stranger's turn in the read-only sandbox and restores it for the guardian", async () => {
+    let turns = 0;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thr-1" } };
+      if (method === "turn/start") return { turn: { id: `native-${++turns}` } };
+      return {};
+    });
+    let senderBondLevel = "other";
+    const session = await new CodexAppServerProvider().openSession(
+      buildParams({
+        builtinTools: ["Read", "Bash", "Edit"],
+        isBuiltinToolAllowed: (name) =>
+          senderBondLevel !== "other" || ["Read", "Glob", "Grep"].includes(name),
+      }),
+    );
+    const turnStarts = () =>
+      requestMock.mock.calls
+        .filter(([method]) => method === "turn/start")
+        .map(([, params]) => (params as { sandboxPolicy?: unknown }).sandboxPolicy);
+
+    for (const bond of ["other", "guardian"]) {
+      senderBondLevel = bond;
+      await session.sendUserInput({ text: bond });
+      const expected = turns + 1;
+      await rs.waitFor(() => expect(turnStarts()).toHaveLength(expected));
+      captured.onNotification?.("turn/completed", {
+        threadId: "thr-1",
+        turn: { id: `native-${expected}`, status: "completed" },
+      });
+      await collectUntilTerminal(session);
+    }
+
+    expect(turnStarts()).toEqual([
+      { type: "readOnly", networkAccess: false },
+      { type: "dangerFullAccess" },
+    ]);
+    await session.close();
+  });
+
+  it("leaves the sandbox alone for a thread that is already read-only", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thr-1" } };
+      if (method === "turn/start") return { turn: { id: "native-a" } };
+      return {};
+    });
+    const session = await new CodexAppServerProvider().openSession(
+      buildParams({ builtinTools: [], isBuiltinToolAllowed: () => false }),
+    );
+    await session.sendUserInput({ text: "hi" });
+    await rs.waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
+    );
+    const [, params] = requestMock.mock.calls.find(([method]) => method === "turn/start")!;
+    expect(params).not.toHaveProperty("sandboxPolicy");
+    captured.onNotification?.("turn/completed", {
+      threadId: "thr-1",
+      turn: { id: "native-a", status: "completed" },
+    });
+    await collectUntilTerminal(session);
+    await session.close();
+  });
+
   it("releases a buffered steer when startup ends without confirming the first input", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thr-1" } };

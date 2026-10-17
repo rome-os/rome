@@ -61,6 +61,7 @@ import {
   type DynamicToolSpec,
   type MessagePhase,
   type ReasoningEffort,
+  type SandboxPolicy,
   type ThreadConfigurationOverrides,
   type ThreadForkParams,
   type ThreadItem,
@@ -163,6 +164,25 @@ function codexToolOverrides(
   }
   const writes = keeps([...SHELL_BUILTINS, "Write", "Edit"]);
   return { sandbox: writes ? "danger-full-access" : "read-only", config };
+}
+
+/**
+ * The sandbox a turn starts with when the session checks its builtins per
+ * turn. Codex cannot switch off one tool for one turn, and its shell both
+ * reads and writes, so a turn that may not run Bash, Write, or Edit gets the
+ * read-only sandbox. Codex keeps a turn's sandbox for later turns, so every
+ * other turn sends the thread's own sandbox back. A thread that is already
+ * read-only needs neither.
+ */
+function codexTurnSandboxPolicy(
+  builtinTools: readonly string[] | undefined,
+  isBuiltinToolAllowed: ((name: string) => boolean) | undefined,
+): SandboxPolicy | undefined {
+  if (!isBuiltinToolAllowed) return undefined;
+  if (codexToolOverrides(builtinTools).sandbox === "read-only") return undefined;
+  return ["Bash", "Write", "Edit"].every(isBuiltinToolAllowed)
+    ? { type: "dangerFullAccess" }
+    : { type: "readOnly", networkAccess: false };
 }
 
 function buildThreadConfigurationOverrides(
@@ -1029,6 +1049,7 @@ export class CodexAppServerProvider implements ModelProvider {
       imageTracker,
       romeTools,
       isClosed: () => closed,
+      isBuiltinToolAllowed: params.isBuiltinToolAllowed,
       onProviderTurn: (turnId) => {
         lastProviderTurnId = turnId;
       },
@@ -1128,6 +1149,10 @@ export class CodexAppServerProvider implements ModelProvider {
         // under the current payer, and surfaces as a transient failure to retry.
         if (payers.size > 1) throw new PayerChangedError();
         const [expectedProvider] = payers;
+        const sandboxPolicy = codexTurnSandboxPolicy(
+          params.builtinTools,
+          runtime.isBuiltinToolAllowed,
+        );
         const started = (await this.appServerManager.requestForThread(
           tid,
           Method.turnStart,
@@ -1135,6 +1160,7 @@ export class CodexAppServerProvider implements ModelProvider {
             threadId: tid,
             input: turnInput,
             effort,
+            ...(sandboxPolicy ? { sandboxPolicy } : {}),
             ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
             ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
           },

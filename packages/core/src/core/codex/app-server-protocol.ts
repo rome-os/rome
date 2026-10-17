@@ -192,6 +192,10 @@ export type AskForApproval =
     }
   | "never";
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+/** A turn's sandbox, as turn/start takes it. Codex keeps it for later turns. */
+export type SandboxPolicy =
+  | { type: "dangerFullAccess" }
+  | { type: "readOnly"; networkAccess: boolean };
 export type ReasoningEffort = string;
 export type ThreadHistoryMode = "legacy" | "paginated";
 
@@ -283,6 +287,7 @@ export interface TurnStartParams {
   model?: string | null;
   effort?: ReasoningEffort | null;
   approvalPolicy?: AskForApproval | null;
+  sandboxPolicy?: SandboxPolicy | null;
   outputSchema?: unknown | null;
 }
 

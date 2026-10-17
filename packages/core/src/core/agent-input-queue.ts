@@ -31,6 +31,11 @@ interface ActiveInputTurn {
   dispatch?: Promise<void>;
 }
 
+/** Whether two inputs come from senders with the same bond to the guardian. */
+function sameSender(a: Entry, b: Entry): boolean {
+  return a.options.threadContext?.senderBondLevel === b.options.threadContext?.senderBondLevel;
+}
+
 /** Chat's input lane is separate from the one-result-per-caller task FIFO. */
 export class AgentInputQueue {
   private active?: ActiveInputTurn;
@@ -67,7 +72,10 @@ export class AgentInputQueue {
     entry.turnId = this.active.handle.turnId;
     this.queued.push(entry);
     void this.update(entry, "queued").catch(this.reportError);
-    const disposition = this.active.ready && !this.active.sealed ? "steering" : "queued";
+    const disposition =
+      this.active.ready && !this.active.sealed && sameSender(this.active.first, entry)
+        ? "steering"
+        : "queued";
     this.flush();
     return { inputId: input.inputId, turnId: entry.turnId, disposition };
   }
@@ -114,8 +122,11 @@ export class AgentInputQueue {
     const active = this.active;
     const provider = this.provider();
     if (!active?.ready || active.pending || active.sealed || !provider.steerUserInput) return;
-    const entry = this.queued.shift();
-    if (!entry) return;
+    // An input from another sender waits for its own turn, so the active
+    // turn's tool limits never apply to it, and it stays ahead of later inputs.
+    const entry = this.queued[0];
+    if (!entry || !sameSender(active.first, entry)) return;
+    this.queued.shift();
     active.pending = entry;
     entry.turnId = active.handle.turnId;
     active.dispatch = (async () => {

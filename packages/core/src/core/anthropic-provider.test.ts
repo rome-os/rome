@@ -674,6 +674,71 @@ describe("AnthropicProvider", () => {
     await session.close();
   });
 
+  describe("built-in tool gate", () => {
+    const preToolUse = (tool_name: string) => ({
+      hook_event_name: "PreToolUse" as const,
+      session_id: "test-session",
+      transcript_path: "/tmp/transcript.jsonl",
+      cwd: "/tmp",
+      tool_name,
+      tool_input: {},
+      tool_use_id: `use-${tool_name}`,
+    });
+    const openGated = async (senderBondLevel: string) => {
+      const session = await new AnthropicProvider().openSession(
+        buildParams({
+          builtinTools: ["Read", "Glob", "Grep", "Bash", "Edit"],
+          isBuiltinToolAllowed: (name) =>
+            senderBondLevel !== "other" || ["Read", "Glob", "Grep"].includes(name),
+        }),
+      );
+      const [matcher] = queryMock.mock.calls[0]![0].options.hooks.PreToolUse;
+      const hook = matcher.hooks[0];
+      const run = (tool: string) =>
+        hook(preToolUse(tool), `use-${tool}`, { signal: new AbortController().signal });
+      return { session, run };
+    };
+
+    it("denies Bash in a stranger's turn", async () => {
+      const { session, run } = await openGated("other");
+
+      expect(await run("Bash")).toEqual({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: "Bash is not allowed in this turn.",
+        },
+      });
+
+      await session.close();
+    });
+
+    it("allows Read and MCP tools in a stranger's turn", async () => {
+      const { session, run } = await openGated("other");
+
+      expect(await run("Read")).toEqual({ continue: true });
+      expect(await run("mcp__rome__send_message")).toEqual({ continue: true });
+
+      await session.close();
+    });
+
+    it("allows Bash in the guardian's turn", async () => {
+      const { session, run } = await openGated("guardian");
+
+      expect(await run("Bash")).toEqual({ continue: true });
+
+      await session.close();
+    });
+
+    it("adds no hook when the session does not gate built-in tools", async () => {
+      const session = await new AnthropicProvider().openSession(buildParams());
+
+      expect(queryMock.mock.calls[0]![0].options.hooks).toBeUndefined();
+
+      await session.close();
+    });
+  });
+
   it("uses SDK outputFormat and publishes only the native structured terminal", async () => {
     const schema = {
       type: "object",

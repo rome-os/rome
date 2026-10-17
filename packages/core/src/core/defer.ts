@@ -140,6 +140,11 @@ export async function runDefer(input: DeferInput, deps: DeferDeps): Promise<Defe
   if (!channelContext?.channel || !channelContext?.threadId) {
     throw new Error("defer is only available inside an active conversation thread");
   }
+  // A woken turn replies without the envoy, so a stranger's turn may not
+  // schedule one.
+  if (channelContext.senderBondLevel === "other") {
+    throw new Error("defer is not available in a stranger's turn");
+  }
 
   const fireAt = new Date(parsed.fireAtMs);
   const iso = fireAt.toISOString();

@@ -167,6 +167,7 @@ describe("ChannelMessageHook", () => {
         thread: { kind: "topic", name: "Dev thread" },
         attachments: [{ type: "image", url: "file-id-1", caption: "pic" }],
         replyTo: { messageId: "tg-99", content: "Earlier message", senderName: "Bob" },
+        addressing: "mention",
       }),
     );
 
@@ -182,6 +183,7 @@ describe("ChannelMessageHook", () => {
         text: "Hello team",
         timestamp: "2026-01-20T12:00:00.000Z",
         messageId: "tg-100",
+        addressing: "mention",
       }),
       expect.objectContaining({
         initiator: `connection:${TELEGRAM_ID}`,
@@ -512,6 +514,21 @@ describe("ChannelMessageHook", () => {
       expect(harness.run).toHaveBeenCalledWith(
         ...passed({ channel: "feishu-2", linkedAgentName: "sales:agent" }),
       );
+    });
+
+    it("passes whether the account pairs senders", async () => {
+      const pairsSenders = rs.fn((name: string) => name === "feishu-2");
+      harness.hook.unregister();
+      harness = createHarness({ linkedAgentOf, pairsSenders });
+      harness.channels.push(harness.channel("feishu-2", FEISHU_2_ID));
+      await harness.hook.register();
+
+      await harness.emit(FEISHU_2_ID, message({ messageId: "m-1" }));
+      await harness.emit(TELEGRAM_ID, message({ messageId: "m-2" }));
+
+      expect(harness.run).toHaveBeenNthCalledWith(1, ...passed({ pairsSenders: true }));
+      expect(harness.run).toHaveBeenNthCalledWith(2, ...passed({ pairsSenders: false }));
+      expect(pairsSenders).toHaveBeenCalledWith("feishu-2");
     });
 
     it("still stops a running turn on an account that is now unlinked", async () => {

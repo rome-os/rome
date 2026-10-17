@@ -1927,6 +1927,10 @@ export interface ChannelMessageHookDeps {
    * as undefined for every channel.
    */
   linkedAgentOf?: (channelName: string) => string | null | undefined;
+  /** Whether the channel named `channelName` pairs unknown senders before
+   *  they reach an agent, as Telegram, Discord and Feishu bots do. Absent
+   *  reads as false. */
+  pairsSenders?: (channelName: string) => boolean;
 }
 
 export interface ChannelMessageHook {
@@ -2574,8 +2578,25 @@ export interface PolicyContext {
   threadType?: string;
 }
 
+/** The kind of policy a {@link PolicyDecision} came from. `default` is the
+ *  rule that applies when no policy matches. */
+export type PolicyMatchedScope =
+  | "sender_specific"
+  | "thread"
+  | "sender_tier"
+  | "channel"
+  | "global"
+  | "default";
+
+/** The rule {@link PolicyEngine.evaluate} applies to a message. `matchedScope`
+ *  is absent when the engine does not report it, so a caller that treats the
+ *  default rule apart from a guardian's own policy reads absent as a policy. */
+export interface PolicyDecision extends PolicyRule {
+  matchedScope?: PolicyMatchedScope;
+}
+
 export interface PolicyEngine {
-  evaluate(context: PolicyContext): Promise<PolicyRule>;
+  evaluate(context: PolicyContext): Promise<PolicyDecision>;
 }
 
 // Routine contracts. Action model: docs/concepts/actions.md.

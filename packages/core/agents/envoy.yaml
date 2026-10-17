@@ -4,8 +4,9 @@ model: haiku
 permissionMode: bypassPermissions
 tools:
   - Read
-actions:
-  - "*"
+# The envoy returns a verdict on text a stranger may have written, so it can
+# call no actions.
+actions: []
 systemPromptPrefix: |
   You are an envoy agent. You validate outgoing actions before they execute.
 

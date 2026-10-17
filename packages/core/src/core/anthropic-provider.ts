@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type {
   EffortLevel,
+  HookCallbackMatcher,
+  HookEvent,
   Query,
   SDKAssistantMessage,
   SDKMessage,
@@ -293,6 +295,39 @@ function buildAnthropicAccounting(
     rawUsage: buildRawUsage(usage),
     context,
   });
+}
+
+/**
+ * PreToolUse hook that denies a built-in tool the current turn does not allow.
+ * Only the tools Rome enabled through `builtinTools` are checked, so MCP tools
+ * and the SDK's own tools (such as structured output) are left to run. A hook
+ * deny holds under `bypassPermissions`, which skips only permission prompts.
+ */
+function builtinToolGateHooks(
+  builtinTools: readonly string[],
+  isBuiltinToolAllowed: (name: string) => boolean,
+): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
+  const gated = new Set(builtinTools);
+  return {
+    PreToolUse: [
+      {
+        hooks: [
+          async (input) => {
+            if (input.hook_event_name !== "PreToolUse") return { continue: true };
+            const name = input.tool_name;
+            if (!gated.has(name) || isBuiltinToolAllowed(name)) return { continue: true };
+            return {
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "deny",
+                permissionDecisionReason: `${name} is not allowed in this turn.`,
+              },
+            };
+          },
+        ],
+      },
+    ],
+  };
 }
 
 function normalizeToolName(name: string): string {
@@ -598,6 +633,11 @@ export class AnthropicProvider implements ModelProvider {
         env: queryEnv,
         maxTurns,
         tools: params.builtinTools ?? [],
+        ...(params.isBuiltinToolAllowed
+          ? {
+              hooks: builtinToolGateHooks(params.builtinTools ?? [], params.isBuiltinToolAllowed),
+            }
+          : {}),
         mcpServers,
         // Only the servers above. Without this, a claude.ai subscription login
         // also loads that account's claude.ai connectors (Gmail, Drive, ...).

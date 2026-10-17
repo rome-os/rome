@@ -37,6 +37,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       slowTurnMs?: number;
       log?: Pick<typeof log, "warn">;
       linkedAgentOf?: ChannelMessageHookDeps["linkedAgentOf"];
+      pairsSenders?: ChannelMessageHookDeps["pairsSenders"];
     } = {},
   ) {}
 
@@ -191,6 +192,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     void this.runTurn(message, service, connectionId, attachments, activity, {
       routedAgentName,
       linkedAgentName: linkedAgent,
+      pairsSenders: this.options.pairsSenders?.(service) ?? false,
     });
   }
 
@@ -200,7 +202,11 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     connectionId: string,
     attachments: InboundEvent["message"]["attachments"],
     activity: Promise<ChannelActivitySession | null>,
-    agents: { routedAgentName: string | undefined; linkedAgentName: string | undefined },
+    agents: {
+      routedAgentName: string | undefined;
+      linkedAgentName: string | undefined;
+      pairsSenders: boolean;
+    },
   ): Promise<void> {
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
     const slow = setTimeout(() => {
@@ -228,6 +234,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           attachments,
           messageId: message.messageId,
           replyTo: message.replyTo,
+          addressing: message.addressing,
           ...agents,
         },
         {
@@ -299,6 +306,6 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
     deps.conversationSettings,
     deps.chatStop,
     deps.channels,
-    { linkedAgentOf: deps.linkedAgentOf },
+    { linkedAgentOf: deps.linkedAgentOf, pairsSenders: deps.pairsSenders },
   );
 }

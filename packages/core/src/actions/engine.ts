@@ -161,6 +161,13 @@ export interface ActionRunContext {
   actionName?: string;
 }
 
+/** Whether a write runs in a turn a stranger started. The envoy checks only
+ *  that turn's reply, so such a write waits for the guardian's approval. */
+function isStrangerWrite(action: Action, context?: ActionRunContext): boolean {
+  const thread = context?.channelContext ?? actionExecutionContext.getStore()?.channelContext;
+  return thread?.senderBondLevel === "other" && action.config.sideEffects === "write";
+}
+
 export interface ApprovalCreatedEvent {
   approvalId: string;
   actionName: string;
@@ -602,7 +609,11 @@ export class ActionEngine {
 
     // Root action itself is sensitive: short-circuit before executing it
     // unless we're replaying after the guardian has already approved it.
-    if (action.config.requiresApproval && replayStore.mode === "record" && !approvedRootResume) {
+    if (
+      (action.config.requiresApproval || isStrangerWrite(action, context)) &&
+      replayStore.mode === "record" &&
+      !approvedRootResume
+    ) {
       const pending = await this.withTrace(
         action.config.name,
         buildRomeSpanAttrs(context),
@@ -781,7 +792,7 @@ export class ActionEngine {
       }
     }
 
-    if (action.config.requiresApproval) {
+    if (action.config.requiresApproval || isStrangerWrite(action, context)) {
       const pending = await this.recordPendingApproval(action.config.name, args, store, context);
       return { status: "pending_approval", approval: pending };
     }

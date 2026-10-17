@@ -8,6 +8,7 @@ import type { Admission } from "./admission.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { isPairingCodeMessage } from "./pairing-code.js";
 import { sendThrough } from "./connection-ports.js";
+import { isCoreMainAgentId } from "../apps/artifact-id.js";
 
 const log = createLogger("channel-pairing");
 function pairingAccount(
@@ -50,6 +51,12 @@ export function createPairingAdmission(deps: {
   talkGrants: (service: string) => readonly string[];
   /** The Connections pairing replies go out on. */
   registry: Pick<ConnectionRegistry, "get">;
+  /** The agent stored as the link of the channel a Connection backs, and
+   *  whether it is loaded, or null for no link. A channel linked to an agent
+   *  other than main creates no pairing requests and sends no guidance. It
+   *  admits every addressed sender while its agent is loaded and only known
+   *  senders while it is not, and redeems pairing codes either way. */
+  linkOf: (connectionId: string) => { agent: string; loaded: boolean } | null;
 }): Admission {
   return async (connectionId, service, message) => {
     const channel = pairingPayloadSchema.shape.channel.safeParse(service);
@@ -71,8 +78,14 @@ export function createPairingAdmission(deps: {
     };
     const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
     try {
+      const link = deps.linkOf(connectionId);
+      // Pairing grants a guardian's authority, so a bot linked to an agent
+      // other than main creates no requests and sends no guidance. It admits
+      // unknown senders as strangers, and redeems only an existing request.
+      const agentBot = link !== null && !isCoreMainAgentId(link.agent);
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {
+          if (agentBot) return false;
           const request = deps.approvalsRepo.requestAuthorizedPairing(
             {
               channel: pairingChannel,
@@ -114,13 +127,21 @@ export function createPairingAdmission(deps: {
         }
         return false;
       }
+      const addressed =
+        message.thread?.kind === "dm" ||
+        ["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient");
       const person = await deps.personMappingRepo.findByChannelUser(service, message.senderId);
-      if (person && person.id !== STRANGER_PERSON_ID) return true;
-      if (
-        message.thread?.kind !== "dm" &&
-        !["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient")
-      )
-        return false;
+      const known = !!person && person.id !== STRANGER_PERSON_ID;
+      if (agentBot) {
+        // A known sender still reaches the hook, which stays silent for an
+        // agent that is not loaded but lets `/stop` end a running turn.
+        if (!link.loaded) return known;
+        // Unaddressed group chatter still needs a sender Rome knows, so a
+        // stranger cannot start a turn with every message in a busy group.
+        return addressed || known;
+      }
+      if (known) return true;
+      if (!addressed) return false;
       const request = deps.approvalsRepo.requestAuthorizedPairing(
         {
           channel: pairingChannel,

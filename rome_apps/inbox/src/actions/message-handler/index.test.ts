@@ -991,6 +991,7 @@ describe("linked agent", () => {
     displayName: "Guardian",
     text: "hello",
     messageId: "msg-1",
+    pairsSenders: true,
     ...overrides,
   });
 
@@ -1133,6 +1134,287 @@ describe("linked agent", () => {
     expect(conversations.ensureChannelConversation).toHaveBeenCalledWith(
       expect.objectContaining({ channel: "feishu-2", threadId: "group-1", agentName: "main" }),
     );
+  });
+
+  it("answers a stranger with an agent other than main, without the guardian's trust", async () => {
+    for (const [linkedAgentName, answered] of [
+      ["sales:agent", true],
+      ["core:main", false],
+    ] as const) {
+      const { deps, agentRunner } = createMessageHandlerDeps({
+        knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+        agentResponses: [
+          [{ type: "result", content: "Hi." }],
+          [{ type: "result", content: "APPROVE" }],
+        ],
+      });
+      (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+        action: "sentinel_review",
+        matchedScope: "default",
+      });
+      const action = createAction(actionConfig, deps);
+
+      const result = await action.execute(
+        inbound({ channelUserId: "stranger", threadType: "private", linkedAgentName }),
+      );
+
+      if (!answered) {
+        expect(result).toEqual({
+          status: "ok",
+          data: { action: "ignored_by_reply_settings", bondLevel: "other" },
+        });
+        expect(agentRunner.calls).toHaveLength(0);
+        continue;
+      }
+      expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sales:agent", "envoy"]);
+      expect(agentRunner.calls[0].threadContext).toMatchObject({ senderBondLevel: "other" });
+      expect(agentRunner.calls[0].contextSuffix).toContain("stranger");
+    }
+  });
+
+  it("keeps reply settings for a stranger on an account that does not pair senders", async () => {
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+    });
+    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+      action: "sentinel_review",
+      matchedScope: "default",
+    });
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(
+      inbound({
+        channel: "telegram_user",
+        channelUserId: "stranger",
+        threadType: "private",
+        linkedAgentName: "sales:agent",
+        pairsSenders: false,
+      }),
+    );
+
+    expect(result).toEqual({
+      status: "ok",
+      data: { action: "ignored_by_reply_settings", bondLevel: "other" },
+    });
+    expect(agentRunner.calls).toHaveLength(0);
+  });
+
+  it("holds a stranger's reply for approval unless the envoy's verdict opens with APPROVE", async () => {
+    for (const [verdict, sent] of [
+      ["", false],
+      ["Looks fine to me.", false],
+      ["I cannot APPROVE this.", false],
+      ["APPROVE", true],
+      ["**APPROVE**: safe", true],
+      ["Verdict: APPROVE", true],
+    ] as const) {
+      const { deps, sentMessages } = createMessageHandlerDeps({
+        knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+        agentResponses: [
+          [{ type: "result", content: "Hi." }],
+          [{ type: "result", content: verdict }],
+        ],
+      });
+      (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+        action: "sentinel_review",
+        matchedScope: "default",
+      });
+      const action = createAction(actionConfig, deps);
+
+      const result = await action.execute(
+        inbound({
+          channelUserId: "stranger",
+          threadType: "private",
+          linkedAgentName: "sales:agent",
+        }),
+      );
+
+      expect(result).toEqual({
+        status: "ok",
+        data: { action: sent ? "sent" : "pending_approval", response: "Hi." },
+      });
+      expect(sentMessages).toHaveLength(sent ? 1 : 0);
+    }
+  });
+
+  it("answers a stranger who addresses an agent other than main in a group", async () => {
+    for (const [addressing, answered] of [
+      ["mention", true],
+      ["reply", true],
+      ["bot_thread", true],
+      ["ambient", false],
+      [undefined, false],
+    ] as const) {
+      const { deps, agentRunner } = createMessageHandlerDeps({
+        knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+        agentResponses: [
+          [{ type: "result", content: "Hi." }],
+          [{ type: "result", content: "APPROVE" }],
+        ],
+      });
+      (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+        action: "sentinel_review",
+        matchedScope: "default",
+      });
+      const action = createAction(actionConfig, deps);
+
+      const result = await action.execute(
+        inbound({ channelUserId: "stranger", linkedAgentName: "sales:agent", addressing }),
+      );
+
+      if (answered) {
+        expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sales:agent", "envoy"]);
+      } else {
+        expect(result).toEqual({
+          status: "ok",
+          data: { action: "ignored_by_reply_settings", bondLevel: "other" },
+        });
+        expect(agentRunner.calls).toHaveLength(0);
+      }
+    }
+  });
+
+  it("triages a known person's ambient group message on an agent other than main", async () => {
+    const alice: PersonRecord = {
+      id: "alice",
+      displayName: "Alice",
+      bondLevel: "inner-circle",
+      channelMappings: [],
+      approved: true,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    };
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => alice) },
+      knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+      settings: { replyToBondLevels: ["guardian", "inner-circle"] },
+      agentResponses: [[{ type: "result", content: "IGNORE" }]],
+    });
+    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+      action: "sentinel_review",
+      matchedScope: "default",
+    });
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(
+      inbound({ channelUserId: "alice", linkedAgentName: "sales:agent", addressing: "ambient" }),
+    );
+
+    expect(result).toEqual({ status: "ok", data: { action: "sentinel_ignored" } });
+    expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sentinel"]);
+  });
+
+  it("honors a guardian's own sentinel review policy for a stranger on an agent other than main", async () => {
+    for (const matchedScope of ["sender_specific", "thread", "channel", undefined]) {
+      const { deps, agentRunner } = createMessageHandlerDeps({
+        knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+        agentResponses: [[{ type: "result", content: "IGNORE" }]],
+      });
+      (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+        action: "sentinel_review",
+        matchedScope,
+      });
+      const action = createAction(actionConfig, deps);
+
+      const result = await action.execute(
+        inbound({
+          channelUserId: "stranger",
+          threadType: "private",
+          linkedAgentName: "sales:agent",
+        }),
+      );
+
+      expect(result).toEqual({ status: "ok", data: { action: "sentinel_ignored" } });
+      expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sentinel"]);
+    }
+  });
+
+  it("blocks a stranger on an agent other than main when a policy blocks them", async () => {
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+    });
+    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+      action: "block",
+      matchedScope: "sender_specific",
+    });
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(
+      inbound({ channelUserId: "stranger", threadType: "private", linkedAgentName: "sales:agent" }),
+    );
+
+    expect(result).toEqual({ status: "ok", data: { action: "blocked" } });
+    expect(agentRunner.calls).toHaveLength(0);
+  });
+
+  it("triages a stranger in a group routed to an agent other than the linked one", async () => {
+    const { deps, agentRunner, conversations } = createMessageHandlerDeps({
+      knownAgents: ["main", "sentinel", "envoy", "sales:agent", "pm:assistant"],
+      settings: { replyToBondLevels: ["guardian", "other"] },
+      agentResponses: [[{ type: "result", content: "IGNORE" }]],
+    });
+    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+      action: "sentinel_review",
+      matchedScope: "default",
+    });
+    conversations.ensureChannelConversation.mockImplementation(async () => ({
+      id: "channel:feishu-2:group-1",
+      agentName: "pm:assistant",
+    }));
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(
+      inbound({
+        channelUserId: "stranger",
+        linkedAgentName: "sales:agent",
+        addressing: "mention",
+      }),
+    );
+
+    expect(result).toEqual({ status: "ok", data: { action: "sentinel_ignored" } });
+    expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sentinel"]);
+  });
+
+  it("ignores a stranger in a group pinned to main on an account linked elsewhere", async () => {
+    const { deps, agentRunner, conversations } = createMessageHandlerDeps({
+      knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+      settings: { replyToBondLevels: ["guardian", "other"] },
+    });
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(
+      inbound({
+        channelUserId: "stranger",
+        routedAgentName: "core:main",
+        linkedAgentName: "sales:agent",
+      }),
+    );
+
+    expect(result).toEqual({
+      status: "ok",
+      data: { action: "ignored_by_reply_settings", bondLevel: "other" },
+    });
+    expect(agentRunner.calls).toHaveLength(0);
+    expect(conversations.addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "notification" }),
+    );
+  });
+
+  it("ignores a stranger on a bot that pairs senders once its link is main", async () => {
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+      settings: { replyToBondLevels: ["guardian", "other"] },
+    });
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(
+      inbound({ channelUserId: "stranger", threadType: "private", linkedAgentName: "core:main" }),
+    );
+
+    expect(result).toEqual({
+      status: "ok",
+      data: { action: "ignored_by_reply_settings", bondLevel: "other" },
+    });
+    expect(agentRunner.calls).toHaveLength(0);
   });
 
   it("stays silent, storing nothing, when the linked agent is not loaded", async () => {

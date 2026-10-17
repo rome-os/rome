@@ -798,6 +798,15 @@ interface TurnExecRefs {
   bindTurnCtx: <T>(fn: () => T) => T;
 }
 
+/** Built-in tools a stranger's turn may still run. The envoy checks only the
+ *  reply, so a stranger's turn must not write files or run commands. */
+const STRANGER_BUILTIN_TOOLS: ReadonlySet<string> = new Set(["Read", "Glob", "Grep"]);
+
+function makeIsBuiltinToolAllowed(refs: TurnExecRefs): (name: string) => boolean {
+  return (name) =>
+    refs.getThreadContext()?.senderBondLevel !== "other" || STRANGER_BUILTIN_TOOLS.has(name);
+}
+
 /** Per-fork identity handed to `buildForkOpenParams` by `runForkedTurn`. */
 interface ForkTurnContext {
   mode: ForkRunMode;
@@ -1523,6 +1532,7 @@ async function openSession(
     outputSchema: config.outputSchema,
     handback: conversationalHandback,
     builtinTools: config.tools.filter((name) => resolution.modelProvider.builtinTools.has(name)),
+    isBuiltinToolAllowed: makeIsBuiltinToolAllowed(sessionExecRefs),
     maxTurns: config.maxTurns,
     reasoningEffort,
     workingDir,
@@ -1706,6 +1716,7 @@ async function openSession(
         model: fork.model,
         executeAction: makeExecuteAction(refs),
         executeSubagent: makeExecuteSubagent(refs),
+        isBuiltinToolAllowed: makeIsBuiltinToolAllowed(refs),
         executeSubmitOutput: conversationalHandback ? makeExecuteSubmitOutput(refs) : undefined,
         executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
         // The spread keeps `supportsInteractiveSurface` (it shapes the

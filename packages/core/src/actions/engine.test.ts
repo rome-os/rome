@@ -1244,6 +1244,29 @@ describe("ActionEngine", () => {
       expect(row!.payload).toMatchObject({ actionName: "risky", args: { target: "prod" } });
     });
 
+    it("holds a write for approval in a stranger's turn, and runs reads and others' writes", async () => {
+      const executed: string[] = [];
+      const record = (name: string) => async () => {
+        executed.push(name);
+        return { status: "ok" as const };
+      };
+      await setup({
+        actions: [
+          buildAction("write", { sideEffects: "write", execute: record("write") }),
+          buildAction("read", { execute: record("read") }),
+        ],
+      });
+      const turn = (senderBondLevel: string): ActionRunContext => ({
+        channelContext: { channel: "telegram", threadId: "t-1", senderBondLevel },
+      });
+
+      const held = await rome.actionEngine.run("write", {}, turn("other"));
+      expect(held.status).toBe("pending_approval");
+      expect((await rome.actionEngine.run("read", {}, turn("other"))).status).toBe("ok");
+      expect((await rome.actionEngine.run("write", {}, turn("inner-circle"))).status).toBe("ok");
+      expect(executed).toEqual(["read", "write"]);
+    });
+
     it("persists journal with pending_approval entry", async () => {
       await setup({ actions: [buildAction("risky", { requiresApproval: true })] });
 

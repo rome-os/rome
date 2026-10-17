@@ -143,6 +143,12 @@ export interface ModelSessionParams {
   /** Conversational candidate/approval flow; separate from final output. */
   handback?: HandbackSpec;
   builtinTools?: string[];
+  /**
+   * Live check the provider runs before each built-in tool call, so the
+   * current turn decides which of `builtinTools` may run. Absent means all
+   * of them may.
+   */
+  isBuiltinToolAllowed?: (name: string) => boolean;
   maxTurns?: number;
   reasoningEffort?: ModelReasoningEffort;
   workingDir?: string;

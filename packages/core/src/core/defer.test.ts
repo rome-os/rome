@@ -137,6 +137,27 @@ describe("runDefer", () => {
     expect(createRoutine).not.toHaveBeenCalled();
   });
 
+  it("refuses a stranger's turn and allows anyone else's", async () => {
+    const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-1" });
+    const run = (senderBondLevel: string) =>
+      runDefer(
+        { name: "x", afterMinutes: 5 },
+        {
+          context: {
+            ...baseContext,
+            channelContext: { ...baseContext.channelContext!, senderBondLevel },
+          },
+          createRoutine,
+          now: NOW,
+        },
+      );
+    await expect(run("other")).rejects.toThrow(/stranger's turn/);
+    expect(createRoutine).not.toHaveBeenCalled();
+    await run("inner-circle");
+    await run("guardian");
+    expect(createRoutine).toHaveBeenCalledTimes(2);
+  });
+
   it("propagates a create_routine domain error", async () => {
     const createRoutine = rs.fn().mockRejectedValue(new Error("boom"));
     await expect(

@@ -110,6 +110,7 @@ export async function createBorrowedExactForkSession(
     imageTracker,
     romeTools,
     isClosed: () => closed,
+    isBuiltinToolAllowed: args.openParams.isBuiltinToolAllowed,
     // Revert happens before the result/error event, so consumers can never
     // observe success while the source conversation still contains the turn.
     beforeTerminal: async ({ threadId, turnId }) => await args.revertTurn(threadId, turnId),

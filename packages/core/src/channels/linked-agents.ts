@@ -10,6 +10,12 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("linked-agents");
 
+/** Whether a linked agent can answer: main always can, any other agent once it
+ *  is loaded. Admission and routing share it, so they agree on a live link. */
+export function isLinkedAgentLoaded(agent: string, agents: { has(name: string): boolean }) {
+  return isCoreMainAgentId(agent) || agents.has(agent);
+}
+
 /**
  * The answer `linkedAgentResolver` gives for the channel, read with no logging
  * and no state, for read-only callers such as the sessions explorer.
@@ -24,7 +30,7 @@ export function readLinkedAgent(
   // no record answers for its own service.
   if (!LINKABLE_SERVICES.has(record?.service ?? channelName)) return undefined;
   const agent = record?.agent ?? null;
-  return agent !== null && (isCoreMainAgentId(agent) || agents.has(agent)) ? agent : null;
+  return agent !== null && isLinkedAgentLoaded(agent, agents) ? agent : null;
 }
 
 /**
