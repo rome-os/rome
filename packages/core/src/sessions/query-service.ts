@@ -69,9 +69,11 @@ export interface SessionQueryServiceOptions {
   };
   /** The channel-message hook's `linkedAgentOf`, so a record names the agent
    *  that answers its conversation. Without it, records show the stored agent. */
-  linkedAgentOf?: (channelName: string) => string | null | undefined;
+  linkedAgentOf?: LinkedAgentOf;
   now?: () => Date;
 }
+
+type LinkedAgentOf = (channelName: string) => string | null | undefined;
 
 function emptyUsage(): RunUsageSummary {
   return {
@@ -330,9 +332,9 @@ export class SessionQueryService {
    * stored column. A silent channel keeps the stored agent, since the record
    * has no shape for no agent.
    */
-  private answeringAgent(session: SessionRow): string | null {
+  private answeringAgent(session: SessionRow, linkedAgentOf: LinkedAgentOf): string | null {
     if (session.type !== "channel" || !session.sourceChannel) return session.agentName;
-    const linked = this.options.linkedAgentOf?.(session.sourceChannel);
+    const linked = linkedAgentOf(session.sourceChannel);
     if (!linked) return session.agentName;
     if (session.sourceThreadType !== "private") {
       // A null routing override is an explicit pin to main.
@@ -340,6 +342,15 @@ export class SessionQueryService {
       if (session.agentName && !isCoreMainAgentId(session.agentName)) return session.agentName;
     }
     return isCoreMainAgentId(linked) ? null : linked;
+  }
+
+  /** A `linkedAgentOf` that reads each channel once, for one request. */
+  private linkedAgentLookup(): LinkedAgentOf {
+    const seen = new Map<string, string | null | undefined>();
+    return (channel) => {
+      if (!seen.has(channel)) seen.set(channel, this.options.linkedAgentOf?.(channel));
+      return seen.get(channel);
+    };
   }
 
   private resolveTime(scope: SessionQueryScope): { from: Date | null; to: Date; timeZone: string } {
@@ -424,8 +435,9 @@ export class SessionQueryService {
     session: SessionRow,
     messageCount: number,
     stats: RomeSessionStats,
+    linkedAgentOf: LinkedAgentOf,
   ): RomeSessionExplorerRecord {
-    const agentName = this.answeringAgent(session);
+    const agentName = this.answeringAgent(session, linkedAgentOf);
     const owner = this.resolveOwner(agentName);
     return {
       id: session.id,
@@ -471,8 +483,9 @@ export class SessionQueryService {
       offset,
       limit,
     });
+    const linkedAgentOf = this.linkedAgentLookup();
     const sessions = result.rows.map((row) =>
-      this.toRecord(row, row.messageCount, storageStats(row.stats)),
+      this.toRecord(row, row.messageCount, storageStats(row.stats), linkedAgentOf),
     );
     return {
       sessions,
@@ -771,8 +784,9 @@ export class SessionQueryService {
     const runs = await this.options.repository.queryRunAggregates(this.storageScope(allScope));
     const accumulator = emptyAccumulator();
     for (const run of runs) appendAggregate(accumulator, run);
+    const linkedAgentOf = this.linkedAgentLookup();
     const lineageEntry = (session: SessionRow) => {
-      const agentName = this.answeringAgent(session);
+      const agentName = this.answeringAgent(session, linkedAgentOf);
       const owner = this.resolveOwner(agentName);
       return {
         id: session.id,
@@ -784,7 +798,12 @@ export class SessionQueryService {
       };
     };
     return {
-      ...this.toRecord(rows.session, rows.messageCount, accumulatorStats(accumulator)),
+      ...this.toRecord(
+        rows.session,
+        rows.messageCount,
+        accumulatorStats(accumulator),
+        linkedAgentOf,
+      ),
       lineage: {
         parent: rows.parent ? lineageEntry(rows.parent) : null,
         children: rows.children.map(lineageEntry),

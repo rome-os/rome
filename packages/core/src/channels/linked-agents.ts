@@ -11,6 +11,23 @@ import { createLogger } from "../logger.js";
 const log = createLogger("linked-agents");
 
 /**
+ * The answer `linkedAgentResolver` gives for the channel, read with no logging
+ * and no state, for read-only callers such as the sessions explorer.
+ */
+export function readLinkedAgent(
+  records: Pick<ChannelRecordsRepository, "byId">,
+  agents: { has(name: string): boolean },
+  channelName: string,
+): string | null | undefined {
+  const record = records.byId(channelName);
+  // A service's first channel carries the service's name, so a channel with
+  // no record answers for its own service.
+  if (!LINKABLE_SERVICES.has(record?.service ?? channelName)) return undefined;
+  const agent = record?.agent ?? null;
+  return agent !== null && (isCoreMainAgentId(agent) || agents.has(agent)) ? agent : null;
+}
+
+/**
  * The hook's `linkedAgentOf`, reading the channel's record on each call, so a
  * relink, or a channel whose record lands after wiring, is right on the next
  * message. It answers undefined for a channel whose service is outside
@@ -26,15 +43,12 @@ export function linkedAgentResolver(
 ): NonNullable<ChannelMessageHookDeps["linkedAgentOf"]> {
   const silent = new Map<string, string | null>();
   return (channelName) => {
-    const record = records.byId(channelName);
-    // A service's first channel carries the service's name, so a channel with
-    // no record answers for its own service.
-    if (!LINKABLE_SERVICES.has(record?.service ?? channelName)) return undefined;
-    const agent = record?.agent ?? null;
-    if (agent !== null && (isCoreMainAgentId(agent) || agents.has(agent))) {
+    const answering = readLinkedAgent(records, agents, channelName);
+    if (answering !== null) {
       silent.delete(channelName);
-      return agent;
+      return answering;
     }
+    const agent = records.byId(channelName)?.agent ?? null;
     if (silent.has(channelName) && silent.get(channelName) === agent) return null;
     silent.set(channelName, agent);
     if (agent === null) {
