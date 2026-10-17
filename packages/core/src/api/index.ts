@@ -79,6 +79,7 @@ import { favorRoutes } from "./routes/favors.js";
 import { sessionsRoutes } from "./routes/sessions.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
+import { linkedAgentResolver } from "../channels/linked-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
@@ -196,6 +197,7 @@ export function buildApp(
     repository: new SessionQueryRepository(deps.db),
     agentLoader: deps.agentLoader,
     appCatalog: deps.appCatalog,
+    linkedAgentOf: linkedAgentResolver(new ChannelRecordsRepository(deps.db), deps.agentLoader),
   });
   api.route("/", sessionsRoutes(sessionQueries));
 

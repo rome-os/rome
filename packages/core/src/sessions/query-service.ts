@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { artifactLocalName } from "../apps/artifact-id.js";
+import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
 import type {
   RomeSessionDetail,
   RomeSessionExplorerRecord,
@@ -67,6 +67,9 @@ export interface SessionQueryServiceOptions {
       iconAbsolutePath?: string | null;
     }[];
   };
+  /** The channel-message hook's `linkedAgentOf`, so a record names the agent
+   *  that answers its conversation. Without it, records show the stored agent. */
+  linkedAgentOf?: (channelName: string) => string | null | undefined;
   now?: () => Date;
 }
 
@@ -321,6 +324,24 @@ export class SessionQueryService {
     };
   }
 
+  /**
+   * The agent that answers a channel conversation, by the rules in
+   * docs/architecture/channels.md#linked-agents, with main as null like the
+   * stored column. A silent channel keeps the stored agent, since the record
+   * has no shape for no agent.
+   */
+  private answeringAgent(session: SessionRow): string | null {
+    if (session.type !== "channel" || !session.sourceChannel) return session.agentName;
+    const linked = this.options.linkedAgentOf?.(session.sourceChannel);
+    if (!linked) return session.agentName;
+    if (session.sourceThreadType !== "private") {
+      // A null routing override is an explicit pin to main.
+      if (session.channelSettings?.overrides.routing?.agentName === null) return null;
+      if (session.agentName && !isCoreMainAgentId(session.agentName)) return session.agentName;
+    }
+    return isCoreMainAgentId(linked) ? null : linked;
+  }
+
   private resolveTime(scope: SessionQueryScope): { from: Date | null; to: Date; timeZone: string } {
     const now = this.now();
     if (scope.time.kind === "all") return { from: null, to: now, timeZone: scope.timeZone };
@@ -404,7 +425,8 @@ export class SessionQueryService {
     messageCount: number,
     stats: RomeSessionStats,
   ): RomeSessionExplorerRecord {
-    const owner = this.resolveOwner(session.agentName);
+    const agentName = this.answeringAgent(session);
+    const owner = this.resolveOwner(agentName);
     return {
       id: session.id,
       name: session.name,
@@ -413,7 +435,7 @@ export class SessionQueryService {
       largeModelSelection: session.largeModelSelection,
       projectName: session.projectName,
       projectPath: session.projectPath,
-      agentName: session.agentName,
+      agentName,
       type: session.type as RomeSessionType,
       sourceChannel: session.sourceChannel,
       sourceThreadId: session.sourceThreadId,
@@ -750,12 +772,13 @@ export class SessionQueryService {
     const accumulator = emptyAccumulator();
     for (const run of runs) appendAggregate(accumulator, run);
     const lineageEntry = (session: SessionRow) => {
-      const owner = this.resolveOwner(session.agentName);
+      const agentName = this.answeringAgent(session);
+      const owner = this.resolveOwner(agentName);
       return {
         id: session.id,
         displayTitle: sessionDisplayTitle(session, owner),
         type: session.type as RomeSessionType,
-        agentName: session.agentName,
+        agentName,
         parentTurnId: session.parentTurnId,
         activityAt: session.activityAt.toISOString(),
       };

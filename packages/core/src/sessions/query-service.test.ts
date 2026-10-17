@@ -10,6 +10,12 @@ describe("SessionQueryService", () => {
   let testDb: TestDb;
   let webchat: WebChatRepository;
   let service: SessionQueryService;
+  // Each channel's linked agent, as the hook's `linkedAgentOf` answers it.
+  const links: Record<string, string | null> = {
+    telegram: "code-review:skill_review",
+    feishu: "core:main",
+    discord: null,
+  };
 
   beforeEach(() => {
     rs.useFakeTimers();
@@ -49,6 +55,7 @@ describe("SessionQueryService", () => {
           },
         ],
       },
+      linkedAgentOf: (channel) => (channel in links ? links[channel] : undefined),
       now: () => new Date("2026-07-15T12:00:00.000Z"),
     });
   });
@@ -495,5 +502,75 @@ describe("SessionQueryService", () => {
         dimension: { dimension: "project", path: null, label: "No project" },
       }),
     ]);
+  });
+
+  it.each([
+    [
+      "a group keeps its own agent choice",
+      "telegram",
+      "group",
+      "code-review-agent",
+      false,
+      "code-review-agent",
+    ],
+    [
+      "a private chat follows the link",
+      "telegram",
+      "private",
+      "code-review-agent",
+      false,
+      "code-review:skill_review",
+    ],
+    [
+      "a group with no choice follows the link",
+      "telegram",
+      "group",
+      "main",
+      false,
+      "code-review:skill_review",
+    ],
+    ["a group pinned to main stays main", "telegram", "group", "main", true, null],
+    ["a channel linked to main reads as main", "feishu", "group", "main", false, null],
+    [
+      "a silent channel keeps the stored agent",
+      "discord",
+      "group",
+      "code-review-agent",
+      false,
+      "code-review-agent",
+    ],
+    [
+      "a service with no link keeps the stored agent",
+      "email",
+      "private",
+      "code-review-agent",
+      false,
+      "code-review-agent",
+    ],
+  ] as const)("labels a channel conversation by the agent that answers it: %s", async (_label, channel, threadType, stored, pinnedMain, expected) => {
+    const { id } = await webchat.ensureChannelConversation({
+      channel,
+      threadId: "thread-1",
+      threadType,
+      agentName: stored,
+    });
+    if (pinnedMain) {
+      await testDb.db
+        .update(romeSessions)
+        .set({
+          channelSettings: {
+            schemaVersion: 1,
+            overrides: { routing: { agentName: null } },
+            updatedAt: "2026-07-15T10:00:00.000Z",
+            updatedBy: { kind: "guardian" },
+          },
+        })
+        .where(eq(romeSessions.id, id));
+    }
+
+    const detail = await service.getSession(id);
+
+    expect(detail?.agentName).toBe(expected);
+    expect(detail?.owner.label).toBe(expected?.startsWith("code-review") ? "Code Review" : "Rome");
   });
 });
