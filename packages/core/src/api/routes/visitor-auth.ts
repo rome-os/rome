@@ -3,6 +3,11 @@ import { createPkce } from "@rome-os/libs/pkce";
 import { hostname } from "node:os";
 import { deleteCookie } from "hono/cookie";
 import { Hono, type Context } from "hono";
+import {
+  clearAttemptCookie,
+  readAttemptCookie,
+  setAttemptCookie,
+} from "../../lib/attempt-cookie.js";
 import { VISITOR_COOKIE_NAME, issueVisitorSession, shouldSecureCookie } from "../../lib/auth.js";
 import { normalizePublicAccessEmail } from "../../lib/public-access-config.js";
 import { isValidAppId } from "../../apps/packaging/app-id.js";
@@ -14,6 +19,8 @@ const log = createLogger("api:visitor-auth");
 
 const CALLBACK_PATH = "/api/auth/visitor/callback";
 const PENDING_TTL_MS = 10 * 60_000;
+// Its own name, so a visitor attempt never overwrites a guardian attempt in flight.
+const LOGIN_STATE_COOKIE = "rome_visitor_login_state";
 
 type PendingVisitorLogin =
   | {
@@ -111,11 +118,12 @@ function exchangeBody(code: string, verifier: string): RequestInit {
   };
 }
 
-// Mint PKCE + state, register the pending attempt, and return the Rome Cloud
-// `/instance/authorize` URL for it. Returns null when no Rome Cloud origin is
-// configured. The pending map is module-scoped, so an entry registered here is
-// redeemable at `/auth/visitor/callback` no matter which route started it.
-function beginVisitorFlow(entry: PendingVisitorLoginDraft): string | null {
+// Mint PKCE + state, register the pending attempt, bind it to this browser,
+// and return the Rome Cloud `/instance/authorize` URL for it. Returns null when
+// no Rome Cloud origin is configured. The pending map is module-scoped, so an
+// entry registered here is redeemable at `/auth/visitor/callback` no matter
+// which route started it.
+function beginVisitorFlow(c: Context, entry: PendingVisitorLoginDraft): string | null {
   const origin = getRomeCloudOrigin();
   if (!origin) return null;
 
@@ -129,6 +137,7 @@ function beginVisitorFlow(entry: PendingVisitorLoginDraft): string | null {
     verifier: pkce.verifier,
     expiresAt: now + PENDING_TTL_MS,
   });
+  setAttemptCookie(c, LOGIN_STATE_COOKIE, state, PENDING_TTL_MS);
 
   const authorizeUrl = new URL("/instance/authorize", origin);
   authorizeUrl.searchParams.set("redirect_uri", redirectUri);
@@ -145,8 +154,8 @@ function beginVisitorFlow(entry: PendingVisitorLoginDraft): string | null {
 // the guardian gets re-routed here so an invited email still lands a visitor
 // session from the single "Sign in with Rome Cloud" button. The caller gates
 // on the dashboard allow-list; the visitor callback re-checks it regardless.
-export function beginDashboardVisitorFlow(next?: string): string | null {
-  return beginVisitorFlow({ scope: "dashboard", next: normalizeDashboardNext(next) });
+export function beginDashboardVisitorFlow(c: Context, next?: string): string | null {
+  return beginVisitorFlow(c, { scope: "dashboard", next: normalizeDashboardNext(next) });
 }
 
 export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): Hono {
@@ -193,7 +202,7 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
       };
     }
 
-    const authorizeUrl = beginVisitorFlow(pendingEntry);
+    const authorizeUrl = beginVisitorFlow(c, pendingEntry);
     if (!authorizeUrl) {
       return c.json({ error: "pantheon_origin_unconfigured" }, 503);
     }
@@ -220,12 +229,23 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
 
     const entry = state ? pending.get(state) : undefined;
     if (!state || !entry) {
+      // Leaves the attempt cookie alone: a stray or stale callback must not
+      // break a sign-in this browser still has in flight.
       return c.redirect("/?visitor=error&reason=state");
     }
+    // Consumed whatever the cookie says: a callback that reached a real
+    // attempt from the wrong browser burns it, so it can't be replayed.
     pending.delete(state);
+    // Expiry first: the attempt cookie expires with the attempt, so checking it
+    // first would report a slow sign-in as a mismatch instead of a timeout.
     if (entry.expiresAt <= Date.now()) {
       return c.redirect(pendingErrorRedirect(entry, "expired"));
     }
+    if (readAttemptCookie(c, LOGIN_STATE_COOKIE) !== state) {
+      log.warn("visitor login callback state not bound to this browser");
+      return c.redirect(pendingErrorRedirect(entry, "state"));
+    }
+    clearAttemptCookie(c, LOGIN_STATE_COOKIE);
     if (oauthError || !code) {
       return c.redirect(pendingErrorRedirect(entry, "denied"));
     }
