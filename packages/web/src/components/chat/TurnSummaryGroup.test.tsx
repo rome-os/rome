@@ -1,7 +1,12 @@
 // @rstest-environment jsdom
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeAll, describe, expect, it } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import i18n from "@/i18n";
 import { TurnSummaryGroup } from "./TurnSummaryGroup";
+
+beforeAll(async () => {
+  await i18n.changeLanguage("en");
+});
 
 afterEach(() => cleanup());
 
@@ -113,6 +118,47 @@ describe("TurnSummaryGroup plan", () => {
 
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("list")).toBeNull();
+  });
+
+  const unfinished = {
+    steps: [
+      { text: "Inspect", status: "completed" as const },
+      { text: "Approve the OAuth app", status: "pending" as const },
+    ],
+  };
+
+  it("says the plan waits on the guardian when the chat is parked at this turn", () => {
+    render(
+      <TurnSummaryGroup
+        plan={unfinished}
+        settled={{ laterPlan: false, laterTurns: 0, waiting: true }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Plan Waiting for you 1 of 2/ })).toBeTruthy();
+  });
+
+  it("collapses a plan that a later plan picked up", () => {
+    render(
+      <TurnSummaryGroup
+        plan={unfinished}
+        settled={{ laterPlan: true, laterTurns: 2, waiting: false }}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: /Plan Continued below ↓ 1 of 2/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("keeps an unfinished plan open and counts the turns after it", () => {
+    render(
+      <TurnSummaryGroup
+        plan={unfinished}
+        settled={{ laterPlan: false, laterTurns: 3, waiting: false }}
+      />,
+    );
+    const toggle = screen.getByRole("button", {
+      name: /Plan Incomplete · 3 more turns after this 1 of 2/,
+    });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("renders nothing for an explicit empty Plan", () => {

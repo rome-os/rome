@@ -57,6 +57,15 @@
     "unavailableTitle": "This shared chat is unavailable",
     "unavailableBody": "The link may have been revoked or is no longer valid."
   },
+  "plan": {
+    "inProgress": "In progress",
+    "completed": "Completed",
+    "incomplete": "Incomplete",
+    "waitingForYou": "Waiting for you",
+    "continuedBelow": "Continued below ↓",
+    "laterTurns_one": "{{count}} more turn after this",
+    "laterTurns_other": "{{count}} more turns after this"
+  },
   "timeline": {
     "label": "Question timeline"
   },

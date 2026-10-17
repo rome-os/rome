@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AlignLeft, Check, Pause, Play } from "lucide-react";
 import type { AgentPlan, AgentPlanStep } from "@rome/api-types/trace-segments";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CollapsibleCard, CollapsibleSection } from "@/components/chat/CollapsibleCard";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
+
+/** Where a settled turn's unfinished plan stands in the conversation: a later
+ *  turn sent a new plan, later turns ran without one, or the chat is still
+ *  waiting on the guardian at this turn. Rome cannot tell whether later turns
+ *  finished the plan, so none of these claims it completed. */
+export interface SettledPlanContext {
+  laterPlan: boolean;
+  laterTurns: number;
+  waiting: boolean;
+}
 
 export interface TurnRecapSummary {
   content: string;
@@ -87,26 +98,41 @@ export function TurnSummaryGroup({
   plan,
   recap,
   live = false,
+  settled,
 }: {
   plan?: AgentPlan | null;
   recap?: TurnRecapSummary | null;
   live?: boolean;
+  settled?: SettledPlanContext;
 }) {
+  const { t } = useTranslation("chat");
   const steps = plan?.steps ?? [];
   const hasPlan = steps.length > 0;
   const completed = steps.filter((step) => step.status === "completed").length;
   const allComplete = hasPlan && completed === steps.length;
-  const [planExpanded, setPlanExpanded] = useState(!allComplete);
+  // A plan picked up by a later plan is history, so it starts collapsed.
+  const superseded = !live && !allComplete && !!settled?.laterPlan;
+  const [planExpanded, setPlanExpanded] = useState(!allComplete && !superseded);
   const [recapExpanded, setRecapExpanded] = useState(false);
 
   useEffect(() => {
-    setPlanExpanded(!allComplete);
-  }, [allComplete]);
+    setPlanExpanded(!allComplete && !superseded);
+  }, [allComplete, superseded]);
 
   if (!hasPlan && !recap) return null;
 
   const activeStep = steps.find((step) => step.status === "in_progress");
-  const status = live ? "In progress" : allComplete ? "Completed" : "Incomplete";
+  const status = live
+    ? t("plan.inProgress")
+    : allComplete
+      ? t("plan.completed")
+      : settled?.waiting
+        ? t("plan.waitingForYou")
+        : superseded
+          ? t("plan.continuedBelow")
+          : settled?.laterTurns
+            ? `${t("plan.incomplete")} · ${t("plan.laterTurns", { count: settled.laterTurns })}`
+            : t("plan.incomplete");
   const progress = hasPlan ? Math.round((completed / steps.length) * 100) : 0;
   const label = hasPlan && recap ? "Turn summary" : hasPlan ? "Agent plan" : "Turn recap";
 

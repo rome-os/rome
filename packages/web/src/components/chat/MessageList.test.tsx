@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 // RomeLogo (the avatar fallback) renders an SVG mask that jsdom can't construct;
@@ -18,6 +18,7 @@ import {
   findLastSubmission,
   hasPendingApprovalConfirmation,
   MessageList,
+  settledPlanContexts,
   type BlockActions,
   type LivePreview,
   type ShareSelection,
@@ -25,6 +26,11 @@ import {
 import { buildRows, type AgentIdentity } from "./chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ThemeProvider } from "@/hooks/use-theme";
+import i18n from "@/i18n";
+
+beforeAll(async () => {
+  await i18n.changeLanguage("en");
+});
 
 afterEach(() => cleanup());
 
@@ -675,5 +681,121 @@ describe("timeline anchors", () => {
     );
 
     expect(anchorIds(container)).toEqual(["u-dimmed"]);
+  });
+});
+
+describe("settledPlanContexts", () => {
+  function turn(
+    turnId: string,
+    opts: { plan?: "unfinished" | "done"; approval?: boolean } = {},
+  ): ChatMessage[] {
+    const messages: ChatMessage[] = [
+      {
+        id: `u-${turnId}`,
+        sessionId: "s-1",
+        role: "user",
+        turnId,
+        content: JSON.stringify([{ type: "text", content: `ask ${turnId}` }]),
+        createdAt: "2026-06-13T00:00:00.000Z",
+      },
+      {
+        id: `a-${turnId}`,
+        sessionId: "s-1",
+        role: "assistant",
+        turnId,
+        content: JSON.stringify([{ type: "text", content: `reply ${turnId}` }]),
+        createdAt: "2026-06-13T00:00:01.000Z",
+      },
+    ];
+    if (opts.approval) {
+      // Saved through the channel with no turn id, before the turn's reply.
+      messages.splice(1, 0, {
+        id: `ap-${turnId}`,
+        sessionId: "s-1",
+        role: "assistant",
+        content: JSON.stringify([
+          {
+            type: "approval_card",
+            approvalId: `ap-${turnId}`,
+            actionName: "github.install_app",
+            preview: { kind: "generic", title: "Install", summary: "Install the app" },
+            status: "pending",
+          },
+        ]),
+        createdAt: "2026-06-13T00:00:00.500Z",
+      });
+    }
+    if (opts.plan) {
+      messages.push({
+        id: `t-${turnId}`,
+        sessionId: "s-1",
+        role: "trace",
+        turnId,
+        content: "[]",
+        createdAt: "2026-06-13T00:00:02.000Z",
+        traceSummary: {
+          distinctApps: [],
+          totalSteps: 1,
+          invocationCounts: {},
+          plan: {
+            steps: [
+              { text: "Inspect", status: "completed" },
+              { text: "Finish", status: opts.plan === "done" ? "completed" : "pending" },
+            ],
+          },
+        },
+      });
+    }
+    return messages;
+  }
+
+  function contextOfFirstPlan(messages: ChatMessage[], awaitingGuardian = false) {
+    const rows = buildRows(messages, new Map([["s-1", IDENTITY]]), IDENTITY, {
+      runningTurnId: null,
+      isStreaming: false,
+    });
+    const contexts = settledPlanContexts(rows, awaitingGuardian);
+    const planRow = rows.find((row) => contexts.has(row.key));
+    return planRow ? contexts.get(planRow.key) : undefined;
+  }
+
+  it("marks a plan that a later turn replaced with a new plan", () => {
+    expect(
+      contextOfFirstPlan([
+        ...turn("t1", { plan: "unfinished" }),
+        ...turn("t2"),
+        ...turn("t3", { plan: "done" }),
+      ]),
+    ).toEqual({ laterPlan: true, laterTurns: 2, waiting: false });
+  });
+
+  it("counts later turns that sent no plan without claiming the plan moved on", () => {
+    expect(
+      contextOfFirstPlan([...turn("t1", { plan: "unfinished" }), ...turn("t2"), ...turn("t3")]),
+    ).toEqual({ laterPlan: false, laterTurns: 2, waiting: false });
+  });
+
+  it("waits on the guardian only at the latest turn", () => {
+    expect(contextOfFirstPlan(turn("t1", { plan: "unfinished" }), true)).toEqual({
+      laterPlan: false,
+      laterTurns: 0,
+      waiting: true,
+    });
+    expect(
+      contextOfFirstPlan([...turn("t1", { plan: "unfinished" }), ...turn("t2")], true)?.waiting,
+    ).toBe(false);
+  });
+
+  it("neither waits on nor counts a turnless approval card", () => {
+    // Its stored status stays "pending" after it resolves, so it proves nothing.
+    expect(contextOfFirstPlan(turn("t1", { plan: "unfinished", approval: true }))).toEqual({
+      laterPlan: false,
+      laterTurns: 0,
+      waiting: false,
+    });
+  });
+
+  it("leaves a finished plan alone", () => {
+    expect(contextOfFirstPlan([...turn("t1", { plan: "done" }), ...turn("t2")])).toBeUndefined();
   });
 });

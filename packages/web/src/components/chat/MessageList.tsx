@@ -11,7 +11,7 @@ import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
 import { DelegatedSubagentGroup } from "@/components/chat/DelegatedSubagentGroup";
 import { MessageRow } from "@/components/chat/MessageRow";
 import { LiveTurnActivity } from "@/components/chat/LiveTurnActivity";
-import { TurnSummaryGroup } from "@/components/chat/TurnSummaryGroup";
+import { type SettledPlanContext, TurnSummaryGroup } from "@/components/chat/TurnSummaryGroup";
 import { TurnBranchButton } from "@/components/chat/TurnBranchButton";
 import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
 import { TraceTrigger } from "@/components/chat/TraceTrigger";
@@ -80,6 +80,10 @@ export interface MessageListProps {
   // button under settled agent turns. Guardian-only, so the live chat opts in
   // while read-only surfaces (public share, sessions viewer) omit them.
   feedback?: boolean;
+  // The chat is parked on a card the guardian has not answered. Lets the
+  // latest turn's unfinished plan read "Waiting for you". Read-only surfaces
+  // leave it out, so they never say so.
+  awaitingGuardian?: boolean;
 }
 
 // Submission helpers — read a handoff child's messages to drive the composer's
@@ -208,6 +212,7 @@ const RowView = memo(function RowView({
   activeTraceTarget,
   subagentIconByName,
   feedback = false,
+  planContext,
 }: {
   row: ChatRow;
   live: LivePreview | null;
@@ -218,6 +223,7 @@ const RowView = memo(function RowView({
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
   feedback?: boolean;
+  planContext?: SettledPlanContext;
 }) {
   if (row.kind === "user") return <UserMessage msg={row.message} />;
   const avatar = <AgentAvatar iconUrl={row.identity.iconUrl} label={row.identity.name} />;
@@ -237,7 +243,9 @@ const RowView = memo(function RowView({
           subagentIconByName,
         )}
       >
-        {plan?.steps.length ? <TurnSummaryGroup plan={plan} live={false} /> : null}
+        {plan?.steps.length ? (
+          <TurnSummaryGroup plan={plan} live={false} settled={planContext} />
+        ) : null}
       </MessageRow>
     );
   }
@@ -335,6 +343,7 @@ const RowView = memo(function RowView({
             <TurnSummaryGroup
               plan={summary?.plan}
               live={!!live}
+              settled={planContext}
               recap={
                 recap?.type === "turn_recap"
                   ? {
@@ -374,7 +383,9 @@ const RowView = memo(function RowView({
           entranceKey={typingEntranceKey(live)}
         />
       ) : null}
-      {recapMessageId ? null : <TurnSummaryGroup plan={summary?.plan} live={!!live} />}
+      {recapMessageId ? null : (
+        <TurnSummaryGroup plan={summary?.plan} live={!!live} settled={planContext} />
+      )}
     </MessageRow>
   );
 });
@@ -447,6 +458,43 @@ function rowTurnRef(row: ChatRow): { turnId: string | null; sessionId: string } 
   return { turnId: first?.turnId ?? null, sessionId: first?.sessionId ?? "" };
 }
 
+function rowPlanSteps(row: ChatRow) {
+  if (row.kind === "trace") return row.message.traceSummary?.plan?.steps ?? [];
+  if (row.kind === "agent") return row.trace?.traceSummary?.plan?.steps ?? [];
+  return [];
+}
+
+// For each row whose turn left its plan unfinished, what came after it in the
+// same session. A plan has no id, so any later plan counts as "new plan
+// below", and later turns without one only say how many there were. Only the
+// latest turn can wait on the guardian, and only when the chat is parked on an
+// unanswered card. An approval card does not count: its stored status stays
+// "pending" after it resolves. A message with no turn id (such as an approval
+// card sent through the channel) is not a later turn.
+export function settledPlanContexts(
+  rows: ChatRow[],
+  awaitingGuardian: boolean,
+): Map<string, SettledPlanContext> {
+  const contexts = new Map<string, SettledPlanContext>();
+  const lastSessionId = rows.length > 0 ? rowTurnRef(rows[rows.length - 1]).sessionId : null;
+  rows.forEach((row, index) => {
+    const steps = rowPlanSteps(row);
+    if (steps.length === 0 || steps.every((step) => step.status === "completed")) return;
+    const { turnId, sessionId } = rowTurnRef(row);
+    const later = rows.slice(index + 1).filter((next) => {
+      const ref = rowTurnRef(next);
+      return ref.sessionId === sessionId && ref.turnId !== null && ref.turnId !== turnId;
+    });
+    const laterTurns = new Set(later.map((next) => rowTurnRef(next).turnId)).size;
+    contexts.set(row.key, {
+      laterPlan: later.some((next) => rowPlanSteps(next).length > 0),
+      laterTurns,
+      waiting: laterTurns === 0 && awaitingGuardian && sessionId === lastSessionId,
+    });
+  });
+  return contexts;
+}
+
 // Wraps a transcript row with a checkbox + full-row click target during share
 // selection. The overlay button sits above the row, so in selection mode a
 // click toggles the turn instead of activating links/cards underneath.
@@ -500,8 +548,13 @@ export function MessageList({
   subagentIconByName,
   actions,
   feedback,
+  awaitingGuardian = false,
 }: MessageListProps) {
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
+  const planContexts = useMemo(
+    () => settledPlanContexts(rows, awaitingGuardian),
+    [rows, awaitingGuardian],
+  );
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;
   const sourceText = live.sourceText ?? live.text;
@@ -558,6 +611,7 @@ export function MessageList({
               activeTraceTarget={activeTraceTarget}
               subagentIconByName={subagentIconByName}
               feedback={feedback}
+              planContext={planContexts.get(row.key)}
             />
           );
           const tail = row === anchorRow ? standalone : null;
