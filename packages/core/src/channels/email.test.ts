@@ -390,6 +390,28 @@ describe("EmailAdapter.send", () => {
     ).rejects.toThrow("Email requires non-empty text or HTML. No email was sent.");
     expect(provider.send).not.toHaveBeenCalled();
   });
+
+  it("points dashboard links at the instance's public origin", async () => {
+    rs.stubEnv("PANTHEON_INSTANCE_ORIGIN", "https://acme.romeos.cc");
+    try {
+      const provider = makeProvider();
+      const adapter = makeAdapter(provider);
+
+      await adapter.send("zoolsher@gmail.com" as ConversationId, {
+        text: "Open [file.md](</memory/topics/file.md>)",
+      });
+
+      expect(provider.sent[0].text).toBe(
+        "Open [file.md](<https://acme.romeos.cc/memory/topics/file.md>)",
+      );
+      expect(provider.sent[0].html).toContain(
+        'href="https://acme.romeos.cc/memory/topics/file.md"',
+      );
+      expect(provider.sent[0].html).toContain('href="https://acme.romeos.cc/settings"');
+    } finally {
+      rs.unstubAllEnvs();
+    }
+  });
 });
 
 describe("EmailAdapter inbound attachments", () => {

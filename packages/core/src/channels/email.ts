@@ -38,6 +38,7 @@ import {
   type IncomingAttachmentPayload,
 } from "./attachment-files.js";
 import { proveIdentity } from "../lib/instance-identity.js";
+import { getConfiguredInstanceOrigin } from "../lib/rome-cloud-origin.js";
 
 const log = createLogger("channel-email");
 
@@ -412,14 +413,15 @@ export class EmailAdapter {
     // Build the multipart body: an app-supplied HTML wins (sanitized + inlined,
     // with a derived text/plain), otherwise render the markdown text to HTML.
     // Always send both `text` and `html`.
+    const instanceOrigin = getConfiguredInstanceOrigin();
     let text: string | undefined;
     let html: string | undefined;
     if (email?.html?.trim()) {
-      const multi = htmlToEmailMultipart(email.html, bodyText || undefined);
+      const multi = htmlToEmailMultipart(email.html, bodyText || undefined, instanceOrigin);
       html = multi.html;
       text = multi.text;
     } else if (bodyText) {
-      const multi = markdownToEmailHtml(bodyText);
+      const multi = markdownToEmailHtml(bodyText, instanceOrigin);
       html = multi.html;
       text = multi.text;
     }
