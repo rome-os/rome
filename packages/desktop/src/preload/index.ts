@@ -12,8 +12,20 @@ const api = {
     openWindow: (): Promise<void> => ipcRenderer.invoke("settings:openWindow"),
   },
 
+  cloud: {
+    getState: (): Promise<CloudState> => ipcRenderer.invoke("cloud:getState"),
+    signIn: (): Promise<CloudState> => ipcRenderer.invoke("cloud:signIn"),
+    cancelSignIn: (): Promise<void> => ipcRenderer.invoke("cloud:cancelSignIn"),
+    signOut: (): Promise<CloudState> => ipcRenderer.invoke("cloud:signOut"),
+    listInstances: (): Promise<CloudInstance[]> => ipcRenderer.invoke("cloud:listInstances"),
+  },
+
   runtime: {
     getStatus: (): Promise<RuntimeStatus> => ipcRenderer.invoke("runtime:getStatus"),
+    setTarget: (target: RuntimeTarget): Promise<"switched" | "relaunching"> =>
+      ipcRenderer.invoke("runtime:setTarget", target),
+    chooseInstance: (instanceId: string): Promise<RuntimeStatus> =>
+      ipcRenderer.invoke("runtime:chooseInstance", instanceId),
     ensureReady: (): Promise<RuntimeStatus> => ipcRenderer.invoke("runtime:ensureReady"),
     openInstallPage: (): Promise<void> => ipcRenderer.invoke("runtime:openInstallPage"),
     startRuntimeApp: (): Promise<void> => ipcRenderer.invoke("runtime:startRuntimeApp"),
@@ -62,7 +74,11 @@ const api = {
   },
 };
 
-contextBridge.exposeInMainWorld("rome", api);
+// The app's own pages load from file: and get the whole bridge. Anything else
+// in the main window is the dashboard, possibly a Rome on the internet, or a
+// sign-in page; it gets only the marker that says "inside the Mac app" (see
+// `isElectronShell` in the dashboard), and main refuses its IPC regardless.
+contextBridge.exposeInMainWorld("rome", location.protocol === "file:" ? api : {});
 
 // Tag the document so the web app can conditionally apply
 // Electron-shell-only styles (drag regions, traffic-light insets) without
@@ -90,7 +106,7 @@ interface RuntimeStatus {
   installDir: string;
   image: string;
   containerName: string;
-  provider: "lima";
+  provider: "lima" | "remote";
   runtimeInstalled: boolean;
   runtimeRunning: boolean;
   runtimeInstallUrl: string;
@@ -137,4 +153,25 @@ interface ImageUpdateStatus {
   lastCheckedAt: string | null;
   message: string;
   error: string | null;
+}
+
+type RuntimeTarget =
+  | { kind: "local" }
+  | { kind: "remote"; instance: { id: string; name: string; origin: string } | null };
+
+interface CloudState {
+  available: boolean;
+  signedIn: boolean;
+  cloudOrigin: string | null;
+  activeTarget: RuntimeTarget;
+  savedTarget: RuntimeTarget;
+  localVm: { supported: boolean; reason: string | null };
+}
+
+interface CloudInstance {
+  id: string;
+  name: string;
+  slug: string;
+  origin: string;
+  status: string;
 }

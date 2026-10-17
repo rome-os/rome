@@ -4,7 +4,7 @@ import type {
   CloudInstanceAuthorization,
   InstanceAuthorizationRequest,
   InstanceSession,
-} from "./native-auth-types";
+} from "./types.js";
 
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;

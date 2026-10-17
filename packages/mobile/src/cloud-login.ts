@@ -2,16 +2,17 @@ import * as Application from "expo-application";
 import * as Crypto from "expo-crypto";
 import * as Device from "expo-device";
 import * as WebBrowser from "expo-web-browser";
-import { fetchWithoutRedirect, responseJson } from "./http";
-import type { CloudCredential } from "./native-auth-types";
-import { NativeAuthError } from "./native-auth-types";
 import {
-  buildMobileAuthorizeUrl,
-  parseMobileCallback,
-  parseMobileTokenResponse,
+  buildAuthorizeUrl,
+  type CloudCredential,
+  fetchWithoutRedirect,
+  NativeAuthError,
+  parseAuthorizationCallback,
+  parseDeviceTokenResponse,
+  responseJson,
   toBase64Url,
-  validateOAuthConfiguration,
-} from "./oauth-protocol";
+} from "@rome-os/libs/native-auth";
+import { validateOAuthConfiguration } from "./oauth-protocol";
 
 function randomBase64Url(length: number): string {
   const bytes = Crypto.getRandomBytes(length);
@@ -32,7 +33,7 @@ export async function signInToRomeCloud(input: {
   const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, verifier, {
     encoding: Crypto.CryptoEncoding.BASE64,
   });
-  const authorizeUrl = buildMobileAuthorizeUrl({
+  const authorizeUrl = buildAuthorizeUrl({
     cloudOrigin: input.cloudOrigin,
     clientId: input.clientId,
     redirectUri: input.redirectUri,
@@ -48,7 +49,7 @@ export async function signInToRomeCloud(input: {
   if (result.type !== "success") {
     throw new NativeAuthError("cancelled", "Sign-in was cancelled");
   }
-  const { code } = parseMobileCallback({
+  const { code } = parseAuthorizationCallback({
     callbackUrl: result.url,
     expectedRedirectUri: input.redirectUri,
     expectedState: state,
@@ -78,5 +79,5 @@ export async function signInToRomeCloud(input: {
     input.cloudOrigin,
   );
   if (!response.ok) throw new NativeAuthError("session_rejected", "Rome Cloud rejected sign-in");
-  return parseMobileTokenResponse(await responseJson(response));
+  return parseDeviceTokenResponse(await responseJson(response));
 }

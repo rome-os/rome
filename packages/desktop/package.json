@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
+    "@rome-os/libs": "workspace:*",
     "better-sqlite3": "^12.6.2",
     "drizzle-orm": "^0.45.1",
     "electron-updater": "^6.3.0",

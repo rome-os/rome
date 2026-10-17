@@ -1,5 +1,6 @@
 import { release } from "os";
-import { app, BrowserWindow } from "electron";
+import { existsSync } from "fs";
+import { app, BrowserWindow, net, shell } from "electron";
 import { initDatabase } from "./db/database";
 import { createLogger } from "./logger";
 import {
@@ -9,8 +10,8 @@ import {
   loadLocalDashboard,
   shouldNavigateToLocalDashboard,
 } from "./window";
-import { registerIpcHandlers } from "./ipc";
-import { isQuitting, setupLifecycle } from "./lifecycle";
+import { readRuntimeTarget, registerIpcHandlers, writeRuntimeTarget } from "./ipc";
+import { isQuitting, requestStopAndQuit, setupLifecycle } from "./lifecycle";
 import { setupUpdater, updateManager } from "./updater";
 import { RESTART_BUTTON, updateDialogFor } from "./update-dialog";
 import { setupTray } from "./tray";
@@ -19,15 +20,54 @@ import { supportsFloatingPill } from "./floating-pill-state";
 import { setupApplicationMenu } from "./menu";
 import { shouldReturnToDashboard } from "./startup-surface";
 import { RuntimeManager, type RuntimeStatus } from "./runtime/manager";
-import { createRomeImageUpdater } from "./runtime/image-updater";
+import { createRomeImageUpdater, type RomeImageUpdater } from "./runtime/image-updater";
+import { resolveRuntimePaths } from "./runtime/config";
+import { RuntimeController } from "./runtime/controller";
+import { RemoteRuntime } from "./runtime/remote";
+import type { Runtime } from "./runtime/runtime";
+import type { CloudAccount } from "./cloud/account";
+import { createCloudAccount } from "./cloud/electron";
 import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler } from "./protocol";
 
 const log = createLogger("main");
 
 let mainWindow: BrowserWindow | null = null;
 let quittingWindow: BrowserWindow | null = null;
-const runtimeManager = new RuntimeManager();
-const romeImageUpdater = createRomeImageUpdater(runtimeManager);
+// Chosen in bootstrap, once the settings database says which Rome this launch
+// opens. The image updater exists only while the private VM is the one open.
+let runtimeManager: Runtime;
+let romeImageUpdater: RomeImageUpdater | null = null;
+
+function createCloudAccountOrNull(): CloudAccount | null {
+  try {
+    return createCloudAccount();
+  } catch (err) {
+    // A staging override that is not an exact https origin cannot back a
+    // sign-in; the local VM still works without one.
+    log.warn(`Rome Cloud sign-in is unavailable (${String(err)})`);
+    return null;
+  }
+}
+
+const netFetch: typeof fetch = (input, init) =>
+  net.fetch(input instanceof URL ? input.toString() : input, init);
+
+async function openDebugLog(): Promise<void> {
+  const error = await shell.openPath(resolveRuntimePaths().debugLogFile);
+  if (error) throw new Error(error);
+}
+
+// An install from before Rome Cloud mode keeps its Rome in this directory.
+function hasLocalRuntime(): boolean {
+  return existsSync(resolveRuntimePaths().rootDir);
+}
+
+function createLocalRuntime(): Runtime {
+  const local = new RuntimeManager();
+  romeImageUpdater = createRomeImageUpdater(local);
+  romeImageUpdater.start();
+  return local;
+}
 
 async function bootstrap() {
   try {
@@ -36,8 +76,40 @@ async function bootstrap() {
     initDatabase();
     log.info("Database initialized");
 
-    registerIpcHandlers(runtimeManager, {
+    const cloudAccount = createCloudAccountOrNull();
+    const controller = new RuntimeController({
+      cloudAccount,
+      savedTarget: readRuntimeTarget(hasLocalRuntime()),
+      writeTarget: writeRuntimeTarget,
+      createLocal: createLocalRuntime,
+      createRemote: (instance, onSelect) => {
+        if (!cloudAccount) throw new Error("This build cannot sign in to Rome Cloud.");
+        return new RemoteRuntime(instance, {
+          account: cloudAccount,
+          fetchImpl: netFetch,
+          openLogs: openDebugLog,
+          openCloud: () =>
+            shell.openExternal(new URL("/dashboard", cloudAccount.cloudOrigin).toString()),
+          onSelect,
+        });
+      },
+      relaunch: () => {
+        app.relaunch();
+        requestStopAndQuit();
+      },
+    });
+    runtimeManager = controller.runtime;
+    const active = controller.activeTarget();
+    log.info(
+      active.kind === "remote"
+        ? `Opening Rome Cloud${active.instance ? ` (${active.instance.origin})` : ""}`
+        : "Opening the Rome on this computer",
+    );
+
+    registerIpcHandlers(controller, {
       openSettingsWindow: () => createSettingsWindow(),
+      cloudAccount,
+      hasLocalRuntime,
     });
 
     mainWindow = await createMainWindow(runtimeManager);
@@ -155,7 +227,6 @@ async function bootstrap() {
       floatingPill,
     });
     setupUpdater();
-    romeImageUpdater.start();
     setupLifecycle({
       runtimeManager,
       onShutdownStart: () => {
@@ -201,7 +272,7 @@ if (!gotTheLock) {
 
   app.on("before-quit", () => {
     updateManager.stop();
-    romeImageUpdater.stop();
+    romeImageUpdater?.stop();
   });
 
   app.on("window-all-closed", () => {
@@ -215,7 +286,7 @@ if (!gotTheLock) {
     // After hide-to-tray the window still exists (just hidden), so the
     // "no windows" check alone would leave Dock-click / relaunch dead
     // until the user finds the tray.
-    if (isQuitting()) return;
+    if (isQuitting() || !runtimeManager) return;
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (!mainWindow.isVisible()) mainWindow.show();
       mainWindow.focus();

@@ -16,6 +16,7 @@ import {
 } from "./config";
 import { startLocalProxy, type LocalProxy } from "./local-proxy";
 import { LimaRuntimeProvider } from "./providers/lima";
+import type { Runtime } from "./runtime";
 import type {
   RuntimeAction,
   RuntimeHostProbe,
@@ -58,7 +59,7 @@ export type {
   RuntimeStatus,
 } from "./provider";
 
-export class RuntimeManager extends EventEmitter {
+export class RuntimeManager extends EventEmitter implements Runtime {
   private readonly paths: RuntimePaths;
   private readonly image: string;
   private readonly provider: LimaRuntimeProvider;
@@ -598,6 +599,19 @@ export function selectProvider(
     );
   }
   return new LimaRuntimeProvider({ hostSocketPath: paths.socketPath });
+}
+
+/** Whether this computer can run the private VM, and why not when it cannot. */
+export function localVmSupport(host: SelectProviderHost = {}): {
+  supported: boolean;
+  reason: string | null;
+} {
+  try {
+    selectProvider(resolveRuntimePaths(), host);
+    return { supported: true, reason: null };
+  } catch (err) {
+    return { supported: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 // Darwin kernel 22.x corresponds to macOS 13 (Ventura), the floor for Lima's

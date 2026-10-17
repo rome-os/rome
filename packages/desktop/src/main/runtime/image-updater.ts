@@ -1,4 +1,5 @@
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow } from "electron";
+import { handleTrusted } from "../ipc-trust";
 import { eq } from "drizzle-orm";
 import { request as httpsRequest } from "https";
 import { getDb } from "../db/database";
@@ -273,10 +274,10 @@ class RomeImageUpdater {
   }
 
   private registerIpcHandlers(): void {
-    ipcMain.handle("rome-image:getStatus", () => this.getStatus());
-    ipcMain.handle("rome-image:check", () => this.checkForUpdate("manual"));
-    ipcMain.handle("rome-image:apply", () => this.applyUpdate());
-    ipcMain.handle("rome-image:setAutoUpdateEnabled", (_event, enabled: unknown) => {
+    handleTrusted("rome-image:getStatus", () => this.getStatus());
+    handleTrusted("rome-image:check", () => this.checkForUpdate("manual"));
+    handleTrusted("rome-image:apply", () => this.applyUpdate());
+    handleTrusted("rome-image:setAutoUpdateEnabled", (_event, enabled: unknown) => {
       if (typeof enabled !== "boolean") {
         throw new Error("enabled must be a boolean");
       }

@@ -6,6 +6,7 @@ export type RuntimePhase =
   | "starting_rome"
   | "waiting_for_health"
   | "ready"
+  | "waiting_for_user"
   | "failed";
 
 export type RuntimePrimaryAction =
@@ -13,6 +14,9 @@ export type RuntimePrimaryAction =
   | "open_runtime_app"
   | "retry"
   | "open_dashboard"
+  | "sign_in"
+  | "choose_instance"
+  | "open_cloud"
   | "none";
 
 export interface RuntimePullProgress {
@@ -35,7 +39,7 @@ export interface RuntimeStatus {
   installDir: string;
   image: string;
   containerName: string;
-  provider: "lima";
+  provider: "lima" | "remote";
   runtimeInstalled: boolean;
   runtimeRunning: boolean;
   runtimeInstallUrl: string;
@@ -90,6 +94,36 @@ export interface ImageUpdateStatus {
   error: string | null;
 }
 
+/** Which Rome the app opens; a change applies when the app restarts. */
+/**
+ * Which Rome the app opens. A remote target with no instance is Rome Cloud
+ * mode before one is picked, which is where a new install starts.
+ */
+export type RuntimeTarget =
+  | { kind: "local" }
+  | { kind: "remote"; instance: { id: string; name: string; origin: string } | null };
+
+export interface CloudState {
+  /** False when this build's Rome Cloud origin cannot back a sign-in. */
+  available: boolean;
+  signedIn: boolean;
+  cloudOrigin: string | null;
+  /** The Rome this launch opened. */
+  activeTarget: RuntimeTarget;
+  /** The Rome the next launch opens. */
+  savedTarget: RuntimeTarget;
+  /** Whether this computer can run the private VM, and why not. */
+  localVm: { supported: boolean; reason: string | null };
+}
+
+export interface CloudInstance {
+  id: string;
+  name: string;
+  slug: string;
+  origin: string;
+  status: string;
+}
+
 export type InstanceEnrollResult =
   | { ok: true; instanceId: string; account: { id: string; email: string } | null }
   | { ok: false; error: string };
@@ -103,8 +137,18 @@ export interface RomeApi {
   instance: {
     enroll(): Promise<InstanceEnrollResult>;
   };
+  cloud: {
+    getState(): Promise<CloudState>;
+    signIn(): Promise<CloudState>;
+    cancelSignIn(): Promise<void>;
+    signOut(): Promise<CloudState>;
+    listInstances(): Promise<CloudInstance[]>;
+  };
   runtime: {
     getStatus(): Promise<RuntimeStatus>;
+    /** Applies in place on the welcome screen, otherwise relaunches. */
+    setTarget(target: RuntimeTarget): Promise<"switched" | "relaunching">;
+    chooseInstance(instanceId: string): Promise<RuntimeStatus>;
     ensureReady(): Promise<RuntimeStatus>;
     openInstallPage(): Promise<void>;
     startRuntimeApp(): Promise<void>;
@@ -194,6 +238,15 @@ function createMockRomeApi(): RomeApi {
     error: null,
   };
 
+  const MOCK_CLOUD_STATE: CloudState = {
+    available: true,
+    signedIn: true,
+    cloudOrigin: "https://romeos.cc",
+    activeTarget: { kind: "local" },
+    savedTarget: { kind: "local" },
+    localVm: { supported: true, reason: null },
+  };
+
   const log = (name: string, ...args: unknown[]) =>
     console.info(`[rome-api mock] ${name}`, ...args);
 
@@ -220,8 +273,39 @@ function createMockRomeApi(): RomeApi {
         };
       },
     },
+    cloud: {
+      getState: async () => MOCK_CLOUD_STATE,
+      signIn: async () => {
+        log("cloud.signIn");
+        return { ...MOCK_CLOUD_STATE, signedIn: true };
+      },
+      cancelSignIn: async () => {
+        log("cloud.cancelSignIn");
+      },
+      signOut: async () => {
+        log("cloud.signOut");
+        return { ...MOCK_CLOUD_STATE, signedIn: false };
+      },
+      listInstances: async () => [
+        {
+          id: "instance-mock",
+          name: "ray",
+          slug: "ray",
+          origin: "https://ray.romeos.cc",
+          status: "running",
+        },
+      ],
+    },
     runtime: {
       getStatus: async () => MOCK_RUNTIME_STATUS,
+      setTarget: async (target) => {
+        log("runtime.setTarget", target);
+        return "relaunching";
+      },
+      chooseInstance: async (instanceId) => {
+        log("runtime.chooseInstance", instanceId);
+        return MOCK_RUNTIME_STATUS;
+      },
       ensureReady: async () => {
         log("runtime.ensureReady");
         return MOCK_RUNTIME_STATUS;
@@ -293,6 +377,14 @@ function resolveRomeApi(): RomeApi {
 
 export const romeApi: RomeApi = resolveRomeApi();
 
+/**
+ * The message a person should read. Errors from main arrive wrapped as
+ * "Error invoking remote method 'x': NativeAuthError: …"; only the last part
+ * means anything to them.
+ */
 export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  const message = err instanceof Error ? err.message : String(err);
+  return message
+    .replace(/^Error invoking remote method '[^']*': /, "")
+    .replace(/^(?:[A-Za-z]*Error): /, "");
 }

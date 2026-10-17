@@ -1,6 +1,5 @@
 import type { KeyValueStorage } from "./instance-store";
-import type { CloudInstance } from "./native-auth-types";
-import { parseCloudInstance } from "./native-auth-validation";
+import { type CloudInstance, parseCloudInstance } from "@rome-os/libs/native-auth";
 
 const SELECTED_INSTANCE_KEY = "rome.selected-instance.v1";
 

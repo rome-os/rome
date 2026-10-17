@@ -4,7 +4,8 @@ import { app, BrowserWindow, Menu, Tray, nativeImage } from "electron";
 import type { FloatingPill } from "./floating-pill";
 import { createLogger } from "./logger";
 import { isQuitting, requestStopAndQuit } from "./lifecycle";
-import type { RuntimeManager, RuntimeStatus } from "./runtime/manager";
+import type { RuntimeStatus } from "./runtime/manager";
+import type { Runtime } from "./runtime/runtime";
 
 const log = createLogger("tray");
 
@@ -56,6 +57,12 @@ function resolveTrayIcon(): Electron.NativeImage {
 
 function statusLabel(status: RuntimeStatus | null): string {
   if (!status) return "Status: Starting…";
+  if (status.provider === "remote" && status.phase === "waiting_for_user") {
+    return status.primaryAction === "sign_in" ? "Status: Not signed in" : "Status: Waiting for you";
+  }
+  if (status.provider === "remote" && status.phase !== "ready" && status.phase !== "failed") {
+    return "Status: Connecting…";
+  }
   switch (status.phase) {
     case "ready":
       return "Status: Ready";
@@ -84,7 +91,7 @@ export interface SetupTrayOptions {
   getMainWindow: () => BrowserWindow | null;
   ensureMainWindow: () => Promise<BrowserWindow> | BrowserWindow;
   openSettings: () => void;
-  runtimeManager: RuntimeManager;
+  runtimeManager: Runtime;
   /** Null where the pill does not exist (every platform but macOS). */
   floatingPill: FloatingPill | null;
 }
@@ -145,7 +152,13 @@ export function setupTray(options: SetupTrayOptions): Tray {
         // so one printed here only advertises a key. ⌘⇧Q used to be that key
         // and no longer exists — the app menu's ⌘Q is the one quit, and it
         // stops the agent on its way out.
-        label: stopping ? "Stopping agent…" : "Stop agent and quit",
+        // A hosted Rome keeps running after the app quits; only the VM stops.
+        label:
+          status?.provider === "remote"
+            ? "Quit Rome"
+            : stopping
+              ? "Stopping agent…"
+              : "Stop agent and quit",
         enabled: !stopping,
         click: () => {
           if (tray) {

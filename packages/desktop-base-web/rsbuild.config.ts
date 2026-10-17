@@ -7,7 +7,7 @@ const srcDir = fileURLToPath(new URL("./src", import.meta.url));
 const rendererOutDir = fileURLToPath(new URL("../desktop/src/renderer", import.meta.url));
 
 const ENTRY_TITLES: Record<string, string> = {
-  onboarding: "Install Rome Desktop",
+  onboarding: "Rome",
   settings: "Rome Settings",
   quitting: "Rome",
   pill: "Rome",

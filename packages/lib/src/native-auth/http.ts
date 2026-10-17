@@ -1,4 +1,4 @@
-import { NativeAuthError } from "./native-auth-types";
+import { NativeAuthError } from "./types.js";
 
 export async function fetchWithoutRedirect(
   fetchImpl: typeof fetch,

@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { romeApi, type RuntimePhase, type RuntimeStatus } from "@/lib/rome-api";
 import { cn } from "@/lib/utils";
+import { RemoteWelcome } from "@/pages/RemoteWelcome";
 
 type StepState = "pending" | "active" | "done";
 
@@ -263,28 +264,32 @@ export function OnboardingPage() {
         </header>
 
         <main className="flex flex-1 flex-col justify-center gap-8 py-10">
-          <div className="space-y-2">
-            <h1 className="text-2xl font-semibold tracking-tight">{view.title}</h1>
-            <p className="text-sm text-muted-foreground">{view.subtitle}</p>
-          </div>
+          {status.provider === "remote" ? (
+            <RemoteWelcome status={status} />
+          ) : (
+            <>
+              <div className="space-y-2">
+                <h1 className="text-2xl font-semibold tracking-tight">{view.title}</h1>
+                <p className="text-sm text-muted-foreground">{view.subtitle}</p>
+              </div>
 
-          <Card className="overflow-hidden p-0">
-            <CardContent className="p-0">
-              <ol className="divide-y">
-                {view.steps.map((step) => (
-                  <li
-                    key={step.id}
-                    className={cn(
-                      "flex items-start gap-3 px-5 py-4 transition-opacity",
-                      step.state === "pending" && "opacity-50",
-                    )}
-                  >
-                    <StepIndicator state={step.state} />
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <p className="text-sm font-medium leading-none">{step.title}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {step.detail}
-                        {/* `primaryAction === "none"` is the manager's own
+              <Card className="overflow-hidden p-0">
+                <CardContent className="p-0">
+                  <ol className="divide-y">
+                    {view.steps.map((step) => (
+                      <li
+                        key={step.id}
+                        className={cn(
+                          "flex items-start gap-3 px-5 py-4 transition-opacity",
+                          step.state === "pending" && "opacity-50",
+                        )}
+                      >
+                        <StepIndicator state={step.state} />
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <p className="text-sm font-medium leading-none">{step.title}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {step.detail}
+                            {/* `primaryAction === "none"` is the manager's own
                             signal that it is working — every waiting-on-the-user
                             state names a button instead. Without it the counter
                             ticks on `installing_runtime` and on a
@@ -295,23 +300,29 @@ export function OnboardingPage() {
                             for `pulling_image` alone: the image step stays
                             active through `starting_rome`, where the bar does
                             not render and the wait is silent again. */}
-                        {status.primaryAction === "none" &&
-                          step.state === "active" &&
-                          status.phase !== "pulling_image" && <ElapsedNote phase={status.phase} />}
-                      </p>
-                      {step.id === "image" && status.phase === "pulling_image" && (
-                        <PullProgress status={status} />
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            </CardContent>
-          </Card>
+                            {status.primaryAction === "none" &&
+                              step.state === "active" &&
+                              status.phase !== "pulling_image" && (
+                                <ElapsedNote phase={status.phase} />
+                              )}
+                          </p>
+                          {step.id === "image" && status.phase === "pulling_image" && (
+                            <PullProgress status={status} />
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </CardContent>
+              </Card>
+            </>
+          )}
 
-          {stalledHint && <p className="text-sm text-destructive">{stalledHint}</p>}
+          {status.provider !== "remote" && stalledHint && (
+            <p className="text-sm text-destructive">{stalledHint}</p>
+          )}
 
-          {view.primary.visible && (
+          {status.provider !== "remote" && view.primary.visible && (
             <Button
               className="w-full"
               disabled={primaryBusy}
@@ -325,17 +336,19 @@ export function OnboardingPage() {
           )}
         </main>
 
-        <footer className="flex justify-center pt-2">
-          <button
-            type="button"
-            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => {
-              romeApi.runtime.openLogs().catch(console.error);
-            }}
-          >
-            Having trouble? View setup logs
-          </button>
-        </footer>
+        {status.provider !== "remote" && (
+          <footer className="flex justify-center pt-2">
+            <button
+              type="button"
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => {
+                romeApi.runtime.openLogs().catch(console.error);
+              }}
+            >
+              Having trouble? View setup logs
+            </button>
+          </footer>
+        )}
       </div>
     </div>
   );

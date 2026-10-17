@@ -19,7 +19,8 @@ import {
 } from "./floating-pill-state";
 import { isQuitting, requestStopAndQuit } from "./lifecycle";
 import { createLogger } from "./logger";
-import type { RuntimeManager, RuntimeStatus } from "./runtime/manager";
+import type { RuntimeStatus } from "./runtime/manager";
+import type { Runtime } from "./runtime/runtime";
 
 const log = createLogger("pill");
 
@@ -29,7 +30,7 @@ const PILL_HTML = path.join(__dirname, "..", "..", "src", "renderer", "pill.html
 export interface FloatingPillOptions {
   showMainWindow: () => void | Promise<void>;
   openSettings: () => void;
-  runtimeManager: RuntimeManager;
+  runtimeManager: Runtime;
 }
 
 export interface FloatingPill {

@@ -23,6 +23,10 @@
       "types": "./dist/oidc/index.d.ts",
       "default": "./dist/oidc/index.js"
     },
+    "./native-auth": {
+      "types": "./dist/native-auth/index.d.ts",
+      "default": "./dist/native-auth/index.js"
+    },
     "./logger": {
       "types": "./dist/logger.d.ts",
       "default": "./dist/logger.js"

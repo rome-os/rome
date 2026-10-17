@@ -468,6 +468,9 @@ importers:
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.0
+      '@rome-os/libs':
+        specifier: workspace:*
+        version: link:../lib
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.6.2
@@ -622,6 +625,9 @@ importers:
       '@react-native-async-storage/async-storage':
         specifier: 2.2.0
         version: 2.2.0(react-native@0.86.2(@babel/core@7.29.0)(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.3)(supports-color@8.1.1)(utf-8-validate@5.0.10))
+      '@rome-os/libs':
+        specifier: workspace:*
+        version: link:../lib
       expo:
         specifier: ~57.0.16
         version: 57.0.16(@babel/core@7.29.0)(@expo/dom-webview@57.0.1)(bufferutil@4.1.0)(expo-widgets@57.0.12)(react-dom@19.2.6(react@19.2.3))(react-native-webview@13.16.1(react-native@0.86.2(@babel/core@7.29.0)(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.3)(supports-color@8.1.1)(utf-8-validate@5.0.10))(react@19.2.3))(react-native@0.86.2(@babel/core@7.29.0)(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.3)(supports-color@8.1.1)(utf-8-validate@5.0.10))(react@19.2.3)(supports-color@8.1.1)(typescript@6.0.3)(utf-8-validate@5.0.10)

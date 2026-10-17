@@ -1,9 +1,8 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { CloudApi } from "./cloud-api.js";
 import { CredentialVault, type SecureKeyValueStore } from "./credential-vault.js";
-import { InstanceSessionCoordinator } from "./instance-session-coordinator.js";
-import type { CloudInstance } from "./native-auth-types.js";
-import type { WebViewCookieStore } from "./webview-cookie-store.js";
+import { InstanceSessionCoordinator, type SessionCookieStore } from "./instance-session.js";
+import type { CloudInstance } from "./types.js";
 
 const instance: CloudInstance = {
   id: "instance-1",
@@ -71,7 +70,7 @@ describe("InstanceSessionCoordinator", () => {
     });
     const vault = new CredentialVault(memoryStore());
     await vault.setCloudCredential({ accessToken: "cloud-token", deviceSessionId: "device-1" });
-    const cookieStore: WebViewCookieStore = { install: rs.fn(), clear: rs.fn() };
+    const cookieStore: SessionCookieStore = { install: rs.fn() };
     const cloudApi = new CloudApi("https://romeos.cc", fetchImpl as unknown as typeof fetch);
     const coordinator = new InstanceSessionCoordinator(
       cloudApi,
@@ -117,7 +116,7 @@ describe("InstanceSessionCoordinator", () => {
     const coordinator = new InstanceSessionCoordinator(
       new CloudApi("https://romeos.cc", fetchImpl as unknown as typeof fetch),
       vault,
-      { install: rs.fn(), clear: rs.fn() },
+      { install: rs.fn() },
       fetchImpl as unknown as typeof fetch,
     );
     await expect(coordinator.refresh(instance)).rejects.toThrow("invalid session request");
@@ -130,7 +129,7 @@ describe("InstanceSessionCoordinator", () => {
     const coordinator = new InstanceSessionCoordinator(
       new CloudApi("https://romeos.cc", fetchImpl as unknown as typeof fetch),
       vault,
-      { install: rs.fn(), clear: rs.fn() },
+      { install: rs.fn() },
       fetchImpl as unknown as typeof fetch,
     );
 
@@ -183,7 +182,7 @@ describe("InstanceSessionCoordinator", () => {
     const coordinator = new InstanceSessionCoordinator(
       new CloudApi("https://romeos.cc", fetchImpl as unknown as typeof fetch),
       vault,
-      { install: rs.fn(), clear: rs.fn() },
+      { install: rs.fn() },
       fetchImpl as unknown as typeof fetch,
     );
     await expect(coordinator.refresh(instance)).resolves.toMatchObject({ token: "instance-token" });

@@ -1,6 +1,6 @@
 # @rome-os/libs
 
-Shared Node.js runtime primitives used by Rome and Rome Cloud.
+Shared runtime primitives used by Rome, Rome Cloud, and the Rome apps.
 
 ## Purpose
 
@@ -29,6 +29,7 @@ subpath so runtime-specific code is visible at the call site.
 | `@rome-os/libs/net` | Hostname predicates shared by origin and authorization checks. |
 | `@rome-os/libs/pkce` | RFC 7636 S256 verifier generation, normalization, and verification. |
 | `@rome-os/libs/oidc` | ES256 ID-token signing and verification, JWKS helpers, and discovery metadata. |
+| `@rome-os/libs/native-auth` | Native app sign-in to Rome Cloud and hosted instances, shared by Rome Mobile and the desktop app. Uses global `fetch` and `URL` only, so it also runs under React Native. |
 | `@rome-os/libs/logger` | Structured JSON logging and process-fatal error reporting. |
 | `@rome-os/libs/feature-flags` | Vendor-neutral, fail-closed feature-gate evaluation. |
 | `@rome-os/libs/feature-flags/statsig` | Statsig-backed production adapter. |

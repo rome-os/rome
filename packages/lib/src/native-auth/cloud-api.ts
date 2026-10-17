@@ -1,16 +1,16 @@
-import { fetchWithoutRedirect, responseJson } from "./http";
+import { fetchWithoutRedirect, responseJson } from "./http.js";
 import type {
   CloudCredential,
   CloudInstance,
   CloudInstanceAuthorization,
   InstanceAuthorizationRequest,
-} from "./native-auth-types";
-import { NativeAuthError } from "./native-auth-types";
+} from "./types.js";
+import { NativeAuthError } from "./types.js";
 import {
   exactHttpsOrigin,
   parseCloudInstance,
   parseCloudInstanceAuthorization,
-} from "./native-auth-validation";
+} from "./validation.js";
 
 export class CloudApi {
   readonly origin: string;

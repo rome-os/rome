@@ -11,6 +11,8 @@ on:
   pull_request:
     paths:
       - "packages/mobile/**"
+      # Mobile bundles the native sign-in flow from @rome-os/libs/native-auth.
+      - "packages/lib/**"
       - ".github/workflows/mobile-ci.yml"
       # Workspace member: the root lockfile and workspace config (overrides,
       # peer rules) control mobile's entire resolved dependency graph — a
@@ -21,6 +23,7 @@ on:
     branches: [main]
     paths:
       - "packages/mobile/**"
+      - "packages/lib/**"
       - ".github/workflows/mobile-ci.yml"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"

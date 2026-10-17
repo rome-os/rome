@@ -1,6 +1,9 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { CloudApi } from "./cloud-api.js";
-import { CredentialVault, type SecureKeyValueStore } from "./credential-vault.js";
+import {
+  type CloudApi,
+  CredentialVault,
+  type SecureKeyValueStore,
+} from "@rome-os/libs/native-auth";
 import { logoutNativeSession, retryPendingCloudRevocation } from "./native-logout.js";
 
 function memoryStore(): SecureKeyValueStore {

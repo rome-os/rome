@@ -1,10 +1,17 @@
-import type { CloudApi } from "./cloud-api";
-import type { CredentialVault } from "./credential-vault";
-import { fetchWithoutRedirect, responseJson } from "./http";
-import type { CloudInstance, InstanceSession } from "./native-auth-types";
-import { NativeAuthError } from "./native-auth-types";
-import { parseInstanceAuthorizationRequest, parseInstanceSession } from "./native-auth-validation";
-import type { WebViewCookieStore } from "./webview-cookie-store";
+import type { CloudApi } from "./cloud-api.js";
+import type { CredentialVault } from "./credential-vault.js";
+import { fetchWithoutRedirect, responseJson } from "./http.js";
+import type { CloudInstance, InstanceSession } from "./types.js";
+import { NativeAuthError } from "./types.js";
+import { parseInstanceAuthorizationRequest, parseInstanceSession } from "./validation.js";
+
+/**
+ * Where a host puts the instance session so its web view sends it: a WebView
+ * cookie jar on mobile, an Electron session on desktop.
+ */
+export interface SessionCookieStore {
+  install(session: InstanceSession): Promise<void>;
+}
 
 interface NativeStartResponse {
   authorizationRequest: NonNullable<ReturnType<typeof parseInstanceAuthorizationRequest>>;
@@ -22,7 +29,7 @@ export class InstanceSessionCoordinator {
   constructor(
     private readonly cloudApi: CloudApi,
     private readonly vault: CredentialVault,
-    private readonly cookieStore: WebViewCookieStore,
+    private readonly cookieStore: SessionCookieStore,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly now: () => number = Date.now,
   ) {}

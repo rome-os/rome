@@ -1,5 +1,4 @@
-import type { CloudApi } from "./cloud-api";
-import type { CredentialVault } from "./credential-vault";
+import type { CloudApi, CredentialVault } from "@rome-os/libs/native-auth";
 import type { WebViewCookieStore } from "./webview-cookie-store";
 
 export async function retryPendingCloudRevocation(

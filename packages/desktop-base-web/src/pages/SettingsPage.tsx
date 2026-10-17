@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { RuntimeTargetCard } from "@/pages/RuntimeTargetCard";
 import {
   errorMessage,
   romeApi,
@@ -170,7 +171,10 @@ export function SettingsPage() {
     if (!runtime) return "Checking…";
     if (runtime.lastError) return runtime.lastError;
     if (runtime.primaryAction === "retry") return runtime.detail;
-    if (runtime.phase === "ready") return "Rome is running on your computer.";
+    if (runtime.phase === "ready")
+      return runtime.provider === "remote"
+        ? "Rome is running in Rome Cloud."
+        : "Rome is running on your computer.";
     if (runtime.phase === "installing_runtime")
       return "Rome needs a small helper to run. Finish setup to continue.";
     if (runtimeBusy) return "Setting things up. This will only take a moment.";
@@ -240,6 +244,8 @@ export function SettingsPage() {
           </Card>
         ) : (
           <>
+            <RuntimeTargetCard />
+
             <Card>
               <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
                 <div className="space-y-1.5">
@@ -272,10 +278,17 @@ export function SettingsPage() {
 
                 {/* Which backend this build runs. Pinned releases fix it, so this
                     is the only place that says which one. */}
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Image</span>
-                  <span className="font-mono text-xs">{runtime?.image ?? "—"}</span>
-                </div>
+                {runtime?.provider === "remote" ? (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Address</span>
+                    <span className="font-mono text-xs">{runtime.dashboardUrl}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Image</span>
+                    <span className="font-mono text-xs">{runtime?.image ?? "—"}</span>
+                  </div>
+                )}
 
                 <Separator />
 

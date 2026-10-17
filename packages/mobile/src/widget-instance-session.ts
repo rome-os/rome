@@ -1,5 +1,4 @@
-import type { InstanceSession } from "./native-auth-types";
-import { exactHttpsOrigin } from "./native-auth-validation";
+import { exactHttpsOrigin, type InstanceSession } from "@rome-os/libs/native-auth";
 
 export interface WidgetInstanceSession {
   version: 1;

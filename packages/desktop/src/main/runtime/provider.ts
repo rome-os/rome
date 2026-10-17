@@ -1,4 +1,5 @@
-export type ProviderKind = "lima";
+// `remote` is a hosted Rome the app only opens; it has no VM to provision.
+export type ProviderKind = "lima" | "remote";
 
 export type RuntimePhase =
   | "checking_host"
@@ -9,6 +10,9 @@ export type RuntimePhase =
   | "waiting_for_health"
   | "ready"
   | "stopping"
+  // A hosted Rome that cannot open until the user acts: sign in, pick one,
+  // or start or create it in Rome Cloud. `primaryAction` says which.
+  | "waiting_for_user"
   | "failed";
 
 export type RuntimeAction =
@@ -16,6 +20,9 @@ export type RuntimeAction =
   | "open_runtime_app"
   | "retry"
   | "open_dashboard"
+  | "sign_in"
+  | "choose_instance"
+  | "open_cloud"
   | "none";
 
 export interface RuntimePullProgress {

@@ -1,5 +1,5 @@
-import type { CloudCredential, InstanceSession } from "./native-auth-types";
-import { exactHttpsOrigin } from "./native-auth-validation";
+import type { CloudCredential, InstanceSession } from "./types.js";
+import { exactHttpsOrigin } from "./validation.js";
 
 export interface SecureKeyValueStore {
   getItem(key: string): Promise<string | null>;

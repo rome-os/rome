@@ -1,6 +1,6 @@
 import CookieManager from "@preeternal/react-native-cookie-manager";
 import { Platform } from "react-native";
-import type { InstanceSession } from "./native-auth-types";
+import type { InstanceSession } from "@rome-os/libs/native-auth";
 
 export interface WebViewCookieStore {
   install(session: InstanceSession): Promise<void>;

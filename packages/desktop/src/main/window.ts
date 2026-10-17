@@ -3,8 +3,12 @@ import path from "path";
 import { pathToFileURL } from "url";
 import { isQuitting } from "./lifecycle";
 import { ROME_CLOUD_ORIGIN, ROME_CLOUD_PRODUCTION_ORIGIN } from "./rome-cloud";
-import type { RuntimeManager } from "./runtime/manager";
-import { chooseStartupSurface, shouldAutoOpenLocalDashboard } from "./startup-surface";
+import type { Runtime } from "./runtime/runtime";
+import {
+  chooseStartupSurface,
+  shouldAutoOpenLocalDashboard,
+  shouldReturnToDashboard,
+} from "./startup-surface";
 
 const PRELOAD_PATH = path.join(__dirname, "..", "preload", "index.js");
 const SETTINGS_HTML = path.join(__dirname, "..", "..", "src", "renderer", "settings.html");
@@ -81,10 +85,7 @@ export function contentSecurityPolicy(cloudSources: string): string {
   );
 }
 
-async function loadStartupSurface(
-  win: BrowserWindow,
-  runtimeManager: RuntimeManager,
-): Promise<void> {
+async function loadStartupSurface(win: BrowserWindow, runtimeManager: Runtime): Promise<void> {
   const startupSurface = chooseStartupSurface(
     runtimeManager.getDashboardUrl(),
     runtimeManager.isReady(),
@@ -112,7 +113,7 @@ export function shouldNavigateToLocalDashboard(
   return shouldAutoOpenLocalDashboard(currentUrl, ONBOARDING_URL, localDashboardUrl);
 }
 
-export async function createMainWindow(runtimeManager: RuntimeManager): Promise<BrowserWindow> {
+export async function createMainWindow(runtimeManager: Runtime): Promise<BrowserWindow> {
   const win = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -204,7 +205,19 @@ export async function createMainWindow(runtimeManager: RuntimeManager): Promise<
   await loadStartupSurface(win, runtimeManager);
 
   // Retry loading if the web server isn't ready
-  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, url, isMainFrame) => {
+    // A hosted Rome that does not load shows the status page, which can retry
+    // or send the user to Settings. -3 is a load another navigation replaced.
+    if (
+      runtimeManager.reportLoadFailure &&
+      isMainFrame &&
+      errorCode !== -3 &&
+      !shouldReturnToDashboard(url, runtimeManager.getDashboardUrl())
+    ) {
+      runtimeManager.reportLoadFailure(`${errorDescription} (${errorCode})`);
+      void loadStartupSurface(win, runtimeManager);
+      return;
+    }
     if (errorCode === -102 || errorCode === -106) {
       // ERR_CONNECTION_REFUSED or ERR_INTERNET_DISCONNECTED — retry after 2s
       setTimeout(() => {

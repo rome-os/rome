@@ -1,7 +1,11 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { CredentialVault, type SecureKeyValueStore } from "./credential-vault.js";
-import type { InstanceSessionCoordinator } from "./instance-session-coordinator.js";
-import type { CloudInstance, InstanceSession } from "./native-auth-types.js";
+import {
+  type CloudInstance,
+  CredentialVault,
+  type InstanceSession,
+  type InstanceSessionCoordinator,
+  type SecureKeyValueStore,
+} from "@rome-os/libs/native-auth";
 import { RomeApiClient } from "./rome-api-client.js";
 
 const instance: CloudInstance = {

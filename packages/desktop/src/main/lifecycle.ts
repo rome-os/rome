@@ -1,6 +1,6 @@
 import { app } from "electron";
 import { createLogger } from "./logger";
-import type { RuntimeManager } from "./runtime/manager";
+import type { Runtime } from "./runtime/runtime";
 
 type AppWithUpdateQuitEvent = typeof app & {
   on(event: "before-quit-for-update", listener: () => void): typeof app;
@@ -17,7 +17,7 @@ let shutdownPromise: Promise<void> | null = null;
 let shutdownComplete = false;
 let quittingForUpdate = false;
 let quitting = false;
-let runtimeManagerRef: RuntimeManager | null = null;
+let runtimeManagerRef: Runtime | null = null;
 let onShutdownStartRef: (() => void) | null = null;
 
 /**
@@ -74,7 +74,7 @@ async function doShutdown(): Promise<void> {
 }
 
 export interface SetupLifecycleOptions {
-  runtimeManager: RuntimeManager;
+  runtimeManager: Runtime;
   onShutdownStart?: () => void;
 }
 

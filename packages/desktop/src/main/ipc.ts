@@ -1,77 +1,168 @@
-import { ipcMain } from "electron";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
+import type { CloudInstance } from "@rome-os/libs/native-auth";
+import type { CloudAccount } from "./cloud/account";
 import { getDb } from "./db/database";
 import { settings } from "./db/schema";
-import { eq } from "drizzle-orm";
-import type { RuntimeManager } from "./runtime/manager";
+import { handleTrusted } from "./ipc-trust";
+import type { RuntimeController } from "./runtime/controller";
+import { localVmSupport } from "./runtime/manager";
+import {
+  parseRuntimeTarget,
+  RUNTIME_TARGET_KEY,
+  requireRuntimeTarget,
+  type RuntimeTarget,
+} from "./runtime/target";
 
 interface IpcHandlerOptions {
   openSettingsWindow: () => void;
+  /** Null when this build's Rome Cloud origin cannot back a sign-in. */
+  cloudAccount: CloudAccount | null;
+  hasLocalRuntime: () => boolean;
+}
+
+interface CloudState {
+  available: boolean;
+  signedIn: boolean;
+  cloudOrigin: string | null;
+  activeTarget: RuntimeTarget;
+  savedTarget: RuntimeTarget;
+  localVm: { supported: boolean; reason: string | null };
 }
 
 const settingsGetSchema = z.tuple([z.string().min(1)]);
 const settingsSetSchema = z.tuple([z.string().min(1), z.string()]);
 
+function readSetting(key: string): string | null {
+  const row = getDb().select().from(settings).where(eq(settings.key, key)).get();
+  return row?.value ?? null;
+}
+
+function writeSetting(key: string, value: string): void {
+  const now = new Date().toISOString();
+  getDb()
+    .insert(settings)
+    .values({ key, value, updatedAt: now })
+    .onConflictDoUpdate({
+      target: settings.key,
+      set: { value, updatedAt: now },
+    })
+    .run();
+}
+
+export function readRuntimeTarget(hasLocalRuntime: boolean): RuntimeTarget {
+  return parseRuntimeTarget(readSetting(RUNTIME_TARGET_KEY), hasLocalRuntime);
+}
+
+export function writeRuntimeTarget(target: RuntimeTarget): void {
+  writeSetting(RUNTIME_TARGET_KEY, JSON.stringify(target));
+}
+
 export function registerIpcHandlers(
-  runtimeManager: RuntimeManager,
+  controller: RuntimeController,
   options: IpcHandlerOptions,
 ): void {
-  const db = getDb();
+  const { cloudAccount } = options;
+  const runtime = controller.runtime;
 
   // ── Settings ──
 
-  ipcMain.handle("settings:get", (_event, ...args: unknown[]) => {
+  handleTrusted("settings:get", (_event, ...args) => {
     const [key] = settingsGetSchema.parse(args);
-    const row = db.select().from(settings).where(eq(settings.key, key)).get();
-    return row?.value ?? null;
+    return readSetting(key);
   });
 
-  ipcMain.handle("settings:set", (_event, ...args: unknown[]) => {
+  handleTrusted("settings:set", (_event, ...args) => {
     const [key, value] = settingsSetSchema.parse(args);
-    const now = new Date().toISOString();
-
-    db.insert(settings)
-      .values({ key, value, updatedAt: now })
-      .onConflictDoUpdate({
-        target: settings.key,
-        set: { value, updatedAt: now },
-      })
-      .run();
+    writeSetting(key, value);
   });
 
-  ipcMain.handle("settings:openWindow", () => {
+  handleTrusted("settings:openWindow", () => {
     options.openSettingsWindow();
   });
 
-  // ── Local Runtime ──
+  // ── Rome Cloud and which Rome to open ──
 
-  ipcMain.handle("runtime:getStatus", () => {
-    return runtimeManager.getStatus();
+  const requireAccount = (): CloudAccount => {
+    if (!cloudAccount) throw new Error("This build cannot sign in to Rome Cloud.");
+    return cloudAccount;
+  };
+
+  const cloudState = async (): Promise<CloudState> => ({
+    available: cloudAccount !== null,
+    signedIn: cloudAccount ? await cloudAccount.isSignedIn() : false,
+    cloudOrigin: cloudAccount?.cloudOrigin ?? null,
+    activeTarget: controller.activeTarget(),
+    savedTarget: readRuntimeTarget(options.hasLocalRuntime()),
+    localVm: localVmSupport(),
   });
 
-  ipcMain.handle("runtime:ensureReady", async () => {
-    await runtimeManager.ensureReady();
-    return runtimeManager.getStatus();
+  handleTrusted("cloud:getState", cloudState);
+
+  handleTrusted("cloud:signIn", async () => {
+    await requireAccount().signIn();
+    return cloudState();
   });
 
-  ipcMain.handle("runtime:upgrade", async () => {
-    await runtimeManager.upgradeRuntime();
-    return runtimeManager.getStatus();
+  handleTrusted("cloud:cancelSignIn", () => {
+    cloudAccount?.cancelSignIn();
   });
 
-  ipcMain.handle("runtime:openInstallPage", async () => {
-    await runtimeManager.openInstallPage();
+  handleTrusted("cloud:signOut", async () => {
+    requireAccount();
+    await controller.signOut();
+    return cloudState();
   });
 
-  ipcMain.handle("runtime:startRuntimeApp", async () => {
-    await runtimeManager.startRuntimeApp();
+  handleTrusted("cloud:listInstances", (): Promise<CloudInstance[]> => {
+    return requireAccount().listInstances();
   });
 
-  ipcMain.handle("runtime:openRuntimeFolder", async () => {
-    await runtimeManager.openRuntimeFolder();
+  // Returns whether the change applied in place or the app is relaunching.
+  handleTrusted("runtime:setTarget", (_event, value) => {
+    const target = requireRuntimeTarget(value);
+    if (target.kind === "local") {
+      const support = localVmSupport();
+      if (!support.supported) throw new Error(support.reason ?? "This computer cannot run the VM.");
+    }
+    return controller.setTarget(target);
   });
 
-  ipcMain.handle("runtime:openLogs", async () => {
-    await runtimeManager.openLogs();
+  handleTrusted("runtime:chooseInstance", async (_event, value) => {
+    const instanceId = z.string().min(1).parse(value);
+    await controller.chooseInstance(instanceId);
+    return runtime.getStatus();
+  });
+
+  // ── Runtime ──
+
+  handleTrusted("runtime:getStatus", () => {
+    return runtime.getStatus();
+  });
+
+  handleTrusted("runtime:ensureReady", async () => {
+    await runtime.ensureReady();
+    return runtime.getStatus();
+  });
+
+  handleTrusted("runtime:upgrade", async () => {
+    await runtime.upgradeRuntime();
+    return runtime.getStatus();
+  });
+
+  handleTrusted("runtime:openInstallPage", async () => {
+    await runtime.openInstallPage();
+  });
+
+  handleTrusted("runtime:startRuntimeApp", async () => {
+    await runtime.startRuntimeApp();
+  });
+
+  handleTrusted("runtime:openRuntimeFolder", async () => {
+    await runtime.openRuntimeFolder();
+  });
+
+  handleTrusted("runtime:openLogs", async () => {
+    await runtime.openLogs();
   });
 }
