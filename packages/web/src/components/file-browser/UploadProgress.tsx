@@ -2,6 +2,7 @@ import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Upload } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { useFileBrowserStore } from "./store/context";
 import type { FileUploadProgress } from "./store/types";
 
 function formatBytes(bytes: number, language: string): string {
@@ -47,7 +48,11 @@ export function UploadProgress({ progress }: { progress: FileUploadProgress }) {
         <span id={titleId} className="min-w-0 flex-1 truncate text-section" title={title}>
           {title}
         </span>
-        <span className="shrink-0 text-aux tabular-nums text-foreground">
+        {/* Numbers tick constantly; keep them out of the live region (the progressbar exposes them). */}
+        <span
+          aria-hidden={finishing ? undefined : true}
+          className="shrink-0 text-aux tabular-nums text-foreground"
+        >
           {finishing
             ? t("status.uploadFinishing")
             : percentage !== undefined
@@ -75,7 +80,7 @@ export function UploadProgress({ progress }: { progress: FileUploadProgress }) {
           />
         </div>
         {determinate && (
-          <p className="text-aux tabular-nums text-muted-foreground">
+          <p aria-hidden="true" className="text-aux tabular-nums text-muted-foreground">
             {t("status.uploadBytes", {
               loaded: formatBytes(Math.min(progress.loaded, progress.total), i18n.language),
               total: formatBytes(progress.total, i18n.language),
@@ -91,4 +96,13 @@ export function UploadProgress({ progress }: { progress: FileUploadProgress }) {
       </div>
     </Card>
   );
+}
+
+/**
+ * Reads progress from the store so only the card re-renders on each XHR tick;
+ * parents subscribe to `uploadProgress !== null` instead of the object.
+ */
+export function UploadProgressFromStore() {
+  const progress = useFileBrowserStore((s) => s.ui.uploadProgress);
+  return progress ? <UploadProgress progress={progress} /> : null;
 }

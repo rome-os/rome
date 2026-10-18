@@ -13,7 +13,7 @@ import { Sidebar } from "./Sidebar";
 import { Content, HistoryMobileSheet } from "./Content";
 import { Dialogs } from "./Dialogs";
 import { DropOverlay } from "./DropOverlay";
-import { UploadProgress } from "./UploadProgress";
+import { UploadProgressFromStore } from "./UploadProgress";
 import { FilesPane } from "@/components/files-pane";
 import { FolderPanelTabBar } from "./FolderPanelTabBar";
 import { useUrlSelectionSync } from "./hooks/useUrlSelectionSync";
@@ -74,7 +74,7 @@ export function Shell({
   const showHistory = useFileBrowserStore((s) => s.ui.showHistory);
   const showSearch = useFileBrowserStore((s) => s.ui.showSearch);
   const filesPaneDrillPath = useFileBrowserStore((s) => s.ui.filesPaneDrillPath);
-  const uploadProgress = useFileBrowserStore((s) => s.ui.uploadProgress);
+  const uploadActive = useFileBrowserStore((s) => s.ui.uploadProgress !== null);
   const contextMenuActions = useContextMenuActions({ rootLabel, onStartChatFromFolder });
   // Compact ("below md") is keyed off this browser's *own* width, not the
   // viewport — so an embedded panel (e.g. the workspace Projects widget)
@@ -226,9 +226,9 @@ export function Shell({
       )}
       {/* Sidebar shows the card on md+; compact layouts show it above both
           the navigator and the Content overlay so it never gets hidden. */}
-      {isBelowMd && uploadProgress && (
+      {isBelowMd && uploadActive && (
         <div className="shrink-0 border-b border-border-subtle bg-surface p-3">
-          <UploadProgress progress={uploadProgress} />
+          <UploadProgressFromStore />
         </div>
       )}
       <div className="flex flex-1 overflow-hidden">

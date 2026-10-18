@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
 import { Tree } from "./Tree";
-import { UploadProgress } from "./UploadProgress";
+import { UploadProgressFromStore } from "./UploadProgress";
 import { useSidebarResize } from "./hooks/useSidebarResize";
 import { usePersistedSidebarWidth } from "./hooks/usePersistedSidebarWidth";
 import {
@@ -48,7 +48,7 @@ export function Sidebar({
   const deleting = useFileBrowserStore((s) => s.ui.deleting);
   const moving = useFileBrowserStore((s) => s.ui.moving);
   const renaming = useFileBrowserStore((s) => s.ui.renaming);
-  const uploadProgress = useFileBrowserStore((s) => s.ui.uploadProgress);
+  const uploadActive = useFileBrowserStore((s) => s.ui.uploadProgress !== null);
   const searchQuery = useFileBrowserStore((s) => s.ui.searchQuery);
   const searching = useFileBrowserStore((s) => s.ui.searching);
 
@@ -171,9 +171,9 @@ export function Sidebar({
             </Button>
           </div>
         </div>
-        {uploadProgress && (
+        {uploadActive && (
           <div className="border-b border-border-subtle p-3">
-            <UploadProgress progress={uploadProgress} />
+            <UploadProgressFromStore />
           </div>
         )}
         {(creating || deleting || moving || renaming) && (
