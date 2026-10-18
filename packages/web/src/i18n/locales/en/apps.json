@@ -29,17 +29,6 @@
     "noResults": "No apps match “{{query}}”",
     "noResultsHint": "Try a different search, or browse the App store."
   },
-  "builtinDescriptions": {
-    "projects": "Working directories the agent operates in",
-    "memory": "Identity, journal, and the people Rome knows",
-    "people": "Persons the guardian has introduced",
-    "routines": "Scheduled and recurring agent actions",
-    "activity": "What Rome has been doing, in order",
-    "store": "Browse and install Rome apps",
-    "desktop": "Embedded browser surface",
-    "chat": "Talk to your agents",
-    "settings": "Profile, channels, and integrations"
-  },
   "installedApps": "Installed Apps",
   "tabs": {
     "installed": "Installed",

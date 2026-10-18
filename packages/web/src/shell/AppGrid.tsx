@@ -9,6 +9,7 @@ import {
 } from "@radix-ui/react-icons";
 import {
   AppWindow,
+  ChartColumn,
   Chrome as ChromeIcon,
   Ellipsis,
   ExternalLink,
@@ -16,7 +17,6 @@ import {
   GripVertical,
   Info,
   MessageCircle,
-  MessagesSquare,
   Pencil,
   Pin,
   PinOff,
@@ -26,8 +26,7 @@ import {
   X,
 } from "lucide-react";
 import type { ComponentType } from "react";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { AppOrigin, InstalledAppCard } from "@rome/api-types/apps";
@@ -45,10 +44,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { AppStoreSheet } from "@/components/AppStoreSheet";
-import { APP_STORE_BROWSE_URL } from "@/lib/app-store-url";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { isElectronShell } from "@/lib/electron-shell";
 import { saveSetting } from "@/lib/chat-api";
@@ -67,6 +65,7 @@ import {
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import { isCarrierApp } from "@/lib/chat-helpers";
 import { RecentAppsRail, RecentAppsZone } from "./RecentAppsZone";
+import { SidebarDisclosure, SidebarDivider } from "./SidebarDisclosure";
 import {
   ACTIVE_CLASS,
   IDLE_CLASS,
@@ -92,7 +91,7 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     sidebarIconMotion: "apps",
   },
   { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: FolderKanban },
-  { id: "sessions", href: "/sessions", labelKey: "nav.sessions", Icon: MessagesSquare },
+  { id: "sessions", href: "/sessions", labelKey: "nav.sessions", Icon: ChartColumn },
   { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: ArchiveIcon },
   { id: "people", href: "/people", labelKey: "nav.people", Icon: PersonIcon },
   { id: "routines", href: "/routines", labelKey: "nav.routines", Icon: CalendarIcon },
@@ -109,23 +108,32 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
   { id: "settings", href: "/settings", labelKey: "nav.settings", Icon: GearIcon },
 ] as const;
 
+// The sidebar's menu of Rome's own surfaces is fixed: these always lead it, in
+// this order, and the guardian cannot reorder or remove them.
+export const SIDEBAR_FIXED_IDS: readonly string[] = ["apps", "chat", "projects", "routines"];
+
+// Built-ins behind the chevron on the divider below the fixed menu. They drop
+// open beneath the divider, in this order.
+export const SIDEBAR_MORE_IDS: readonly string[] = [
+  "people",
+  "sessions",
+  "memory",
+  "activity",
+  "desktop",
+];
+const SIDEBAR_MORE_EXPANDED_KEY = "rome-sidebar-more-expanded";
+
+// Pins hold the guardian's apps only. Earlier versions pinned built-in pages
+// too, so stored lists can still carry `builtin` entries; parsing drops them.
 export interface PinnedEntry {
-  type: "builtin" | "app";
+  type: "app";
   id: string;
 }
 
-export const DEFAULT_SIDEBAR_PINS: PinnedEntry[] = [
-  { type: "builtin", id: "apps" },
-  { type: "builtin", id: "chat" },
-  { type: "builtin", id: "projects" },
-];
+export const DEFAULT_SIDEBAR_PINS: PinnedEntry[] = [];
 
 export const STORAGE_KEY = "rome-sidebar-pins";
 const APPS_CACHE_KEY = "rome-sidebar-apps";
-const REQUIRED_BUILTIN_PINS: PinnedEntry[] = [
-  { type: "builtin", id: "apps" },
-  { type: "builtin", id: "chat" },
-];
 
 function pinKey(p: PinnedEntry): string {
   return `${p.type}:${p.id}`;
@@ -145,21 +153,28 @@ interface CachedApp {
 
 function parsePins(raw: unknown): PinnedEntry[] | null {
   if (!Array.isArray(raw)) return null;
-  const valid = raw.filter(
-    (item): item is PinnedEntry =>
-      typeof item === "object" &&
-      item !== null &&
-      (item.type === "builtin" || item.type === "app") &&
-      typeof item.id === "string",
-  );
-  if (valid.length === 0) return null;
-  return valid;
+  return normalizeSidebarPins(raw);
 }
 
-export function normalizeSidebarPins(pins: PinnedEntry[]): PinnedEntry[] {
-  const requiredIds = new Set(REQUIRED_BUILTIN_PINS.map((pin) => pin.id));
-  const rest = pins.filter((pin) => !(pin.type === "builtin" && requiredIds.has(pin.id)));
-  return [...REQUIRED_BUILTIN_PINS, ...rest];
+export function normalizeSidebarPins(pins: readonly unknown[]): PinnedEntry[] {
+  const seen = new Set<string>();
+  const result: PinnedEntry[] = [];
+  for (const item of pins) {
+    if (typeof item !== "object" || item === null) continue;
+    const { type, id } = item as { type?: unknown; id?: unknown };
+    if (type !== "app" || typeof id !== "string" || seen.has(id)) continue;
+    seen.add(id);
+    result.push({ type: "app", id });
+  }
+  return result;
+}
+
+function readMoreExpanded(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_MORE_EXPANDED_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 function readLocalPins(): PinnedEntry[] | null {
@@ -218,9 +233,36 @@ function renderBuiltinIcon(entry: BuiltinNavEntry): React.ReactNode {
   );
 }
 
+function renderAppIcon(app: InstalledAppCard | CachedApp): React.ReactNode {
+  if (app.iconUrl) {
+    return (
+      <img
+        src={app.iconUrl}
+        alt=""
+        className="h-4 w-4 shrink-0 rounded-4"
+        onError={(e) => {
+          (e.target as HTMLImageElement).style.display = "none";
+        }}
+      />
+    );
+  }
+  return (
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-4 bg-surface-muted text-aux text-muted-foreground">
+      {app.displayName.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+function builtinEntries(ids: readonly string[]): BuiltinNavEntry[] {
+  return ids.flatMap((id) => APP_NAV.find((entry) => entry.id === id) ?? []);
+}
+
+function isMorePageActive(pathname: string): boolean {
+  return builtinEntries(SIDEBAR_MORE_IDS).some((b) => isEntryActive(pathname, b.href));
+}
+
 interface AppGridProps {
-  headerControlsHost?: HTMLElement | null;
-  /** Icon-rail rendering for the collapsed sidebar: pinned entries become
+  /** Icon-rail rendering for the collapsed sidebar: entries become
    *  tooltip-labelled tiles and the edit affordances disappear. */
   collapsed?: boolean;
   /** Rail-only search tile. The expanded sidebar reaches search through
@@ -228,18 +270,27 @@ interface AppGridProps {
   onSearch?: () => void;
 }
 
-export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProps = {}) {
+export function AppGrid({ collapsed, onSearch }: AppGridProps = {}) {
   const { t } = useTranslation("common");
   const { t: tApps } = useTranslation("apps");
   const location = useLocation();
   const navigate = useNavigate();
-  const [pins, setPins] = useState<PinnedEntry[]>(() =>
-    normalizeSidebarPins(readLocalPins() ?? DEFAULT_SIDEBAR_PINS),
-  );
+  const [pins, setPins] = useState<PinnedEntry[]>(() => readLocalPins() ?? DEFAULT_SIDEBAR_PINS);
   const [installedApps, setInstalledApps] =
     useState<(InstalledAppCard | CachedApp)[]>(readLocalApps);
   const [editing, setEditing] = useState(false);
-  const [storeOpen, setStoreOpen] = useState(false);
+  // A first load on one of the fold's pages starts open, so the fold never
+  // paints shut and then jumps open.
+  const [moreExpanded, setMoreExpanded] = useState(
+    () => readMoreExpanded() || isMorePageActive(location.pathname),
+  );
+  const toggleMoreExpanded = useCallback(() => {
+    const next = !moreExpanded;
+    setMoreExpanded(next);
+    try {
+      localStorage.setItem(SIDEBAR_MORE_EXPANDED_KEY, next ? "1" : "0");
+    } catch {}
+  }, [moreExpanded]);
   const invalidateSettings = useInvalidateSettings();
   const invalidateApps = useInvalidateApps();
   // The Mac app has no tabs, and its shell hands every new-window request to
@@ -267,10 +318,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
 
   const { data: settings } = useSettings();
   const { apps: appsFromQuery } = useApps();
-  const pinnedAppIds = useMemo(
-    () => new Set(pins.filter((pin) => pin.type === "app").map((pin) => pin.id)),
-    [pins],
-  );
+  const pinnedAppIds = useMemo(() => new Set(pins.map((pin) => pin.id)), [pins]);
   const { recent: recentApps, unopenedIds } = useRecentApps(installedApps, pinnedAppIds);
 
   useEffect(() => {
@@ -285,16 +333,15 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
     if (!settings) return;
     const serverPins = parsePins(settings.sidebarPins);
     if (serverPins) {
-      const resolved = normalizeSidebarPins(serverPins);
-      setPins(resolved);
-      writeLocalPins(resolved);
+      setPins(serverPins);
+      writeLocalPins(serverPins);
     }
   }, [settings]);
 
   useEffect(() => {
     const onExternalChange = () => {
       const local = readLocalPins();
-      if (local) setPins(normalizeSidebarPins(local));
+      if (local) setPins(local);
     };
     window.addEventListener("rome-pins-changed", onExternalChange);
     return () => window.removeEventListener("rome-pins-changed", onExternalChange);
@@ -349,36 +396,18 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
     </ContextMenuItem>
   );
 
-  // Rome's own surfaces sit in the same pin list as apps, so their rows answer
-  // a right-click the same way. Split view is the one app action they lack:
-  // the chat's side panel hosts app widgets only. The store row already leaves
-  // the page, so it offers just Unpin, and the required pins offer no Unpin.
+  // The fixed menu has nothing to unpin, so its rows answer a right-click only
+  // where there are tabs to open; without tabs, Open would repeat a click and
+  // take over a long-press.
   const withBuiltinContextMenu = (
     entry: BuiltinNavEntry,
     trigger: React.ReactNode,
   ): React.ReactNode => {
-    const canUnpin = !REQUIRED_BUILTIN_PINS.some((pin) => pin.id === entry.id);
-    // Without tabs the open item is a plain Open, which a menu earns only
-    // beside Unpin; alone it would repeat a click and take over a long-press.
-    const canOpen = entry.id !== "store" && (canOpenNewTab || canUnpin);
-    if (!canOpen && !canUnpin) return trigger;
+    if (!canOpenNewTab) return trigger;
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
-        <ContextMenuContent>
-          {canOpen ? renderOpenMenuItem(entry.href) : null}
-          {canOpen && canUnpin ? <ContextMenuSeparator /> : null}
-          {canUnpin ? (
-            <ContextMenuItem
-              onSelect={() =>
-                persistPins(pins.filter((pin) => !(pin.type === "builtin" && pin.id === entry.id)))
-              }
-            >
-              <PinOff aria-hidden />
-              {tApps("installed.unpin")}
-            </ContextMenuItem>
-          ) : null}
-        </ContextMenuContent>
+        <ContextMenuContent>{renderOpenMenuItem(entry.href)}</ContextMenuContent>
       </ContextMenu>
     );
   };
@@ -415,7 +444,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
           {pinned ? (
             <ContextMenuItem
               onSelect={() => {
-                persistPins(pins.filter((pin) => !(pin.type === "app" && pin.id === app.id)));
+                persistPins(pins.filter((pin) => pin.id !== app.id));
                 onSelect?.();
               }}
             >
@@ -438,145 +467,112 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
     );
   };
 
-  const builtinMap = new Map(APP_NAV.map((b) => [b.id, b]));
+  const fixedEntries = builtinEntries(SIDEBAR_FIXED_IDS);
+  const moreEntries = builtinEntries(SIDEBAR_MORE_IDS);
+  const activeMoreId = moreEntries.find((entry) =>
+    isEntryActive(location.pathname, entry.href),
+  )?.id;
+  const moreActive = activeMoreId !== undefined;
+  // Arriving on one of the group's pages opens the group, so the active row is
+  // never hidden behind the fold. It reopens on each such arrival, including a
+  // move between two of its pages, before the browser paints. A move within
+  // one page leaves it as the guardian set it.
+  useLayoutEffect(() => {
+    if (activeMoreId) setMoreExpanded(true);
+  }, [activeMoreId]);
 
-  const unpinnedApps = installedApps.filter(
-    (app) => app.hasFrontend && app.href && !pins.some((p) => p.type === "app" && p.id === app.id),
-  );
-  const hiddenBuiltins = APP_NAV.filter(
-    (b) =>
-      !REQUIRED_BUILTIN_PINS.some((pin) => pin.id === b.id) &&
-      !pins.some((p) => p.type === "builtin" && p.id === b.id),
-  );
-  const hasUnpinned = hiddenBuiltins.length > 0 || unpinnedApps.length > 0;
-
-  const resolveLabel = (pin: PinnedEntry): string => {
-    if (pin.type === "builtin") {
-      const b = builtinMap.get(pin.id);
-      return b ? t(b.labelKey) : pin.id;
-    }
+  // Only pins whose app is installed with a frontend render; the rest wait in
+  // storage in case the app comes back.
+  const pinnedApps = pins.flatMap((pin) => {
     const app = installedApps.find((a) => a.id === pin.id);
-    return app?.displayName ?? pin.id;
-  };
+    return app && app.hasFrontend && app.href ? [{ pin, app }] : [];
+  });
+  const unpinnedApps = installedApps.filter(
+    (app) => app.hasFrontend && app.href && !pinnedAppIds.has(app.id),
+  );
+
+  const resolveLabel = (pin: PinnedEntry): string =>
+    installedApps.find((a) => a.id === pin.id)?.displayName ?? pin.id;
 
   const resolveIcon = (pin: PinnedEntry): React.ReactNode => {
-    if (pin.type === "builtin") {
-      const b = builtinMap.get(pin.id);
-      if (!b) return null;
-      return <b.Icon className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />;
-    }
     const app = installedApps.find((a) => a.id === pin.id);
-    if (!app) return null;
-    if (app.iconUrl) {
-      return (
-        <img
-          src={app.iconUrl}
-          alt=""
-          className="h-4 w-4 shrink-0 rounded-4"
-          onError={(e) => {
-            (e.target as HTMLImageElement).style.display = "none";
-          }}
-        />
-      );
-    }
-    return (
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-4 bg-surface-muted text-aux text-muted-foreground">
-        {app.displayName.charAt(0).toUpperCase()}
-      </span>
-    );
+    return app ? renderAppIcon(app) : null;
   };
 
-  // The App Store lives on Rome Cloud. A browser opens it in a new tab, which
-  // is what a tab is for; the Mac app (see `inDesktopApp`) swaps to the embedded
-  // sheet instead.
-  // Held here rather than at either call site: the rail and the wide sidebar
-  // return separately, and both need it.
-  const storeSheet = inDesktopApp ? (
-    <AppStoreSheet
-      open={storeOpen}
-      onClose={() => setStoreOpen(false)}
-      onInstalled={() => {
-        void invalidateApps.list();
-        void invalidateApps.updates();
-      }}
-    />
-  ) : null;
-
   if (collapsed) {
+    const renderRailBuiltin = (entry: BuiltinNavEntry) => {
+      const label = t(entry.labelKey);
+      const active = isEntryActive(location.pathname, entry.href);
+      return (
+        <Tooltip key={`builtin-${entry.id}`}>
+          {withBuiltinContextMenu(
+            entry,
+            <TooltipTrigger asChild>
+              <Link
+                to={entry.href}
+                aria-label={label}
+                className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+              >
+                {renderBuiltinIcon(entry)}
+              </Link>
+            </TooltipTrigger>,
+          )}
+          <TooltipContent side="right">{label}</TooltipContent>
+        </Tooltip>
+      );
+    };
+
     return (
       <TooltipProvider delayDuration={150}>
         <nav className="flex shrink-0 flex-col items-center gap-1 px-3 pb-2">
-          {pins.map((pin) => {
-            if (pin.type === "builtin") {
-              const entry = builtinMap.get(pin.id);
-              if (!entry) return null;
-              const label = t(entry.labelKey);
-              if (entry.id === "store") {
+          {fixedEntries.map(renderRailBuiltin)}
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={t("sidebar.more")}
+                    className={`${RAIL_LINK_CLASS} ${moreActive ? ACTIVE_CLASS : IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
+                  >
+                    <Ellipsis className="h-4 w-4" aria-hidden />
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="right">{t("sidebar.more")}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent side="right" align="start">
+              {moreEntries.map((entry) => {
+                const active = isEntryActive(location.pathname, entry.href);
                 return (
-                  <Tooltip key={`builtin-${pin.id}`}>
-                    {withBuiltinContextMenu(
-                      entry,
-                      <TooltipTrigger asChild>
-                        {inDesktopApp ? (
-                          <button
-                            type="button"
-                            onClick={() => setStoreOpen(true)}
-                            aria-label={label}
-                            className={`${RAIL_LINK_CLASS} ${IDLE_CLASS}`}
-                          >
-                            {renderBuiltinIcon(entry)}
-                          </button>
-                        ) : (
-                          <a
-                            href={APP_STORE_BROWSE_URL}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            aria-label={label}
-                            className={`${RAIL_LINK_CLASS} ${IDLE_CLASS}`}
-                          >
-                            {renderBuiltinIcon(entry)}
-                          </a>
-                        )}
-                      </TooltipTrigger>,
-                    )}
-                    <TooltipContent side="right">{label}</TooltipContent>
-                  </Tooltip>
+                  <DropdownMenuItem key={entry.id} asChild>
+                    <Link
+                      to={entry.href}
+                      aria-current={active ? "page" : undefined}
+                      className={active ? ACTIVE_CLASS : undefined}
+                    >
+                      <entry.Icon className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
+                      {t(entry.labelKey)}
+                    </Link>
+                  </DropdownMenuItem>
                 );
-              }
-              const active = isEntryActive(location.pathname, entry.href);
-              return (
-                <Tooltip key={`builtin-${pin.id}`}>
-                  {withBuiltinContextMenu(
-                    entry,
-                    <TooltipTrigger asChild>
-                      <Link
-                        to={entry.href}
-                        aria-label={label}
-                        className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
-                      >
-                        {renderBuiltinIcon(entry)}
-                      </Link>
-                    </TooltipTrigger>,
-                  )}
-                  <TooltipContent side="right">{label}</TooltipContent>
-                </Tooltip>
-              );
-            }
-
-            const app = installedApps.find((a) => a.id === pin.id);
-            if (!app || !app.hasFrontend || !app.href) return null;
-            const active = isEntryActive(location.pathname, app.href);
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {pinnedApps.length > 0 ? <Separator className="my-1 w-6" /> : null}
+          {pinnedApps.map(({ app }) => {
+            const active = isEntryActive(location.pathname, app.href!);
             return (
-              <Tooltip key={`app-${pin.id}`}>
+              <Tooltip key={`app-${app.id}`}>
                 {withAppContextMenu(
                   app,
                   <TooltipTrigger asChild>
                     <Link
-                      to={app.href}
+                      to={app.href!}
                       aria-label={app.displayName}
                       className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
                     >
-                      {resolveIcon(pin)}
+                      {renderAppIcon(app)}
                       {app.status === "disabled" ? (
                         <span
                           className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-border-strong"
@@ -622,12 +618,30 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
             </>
           ) : null}
         </nav>
-        {storeSheet}
       </TooltipProvider>
     );
   }
 
-  const headerControls = editing ? (
+  const renderBuiltinRow = (entry: BuiltinNavEntry) => {
+    const active = isEntryActive(location.pathname, entry.href);
+    return (
+      <Fragment key={`builtin-${entry.id}`}>
+        {withBuiltinContextMenu(
+          entry,
+          <Link
+            to={entry.href}
+            title={t(entry.labelKey)}
+            className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+          >
+            {renderBuiltinIcon(entry)}
+            <span className="flex-1 truncate">{t(entry.labelKey)}</span>
+          </Link>,
+        )}
+      </Fragment>
+    );
+  };
+
+  const pinnedControls = editing ? (
     <Button
       type="button"
       variant="ghost"
@@ -638,70 +652,70 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
       {t("sidebar.done")}
     </Button>
   ) : (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={t("sidebar.edit")}
-          className="rounded-4 p-1 text-subtle-foreground transition hover:bg-surface-hover hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30 flex min-h-[var(--control-min-h)] min-w-[var(--control-min-h)] items-center justify-center"
-        >
-          <Ellipsis className="h-4 w-4" aria-hidden />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="bottom" align="end">
-        <DropdownMenuItem onSelect={() => setEditing(true)}>
-          <Pencil className="h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
-          {t("sidebar.edit")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <IconButton
+      size="sm"
+      label={t("sidebar.edit")}
+      icon={<Pencil aria-hidden />}
+      onClick={() => setEditing(true)}
+      className="text-subtle-foreground hover:text-foreground"
+    />
   );
 
   return (
     <div className="flex shrink-0 flex-col pb-2">
-      {headerControlsHost === undefined ? (
-        <div className="flex items-center justify-end px-5 pb-2 pt-2">{headerControls}</div>
-      ) : headerControlsHost ? (
-        createPortal(headerControls, headerControlsHost)
+      <nav aria-label={t("sidebar.menu")} className="flex flex-col gap-1 px-3">
+        {fixedEntries.map(renderBuiltinRow)}
+      </nav>
+      {moreExpanded ? (
+        <nav
+          id="sidebar-more"
+          aria-label={t("sidebar.more")}
+          className="mt-1 flex flex-col gap-1 px-3"
+        >
+          {moreEntries.map(renderBuiltinRow)}
+        </nav>
       ) : null}
+      <SidebarDisclosure
+        expanded={moreExpanded}
+        onToggle={toggleMoreExpanded}
+        controls={moreExpanded ? "sidebar-more" : undefined}
+        showLabel={t("sidebar.showMorePages")}
+        hideLabel={t("sidebar.showFewerPages")}
+      />
+
+      <div className="flex items-center justify-between px-5 pb-1 pt-1">
+        <span className="text-aux text-subtle-foreground">{t("sidebar.pinned")}</span>
+        {pinnedControls}
+      </div>
 
       {editing ? (
         <div className="flex flex-col gap-2 px-3">
           <Sortable value={pins} onValueChange={persistPins} getItemValue={pinKey}>
             <SortableContent className="flex flex-col gap-1">
-              {pins.map((pin) => {
-                const isRequiredBuiltin =
-                  pin.type === "builtin" &&
-                  REQUIRED_BUILTIN_PINS.some((requiredPin) => requiredPin.id === pin.id);
-                return (
-                  <SortableItem
-                    key={pinKey(pin)}
-                    value={pinKey(pin)}
-                    className="flex h-8 items-center gap-1 rounded-8 bg-surface px-1 py-1 text-ui text-foreground"
+              {pins.map((pin) => (
+                <SortableItem
+                  key={pinKey(pin)}
+                  value={pinKey(pin)}
+                  className="flex h-8 items-center gap-1 rounded-8 bg-surface px-1 py-1 text-ui text-foreground"
+                >
+                  <SortableItemHandle className="flex h-6 w-6 shrink-0 items-center justify-center rounded-4 text-subtle-foreground hover:text-foreground">
+                    <GripVertical className="h-3.5 w-3.5" aria-hidden />
+                  </SortableItemHandle>
+                  {resolveIcon(pin)}
+                  <span className="flex-1 truncate">{resolveLabel(pin)}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => persistPins(pins.filter((p) => pinKey(p) !== pinKey(pin)))}
+                    aria-label={t("sidebar.remove")}
+                    title={t("sidebar.remove")}
+                    className="text-subtle-foreground hover:bg-transparent hover:text-destructive-fg dark:hover:bg-transparent"
                   >
-                    <SortableItemHandle className="flex h-6 w-6 shrink-0 items-center justify-center rounded-4 text-subtle-foreground hover:text-foreground">
-                      <GripVertical className="h-3.5 w-3.5" aria-hidden />
-                    </SortableItemHandle>
-                    {resolveIcon(pin)}
-                    <span className="flex-1 truncate">{resolveLabel(pin)}</span>
-                    {!isRequiredBuiltin ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => persistPins(pins.filter((p) => pinKey(p) !== pinKey(pin)))}
-                        aria-label={t("sidebar.remove")}
-                        title={t("sidebar.remove")}
-                        className="text-subtle-foreground hover:bg-transparent hover:text-destructive-fg dark:hover:bg-transparent"
-                      >
-                        <X className="size-3.5" aria-hidden />
-                      </Button>
-                    ) : (
-                      <span className="w-6" />
-                    )}
-                  </SortableItem>
-                );
-              })}
+                    <X className="size-3.5" aria-hidden />
+                  </Button>
+                </SortableItem>
+              ))}
             </SortableContent>
             <SortableOverlay>
               {({ value }) => {
@@ -721,45 +735,18 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
             </SortableOverlay>
           </Sortable>
 
-          {hasUnpinned ? (
+          {unpinnedApps.length > 0 ? (
             <>
-              <div className="border-t border-border-subtle" />
+              {pins.length > 0 ? <div className="border-t border-border-subtle" /> : null}
               <p className="text-aux text-subtle-foreground">{t("sidebar.addSection")}</p>
               <div className="flex flex-col gap-1">
-                {hiddenBuiltins.map((b) => (
-                  <div
-                    key={b.id}
-                    className="flex h-8 items-center gap-1 rounded-8 px-1 py-1 text-ui text-foreground hover:bg-surface-hover"
-                  >
-                    <span className="w-6" />
-                    <b.Icon className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
-                    <span className="flex-1 truncate">{t(b.labelKey)}</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => persistPins([...pins, { type: "builtin", id: b.id }])}
-                      aria-label={t("sidebar.add")}
-                      title={t("sidebar.add")}
-                      className="text-subtle-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent"
-                    >
-                      <Plus className="size-3.5" aria-hidden />
-                    </Button>
-                  </div>
-                ))}
                 {unpinnedApps.map((app) => (
                   <div
                     key={app.id}
                     className="flex h-8 items-center gap-1 rounded-8 px-1 py-1 text-ui text-foreground hover:bg-surface-hover"
                   >
                     <span className="w-6" />
-                    {app.iconUrl ? (
-                      <img src={app.iconUrl} alt="" className="h-4 w-4 shrink-0 rounded-4" />
-                    ) : (
-                      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-4 bg-surface-muted text-aux text-muted-foreground">
-                        {app.displayName.charAt(0).toUpperCase()}
-                      </span>
-                    )}
+                    {renderAppIcon(app)}
                     <span className="flex-1 truncate">{app.displayName}</span>
                     <Button
                       type="button"
@@ -780,100 +767,38 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
         </div>
       ) : (
         <>
-          <nav className="flex flex-col gap-1 px-3">
-            {pins.map((pin) => {
-              if (pin.type === "builtin") {
-                const entry = builtinMap.get(pin.id);
-                if (!entry) return null;
-                if (entry.id === "store") {
-                  return (
-                    <Fragment key={`builtin-${pin.id}`}>
-                      {withBuiltinContextMenu(
-                        entry,
-                        inDesktopApp ? (
-                          <button
-                            type="button"
-                            onClick={() => setStoreOpen(true)}
-                            title={t(entry.labelKey)}
-                            className={`${LINK_CLASS} hover:bg-surface-hover`}
-                          >
-                            {renderBuiltinIcon(entry)}
-                            <span className="flex-1 truncate">{t(entry.labelKey)}</span>
-                          </button>
-                        ) : (
-                          <a
-                            href={APP_STORE_BROWSE_URL}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={t(entry.labelKey)}
-                            className={`${LINK_CLASS} hover:bg-surface-hover`}
-                          >
-                            {renderBuiltinIcon(entry)}
-                            <span className="flex-1 truncate">{t(entry.labelKey)}</span>
-                          </a>
-                        ),
-                      )}
-                    </Fragment>
-                  );
-                }
-                const active = isEntryActive(location.pathname, entry.href);
+          {pinnedApps.length > 0 ? (
+            <nav aria-label={t("sidebar.pinned")} className="flex flex-col gap-1 px-3">
+              {pinnedApps.map(({ app }) => {
+                const active = isEntryActive(location.pathname, app.href!);
                 return (
-                  <Fragment key={`builtin-${pin.id}`}>
-                    {withBuiltinContextMenu(
-                      entry,
+                  <Fragment key={`app-${app.id}`}>
+                    {withAppContextMenu(
+                      app,
                       <Link
-                        to={entry.href}
-                        title={t(entry.labelKey)}
+                        to={app.href!}
+                        title={app.displayName}
                         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
                       >
-                        {renderBuiltinIcon(entry)}
-                        <span className="flex-1 truncate">{t(entry.labelKey)}</span>
+                        {renderAppIcon(app)}
+                        <span className="flex-1 truncate">{app.displayName}</span>
+                        {app.status === "disabled" ? (
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong"
+                            role="img"
+                            aria-label={t("sidebar.appDisabled")}
+                          />
+                        ) : null}
                       </Link>,
                     )}
                   </Fragment>
                 );
-              }
-
-              const app = installedApps.find((a) => a.id === pin.id);
-              if (!app || !app.hasFrontend || !app.href) return null;
-              const active = isEntryActive(location.pathname, app.href);
-              return (
-                <Fragment key={`app-${pin.id}`}>
-                  {withAppContextMenu(
-                    app,
-                    <Link
-                      to={app.href}
-                      title={app.displayName}
-                      className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
-                    >
-                      {app.iconUrl ? (
-                        <img
-                          src={app.iconUrl}
-                          alt=""
-                          className="h-4 w-4 shrink-0 rounded-4"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = "none";
-                          }}
-                        />
-                      ) : (
-                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-4 bg-surface-muted text-aux text-muted-foreground">
-                          {app.displayName.charAt(0).toUpperCase()}
-                        </span>
-                      )}
-                      <span className="flex-1 truncate">{app.displayName}</span>
-                      {app.status === "disabled" ? (
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong"
-                          role="img"
-                          aria-label={t("sidebar.appDisabled")}
-                        />
-                      ) : null}
-                    </Link>,
-                  )}
-                </Fragment>
-              );
-            })}
-          </nav>
+              })}
+            </nav>
+          ) : (
+            <p className="px-5 pb-1 text-aux text-subtle-foreground">{t("sidebar.noPinned")}</p>
+          )}
+          <SidebarDivider />
           <RecentAppsZone
             apps={recentApps}
             unopenedIds={unopenedIds}
@@ -883,7 +808,6 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
           />
         </>
       )}
-      {storeSheet}
     </div>
   );
 }

@@ -20,8 +20,9 @@ import { fetchJson } from "@/lib/fetch-json";
 // when available, with initials as the local/password fallback. It opens the
 // account menu (Settings, Feedback, Log out). Password and cloud guardians
 // still resolve to the same guardian identity; only the bound Cloud profile
-// supplies a picture.
-export function ProfileMenu() {
+// supplies a picture. The wide sidebar also names the identity and its role
+// beside the avatar; the rail has room for the avatar alone.
+export function ProfileMenu({ showIdentity = false }: { showIdentity?: boolean } = {}) {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const { data: identity } = useDashboardIdentity();
@@ -44,9 +45,21 @@ export function ProfileMenu() {
       : identity?.kind === "visitor"
         ? t("profile.visitor")
         : null;
+  // The wide button's accessible name starts with the name and role it shows,
+  // so a voice user can say what they see.
+  const identityLabel = [title, subtitle, t("profile.menuLabel")].filter(Boolean).join(", ");
   const initial = title?.trim().charAt(0).toUpperCase() ?? "";
   const avatarUrl =
     identity?.kind === "guardian" || identity?.kind === "visitor" ? identity.avatarUrl : null;
+
+  const avatar = (
+    <Avatar>
+      {avatarUrl ? <AvatarImage src={avatarUrl} alt="" /> : null}
+      <AvatarFallback className="bg-primary/15 text-primary">
+        {initial || <UserRound className="size-4" aria-hidden />}
+      </AvatarFallback>
+    </Avatar>
+  );
 
   async function signOut() {
     if (signingOut) return;
@@ -70,19 +83,33 @@ export function ProfileMenu() {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label={t("profile.menuLabel")}
-            title={title ?? t("profile.menuLabel")}
-            className="rounded-full outline-none transition hover:opacity-80 focus-visible:ring-3 focus-visible:ring-ring/50 flex min-h-[var(--control-min-h)] min-w-[var(--control-min-h)] items-center justify-center"
-          >
-            <Avatar>
-              {avatarUrl ? <AvatarImage src={avatarUrl} alt="" /> : null}
-              <AvatarFallback className="bg-primary/15 text-primary">
-                {initial || <UserRound className="size-4" aria-hidden />}
-              </AvatarFallback>
-            </Avatar>
-          </button>
+          {showIdentity ? (
+            <button
+              type="button"
+              aria-label={identityLabel}
+              title={title ?? t("profile.menuLabel")}
+              className="flex min-h-[var(--control-min-h)] w-full min-w-0 items-center gap-2 rounded-8 px-1 py-1 text-left outline-none outline-1 outline-offset-0 outline-transparent transition hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50 dark:hover:bg-surface"
+            >
+              {avatar}
+              {title ? (
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-ui text-foreground">{title}</span>
+                  {subtitle ? (
+                    <span className="truncate text-aux text-subtle-foreground">{subtitle}</span>
+                  ) : null}
+                </span>
+              ) : null}
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label={t("profile.menuLabel")}
+              title={title ?? t("profile.menuLabel")}
+              className="rounded-full outline-none outline-1 outline-offset-0 outline-transparent transition hover:opacity-80 focus-visible:outline-solid focus-visible:outline-ring/50 flex min-h-[var(--control-min-h)] min-w-[var(--control-min-h)] items-center justify-center"
+            >
+              {avatar}
+            </button>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="start" className="w-56">
           {title ? (

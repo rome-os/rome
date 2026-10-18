@@ -34,8 +34,8 @@ suite.
   switch or sidebar edit persists across navigation):
   - `rome.lang = en`: pins the English UI (avoids locale interference on a
     Chinese CI machine);
-  - `rome-sidebar-pins`: expands every built-in sidebar entry (the mock user
-    pins only Apps/Chat/Projects by default).
+  - `rome-sidebar-more-expanded = 1`: opens the sidebar fold, so People,
+    Usage, Memory, Activity and Browser show beside the fixed menu.
 - The strict E2E worker rejects external HTTP requests. A BrowserContext guard also
   blocks external HTTP and WebSocket traffic. The setup check fails the run if
   either path lets a request out. Strict E2E mode disables the backend proxy,

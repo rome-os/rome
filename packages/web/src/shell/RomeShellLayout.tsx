@@ -46,7 +46,6 @@ export function RomeShellLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
-  const [appGridControlsHost, setAppGridControlsHost] = useState<HTMLDivElement | null>(null);
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const isDesktop = useDesktop();
   // The fallback title for whatever the shell is showing. A routed page that
@@ -190,7 +189,7 @@ export function RomeShellLayout() {
         {!hideSidebar ? (
           <aside
             ref={sidebarRef}
-            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[translate,width] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
+            className={`fixed inset-y-0 left-0 z-40 flex w-68 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[translate,width] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
               railMode ? "md:w-16" : ""
             } ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
           >
@@ -234,7 +233,6 @@ export function RomeShellLayout() {
                   {t("appName")}
                 </Link>
                 <div className="flex items-center gap-1">
-                  <div ref={setAppGridControlsHost} />
                   <IconButton
                     size="md"
                     label={t("nav.collapseSidebar")}
@@ -258,21 +256,21 @@ export function RomeShellLayout() {
                 <AppGrid collapsed onSearch={() => setChatSearchOpen(true)} />
               ) : (
                 <>
-                  <AppGrid headerControlsHost={appGridControlsHost} />
+                  <AppGrid />
                   <RecentChats onSearch={() => setChatSearchOpen(true)} />
                 </>
               )}
             </div>
             <div
-              className={`flex shrink-0 items-center py-3 ${railMode ? "justify-center" : "px-4"}`}
+              className={`flex shrink-0 items-center py-3 ${railMode ? "justify-center" : "px-3"}`}
             >
-              <ProfileMenu />
+              <ProfileMenu showIdentity={!railMode} />
             </div>
           </aside>
         ) : null}
         <ChatSearchDialog open={chatSearchOpen} onOpenChange={setChatSearchOpen} />
         {/* The in-flow sidebar pushes routed content right by its own width on
-            desktop — 16rem expanded, 4rem as the collapsed rail — and with
+            desktop — 17rem expanded, 4rem as the collapsed rail — and with
             ?hideSidebar=1 there's no sidebar and content starts at the viewport
             edge. Publish that left offset so a `fixed` child like the trace
             drawer can align to the chat column. The public share tree has no
@@ -280,11 +278,11 @@ export function RomeShellLayout() {
         <main
           ref={pageRef}
           className={`flex min-w-0 flex-1 flex-col bg-background max-md:transition-[translate] max-md:duration-200 max-md:ease-out motion-reduce:transition-none ${
-            sidebarOpen && !hideSidebar ? "max-md:translate-x-64" : ""
+            sidebarOpen && !hideSidebar ? "max-md:translate-x-68" : ""
           }`}
           style={
             {
-              "--rome-chat-left": hideSidebar ? "0px" : railMode ? "4rem" : "16rem",
+              "--rome-chat-left": hideSidebar ? "0px" : railMode ? "4rem" : "17rem",
             } as CSSProperties
           }
         >

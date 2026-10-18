@@ -51,8 +51,8 @@ const geometry = (page: Page) =>
       Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth,
   }));
 
-const OPEN = { sidebarLeft: 0, pageLeft: 256, overflowX: 0 };
-const SHUT = { sidebarLeft: -256, pageLeft: 0, overflowX: 0 };
+const OPEN = { sidebarLeft: 0, pageLeft: 272, overflowX: 0 };
+const SHUT = { sidebarLeft: -272, pageLeft: 0, overflowX: 0 };
 
 test("a swipe right opens the sidebar and pushes the page", async ({ page }) => {
   const cdp = await open(page);

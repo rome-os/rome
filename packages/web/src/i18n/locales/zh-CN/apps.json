@@ -29,17 +29,6 @@
     "noResults": "没有与“{{query}}”匹配的应用",
     "noResultsHint": "换个关键词,或前往应用商店浏览。"
   },
-  "builtinDescriptions": {
-    "projects": "智能体工作的目录",
-    "memory": "身份、日志和 Rome 认识的人",
-    "people": "守护者介绍过的联系人",
-    "routines": "定时与周期性的智能体任务",
-    "activity": "Rome 最近做了什么",
-    "store": "浏览并安装 Rome 应用",
-    "desktop": "内嵌浏览器界面",
-    "chat": "和你的智能体对话",
-    "settings": "档案、通道与集成"
-  },
   "installedApps": "已安装应用",
   "tabs": {
     "installed": "已安装",

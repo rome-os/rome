@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { Link, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -268,6 +269,7 @@ function SessionsIndexPage({
   state: SessionsExplorerState;
   view: "overview" | "sessions";
 }) {
+  const { t: tCommon } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
   const fullMode = location.pathname.startsWith("/full/apps/sessions");
@@ -675,7 +677,7 @@ function SessionsIndexPage({
           <Page>
             <PageHeader align="end">
               <PageHeading>
-                <PageTitle>Sessions</PageTitle>
+                <PageTitle>{tCommon("nav.sessions")}</PageTitle>
               </PageHeading>
               <PageActions>{viewSwitch}</PageActions>
             </PageHeader>

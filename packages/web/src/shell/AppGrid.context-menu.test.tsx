@@ -261,17 +261,7 @@ it("unpins the app from its context menu", async () => {
   });
 });
 
-describe("pinned built-in page context menu", () => {
-  beforeEach(() => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify([
-        { type: "builtin", id: "people" },
-        { type: "app", id: "recipe-box" },
-      ]),
-    );
-  });
-
+describe("fixed menu context menu", () => {
   async function findBuiltinLink(href: string): Promise<HTMLAnchorElement> {
     let link: HTMLAnchorElement | null = null;
     await waitFor(() => {
@@ -284,37 +274,8 @@ describe("pinned built-in page context menu", () => {
   it.each([
     ["expanded sidebar", false],
     ["collapsed rail", true],
-  ] as const)("offers new-tab and unpin, like an app row, in the %s", async (_name, collapsed) => {
-    renderSidebar(collapsed);
-
-    fireEvent.contextMenu(await findBuiltinLink("/people"));
-
-    const menu = await screen.findByRole("menu");
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((item) => item.textContent),
-    ).toEqual(["Open in new tab", "Unpin from sidebar"]);
-    expect(
-      within(menu).getByRole("menuitem", { name: "Open in new tab" }).getAttribute("href"),
-    ).toBe("/people");
-  });
-
-  it("unpins the page from its context menu and keeps the app pin", async () => {
-    const user = userEvent.setup();
-    renderSidebar(false);
-
-    fireEvent.contextMenu(await findBuiltinLink("/people"));
-    await user.click(await screen.findByRole("menuitem", { name: "Unpin from sidebar" }));
-
-    expect(document.querySelector('nav a[href="/people"]')).toBeNull();
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-    expect(stored).not.toContainEqual({ type: "builtin", id: "people" });
-    expect(stored).toContainEqual({ type: "app", id: "recipe-box" });
-  });
-
-  it("offers no unpin on a required pin", async () => {
-    renderSidebar(false, "/projects");
+  ] as const)("offers only a new tab, with nothing to unpin, in the %s", async (_name, collapsed) => {
+    renderSidebar(collapsed, "/projects");
 
     fireEvent.contextMenu(await findBuiltinLink("/chat"));
 
@@ -324,9 +285,12 @@ describe("pinned built-in page context menu", () => {
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
     ).toEqual(["Open in new tab"]);
+    expect(
+      within(menu).getByRole("menuitem", { name: "Open in new tab" }).getAttribute("href"),
+    ).toBe("/chat");
   });
 
-  it("opens no menu on a required pin where there are no tabs, since Open would only repeat a click", async () => {
+  it("opens no menu where there are no tabs, since Open would only repeat a click", async () => {
     window.rome = {};
     renderSidebar(false, "/projects");
 
@@ -337,27 +301,17 @@ describe("pinned built-in page context menu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it.each([
-    ["in the browser", false],
-    ["in the Mac app", true],
-  ] as const)("offers only unpin on the App Store row %s", async (_name, inDesktopApp) => {
-    if (inDesktopApp) window.rome = {};
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([{ type: "builtin", id: "store" }]));
+  it("drops built-in pages left in a stored pin list from an earlier version", async () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { type: "builtin", id: "settings" },
+        { type: "app", id: "recipe-box" },
+      ]),
+    );
     renderSidebar(false);
 
-    let trigger: Element | null = null;
-    await waitFor(() => {
-      trigger = document.querySelector('nav [title="App Store"]');
-      expect(trigger).toBeTruthy();
-    });
-    expect((trigger as unknown as Element).tagName).toBe(inDesktopApp ? "BUTTON" : "A");
-    fireEvent.contextMenu(trigger as unknown as Element);
-
-    const menu = await screen.findByRole("menu");
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((item) => item.textContent),
-    ).toEqual(["Unpin from sidebar"]);
+    await findPinnedAppLink();
+    expect(document.querySelector('nav a[href="/settings"]')).toBeNull();
   });
 });
