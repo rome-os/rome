@@ -24,13 +24,13 @@ describe("buildFullAppPath", () => {
 
 describe("getWidgetFullHref", () => {
   it("addresses the projects root when no path is selected", () => {
-    expect(getWidgetFullHref(placement({ type: "projects" }))).toBe("/projects");
+    expect(getWidgetFullHref(placement({ type: "projects" }))).toBe("/files");
   });
 
   it("carries the selected file or folder into the projects URL", () => {
     expect(
       getWidgetFullHref(placement({ type: "projects", selectedPath: "projects/docs/a b.md" })),
-    ).toBe("/projects/docs/a%20b.md");
+    ).toBe("/files/docs/a%20b.md");
   });
 
   it("addresses the desktop page for the browser widget", () => {

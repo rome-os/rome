@@ -64,7 +64,7 @@ test("search continues through pages with no matches without another scroll", as
   chats[40].title = "SF later match";
   const requests = await mockDashboard(context, chats);
 
-  await page.goto("/projects");
+  await page.goto("/files");
   await expect(page.getByText("20 of 60 chats")).toBeVisible();
   await page.getByPlaceholder("Search chats…").fill("sf");
 
@@ -88,7 +88,7 @@ test("each scroll appends 20 chats and preserves the scroll position", async ({
 }) => {
   const requests = await mockDashboard(context, buildChats(60));
 
-  await page.goto("/projects");
+  await page.goto("/files");
   await expect(page.getByText("20 of 60 chats")).toBeVisible();
   const sentinel = page.getByText("Scroll for more chats");
   await sentinel.scrollIntoViewIfNeeded();
@@ -113,7 +113,7 @@ test("a search scroll adds 20 matches across sparse pages and keeps leftover mat
   }
   const requests = await mockDashboard(context, chats);
 
-  await page.goto("/projects");
+  await page.goto("/files");
   await expect(page.getByText("20 of 80 chats")).toBeVisible();
   await page.getByPlaceholder("Search chats…").fill("sf");
   const sentinel = page.getByText("Scroll for more chats");
@@ -142,7 +142,7 @@ test("a failed page waits for retry before filling the search batch", async ({ c
     { times: 1 },
   );
 
-  await page.goto("/projects");
+  await page.goto("/files");
   await expect(page.getByText("20 of 60 chats")).toBeVisible();
   await page.getByPlaceholder("Search chats…").fill("sf");
   const retry = page.getByRole("button", { name: "Retry loading chats" });
@@ -159,7 +159,7 @@ for (const action of ["clear", "change"] as const) {
   test(`${action} search resets a scrolled list to its first batch`, async ({ context, page }) => {
     const requests = await mockDashboard(context, buildChats(80));
 
-    await page.goto("/projects");
+    await page.goto("/files");
     await expect(page.getByText("20 of 80 chats")).toBeVisible();
     await page.getByPlaceholder("Search chats…").fill("chat");
     const sentinel = page.getByText("Scroll for more chats");
@@ -198,7 +198,7 @@ for (const action of ["clear", "change"] as const) {
       return route.fulfill({ status: 500 });
     });
 
-    await page.goto("/projects");
+    await page.goto("/files");
     await expect(page.getByText("20 of 80 chats")).toBeVisible();
     await page.getByPlaceholder("Search chats…").fill("chat");
     const sentinel = page.getByText("Scroll for more chats");

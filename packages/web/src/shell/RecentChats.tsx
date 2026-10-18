@@ -1,11 +1,9 @@
-import { ChevronDownIcon, ChevronRightIcon, Pencil2Icon } from "@radix-ui/react-icons";
+import { ChevronDownIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import {
   Archive,
   ArchiveRestore,
   Check,
   Ellipsis,
-  Folder,
-  FolderOpen,
   Pencil,
   Pin,
   PinOff,
@@ -29,11 +27,9 @@ import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { deleteSession, listSessions, renameSession, type SessionScope } from "@/lib/chat-api";
-import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import type { ChatSession } from "@/lib/chat-types";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
-import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import {
   emitSessionsChanged,
@@ -140,42 +136,16 @@ function ChatStatusGlyph({ status }: { status: ChatRowStatus }) {
   );
 }
 
-type GroupMode = "project" | "date";
 type LoadPhase = "loading" | "ready" | "error";
 type StatusFilter = "all" | "active" | "archived";
 
-interface SessionGroup {
-  key: string;
-  label: string;
-  items: ChatSession[];
-  latest: number;
-  projectPath: string;
-}
-
-const GROUP_MODE_STORAGE_KEY = "rome-recent-chats-group-mode";
 const SCOPE_STORAGE_KEY = "rome-recent-chats-scope";
 const STATUS_FILTER_STORAGE_KEY = "rome-recent-chats-status-filter";
 const COLLAPSED_GROUPS_STORAGE_KEY = "rome-recent-chats-collapsed-groups";
 
-const DATE_BUCKETS = [
-  { id: "today", tKey: "recentChats.groups.today" },
-  { id: "yesterday", tKey: "recentChats.groups.yesterday" },
-  { id: "previous7Days", tKey: "recentChats.groups.previous7Days" },
-  { id: "previous30Days", tKey: "recentChats.groups.previous30Days" },
-  { id: "older", tKey: "recentChats.groups.older" },
-] as const;
-
-type DateBucketId = (typeof DATE_BUCKETS)[number]["id"];
-
 function readScope(): SessionScope {
   if (typeof window === "undefined") return "all";
   return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "mine" ? "mine" : "all";
-}
-
-function readGroupMode(): GroupMode {
-  if (typeof window === "undefined") return "project";
-  const raw = window.localStorage.getItem(GROUP_MODE_STORAGE_KEY);
-  return raw === "date" ? "date" : "project";
 }
 
 function readStatusFilter(): StatusFilter {
@@ -199,36 +169,8 @@ function readStringSetFromStorage(storageKey: string): Set<string> {
   return new Set();
 }
 
-function dateBucketFor(createdAt: string, now: number): DateBucketId {
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
-  const today = startOfToday.getTime();
-  const t = new Date(createdAt).getTime();
-  if (t >= today) return "today";
-  if (t >= today - 86_400_000) return "yesterday";
-  if (t >= today - 7 * 86_400_000) return "previous7Days";
-  if (t >= today - 30 * 86_400_000) return "previous30Days";
-  return "older";
-}
-
-function projectNameFromPath(projectPath: string): string {
-  return projectPath.split(/[\\/]/).filter(Boolean).at(-1) ?? projectPath;
-}
-
-function isDefaultProjectChat(session: ChatSession): boolean {
-  return (
-    session.projectPath === DEFAULT_PROJECT_NAME ||
-    session.projectName === DEFAULT_PROJECT_NAME ||
-    (!session.projectPath && !session.projectName)
-  );
-}
-
-function projectPathForSession(session: ChatSession): string {
-  return isDefaultProjectChat(session) ? DEFAULT_PROJECT_NAME : session.projectPath || "";
-}
-
-const PROJECT_DEFAULT_VISIBLE = 4;
-const PROJECT_LOAD_MORE_COUNT = 10;
+// The flat list shows this many chats, and each Load more adds as many again.
+const CHATS_PAGE_SIZE = 20;
 // Keep in sync with the server-side cap in webchat.ts (PATCH /chat/sessions/:id/name).
 const SESSION_NAME_MAX_LENGTH = 50;
 
@@ -236,7 +178,7 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
+function ChatRowLink({ id, name }: { id: string; name: string }) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -262,9 +204,7 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
           to={`/chat/${id}`}
           onPointerEnter={syncNameClipped}
           onFocus={syncNameClipped}
-          className={`flex h-full min-w-0 flex-1 items-center rounded-8 border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-            nested ? "pl-4" : "pl-2"
-          }`}
+          className="flex h-full min-w-0 flex-1 items-center rounded-8 border border-transparent pl-2 pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
         >
           <span ref={nameRef} className="truncate">
             {name}
@@ -288,14 +228,12 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const location = useLocation();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [phase, setPhase] = useState<LoadPhase>("loading");
-  const [groupMode, setGroupMode] = useState<GroupMode>(() => readGroupMode());
   const [scope, setScope] = useState<SessionScope>(() => readScope());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => readStatusFilter());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
     readStringSetFromStorage(COLLAPSED_GROUPS_STORAGE_KEY),
   );
-  const { pinnedProjectPaths, togglePinnedProject } = usePinnedProjects();
-  const [visibleGroupCounts, setVisibleGroupCounts] = useState<Record<string, number>>({});
+  const [visibleCount, setVisibleCount] = useState(CHATS_PAGE_SIZE);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -363,11 +301,6 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(GROUP_MODE_STORAGE_KEY, groupMode);
-  }, [groupMode]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
     window.localStorage.setItem(STATUS_FILTER_STORAGE_KEY, statusFilter);
   }, [statusFilter]);
 
@@ -392,88 +325,14 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     [sessions],
   );
 
-  const pinnedProjects = useMemo(() => {
-    const namesByPath = new Map<string, string>();
-    const sessionsByPath = new Map<string, ChatSession[]>();
-    for (const session of sessions) {
-      const projectPath = projectPathForSession(session);
-      if (!projectPath) continue;
-      if (!namesByPath.has(projectPath)) {
-        namesByPath.set(projectPath, session.projectName || projectNameFromPath(projectPath));
-      }
-      if (session.pinnedAt) continue;
-      const projectSessions = sessionsByPath.get(projectPath) ?? [];
-      projectSessions.push(session);
-      sessionsByPath.set(projectPath, projectSessions);
-    }
-    return Array.from(pinnedProjectPaths).map((projectPath) => ({
-      projectPath,
-      name: namesByPath.get(projectPath) ?? projectNameFromPath(projectPath),
-      items: (sessionsByPath.get(projectPath) ?? []).sort(
-        (a, b) => sessionActivityTime(b) - sessionActivityTime(a),
-      ),
-    }));
-  }, [pinnedProjectPaths, sessions]);
-
+  // Everything not pinned, as one list: the newest activity leads.
   const regularSessions = useMemo(
     () =>
       sessions
-        .filter(
-          (session) => !session.pinnedAt && !pinnedProjectPaths.has(projectPathForSession(session)),
-        )
+        .filter((session) => !session.pinnedAt)
         .sort((a, b) => sessionActivityTime(b) - sessionActivityTime(a)),
-    [pinnedProjectPaths, sessions],
+    [sessions],
   );
-
-  const projectGroups = useMemo<SessionGroup[]>(() => {
-    const buckets = new Map<string, { label: string; items: ChatSession[]; projectPath: string }>();
-    for (const session of regularSessions) {
-      const projectPath = projectPathForSession(session);
-      const rawKey = projectPath || session.projectName || "";
-      if (!rawKey) continue;
-      const label = session.projectName || projectNameFromPath(projectPath);
-      const bucket = buckets.get(rawKey) ?? {
-        label,
-        items: [],
-        projectPath,
-      };
-      bucket.items.push(session);
-      buckets.set(rawKey, bucket);
-    }
-    return Array.from(buckets.entries())
-      .map(([rawKey, { label, items, projectPath }]) => ({
-        key: `project:${rawKey}`,
-        label,
-        items,
-        latest: sessionActivityTime(items[0]),
-        projectPath,
-      }))
-      .sort((a, b) => b.latest - a.latest);
-  }, [regularSessions]);
-
-  const dateGroups = useMemo<SessionGroup[]>(() => {
-    const now = Date.now();
-    const buckets = new Map<DateBucketId, ChatSession[]>();
-    for (const session of regularSessions) {
-      const id = dateBucketFor(session.activityAt, now);
-      const existing = buckets.get(id);
-      if (existing) existing.push(session);
-      else buckets.set(id, [session]);
-    }
-    return DATE_BUCKETS.flatMap((bucket) => {
-      const items = buckets.get(bucket.id);
-      if (!items || items.length === 0) return [];
-      return [
-        {
-          key: `date:${bucket.id}`,
-          label: t(bucket.tKey),
-          items,
-          latest: sessionActivityTime(items[0]),
-          projectPath: "",
-        },
-      ];
-    });
-  }, [regularSessions, t]);
 
   const toggleGroup = useCallback((key: string) => {
     setCollapsedGroups((prev) => {
@@ -482,13 +341,6 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
       else next.add(key);
       return next;
     });
-  }, []);
-
-  const loadMore = useCallback((key: string) => {
-    setVisibleGroupCounts((prev) => ({
-      ...prev,
-      [key]: (prev[key] ?? PROJECT_DEFAULT_VISIBLE) + PROJECT_LOAD_MORE_COUNT,
-    }));
   }, []);
 
   const archiveMutation = useArchiveSession();
@@ -605,7 +457,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     }
   }, [editingId]);
 
-  const renderChatRow = (session: ChatSession, nested = false) => {
+  const renderChatRow = (session: ChatSession) => {
     const isActive = activeSessionId === session.id;
     const status = chatRowStatus(session, isActive);
     const statusLabel = status ? t(`recentChats.rowStatus.${status}`) : null;
@@ -650,12 +502,10 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 cancelRename();
               }
             }}
-            className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-              nested ? "ml-4" : "ml-2"
-            }`}
+            className="my-1 ml-2 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
           />
         ) : (
-          <ChatRowLink id={session.id} name={session.name} nested={nested} />
+          <ChatRowLink id={session.id} name={session.name} />
         )}
         <span
           className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
@@ -752,106 +602,9 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     );
   };
 
-  const renderProjectGroup = ({
-    key,
-    label,
-    items,
-    projectPath,
-    pinned,
-  }: {
-    key: string;
-    label: string;
-    items: ChatSession[];
-    projectPath: string;
-    pinned: boolean;
-  }) => {
-    const collapsed = collapsedGroups.has(key);
-    const visibleCount = visibleGroupCounts[key] ?? PROJECT_DEFAULT_VISIBLE;
-    const visibleItems = items.slice(0, visibleCount);
-    const remainingCount = Math.max(items.length - visibleCount, 0);
-    const projectLabel = (
-      <>
-        {collapsed ? (
-          <Folder className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
-        ) : (
-          <FolderOpen className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
-        )}
-        <span className="truncate">{label}</span>
-      </>
-    );
-    return (
-      <div key={key} className="mb-1" data-pinned-project-row={pinned || undefined}>
-        <div className="group/project flex h-8 items-center min-h-[var(--control-min-h)] gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
-          <button
-            type="button"
-            onClick={() => toggleGroup(key)}
-            aria-expanded={!collapsed}
-            title={label}
-            className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-8 border border-transparent pl-2 pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
-          >
-            {projectLabel}
-          </button>
-          {projectPath ? (
-            <button
-              type="button"
-              onClick={() =>
-                navigate("/chat", {
-                  state: { projectPath },
-                })
-              }
-              aria-label={t("recentChats.newChatInProject")}
-              title={t("recentChats.newChatInProject")}
-              className="touch-show shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
-            >
-              <Pencil2Icon className="h-3.5 w-3.5" aria-hidden />
-            </button>
-          ) : null}
-          {projectPath ? (
-            <span className="relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label={t("recentChats.projectActions")}
-                    title={t("recentChats.projectActions")}
-                    className="absolute inset-0 flex items-center justify-center rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
-                  >
-                    <Ellipsis className="h-3 w-3" aria-hidden />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="bottom" align="end">
-                  <DropdownMenuItem onSelect={() => togglePinnedProject(projectPath)}>
-                    {pinned ? (
-                      <PinOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    ) : (
-                      <Pin className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    )}
-                    {pinned ? t("recentChats.unpin") : t("recentChats.pin")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </span>
-          ) : null}
-        </div>
-        {collapsed ? null : (
-          <>
-            {visibleItems.map((session) => renderChatRow(session, true))}
-            {remainingCount > 0 ? (
-              <button
-                type="button"
-                onClick={() => loadMore(key)}
-                className="ml-4 rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
-              >
-                {t("recentChats.loadMore", { count: remainingCount })}
-              </button>
-            ) : null}
-          </>
-        )}
-      </div>
-    );
-  };
-
-  const hasPinned = pinnedChats.length > 0 || pinnedProjects.length > 0;
+  const hasPinned = pinnedChats.length > 0;
+  const visibleSessions = regularSessions.slice(0, visibleCount);
+  const remainingCount = Math.max(regularSessions.length - visibleCount, 0);
   const pinnedCollapsed = collapsedGroups.has("section:pinned");
 
   return (
@@ -860,7 +613,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     // once one has opened, strobing the list as the pointer runs down it.
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex flex-col">
-        <div className="flex items-center justify-between px-5 pt-4">
+        <div className="flex items-center justify-between px-5 pt-1">
           <span className="text-section text-foreground">{t("recentChats.title")}</span>
           <div className="flex items-center gap-1">
             <IconButton
@@ -887,7 +640,10 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 ].map(({ value, label }) => (
                   <DropdownMenuItem
                     key={value}
-                    onSelect={() => setScope(value)}
+                    onSelect={() => {
+                      setScope(value);
+                      setVisibleCount(CHATS_PAGE_SIZE);
+                    }}
                     className={
                       scope === value ? "text-ui text-foreground" : "text-ui text-foreground/85"
                     }
@@ -899,29 +655,6 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                   </DropdownMenuItem>
                 ))}
                 <div className="px-2 pb-1 pt-1 text-aux text-subtle-foreground">
-                  {t("recentChats.groupBy")}
-                </div>
-                {[
-                  { mode: "date" as const, label: t("recentChats.groupByDate") },
-                  { mode: "project" as const, label: t("recentChats.groupByProjects") },
-                ].map(({ mode, label }) => {
-                  const selected = groupMode === mode;
-                  return (
-                    <DropdownMenuItem
-                      key={mode}
-                      onSelect={() => setGroupMode(mode)}
-                      className={
-                        selected ? "text-ui text-foreground" : "text-ui text-foreground/85"
-                      }
-                    >
-                      <span>{label}</span>
-                      {selected ? (
-                        <Check className="ml-auto h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
-                      ) : null}
-                    </DropdownMenuItem>
-                  );
-                })}
-                <div className="px-2 pb-1 pt-2 text-aux text-subtle-foreground">
                   {t("recentChats.status")}
                 </div>
                 {[
@@ -933,7 +666,10 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                   return (
                     <DropdownMenuItem
                       key={value}
-                      onSelect={() => setStatusFilter(value)}
+                      onSelect={() => {
+                        setStatusFilter(value);
+                        setVisibleCount(CHATS_PAGE_SIZE);
+                      }}
                       className={
                         selected ? "text-ui text-foreground" : "text-ui text-foreground/85"
                       }
@@ -973,15 +709,6 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               {pinnedCollapsed ? null : (
                 <div className="space-y-1">
                   {pinnedChats.map((session) => renderChatRow(session))}
-                  {pinnedProjects.map(({ projectPath, name, items }) =>
-                    renderProjectGroup({
-                      key: `pinned-project:${projectPath}`,
-                      label: name,
-                      items,
-                      projectPath,
-                      pinned: true,
-                    }),
-                  )}
                 </div>
               )}
             </section>
@@ -1015,59 +742,32 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 {t("recentChats.empty")}
               </div>
             )
-          ) : groupMode === "project" ? (
-            projectGroups.length > 0 ? (
-              <section
-                aria-label={hasPinned ? undefined : t("recentChats.sectionProjects")}
-                aria-labelledby={hasPinned ? "recent-chats-projects-heading" : undefined}
-              >
-                {hasPinned ? (
-                  <h2
-                    id="recent-chats-projects-heading"
-                    className="px-2 pb-1 pt-3 text-aux text-subtle-foreground"
-                  >
-                    {t("recentChats.sectionProjects")}
-                  </h2>
-                ) : null}
-                <div className="space-y-1">
-                  {projectGroups.map(({ key, label, items, projectPath }) =>
-                    renderProjectGroup({
-                      key,
-                      label,
-                      items,
-                      projectPath,
-                      pinned: false,
-                    }),
-                  )}
-                </div>
-              </section>
-            ) : null
           ) : (
-            dateGroups.map(({ key, label, items }) => {
-              const collapsed = collapsedGroups.has(key);
-              return (
-                <section key={key} className="mb-4 last:mb-0">
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(key)}
-                    aria-expanded={!collapsed}
-                    className="flex items-center gap-2 rounded-4 border border-transparent px-2 pb-1 pt-3 text-aux text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
-                  >
-                    <span>{label}</span>
-                    {collapsed ? (
-                      <ChevronRightIcon className="h-3.5 w-3.5" aria-hidden />
-                    ) : (
-                      <ChevronDownIcon className="h-3.5 w-3.5" aria-hidden />
-                    )}
-                  </button>
-                  {collapsed ? null : (
-                    <div className="space-y-1">
-                      {items.map((session) => renderChatRow(session))}
-                    </div>
-                  )}
-                </section>
-              );
-            })
+            <section
+              aria-label={hasPinned ? undefined : t("recentChats.sectionRecent")}
+              aria-labelledby={hasPinned ? "recent-chats-recent-heading" : undefined}
+            >
+              {hasPinned ? (
+                <h2
+                  id="recent-chats-recent-heading"
+                  className="px-2 pb-1 pt-3 text-aux text-subtle-foreground"
+                >
+                  {t("recentChats.sectionRecent")}
+                </h2>
+              ) : null}
+              <div className="space-y-1">
+                {visibleSessions.map((session) => renderChatRow(session))}
+              </div>
+              {remainingCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((count) => count + CHATS_PAGE_SIZE)}
+                  className="mt-1 rounded-4 border border-transparent px-2 py-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+                >
+                  {t("recentChats.loadMore", { count: Math.min(remainingCount, CHATS_PAGE_SIZE) })}
+                </button>
+              ) : null}
+            </section>
           )}
         </div>
         <RomeConfirmDialog

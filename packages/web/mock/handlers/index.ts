@@ -952,6 +952,17 @@ const projectsTree: MockFsNode[] = [
   dir("projects/research", [
     file("projects/research/papers.md", mockBody("projects/research/papers.md")),
   ]),
+  // The folders the chat fixtures work in, so each chat's project has files.
+  dir("projects/default", [
+    file("projects/default/notes.md", mockBody("projects/default/notes.md")),
+  ]),
+  dir("projects/website-redesign", [
+    file("projects/website-redesign/brief.md", mockBody("projects/website-redesign/brief.md")),
+    file(
+      "projects/website-redesign/launch-email.md",
+      mockBody("projects/website-redesign/launch-email.md"),
+    ),
+  ]),
   file("projects/todo.md", mockBody("projects/todo.md")),
 ];
 

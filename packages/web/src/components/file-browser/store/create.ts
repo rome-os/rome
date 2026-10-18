@@ -304,7 +304,7 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         navigateToPath(path, opts) {
           if (embedded) return;
           const route = getRouteSnapshot();
-          const nextPathname = getFileBrowserUrlPath(logicalRootPath, path);
+          const nextPathname = getFileBrowserUrlPath(logicalRootPath, path, config.routeBasePath);
           const hideSidebar = new URLSearchParams(route.search).get("hideSidebar");
           const nextLocation = hideSidebar === "1" ? `${nextPathname}?hideSidebar=1` : nextPathname;
           get().refs.acceptedBrowserPath = nextPathname;

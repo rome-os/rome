@@ -6,7 +6,7 @@ import { getFileBrowserUrlPath } from "@/lib/file-browser-routing";
 import type { WidgetPlacement } from "./use-free-cells";
 
 // Must match the `logicalRootPath` ProjectsWidget passes to FileBrowserPage —
-// both name the same route namespace the full `/projects` page mounts at.
+// both name the logical root the full Files page (`/files`) browses.
 const PROJECTS_LOGICAL_ROOT = "projects";
 
 /**
@@ -50,7 +50,7 @@ export function buildFullAppPath(
 export function getWidgetFullHref(widget: WidgetPlacement): string | null {
   switch (widget.type) {
     case "projects":
-      return getFileBrowserUrlPath(PROJECTS_LOGICAL_ROOT, widget.selectedPath ?? null);
+      return getFileBrowserUrlPath(PROJECTS_LOGICAL_ROOT, widget.selectedPath ?? null, "/files");
     case "desktop":
       return "/desktop";
     case "app":

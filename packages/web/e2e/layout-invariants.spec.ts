@@ -39,6 +39,7 @@ const ROUTES = [
   "/activity",
   "/memory",
   "/projects",
+  "/files",
   "/dev/styleguide",
   "/dev/typography",
   "/dev/connections",

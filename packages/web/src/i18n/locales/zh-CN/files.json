@@ -17,7 +17,7 @@
     }
   },
   "projects": {
-    "title": "项目",
+    "title": "文件",
     "rootLabel": "~/.rome/<profile>/projects",
     "searchPlaceholder": "搜索项目文件…",
     "allHeroTitle": "所有项目",

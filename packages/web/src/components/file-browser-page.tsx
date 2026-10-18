@@ -23,6 +23,8 @@ interface FileBrowserPageProps {
   folderPanel?: (props: { path: string }) => ReactNode;
   initialSelectedFolderPath?: string;
   logicalRootPath: string;
+  /** The page route, when it differs from `/<logicalRootPath>`. */
+  routeBasePath?: string;
   getDeleteDescription?: DeleteDescriptionResolver;
   onStartChatFromFolder?: (path: string) => void;
   onPathsDeleted?: (paths: string[]) => void;
@@ -54,6 +56,7 @@ export function FileBrowserPage({
   folderPanel,
   initialSelectedFolderPath,
   logicalRootPath,
+  routeBasePath = `/${logicalRootPath}`,
   getDeleteDescription,
   onStartChatFromFolder,
   onPathsDeleted,
@@ -76,7 +79,7 @@ export function FileBrowserPage({
     // pre-populate selectedFolderPath here or the folder dashboard flashes
     // briefly before the real selection lands.
     const routePathRelative = location.pathname
-      .replace(new RegExp(`^/${logicalRootPath}/?`), "")
+      .replace(new RegExp(`^${routeBasePath}/?`), "")
       .replace(/^\/+|\/+$/g, "");
     if (!embedded && routePathRelative) return null;
 
@@ -102,6 +105,7 @@ export function FileBrowserPage({
     () => ({
       apiBasePath,
       logicalRootPath,
+      routeBasePath,
       rootLabel,
       autoSave,
       initialSelectedFolderPath: effectiveInitialSelectedFolderPath,
@@ -118,6 +122,7 @@ export function FileBrowserPage({
     [
       apiBasePath,
       logicalRootPath,
+      routeBasePath,
       rootLabel,
       autoSave,
       effectiveInitialSelectedFolderPath,

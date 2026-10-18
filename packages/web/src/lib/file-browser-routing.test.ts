@@ -16,6 +16,13 @@ describe("file browser routing", () => {
     expect(getFileBrowserUrlPath("projects", null)).toBe("/projects");
   });
 
+  it("builds URLs under a route that differs from the logical root", () => {
+    expect(getFileBrowserUrlPath("projects", "projects/app/a b.md", "/files")).toBe(
+      "/files/app/a%20b.md",
+    );
+    expect(getFileBrowserUrlPath("projects", null, "/files")).toBe("/files");
+  });
+
   it("maps route splats back to logical paths", () => {
     expect(getFileBrowserRouteLogicalPath("projects", "app/src/index.ts")).toBe(
       "projects/app/src/index.ts",

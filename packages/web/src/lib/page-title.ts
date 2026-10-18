@@ -64,7 +64,7 @@ export interface TitledDestination {
 // The two routes whose whole subject is a path in a tree. Their pages render a
 // file browser that keeps the open file in the URL, so the route can name it
 // without the page reporting anything.
-const FILE_BROWSER_PREFIXES = ["/memory", "/projects"];
+const FILE_BROWSER_PREFIXES = ["/memory", "/files"];
 
 export interface RouteTitle {
   /** Key into the `common` namespace naming the destination. */
