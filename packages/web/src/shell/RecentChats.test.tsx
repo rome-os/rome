@@ -204,9 +204,11 @@ describe("RecentChats", () => {
     renderRecentChats("/chat", onSearch);
 
     await screen.findByText("No chats yet");
-    const searchButton = screen.getByRole("button", { name: "Search apps and chats" });
+    const searchButton = screen.getByRole("button", { name: "Search pages, apps, and chats" });
     expect(searchButton).toBeTruthy();
-    expect(searchButton.getAttribute("title")).toMatch(/^Search apps and chats \((⌘K|Ctrl K)\)$/);
+    expect(searchButton.getAttribute("title")).toMatch(
+      /^Search pages, apps, and chats \((⌘K|Ctrl K)\)$/,
+    );
     expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
 
     await user.click(searchButton);

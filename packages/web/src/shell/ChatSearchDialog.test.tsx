@@ -152,15 +152,15 @@ describe("chat search shortcut", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
-    expect(screen.getByRole("dialog", { name: "Search apps and chats" })).toBeTruthy();
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
+    expect(screen.getByRole("dialog", { name: "Search pages, apps, and chats" })).toBeTruthy();
     expect(document.activeElement).toBe(input);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(fetchSpy).toHaveBeenCalledWith("/api/apps", expect.any(Object));
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     await waitFor(() =>
-      expect(screen.queryByRole("combobox", { name: "Search apps and chats" })).toBeNull(),
+      expect(screen.queryByRole("combobox", { name: "Search pages, apps, and chats" })).toBeNull(),
     );
   });
 });
@@ -205,10 +205,12 @@ describe("ChatSearchDialog", () => {
     renderSearch("/chat", true);
 
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "roadmap",
     );
-    expect(await screen.findByRole("status", { name: "Searching apps and chats…" })).toBeTruthy();
+    expect(
+      await screen.findByRole("status", { name: "Searching pages, apps, and chats…" }),
+    ).toBeTruthy();
     expect(screen.getAllByRole("status")).toHaveLength(1);
   });
 
@@ -225,7 +227,7 @@ describe("ChatSearchDialog", () => {
 
     renderSearch("/chat/current", true);
 
-    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
     expect(fetchSpy).toHaveBeenCalledWith("/api/chat/sessions?status=all", {
       credentials: "include",
     });
@@ -260,7 +262,7 @@ describe("ChatSearchDialog", () => {
     const user = userEvent.setup();
     renderSearch("/chat", true);
 
-    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
     const option = (await screen.findAllByRole("option"))[0];
     expect(
       within(option).getByText(formatMessageTimestamp("2026-07-15T09:00:00.000Z")),
@@ -286,7 +288,7 @@ describe("ChatSearchDialog", () => {
     ]);
     renderSearch("/settings?hideSidebar=1", true);
 
-    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
     const options = await screen.findAllByRole("option");
     expect(options[0].getAttribute("aria-selected")).toBe("true");
 
@@ -305,13 +307,15 @@ describe("ChatSearchDialog", () => {
     const user = userEvent.setup();
     renderSearch("/chat", true);
 
-    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
     await user.type(input, "missing");
 
     // The no-results state waits for the debounced message search to settle.
-    expect(await screen.findByText("No apps or chats found")).toBeTruthy();
+    expect(await screen.findByText("No pages, apps, or chats found")).toBeTruthy();
     expect(
-      screen.getByText("Try another app name, app id, chat title, project, or message text."),
+      screen.getByText(
+        "Try another page or app name, app id, chat title, project, or message text.",
+      ),
     ).toBeTruthy();
     expect(screen.queryByRole("option")).toBeNull();
 
@@ -342,7 +346,7 @@ describe("ChatSearchDialog", () => {
     const user = userEvent.setup();
     renderSearch("/chat", true);
 
-    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
     await user.type(input, "roadmap");
 
     // Title match shows immediately; the content match lands after the debounce.
@@ -369,7 +373,7 @@ describe("ChatSearchDialog", () => {
     const user = userEvent.setup();
     renderSearch("/settings", true);
 
-    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
     const recentOptions = await screen.findAllByRole("option");
     expect(recentOptions).toHaveLength(1);
     expect(recentOptions[0].textContent).toContain("Roadmap review");
@@ -416,7 +420,7 @@ describe("ChatSearchDialog", () => {
     renderSearch("/chat", true);
 
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "notes",
     );
     const options = screen.getAllByRole("option");
@@ -442,7 +446,7 @@ describe("ChatSearchDialog", () => {
     renderSearch("/chat", true);
 
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "inbox",
     );
     await user.click(await screen.findByRole("option", { name: "Inbox" }));
@@ -458,12 +462,108 @@ describe("ChatSearchDialog", () => {
     const user = userEvent.setup();
     renderSearch("/settings?hideSidebar=1", true);
 
-    await user.type(await screen.findByRole("combobox", { name: "Search apps and chats" }), "road");
+    await user.type(
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
+      "road",
+    );
     await user.click(await screen.findByRole("option", { name: "Roadmap" }));
 
     expect(screen.getByTestId("location").textContent).toBe(
       "/apps/road?view=compact&hideSidebar=1",
     );
+  });
+
+  it("finds Rome's own pages by label, id, or alias, and opens them", async () => {
+    mockSessionSearch([chatSession("browse-chat", "Browser research", "rome")], [], []);
+    const user = userEvent.setup();
+    renderSearch("/chat", true);
+
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
+    // The blank state stays recent chats only.
+    await screen.findByRole("option", { name: /Browser research/ });
+    expect(screen.queryByRole("option", { name: "Browser" })).toBeNull();
+
+    for (const query of ["projects", "sessions", "desktop"]) {
+      await user.clear(input);
+      await user.type(input, query);
+      expect(await screen.findByText("Pages")).toBeTruthy();
+    }
+    expect(screen.getByRole("option", { name: "Browser" })).toBeTruthy();
+
+    await user.clear(input);
+    await user.type(input, "browser");
+    const options = await screen.findAllByRole("option");
+    expect(options[0].getAttribute("aria-label")).toBe("Browser");
+    expect(screen.getByText("Pages")).toBeTruthy();
+    expect(screen.getByText("Chats")).toBeTruthy();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/desktop"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("lists pages before apps and moves between them with the keyboard", async () => {
+    mockSessionSearch([], [], [installedApp("settings-sync", "Settings Sync")]);
+    const user = userEvent.setup();
+    renderSearch("/chat", true);
+
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
+    await user.type(input, "settings");
+    await screen.findByRole("option", { name: "Settings Sync" });
+    expect(
+      screen.getAllByRole("option").map((option) => option.getAttribute("aria-label")),
+    ).toEqual(["Settings", "Settings Sync"]);
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe("/apps/settings-sync"),
+    );
+  });
+
+  it("leaves the App Store, which has no dashboard page, out of page results", async () => {
+    mockSessionSearch([], [], []);
+    const user = userEvent.setup();
+    renderSearch("/chat", true);
+
+    await user.type(
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
+      "store",
+    );
+    expect(await screen.findByText("No pages, apps, or chats found")).toBeTruthy();
+  });
+
+  it("matches translated page labels and keeps the English alias", async () => {
+    await i18n.changeLanguage("zh-CN");
+    try {
+      mockSessionSearch([], [], []);
+      const user = userEvent.setup();
+      renderSearch("/chat", true);
+
+      const input = await screen.findByRole("combobox", { name: "搜索页面、应用和对话" });
+      await user.type(input, "浏览器");
+      expect(await screen.findByRole("option", { name: "浏览器" })).toBeTruthy();
+      expect(screen.getByText("页面")).toBeTruthy();
+
+      await user.clear(input);
+      await user.type(input, "browser");
+      expect(await screen.findByRole("option", { name: "浏览器" })).toBeTruthy();
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("keeps hidden-sidebar mode when opening a page", async () => {
+    mockSessionSearch([], [], []);
+    const user = userEvent.setup();
+    renderSearch("/settings?hideSidebar=1", true);
+
+    await user.type(
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
+      "projects",
+    );
+    await user.click(await screen.findByRole("option", { name: "Projects" }));
+    expect(screen.getByTestId("location").textContent).toBe("/projects?hideSidebar=1");
   });
 
   it("keeps app matches usable when chats fail", async () => {
@@ -478,7 +578,7 @@ describe("ChatSearchDialog", () => {
     renderSearch("/chat", true);
 
     expect(await screen.findByText("Chats couldn't be loaded")).toBeTruthy();
-    const input = screen.getByRole("combobox", { name: "Search apps and chats" });
+    const input = screen.getByRole("combobox", { name: "Search pages, apps, and chats" });
     await user.type(input, "road");
     expect(await screen.findByRole("option", { name: "Roadmap" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry loading chats" })).toBeTruthy();
@@ -497,10 +597,13 @@ describe("ChatSearchDialog", () => {
     const user = userEvent.setup();
     renderSearch("/chat", true);
 
-    await user.type(await screen.findByRole("combobox", { name: "Search apps and chats" }), "road");
+    await user.type(
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
+      "road",
+    );
     expect((await screen.findAllByRole("option"))[0].textContent).toContain("Roadmap review");
-    expect(screen.getByRole("status", { name: "Searching apps and chats…" })).toBeTruthy();
-    expect(screen.queryByText("No apps or chats found")).toBeNull();
+    expect(screen.getByRole("status", { name: "Searching pages, apps, and chats…" })).toBeTruthy();
+    expect(screen.queryByText("No pages, apps, or chats found")).toBeNull();
   });
 
   it("retries an app failure without clearing the query or hiding chat matches", async () => {
@@ -521,7 +624,7 @@ describe("ChatSearchDialog", () => {
     const user = userEvent.setup();
     renderSearch("/chat", true);
 
-    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
     await user.type(input, "beta");
     expect((await screen.findAllByRole("option"))[0].textContent).toContain("Beta plan");
     await user.click(await screen.findByRole("button", { name: "Retry loading apps" }));
@@ -552,7 +655,7 @@ describe("ChatSearchDialog", () => {
     renderSearch("/chat", true);
 
     expect(await screen.findByText("Chats couldn't be loaded")).toBeTruthy();
-    const input = screen.getByRole("combobox", { name: "Search apps and chats" });
+    const input = screen.getByRole("combobox", { name: "Search pages, apps, and chats" });
     await user.type(input, "beta");
     await user.click(screen.getByRole("button", { name: "Retry loading chats" }));
 
@@ -674,7 +777,7 @@ describe("ChatSearchDialog agent messaging", () => {
     renderSearch("/chat", true);
 
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "@expl",
     );
 
@@ -697,7 +800,7 @@ describe("ChatSearchDialog agent messaging", () => {
     renderSearch("/chat?hideSidebar=1", true);
 
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "@writ",
     );
     await screen.findByRole("option", { name: "Writer" });
@@ -734,7 +837,10 @@ describe("ChatSearchDialog agent messaging", () => {
     const user = userEvent.setup();
     renderSearch("/chat", true);
 
-    await user.type(await screen.findByRole("combobox", { name: "Search apps and chats" }), "@");
+    await user.type(
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
+      "@",
+    );
     await user.click(await screen.findByRole("option", { name: "Main" }));
     const input = await screen.findByRole("combobox", { name: "Message Main" });
     expect(
@@ -752,7 +858,7 @@ describe("ChatSearchDialog agent messaging", () => {
     renderSearch("/chat", true);
 
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "@expl",
     );
     await user.click(await screen.findByRole("option", { name: "Explorer" }));
@@ -760,7 +866,9 @@ describe("ChatSearchDialog agent messaging", () => {
 
     await user.type(input, "{Backspace}");
 
-    expect(await screen.findByRole("combobox", { name: "Search apps and chats" })).toBe(input);
+    expect(await screen.findByRole("combobox", { name: "Search pages, apps, and chats" })).toBe(
+      input,
+    );
     expect(screen.queryByRole("button", { name: "Remove Explorer" })).toBeNull();
   });
 
@@ -772,7 +880,7 @@ describe("ChatSearchDialog agent messaging", () => {
     renderSearch("/chat", true);
 
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "@expl",
     );
     await user.click(await screen.findByRole("option", { name: "Explorer" }));
@@ -806,7 +914,7 @@ describe("ChatSearchDialog agent message controls", () => {
     renderSearch("/chat", true);
 
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "@expl",
     );
     await user.click(await screen.findByRole("option", { name: "Explorer" }));
@@ -837,7 +945,7 @@ describe("ChatSearchDialog agent message controls", () => {
     renderSearch("/chat", true);
 
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "@expl",
     );
     await user.click(await screen.findByRole("option", { name: "Explorer" }));
@@ -863,7 +971,10 @@ describe("ChatSearchDialog agent messaging across openings", () => {
     const user = userEvent.setup();
     renderSearch("/chat", true);
 
-    await user.type(await screen.findByRole("combobox", { name: "Search apps and chats" }), "@");
+    await user.type(
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
+      "@",
+    );
 
     expect((await screen.findByRole("alert")).textContent).toContain("Agents couldn't be loaded");
     await user.click(screen.getByRole("button", { name: "Try again" }));
@@ -884,7 +995,7 @@ describe("ChatSearchDialog agent messaging across openings", () => {
     renderSearch("/chat", true);
 
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "@expl",
     );
     await user.click(await screen.findByRole("option", { name: "Explorer" }));
@@ -927,7 +1038,7 @@ describe("ChatSearchDialog agent messaging across openings", () => {
     renderSearch("/chat", true);
 
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "@expl",
     );
     await user.click(await screen.findByRole("option", { name: "Explorer" }));
@@ -955,7 +1066,7 @@ describe("ChatSearchDialog agent messaging across openings", () => {
     // send's in-flight guard or its session.
     await user.click(screen.getByRole("button", { name: "Open search" }));
     await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
       "@writ",
     );
     await user.click(await screen.findByRole("option", { name: "Writer" }));
@@ -1000,7 +1111,7 @@ describe("ChatSearchDialog agent catalog errors", () => {
     const user = userEvent.setup();
     renderSearch("/chat", true);
 
-    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
     await user.type(input, "@");
     expect((await screen.findByRole("alert")).textContent).toContain("Agents couldn't be loaded");
 

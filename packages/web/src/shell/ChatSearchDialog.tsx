@@ -54,6 +54,7 @@ import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 import { randomUUID } from "@/lib/random-uuid";
+import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
 
 const RECENT_CHAT_LIMIT = 10;
 const CONTENT_SEARCH_DEBOUNCE_MS = 200;
@@ -69,6 +70,15 @@ interface AppSearchEntry {
   app: InstalledAppCard;
   href: string;
 }
+
+interface PageSearchEntry {
+  page: BuiltinNavEntry;
+  label: string;
+}
+
+/** Built-in pages the switcher can open. The App Store has no dashboard route
+ * (it opens a sheet or Rome Cloud), so it stays with the sidebar and launcher. */
+const SEARCHABLE_PAGES = APP_NAV.filter((page) => page.id !== "store");
 
 /**
  * The agent filter while the query is a lone `@` token at its start, else
@@ -108,6 +118,32 @@ function matchingOpenableApps(apps: InstalledAppCard[], normalizedQuery: string)
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
     .sort((a, b) => b.rank - a.rank || a.originalIndex - b.originalIndex)
     .map(({ app, href }) => ({ app, href }));
+}
+
+/** Matches Rome's own pages by translated label, id, or alias, ranked like
+ * apps: an exact name, then a name prefix, then any substring. */
+function matchingPages(
+  pages: readonly BuiltinNavEntry[],
+  labelFor: (page: BuiltinNavEntry) => string,
+  normalizedQuery: string,
+): PageSearchEntry[] {
+  if (!normalizedQuery) return [];
+
+  return pages
+    .map((page, originalIndex) => {
+      const label = labelFor(page);
+      const names = [label, page.id, ...(page.aliases ?? [])].map(normalizeSearchText);
+      if (!names.some((name) => name.includes(normalizedQuery))) return null;
+      const rank = names.includes(normalizedQuery)
+        ? 3
+        : names.some((name) => name.startsWith(normalizedQuery))
+          ? 2
+          : 1;
+      return { page, label, originalIndex, rank };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .sort((a, b) => b.rank - a.rank || a.originalIndex - b.originalIndex)
+    .map(({ page, label }) => ({ page, label }));
 }
 
 interface MatchRange {
@@ -352,6 +388,10 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
   }, [open, trimmedQuery]);
 
   const normalizedQuery = normalizeSearchText(searchQuery);
+  const matchingPageEntries = useMemo(
+    () => matchingPages(SEARCHABLE_PAGES, (page) => t(page.labelKey), normalizedQuery),
+    [normalizedQuery, t],
+  );
   const matchingApps = useMemo(
     () => matchingOpenableApps(apps ?? [], normalizedQuery),
     [apps, normalizedQuery],
@@ -537,18 +577,18 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     }
   }, [agentMention, messageText, openSessionById, t, tChat]);
 
-  const openApp = useCallback(
-    (entry: AppSearchEntry) => {
+  const openHref = useCallback(
+    (href: string) => {
       onOpenChange(false);
       const preserveHiddenSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
       if (!preserveHiddenSidebar) {
-        navigate(entry.href);
+        navigate(href);
         return;
       }
 
       // App hrefs may already carry app-owned query parameters. Parse rather
       // than concatenate so shell mode is added without replacing them.
-      const target = new URL(entry.href, "http://rome.local");
+      const target = new URL(href, "http://rome.local");
       target.searchParams.set("hideSidebar", "1");
       navigate(`${target.pathname}${target.search}${target.hash}`);
     },
@@ -561,7 +601,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
   const isSearching = normalizedQuery.length > 0;
   const chatLoading = sessions === null && !loadError;
   const contentPending = isSearching && contentSearchQuery !== trimmedQuery;
-  const resultCount = visibleEntries.length + matchingApps.length;
+  const resultCount = matchingPageEntries.length + matchingApps.length + visibleEntries.length;
   const relevantLoading = isSearching
     ? chatLoading || appsLoading || contentLoading || contentPending
     : chatLoading;
@@ -649,12 +689,40 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
       </CommandItem>
     ) : null;
 
+  const pageItems = matchingPageEntries.map(({ page, label }) => (
+    <CommandItem
+      key={`page:${page.id}`}
+      value={`page:${page.id}`}
+      aria-label={label}
+      onSelect={() => openHref(page.href)}
+      className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+    >
+      <span
+        className={cn(
+          "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
+          "bg-surface-muted text-muted-foreground",
+          "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
+        )}
+      >
+        <page.Icon className="size-4" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-ui text-foreground">
+          <HighlightedText text={label} terms={queryTerms} />
+        </span>
+        <span aria-hidden className="mt-1 block truncate text-aux text-muted-foreground">
+          <HighlightedText text={page.href} terms={queryTerms} />
+        </span>
+      </span>
+    </CommandItem>
+  ));
+
   const appItems = matchingApps.map((entry) => (
     <CommandItem
       key={`app:${entry.app.id}`}
       value={`app:${entry.app.id}`}
       aria-label={entry.app.displayName}
-      onSelect={() => openApp(entry)}
+      onSelect={() => openHref(entry.href)}
       className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
     >
       <TileIcon
@@ -1025,6 +1093,11 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
             {messagingAgent ? sendItem : null}
             {!pickingAgent && !messagingAgent ? (
               <>
+                {hasResults && isSearching && matchingPageEntries.length > 0 ? (
+                  <CommandGroup heading={t("recentChats.searchPagesGroup")}>
+                    {pageItems}
+                  </CommandGroup>
+                ) : null}
                 {hasResults && isSearching && matchingApps.length > 0 ? (
                   <CommandGroup heading={t("recentChats.searchAppsGroup")}>{appItems}</CommandGroup>
                 ) : null}

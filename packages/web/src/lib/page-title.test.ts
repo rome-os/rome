@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { APP_NAV } from "@/shell/AppGrid";
+import { APP_NAV } from "@/shell/builtin-nav";
 import { composeTitle, routeTitle } from "./page-title";
 
 describe("composeTitle", () => {

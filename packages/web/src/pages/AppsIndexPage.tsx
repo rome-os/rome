@@ -44,7 +44,7 @@ import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { useSidebarPins } from "@/hooks/use-sidebar-pins";
-import { APP_NAV } from "@/shell/AppGrid";
+import { APP_NAV } from "@/shell/builtin-nav";
 
 function isInFlight(phase: AppViewState): boolean {
   return phase === "installing" || phase === "uninstalling";
@@ -318,6 +318,7 @@ export default function AppsIndexPage() {
       tCommon(entry.labelKey),
       t(`builtinDescriptions.${entry.id}`, { defaultValue: "" }),
       entry.id,
+      ...(entry.aliases ?? []),
     ]
       .join(" ")
       .toLowerCase();

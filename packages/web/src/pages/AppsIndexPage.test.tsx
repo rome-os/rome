@@ -32,12 +32,14 @@ rs.mock("@/components/logo", () => ({
 // The built-in nav grid imports .svg icons that resolve to URL strings under
 // Rstest (not React components), which jsdom rejects as element names. The
 // real icons are irrelevant to apps reactivity, so stub them with components.
-rs.mock("@/shell/AppGrid", () => ({
+rs.mock("@/shell/builtin-nav", () => ({
   APP_NAV: [
     { id: "apps", href: "/apps", labelKey: "nav.apps", Icon: () => null },
     { id: "chat", href: "/chat", labelKey: "nav.chat", Icon: () => null },
     { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: () => null },
   ],
+}));
+rs.mock("@/shell/AppGrid", () => ({
   DEFAULT_SIDEBAR_PINS: [
     { type: "builtin" as const, id: "apps" },
     { type: "builtin" as const, id: "chat" },
