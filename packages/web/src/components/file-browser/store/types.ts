@@ -256,7 +256,6 @@ export interface UiSlice {
   deleting: boolean;
   moving: boolean;
   renaming: boolean;
-  uploading: boolean;
   uploadProgress: FileUploadProgress | null;
   /**
    * The folder that the sm-only `FilesPane` navigator is currently showing

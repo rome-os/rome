@@ -736,7 +736,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         deleting: false,
         moving: false,
         renaming: false,
-        uploading: false,
         uploadProgress: null,
         filesPaneDrillPath: null,
 
@@ -822,6 +821,12 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         async uploadFiles(files, targetPathOverride) {
           if (files.length === 0) return;
           const state = get();
+          // One shared progress card and unload guard track a single batch, so
+          // a second batch must wait instead of overwriting and clearing them.
+          if (state.ui.uploadProgress) {
+            toast.error(config.t("status.uploadInProgress"));
+            return;
+          }
           const fallbackTarget =
             state.selection.selectedFolderPath ??
             state.ui.filesPaneDrillPath ??
@@ -833,11 +838,15 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
           ) {
             return;
           }
+          // Re-check: another batch may have started while unsaved edits were resolved.
+          if (get().ui.uploadProgress) {
+            toast.error(config.t("status.uploadInProgress"));
+            return;
+          }
 
           set((s) => ({
             ui: {
               ...s.ui,
-              uploading: true,
               uploadProgress: {
                 fileCount: files.length,
                 firstFileName: files[0].file.name,
@@ -918,7 +927,7 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
           } catch {
             toast.error(config.t("status.networkError"));
           } finally {
-            set((s) => ({ ui: { ...s.ui, uploading: false, uploadProgress: null } }));
+            set((s) => ({ ui: { ...s.ui, uploadProgress: null } }));
           }
         },
 

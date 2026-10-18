@@ -3,7 +3,7 @@ import { useFileBrowserStore, useFileBrowserStoreApi } from "../store/context";
 
 export function useBeforeUnloadGuard() {
   const store = useFileBrowserStoreApi();
-  const uploading = useFileBrowserStore((state) => state.ui.uploading);
+  const uploading = useFileBrowserStore((state) => state.ui.uploadProgress !== null);
 
   // Upload protection must not inherit the editor's one-shot navigation exemption.
   useEffect(() => {

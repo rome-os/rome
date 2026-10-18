@@ -5,7 +5,7 @@ import { useBeforeUnloadGuard } from "./useBeforeUnloadGuard";
 
 const { state, store } = rs.hoisted(() => {
   const state = {
-    ui: { uploading: false },
+    ui: { uploadProgress: null as object | null },
     file: {
       _suppressNextBeforeUnload: false,
       _manualSaveInFlight: false,
@@ -15,6 +15,14 @@ const { state, store } = rs.hoisted(() => {
   };
   return { state, store: { getState: () => state } };
 });
+
+const ACTIVE_UPLOAD = {
+  fileCount: 1,
+  firstFileName: "a.txt",
+  loaded: 0,
+  total: 0,
+  phase: "uploading",
+};
 
 rs.mock("../store/context", () => ({
   useFileBrowserStoreApi: () => store,
@@ -28,7 +36,7 @@ function tryLeaving() {
 }
 
 beforeEach(() => {
-  state.ui.uploading = false;
+  state.ui.uploadProgress = null;
   state.file._suppressNextBeforeUnload = false;
   state.file._manualSaveInFlight = false;
   state.file._autoSaveCanRecover = false;
@@ -44,21 +52,21 @@ describe("useBeforeUnloadGuard", () => {
     const remove = rs.spyOn(window, "removeEventListener");
     const { rerender, unmount } = renderHook(() => useBeforeUnloadGuard());
     expect(tryLeaving()).toBe(false);
-    state.ui.uploading = true;
+    state.ui.uploadProgress = ACTIVE_UPLOAD;
     rerender();
     expect(tryLeaving()).toBe(true);
-    state.ui.uploading = false;
+    state.ui.uploadProgress = null;
     rerender();
     expect(remove).toHaveBeenCalledWith("beforeunload", expect.any(Function));
     expect(tryLeaving()).toBe(false);
-    state.ui.uploading = true;
+    state.ui.uploadProgress = ACTIVE_UPLOAD;
     rerender();
     unmount();
     expect(tryLeaving()).toBe(false);
   });
 
   it("does not let an editor navigation exemption bypass upload protection", () => {
-    state.ui.uploading = true;
+    state.ui.uploadProgress = ACTIVE_UPLOAD;
     state.file._suppressNextBeforeUnload = true;
     state.file._autoSaveCanRecover = true;
     renderHook(() => useBeforeUnloadGuard());

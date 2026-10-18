@@ -158,7 +158,6 @@ describe("file-browser upload progress", () => {
       "first.txt",
       "second.txt",
     ]);
-    expect(store.getState().ui.uploading).toBe(true);
     expect(store.getState().ui.uploadProgress).toEqual({
       fileCount: 2,
       firstFileName: "first.txt",
@@ -175,7 +174,6 @@ describe("file-browser upload progress", () => {
     });
     xhr.progress(100, 100);
     expect(store.getState().ui.uploadProgress?.phase).toBe("finishing");
-    expect(store.getState().ui.uploading).toBe(true);
     xhr.upload.onload?.();
     expect(store.getState().ui.uploadProgress?.phase).toBe("finishing");
     expect(toast.success).not.toHaveBeenCalled();
@@ -188,7 +186,6 @@ describe("file-browser upload progress", () => {
     expect(loadAncestors).toHaveBeenCalledWith("/projects/target/folder/first.txt");
     expect(loadFile).toHaveBeenCalledWith("/projects/target/folder/first.txt", {});
     expect(toast.success).toHaveBeenCalledWith("Uploaded");
-    expect(store.getState().ui.uploading).toBe(false);
     expect(store.getState().ui.uploadProgress).toBeNull();
   });
 
@@ -223,7 +220,6 @@ describe("file-browser upload progress", () => {
     await pending;
     expect(toast.error).toHaveBeenCalledWith(message);
     expect(toast.success).not.toHaveBeenCalled();
-    expect(store.getState().ui.uploading).toBe(false);
     expect(store.getState().ui.uploadProgress).toBeNull();
   });
 
@@ -237,7 +233,6 @@ describe("file-browser upload progress", () => {
     MockUploadRequest.instances[0][event]?.();
     await pending;
     expect(toast.error).toHaveBeenCalledWith("status.networkError");
-    expect(store.getState().ui.uploading).toBe(false);
     expect(store.getState().ui.uploadProgress).toBeNull();
   });
 
@@ -248,8 +243,28 @@ describe("file-browser upload progress", () => {
     MockUploadRequest.instances[0].onload?.();
     await pending;
     expect(toast.error).toHaveBeenCalledWith("status.networkError");
-    expect(store.getState().ui.uploading).toBe(false);
     expect(store.getState().ui.uploadProgress).toBeNull();
+  });
+
+  it("rejects a second batch while one is in flight and keeps the first batch tracked", async () => {
+    const store = createTestStore();
+    rs.spyOn(store.getState().tree, "loadRoot").mockResolvedValue([]);
+    const first = store.getState().ui.uploadFiles(entries);
+    MockUploadRequest.instances[0].progress(40, 100);
+
+    await store.getState().ui.uploadFiles([entries[0]]);
+    expect(MockUploadRequest.instances).toHaveLength(1);
+    expect(toast.error).toHaveBeenCalledWith("status.uploadInProgress");
+    expect(store.getState().ui.uploadProgress).toMatchObject({ fileCount: 2, loaded: 40 });
+
+    MockUploadRequest.instances[0].respond(200, {});
+    await first;
+    expect(store.getState().ui.uploadProgress).toBeNull();
+
+    const next = store.getState().ui.uploadFiles([entries[0]]);
+    expect(MockUploadRequest.instances).toHaveLength(2);
+    MockUploadRequest.instances[1].respond(200, {});
+    await next;
   });
 
   it("does not start an empty or cancelled upload", async () => {
@@ -260,6 +275,5 @@ describe("file-browser upload progress", () => {
     await store.getState().ui.uploadFiles(entries);
     expect(MockUploadRequest.instances).toHaveLength(0);
     expect(store.getState().ui.uploadProgress).toBeNull();
-    expect(store.getState().ui.uploading).toBe(false);
   });
 });
