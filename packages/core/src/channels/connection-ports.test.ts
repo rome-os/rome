@@ -485,7 +485,7 @@ describe("reply streaming ports", () => {
     expect(sent).toEqual(["start first", "end first", "start second", "end second"]);
   });
 
-  it("sends at once while reply streaming is off, as it did before", async () => {
+  it("sends at once while reply streaming is off", async () => {
     const { send, sent, release } = portsFor({ pacing: pacingWith(false) });
     const first = send.send(chat, { text: "first" });
     const second = send.send(chat, { text: "second" });

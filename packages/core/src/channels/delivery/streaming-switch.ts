@@ -6,7 +6,7 @@ const log = createLogger("reply-streaming");
 /**
  * The guardian setting that turns reply streaming on, kept under Experimental
  * features in Advanced settings. Any value but `true` leaves Rome sending each
- * reply whole, as it did before streaming existed.
+ * reply whole.
  */
 export const ENABLE_REPLY_STREAMING_SETTING_KEY = "enableReplyStreaming";
 

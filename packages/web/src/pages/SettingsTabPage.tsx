@@ -1544,9 +1544,8 @@ function ImpersonationAdvancedSection({
 }
 
 /** Features still being tried out, each off until a guardian switches it on.
- *  Reply streaming is the first: with it off, Rome sends each reply whole, as it
- *  did before streaming existed. The setting is `enableReplyStreaming`, read by
- *  the host on every reply. */
+ *  Reply streaming is the first: with it off, Rome sends each reply whole. The
+ *  setting is `enableReplyStreaming`, read by the host on every reply. */
 function ExperimentalFeaturesSection({
   settings,
   onSave,
