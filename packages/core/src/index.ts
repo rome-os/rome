@@ -592,12 +592,16 @@ async function main() {
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, serviceOfChannel);
 
   // The worker cap bounds memory, so its default follows the instance's
-  // memory: the fixed 8 was tight on 4 GB and idle on 16 GB.
-  const maxWorkerProcesses = config.actionWorkerMaxProcesses ?? defaultWorkerCap(totalmem());
+  // memory: the fixed 8 was tight on 4 GB and idle on 16 GB. Inside a
+  // container with a memory limit, os.totalmem() is the host's total, so the
+  // cgroup limit wins when it is smaller.
+  const constrained = process.constrainedMemory();
+  const instanceMemory = constrained > 0 && constrained < totalmem() ? constrained : totalmem();
+  const maxWorkerProcesses = config.actionWorkerMaxProcesses ?? defaultWorkerCap(instanceMemory);
   log.info("action worker cap", {
     maxWorkers: maxWorkerProcesses,
     source: config.actionWorkerMaxProcesses === undefined ? "memory" : "env",
-    totalMemoryMB: Math.round(totalmem() / 1_048_576),
+    instanceMemoryMB: Math.round(instanceMemory / 1_048_576),
   });
   const actionEngine = new ActionEngine(
     actionRegistry,
