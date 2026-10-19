@@ -13,7 +13,7 @@ import type {
   AgentTurnHandle,
 } from "./agent-session.js";
 import { Pacer } from "../channels/delivery/pacer.js";
-import { type ReplyStream, ReplyStreams } from "../channels/delivery/streams.js";
+import { type ReplyStream, ReplyStreams, type ReplyTarget } from "../channels/delivery/streams.js";
 import { type DeliveryTransport, plainText } from "../channels/delivery/types.js";
 import { systemClock } from "../lib/clock.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
@@ -580,8 +580,14 @@ describe("AgentSessionBridge reply streaming", () => {
       sendTurn: () => ({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = { acquire: async () => session } as unknown as AgentSessionManager;
+    const targets: ReplyTarget[] = [];
     const replies = replacement
-      ? ({ open: async () => replacement } as unknown as ReplyStreams)
+      ? ({
+          open: async (target: ReplyTarget) => {
+            targets.push(target);
+            return replacement;
+          },
+        } as unknown as ReplyStreams)
       : new ReplyStreams({
           streaming: async () => on,
           replies: (channel) =>
@@ -605,6 +611,7 @@ describe("AgentSessionBridge reply streaming", () => {
         platformMessageId: "msg-1",
         streamReply,
         init: {
+          romeSessionId: "conversation-1",
           threadContext: {
             channel: "telegram",
             connectionId: "c",
@@ -616,7 +623,7 @@ describe("AgentSessionBridge reply streaming", () => {
     });
     const turnEnd = () =>
       child.sent.find((message) => JSON.stringify(message).includes('"type":"turn_end"'));
-    return { written, edits, turnEnd, turns };
+    return { written, edits, turnEnd, turns, targets };
   }
 
   const turnStart: StreamAgentEvent = {
@@ -679,6 +686,61 @@ describe("AgentSessionBridge reply streaming", () => {
     expect(JSON.stringify(turnEnd())).toContain(
       JSON.stringify({ status: "failed", messageIds: [] }),
     );
+  });
+
+  it("reports a broken reply whose message may have been created as unknown, so its caller does not send it again", async () => {
+    const { turnEnd } = run(turnEvents(...answer), {
+      streamReply: true,
+      replies: {
+        accept: () => {
+          throw new Error("split failed");
+        },
+        settle: async () => ({
+          status: "unknown",
+          parts: [{ block: 0, text: "hi there", state: "unknown" }],
+        }),
+        stop: () => {},
+      },
+    });
+
+    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+    expect(JSON.stringify(turnEnd())).toContain(
+      JSON.stringify({ status: "unknown", messageIds: [] }),
+    );
+  });
+
+  it("still ends the turn when the reply cannot settle, and reports the reply as unknown", async () => {
+    const { turnEnd } = run(turnEvents(...answer), {
+      streamReply: true,
+      replies: {
+        accept: () => {},
+        settle: async () => {
+          throw new Error("record failed");
+        },
+        stop: () => {},
+      },
+    });
+
+    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+    expect(JSON.stringify(turnEnd())).toContain(
+      JSON.stringify({ status: "unknown", messageIds: [] }),
+    );
+  });
+
+  it("opens the reply in the conversation its caller records the run in", async () => {
+    const { turnEnd, targets } = run(turnEvents(...answer), {
+      streamReply: true,
+      replies: {
+        accept: () => {},
+        settle: async () => ({ status: "delivered", parts: [] }),
+        stop: () => {},
+      },
+    });
+
+    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+    expect(targets).toEqual([
+      expect.objectContaining({ channel: "telegram", romeSessionId: "conversation-1" }),
+    ]);
   });
 
   it("stops writing the reply before it interrupts the provider", async () => {

@@ -44,13 +44,13 @@ A reply can reach a chat as the agent writes it, rather than whole after the run
 
 ### Invariants
 
-- Reply streaming is off until it is switched on under Experimental features in Advanced settings. Off, the app that ran a reply sends it whole, and no send waits on a write budget. The host reads the setting for each reply and each send, so a change applies to the next one.
+- Reply streaming is off until it is switched on under Experimental features in Advanced settings. Off, the app that ran a reply sends it whole, and no send waits on a write budget. The host reads the setting for each reply, and for each send on a Connection that can stream, so a change applies to the next one.
 - An app asks for streaming and the host decides. The reply streams only when the setting is on and the channel can stream. Otherwise the run reports no delivery, and the app sends the reply itself.
 - Only a guardian's direct conversation asks. Every other sender's reply passes Envoy whole before anything is sent.
 - A reply the host streamed is not sent again by its caller, unless the stream wrote nothing. Any other outcome may already show on the platform, so a reply that failed partway stays unfinished.
 - A Connection's streamed replies and ordinary sends share one write budget, and only a Connection that can stream has one. A write that hangs cannot stall the Connection's other writes, and it is not cut off.
 - A stop reaches the reply before the provider, so nothing new is written after it.
-- A fault in the reply stream never ends the run. The result still reaches its caller, and a reply that wrote nothing is reported as failed, so the caller sends it.
+- A fault in the reply stream never ends the run. The result still reaches its caller. A reply that certainly wrote nothing is reported as failed, so the caller sends it. A reply that cannot settle is reported as unknown.
 
 ## Linked agents
 

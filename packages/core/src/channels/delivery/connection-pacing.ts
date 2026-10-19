@@ -33,10 +33,12 @@ export class ConnectionPacing {
 
   /**
    * Runs `write` in the Connection's pacer. It runs at once, as it would with
-   * no pacing, when reply streaming is off or the Connection has no pacer.
+   * no pacing, when the Connection has no pacer or reply streaming is off. The
+   * setting is read only for a Connection that has one.
    */
   async run<T>(connection: Connection, conversation: string, write: () => Promise<T>): Promise<T> {
-    if (!(await this.streaming())) return write();
-    return this.pacerFor(connection)?.run(conversation, write) ?? write();
+    const pacer = this.pacerFor(connection);
+    if (!pacer || !(await this.streaming())) return write();
+    return pacer.run(conversation, write);
   }
 }

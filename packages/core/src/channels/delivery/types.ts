@@ -26,9 +26,10 @@ export interface DeliveryCapabilities {
   /** How fast one account may write. Every write the account makes, ordinary
    *  sends included, shares it. This is the one authority: whoever wires the
    *  engine builds the account's Pacer from it, and routes the account's
-   *  ordinary sends through that Pacer too. Until sends are routed so, a
-   *  rate limit that one of them meets does not pause the engine's writes, and
-   *  the account can exceed its budget. */
+   *  ordinary sends through that Pacer too. An ordinary send takes one turn,
+   *  however many calls it makes. A rate limit it meets does not pause the
+   *  Pacer, since only a transport names its failures. So the account can
+   *  still exceed its budget. */
   budget: Budget;
 }
 

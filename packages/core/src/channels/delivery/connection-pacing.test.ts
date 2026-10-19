@@ -119,6 +119,17 @@ describe("ConnectionPacing", () => {
     await Promise.all([first, second]);
   });
 
+  it("does not read the switch for a Connection whose talker declares no reply delivery", async () => {
+    let reads = 0;
+    pacing = new ConnectionPacing(systemClock, async () => {
+      reads += 1;
+      return true;
+    });
+
+    expect(await pacing.run(connection("c2", false), "chat", async () => "sent")).toBe("sent");
+    expect(reads).toBe(0);
+  });
+
   it("keeps one pacer for a Connection, and none while its talker is not live", () => {
     const locked = connection("c3", true, false);
     expect(pacing.pacerFor(locked)).toBeNull();

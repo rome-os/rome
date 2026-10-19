@@ -88,6 +88,56 @@ describe("ReplyStreams", () => {
     );
   });
 
+  it("records the reply in the conversation its caller names, without looking one up", async () => {
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    const ensureChannelConversation = rs.fn(async () => ({ id: "conversation-1" }));
+    const conversations = {
+      ensureChannelConversation,
+      recordOutboundMessage,
+    } as unknown as ConversationRepository;
+    const streams = new ReplyStreams({
+      streaming: async () => true,
+      replies,
+      clock: systemClock,
+      conversations,
+    });
+    const stream = (await streams.open({ ...target, romeSessionId: "conversation-9" }))!;
+
+    stream.accept({ type: "result", content: "one" });
+    await stream.settle(false);
+
+    expect(ensureChannelConversation).not.toHaveBeenCalled();
+    expect(recordOutboundMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "conversation-9" }),
+    );
+  });
+
+  it("records each block of the reply as its own paragraph", async () => {
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    const conversations = {
+      ensureChannelConversation: rs.fn(async () => ({ id: "conversation-1" })),
+      recordOutboundMessage,
+    } as unknown as ConversationRepository;
+    const streams = new ReplyStreams({
+      streaming: async () => true,
+      replies,
+      clock: systemClock,
+      conversations,
+    });
+    const stream = (await streams.open(target))!;
+
+    stream.accept({ type: "text", content: "one two" });
+    stream.accept({ type: "text", content: "six", turnPhase: "final" });
+    stream.accept({ type: "result", content: "six" });
+    await stream.settle(false);
+
+    expect(recordOutboundMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: JSON.stringify([{ type: "text", content: "one two\n\nsix" }]),
+      }),
+    );
+  });
+
   it("records nothing when no message was written, so a failed stream leaves no history", async () => {
     const recordOutboundMessage = rs.fn(async () => undefined);
     const conversations = {

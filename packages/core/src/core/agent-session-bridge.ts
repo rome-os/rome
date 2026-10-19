@@ -244,6 +244,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 conversationId: thread.threadId,
                 ...(req.platformMessageId ? { replyToMessageId: req.platformMessageId } : {}),
                 agentName: req.key.agentName,
+                ...(req.init?.romeSessionId ? { romeSessionId: req.init.romeSessionId } : {}),
                 turnId: handle.turnId,
               })) ?? null;
           } catch (err) {
@@ -317,10 +318,17 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
               }
               if (reply && msg.type === "turn_end") {
                 // The caller learns the reply's fate on the turn's last event,
-                // so it never sends a reply the platform already shows.
-                const outcome = await reply.settle(replyBroken || msg.status === "interrupted");
+                // so it never sends a reply the platform already shows. The
+                // turn stays registered until then, so a Stop meanwhile stops
+                // the reply.
                 replySettled = true;
-                stream.send({ ...msg, replyDelivery: reportOf(outcome, replyBroken) });
+                const replyDelivery = await settleReply(
+                  reply,
+                  replyBroken || msg.status === "interrupted",
+                  replyBroken,
+                  turnLogFields,
+                );
+                stream.send({ ...msg, replyDelivery });
                 continue;
               }
               stream.send(msg);
@@ -336,7 +344,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             workerWatch.release();
             // A turn that ended without turn_end leaves no caller to report to:
             // stop writing rather than finish a reply nobody settles.
-            if (reply && !replySettled) void reply.settle(true);
+            if (reply && !replySettled) void settleReply(reply, true, replyBroken, turnLogFields);
             liveStream?.finish();
           }
         })();
@@ -429,14 +437,41 @@ function interruptTurnOnWorkerDisconnect(
 }
 
 /**
+ * Settles `reply` and says what `turn_end` reports. A reply that cannot settle
+ * may show anything, so it is unknown and its caller does not send it again.
+ */
+async function settleReply(
+  reply: ReplyStream,
+  stopped: boolean,
+  broken: boolean,
+  logFields: Record<string, unknown>,
+): Promise<ReplyDeliveryReport> {
+  try {
+    return reportOf(await reply.settle(stopped), broken);
+  } catch (err) {
+    log.warn("reply stream could not settle", {
+      ...logFields,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { status: "unknown", messageIds: [] };
+  }
+}
+
+/**
  * What `turn_end` reports. A reply stream that broke was stopped, which is not
  * what happened to the user: they were shown whatever it wrote before it broke.
- * Nothing written leaves the reply safe to send again.
+ * Only a reply that certainly wrote nothing is safe to send again, so a create
+ * whose result is unknown keeps the reply unknown.
  */
 function reportOf(outcome: ReplyOutcome, broken: boolean): ReplyDeliveryReport {
   const messageIds = outcome.parts.flatMap((part) =>
     part.receipt ? [part.receipt.messageId] : [],
   );
-  const status = broken ? (messageIds.length ? "partial" : "failed") : outcome.status;
+  const status =
+    !broken || outcome.status === "unknown"
+      ? outcome.status
+      : messageIds.length
+        ? "partial"
+        : "failed";
   return { status, messageIds };
 }

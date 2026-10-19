@@ -16,6 +16,9 @@ import type { Accounts } from "./accounts.js";
 import { ChannelNotConnected } from "./channel.js";
 import { channelList, joinLaterChannel } from "./channel-list.js";
 import type { ConnectionPortsDeps } from "./connection-ports.js";
+import { ConnectionPacing } from "./delivery/connection-pacing.js";
+import { type DeliveryTransport, plainText } from "./delivery/types.js";
+import { systemClock } from "../lib/clock.js";
 
 const noAccounts: Accounts = {
   listAccounts: async () => ({ accounts: [] }),
@@ -44,6 +47,7 @@ function talkService(
   activity: ChannelActivity | null = null,
   history: TalkHistory | null = null,
   directory: TalkDirectory | null = null,
+  replyDelivery: DeliveryTransport | null = null,
 ): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: ChannelMessage) => void }> } {
   const epochs: Array<{ deliver?: (m: ChannelMessage) => void }> = [];
   return {
@@ -70,6 +74,7 @@ function talkService(
               ...(activity && { activity }),
               ...(history && { history }),
               ...(directory && { directory }),
+              ...(replyDelivery && { replyDelivery }),
             };
           },
         },
@@ -647,5 +652,33 @@ describe("joinLaterChannel", () => {
       expect(heard.map((event) => event.message.messageId)).toEqual(["to the second bot", "next"]),
     );
     expect(channels.filter((channel) => channel.name === `later-${second.id}`)).toHaveLength(1);
+  });
+
+  it("paces a later channel's writes with its Connection's pacer, so its replies can stream", async () => {
+    testDb = createTestDb();
+    const service = talkService("telegram", {}, null, null, null, null, {
+      capabilities: {
+        maxPartLength: 10,
+        edit: false,
+        budget: { burst: 1, refillMs: 1, conversationSpacingMs: 0 },
+      },
+      codec: plainText,
+      create: async () => ({ messageId: "m", conversationId: "c" }),
+    });
+    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    registry.register(service.descriptor);
+    const connection = await registry.connect("telegram");
+    await registry.importCredential(connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    const pacing = new ConnectionPacing(systemClock, async () => true);
+
+    const channel = joinLaterChannel(
+      { registry, admit: async () => true, channelOf: () => "later", pacing, channels: [] },
+      connection,
+    );
+
+    expect(channel?.send?.replies?.pacer).toBe(pacing.pacerFor(connection));
   });
 });

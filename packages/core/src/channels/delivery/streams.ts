@@ -23,6 +23,9 @@ export interface ReplyTarget {
   /** The message the reply answers. */
   replyToMessageId?: string;
   agentName: string;
+  /** The conversation the caller records the run in. Without one, the reply
+   *  is recorded in the channel's conversation for `conversationId`. */
+  romeSessionId?: string;
   turnId: string;
 }
 
@@ -92,15 +95,23 @@ export class ReplyStreams {
   private async record(target: ReplyTarget, outcome: ReplyOutcome): Promise<void> {
     const shown = outcome.parts.filter((part) => part.receipt);
     if (!this.deps.conversations || shown.length === 0) return;
+    // A block's parts split its text, and each block is a message of its own.
+    const text = shown
+      .map((part, i) => (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.text)
+      .join("");
     try {
-      const conversation = await this.deps.conversations.ensureChannelConversation({
-        channel: target.channel,
-        threadId: target.conversationId,
-        agentName: target.agentName,
-      });
+      const sessionId =
+        target.romeSessionId ??
+        (
+          await this.deps.conversations.ensureChannelConversation({
+            channel: target.channel,
+            threadId: target.conversationId,
+            agentName: target.agentName,
+          })
+        ).id;
       await this.deps.conversations.recordOutboundMessage({
-        sessionId: conversation.id,
-        content: JSON.stringify([{ type: "text", content: shown.map((p) => p.text).join("") }]),
+        sessionId,
+        content: JSON.stringify([{ type: "text", content: text }]),
         platformMessageId: shown[0]!.receipt!.messageId,
         senderId: "rome",
         senderName: "Rome",
