@@ -45,11 +45,13 @@ mkdir -p "$REPO" && cd "$REPO"
 ```
 
 ```jsonc
-// 2. Call `system:app_management` to scaffold the template into the empty dir. rootPath is required and
-//    absolute — the daemon does not pick a default. It refuses a non-empty
-//    directory, so this must run BEFORE `git init` (a `.git/` dir counts as
-//    non-empty and would make the scaffold fail).
-{ "op": "create", "appId": "<appId>", "rootPath": "<absolute $REPO>" }
+// 2. Call `system:app_management` to scaffold the template into the empty dir. rootPath
+//    (absolute) and template are both required — the daemon picks no default for
+//    either. Use "default" for a plain app; workflows use "workflow" via
+//    `coding:workflow_creation`. It refuses a non-empty directory, so this must
+//    run BEFORE `git init` (a `.git/` dir counts as non-empty and would make the
+//    scaffold fail).
+{ "op": "create", "appId": "<appId>", "rootPath": "<absolute $REPO>", "template": "default" }
 ```
 
 ```bash
