@@ -1193,7 +1193,15 @@ export interface RunParams {
   /** Variable content appended to the end of the system prompt */
   contextSuffix?: string;
   sharedContext?: Record<string, unknown>;
-  /** Working directory for the agent. Defaults to project root. */
+  /**
+   * Working directory for the agent. Defaults to the default project. Must be
+   * an existing directory inside the projects root, named relative to it
+   * (`site/content`) or by absolute path. An app's own agent may also use the
+   * app's data directory (`~/.rome/<profile>/apps/data/<appId>/`, with the
+   * app id URL-encoded, so `@handle/slug` is `%40handle%2Fslug`) or a folder
+   * inside it, named by absolute path. The app creates that folder. Rome
+   * rejects any other directory before the agent starts.
+   */
   workingDir?: string;
 }
 

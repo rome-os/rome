@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
@@ -12,7 +12,7 @@ import type {
   AgentSessionManager,
   AgentTurnHandle,
 } from "./agent-session.js";
-import { AgentSessionBridge } from "./agent-session-bridge.js";
+import { AgentSessionBridge, resolveAgentAppDataDir } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb } from "../test/helpers.js";
@@ -61,7 +61,7 @@ describe("AgentSessionBridge turn routing", () => {
     } as unknown as AgentSessionManager;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
-    new AgentSessionBridge(manager, undefined, undefined, turns).attach(
+    new AgentSessionBridge(manager, { turnStreams: turns }).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -154,7 +154,7 @@ describe("AgentSessionBridge conversation", () => {
         peek: () => session,
       } as unknown as AgentSessionManager;
       const child = new FakeChild();
-      new AgentSessionBridge(manager, repo).attach(
+      new AgentSessionBridge(manager, { webchatRepo: repo }).attach(
         new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
         child as unknown as ChildProcess,
       );
@@ -191,10 +191,14 @@ describe("AgentSessionBridge working dir", () => {
     for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  function setup(callerWorkingDirs: Record<string, string> = {}) {
-    const projectsRoot = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-projects-")));
-    tempDirs.push(projectsRoot);
-    mkdirSync(join(projectsRoot, "landingpage"));
+  function setup(
+    callerWorkingDirs: Record<string, string> = {},
+    appDataDirForAgent?: (profileDir: string, agentName: string) => string | undefined,
+  ) {
+    const profileDir = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-profile-")));
+    tempDirs.push(profileDir);
+    const projectsRoot = join(profileDir, "projects");
+    mkdirSync(join(projectsRoot, "landingpage"), { recursive: true });
     const acquired: AgentSessionInit[] = [];
     const session = {
       key: { agentName: "coder", channelThreadKey: "coder:1" },
@@ -219,7 +223,12 @@ describe("AgentSessionBridge working dir", () => {
       findWorkingDirBySessionId: (id: string) => callerWorkingDirs[id],
     } as unknown as AgentSessionManager;
     const child = new FakeChild();
-    new AgentSessionBridge(manager, undefined, undefined, undefined, projectsRoot).attach(
+    new AgentSessionBridge(manager, {
+      projectsRoot,
+      ...(appDataDirForAgent
+        ? { appDataDirForAgent: (agentName: string) => appDataDirForAgent(profileDir, agentName) }
+        : {}),
+    }).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -244,7 +253,7 @@ describe("AgentSessionBridge working dir", () => {
       });
       return response!;
     };
-    return { projectsRoot, acquired, runTurn };
+    return { profileDir, projectsRoot, acquired, runTurn };
   }
 
   it("opens the run in a requested project inside the projects root", async () => {
@@ -319,6 +328,131 @@ describe("AgentSessionBridge working dir", () => {
 
     expect(acquired.map((init) => init.workingDir)).toEqual([undefined]);
   });
+
+  describe("app data directory", () => {
+    const appDataDirs = (profileDir: string, agentName: string) =>
+      ({
+        "notes-app:planner": join(profileDir, "apps", "data", "notes-app"),
+        "other-app:writer": join(profileDir, "apps", "data", "other-app"),
+      })[agentName];
+    const plannerKey = { agentName: "notes-app:planner", channelThreadKey: "notes-app:1" };
+
+    function setupAppData() {
+      const env = setup({}, appDataDirs);
+      const dataDir = join(env.profileDir, "apps", "data", "notes-app");
+      const planDir = join(dataDir, "plans", "plan-1");
+      mkdirSync(planDir, { recursive: true });
+      mkdirSync(join(env.profileDir, "apps", "data", "other-app", "work"), { recursive: true });
+      return { ...env, dataDir, planDir };
+    }
+
+    it("opens an app agent's run in a folder inside its own app data directory", async () => {
+      const { acquired, runTurn, dataDir, planDir } = setupAppData();
+
+      const inside = await runTurn({ key: plannerKey, init: { workingDir: planDir } });
+      const dataDirItself = await runTurn({ key: plannerKey, init: { workingDir: dataDir } });
+
+      expect(inside.error).toBeUndefined();
+      expect(dataDirItself.error).toBeUndefined();
+      expect(acquired.map((init) => init.workingDir)).toEqual([planDir, dataDir]);
+    });
+
+    it("still opens an app agent's run in a project", async () => {
+      const { projectsRoot, acquired, runTurn } = setupAppData();
+
+      const result = await runTurn({ key: plannerKey, init: { workingDir: "landingpage" } });
+
+      expect(result.error).toBeUndefined();
+      expect(acquired.map((init) => init.workingDir)).toEqual([join(projectsRoot, "landingpage")]);
+    });
+
+    it("refuses an app data folder for an agent with no app data directory", async () => {
+      const { acquired, runTurn, planDir } = setupAppData();
+
+      const result = await runTurn({
+        key: { agentName: "core:main", channelThreadKey: "main:1" },
+        init: { workingDir: planDir },
+      });
+
+      expect(result.error).toContain("is not inside the projects root");
+      expect(acquired).toEqual([]);
+    });
+
+    it("refuses another app's data directory and the shared apps data parent", async () => {
+      const { profileDir, acquired, runTurn, dataDir } = setupAppData();
+      const otherAppWork = join(profileDir, "apps", "data", "other-app", "work");
+
+      const otherApp = await runTurn({ key: plannerKey, init: { workingDir: otherAppWork } });
+      const parent = await runTurn({
+        key: plannerKey,
+        init: { workingDir: join(profileDir, "apps", "data") },
+      });
+
+      for (const result of [otherApp, parent]) {
+        expect(result.error).toContain("is not inside the projects root");
+        expect(result.error).toContain(`or the app data directory of agent "notes-app:planner"`);
+        expect(result.error).toContain(dataDir);
+      }
+      expect(acquired).toEqual([]);
+    });
+
+    it("refuses a symlink in the app data directory that points out of it", async () => {
+      const { acquired, runTurn, dataDir } = setupAppData();
+      const outside = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-outside-")));
+      tempDirs.push(outside);
+      symlinkSync(outside, join(dataDir, "escape"));
+
+      const result = await runTurn({
+        key: plannerKey,
+        init: { workingDir: join(dataDir, "escape") },
+      });
+
+      expect(result.error).toContain("is not inside the projects root");
+      expect(acquired).toEqual([]);
+    });
+
+    it("resolves a relative path only against the projects root", async () => {
+      const { acquired, runTurn } = setupAppData();
+
+      const result = await runTurn({ key: plannerKey, init: { workingDir: "plans/plan-1" } });
+
+      expect(result.error).toContain("does not exist");
+      expect(acquired).toEqual([]);
+    });
+  });
+});
+
+describe("resolveAgentAppDataDir", () => {
+  const dataDirFor = (appId: string) => `/profile/apps/data/${appId}`;
+  const loader = (canonical: Record<string, string>) => ({
+    getCanonicalName(name: string): string {
+      const resolved = canonical[name];
+      if (!resolved) throw new Error(`Agent "${name}" not found`);
+      return resolved;
+    },
+  });
+
+  it("returns the owning app's data directory for an app agent, by canonical or legacy name", () => {
+    const agents = loader({
+      "notes-app:planner": "notes-app:planner",
+      planner: "notes-app:planner",
+    });
+
+    expect(resolveAgentAppDataDir(agents, "notes-app:planner", dataDirFor)).toBe(
+      "/profile/apps/data/notes-app",
+    );
+    expect(resolveAgentAppDataDir(agents, "planner", dataDirFor)).toBe(
+      "/profile/apps/data/notes-app",
+    );
+  });
+
+  it("returns undefined for a core agent and for an agent that does not resolve", () => {
+    const agents = loader({ main: "core:main", "core:main": "core:main" });
+
+    expect(resolveAgentAppDataDir(agents, "main", dataDirFor)).toBeUndefined();
+    expect(resolveAgentAppDataDir(agents, "core:main", dataDirFor)).toBeUndefined();
+    expect(resolveAgentAppDataDir(agents, "ghost-app:planner", dataDirFor)).toBeUndefined();
+  });
 });
 
 describe("AgentSessionBridge worker disconnect", () => {
@@ -372,7 +506,10 @@ describe("AgentSessionBridge worker disconnect", () => {
     } as unknown as AgentSessionManager;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
-    new AgentSessionBridge(manager, options.webchatRepo, undefined, turns).attach(
+    new AgentSessionBridge(manager, {
+      webchatRepo: options.webchatRepo,
+      turnStreams: turns,
+    }).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );

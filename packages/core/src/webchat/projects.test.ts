@@ -11,6 +11,8 @@ import {
   resolveProjectWorkingDirWithinRoot,
   resolveWebchatContinuationWorkingDir,
   resolveWebchatProjectPath,
+  resolveWorkingDirWithinRoot,
+  WorkingDirOutsideRootError,
 } from "./projects.js";
 
 describe("webchat project helpers", () => {
@@ -186,5 +188,72 @@ describe("resolveProjectWorkingDirWithinRoot", () => {
     await expect(resolveProjectWorkingDirWithinRoot("notes.txt", root)).rejects.toThrow(
       "is not a directory",
     );
+  });
+
+  it("names the projects root in the error for a path outside it", async () => {
+    const root = makeRoot();
+
+    await expect(resolveProjectWorkingDirWithinRoot("/etc", root)).rejects.toThrow(
+      `Working directory "/etc" is not inside the projects root (${root})`,
+    );
+  });
+});
+
+describe("resolveWorkingDirWithinRoot", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+    tempDirs.length = 0;
+  });
+
+  function makeRoot(): string {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "rome-working-dir-root-")));
+    tempDirs.push(root);
+    mkdirSync(join(root, "work"));
+    return root;
+  }
+
+  it("accepts the root itself only with allowRoot", async () => {
+    const root = makeRoot();
+    const appData = { path: root, label: "the app data directory" };
+
+    await expect(resolveWorkingDirWithinRoot(root, { ...appData, allowRoot: true })).resolves.toBe(
+      root,
+    );
+    await expect(resolveWorkingDirWithinRoot(root, appData)).rejects.toBeInstanceOf(
+      WorkingDirOutsideRootError,
+    );
+    await expect(
+      resolveWorkingDirWithinRoot(join(root, "work"), { ...appData, allowRoot: true }),
+    ).resolves.toBe(join(root, "work"));
+  });
+
+  it("still rejects a path outside the root with allowRoot, naming the root by its label", async () => {
+    const root = makeRoot();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "rome-working-dir-outside-")));
+    tempDirs.push(outside);
+    symlinkSync(outside, join(root, "escape"));
+    const appData = { path: root, label: "the app data directory", allowRoot: true };
+
+    for (const requested of [outside, join(root, ".."), join(root, "escape")]) {
+      const error: unknown = await resolveWorkingDirWithinRoot(requested, appData).catch(
+        (err: unknown) => err,
+      );
+      expect(error).toBeInstanceOf(WorkingDirOutsideRootError);
+      expect((error as Error).message).toContain(`is not inside the app data directory (${root})`);
+    }
+  });
+
+  it("treats a root that does not exist as containing nothing", async () => {
+    const root = makeRoot();
+
+    await expect(
+      resolveWorkingDirWithinRoot(join(root, "work"), {
+        path: join(root, "missing-root"),
+        label: "the app data directory",
+        allowRoot: true,
+      }),
+    ).rejects.toBeInstanceOf(WorkingDirOutsideRootError);
   });
 });

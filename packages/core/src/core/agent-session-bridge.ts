@@ -4,6 +4,7 @@
 // returned `agent.turn:<turnId>` stream.
 
 import type { ChildProcess } from "node:child_process";
+import { isAbsolute } from "node:path";
 import type { IpcRpc } from "../actions/ipc.js";
 import type {
   ConversationId,
@@ -34,7 +35,14 @@ import {
   registerActionSubprocessHost,
 } from "../actions/action-subprocess.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
-import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
+import {
+  getWebchatProjectsRoot,
+  resolveProjectWorkingDirWithinRoot,
+  resolveWorkingDirWithinRoot,
+  WorkingDirOutsideRootError,
+} from "../webchat/projects.js";
+import { isCanonicalArtifactId } from "../apps/artifact-id.js";
+import { getProfileAppDataDir } from "../paths.js";
 
 const log = createLogger("agent-session-bridge");
 
@@ -62,6 +70,42 @@ export interface RunTurnResponse {
 
 export const AGENT_SESSION_RUN_TURN_TIMEOUT_MS = 10 * 60_000;
 
+export interface AgentSessionBridgeOptions {
+  webchatRepo?: WebChatRepository;
+  actionWorkerCoordinator?: ActionWorkerCoordinator;
+  turnStreams?: AgentTurnStreamRegistry;
+  /** Root that worker-requested working dirs must stay inside. Defaults to the profile's projects root. */
+  projectsRoot?: string;
+  /**
+   * The data directory of the app that owns the named agent, or undefined for
+   * a core agent or a name that does not resolve. A worker may also open that
+   * agent's runs in this directory or below it. Without this option, no app
+   * data directory is accepted.
+   */
+  appDataDirForAgent?: (agentName: string) => string | undefined;
+}
+
+/**
+ * The data directory of the app that owns the agent `agentName` names, or
+ * undefined when the name resolves to no loaded agent or to a core agent.
+ * Never throws.
+ */
+export function resolveAgentAppDataDir(
+  agentLoader: { getCanonicalName(name: string): string },
+  agentName: string,
+  appDataDir: (appId: string) => string = getProfileAppDataDir,
+): string | undefined {
+  try {
+    const canonical = agentLoader.getCanonicalName(agentName);
+    if (!isCanonicalArtifactId(canonical)) return undefined;
+    const appId = canonical.slice(0, canonical.indexOf(":"));
+    return appId === "core" ? undefined : appDataDir(appId);
+  } catch {
+    // An unknown agent fails with its own error when the manager opens the session.
+    return undefined;
+  }
+}
+
 /** A process that can expose the agent-session IPC surface to a child. */
 export interface AgentSessionChildBridge {
   attach(rpc: IpcRpc, child: ChildProcess): void;
@@ -81,14 +125,22 @@ export interface AgentSessionChildBridge {
  * worker started that has not ended, so it finishes `interrupted`.
  */
 export class AgentSessionBridge implements AgentSessionChildBridge {
+  private readonly webchatRepo?: WebChatRepository;
+  private readonly actionWorkerCoordinator?: ActionWorkerCoordinator;
+  private readonly turnStreams?: AgentTurnStreamRegistry;
+  private readonly projectsRoot?: string;
+  private readonly appDataDirForAgent?: (agentName: string) => string | undefined;
+
   constructor(
     private manager: AgentSessionManager,
-    private webchatRepo?: WebChatRepository,
-    private actionWorkerCoordinator?: ActionWorkerCoordinator,
-    private turnStreams?: AgentTurnStreamRegistry,
-    /** Root that worker-requested working dirs must stay inside. Defaults to the profile's projects root. */
-    private projectsRoot?: string,
-  ) {}
+    options: AgentSessionBridgeOptions = {},
+  ) {
+    this.webchatRepo = options.webchatRepo;
+    this.actionWorkerCoordinator = options.actionWorkerCoordinator;
+    this.turnStreams = options.turnStreams;
+    this.projectsRoot = options.projectsRoot;
+    this.appDataDirForAgent = options.appDataDirForAgent;
+  }
 
   attach(rpc: IpcRpc, child: ChildProcess): void {
     if (this.actionWorkerCoordinator) {
@@ -293,7 +345,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
 
   /**
    * The worker names a working dir from app code, so an explicit one must
-   * resolve inside the projects root. Without one, a new `summon` run inherits
+   * resolve inside the projects root or, for an app's agent, inside that
+   * app's data directory. Without one, a new `summon` run inherits
    * the working dir of the open agent session whose action asked for it, as
    * `execute_subagent` inherits its parent's. Summon sends no channel-thread
    * key, so a summon run without a `sessionId` always opens a new session.
@@ -304,11 +357,42 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
   private async resolveRunWorkingDir(req: RunTurnRequest): Promise<string | undefined> {
     const requested = req.init?.workingDir;
     if (requested !== undefined) {
-      return await resolveProjectWorkingDirWithinRoot(requested, this.projectsRoot);
+      return await this.resolveRequestedWorkingDir(requested, req.key.agentName);
     }
     if (req.sessionId || req.actionContext?.actionName !== SUMMON_ACTION) return undefined;
     const callerSessionId = req.actionContext?.sessionId;
     return callerSessionId ? this.manager.findWorkingDirBySessionId(callerSessionId) : undefined;
+  }
+
+  /**
+   * The app data directory is keyed by the agent's host-resolved canonical
+   * id, not by the action context, because workers are pooled across apps
+   * and the worker supplies the action context. A relative path names a
+   * project only.
+   */
+  private async resolveRequestedWorkingDir(requested: string, agentName: string): Promise<string> {
+    const projectsRoot = this.projectsRoot ?? getWebchatProjectsRoot();
+    try {
+      return await resolveProjectWorkingDirWithinRoot(requested, projectsRoot);
+    } catch (err) {
+      if (!(err instanceof WorkingDirOutsideRootError)) throw err;
+      const appDataDir = this.appDataDirForAgent?.(agentName);
+      if (!appDataDir) throw err;
+      const outsideBoth = new Error(
+        `Working directory "${requested}" is not inside the projects root (${projectsRoot}) ` +
+          `or the app data directory of agent "${agentName}" (${appDataDir})`,
+      );
+      if (!isAbsolute(requested.trim())) throw outsideBoth;
+      try {
+        return await resolveWorkingDirWithinRoot(requested, {
+          path: appDataDir,
+          label: "the app data directory",
+          allowRoot: true,
+        });
+      } catch (dataDirErr) {
+        throw dataDirErr instanceof WorkingDirOutsideRootError ? outsideBoth : dataDirErr;
+      }
+    }
   }
 }
 
