@@ -49,6 +49,17 @@ export function runWithSession<T>(sessionId: string, fn: () => T): T {
 }
 
 /**
+ * Run `fn` outside any session context. Async resources capture the context
+ * they are created in, so a timer registered during a session's turn would
+ * stamp every later autonomous fire with that session's id. Wrap the start of
+ * work that belongs to no session (routine fires) so its spans and logs carry
+ * none.
+ */
+export function runWithoutSession<T>(fn: () => T): T {
+  return store.exit(fn);
+}
+
+/**
  * Drive an async iterable so that **every** `.next()` call runs inside the
  * session context. Use this to wrap an inner generator whose body should
  * observe `sessionId`, even if a nested call (e.g., a subagent) has entered

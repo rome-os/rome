@@ -490,15 +490,15 @@ describe("ActionEngine", () => {
         expect(actionWorkerFork).toHaveBeenCalledTimes(1);
       });
 
-      it("forks a worker for an allowlisted name owned by a non-first-party app", async () => {
+      it("forks a worker for an allowlisted id the trust check rejects", async () => {
         const { engine, actionWorkerFork } = engineWith(
-          [buildAction("store-app:send_message", { type: "system", execute: inMain })],
+          [buildAction("system:send_message", { type: "system", execute: inMain })],
           () => false,
         );
 
-        await expect(engine.run("store-app:send_message", {})).resolves.toEqual({
+        await expect(engine.run("system:send_message", {})).resolves.toEqual({
           status: "ok",
-          data: "store-app:send_message",
+          data: "system:send_message",
         });
         expect(actionWorkerFork).toHaveBeenCalledTimes(1);
       });

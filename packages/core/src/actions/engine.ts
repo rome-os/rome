@@ -536,10 +536,10 @@ export class ActionEngine {
     if (!action) {
       throw new ActionNotFoundError(name);
     }
-    const coordinationRoot = replayContext.getStore();
-    if (coordinationRoot?.coordinationRoot) {
+    const store = replayContext.getStore();
+    if (store?.coordinationRoot) {
       throw new Error(
-        `Action "${coordinationRoot.rootActionName}" runs in the main process as a coordination action and may not dispatch other actions (it dispatched "${action.config.name}")`,
+        `Action "${store.rootActionName}" runs in the main process as a coordination action and may not dispatch other actions (it dispatched "${action.config.name}")`,
       );
     }
     const resolvedName = action.config.name;
