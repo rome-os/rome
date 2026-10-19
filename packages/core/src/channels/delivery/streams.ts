@@ -22,10 +22,8 @@ export interface ReplyTarget {
   conversationId: string;
   /** The message the reply answers. */
   replyToMessageId?: string;
-  agentName: string;
-  /** The conversation the caller records the run in. Without one, the reply
-   *  is recorded in the channel's conversation for `conversationId`. */
-  romeSessionId?: string;
+  /** The conversation the run's turn is recorded in. */
+  romeSessionId: string;
   turnId: string;
 }
 
@@ -45,7 +43,7 @@ export interface ReplyStreamsDeps {
   /** The channel's reply port, read when a reply opens. */
   replies(channel: string): ChannelReplies | null | undefined;
   clock: Clock;
-  conversations?: ConversationRepository;
+  conversations?: Pick<ConversationRepository, "recordOutboundMessage">;
   policy?: DeliveryPolicy;
 }
 
@@ -105,20 +103,14 @@ export class ReplyStreams {
       .join("");
     // A row holds one message id. A quote names it to reach the row, and the
     // message quoted is most often the answer, which the last block starts.
-    const lastBlock = shown.at(-1)!.block;
-    const quoted = shown.find((part) => part.block === lastBlock)!.receipt;
+    // A message whose create is unknown has no id, so the last block with one
+    // stands in.
+    const receipted = shown.filter((part) => part.receipt);
+    const lastBlock = receipted.at(-1)?.block;
+    const quoted = receipted.find((part) => part.block === lastBlock)?.receipt;
     try {
-      const sessionId =
-        target.romeSessionId ??
-        (
-          await this.deps.conversations.ensureChannelConversation({
-            channel: target.channel,
-            threadId: target.conversationId,
-            agentName: target.agentName,
-          })
-        ).id;
       await this.deps.conversations.recordOutboundMessage({
-        sessionId,
+        sessionId: target.romeSessionId,
         content: JSON.stringify([{ type: "text", content: text }]),
         ...(quoted ? { platformMessageId: quoted.messageId } : {}),
         senderId: "rome",

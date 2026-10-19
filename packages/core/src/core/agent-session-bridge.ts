@@ -228,8 +228,9 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
               channel: thread.channel,
               conversationId: thread.threadId,
               ...(req.platformMessageId ? { replyToMessageId: req.platformMessageId } : {}),
-              agentName: req.key.agentName,
-              ...(req.init?.romeSessionId ? { romeSessionId: req.init.romeSessionId } : {}),
+              // The transcript leaves the answer to the reply, so the reply
+              // records it in the conversation the turn is recorded in.
+              romeSessionId,
               turnId: handle.turnId,
             });
             // The worker may have gone away while the reply opened. Nobody is

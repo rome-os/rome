@@ -1,4 +1,3 @@
-import type { ConversationRepository } from "@rome-os/app-runtime";
 import { describe, expect, it, rs } from "@rstest/core";
 import { systemClock } from "../../lib/clock.js";
 import { Pacer } from "./pacer.js";
@@ -18,7 +17,7 @@ const target = {
   channel: "telegram",
   conversationId: "chat-1",
   replyToMessageId: "msg-1",
-  agentName: "main",
+  romeSessionId: "conversation-1",
   turnId: "turn-1",
 };
 const replies = () => ({ transport, pacer: new Pacer(budget, systemClock) });
@@ -60,10 +59,7 @@ describe("ReplyStreams", () => {
 
   it("records the delivered reply once, as the text the user was shown", async () => {
     const recordOutboundMessage = rs.fn(async () => undefined);
-    const conversations = {
-      ensureChannelConversation: rs.fn(async () => ({ id: "conversation-1" })),
-      recordOutboundMessage,
-    } as unknown as ConversationRepository;
+    const conversations = { recordOutboundMessage };
     const streams = new ReplyStreams({
       streaming: async () => true,
       replies,
@@ -88,36 +84,9 @@ describe("ReplyStreams", () => {
     );
   });
 
-  it("records the reply in the conversation its caller names, without looking one up", async () => {
-    const recordOutboundMessage = rs.fn(async () => undefined);
-    const ensureChannelConversation = rs.fn(async () => ({ id: "conversation-1" }));
-    const conversations = {
-      ensureChannelConversation,
-      recordOutboundMessage,
-    } as unknown as ConversationRepository;
-    const streams = new ReplyStreams({
-      streaming: async () => true,
-      replies,
-      clock: systemClock,
-      conversations,
-    });
-    const stream = (await streams.open({ ...target, romeSessionId: "conversation-9" }))!;
-
-    stream.accept({ type: "result", content: "one" });
-    await stream.settle(false);
-
-    expect(ensureChannelConversation).not.toHaveBeenCalled();
-    expect(recordOutboundMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "conversation-9" }),
-    );
-  });
-
   it("records each block as its own paragraph, under the first message of the last block", async () => {
     const recordOutboundMessage = rs.fn(async () => undefined);
-    const conversations = {
-      ensureChannelConversation: rs.fn(async () => ({ id: "conversation-1" })),
-      recordOutboundMessage,
-    } as unknown as ConversationRepository;
+    const conversations = { recordOutboundMessage };
     const streams = new ReplyStreams({
       streaming: async () => true,
       replies,
@@ -139,12 +108,40 @@ describe("ReplyStreams", () => {
     );
   });
 
+  it("records the reply under the last block with a message id, when the answer's create is unknown", async () => {
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    const conversations = { recordOutboundMessage };
+    const answerUnknown: DeliveryTransport = {
+      ...transport,
+      create: async (conversation, text) => {
+        if (text === "six") throw new DeliveryFailure("unknown", "no answer");
+        return { messageId: `id-${text.trim()}`, conversationId: conversation };
+      },
+    };
+    const streams = new ReplyStreams({
+      streaming: async () => true,
+      replies: () => ({ transport: answerUnknown, pacer: new Pacer(budget, systemClock) }),
+      clock: systemClock,
+      conversations,
+    });
+    const stream = (await streams.open(target))!;
+
+    stream.accept({ type: "text", content: "one two" });
+    stream.accept({ type: "text", content: "six", turnPhase: "final" });
+    stream.accept({ type: "result", content: "six" });
+    expect((await stream.settle(false)).status).toBe("unknown");
+
+    expect(recordOutboundMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: JSON.stringify([{ type: "text", content: "one two\n\nsix" }]),
+        platformMessageId: "id-one",
+      }),
+    );
+  });
+
   it("shows the answer WebChat shows, for a structured result and for a turn that ends mid-block", async () => {
     const recordOutboundMessage = rs.fn(async () => undefined);
-    const conversations = {
-      ensureChannelConversation: rs.fn(async () => ({ id: "conversation-1" })),
-      recordOutboundMessage,
-    } as unknown as ConversationRepository;
+    const conversations = { recordOutboundMessage };
     const streams = new ReplyStreams({
       streaming: async () => true,
       replies,
@@ -180,10 +177,7 @@ describe("ReplyStreams", () => {
 
   it("records nothing when no message was written, so a failed stream leaves no history", async () => {
     const recordOutboundMessage = rs.fn(async () => undefined);
-    const conversations = {
-      ensureChannelConversation: rs.fn(async () => ({ id: "conversation-1" })),
-      recordOutboundMessage,
-    } as unknown as ConversationRepository;
+    const conversations = { recordOutboundMessage };
     const refusing: DeliveryTransport = {
       ...transport,
       create: async () => {
@@ -205,10 +199,7 @@ describe("ReplyStreams", () => {
 
   it("records a message whose create may have landed, since nothing sends it again", async () => {
     const recordOutboundMessage = rs.fn(async () => undefined);
-    const conversations = {
-      ensureChannelConversation: rs.fn(async () => ({ id: "conversation-1" })),
-      recordOutboundMessage,
-    } as unknown as ConversationRepository;
+    const conversations = { recordOutboundMessage };
     const unanswered: DeliveryTransport = {
       ...transport,
       create: async () => {

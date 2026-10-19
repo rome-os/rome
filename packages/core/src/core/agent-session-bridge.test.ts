@@ -571,6 +571,7 @@ describe("AgentSessionBridge reply streaming", () => {
       replies: replacement,
       transport: own,
       repo,
+      named = true,
     }: {
       streamReply: boolean;
       /** A pending promise holds the setting's read open. */
@@ -582,16 +583,23 @@ describe("AgentSessionBridge reply streaming", () => {
       transport?: DeliveryTransport;
       /** The repository the turn and its reply are recorded in. */
       repo?: WebChatRepository;
+      /** Whether the caller names the conversation. Otherwise the thread does. */
+      named?: boolean;
     },
   ) {
     const recording = platform();
     const { written, edits } = recording;
     const transport = own ?? recording.transport;
+    // The host's adapter over the repository.
     const conversations =
       repo &&
       ({
+        ensureChannelConversation: (input) => repo.ensureChannelConversation(input),
         recordOutboundMessage: (input) => repo.recordOutboundConversationMessage(input),
-      } satisfies Pick<ConversationRepository, "recordOutboundMessage">);
+      } satisfies Pick<
+        ConversationRepository,
+        "ensureChannelConversation" | "recordOutboundMessage"
+      >);
     const session = {
       key: { agentName: "main", channelThreadKey: "telegram:chat-1" },
       sessionId: "session-1",
@@ -612,9 +620,7 @@ describe("AgentSessionBridge reply streaming", () => {
             channel === "telegram" ? { transport, pacer: new Pacer(budget, systemClock) } : null,
           clock: systemClock,
           policy,
-          ...(conversations
-            ? { conversations: conversations as unknown as ConversationRepository }
-            : {}),
+          ...(conversations ? { conversations } : {}),
         });
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
@@ -632,12 +638,13 @@ describe("AgentSessionBridge reply streaming", () => {
         platformMessageId: "msg-1",
         streamReply,
         init: {
-          romeSessionId: "conversation-1",
+          ...(named ? { romeSessionId: "conversation-1" } : {}),
           threadContext: {
             channel: "telegram",
             connectionId: "c",
             threadId: "chat-1",
             channelUserId: "user-1",
+            ...(named ? {} : { romeSessionId: "conversation-1" }),
           },
         },
       },
@@ -962,6 +969,19 @@ describe("AgentSessionBridge reply streaming", () => {
         JSON.stringify({ status: "unknown", messageIds: [] }),
       );
       expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "hi there" }])]);
+    } finally {
+      close();
+    }
+  });
+
+  it("records a streamed reply in the conversation its turn is recorded in, when the caller names none", async () => {
+    const { repo, answers, close } = await recorded();
+    try {
+      const { turnEnd } = run(turnEvents(...answer), { streamReply: true, repo, named: false });
+
+      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+      expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "hi there" }])]);
+      expect(await repo.getMessages("channel:telegram:chat-1")).toEqual([]);
     } finally {
       close();
     }
