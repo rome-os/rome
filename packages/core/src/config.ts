@@ -58,9 +58,9 @@ const configSchema = z.object({
     .transform((value) => value === "true"),
 
   // Every root, delegated, and warm action worker counts against this bound.
-  // A bounded default keeps burst traffic from forking unbounded workers;
-  // operators can tune it to measured worker RSS.
-  actionWorkerMaxProcesses: z.coerce.number().int().positive().default(8),
+  // Unset, the host sizes it to the instance's memory at startup (see
+  // defaultWorkerCap); operators can pin it to measured worker RSS.
+  actionWorkerMaxProcesses: z.coerce.number().int().positive().optional(),
 
   // Database
   database: z.discriminatedUnion("type", [

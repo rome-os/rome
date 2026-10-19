@@ -208,8 +208,8 @@ describe("loadConfig()", () => {
     expect(() => loadConfig()).toThrow(/Invalid configuration/);
   });
 
-  it("defaults and overrides the action-worker process cap", () => {
-    expect(loadConfig().actionWorkerMaxProcesses).toBe(8);
+  it("leaves the action-worker process cap to the host unless overridden", () => {
+    expect(loadConfig().actionWorkerMaxProcesses).toBeUndefined();
 
     rs.stubEnv("ROME_ACTION_MAX_WORKERS", "5");
     expect(loadConfig().actionWorkerMaxProcesses).toBe(5);
