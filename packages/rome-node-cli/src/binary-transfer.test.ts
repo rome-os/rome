@@ -17,17 +17,23 @@ afterEach(async () => {
 });
 
 /**
- * Reserves the caller daemon port. The default port is hashed from the temporary directory and
- * can land in the OS ephemeral range, where an unrelated socket may hold it and the daemon can
- * never bind.
+ * Reserves a daemon port below the OS ephemeral ranges (Linux 32768+, macOS and Windows 49152+).
+ * A `listen(0)` port comes from that range, so after it is released any outbound connection or
+ * other test can take it before the daemon binds (EADDRINUSE). Ports here are only held by
+ * explicit binds, and the check below skips any that are taken.
  */
 async function freePort() {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  if (!address || typeof address === "string") throw new Error("Missing address");
-  return address.port;
+  for (;;) {
+    const port = 20000 + Math.floor(Math.random() * 12000);
+    const server = createServer();
+    const bound = await new Promise<boolean>((resolve) => {
+      server.once("error", () => resolve(false));
+      server.listen(port, "127.0.0.1", () => resolve(true));
+    });
+    if (!bound) continue;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    return port;
+  }
 }
 
 async function listen(server: Server) {
