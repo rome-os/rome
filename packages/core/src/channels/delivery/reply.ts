@@ -3,7 +3,7 @@ import type { Clock, ClockTimer } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
 import { ReplyAssembler, type TextBlock } from "./assembler.js";
 import { Outlasted, type Pacer, SKIPPED } from "./pacer.js";
-import { lastBreak, splitPoint, splitsPair } from "./split.js";
+import { endsMidPair, lastBreak, splitPoint, splitsPair } from "./split.js";
 import {
   asDeliveryFailure,
   DeliveryFailure,
@@ -518,7 +518,12 @@ export class ReplyDelivery {
         const start = active ? active.start : Math.max(last?.end ?? 0, state.skipped ?? 0);
         // Offsets below are the block's, and `remaining` holds its text from
         // `start` on. A delta then costs what is unsent, not the whole block.
-        const remaining = block.from(start);
+        let remaining = block.from(start);
+        // A delta can stop between the two halves of a pair, and a platform
+        // refuses text with a lone half. The first half waits for the second,
+        // and is left out if the text ends without it.
+        if (endsMidPair(remaining)) remaining = remaining.slice(0, -1);
+        const textEnd = start + remaining.length;
         // Nothing visible yet, or only a whitespace tail after a split. A
         // platform refuses a message with no visible text, and one refusal
         // ends the reply.
@@ -544,10 +549,10 @@ export class ReplyDelivery {
           end < shown &&
           codec.measure(codec.render(remaining.slice(0, shown - start), true)) <= limit
         )
-          end = Math.min(shown, block.text.length);
+          end = Math.min(shown, textEnd);
         // What a preview showed can end inside a pair of the final text.
         if (end > start + 1 && splitsPair(remaining, end - start)) end -= 1;
-        const settle = complete || end < block.text.length;
+        const settle = complete || end < textEnd;
         const source = remaining.slice(0, end - start);
         // The split can choose a prefix with nothing visible in it, such as a
         // long run of spaces. It is passed over without a message, and the

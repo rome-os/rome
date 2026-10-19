@@ -257,15 +257,31 @@ describe("ReplyDelivery", () => {
     it("keeps Chinese and emoji whole within the limit", async () => {
       const delivery = reply({ editIntervalMs: 0 });
       const source = "这是一个很长的回答😀，它需要被分成好几条消息才能发完。最后一句话在这里😀";
-      await stream(delivery, source.split("").join(""), 0);
+      // One code unit per delta, so each emoji arrives as two halves.
+      for (const unit of source.split("")) {
+        delivery.accept(delta(unit));
+        await advance(0);
+      }
       delivery.accept(text(source));
       await delivery.finish();
 
       expect(platform.shown.join("")).toBe(source);
-      for (const shown of platform.shown) {
-        expect(shown.length).toBeLessThanOrEqual(20);
-        expect(shown).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/);
+      for (const written of platform.messages.flatMap((m) => m.history)) {
+        expect(written.length).toBeLessThanOrEqual(20);
+        expect(written).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/);
       }
+    });
+
+    it("never writes the first half of an emoji whose second half has not arrived", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      for (const content of ["\ud83d", "\ude00 Hello ", "\ud83d", "\ude00 ok"]) {
+        delivery.accept(delta(content));
+        await advance(0);
+      }
+      delivery.accept(text("😀 Hello 😀 ok"));
+      await delivery.finish();
+
+      expect(platform.messages.map((m) => m.history)).toEqual([["😀 Hello ", "😀 Hello 😀 ok"]]);
     });
 
     it("falls back to separate messages when the platform refuses edits", async () => {

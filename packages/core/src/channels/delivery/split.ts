@@ -80,6 +80,11 @@ function isLowSurrogate(code: number): boolean {
   return code >= 0xdc00 && code <= 0xdfff;
 }
 
+/** Whether `text` ends with the first half of a surrogate pair, without the second. */
+export function endsMidPair(text: string): boolean {
+  return text.length > 0 && isHighSurrogate(text.charCodeAt(text.length - 1));
+}
+
 /** Whether a cut at `at` would separate the two halves of a surrogate pair. */
 export function splitsPair(text: string, at: number): boolean {
   return (
