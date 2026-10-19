@@ -191,12 +191,16 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           turnId: handle.turnId,
         };
         let reply: ReplyStream | null = null;
+        let replyStopped = false;
         const workerWatch = interruptTurnOnWorkerDisconnect(
           rpc,
           session,
           handle,
           turnLogFields,
-          () => reply?.stop(),
+          () => {
+            replyStopped = true;
+            reply?.stop();
+          },
         );
         if (this.webchatRepo && conversation.promptPersisted && req.platformMessageId) {
           try {
@@ -220,15 +224,18 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const thread = req.init?.threadContext;
         if (req.streamReply && thread?.channel && thread.threadId) {
           try {
-            reply =
-              (await this.replyStreams?.open({
-                channel: thread.channel,
-                conversationId: thread.threadId,
-                ...(req.platformMessageId ? { replyToMessageId: req.platformMessageId } : {}),
-                agentName: req.key.agentName,
-                ...(req.init?.romeSessionId ? { romeSessionId: req.init.romeSessionId } : {}),
-                turnId: handle.turnId,
-              })) ?? null;
+            const opened = await this.replyStreams?.open({
+              channel: thread.channel,
+              conversationId: thread.threadId,
+              ...(req.platformMessageId ? { replyToMessageId: req.platformMessageId } : {}),
+              agentName: req.key.agentName,
+              ...(req.init?.romeSessionId ? { romeSessionId: req.init.romeSessionId } : {}),
+              turnId: handle.turnId,
+            });
+            // The worker may have gone away while the reply opened. Nobody is
+            // left to stream to, so the reply is dropped before it writes.
+            if (opened && replyStopped) opened.stop();
+            else reply = opened ?? null;
           } catch (err) {
             log.warn("reply stream could not open, the caller sends the reply", {
               ...turnLogFields,

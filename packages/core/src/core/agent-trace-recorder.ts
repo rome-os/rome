@@ -41,8 +41,8 @@ export interface AgentTraceRecorderInput {
   persistTranscript?: boolean;
   /** Inbound conversation messages are already persisted before dispatch. */
   persistUserTranscript?: boolean;
-  /** A reply the host streams records its own assistant row, as the text the
-   *  user was shown, so the turn's answer is not recorded twice. */
+  /** A reply the host streams records its own assistant row, as the text it
+   *  showed, so the turn's answer is not recorded twice. */
   persistAssistantTranscript?: boolean;
   /**
    * Explicit trigger metadata stamped on the trace message row. When absent,

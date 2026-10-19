@@ -202,4 +202,35 @@ describe("ReplyStreams", () => {
     expect((await stream.settle(false)).status).toBe("failed");
     expect(recordOutboundMessage).not.toHaveBeenCalled();
   });
+
+  it("records a message whose create may have landed, since nothing sends it again", async () => {
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    const conversations = {
+      ensureChannelConversation: rs.fn(async () => ({ id: "conversation-1" })),
+      recordOutboundMessage,
+    } as unknown as ConversationRepository;
+    const unanswered: DeliveryTransport = {
+      ...transport,
+      create: async () => {
+        throw new DeliveryFailure("unknown", "no answer");
+      },
+    };
+    const streams = new ReplyStreams({
+      streaming: async () => true,
+      replies: () => ({ transport: unanswered, pacer: new Pacer(budget, systemClock) }),
+      clock: systemClock,
+      conversations,
+    });
+    const stream = (await streams.open(target))!;
+
+    stream.accept({ type: "result", content: "one" });
+    expect((await stream.settle(false)).status).toBe("unknown");
+    expect(recordOutboundMessage).toHaveBeenCalledTimes(1);
+    const [recorded] = recordOutboundMessage.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(recorded).toMatchObject({
+      content: JSON.stringify([{ type: "text", content: "one" }]),
+      turnId: "turn-1",
+    });
+    expect(recorded).not.toHaveProperty("platformMessageId");
+  });
 });

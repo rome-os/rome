@@ -53,8 +53,9 @@ export interface ReplyStreamsDeps {
  * Opens the main-process owner of a run's reply to an external channel: one
  * ReplyDelivery per run, fed the run's events as they happen. Canonical
  * history stays in the conversation repository: a settled reply is recorded
- * there once, as the text the user was shown. That row is the turn's only
- * answer, since the run's transcript leaves a streamed answer to it.
+ * there once, as the text the user was shown or may have been shown. That row
+ * is the turn's only answer, since the run's transcript leaves a streamed
+ * answer to it.
  */
 export class ReplyStreams {
   constructor(private readonly deps: ReplyStreamsDeps) {}
@@ -94,7 +95,9 @@ export class ReplyStreams {
   }
 
   private async record(target: ReplyTarget, outcome: ReplyOutcome): Promise<void> {
-    const shown = outcome.parts.filter((part) => part.receipt);
+    // Every part showed or may have: a create whose result is unknown most
+    // likely landed, and nothing sends it again.
+    const shown = outcome.parts;
     if (!this.deps.conversations || shown.length === 0) return;
     // A block's parts split its text, and each block is a message of its own.
     const text = shown
@@ -103,7 +106,7 @@ export class ReplyStreams {
     // A row holds one message id. A quote names it to reach the row, and the
     // message quoted is most often the answer, which the last block starts.
     const lastBlock = shown.at(-1)!.block;
-    const quoted = shown.find((part) => part.block === lastBlock)!.receipt!;
+    const quoted = shown.find((part) => part.block === lastBlock)!.receipt;
     try {
       const sessionId =
         target.romeSessionId ??
@@ -117,7 +120,7 @@ export class ReplyStreams {
       await this.deps.conversations.recordOutboundMessage({
         sessionId,
         content: JSON.stringify([{ type: "text", content: text }]),
-        platformMessageId: quoted.messageId,
+        ...(quoted ? { platformMessageId: quoted.messageId } : {}),
         senderId: "rome",
         senderName: "Rome",
         ...(target.replyToMessageId ? { replyToPlatformMessageId: target.replyToMessageId } : {}),

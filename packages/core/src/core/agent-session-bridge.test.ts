@@ -573,7 +573,8 @@ describe("AgentSessionBridge reply streaming", () => {
       repo,
     }: {
       streamReply: boolean;
-      on?: boolean;
+      /** A pending promise holds the setting's read open. */
+      on?: boolean | Promise<boolean>;
       interrupt?: () => Promise<void>;
       /** A stream to hand out in place of the real one. */
       replies?: ReplyStream;
@@ -854,6 +855,31 @@ describe("AgentSessionBridge reply streaming", () => {
     expect(created).toEqual(["Looking."]);
   });
 
+  it("writes nothing when the worker disconnects while the reply opens, and records the answer as usual", async () => {
+    const { repo, answers, close } = await recorded();
+    try {
+      let read!: (on: boolean) => void;
+      const setting = new Promise<boolean>((resolve) => (read = resolve));
+      const interrupt = rs.fn(async () => undefined);
+      const { written, turns, workerGone } = run(turnEvents(...answer), {
+        streamReply: true,
+        on: setting,
+        interrupt,
+        repo,
+      });
+
+      workerGone();
+      await rs.waitFor(() => expect(interrupt).toHaveBeenCalledWith("action worker disconnected"));
+      read(true);
+
+      await rs.waitFor(() => expect(turns.get("turn-1")?.finished).toBe(true));
+      expect(written).toEqual([]);
+      expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "hi there" }])]);
+    } finally {
+      close();
+    }
+  });
+
   /** A repository holding the conversation the run is recorded in. */
   async function recorded() {
     const testDb = createTestDb();
@@ -913,6 +939,29 @@ describe("AgentSessionBridge reply streaming", () => {
         JSON.stringify({ status: "partial", messageIds: ["m1"] }),
       );
       expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "Looking." }])]);
+    } finally {
+      close();
+    }
+  });
+
+  it("records the answer of a reply whose create may have landed, which its caller does not send", async () => {
+    const { repo, answers, close } = await recorded();
+    try {
+      const transport: DeliveryTransport = {
+        capabilities: { maxPartLength: 100, edit: true, budget },
+        codec: plainText,
+        async create() {
+          throw new DeliveryFailure("unknown", "no answer");
+        },
+        async edit() {},
+      };
+      const { turnEnd } = run(turnEvents(...answer), { streamReply: true, repo, transport });
+
+      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+      expect(JSON.stringify(turnEnd())).toContain(
+        JSON.stringify({ status: "unknown", messageIds: [] }),
+      );
+      expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "hi there" }])]);
     } finally {
       close();
     }
