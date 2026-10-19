@@ -12,6 +12,20 @@ afterEach(async () => {
   for (const clean of cleanup.splice(0).reverse()) await clean();
 });
 
+/**
+ * Reserves the caller daemon port. The default port is hashed from the temporary directory and
+ * can land in the OS ephemeral range, where an unrelated socket may hold it and the daemon can
+ * never bind.
+ */
+async function freePort() {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (!address || typeof address === "string") throw new Error("Missing address");
+  return address.port;
+}
+
 async function fixture(
   options: {
     exchangeStatuses?: number[];
@@ -21,6 +35,7 @@ async function fixture(
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-daemon-"));
+  const port = await freePort();
   cleanup.push(() =>
     rm(root, { recursive: true, force: true, maxRetries: 5 }).catch((error) => {
       // A stopped daemon can hold observe.db open a little longer, and Windows refuses to remove
@@ -72,7 +87,12 @@ async function fixture(
   ): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [path, ...args], {
-        env: { ...process.env, ROME_NODE_CONFIG_DIR: root, ...env },
+        env: {
+          ...process.env,
+          ROME_NODE_CONFIG_DIR: root,
+          ROME_NODE_DAEMON_PORT: String(port),
+          ...env,
+        },
         stdio: "pipe",
         windowsHide: true,
       });

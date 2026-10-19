@@ -16,6 +16,20 @@ afterEach(async () => {
   for (const clean of cleanup.splice(0).reverse()) await clean();
 });
 
+/**
+ * Reserves the caller daemon port. The default port is hashed from the temporary directory and
+ * can land in the OS ephemeral range, where an unrelated socket may hold it and the daemon can
+ * never bind.
+ */
+async function freePort() {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (!address || typeof address === "string") throw new Error("Missing address");
+  return address.port;
+}
+
 async function listen(server: Server) {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   cleanup.push(async () => {
@@ -41,6 +55,7 @@ async function until(check: () => boolean) {
  */
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "rome-node-transfer-"));
+  const port = await freePort();
   cleanup.push(() =>
     rm(root, { recursive: true, force: true, maxRetries: 5 }).catch((error) => {
       // A stopped daemon can hold observe.db open a little longer, and Windows refuses to remove
@@ -124,7 +139,7 @@ async function fixture() {
   function spawnCli(args: string[], directory: string, cwd = root, input?: Buffer) {
     const child = spawn(process.execPath, [resolve("bin/rome-node.js"), ...args], {
       cwd,
-      env: { ...process.env, ROME_NODE_CONFIG_DIR: directory },
+      env: { ...process.env, ROME_NODE_CONFIG_DIR: directory, ROME_NODE_DAEMON_PORT: String(port) },
       stdio: "pipe",
       windowsHide: true,
     });
@@ -166,7 +181,7 @@ async function fixture() {
 
   const caller = join(root, "caller");
   await writePrivateJson(join(caller, "caller.json"), { cloudUrl, token: tokenFor("c") });
-  cleanup.push(() => stopDaemon(createNodeConfig({ directory: caller })));
+  cleanup.push(() => stopDaemon(createNodeConfig({ directory: caller, port })));
   const cli = async (args: string[], input?: Buffer) => {
     const run = spawnCli(args, caller, root, input);
     const code = await run.exited;

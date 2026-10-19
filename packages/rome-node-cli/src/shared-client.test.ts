@@ -19,6 +19,20 @@ afterEach(async () => {
   for (const clean of cleanup.splice(0).reverse()) await clean();
 });
 
+/**
+ * Reserves the caller daemon port. The default port is hashed from the temporary directory and
+ * can land in the OS ephemeral range, where an unrelated socket may hold it and the daemon can
+ * never bind.
+ */
+async function freePort() {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (!address || typeof address === "string") throw new Error("Missing address");
+  return address.port;
+}
+
 async function fixture(dropReply = false) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-shared-"));
   cleanup.push(() =>
@@ -78,7 +92,8 @@ async function fixture(dropReply = false) {
   cleanup.push(() => new Promise<void>((resolve) => cloud.close(() => resolve())));
   const cloudAddress = cloud.address();
   if (!cloudAddress || typeof cloudAddress === "string") throw new Error("Missing Cloud address");
-  const config = createNodeConfig({ directory: root });
+  const port = await freePort();
+  const config = createNodeConfig({ directory: root, port });
   await writePrivateJson(join(root, "caller.json"), {
     cloudUrl: `http://127.0.0.1:${cloudAddress.port}`,
     token,
@@ -89,7 +104,7 @@ async function fixture(dropReply = false) {
     return new Promise<{ code: number | null; stdout: string; stderr: string }>(
       (resolve, reject) => {
         const child = spawn(process.execPath, args, {
-          env: { ...process.env, ROME_NODE_CONFIG_DIR: root },
+          env: { ...process.env, ROME_NODE_CONFIG_DIR: root, ROME_NODE_DAEMON_PORT: String(port) },
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
         });
@@ -131,7 +146,7 @@ async function fixture(dropReply = false) {
   function watch() {
     const events: ConnectionEvent[] = [];
     const child = spawn(process.execPath, [resolve("bin/rome-node.js"), "watch"], {
-      env: { ...process.env, ROME_NODE_CONFIG_DIR: root },
+      env: { ...process.env, ROME_NODE_CONFIG_DIR: root, ROME_NODE_DAEMON_PORT: String(port) },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
