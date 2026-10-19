@@ -68,6 +68,20 @@ describe("ReplyAssembler", () => {
     expect(blocksOf(assembler)).toEqual(["First turn.", "Second", "Second turn."]);
   });
 
+  it("ends a block the last turn left streaming, with the text it has", () => {
+    // Nothing could complete it once ids match afresh, and a block still
+    // streaming holds back the blocks after it.
+    const assembler = new ReplyAssembler();
+    assembler.apply({ type: "text_delta", content: "Cut off" });
+    assembler.apply({ type: "turn_start", turnId: "t2", sessionId: "s", userPrompt: "" });
+    assembler.apply({ type: "text_delta", content: "Next" });
+
+    expect(assembler.blocks.map((block) => [block.text, block.complete, block.revision])).toEqual([
+      ["Cut off", true, 0],
+      ["Next", false, 0],
+    ]);
+  });
+
   it("counts each time a block's text is replaced, and not each time it grows", () => {
     const assembler = new ReplyAssembler();
     assembler.apply({ type: "text_delta", content: "Hel", blockId: "a" });

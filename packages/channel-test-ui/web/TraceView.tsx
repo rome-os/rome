@@ -29,7 +29,7 @@ const LANES: Array<[Lane, string]> = [
 // A frame's columns: the time, then one per lane. A narrow screen keeps one
 // lane column and names each row's lane inline.
 const FRAME_GRID =
-  "grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[2.5rem_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.3fr)]";
+  "grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[3.5rem_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.3fr)]";
 
 const LANE_COLUMN: Record<Lane, string> = {
   test: "col-start-2",

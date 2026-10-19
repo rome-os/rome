@@ -302,6 +302,17 @@ describe("ReplyDelivery", () => {
       expect(platform.messages.every((m) => m.history.length === 1)).toBe(true);
     });
 
+    it("sends the blocks after one the last turn left streaming before the reply finishes", async () => {
+      const delivery = reply({ mode: "blocks" });
+      delivery.accept(delta("Cut off"));
+      delivery.accept({ type: "turn_start", turnId: "t2", sessionId: "s", userPrompt: "" });
+      delivery.accept(text("Next."));
+      await advance(0);
+      await advance(0);
+
+      expect(platform.shown).toEqual(["Cut off", "Next."]);
+    });
+
     it("never ends a part that waited out blockWaitMs in the middle of a word", async () => {
       const delivery = reply({ mode: "blocks", blockWaitMs: 1000 });
       delivery.accept(delta("Hello wor", "a"));

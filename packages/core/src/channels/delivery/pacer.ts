@@ -51,9 +51,10 @@ interface Lane {
 }
 
 /**
- * Paces every write one account makes to a platform: ordinary sends, each
- * part of a split text, attachments, and streamed edits all go through the
- * one Pacer for that account.
+ * Paces the writes one account makes to a platform. Holding the account to its
+ * budget requires that every write go through the one Pacer for that account:
+ * ordinary sends, each part of a split text, attachments, and streamed edits.
+ * Only a reply's writes do so far.
  *
  * - One write runs at a time. Writes to one conversation run in the order
  *   they were asked for.

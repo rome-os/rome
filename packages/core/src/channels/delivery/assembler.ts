@@ -5,7 +5,8 @@ export class TextBlock {
   /** The text so far. Reading the characters of a text that grew by deltas
    *  copies it whole, so a reader that runs on every delta uses `from`. */
   text = "";
-  /** The agent finished the block, so its text will not change again. */
+  /** The agent finished the block, or a new turn began after it, so its text
+   *  will not change again. */
   complete = false;
   /** How many times the block's text was replaced rather than grown. Text
    *  that only grows keeps every earlier offset, and a replacement does not. */
@@ -51,7 +52,8 @@ export class TextBlock {
  *   still open. A provider gives a block's deltas and its text one id, or
  *   neither, and an event with an id is not taken to be part of a block that
  *   has none, since that could join two different blocks. An id is unique only
- *   within its turn, so a `turn_start` begins matching afresh.
+ *   within its turn, so a `turn_start` begins matching afresh, and ends a
+ *   block the last turn left streaming with the text it has.
  * - A `text` completes its block and its content replaces whatever the
  *   deltas built, since the complete block is authoritative.
  * - A `result` adds the answer as a last block, unless the provider already
@@ -69,6 +71,9 @@ export class ReplyAssembler {
   /** Applies `event` to the blocks. */
   apply(event: StreamAgentEvent): void {
     if (event.type === "turn_start") {
+      // No event can complete a block of the last turn now, and one still
+      // streaming would hold back every block after it.
+      for (const block of this.blocks) block.complete = true;
       this.byId.clear();
       this.open = undefined;
       this.finalSeen = false;
