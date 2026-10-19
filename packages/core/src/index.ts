@@ -111,6 +111,7 @@ import { ActionLoader } from "./actions/loader.js";
 import { ActionEngine } from "./actions/engine.js";
 import { readMemoryHeadroom } from "./actions/memory-headroom.js";
 import { defaultWorkerCap } from "./actions/worker-cap.js";
+import { isFirstPartyAction } from "./apps/first-party-action.js";
 import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
 import { ActionWorkerCoordinator } from "./actions/action-subprocess.js";
 import { endInterruptedRuns } from "./actions/restart-recovery.js";
@@ -611,6 +612,9 @@ async function main() {
       onWorkerInterrupted: createHostWorkerRecovery(actionExecutionsRepo),
       maxWorkerProcesses,
       memoryHeadroom: readMemoryHeadroom,
+      // Coordination roots run in main only when the lockfile marks their app
+      // first-party; the action's own manifest is never trusted for this.
+      isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
     },

@@ -94,3 +94,17 @@ Alternatives rejected for this amendment:
 - **Lower the cap under memory pressure at run time.** Rejected because the queue waits on a live memory reading (the amendment of 2026-10-18), which answers pressure directly. A moving cap would answer the same signal a second way and make the two disagree.
 
 Future diffs must respect: the cap's default is derived from the instance's memory and never from the work in flight, and an explicit `ROME_ACTION_MAX_WORKERS` always wins.
+
+## Amendment (2026-10-19): four coordination roots run in main
+
+Every root dispatched from main took a worker, whatever the action did. Four first-party actions are short writes to main-owned services: `send_message`, `send_user_message`, `create_routine` and `send_feedback`. In a worker each reached back into main over RPC, so the worker added a fork and an IPC hop and made a 50 ms call compete with hour-long jobs for the capped budget. When the pool was full, an agent could not send its reply, schedule a wake-up or file feedback, and the final answer of a webchat turn could be lost.
+
+A root run of one of these four actions executes in main when the lockfile marks the owning app first-party and the action is not cancellable. Such a root may not call other actions: the engine refuses the nested call, so no app code reaches main through this door. Trust comes from the install record, never from the action's own manifest. The list grows only with actions that start no agent and call no action.
+
+Alternatives rejected for this amendment:
+
+- **Run every first-party `type: system` root in main.** Rejected because `summon` and its kin are `type: system` and run whole agent loops, whose tool calls would become nested in-process calls in main and run third-party app code there.
+- **Rely on the two reserved slots.** Rejected because a reserve counts workers, not callers: a burst of fail-fast roots from agent turns fills it, and the coordination call then fails anyway.
+- **Retry at each caller.** Rejected because every scheduling boundary would reimplement the same backoff, and a caller that gives up drops work such as a deferred wake-up.
+
+This accepts that an in-process root cannot be killed by `cancel()` and that an unhandled error in one of these handlers reaches main. Future diffs must respect: a root runs in main only when it is on the coordination list, first-party and not cancellable, and a coordination root never calls another action.

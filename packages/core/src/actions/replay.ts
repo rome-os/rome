@@ -29,6 +29,10 @@ export interface ReplayStore {
    * see the same signal regardless of where the approval originated.
    */
   pendingApproval?: PendingApproval;
+  /** Set on a root that main runs in-process as a coordination action. Such a
+   * root may not call other actions, since a nested call would run app code
+   * in main; the engine refuses the call instead. */
+  coordinationRoot?: boolean;
 }
 
 export const replayContext = new AsyncLocalStorage<ReplayStore>();

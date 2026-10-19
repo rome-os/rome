@@ -400,6 +400,146 @@ describe("ActionEngine", () => {
       await engine.stopWorkerWarmPool();
     });
 
+    describe("coordination roots", () => {
+      // A forked (fake) worker answers `data: <actionName>`; running in main
+      // returns whatever `execute` returns, so `data` tells the paths apart.
+      const inMain = async (): Promise<ActionResult> => ({ status: "ok", data: "ran-in-main" });
+
+      function engineWith(
+        actions: Action[],
+        isFirstPartyAction?: (name: string) => boolean,
+        maxWorkerProcesses = 8,
+        autoRespond = true,
+      ) {
+        const registry = new ActionRegistryImpl();
+        for (const action of actions) registry.register(action);
+        const { children, actionWorkerFork } = installFakeChildProcessFactory({ autoRespond });
+        const engine = new ActionEngine(registry, createActionEngineRepos(), {
+          processRole: "main",
+          workerWarmPoolSize: 0,
+          maxWorkerProcesses,
+          actionWorkerFork,
+          isFirstPartyAction,
+        });
+        return { engine, children, actionWorkerFork };
+      }
+
+      it("runs a first-party coordination root in main without forking a worker", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [buildAction("system:send_message", { type: "system", execute: inMain })],
+          (name) => name === "system:send_message",
+        );
+
+        await expect(engine.run("system:send_message", {})).resolves.toEqual({
+          status: "ok",
+          data: "ran-in-main",
+        });
+        expect(actionWorkerFork).not.toHaveBeenCalled();
+      });
+
+      it("still runs a coordination root when every worker slot is taken", async () => {
+        const { engine, children, actionWorkerFork } = engineWith(
+          [
+            buildAction("root"),
+            buildAction("system:create_routine", { type: "system", execute: inMain }),
+          ],
+          (name) => name === "system:create_routine",
+          1,
+          false,
+        );
+
+        const busy = engine.run("root", {});
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        await expect(engine.run("root", {})).rejects.toMatchObject({
+          name: "ActionWorkerCapacityError",
+        });
+
+        await expect(engine.run("system:create_routine", {})).resolves.toEqual({
+          status: "ok",
+          data: "ran-in-main",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+
+        children[0].completeNext();
+        await expect(busy).resolves.toEqual({ status: "ok", data: "root" });
+      });
+
+      it("forks a worker for a first-party action outside the allowlist", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [buildAction("system:summon", { type: "system", execute: inMain })],
+          () => true,
+        );
+
+        await expect(engine.run("system:summon", {})).resolves.toEqual({
+          status: "ok",
+          data: "system:summon",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+      });
+
+      it("forks a worker for an allowlisted name owned by a non-first-party app", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [buildAction("store-app:send_message", { type: "system", execute: inMain })],
+          () => false,
+        );
+
+        await expect(engine.run("store-app:send_message", {})).resolves.toEqual({
+          status: "ok",
+          data: "store-app:send_message",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+      });
+
+      it("forks a worker for a cancellable coordination action", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [
+            buildAction("system:send_message", {
+              type: "system",
+              cancellable: true,
+              execute: inMain,
+            }),
+          ],
+          () => true,
+        );
+
+        await expect(engine.run("system:send_message", {})).resolves.toEqual({
+          status: "ok",
+          data: "system:send_message",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+      });
+
+      it("forks a worker when no trust check is configured", async () => {
+        const { engine, actionWorkerFork } = engineWith([
+          buildAction("system:send_message", { type: "system", execute: inMain }),
+        ]);
+
+        await expect(engine.run("system:send_message", {})).resolves.toEqual({
+          status: "ok",
+          data: "system:send_message",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+      });
+
+      it("refuses a nested call from a coordination root", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [
+            buildAction("other"),
+            buildAction("system:send_feedback", {
+              type: "system",
+              execute: async () => await callAction("other", {}),
+            }),
+          ],
+          (name) => name === "system:send_feedback",
+        );
+
+        await expect(engine.run("system:send_feedback", {})).rejects.toThrow(
+          /may not call other actions/,
+        );
+        expect(actionWorkerFork).not.toHaveBeenCalled();
+      });
+    });
+
     describe("queued roots", () => {
       const queue: ActionRunContext = { whenWorkersBusy: "queue" };
 

@@ -127,6 +127,17 @@ const QUEUE_MEMORY_RECHECK_MS = 5_000;
 /** A reading that hovers at the line crosses it on many rechecks. The gate logs
  * a crossing at most this often, so a long hold costs two lines, not hundreds. */
 const MEMORY_LOG_INTERVAL_MS = 60_000;
+/** First-party coordination actions that main runs in-process instead of in a
+ * worker. Each is a short write to a main-owned service that starts no agent
+ * and calls no action, so a worker added a fork and an IPC hop and made a
+ * 50 ms call compete with hour-long jobs for the capped budget (#830). The
+ * list grows only with actions that keep both properties. */
+const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
+  "send_message",
+  "send_user_message",
+  "create_routine",
+  "send_feedback",
+]);
 
 export interface ActionRunContext {
   initiator?: string;
@@ -245,6 +256,12 @@ interface ActionEngineOptions {
   ) => Promise<ActionResult | undefined>;
   /** Main-only process factory. Worker engines intentionally receive none. */
   actionWorkerFork?: (entryPath: string, options: ForkOptions) => ChildProcess;
+  /** Main-only trust check: true when the named action is owned by core or by
+   * an app installed as first-party. A root coordination action (see
+   * COORDINATION_ACTIONS) that passes it runs in main instead of taking a
+   * worker. Trust never comes from the action's own manifest. Absent, every
+   * root takes a worker as before. */
+  isFirstPartyAction?: (actionName: string) => boolean;
 }
 
 interface ExecutionInvocation {
@@ -357,6 +374,7 @@ export class ActionEngine {
   private actionWorkerCoordinator: ActionWorkerCoordinator | null = null;
   private actionSubprocessRunner: ActionSubprocessRunner | null;
   private actionWorkerFork: ActionEngineOptions["actionWorkerFork"];
+  private isFirstPartyAction: ActionEngineOptions["isFirstPartyAction"];
   private onWorkerInterrupted: ActionEngineOptions["onWorkerInterrupted"];
   private onApprovalCreated: ActionEngineOptions["onApprovalCreated"];
   private clock: Clock;
@@ -392,6 +410,7 @@ export class ActionEngine {
     this.clock = options?.clock ?? systemClock;
     this.actionSubprocessRunner = options?.actionSubprocessRunner ?? null;
     this.actionWorkerFork = options?.actionWorkerFork;
+    this.isFirstPartyAction = options?.isFirstPartyAction;
     this.workerWarmPoolSize =
       this.processRole === "main"
         ? Math.max(0, Math.floor(options?.workerWarmPoolSize ?? DEFAULT_WORKER_WARM_POOL_SIZE))
@@ -622,6 +641,7 @@ export class ActionEngine {
       nextSequence: 0,
       replayIndex: 0,
       mode: isReplay ? "replay" : "record",
+      coordinationRoot: this.processRole === "main" && this.runsRootInMain(action),
     };
 
     let preloadedEntryCount = 0;
@@ -751,6 +771,11 @@ export class ActionEngine {
     observer?: ActionRunObserver,
     actionEventObserver?: ActionInvocationObserver,
   ): Promise<ActionResult> {
+    if (store.coordinationRoot) {
+      throw new Error(
+        `Action "${store.rootActionName}" runs in the main process as a coordination action and may not call other actions (it called "${action.config.name}")`,
+      );
+    }
     const argsHash = hashArgs(args);
 
     if (store.mode === "replay") {
@@ -1744,9 +1769,29 @@ export class ActionEngine {
 
   private resolveExecutionMode(action: Action, isRoot: boolean): "in_process" | "subprocess" {
     if (isRoot) {
-      return this.processRole === "main" ? "subprocess" : "in_process";
+      if (this.processRole !== "main") return "in_process";
+      return this.runsRootInMain(action) ? "in_process" : "subprocess";
     }
     return action.config.cancellable ? "subprocess" : "in_process";
+  }
+
+  /** Whether a root runs in main: a first-party coordination action that is
+   * not cancellable. Cancellable actions keep their worker so process-level
+   * termination stays available. A failing or absent trust check means a
+   * worker, as before. */
+  private runsRootInMain(action: Action): boolean {
+    if (action.config.cancellable) return false;
+    if (!COORDINATION_ACTIONS.has(artifactLocalName(action.config.name))) return false;
+    if (!this.isFirstPartyAction) return false;
+    try {
+      return this.isFirstPartyAction(action.config.name);
+    } catch (err) {
+      log.warn("first-party action check failed; using a worker", {
+        action: action.config.name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
   }
 
   private emitRuntimeEvent(
