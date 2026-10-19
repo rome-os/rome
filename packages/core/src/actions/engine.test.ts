@@ -1,6 +1,22 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect, rs, afterEach } from "@rstest/core";
+import type { ActionConfig } from "@rome-os/app-runtime";
+import { parse as parseYaml } from "yaml";
+import { createCreateRoutineAction } from "../../../../rome_apps/system/src/actions/create-routine/index.js";
+import { createSendFeedbackAction } from "../../../../rome_apps/system/src/actions/send-feedback/index.js";
+import { createSendUserMessageAction } from "../../../../rome_apps/system/src/actions/send-user-message/index.js";
+import { createEmptyLegacyArtifactBindings, formatArtifactId } from "../apps/artifact-id.js";
+import { ActionConfigSchema } from "../apps/packaging/index.js";
+import type { ArtifactMetadata } from "../apps/types.js";
+import { runDefer } from "../core/defer.js";
+import { RoutinesRepository } from "../db/repositories/routines.js";
+import type { RoutineEngine } from "../routines/engine.js";
+import { resolveOneOffDate } from "../routines/schedule-trigger-provider.js";
+import type { Routine, Trigger } from "../routines/types.js";
 import {
   ActionEngine,
   resolveActionWorkerEntryPath,
@@ -8,6 +24,7 @@ import {
   type ApprovalCreatedEvent,
 } from "./engine.js";
 import { actionExecutionContext } from "./context.js";
+import { createRunsRootInMain } from "./main-process-actions.js";
 import { hashArgs, replayContext, type JournalEntry } from "./replay.js";
 import { ActionRegistryImpl } from "./registry.js";
 import type { Action, ActionResult } from "./types.js";
@@ -25,7 +42,7 @@ import {
   FakeClock,
   type TestRome,
 } from "../test/kit/index.js";
-import { createActionEngineRepos } from "../test/helpers.js";
+import { createActionEngineRepos, createTestDb } from "../test/helpers.js";
 
 // ActionEngine tests through the real wiring (testkit): the production engine
 // over real repositories on an in-memory DB. Assertions read execution rows,
@@ -593,6 +610,352 @@ describe("ActionEngine", () => {
 
         children[0].completeNext();
         await blocker;
+      });
+    });
+
+    // #830: coordination actions an agent calls mid-turn must not depend on a
+    // free worker slot, since at saturation the turn has no other way to
+    // schedule its own wake-up or reach the guardian.
+    describe("roots placed in main", () => {
+      const systemActionsDir = fileURLToPath(
+        new URL("../../../../rome_apps/system/src/actions/", import.meta.url),
+      );
+
+      /** The shipped manifest, so the test breaks if one turns cancellable. */
+      function systemConfig(dir: string): ActionConfig {
+        return ActionConfigSchema.parse(
+          parseYaml(readFileSync(join(systemActionsDir, dir, "action.yaml"), "utf8")),
+        ) as ActionConfig;
+      }
+
+      function appMetadata(ownerId: string, name: string): ArtifactMetadata {
+        return {
+          kind: "action",
+          ownerType: "app",
+          ownerId,
+          publicName: name,
+          aliases: [],
+          sourcePath: `/${ownerId}/${name}`,
+          formatVersion: 2,
+        };
+      }
+
+      /**
+       * A main engine over an identity-backed registry, like production's,
+       * whose single worker slot is held by a running root. `register` takes
+       * an action and its owning app, and binds the legacy bare name the way
+       * the system app's install does.
+       */
+      async function saturatedMainEngine(
+        actions: Array<{ action: Action; ownerId: string }>,
+        options: { runsRootInMain?: (name: string) => boolean; useDefaultCheck?: boolean } = {},
+      ) {
+        const legacyBindings = createEmptyLegacyArtifactBindings();
+        const registry = new ActionRegistryImpl({ legacyBindings });
+        for (const { action, ownerId } of [
+          { action: buildAction("busy"), ownerId: "acme" },
+          ...actions,
+        ]) {
+          registry.register(action, appMetadata(ownerId, action.config.name));
+          if (ownerId === "system") {
+            legacyBindings.action[action.config.name] = formatArtifactId(
+              "system",
+              action.config.name,
+            );
+          }
+        }
+        const testDb = createTestDb();
+        openDbs.push(testDb);
+        const { children, actionWorkerFork } = installFakeChildProcessFactory({
+          autoRespond: false,
+        });
+        const engine = new ActionEngine(registry, createActionEngineRepos(testDb.db), {
+          processRole: "main",
+          workerWarmPoolSize: 0,
+          maxWorkerProcesses: 1,
+          actionWorkerFork,
+          runsRootInMain:
+            options.runsRootInMain ??
+            (options.useDefaultCheck === false ? undefined : createRunsRootInMain(registry)),
+        });
+
+        const busy = engine.run("acme:busy", {});
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        await expect(engine.run("acme:busy", {})).rejects.toMatchObject({
+          name: "ActionWorkerCapacityError",
+        });
+
+        return {
+          engine,
+          registry,
+          db: testDb.db,
+          children,
+          actionWorkerFork,
+          /** Finishes the busy root. Its worker exits on the next tick. */
+          async release() {
+            children[0].completeNext();
+            await busy;
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          },
+        };
+      }
+
+      const openDbs: Array<{ close(): void }> = [];
+      afterEach(() => {
+        for (const db of openDbs.splice(0)) db.close();
+      });
+
+      const agentTurn: ActionRunContext = {
+        initiator: "agent:main",
+        sessionId: "session-1",
+        agentName: "main",
+        turnId: "turn-1",
+      };
+
+      it("writes defer's routine while every worker slot is taken", async () => {
+        const activated: Routine[] = [];
+        let routinesRepo: RoutinesRepository | undefined;
+        const createRoutineAction = createCreateRoutineAction(systemConfig("create-routine"), {
+          get routinesRepo() {
+            return routinesRepo!;
+          },
+          routineEngine: {
+            async activate(routine: Routine) {
+              activated.push(routine);
+            },
+          } as unknown as RoutineEngine,
+          actionRegistry: { has: () => true, isExplicit: () => false },
+          resolveOneOffDate: (trigger) => resolveOneOffDate(trigger as Trigger, async () => "UTC"),
+          agentRunner: { hasAction: () => true },
+        });
+        const { engine, db, actionWorkerFork, release } = await saturatedMainEngine([
+          { action: createRoutineAction as Action, ownerId: "system" },
+        ]);
+        routinesRepo = new RoutinesRepository(db);
+
+        // The same call agent-session's defer tool makes: the bare legacy
+        // name, no queueing opt-in.
+        const deferred = await runDefer(
+          { name: "Coding validation watch", afterMinutes: 5 },
+          {
+            context: {
+              agentName: "main",
+              sessionId: "session-1",
+              channelContext: { channel: "webchat", threadId: "chat-1", channelUserId: "guardian" },
+            },
+            createRoutine: async (createArgs) => {
+              const result = await engine.run("create_routine", createArgs, agentTurn);
+              if (result.status !== "ok") throw new Error(JSON.stringify(result));
+              return result.data;
+            },
+            now: Date.now(),
+          },
+        );
+
+        expect(deferred).toMatchObject({ ok: true, name: "Coding validation watch" });
+        const routineId = (deferred as { routineId?: string }).routineId;
+        expect(routineId).toEqual(expect.any(String));
+        expect(await routinesRepo.findById(routineId!)).toMatchObject({
+          name: "Coding validation watch",
+          enabled: true,
+        });
+        expect(activated.map((routine) => routine.id)).toEqual([routineId]);
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+        await release();
+      });
+
+      it("sends a guardian webchat message while every worker slot is taken", async () => {
+        const requests: string[] = [];
+        const fetchImpl = (async (url: string | URL | Request) => {
+          requests.push(String(url));
+          return String(url).endsWith("/turns")
+            ? Response.json({ turnId: "turn-9" })
+            : Response.json({ id: "chat-9" });
+        }) as typeof fetch;
+        const { engine, actionWorkerFork, release } = await saturatedMainEngine([
+          {
+            action: createSendUserMessageAction(systemConfig("send-user-message"), {
+              fetchImpl,
+              baseUrl: "http://127.0.0.1:4141",
+            }) as Action,
+            ownerId: "system",
+          },
+        ]);
+
+        await expect(
+          engine.run("send_user_message", { text: "Morning briefing" }, agentTurn),
+        ).resolves.toEqual({
+          status: "ok",
+          data: { sessionId: "chat-9", turnId: "turn-9", createdSession: true },
+        });
+        expect(requests).toEqual([
+          "http://127.0.0.1:4141/api/chat/sessions",
+          "http://127.0.0.1:4141/api/chat/sessions/chat-9/turns",
+        ]);
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+        await release();
+      });
+
+      it("files agent feedback while every worker slot is taken", async () => {
+        const sent: unknown[] = [];
+        const { engine, actionWorkerFork, release } = await saturatedMainEngine([
+          {
+            action: createSendFeedbackAction(systemConfig("send-feedback"), {
+              feedback: {
+                async send(input) {
+                  sent.push(input);
+                  return { kind: "ok" };
+                },
+              },
+            }) as Action,
+            ownerId: "system",
+          },
+        ]);
+
+        await expect(
+          engine.run(
+            "send_feedback",
+            { category: "bug", summary: "Worker cap reached", details: "Repro steps." },
+            agentTurn,
+          ),
+        ).resolves.toEqual({ status: "ok" });
+        expect(sent).toEqual([
+          expect.objectContaining({
+            summary: "Worker cap reached",
+            reporter: expect.objectContaining({
+              kind: "agent",
+              agentName: "main",
+              sessionId: "session-1",
+              turnId: "turn-1",
+            }),
+          }),
+        ]);
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+        await release();
+      });
+
+      const ranInMain = rs.fn(async (): Promise<ActionResult> => ({ status: "ok" }));
+
+      it.each([
+        {
+          case: "a system action outside the allowlist",
+          name: "system:summon",
+          actions: [{ action: buildAction("summon", { execute: ranInMain }), ownerId: "system" }],
+        },
+        {
+          case: "another app's action with an allowlisted local name",
+          name: "acme:create_routine",
+          actions: [
+            { action: buildAction("create_routine", { execute: ranInMain }), ownerId: "acme" },
+          ],
+        },
+        {
+          case: "an allowlisted action marked cancellable",
+          name: "system:send_feedback",
+          actions: [
+            {
+              action: buildAction("send_feedback", { cancellable: true, execute: ranInMain }),
+              ownerId: "system",
+            },
+          ],
+        },
+      ])("still needs a worker for $case", async ({ name, actions }) => {
+        ranInMain.mockClear();
+        const { engine, actionWorkerFork, release } = await saturatedMainEngine(actions);
+
+        await expect(engine.run(name, {}, agentTurn)).rejects.toMatchObject({
+          name: "ActionWorkerCapacityError",
+        });
+        expect(ranInMain).not.toHaveBeenCalled();
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+        await release();
+      });
+
+      it("needs a worker for an allowlisted action when the engine has no placement check", async () => {
+        ranInMain.mockClear();
+        const { engine, release } = await saturatedMainEngine(
+          [{ action: buildAction("send_feedback", { execute: ranInMain }), ownerId: "system" }],
+          { useDefaultCheck: false },
+        );
+
+        await expect(engine.run("send_feedback", {}, agentTurn)).rejects.toMatchObject({
+          name: "ActionWorkerCapacityError",
+        });
+        expect(ranInMain).not.toHaveBeenCalled();
+        await release();
+      });
+
+      it("needs a worker when the placement check throws", async () => {
+        ranInMain.mockClear();
+        const { engine, release } = await saturatedMainEngine(
+          [{ action: buildAction("send_feedback", { execute: ranInMain }), ownerId: "system" }],
+          {
+            runsRootInMain: () => {
+              throw new Error("registry unavailable");
+            },
+          },
+        );
+        await expect(engine.run("send_feedback", {}, agentTurn)).rejects.toMatchObject({
+          name: "ActionWorkerCapacityError",
+        });
+        expect(ranInMain).not.toHaveBeenCalled();
+        await release();
+      });
+
+      it("never runs a nested call under a root placed in main in the main process", async () => {
+        const nestedInMain = rs.fn(async (): Promise<ActionResult> => ({ status: "ok" }));
+        let nestedResult: Promise<ActionResult> | undefined;
+        const { engine, children, actionWorkerFork, release } = await saturatedMainEngine([
+          {
+            action: buildAction("send_feedback", {
+              execute: async () => {
+                nestedResult = callAction("acme:helper", {});
+                return await nestedResult;
+              },
+            }),
+            ownerId: "system",
+          },
+          { action: buildAction("helper", { execute: nestedInMain }), ownerId: "acme" },
+        ]);
+
+        // Saturated: the nested call fails fast instead of running in main.
+        await expect(engine.run("send_feedback", {}, agentTurn)).rejects.toMatchObject({
+          name: "ActionWorkerCapacityError",
+        });
+        await expect(nestedResult).rejects.toMatchObject({ name: "ActionWorkerCapacityError" });
+        expect(nestedInMain).not.toHaveBeenCalled();
+
+        // With a slot free, the nested call is sent to a worker.
+        await release();
+        const run = engine.run("send_feedback", {}, agentTurn);
+        await rs.waitFor(() => expect(actionMessages(children[1])).toHaveLength(1));
+        expect(actionMessages(children[1])[0]).toMatchObject({ actionName: "acme:helper" });
+        children[1].completeNext("acme:helper");
+        await expect(run).resolves.toEqual({ status: "ok", data: "acme:helper" });
+        expect(nestedInMain).not.toHaveBeenCalled();
+        expect(actionWorkerFork).toHaveBeenCalledTimes(2);
+      });
+
+      it("reports a root placed in main as not cancellable", async () => {
+        let finish: ((result: ActionResult) => void) | undefined;
+        const { engine, release } = await saturatedMainEngine([
+          {
+            action: buildAction("send_user_message", {
+              execute: () =>
+                new Promise<ActionResult>((resolve) => {
+                  finish = resolve;
+                }),
+            }),
+            ownerId: "system",
+          },
+        ]);
+
+        const run = engine.run("send_user_message", {}, { rootExecutionId: "in-main-root" });
+        await rs.waitFor(() => expect(finish).toBeDefined());
+        await expect(engine.cancel("in-main-root")).resolves.toBe(false);
+        finish!({ status: "ok" });
+        await expect(run).resolves.toEqual({ status: "ok" });
+        await release();
       });
     });
   });

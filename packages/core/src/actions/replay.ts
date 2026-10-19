@@ -29,6 +29,9 @@ export interface ReplayStore {
    * see the same signal regardless of where the approval originated.
    */
   pendingApproval?: PendingApproval;
+  /** Set on a root that the main process runs in-process. Every nested call
+   * under it then runs in an action worker, never in main. */
+  rootRunsInMain?: boolean;
 }
 
 export const replayContext = new AsyncLocalStorage<ReplayStore>();
