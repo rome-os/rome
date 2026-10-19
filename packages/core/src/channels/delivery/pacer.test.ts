@@ -96,7 +96,7 @@ describe("Pacer", () => {
 
   it("holds every write of the account when the platform says to slow down", async () => {
     const paced = pacer();
-    paced.pause(5000);
+    paced.pause(5000, "rate-limited");
     const a = paced.run("a", write("a"));
     const b = paced.run("b", write("b"));
     await advance(0);
@@ -106,10 +106,26 @@ describe("Pacer", () => {
     expect(log).toEqual(["a@5000", "b@5000"]);
   });
 
+  it("holds writes for an outage's backoff too, and remembers only a rate limit's pause", async () => {
+    const paced = pacer();
+    paced.pause(2000, "unavailable");
+    const held = paced.run("a", write("a"));
+    await advance("1s");
+    expect(log).toEqual([]);
+    expect(paced.lastRateLimitEnd()).toBe(0);
+
+    paced.pause(3000, "rate-limited");
+    paced.pause(10_000, "unavailable");
+    expect(paced.lastRateLimitEnd()).toBe(start + 4000);
+    await advance("10s");
+    await held;
+    expect(log).toEqual(["a@11000"]);
+  });
+
   it("keeps a pause the running write asked for", async () => {
     const paced = pacer();
     const limited = paced.run("a", async () => {
-      paced.pause(3000);
+      paced.pause(3000, "rate-limited");
       throw new Error("rate limited");
     });
     await expect(limited).rejects.toThrow();

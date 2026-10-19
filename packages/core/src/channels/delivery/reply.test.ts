@@ -229,6 +229,18 @@ describe("ReplyDelivery", () => {
       expect(platform.shown.join("")).toBe("Final text that goes past one part");
     });
 
+    it("edits a settled part again when its block's complete text arrives a second time, different", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(text("First version of it", "a"));
+      await advance(0);
+      await advance(0);
+      expect(platform.shown).toEqual(["First version of it"]);
+
+      delivery.accept(text("Final version of it", "a"));
+      await delivery.finish();
+      expect(platform.shown).toEqual(["Final version of it"]);
+    });
+
     it("never moves text a preview already shows into the next message", async () => {
       const delivery = reply({ editIntervalMs: 0 });
       // Twenty characters fill the part; a readable break lies at 14.
@@ -549,7 +561,7 @@ describe("ReplyDelivery", () => {
   describe("a write that waits in a paced queue", () => {
     const paused = (policy: Partial<DeliveryPolicy> = {}) => {
       const pacer = new Pacer(OPEN_BUDGET, clock);
-      pacer.pause(1000);
+      pacer.pause(1000, "rate-limited");
       const delivery = new ReplyDelivery({
         transport: platform,
         pacer,
@@ -853,7 +865,7 @@ describe("ReplyDelivery", () => {
     it("does not wait for its queued write once the reply has failed", async () => {
       // Another reply of the account got an hour's wait, so this reply's create waits in the queue.
       const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
-      pacer.pause(3_600_000);
+      pacer.pause(3_600_000, "rate-limited");
       const delivery = new ReplyDelivery({
         transport: platform,
         pacer,
@@ -877,7 +889,7 @@ describe("ReplyDelivery", () => {
     it("fails the reply when the account's queue holds its write for longer than a minute", async () => {
       // Another reply of the account got an hour's wait, which pauses every write.
       const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
-      pacer.pause(3_600_000);
+      pacer.pause(3_600_000, "rate-limited");
       const delivery = new ReplyDelivery({
         transport: platform,
         pacer,
@@ -927,7 +939,7 @@ describe("ReplyDelivery", () => {
       // An hour's wait elsewhere ended at 50 s, and the write is still behind another
       // conversation's when its own wait runs out, so no pause is in effect then.
       const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
-      pacer.pause(50_000);
+      pacer.pause(50_000, "rate-limited");
       let end = () => {};
       void pacer.run("c2", () => new Promise<void>((resolve) => (end = resolve)));
       const delivery = new ReplyDelivery({
@@ -972,6 +984,50 @@ describe("ReplyDelivery", () => {
       expect(platform.messages).toHaveLength(0);
     });
 
+    it("reports a write held by its own conversation as unavailable, though another reply backed off from an outage meanwhile", async () => {
+      const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
+      // An earlier call for this conversation is still running, past what its caller waited for.
+      await pacer.run("c1", async () => new Outlasted(new Promise<void>(() => {})));
+      const policy = {
+        mode: "edit",
+        editIntervalMs: 0,
+        blockWaitMs: 0,
+        maxPendingChars: 10_000,
+      } as const;
+      const held = new ReplyDelivery({
+        transport: platform,
+        pacer,
+        policy,
+        conversation: "c1",
+        clock,
+      });
+      held.accept(result("Hello"));
+      const finished = held.finish();
+      await settle();
+      // Another conversation's create cannot reach the platform, so the account backs off.
+      platform.failures.push({
+        write: "create",
+        failure: new DeliveryFailure("unavailable", "getaddrinfo EAI_AGAIN"),
+      });
+      const other = new ReplyDelivery({
+        transport: platform,
+        pacer,
+        policy,
+        conversation: "c2",
+        clock,
+      });
+      other.accept(result("Hi"));
+      const otherFinished = other.finish();
+      await advance(61_000);
+      await settle();
+
+      expect((await otherFinished).status).toBe("delivered");
+      const outcome = await Promise.race([finished, Promise.resolve("hung" as const)]);
+      expect(outcome).not.toBe("hung");
+      // The backoff was no rate limit, and waiting one out would not help.
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "unavailable" } });
+    });
+
     it("fails the reply when another write's wait starts after its own write is queued", async () => {
       const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
       let release = () => {};
@@ -987,7 +1043,7 @@ describe("ReplyDelivery", () => {
       const finished = delivery.finish();
       await settle();
       // The write that runs ahead of it ends, and its platform answers with an hour's wait.
-      pacer.pause(3_600_000);
+      pacer.pause(3_600_000, "rate-limited");
       release();
       await advance(61_000);
       await settle();

@@ -82,6 +82,8 @@ export class Pacer {
   private tokens: number;
   private refilledAt: number;
   private pausedUntil = 0;
+  /** When the latest pause that a rate limit asked for ends. */
+  private rateLimitedUntil = 0;
   private running = false;
   private turns = 0;
   private timer?: ClockTimer;
@@ -132,17 +134,24 @@ export class Pacer {
   }
 
   /**
-   * When the account's latest pause ends, as a time of the clock, or 0 when it
-   * was never paused. A pause that is over still answers, so a write that waited
-   * can tell that one held it back.
+   * When the account's latest pause for a rate limit ends, as a time of the
+   * clock, or 0 when none was asked for. A pause that is over still answers, so
+   * a write that waited can tell that a limit held it back. A backoff after an
+   * outage does not count.
    */
-  lastPauseEnd(): number {
-    return this.pausedUntil;
+  lastRateLimitEnd(): number {
+    return this.rateLimitedUntil;
   }
 
-  /** Holds every write of the account for `ms`, after the platform asked to slow down. */
-  pause(ms: number): void {
-    this.pausedUntil = Math.max(this.pausedUntil, this.now() + ms);
+  /**
+   * Holds every write of the account for `ms`. `cause` says why: the platform
+   * asked to slow down (`rate-limited`), or could not be reached and the
+   * account backs off (`unavailable`).
+   */
+  pause(ms: number, cause: "rate-limited" | "unavailable"): void {
+    const until = this.now() + ms;
+    this.pausedUntil = Math.max(this.pausedUntil, until);
+    if (cause === "rate-limited") this.rateLimitedUntil = Math.max(this.rateLimitedUntil, until);
     this.pump();
   }
 

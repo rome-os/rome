@@ -1,7 +1,7 @@
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { Clock, ClockTimer } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
-import { ReplyAssembler } from "./assembler.js";
+import { ReplyAssembler, type TextBlock } from "./assembler.js";
 import { Outlasted, type Pacer, SKIPPED } from "./pacer.js";
 import { lastBreak, splitPoint, splitsPair } from "./split.js";
 import {
@@ -103,6 +103,10 @@ interface Part {
    *  it, so it counts as shown, though `sentSource` is what was acknowledged. */
   attempted?: string;
   diverged?: true;
+  /** The revision of its block whose text the part was found to show at its
+   *  offsets. It is not compared again until that text is replaced or the
+   *  offsets move. */
+  checked?: number;
   lastWriteAt: number;
 }
 
@@ -113,6 +117,8 @@ interface BlockState {
   skipped?: number;
   /** When unsent text started waiting, in `blocks` mode. */
   waitingSince?: number;
+  /** The block's text the parts' layout was last checked against. */
+  laidOut?: { revision: number; length: number };
 }
 
 type Plan =
@@ -259,7 +265,7 @@ export class ReplyDelivery {
     try {
       for (const [index, block] of this.assembler.blocks.entries()) {
         const state = this.blocks[index];
-        if (state) this.reconcileLayout(block.text, state);
+        if (state) this.reconcileLayout(block, state);
       }
     } catch (error) {
       this.fail({
@@ -403,12 +409,12 @@ export class ReplyDelivery {
         // that failed after it. The reply's failure stays what it was.
         if (this.failure) return;
         if (error instanceof QueueWaitExceeded) {
-          // A pause that was in effect while the write waited, even one that is
-          // over by now, is a limit the caller can wait out. With none, the
-          // conversation is still held by an earlier call, and waiting out a
-          // limit would not help. Either way, the write never started.
-          const paused = this.options.pacer.lastPauseEnd() > queuedAt;
-          this.fail({ kind: paused ? "rate-limited" : "unavailable", message: error.message });
+          // A rate limit's pause in effect while the write waited, even one over
+          // by now, is a limit the caller can wait out. With none, an earlier
+          // call still holds the conversation, or the account backed off from an
+          // outage, and waiting would not help. Either way, the write never started.
+          const limited = this.options.pacer.lastRateLimitEnd() > queuedAt;
+          this.fail({ kind: limited ? "rate-limited" : "unavailable", message: error.message });
           return;
         }
         // Anything else escaped the write's own handling of the transport's
@@ -461,12 +467,20 @@ export class ReplyDelivery {
       const own = (part: Part) =>
         dry ? this.blocks[index]!.parts[state.parts.indexOf(part)]! : part;
       const complete = block.complete || this.closed;
-      this.reconcileLayout(block.text, state);
+      this.reconcileLayout(block, state);
 
       for (const part of state.parts) {
         if (!part.settled || part.diverged || part.unknown) continue;
+        // Text that only grows leaves a settled part's source as it was. A part
+        // found to show it is compared again only once the text is replaced or
+        // its offsets move, so a delta does not compare every settled part. A
+        // part whose last edit's result is unknown is edited again either way.
+        if (!part.uncertain && part.checked === block.revision) continue;
         const source = block.text.slice(part.start, part.end);
-        if (source === part.sentSource && !part.uncertain) continue;
+        if (source === part.sentSource && !part.uncertain) {
+          part.checked = block.revision;
+          continue;
+        }
         const rendered = codec.render(source, true);
         // A platform refuses a blank edit, so a message whose place in the block
         // is now empty stays as it is, and the part is reported as differing.
@@ -482,6 +496,7 @@ export class ReplyDelivery {
         }
         if (rendered === part.sent && !part.uncertain) {
           part.sentSource = source;
+          part.checked = block.revision;
           continue;
         }
         const due = part.lastWriteAt + this.options.policy.editIntervalMs;
@@ -501,7 +516,9 @@ export class ReplyDelivery {
         if (last?.unknown) return null;
         const active = last && !last.settled ? last : undefined;
         const start = active ? active.start : Math.max(last?.end ?? 0, state.skipped ?? 0);
-        const remaining = block.text.slice(start);
+        // Offsets below are the block's, and `remaining` holds its text from
+        // `start` on. A delta then costs what is unsent, not the whole block.
+        const remaining = block.from(start);
         // Nothing visible yet, or only a whitespace tail after a split. A
         // platform refuses a message with no visible text, and one refusal
         // ends the reply.
@@ -513,7 +530,7 @@ export class ReplyDelivery {
           if (active) {
             if (active.uncertain) return dry ? null : this.failUncertain();
             active.diverged = true;
-            this.settlePart(active, active.start + active.sentSource.length);
+            this.settlePart(state, active, active.start + active.sentSource.length);
           }
           state.skipped = block.text.length;
           break;
@@ -525,13 +542,13 @@ export class ReplyDelivery {
           : start;
         if (
           end < shown &&
-          codec.measure(codec.render(block.text.slice(start, shown), true)) <= limit
+          codec.measure(codec.render(remaining.slice(0, shown - start), true)) <= limit
         )
           end = Math.min(shown, block.text.length);
         // What a preview showed can end inside a pair of the final text.
-        if (end > start + 1 && splitsPair(block.text, end)) end -= 1;
+        if (end > start + 1 && splitsPair(remaining, end - start)) end -= 1;
         const settle = complete || end < block.text.length;
-        const source = block.text.slice(start, end);
+        const source = remaining.slice(0, end - start);
         // The split can choose a prefix with nothing visible in it, such as a
         // long run of spaces. It is passed over without a message, and the
         // visible rest starts the next part.
@@ -541,7 +558,7 @@ export class ReplyDelivery {
           if (active) {
             if (active.uncertain) return dry ? null : this.failUncertain();
             active.diverged = true;
-            this.settlePart(active, active.start + active.sentSource.length);
+            this.settlePart(state, active, active.start + active.sentSource.length);
           }
           state.skipped = end;
           continue;
@@ -550,7 +567,7 @@ export class ReplyDelivery {
         if (active) {
           if (codec.render(source, settle) === active.sent && !active.uncertain) {
             if (!settle) return null;
-            this.settlePart(active, end);
+            this.settlePart(state, active, end);
             continue;
           }
           const due = active.lastWriteAt + this.options.policy.editIntervalMs;
@@ -604,14 +621,40 @@ export class ReplyDelivery {
    * sent. Text between two messages cannot be, since a message cannot be put in
    * front of one that exists, so the message after it is reported as differing.
    */
-  private reconcileLayout(text: string, state: BlockState): void {
+  private reconcileLayout(block: TextBlock, state: BlockState): void {
+    const { revision } = block;
+    const { length } = block.text;
+    const seen = state.laidOut;
+    if (seen?.revision === revision && seen.length === length) return;
+    state.laidOut = { revision, length };
+    // Text that only grew keeps every offset as it was, except one at its old
+    // end, where the second half of a pair can arrive. Only those are looked
+    // at, since reading a growing text copies it whole on every delta. A
+    // write or a settle sets offsets anew and asks for a full check.
+    if (seen?.revision === revision) {
+      const at = seen.length;
+      const touched =
+        state.skipped === at || state.parts.some((part) => part.start === at || part.end === at);
+      if (!touched || at === 0 || !splitsPair(block.from(at - 1), 1)) return;
+      for (const part of state.parts) {
+        if (part.start !== at && part.end !== at) continue;
+        if (part.start === at) part.start -= 1;
+        if (part.end === at) part.end -= 1;
+        delete part.checked;
+      }
+      if (state.skipped === at) state.skipped -= 1;
+      return;
+    }
+    const { text } = block;
     const { codec } = this.options.transport;
     const visible = (from: number, to: number) =>
       to > from && codec.render(text.slice(from, to), true).trim() !== "";
     let covered = 0;
     for (const part of state.parts) {
+      const [start, end] = [part.start, part.end];
       if (splitsPair(text, part.start)) part.start -= 1;
       if (splitsPair(text, part.end)) part.end -= 1;
+      if (part.start !== start || part.end !== end) delete part.checked;
       if (!part.diverged && visible(covered, part.start)) part.diverged = true;
       covered = Math.max(covered, part.end);
     }
@@ -662,12 +705,16 @@ export class ReplyDelivery {
           lastWriteAt: this.now(),
         };
         state.parts.push(part);
-        if (plan.settle) this.settlePart(part, plan.end);
+        // Its offsets come from the text as it was when the write was planned,
+        // which may have grown since. The next pass checks them against it.
+        delete state.laidOut;
+        if (plan.settle) this.settlePart(state, part, plan.end);
         report("accepted", partIndex);
       } catch (error) {
         const failure = asDeliveryFailure(error);
         report(failure.kind, partIndex);
-        if (failure.kind === "unknown")
+        if (failure.kind === "unknown") {
+          delete state.laidOut;
           state.parts.push({
             start: plan.start,
             end: plan.end,
@@ -677,6 +724,7 @@ export class ReplyDelivery {
             unknown: true,
             lastWriteAt: this.now(),
           });
+        }
         this.handle(failure);
       }
       return;
@@ -691,8 +739,11 @@ export class ReplyDelivery {
       Object.assign(part, { sent: rendered, sentSource: plan.source, lastWriteAt: this.now() });
       delete part.uncertain;
       delete part.attempted;
-      if (!part.settled) part.end = plan.end;
-      if (plan.settle && !part.settled) this.settlePart(part, plan.end);
+      if (!part.settled) {
+        part.end = plan.end;
+        delete state.laidOut;
+      }
+      if (plan.settle && !part.settled) this.settlePart(state, part, plan.end);
       this.unknownEdits = 0;
       this.unavailableRetries = 0;
       report("accepted", partIndex);
@@ -707,7 +758,7 @@ export class ReplyDelivery {
       if (failure.kind === "unsupported" && !part.uncertain) {
         // The platform will not edit: keep what it shows and carry on in blocks.
         this.mode = "blocks";
-        if (!part.settled) this.settlePart(part, part.start + part.sentSource.length);
+        if (!part.settled) this.settlePart(state, part, part.start + part.sentSource.length);
         return;
       }
       if (failure.kind === "unsupported") {
@@ -741,7 +792,7 @@ export class ReplyDelivery {
       // that waits behind the pause gives up after a minute. It pauses when the
       // reply gives up too, since a send the caller makes next would run into
       // the same window.
-      this.options.pacer.pause(wait);
+      this.options.pacer.pause(wait, "rate-limited");
       this.ownPausedUntil = Math.max(this.ownPausedUntil, this.now() + wait);
       if (this.rateLimitedMs + wait > MAX_RATE_LIMIT_WAIT_MS) {
         this.fail({ kind: "rate-limited", message: failure.message });
@@ -754,7 +805,7 @@ export class ReplyDelivery {
       // The write did not arrive, so doing it again cannot show anything twice.
       // The connection is the account's, so the account waits a little, longer
       // each time, instead of every conversation trying at once.
-      this.options.pacer.pause(1000 * 2 ** this.unavailableRetries);
+      this.options.pacer.pause(1000 * 2 ** this.unavailableRetries, "unavailable");
       this.unavailableRetries += 1;
       return;
     }
@@ -777,9 +828,13 @@ export class ReplyDelivery {
     }
   }
 
-  private settlePart(part: Part, end: number): void {
+  private settlePart(state: BlockState, part: Part, end: number): void {
     part.end = end;
     part.settled = true;
+    delete part.checked;
+    // The end can come from text the part showed earlier, so the next pass
+    // checks it against the text as it is.
+    delete state.laidOut;
   }
 
   private outcome(): ReplyOutcome {

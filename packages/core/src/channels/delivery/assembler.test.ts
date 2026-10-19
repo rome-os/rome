@@ -12,7 +12,7 @@ describe("ReplyAssembler", () => {
     matched.apply({ type: "text_delta", content: "Hel", blockId: "a" });
     matched.apply({ type: "text_delta", content: "lo", blockId: "a" });
     matched.apply({ type: "text", content: "Hello", blockId: "a" });
-    expect(matched.blocks).toEqual([{ text: "Hello", complete: true }]);
+    expect(matched.blocks).toMatchObject([{ text: "Hello", complete: true }]);
 
     // A provider gives a block's deltas and its text one id, or neither. Merging a block
     // that has an id into one that has none could join two different blocks, so they stay apart.
@@ -54,5 +54,37 @@ describe("ReplyAssembler", () => {
     assembler.apply({ type: "result", content: "The answer is 42." });
 
     expect(blocksOf(assembler)).toEqual(["The answer", "The answer is 42."]);
+  });
+
+  it("keeps a block id of one turn apart from the same id in the next", () => {
+    // A block id is unique only within its turn, so two turns can reuse one.
+    const assembler = new ReplyAssembler();
+    assembler.apply({ type: "turn_start", turnId: "t1", sessionId: "s", userPrompt: "" });
+    assembler.apply(text("First turn.", "0", "final"));
+    assembler.apply({ type: "turn_start", turnId: "t2", sessionId: "s", userPrompt: "" });
+    assembler.apply({ type: "text_delta", content: "Second", blockId: "0" });
+    assembler.apply({ type: "result", content: "Second turn." });
+
+    expect(blocksOf(assembler)).toEqual(["First turn.", "Second", "Second turn."]);
+  });
+
+  it("counts each time a block's text is replaced, and not each time it grows", () => {
+    const assembler = new ReplyAssembler();
+    assembler.apply({ type: "text_delta", content: "Hel", blockId: "a" });
+    assembler.apply({ type: "text_delta", content: "lo", blockId: "a" });
+    expect(assembler.blocks[0]!.revision).toBe(0);
+    assembler.apply(text("Hello", "a"));
+    expect(assembler.blocks[0]!.revision).toBe(1);
+  });
+
+  it("gives a block's text from any offset, across the deltas it grew by and after it is replaced", () => {
+    const assembler = new ReplyAssembler();
+    for (const piece of ["Hel", "lo ", "", "wor", "ld"])
+      assembler.apply({ type: "text_delta", content: piece, blockId: "a" });
+    const [block] = assembler.blocks;
+    for (let start = 0; start <= 12; start++)
+      expect(block!.from(start)).toBe("Hello world".slice(start));
+    assembler.apply(text("Goodbye", "a"));
+    expect(block!.from(4)).toBe("bye");
   });
 });
