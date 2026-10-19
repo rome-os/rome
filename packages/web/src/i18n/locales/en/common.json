@@ -162,6 +162,7 @@
       "step2": "Copy the callback link or code shown in your browser.",
       "step3": "Paste it below to finish.",
       "openButton": "Open sign-in page",
+      "agentBrowserHint": "You can also sign in from the agent's browser: open <link>/desktop</link> and visit the sign-in page there.",
       "codeLabel": "Paste the callback link or code from your browser",
       "codePlaceholder": "Paste link or code here",
       "submit": "Submit",

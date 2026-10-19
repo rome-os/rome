@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import TerminalModal from "./terminal-modal";
@@ -79,5 +79,21 @@ describe("TerminalModal Claude login completion", () => {
       await rs.advanceTimersByTimeAsync(1200);
     });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("points to the agent browser as another place to sign in", async () => {
+    (globalThis as unknown as { WebSocket: typeof MockWebSocket }).WebSocket = MockWebSocket;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
+      Response.json({ claude: { loggedIn: false } })) as typeof fetch);
+
+    render(<TerminalModal preset="claude-login" onClose={rs.fn()} />);
+    await act(async () => {
+      MockWebSocket.instances[0]?.onopen?.();
+    });
+
+    const link = screen.getByRole("link");
+    expect(link.getAttribute("href")).toBe("/desktop");
+    // New tab keeps this dialog open for pasting the code back.
+    expect(link.getAttribute("target")).toBe("_blank");
   });
 });

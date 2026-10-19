@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Check, ExternalLink } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
 import { Button } from "@/components/ui/button";
@@ -268,6 +268,23 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
               )}
               {t("terminal.claudeLogin.openButton")}
             </Button>
+            {/* New tab so this dialog stays open for pasting the code back. */}
+            <p className="text-ui text-muted-foreground">
+              <Trans
+                t={t}
+                i18nKey="terminal.claudeLogin.agentBrowserHint"
+                components={{
+                  link: (
+                    <a
+                      href="/desktop"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-info-fg hover:underline"
+                    />
+                  ),
+                }}
+              />
+            </p>
             <div className="flex flex-col gap-2">
               <FieldLabel htmlFor="claude-login-code">
                 {t("terminal.claudeLogin.codeLabel")}

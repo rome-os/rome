@@ -162,6 +162,7 @@
       "step2": "复制浏览器中显示的回调链接或代码。",
       "step3": "将代码粘贴到下方以完成登录。",
       "openButton": "打开登录页面",
+      "agentBrowserHint": "你也可以在智能体的浏览器中登录：打开 <link>/desktop</link>，在其中访问登录页面。",
       "codeLabel": "粘贴浏览器中的回调链接或代码",
       "codePlaceholder": "在此粘贴链接或代码",
       "submit": "提交",
