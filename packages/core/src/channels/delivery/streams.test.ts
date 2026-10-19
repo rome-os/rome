@@ -112,7 +112,7 @@ describe("ReplyStreams", () => {
     );
   });
 
-  it("records each block of the reply as its own paragraph", async () => {
+  it("records each block as its own paragraph, under the first message of the last block", async () => {
     const recordOutboundMessage = rs.fn(async () => undefined);
     const conversations = {
       ensureChannelConversation: rs.fn(async () => ({ id: "conversation-1" })),
@@ -134,6 +134,7 @@ describe("ReplyStreams", () => {
     expect(recordOutboundMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         content: JSON.stringify([{ type: "text", content: "one two\n\nsix" }]),
+        platformMessageId: "id-six",
       }),
     );
   });

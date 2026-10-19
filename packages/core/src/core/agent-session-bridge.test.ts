@@ -4,7 +4,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, StreamAgentEvent } from "@rome-os/app-runtime";
+import type {
+  ConversationId,
+  ConversationRepository,
+  StreamAgentEvent,
+} from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import type {
   AgentSession,
@@ -14,7 +18,7 @@ import type {
 } from "./agent-session.js";
 import { Pacer } from "../channels/delivery/pacer.js";
 import { type ReplyStream, ReplyStreams, type ReplyTarget } from "../channels/delivery/streams.js";
-import { type DeliveryTransport, plainText } from "../channels/delivery/types.js";
+import { DeliveryFailure, type DeliveryTransport, plainText } from "../channels/delivery/types.js";
 import { systemClock } from "../lib/clock.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
@@ -565,15 +569,28 @@ describe("AgentSessionBridge reply streaming", () => {
       on = true,
       interrupt,
       replies: replacement,
+      transport: own,
+      repo,
     }: {
       streamReply: boolean;
       on?: boolean;
       interrupt?: () => Promise<void>;
       /** A stream to hand out in place of the real one. */
       replies?: ReplyStream;
+      /** A platform to write to in place of the one that records. */
+      transport?: DeliveryTransport;
+      /** The repository the turn and its reply are recorded in. */
+      repo?: WebChatRepository;
     },
   ) {
-    const { transport, written, edits } = platform();
+    const recording = platform();
+    const { written, edits } = recording;
+    const transport = own ?? recording.transport;
+    const conversations =
+      repo &&
+      ({
+        recordOutboundMessage: (input) => repo.recordOutboundConversationMessage(input),
+      } satisfies Pick<ConversationRepository, "recordOutboundMessage">);
     const session = {
       key: { agentName: "main", channelThreadKey: "telegram:chat-1" },
       sessionId: "session-1",
@@ -594,10 +611,13 @@ describe("AgentSessionBridge reply streaming", () => {
             channel === "telegram" ? { transport, pacer: new Pacer(budget, systemClock) } : null,
           clock: systemClock,
           policy,
+          ...(conversations
+            ? { conversations: conversations as unknown as ConversationRepository }
+            : {}),
         });
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
-    new AgentSessionBridge(manager, undefined, undefined, turns, undefined, replies).attach(
+    new AgentSessionBridge(manager, repo, undefined, turns, undefined, replies).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -623,7 +643,11 @@ describe("AgentSessionBridge reply streaming", () => {
     });
     const turnEnd = () =>
       child.sent.find((message) => JSON.stringify(message).includes('"type":"turn_end"'));
-    return { written, edits, turnEnd, turns, targets };
+    const workerGone = () => {
+      child.connected = false;
+      child.emit("disconnect");
+    };
+    return { written, edits, turnEnd, turns, targets, workerGone };
   }
 
   const turnStart: StreamAgentEvent = {
@@ -767,5 +791,130 @@ describe("AgentSessionBridge reply streaming", () => {
     expect(written).toHaveLength(1);
     expect(edits).toEqual([]);
     expect(JSON.stringify(turnEnd())).toContain('"status":"stopped"');
+  });
+
+  it("stops writing the reply before it interrupts the provider when the worker disconnects", async () => {
+    let more!: () => void;
+    const gate = new Promise<void>((resolve) => (more = resolve));
+    let end!: () => void;
+    const ended = new Promise<void>((resolve) => (end = resolve));
+    const events = (async function* (): AsyncIterable<StreamAgentEvent> {
+      yield turnStart;
+      yield { type: "text_delta", content: "Hello", blockId: "a" };
+      await gate;
+      yield { type: "text_delta", content: " world", blockId: "a" };
+      await ended;
+      yield { type: "turn_end", turnId: "turn-1", status: "interrupted", durationMs: 1 };
+    })();
+    const interrupt = rs.fn(async () => undefined);
+    const { written, edits, turns, workerGone } = run(events, { streamReply: true, interrupt });
+
+    await rs.waitFor(() => expect(written).toEqual([["chat-1", "Hello", "msg-1"]]));
+    workerGone();
+    await rs.waitFor(() => expect(interrupt).toHaveBeenCalledWith("action worker disconnected"));
+
+    // The provider winds down and still emits text, with time for the reply
+    // to write it. None of it is written. No worker is left to hear turn_end,
+    // so the turn's end in the registry marks the reply settled.
+    more();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    end();
+    await rs.waitFor(() => expect(turns.get("turn-1")?.finished).toBe(true));
+    expect(written).toHaveLength(1);
+    expect(edits).toEqual([]);
+  });
+
+  it("drops the reply's queued writes when the worker disconnects after the run ended", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const created: string[] = [];
+    const transport: DeliveryTransport = {
+      capabilities: { maxPartLength: 100, edit: true, budget },
+      codec: plainText,
+      async create(conversation, text) {
+        created.push(text);
+        if (created.length === 1) await held;
+        return { messageId: `m${created.length}`, conversationId: conversation };
+      },
+      async edit() {},
+    };
+    const interrupt = rs.fn(async () => undefined);
+    const { turns, workerGone } = run(
+      turnEvents({ type: "text", content: "Looking." }, ...answer),
+      { streamReply: true, interrupt, transport },
+    );
+
+    // The run has ended, and the reply's first write is still running.
+    await rs.waitFor(() => expect(created).toEqual(["Looking."]));
+    workerGone();
+    await rs.waitFor(() => expect(interrupt).toHaveBeenCalledWith("action worker disconnected"));
+    release();
+
+    await rs.waitFor(() => expect(turns.get("turn-1")?.finished).toBe(true));
+    expect(created).toEqual(["Looking."]);
+  });
+
+  /** A repository holding the conversation the run is recorded in. */
+  async function recorded() {
+    const testDb = createTestDb();
+    const repo = new WebChatRepository(testDb.db);
+    await repo.ensureRomeSession({
+      id: "conversation-1",
+      type: "channel",
+      name: "telegram:chat-1",
+      agentName: null,
+    });
+    const answers = async () =>
+      (await repo.getMessages("conversation-1"))
+        .filter((message) => message.role === "assistant")
+        .map((message) => message.content);
+    return { repo, answers, close: () => testDb.close() };
+  }
+
+  it("records a streamed reply as the turn's one answer, under the message a quote of the answer names", async () => {
+    const { repo, answers, close } = await recorded();
+    try {
+      const { written, turnEnd } = run(
+        turnEvents({ type: "text", content: "Looking." }, ...answer),
+        { streamReply: true, repo },
+      );
+
+      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+      expect(written.map(([, text]) => text)).toEqual(["Looking.", "hi there"]);
+      const shown = JSON.stringify([{ type: "text", content: "Looking.\n\nhi there" }]);
+      expect(await answers()).toEqual([shown]);
+      const { repliedTo } = await repo.loadConversationContext("conversation-1", "m2");
+      expect(repliedTo?.content).toBe(shown);
+    } finally {
+      close();
+    }
+  });
+
+  it("records only what a reply that failed partway showed", async () => {
+    const { repo, answers, close } = await recorded();
+    try {
+      const transport: DeliveryTransport = {
+        capabilities: { maxPartLength: 100, edit: true, budget },
+        codec: plainText,
+        async create(conversation, text) {
+          if (text !== "Looking.") throw new DeliveryFailure("rejected", "refused");
+          return { messageId: "m1", conversationId: conversation };
+        },
+        async edit() {},
+      };
+      const { turnEnd } = run(turnEvents({ type: "text", content: "Looking." }, ...answer), {
+        streamReply: true,
+        repo,
+        transport,
+      });
+
+      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+      expect(JSON.stringify(turnEnd())).toContain(
+        JSON.stringify({ status: "partial", messageIds: ["m1"] }),
+      );
+      expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "Looking." }])]);
+    } finally {
+      close();
+    }
   });
 });

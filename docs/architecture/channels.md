@@ -49,7 +49,8 @@ A reply can reach a chat as the agent writes it, rather than whole after the run
 - Only a guardian's direct conversation asks. Every other sender's reply passes Envoy whole before anything is sent.
 - A reply the host streamed is not sent again by its caller, unless the stream wrote nothing. Any other outcome may already show on the platform, so a reply that failed partway stays unfinished.
 - A Connection's streamed replies and ordinary sends share one write budget, and only a Connection that can stream has one. A write that hangs cannot stall the Connection's other writes, and it is not cut off.
-- A stop reaches the reply before the provider, so nothing new is written after it.
+- A stop reaches the reply before the provider, so nothing new is written after it. When the worker that asked for the reply goes away, the reply stops the same way, even after the run has ended.
+- A streamed reply is its turn's one answer in the conversation's history, and holds the text the user was shown.
 - A fault in the reply stream never ends the run. The result still reaches its caller. A reply that certainly wrote nothing is reported as failed, so the caller sends it. A reply that cannot settle is reported as unknown.
 
 ## Linked agents

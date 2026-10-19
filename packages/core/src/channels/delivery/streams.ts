@@ -53,7 +53,8 @@ export interface ReplyStreamsDeps {
  * Opens the main-process owner of a run's reply to an external channel: one
  * ReplyDelivery per run, fed the run's events as they happen. Canonical
  * history stays in the conversation repository: a settled reply is recorded
- * there once, as the text the user was shown.
+ * there once, as the text the user was shown. That row is the turn's only
+ * answer, since the run's transcript leaves a streamed answer to it.
  */
 export class ReplyStreams {
   constructor(private readonly deps: ReplyStreamsDeps) {}
@@ -99,6 +100,10 @@ export class ReplyStreams {
     const text = shown
       .map((part, i) => (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.text)
       .join("");
+    // A row holds one message id. A quote names it to reach the row, and the
+    // message quoted is most often the answer, which the last block starts.
+    const lastBlock = shown.at(-1)!.block;
+    const quoted = shown.find((part) => part.block === lastBlock)!.receipt!;
     try {
       const sessionId =
         target.romeSessionId ??
@@ -112,7 +117,7 @@ export class ReplyStreams {
       await this.deps.conversations.recordOutboundMessage({
         sessionId,
         content: JSON.stringify([{ type: "text", content: text }]),
-        platformMessageId: shown[0]!.receipt!.messageId,
+        platformMessageId: quoted.messageId,
         senderId: "rome",
         senderName: "Rome",
         ...(target.replyToMessageId ? { replyToPlatformMessageId: target.replyToMessageId } : {}),

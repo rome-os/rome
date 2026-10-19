@@ -41,6 +41,9 @@ export interface AgentTraceRecorderInput {
   persistTranscript?: boolean;
   /** Inbound conversation messages are already persisted before dispatch. */
   persistUserTranscript?: boolean;
+  /** A reply the host streams records its own assistant row, as the text the
+   *  user was shown, so the turn's answer is not recorded twice. */
+  persistAssistantTranscript?: boolean;
   /**
    * Explicit trigger metadata stamped on the trace message row. When absent,
    * falls back to the ambient action context.
@@ -260,17 +263,19 @@ export class AgentTraceRecorder {
       }
     }
 
-    for (const msg of messages) {
-      if (msg.type !== "result") continue;
-      if (!msg.content.trim()) continue;
-      if (this.persistedAssistantTurnIds.has(this.input.turnId)) continue;
-      rows.push({
-        id: transcriptMessageId(sessionId, this.input.turnId, "assistant"),
-        sessionId,
-        role: "assistant",
-        content: textMessageContent(msg.content),
-        turnId: this.input.turnId,
-      });
+    if (this.input.persistAssistantTranscript ?? true) {
+      for (const msg of messages) {
+        if (msg.type !== "result") continue;
+        if (!msg.content.trim()) continue;
+        if (this.persistedAssistantTurnIds.has(this.input.turnId)) continue;
+        rows.push({
+          id: transcriptMessageId(sessionId, this.input.turnId, "assistant"),
+          sessionId,
+          role: "assistant",
+          content: textMessageContent(msg.content),
+          turnId: this.input.turnId,
+        });
+      }
     }
     return rows;
   }

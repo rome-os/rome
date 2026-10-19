@@ -190,7 +190,14 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           sessionId: session.sessionId,
           turnId: handle.turnId,
         };
-        const workerWatch = interruptTurnOnWorkerDisconnect(rpc, session, handle, turnLogFields);
+        let reply: ReplyStream | null = null;
+        const workerWatch = interruptTurnOnWorkerDisconnect(
+          rpc,
+          session,
+          handle,
+          turnLogFields,
+          () => reply?.stop(),
+        );
         if (this.webchatRepo && conversation.promptPersisted && req.platformMessageId) {
           try {
             await this.webchatRepo.assignConversationMessageTurn(
@@ -206,36 +213,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           }
         }
 
-        const recorder =
-          this.webchatRepo && shouldPersistAgentTrace(req.init?.threadContext)
-            ? new AgentTraceRecorder({
-                webchatRepo: this.webchatRepo,
-                agentName: req.key.agentName,
-                agentSessionId: session.sessionId,
-                romeSessionId,
-                existingSessionId: conversation.existing ? romeSessionId : undefined,
-                channelThreadKey: req.key.channelThreadKey,
-                turnId: handle.turnId,
-                threadContext: req.init?.threadContext,
-                actionContext: req.actionContext,
-                persistTranscript: true,
-                persistUserTranscript: !conversation.promptPersisted,
-              })
-            : null;
-
-        log.info("agent.session.runTurn response ready", {
-          ...baseLogFields,
-          sessionId: session.sessionId,
-          turnId: handle.turnId,
-          durationMs: Date.now() - requestStartedAt,
-        });
-
         // A reply streams only when the caller asked, the setting is on and the
         // channel can. Otherwise `reply` is null and the caller sends the reply.
         // A reply that cannot open is the same: it must not fail the turn it
         // would ride on, whose events nothing would then read.
         const thread = req.init?.threadContext;
-        let reply: ReplyStream | null = null;
         if (req.streamReply && thread?.channel && thread.threadId) {
           try {
             reply =
@@ -254,6 +236,32 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             });
           }
         }
+
+        const recorder =
+          this.webchatRepo && shouldPersistAgentTrace(req.init?.threadContext)
+            ? new AgentTraceRecorder({
+                webchatRepo: this.webchatRepo,
+                agentName: req.key.agentName,
+                agentSessionId: session.sessionId,
+                romeSessionId,
+                existingSessionId: conversation.existing ? romeSessionId : undefined,
+                channelThreadKey: req.key.channelThreadKey,
+                turnId: handle.turnId,
+                threadContext: req.init?.threadContext,
+                actionContext: req.actionContext,
+                persistTranscript: true,
+                persistUserTranscript: !conversation.promptPersisted,
+                persistAssistantTranscript: !reply,
+              })
+            : null;
+
+        log.info("agent.session.runTurn response ready", {
+          ...baseLogFields,
+          sessionId: session.sessionId,
+          turnId: handle.turnId,
+          durationMs: Date.now() - requestStartedAt,
+        });
+
         let replySettled = false;
         // A fault in the reply stream must never break the turn it rides on.
         let replyBroken = false;
@@ -396,14 +404,17 @@ interface TurnWorkerWatch {
 /**
  * Interrupts `handle`'s turn when `rpc` disconnects. A worker that already
  * disconnected still gets its turn interrupted, because `IpcRpc.onDisconnect`
- * runs a late subscriber on the next microtask. Never throws: an interrupt
- * that fails is logged.
+ * runs a late subscriber on the next microtask. `stopReply` runs first, so a
+ * streamed reply writes nothing more, even when the run has already ended and
+ * only the reply's writes remain. Never throws: an interrupt that fails is
+ * logged.
  */
 function interruptTurnOnWorkerDisconnect(
   rpc: IpcRpc,
   session: AgentSession,
   handle: AgentTurnHandle,
   logFields: Record<string, unknown>,
+  stopReply: () => void,
 ): TurnWorkerWatch {
   let watching = true;
   let offDisconnect: () => void = () => undefined;
@@ -412,6 +423,7 @@ function interruptTurnOnWorkerDisconnect(
     watching = false;
     offDisconnect();
     log.info("interrupting agent turn", { ...logFields, reason });
+    stopReply();
     void (async () => {
       try {
         await (handle.interrupt
