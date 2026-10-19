@@ -1,6 +1,6 @@
 name: coding
 description: Writes and modifies code.
-model: opus
+tier: medium
 permissionMode: bypassPermissions
 tools:
   - Read
