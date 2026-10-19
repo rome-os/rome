@@ -802,7 +802,9 @@ export interface ReplyDeliveryReport {
    * `delivered`: every message settled. `partial`: some messages were sent
    * before a failure. `failed`: none was. `unknown`: a message may or may not
    * have been sent. `stopped`: the run was stopped. Only `failed` leaves the
-   * reply safe to send again.
+   * reply safe to send again. The host records what the reply showed or may
+   * have shown in the conversation's history, so a `failed` reply leaves
+   * nothing recorded.
    */
   status: "delivered" | "partial" | "failed" | "unknown" | "stopped";
   /** The platform ids of the messages the reply shows, in order. */
@@ -1213,6 +1215,11 @@ export interface RunParams {
    * the instance has reply streaming on and the channel can stream, and then
    * reports the outcome in `turn_end.replyDelivery`. Without that report, the
    * caller sends the reply.
+   *
+   * A streamed reply is the turn's answer in the conversation's history. The
+   * host records it there in place of the run's transcript. A reply reported
+   * `failed` recorded nothing, so the caller sends the reply and records it,
+   * as `send_message` does.
    */
   streamReply?: boolean;
   /** Explicit session ID to continue */
