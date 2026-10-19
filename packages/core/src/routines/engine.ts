@@ -1,3 +1,4 @@
+import { context as otelContext, ROOT_CONTEXT } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 import type { TriggerProvider } from "./trigger-provider.js";
 import type { Routine, RoutineRunStatus } from "./types.js";
@@ -179,8 +180,15 @@ export class RoutineEngine {
     payload: Record<string, unknown>,
     opts: { manual?: boolean } = {},
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
-    return replayContext.exit(() =>
-      actionExecutionContext.exit(() => this.dispatchAsRoot(routine, payload, opts)),
+    // A fire is a new root in every sense. The trigger that fires it was
+    // registered from inside the action that created the routine, and a timer
+    // inherits that action's async context: its replay store, its execution
+    // store and its trace span. Leaving all three keeps a fire from reading as
+    // a nested call and from parenting its span under a long-ended action.
+    return otelContext.with(ROOT_CONTEXT, () =>
+      replayContext.exit(() =>
+        actionExecutionContext.exit(() => this.dispatchAsRoot(routine, payload, opts)),
+      ),
     );
   }
 

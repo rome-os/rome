@@ -131,9 +131,11 @@ const MEMORY_LOG_INTERVAL_MS = 60_000;
  * by canonical id so no other app's action of the same local name joins by
  * accident. Each is a short write to a main-owned service, so a worker added
  * a fork and an IPC hop and made a 50 ms call compete with hour-long jobs for
- * the capped budget (#830). An action joins the list only when it starts no
- * agent, calls and dispatches no action, and leaves behind no timer, listener
- * or client that would later call one from inside its action context. */
+ * the capped budget (#830). An action joins the list only when, inside its own
+ * async context, it starts no agent and calls or dispatches no action, and
+ * when nothing it leaves behind (a timer, a listener, a client) would later
+ * call one from that context. Work that leaves the context first, such as a
+ * loopback HTTP request or a routine fire, is fine. */
 const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "system:send_message",
   "system:send_user_message",
