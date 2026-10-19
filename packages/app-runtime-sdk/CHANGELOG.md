@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.7.6](https://github.com/rome-os/rome/compare/app-runtime-v0.7.5...app-runtime-v0.7.6) (2026-10-19)
+
+
+### Features
+
+* **app-runtime:** stream a guardian's Telegram reply as the agent writes it ([#1145](https://github.com/rome-os/rome/issues/1145)) ([b2bc593](https://github.com/rome-os/rome/commit/b2bc5937569b5c5ab986743faf406e3fa1464201))
+
 ## [0.7.5](https://github.com/rome-os/rome/compare/app-runtime-v0.7.4...app-runtime-v0.7.5) (2026-10-16)
 
 
