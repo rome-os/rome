@@ -21,8 +21,9 @@ export class Outlasted {
   constructor(readonly settled: Promise<unknown>) {}
 }
 
-/** How long a write may run before it stops holding the queue. */
-const SLOW_WRITE_MS = 30_000;
+/** How long a write may run before it stops holding the queue. A reply stops
+ *  waiting for its write's answer at the same moment. */
+export const SLOW_WRITE_MS = 30_000;
 
 /** How long a conversation stays held by a call that its caller stopped waiting
  *  for, after the account's queue went on. Past it the conversation is given

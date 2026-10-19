@@ -2,7 +2,7 @@ import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { Clock, ClockTimer } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
 import { ReplyAssembler, type TextBlock } from "./assembler.js";
-import { Outlasted, type Pacer, SKIPPED } from "./pacer.js";
+import { Outlasted, type Pacer, SKIPPED, SLOW_WRITE_MS } from "./pacer.js";
 import { endsMidPair, lastBreak, splitPoint, splitsPair } from "./split.js";
 import {
   asDeliveryFailure,
@@ -151,8 +151,10 @@ const MAX_UNKNOWN_EDITS = 3;
  *  go first once the pause ends do not use it up. */
 const QUEUE_WAIT_MS = MAX_RATE_LIMIT_WAIT_MS + 1000;
 
-/** How long a write may run before the reply stops waiting for its answer. */
-const WRITE_DEADLINE_MS = 30_000;
+/** How long a write may run before the reply stops waiting for its answer. It
+ *  is the pacer's limit, so the reply stops waiting, and holds the write's
+ *  conversation with `Outlasted`, as the write stops holding the queue. */
+const WRITE_DEADLINE_MS = SLOW_WRITE_MS;
 
 /** A write that waited too long in the account's queue. It never started. */
 class QueueWaitExceeded extends Error {
@@ -578,6 +580,15 @@ export class ReplyDelivery {
           const due = active.lastWriteAt + this.options.policy.editIntervalMs;
           if (now < due && !ignoreWaits) return { waitUntil: due };
           return { write: "edit", block: index, part: own(active), end, source, settle };
+        }
+        // A message cannot be put in front of one that exists. Text a block
+        // gained after a later block's message stays unsent, and that message
+        // is reported as differing, as between two messages of one block.
+        const after = blocks.slice(index + 1).find((later) => later.parts.length > 0)?.parts[0];
+        if (after) {
+          after.diverged = true;
+          state.skipped = block.text.length;
+          break;
         }
         if (this.mode === "edit" || settle) {
           state.waitingSince = undefined;

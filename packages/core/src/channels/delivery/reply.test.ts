@@ -1470,6 +1470,33 @@ describe("ReplyDelivery", () => {
     });
   });
 
+  describe("a block that grows after a later block's message", () => {
+    // Each message holds four characters, so the first block's new text needs a message of its own.
+    const narrow = () => new MemoryPlatform({ maxPartLength: 4, edit: true, budget: OPEN_BUDGET });
+
+    for (const mode of ["edit", "blocks"] as const) {
+      it(`keeps the messages in order and reports the message after its new text as differing, in ${mode} mode`, async () => {
+        const four = narrow();
+        const delivery = reply({ mode, editIntervalMs: 0, blockWaitMs: 0 }, four);
+        delivery.accept(text("AAAA", "a"));
+        await advance(0);
+        delivery.accept(text("BBBB", "b"));
+        await advance(0);
+        // A second complete text for the first block, one character longer.
+        delivery.accept(text("AAAAT", "a"));
+        const outcome = await delivery.finish();
+
+        expect(four.messages.map((m) => m.history)).toEqual([["AAAA"], ["BBBB"]]);
+        expect(outcome.status).toBe("delivered");
+        expect(outcome.diverged).toBe(true);
+        expect(outcome.parts.map((part) => [part.text, part.diverged])).toEqual([
+          ["AAAA", undefined],
+          ["BBBB", true],
+        ]);
+      });
+    }
+  });
+
   it("keeps a reply's pacer lane when the platform reports another conversation id after the first create", async () => {
     const pacer = new Pacer({ ...OPEN_BUDGET, conversationSpacingMs: 1000 }, clock);
     const delivery = new ReplyDelivery({
