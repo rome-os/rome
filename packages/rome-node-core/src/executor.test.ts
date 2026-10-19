@@ -302,6 +302,10 @@ describe("file transfers over binary frames", () => {
     await executor.receiveFrame(frame({ type: "transfer", kind: "data", offset: 0 }, data));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(frames).toHaveLength(1);
+    // Abort cleanup fsyncs and closes the part file before removing it, which can outlast 50 ms.
+    const deadline = Date.now() + 5000;
+    while ((await readdir(dir)).length > 1 && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 5));
     expect(await readdir(dir)).toEqual(["pushed.bin"]);
   });
 
