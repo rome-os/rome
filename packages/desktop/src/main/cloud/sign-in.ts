@@ -105,7 +105,7 @@ export async function signInToRomeCloud(options: SignInOptions): Promise<CloudCr
   const { redirectUri, callback } = await listenForCallback(signal);
   callback.catch(() => undefined);
   try {
-    return await exchange(options, { redirectUri, callback, verifier, challenge, state });
+    return await exchange(options, { redirectUri, callback, verifier, challenge, state, signal });
   } finally {
     done.abort();
   }
@@ -119,9 +119,10 @@ async function exchange(
     verifier: string;
     challenge: string;
     state: string;
+    signal: AbortSignal;
   },
 ): Promise<CloudCredential> {
-  const { redirectUri, callback, verifier, challenge, state } = flow;
+  const { redirectUri, callback, verifier, challenge, state, signal } = flow;
   await options.openBrowser(
     buildAuthorizeUrl({
       cloudOrigin: options.cloudOrigin,
@@ -140,25 +141,36 @@ async function exchange(
     expectedIssuer: options.cloudOrigin,
   });
 
-  const response = await fetchWithoutRedirect(
-    options.fetchImpl,
-    new URL("/oauth2/token", options.cloudOrigin).toString(),
-    {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
-        code_verifier: verifier,
-        client_id: DESKTOP_CLIENT_ID,
-        redirect_uri: redirectUri,
-        platform: options.platform,
-        app_version: options.appVersion,
-        os_version: options.osVersion,
-      }).toString(),
-    },
-    options.cloudOrigin,
-  );
+  // Cancelling or timing out still applies once the browser has answered:
+  // the exchange is aborted, and an answer that arrives anyway is refused.
+  const cancelled = () => new NativeAuthError("cancelled", "Sign-in was cancelled");
+  let response: Response;
+  try {
+    response = await fetchWithoutRedirect(
+      options.fetchImpl,
+      new URL("/oauth2/token", options.cloudOrigin).toString(),
+      {
+        method: "POST",
+        signal,
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          code_verifier: verifier,
+          client_id: DESKTOP_CLIENT_ID,
+          redirect_uri: redirectUri,
+          platform: options.platform,
+          app_version: options.appVersion,
+          os_version: options.osVersion,
+        }).toString(),
+      },
+      options.cloudOrigin,
+    );
+  } catch (err) {
+    throw signal.aborted ? cancelled() : err;
+  }
   if (!response.ok) throw new NativeAuthError("session_rejected", "Rome Cloud rejected sign-in");
-  return parseDeviceTokenResponse(await responseJson(response));
+  const credential = parseDeviceTokenResponse(await responseJson(response));
+  if (signal.aborted) throw cancelled();
+  return credential;
 }

@@ -79,6 +79,26 @@ describe("signInToRomeCloud", () => {
     ).rejects.toThrow(/state/);
   });
 
+  it("aborts and refuses a token exchange cancelled after the browser answered", async () => {
+    const abort = new AbortController();
+    let exchangeSignal: AbortSignal | undefined;
+    const fetchImpl = rs.fn(async (_url: string, init?: RequestInit) => {
+      exchangeSignal = init?.signal ?? undefined;
+      abort.abort();
+      return Response.json({
+        access_token: "romemob_token",
+        token_type: "Bearer",
+        device_session_id: "s1",
+      });
+    });
+    await expect(
+      signInToRomeCloud(
+        options({ signal: abort.signal, fetchImpl: fetchImpl as unknown as typeof fetch }),
+      ),
+    ).rejects.toThrow(/cancelled/);
+    expect(exchangeSignal?.aborted).toBe(true);
+  });
+
   it("stops waiting when cancelled", async () => {
     const abort = new AbortController();
     const pending = signInToRomeCloud(

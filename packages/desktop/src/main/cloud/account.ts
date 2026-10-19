@@ -77,6 +77,11 @@ export class CloudAccount {
         fetchImpl: this.options.fetchImpl,
         signal: abort.signal,
       });
+      // A cancelled sign-in, or one a newer sign-in replaced, never becomes
+      // the account's credential, even if Rome Cloud answered it.
+      if (abort.signal.aborted || this.signInAbort !== abort) {
+        throw new NativeAuthError("cancelled", "Sign-in was cancelled");
+      }
       await this.vault.setCloudCredential(credential);
     } finally {
       if (this.signInAbort === abort) this.signInAbort = null;

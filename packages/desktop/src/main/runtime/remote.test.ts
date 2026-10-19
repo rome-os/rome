@@ -128,6 +128,34 @@ describe("RemoteRuntime", () => {
     expect(silent.getStatus().title).toMatch(/Can't reach/);
   });
 
+  it("commits nothing when Rome Cloud answers after the runtime was swapped out", async () => {
+    let answer: (instances: CloudInstance[]) => void = () => {};
+    const openSession = rs.fn(async () => {});
+    const onSelect = rs.fn();
+    const remote = new RemoteRuntime(null, {
+      account: {
+        isSignedIn: async () => true,
+        listInstances: () => new Promise<CloudInstance[]>((resolve) => (answer = resolve)),
+        openSession,
+      },
+      fetchImpl: rs.fn(async () => new Response(null, { status: 200 })),
+      openLogs: async () => {},
+      openCloud: async () => {},
+      onSelect,
+    });
+    const statuses: string[] = [];
+    remote.on("status", (status) => statuses.push(status.phase));
+    const connecting = remote.ensureReady();
+    await new Promise((resolve) => setImmediate(resolve));
+    remote.dispose();
+    answer([running]);
+    await connecting;
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(openSession).not.toHaveBeenCalled();
+    expect(statuses).not.toContain("ready");
+    expect(remote.isReady()).toBe(false);
+  });
+
   it("shares one connect between concurrent callers", async () => {
     const { remote, openSession } = runtime({});
     await Promise.all([remote.ensureReady(), remote.ensureReady()]);

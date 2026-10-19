@@ -5,6 +5,7 @@ rs.mock("../logger", () => ({
 }));
 
 import { EventEmitter } from "events";
+import type { CloudInstance } from "@rome-os/libs/native-auth";
 import type { CloudAccount } from "../cloud/account";
 import { RuntimeController } from "./controller";
 import type { RuntimeStatus } from "./provider";
@@ -27,7 +28,14 @@ class FakeRuntime extends EventEmitter {
   openLogs = async () => {};
 }
 
-function controller(saved: RuntimeTarget, options: { remoteReady?: boolean } = {}) {
+function controller(
+  saved: RuntimeTarget,
+  options: {
+    remoteReady?: boolean;
+    signedIn?: boolean;
+    listInstances?: () => Promise<CloudInstance[]>;
+  } = {},
+) {
   const writes: RuntimeTarget[] = [];
   const relaunch = rs.fn();
   const local = new FakeRuntime();
@@ -42,8 +50,8 @@ function controller(saved: RuntimeTarget, options: { remoteReady?: boolean } = {
     createRemote: (instance, onSelect) => {
       const remote = new RemoteRuntime(instance, {
         account: {
-          isSignedIn: async () => false,
-          listInstances: async () => [],
+          isSignedIn: async () => options.signedIn ?? false,
+          listInstances: options.listInstances ?? (async () => []),
           openSession: async () => {},
         },
         fetchImpl: fetch,
@@ -101,5 +109,22 @@ describe("RuntimeController", () => {
     const { subject, writes } = controller({ kind: "local" });
     await subject.signOut();
     expect(writes).toEqual([]);
+  });
+
+  it("keeps the VM when a replaced Rome Cloud lookup answers late", async () => {
+    let answer: (instances: CloudInstance[]) => void = () => {};
+    const { subject, writes } = controller(welcome, {
+      signedIn: true,
+      listInstances: () => new Promise((resolve) => (answer = resolve)),
+    });
+    const connecting = subject.runtime.ensureReady();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(subject.setTarget({ kind: "local" })).toBe("switched");
+    answer([
+      { id: "i", name: "ray", slug: "ray", origin: "https://ray.romeos.cc", status: "running" },
+    ]);
+    await connecting;
+    expect(writes).toEqual([{ kind: "local" }]);
+    expect(subject.activeTarget()).toEqual({ kind: "local" });
   });
 });

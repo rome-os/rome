@@ -83,6 +83,7 @@ export class RemoteRuntime extends EventEmitter implements Runtime {
     const listed = (await this.deps.account.listInstances()).find(
       (candidate) => candidate.id === instanceId,
     );
+    if (this.disposed) return;
     if (!listed) throw new Error("That Rome is no longer in your account.");
     this.select(listed);
     await this.ensureReady();
@@ -92,7 +93,12 @@ export class RemoteRuntime extends EventEmitter implements Runtime {
     return this.instance ? this.probeHealth(this.instance.origin) : Promise.resolve(false);
   }
 
-  /** Stops polling; called when this runtime is swapped out or the app quits. */
+  /**
+   * Called when this runtime is swapped out or the app quits. Work already in
+   * flight keeps running, so every step after an await checks this and stops
+   * before it saves a pick, installs a session, or reports a status: a late
+   * answer from Rome Cloud must not undo the user's switch.
+   */
   dispose(): void {
     this.disposed = true;
     this.clearPoll();
@@ -125,7 +131,9 @@ export class RemoteRuntime extends EventEmitter implements Runtime {
     if (this.disposed) return;
     if (!background) this.setStatus(this.connectingStatus());
     try {
-      if (!(await this.deps.account.isSignedIn())) {
+      const signedIn = await this.deps.account.isSignedIn();
+      if (this.disposed) return;
+      if (!signedIn) {
         this.waitForUser(
           "sign_in",
           "Welcome to Rome",
@@ -134,11 +142,12 @@ export class RemoteRuntime extends EventEmitter implements Runtime {
         return;
       }
       const instances = await this.deps.account.listInstances();
+      if (this.disposed) return;
       const instance = this.pick(instances);
       if (!instance) return;
       await this.open(instance);
     } catch (err) {
-      this.failFrom(err);
+      if (!this.disposed) this.failFrom(err);
     }
   }
 
@@ -195,8 +204,11 @@ export class RemoteRuntime extends EventEmitter implements Runtime {
       return;
     }
     await this.deps.account.openSession(instance);
+    if (this.disposed) return;
     this.setPhase("waiting_for_health", `Connecting to ${name}`, "Waiting for your Rome.", "none");
-    if (!(await this.probeHealth(instance.origin))) {
+    const healthy = await this.probeHealth(instance.origin);
+    if (this.disposed) return;
+    if (!healthy) {
       this.fail(`Can't reach ${name}`, `${instance.origin} did not answer.`);
       return;
     }
@@ -204,6 +216,7 @@ export class RemoteRuntime extends EventEmitter implements Runtime {
   }
 
   private select(instance: CloudInstance): void {
+    if (this.disposed) return;
     const next = refOf(instance);
     const current = this.instance;
     this.instance = next;
@@ -324,6 +337,7 @@ export class RemoteRuntime extends EventEmitter implements Runtime {
   }
 
   private setStatus(status: RuntimeStatus): void {
+    if (this.disposed) return;
     this.status = status;
     this.emit("status", this.status);
   }

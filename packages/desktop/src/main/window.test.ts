@@ -7,7 +7,12 @@ rs.mock("electron", () => ({
 }));
 rs.mock("./lifecycle", () => ({ isQuitting: () => false }));
 
-import { contentSecurityPolicy, cspSourcesForRomeCloud, policyAppliesTo } from "./window";
+import {
+  contentSecurityPolicy,
+  cspSourcesForRomeCloud,
+  loadFailureAction,
+  policyAppliesTo,
+} from "./window";
 
 // Spelled out rather than imported: a wrong edit to the constant should turn
 // these red, not travel through them.
@@ -112,5 +117,31 @@ describe("policyAppliesTo", () => {
   it("declines anything it cannot parse", () => {
     expect(policyAppliesTo("")).toBe(false);
     expect(policyAppliesTo("about:blank")).toBe(false);
+  });
+});
+
+describe("loadFailureAction", () => {
+  const failure = { errorCode: -102, isMainFrame: true, onDashboard: true };
+
+  it("keeps the VM's paused retry on refused or offline loads, and nothing else", () => {
+    // The VM can report ready while it restarts; an immediate reload would
+    // spin until it answers.
+    expect(loadFailureAction({ ...failure, provider: "lima" })).toBe("retry");
+    expect(loadFailureAction({ ...failure, provider: "lima", errorCode: -106 })).toBe("retry");
+    expect(loadFailureAction({ ...failure, provider: "lima", errorCode: -105 })).toBe("ignore");
+  });
+
+  it("reports a hosted Rome's failed dashboard load", () => {
+    expect(loadFailureAction({ ...failure, provider: "remote", errorCode: -105 })).toBe("report");
+  });
+
+  it("ignores replaced loads, subframes, and pages off the dashboard", () => {
+    expect(loadFailureAction({ ...failure, provider: "remote", errorCode: -3 })).toBe("ignore");
+    expect(loadFailureAction({ ...failure, provider: "remote", isMainFrame: false })).toBe(
+      "ignore",
+    );
+    expect(loadFailureAction({ ...failure, provider: "remote", onDashboard: false })).toBe(
+      "ignore",
+    );
   });
 });

@@ -75,10 +75,14 @@ export class RuntimeController {
 
   private build(target: RuntimeTarget): Runtime {
     if (target.kind === "local") return this.deps.createLocal();
-    return this.deps.createRemote(target.instance, (instance) => {
+    const remote = this.deps.createRemote(target.instance, (instance) => {
+      // Only the runtime that is open may save its pick. One the user has
+      // already switched away from can still finish a request late.
+      if (this.runtime.inner !== remote) return;
       const next: RuntimeTarget = { kind: "remote", instance };
       this.active = next;
       this.deps.writeTarget(next);
     });
+    return remote;
   }
 }
