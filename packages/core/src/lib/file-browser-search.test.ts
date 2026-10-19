@@ -85,6 +85,36 @@ describe("Projects file search result limit", () => {
     expect(results[99].line).toBe(100);
   });
 
+  it("returns bounded snippets for a matching line larger than the output budget", async () => {
+    writeFileSync(
+      join(rootDir, "daily-import", "bundle.js"),
+      `${"a".repeat(1_000_000)}INFO${"b".repeat(1_000_000)}\n`,
+    );
+    writeFileSync(join(rootDir, "daily-import", "normal.log"), "INFO normal match\n");
+
+    const response = await app.request("/projects/search?q=INFO");
+
+    expect(response.status).toBe(200);
+    const results = (await response.json()) as Array<{
+      content: string;
+      file: string;
+      line: number;
+    }>;
+    expect(results).toHaveLength(2);
+    expect(results).toContainEqual({
+      content: "INFO normal match",
+      file: "projects/daily-import/normal.log",
+      line: 1,
+    });
+    const longLineResult = results.find(
+      (result) => result.file === "projects/daily-import/bundle.js",
+    );
+    expect(longLineResult).toBeDefined();
+    expect(longLineResult!.line).toBe(1);
+    expect(longLineResult!.content.length).toBeGreaterThan(0);
+    expect(longLineResult!.content.length).toBeLessThan(1_000);
+  });
+
   it("limits matches across files without buffering all their output", async () => {
     const content = importLog(75);
     for (let index = 0; index < 160; index++) {

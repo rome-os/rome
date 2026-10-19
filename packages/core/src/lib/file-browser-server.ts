@@ -1874,6 +1874,10 @@ export function createSearchHandler(scope: FileBrowserScope): Handler {
         "never",
         "--fixed-strings",
         "--smart-case",
+        // The UI shows short snippets; one huge line must not fail the whole search.
+        "--max-columns",
+        "500",
+        "--max-columns-preview",
         ...(scope.searchGlobs ?? []).flatMap((pattern) => ["--glob", pattern]),
         ...DOT_ENTRY_SEARCH_GLOBS.flatMap((pattern) => ["--glob", pattern]),
         // Without "--", a query such as "-L" turns into an rg flag, and --follow
