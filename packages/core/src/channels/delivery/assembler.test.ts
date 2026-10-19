@@ -68,6 +68,17 @@ describe("ReplyAssembler", () => {
     expect(blocksOf(assembler)).toEqual(["First turn.", "Second", "Second turn."]);
   });
 
+  it("adds a turn's result that repeats an earlier turn's answer", () => {
+    // Each turn answers its own prompt, so the same words are a new answer.
+    const assembler = new ReplyAssembler();
+    assembler.apply({ type: "turn_start", turnId: "t1", sessionId: "s", userPrompt: "" });
+    assembler.apply({ type: "result", content: "Done." });
+    assembler.apply({ type: "turn_start", turnId: "t2", sessionId: "s", userPrompt: "" });
+    assembler.apply({ type: "result", content: "Done." });
+
+    expect(blocksOf(assembler)).toEqual(["Done.", "Done."]);
+  });
+
   it("ends a block the last turn left streaming, with the text it has", () => {
     // Nothing could complete it once ids match afresh, and a block still
     // streaming holds back the blocks after it.

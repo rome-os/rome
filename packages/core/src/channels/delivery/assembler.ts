@@ -23,9 +23,10 @@ export interface TextBlock {
  * - A `text` completes its block and its content replaces whatever the
  *   deltas built, since the complete block is authoritative.
  * - A `result` adds the answer as a last block, unless the provider already
- *   sent the answer as a text block marked `final`, or a block carries exactly
- *   that text. The `result` repeats the answer, and the two may differ by
- *   whitespace, so the answer is never sent twice.
+ *   sent the answer as a text block marked `final`, or a block of the same
+ *   turn carries exactly that text. The `result` repeats the answer, and the
+ *   two may differ by whitespace, so the answer is never sent twice. Each turn
+ *   answers its own prompt, so an earlier turn's text does not count.
  */
 export class ReplyAssembler {
   readonly blocks: TextBlock[] = [];
@@ -33,6 +34,8 @@ export class ReplyAssembler {
   private open?: TextBlock;
   /** A block the provider marked as the turn's final answer has completed. */
   private finalSeen = false;
+  /** Where the current turn's blocks begin. */
+  private turnBegin = 0;
 
   /** Applies `event` to the blocks. */
   apply(event: StreamAgentEvent): void {
@@ -43,6 +46,7 @@ export class ReplyAssembler {
       this.byId.clear();
       this.open = undefined;
       this.finalSeen = false;
+      this.turnBegin = this.blocks.length;
       return;
     }
     if (event.type === "text_delta") {
@@ -65,7 +69,8 @@ export class ReplyAssembler {
       // An agent that declares an output schema has a `result` of canonical JSON,
       // which may not be what streamed. Which of the two is authoritative is
       // decided where the engine is wired into runs.
-      if (!answer || this.finalSeen || this.blocks.some((block) => block.text === answer)) return;
+      const turn = this.blocks.slice(this.turnBegin);
+      if (!answer || this.finalSeen || turn.some((block) => block.text === answer)) return;
       this.blocks.push({ text: answer, complete: true });
     }
   }
