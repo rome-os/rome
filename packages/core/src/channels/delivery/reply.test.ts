@@ -585,6 +585,101 @@ describe("ReplyDelivery", () => {
     });
   });
 
+  describe("a write whose turn comes after the reply changed", () => {
+    // Another write of the account holds the queue, so the reply's next write waits behind it.
+    const held = (policy: Partial<DeliveryPolicy>, transport: DeliveryTransport = platform) => {
+      const pacer = new Pacer(OPEN_BUDGET, clock);
+      const delivery = new ReplyDelivery({
+        transport,
+        pacer,
+        policy: {
+          mode: "edit",
+          editIntervalMs: 0,
+          blockWaitMs: 0,
+          maxPendingChars: 10_000,
+          ...policy,
+        },
+        conversation: "c1",
+        clock,
+        observe: (event) => events.push(event),
+      });
+      const hold = () => {
+        let release = () => {};
+        void pacer.run("c1", () => new Promise<void>((resolve) => (release = resolve)));
+        return () => release();
+      };
+      return { delivery, hold };
+    };
+
+    it("edits a message no sooner than editIntervalMs after its last write, though another write's turn came", async () => {
+      const { delivery, hold } = held({ editIntervalMs: 1000 });
+      delivery.accept(text("Hello", "a"));
+      await advance(0);
+      const release = hold();
+      // The second block's create waits behind the held write.
+      delivery.accept(delta("World", "b"));
+      await settle();
+      // Meanwhile the first block's message, written just now, is revised.
+      delivery.accept(text("Hullo", "a"));
+      release();
+      await advance(0);
+      expect(platform.messages.map((m) => m.history)).toEqual([["Hello"]]);
+      await advance(1000);
+      delivery.accept(text("World", "b"));
+      await delivery.finish();
+
+      expect(platform.messages.map((m) => m.history)).toEqual([["Hello", "Hullo"], ["World"]]);
+      const [create, edit] = events.filter((event) => event.block === 0);
+      expect(edit!.at - create!.at).toBeGreaterThanOrEqual(1000);
+    });
+
+    it("sends a part that has waited out blockWaitMs at its turn, though another write went first", async () => {
+      const { delivery, hold } = held({ mode: "blocks", blockWaitMs: 2000 });
+      delivery.accept(text("First.", "a"));
+      await advance(0);
+      delivery.accept(delta("Second idea. More", "b"));
+      await advance(1000);
+      const release = hold();
+      // The second block's part has waited 2000 ms, and its create waits behind the held write.
+      await advance(1000);
+      // Meanwhile the first block's complete text arrives again, longer, and its new text goes first.
+      delivery.accept(text("First. Again", "a"));
+      release();
+      await advance(0);
+
+      expect(platform.shown).toEqual(["First.", " Again", "Second idea."]);
+      delivery.accept(text("Second idea. More", "b"));
+      await delivery.finish();
+      expect(platform.shown).toEqual(["First.", " Again", "Second idea.", " More"]);
+    });
+
+    it("reports what it found at the turn when the write it chose is refused", async () => {
+      const four = new MemoryPlatform({ maxPartLength: 4, edit: true, budget: OPEN_BUDGET });
+      const { delivery, hold } = held({}, four);
+      delivery.accept(text("AAAA", "a"));
+      await advance(0);
+      delivery.accept(delta("BB", "b"));
+      await advance(0);
+      const release = hold();
+      // The preview's edit waits behind the held write.
+      delivery.accept(delta("BB", "b"));
+      await settle();
+      // Meanwhile the first block gains text that cannot go in front of the preview.
+      delivery.accept(text("AAAAT", "a"));
+      four.failures.push({ write: "edit", failure: new DeliveryFailure("rejected", "refused") });
+      release();
+      const outcome = await delivery.finish();
+
+      expect(four.messages.map((m) => m.history)).toEqual([["AAAA"], ["BB"]]);
+      expect(outcome.status).toBe("partial");
+      expect(outcome.diverged).toBe(true);
+      expect(outcome.parts.map((part) => [part.text, part.diverged])).toEqual([
+        ["AAAA", undefined],
+        ["BB", true],
+      ]);
+    });
+  });
+
   describe("a write that waits in a paced queue", () => {
     const paused = (policy: Partial<DeliveryPolicy> = {}) => {
       const pacer = new Pacer(OPEN_BUDGET, clock);
@@ -1274,46 +1369,6 @@ describe("ReplyDelivery", () => {
       // The late create reached the platform, but the reply had already given up on it.
       expect(events.filter((event) => event.result === "accepted")).toHaveLength(0);
     });
-  });
-
-  it("leaves the reply's state alone when it plans again as a write's turn comes", async () => {
-    // The pacer is busy, so the second block's create waits in the queue with the reply writing.
-    const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
-    let release = () => {};
-    const delivery = new ReplyDelivery({
-      transport: platform,
-      pacer,
-      policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
-      conversation: "c1",
-      clock,
-    });
-    delivery.accept(delta("Hello there my friend, nice day", "a"));
-    delivery.accept(text("Hello there my friend, nice day", "a"));
-    await advance(0);
-    await advance(0);
-    void pacer.run("c1", () => new Promise<void>((resolve) => (release = resolve)));
-    delivery.accept(delta("Second", "b"));
-    await settle();
-    // The first block is revised to nothing visible, which a plan notes as parts
-    // that differ. The reply is still writing, so nothing has planned since.
-    delivery.accept(text("", "a"));
-
-    type Probe = {
-      planSafely(now: number, ignoreWaits: boolean, dry: boolean): unknown;
-      blocks: Array<{ parts: Array<{ diverged?: true }> }>;
-    };
-    const probe = delivery as unknown as Probe;
-    const differing = () => probe.blocks[0]!.parts.filter((part) => part.diverged).length;
-    expect(differing()).toBe(0);
-    // Planning as the pacer's job does, when its turn comes, changes nothing.
-    probe.planSafely(clock.now().getTime(), true, true);
-    expect(differing()).toBe(0);
-    // Planning for real notes the parts.
-    probe.planSafely(clock.now().getTime(), false, false);
-    expect(differing()).toBeGreaterThan(0);
-
-    release();
-    await delivery.finish();
   });
 
   it("keeps the conversation's later writes behind a create the reply stopped waiting for", async () => {

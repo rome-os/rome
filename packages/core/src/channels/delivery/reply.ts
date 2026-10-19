@@ -181,9 +181,10 @@ class WriteTimedOut extends DeliveryFailure {
  *   settled, or has waited `blockWaitMs` and ends at a readable break. In
  *   `final` mode nothing is sent before `finish()`.
  * - One write runs at a time, through the account's Pacer. When the Pacer
- *   lets it run, the write carries the latest text, so a preview that went
- *   stale while it waited is never sent. A write whose target is gone, or that
- *   waited past the reply's failure, is dropped.
+ *   lets it run, the reply writes what it needs then, with the latest text,
+ *   so a preview that went stale while it waited is never sent. A write that
+ *   nothing needs any more, or that waited past the reply's failure, is
+ *   dropped.
  * - A message is never created for text with nothing visible in it, since a
  *   platform refuses one. The reply waits for visible text instead.
  * - A message never receives text older than what it shows.
@@ -387,13 +388,14 @@ export class ReplyDelivery {
           this.options.clock.clearTimeout(queueTimer);
           // The reply can change while a write waits its turn. Its text may
           // have grown, it may have failed, and the write may have become
-          // unnecessary. Only a write for the same target runs, with the
-          // latest text. A write that does not run costs the pacer nothing.
+          // unnecessary. So the write is planned again, and what runs is what
+          // the reply needs now, with the latest text. A write that must still
+          // wait, or that nothing needs, does not run and costs the pacer
+          // nothing. Waits only end as time passes, so a write that was due
+          // when it was planned is still due.
           if (this.failure) return SKIPPED;
-          // Planned on a copy of the bookkeeping, so that planning again cannot
-          // change the reply. The next planning notes what this one would have.
-          const fresh = this.planSafely(this.now(), true, true);
-          if (!fresh || !sameTarget(fresh, plan)) return SKIPPED;
+          const fresh = this.planSafely(this.now());
+          if (!fresh || "waitUntil" in fresh) return SKIPPED;
           await this.write(fresh);
           // A call the reply stopped waiting for is still running. The pacer
           // keeps the conversation busy until it ends, so a later write to it
@@ -436,9 +438,9 @@ export class ReplyDelivery {
 
   /** `plan`, where a fault in planning fails the reply instead of throwing
    *  into whoever fed it text, or into the pacer. */
-  private planSafely(now: number, ignoreWaits = false, dry = false): Plan {
+  private planSafely(now: number): Plan {
     try {
-      return this.plan(now, ignoreWaits, dry);
+      return this.plan(now);
     } catch (error) {
       this.fail({
         kind: "internal",
@@ -449,25 +451,21 @@ export class ReplyDelivery {
   }
 
   /** The next write, or when to look again, or null when there is nothing
-   *  to do until more text arrives. `now` decides waits; `ignoreWaits` plans
-   *  as though every wait were over.
+   *  to do until more text arrives. `now` decides waits.
    *
    *  It runs twice per write, once to choose it and once when the pacer lets
    *  it run. It also brings the reply's bookkeeping up to date with the text,
-   *  such as what was passed over and which parts differ. The second run is
-   *  `dry`: it plans on a copy of that bookkeeping and fails nothing, so it
-   *  cannot change the reply, and the next planning notes what it would have. */
-  private plan(now: number, ignoreWaits = false, dry = false): Plan {
+   *  such as what was passed over and which parts differ. Each of those steps
+   *  leaves a second run as it found it, so planning again at the same moment
+   *  gives the same answer. The bookkeeping of a write itself, such as when
+   *  its part last changed, is kept by the write. */
+  private plan(now: number): Plan {
     // Nothing is written before the reply finishes, so there is nothing to plan.
     if (this.mode === "final" && !this.closed) return null;
     const { codec, capabilities } = this.options.transport;
     const limit = capabilities.maxPartLength;
-    const blocks = dry ? this.snapshot() : this.blocks;
     for (const [index, block] of this.assembler.blocks.entries()) {
-      const state = (blocks[index] ??= { parts: [] });
-      // A part of the copy is the reply's own part again when a write names it.
-      const own = (part: Part) =>
-        dry ? this.blocks[index]!.parts[state.parts.indexOf(part)]! : part;
+      const state = (this.blocks[index] ??= { parts: [] });
       const complete = block.complete || this.closed;
       this.reconcileLayout(block, state);
 
@@ -488,7 +486,7 @@ export class ReplyDelivery {
         // is now empty stays as it is, and the part is reported as differing.
         // If its last edit's result is unknown, nothing can put its text back.
         if (!rendered.trim()) {
-          if (part.uncertain) return dry ? null : this.failUncertain();
+          if (part.uncertain) return this.failUncertain();
           part.diverged = true;
           continue;
         }
@@ -502,11 +500,11 @@ export class ReplyDelivery {
           continue;
         }
         const due = part.lastWriteAt + this.options.policy.editIntervalMs;
-        if (now < due && !ignoreWaits) return { waitUntil: due };
+        if (now < due) return { waitUntil: due };
         return {
           write: "edit",
           block: index,
-          part: own(part),
+          part,
           end: part.end,
           source,
           settle: true,
@@ -535,7 +533,7 @@ export class ReplyDelivery {
           // shows cannot be taken back, so it stays as shown, and the part
           // is reported as differing from the final text.
           if (active) {
-            if (active.uncertain) return dry ? null : this.failUncertain();
+            if (active.uncertain) return this.failUncertain();
             active.diverged = true;
             this.settlePart(state, active, active.start + active.sentSource.length);
           }
@@ -563,7 +561,7 @@ export class ReplyDelivery {
           // A preview already shown at the start of this text stays as it is,
           // since a blank edit is refused, and is reported as differing.
           if (active) {
-            if (active.uncertain) return dry ? null : this.failUncertain();
+            if (active.uncertain) return this.failUncertain();
             active.diverged = true;
             this.settlePart(state, active, active.start + active.sentSource.length);
           }
@@ -578,32 +576,30 @@ export class ReplyDelivery {
             continue;
           }
           const due = active.lastWriteAt + this.options.policy.editIntervalMs;
-          if (now < due && !ignoreWaits) return { waitUntil: due };
-          return { write: "edit", block: index, part: own(active), end, source, settle };
+          if (now < due) return { waitUntil: due };
+          return { write: "edit", block: index, part: active, end, source, settle };
         }
         // A message cannot be put in front of one that exists. Text a block
         // gained after a later block's message stays unsent, and that message
         // is reported as differing, as between two messages of one block.
-        const after = blocks.slice(index + 1).find((later) => later.parts.length > 0)?.parts[0];
+        const after = this.blocks.slice(index + 1).find((later) => later.parts.length > 0)
+          ?.parts[0];
         if (after) {
           after.diverged = true;
           state.skipped = block.text.length;
           break;
         }
-        if (this.mode === "edit" || settle) {
-          state.waitingSince = undefined;
+        if (this.mode === "edit" || settle)
           return { write: "create", block: index, start, end, source, settle };
-        }
         state.waitingSince ??= now;
         const due = state.waitingSince + this.options.policy.blockWaitMs;
-        if (now < due && !ignoreWaits) return { waitUntil: due };
+        if (now < due) return { waitUntil: due };
         // The wait is over, but the text may stop mid-word, and a part cannot be
         // edited back together. It ends at the last readable break, and what
         // follows waits. With no break yet, all of it keeps waiting, and the
         // text that completes a break sends the part at once.
         const cut = lastBreak(source);
         if (cut === 0 || !codec.render(source.slice(0, cut), true).trim()) return null;
-        state.waitingSince = undefined;
         return {
           write: "create",
           block: index,
@@ -615,14 +611,6 @@ export class ReplyDelivery {
       }
     }
     return null;
-  }
-
-  /** A copy of the blocks' bookkeeping, for planning that must not change it. */
-  private snapshot(): BlockState[] {
-    return this.blocks.map((state) => ({
-      ...state,
-      parts: state.parts.map((part) => ({ ...part })),
-    }));
   }
 
   /**
@@ -702,6 +690,8 @@ export class ReplyDelivery {
     };
 
     if (plan.write === "create") {
+      // The text this part takes stops waiting, and what follows it waits afresh.
+      state.waitingSince = undefined;
       const first = this.blocks.every((block) => block.parts.length === 0);
       const partIndex = state.parts.length;
       try {
@@ -888,15 +878,4 @@ export class ReplyDelivery {
       ...(this.failure ? { failure: this.failure } : {}),
     };
   }
-}
-
-function sameTarget(
-  fresh: Exclude<Plan, null>,
-  planned: Exclude<Plan, null | { waitUntil: number }>,
-): fresh is Exclude<Plan, null | { waitUntil: number }> {
-  if (!("write" in fresh) || fresh.write !== planned.write || fresh.block !== planned.block)
-    return false;
-  return fresh.write === "edit"
-    ? fresh.part === (planned as { part: Part }).part
-    : fresh.start === (planned as { start: number }).start;
 }
