@@ -18,7 +18,7 @@ describe("SessionManager", () => {
   beforeEach(() => {
     testDb = createTestDb();
     repo = new SessionsRepository(testDb.db);
-    manager = new SessionManager(repo);
+    manager = new SessionManager(repo, { legacyBindings: createEmptyLegacyArtifactBindings() });
   });
 
   afterEach(() => testDb.close());

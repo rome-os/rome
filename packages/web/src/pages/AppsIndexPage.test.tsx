@@ -32,12 +32,14 @@ rs.mock("@/components/logo", () => ({
 // The built-in nav grid imports .svg icons that resolve to URL strings under
 // Rstest (not React components), which jsdom rejects as element names. The
 // real icons are irrelevant to apps reactivity, so stub them with components.
-rs.mock("@/shell/AppGrid", () => ({
+rs.mock("@/shell/builtin-nav", () => ({
   APP_NAV: [
     { id: "apps", href: "/apps", labelKey: "nav.apps", Icon: () => null },
     { id: "chat", href: "/chat", labelKey: "nav.chat", Icon: () => null },
     { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: () => null },
   ],
+}));
+rs.mock("@/shell/AppGrid", () => ({
   DEFAULT_SIDEBAR_PINS: [
     { type: "builtin" as const, id: "apps" },
     { type: "builtin" as const, id: "chat" },
@@ -67,11 +69,6 @@ rs.mock("@/shell/AppGrid", () => ({
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  // Radix menu + dialog poke pointer-capture and scrollIntoView, which jsdom omits.
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
   // Radix tooltip arrows measure themselves with ResizeObserver, also absent.
   class TestResizeObserver implements ResizeObserver {
     observe(): void {}
@@ -456,6 +453,26 @@ describe("AppsIndexPage reactivity", () => {
     expect(
       Boolean(storeApp.compareDocumentPosition(shipped) & Node.DOCUMENT_POSITION_FOLLOWING),
     ).toBe(true);
+  });
+
+  it("hides the user-skills carrier: no tile, not counted, not searchable", async () => {
+    const user = userEvent.setup();
+    mockBackend({
+      installed: [
+        installedCard({ id: "weather", displayName: "Weather", origin: "local" }),
+        installedCard({ id: "user-skills", displayName: "User Skills", origin: "local" }),
+      ],
+    });
+
+    renderPage();
+
+    await screen.findByText("Weather");
+    const mySection = screen.getByRole("region", { name: "My apps" });
+    expect(within(mySection).getByText("1")).toBeTruthy();
+    expect(screen.queryByText("User Skills")).toBeNull();
+
+    await user.type(screen.getByLabelText("Search apps"), "skills");
+    expect(screen.queryByText("User Skills")).toBeNull();
   });
 
   it("hides a section that has no matches while searching", async () => {

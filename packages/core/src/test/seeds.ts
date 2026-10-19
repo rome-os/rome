@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DrizzleDb } from "../db/index.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { ServiceOfChannel } from "../db/repositories/channel-records.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
@@ -8,6 +9,9 @@ import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocat
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { GUARDIAN_PROFILE_PATH } from "../profile-memory.js";
+
+/** Maps every channel to itself. Valid only where no service has a later channel. */
+const identity: ServiceOfChannel = (channel) => channel;
 
 /**
  * Unified, deterministic baseline seed.
@@ -83,7 +87,7 @@ export async function seedBaseline(db: DrizzleDb): Promise<BaselineIds> {
 // Baseline builders (internal — tests should call seedBaseline instead)
 
 async function seedPersonsBaseline(db: DrizzleDb) {
-  const repo = new PersonMappingRepository(db);
+  const repo = new PersonMappingRepository(db, identity);
 
   const guardianId = "guardian";
   await repo.createWithId(guardianId, {
@@ -127,7 +131,7 @@ async function seedPersonsBaseline(db: DrizzleDb) {
 }
 
 async function seedApprovalsBaseline(db: DrizzleDb) {
-  const repo = new ApprovalsRepository(db);
+  const repo = new ApprovalsRepository(db, new PersonMappingRepository(db, identity));
 
   const pendingId = await repo.create({
     type: "action_execution",

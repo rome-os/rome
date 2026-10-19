@@ -22,7 +22,7 @@ function Switch({
         // placed by transform rather than by padding on the track: a 1px inset
         // is not a step on the spacing scale, and it is geometry rather than
         // spacing.
-        "peer group/switch relative inline-flex h-[var(--switch-h)] w-[var(--switch-w)] shrink-0 items-center rounded-full transition-all outline-none after:absolute after:-inset-x-[var(--switch-hit-inset-x)] after:-inset-y-2",
+        "peer group/switch relative inline-flex h-[var(--switch-h)] w-[var(--switch-w)] shrink-0 items-center rounded-full transition-colors outline-none after:absolute after:-inset-x-[var(--switch-hit-inset-x)] after:-inset-y-2",
         "[--switch-inset:1px] [--switch-h:calc(var(--switch-thumb)_+_2_*_var(--switch-inset))] [--switch-travel:calc(var(--switch-w)_-_var(--switch-inset)_-_var(--switch-thumb))]",
         "data-[size=default]:[--switch-thumb:var(--switch-thumb-md)] data-[size=default]:[--switch-w:var(--switch-width-md)]",
         "data-[size=sm]:[--switch-thumb:var(--switch-thumb-sm)] data-[size=sm]:[--switch-w:var(--switch-width-sm)]",

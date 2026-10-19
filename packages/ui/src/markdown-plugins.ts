@@ -10,7 +10,7 @@ const loaders: {
   code: () => Promise<CodeHighlighterPlugin>;
   math: () => Promise<MathPlugin>;
 } = {
-  code: () => import("@streamdown/code").then((module) => module.code),
+  code: () => import("./code-highlighter.js").then((module) => module.code),
   math: () => import("@streamdown/math").then((module) => module.math),
 };
 

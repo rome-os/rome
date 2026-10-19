@@ -9,7 +9,6 @@ import { createLogger } from "../../logger";
 import type {
   ProviderKind,
   RuntimeHostProbe,
-  RuntimeProvider,
   RuntimePullProgress,
   StartContainerArgs,
 } from "../provider";
@@ -187,7 +186,7 @@ export interface LimaProviderOptions {
   containerName?: string;
 }
 
-export class LimaRuntimeProvider implements RuntimeProvider {
+export class LimaRuntimeProvider {
   readonly kind: ProviderKind = "lima";
   readonly containerName: string;
   private readonly hostSocketPath: string;
@@ -410,6 +409,13 @@ export class LimaRuntimeProvider implements RuntimeProvider {
     ]);
   }
 
+  /**
+   * Returns the digest of the locally-stored image (the same value that
+   * would appear after `@` in `nerdctl image inspect`'s RepoDigests), or
+   * null when the image is not present locally or has no stored digest.
+   * Used by the image updater to compare against the registry's current
+   * digest for the tag.
+   */
   async getLocalImageDigest(image: string): Promise<string | null> {
     const bundled = this.getBundledLima();
     if (!bundled) return null;
@@ -524,6 +530,14 @@ export class LimaRuntimeProvider implements RuntimeProvider {
     );
   }
 
+  /**
+   * Best-effort removal of dangling images left behind after an image
+   * upgrade. Pulling a new `:tag` over an existing tag in nerdctl leaves
+   * the previous image as a dangling `<none>:<none>` entry whose layers
+   * stay in the content store; over many upgrades this fills the guest
+   * VM disk. Removes only unreferenced images and never throws: pruning is
+   * a hygiene step that should not surface as an upgrade failure.
+   */
   async pruneDanglingImages(): Promise<void> {
     const bundled = this.getBundledLima();
     if (!bundled) return;
@@ -549,6 +563,15 @@ export class LimaRuntimeProvider implements RuntimeProvider {
     }
   }
 
+  /**
+   * Best-effort removal of the Rome image's other tags, keeping `keep`.
+   *
+   * Pinned releases each hold their own tag, so nothing ever becomes dangling
+   * and `pruneDanglingImages` reclaims nothing — every app update leaves a
+   * multi-gigabyte image behind until the guest disk fills and the next pull
+   * fails. Touches only `keep`'s repository and never throws: reclaiming
+   * space is hygiene and cannot be allowed to fail a launch.
+   */
   async removeOtherImageTags(keep: string): Promise<void> {
     const bundled = this.getBundledLima();
     if (!bundled) return;
@@ -720,6 +743,12 @@ export class LimaRuntimeProvider implements RuntimeProvider {
     await this.spawnStreaming(runArgs, { timeoutMs: CONTAINER_RUN_TIMEOUT_MS });
   }
 
+  /**
+   * Best-effort graceful stop of the Rome container. Returns once the
+   * container is no longer running, or after the internal grace period —
+   * never throws. Called during quit so the Rome process inside the VM gets
+   * a SIGTERM and a chance to flush state before the VM is torn down.
+   */
   async stopContainer(): Promise<void> {
     const bundled = this.getBundledLima();
     if (!bundled) return;
@@ -761,6 +790,11 @@ export class LimaRuntimeProvider implements RuntimeProvider {
     }
   }
 
+  /**
+   * Best-effort stop of the Lima VM. Returns once it reports stopped, or
+   * after the internal grace period — never throws. Called during quit after
+   * stopContainer.
+   */
   async stopRuntime(): Promise<void> {
     const bundled = this.getBundledLima();
     if (!bundled) return;

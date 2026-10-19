@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb, identityServiceOf } from "../test/helpers.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import {
   applyGuardianMappingWithinTx,
@@ -13,7 +13,7 @@ describe("guardian channel mapping", () => {
 
   beforeEach(async () => {
     testDb = createTestDb();
-    repo = new PersonMappingRepository(testDb.db);
+    repo = new PersonMappingRepository(testDb.db, identityServiceOf);
     await repo.createWithId("guardian", { displayName: "Guardian", bondLevel: "guardian" });
   });
 

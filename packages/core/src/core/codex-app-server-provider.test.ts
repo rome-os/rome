@@ -28,7 +28,7 @@ const {
   closeMock: rs.fn(),
   captured: {
     onNotification: undefined as undefined | ((m: string, p: unknown) => void),
-    onExit: undefined as undefined | ((code: number | null) => void),
+    onExit: undefined as undefined | ((error: Error) => void),
     onServerRequest: undefined as
       | undefined
       | ((method: string, params: unknown) => Promise<unknown>),
@@ -245,6 +245,102 @@ describe("CodexAppServerProvider", () => {
     expect(provider.builtinTools.has("Task")).toBe(true);
   });
 
+  // Every config value that switches off one of Codex's own tools.
+  const CODEX_TOOLS_OFF = {
+    "features.shell_tool": false,
+    "features.unified_exec": false,
+    "features.view_image": false,
+    "features.multi_agent": false,
+    "features.image_generation": false,
+    web_search: "disabled",
+  };
+  const threadRequest = (method: string) =>
+    requestMock.mock.calls.find((call) => call[0] === method)?.[1] as
+      | { sandbox?: string; approvalPolicy?: string; config: Record<string, unknown> }
+      | undefined;
+  const switchedOff = (config: Record<string, unknown>) =>
+    Object.fromEntries(
+      Object.keys(CODEX_TOOLS_OFF).flatMap((key) => (key in config ? [[key, config[key]]] : [])),
+    );
+
+  it.each([
+    { label: "none", builtinTools: [], sandbox: "read-only", off: Object.keys(CODEX_TOOLS_OFF) },
+    {
+      label: "Read, Glob, and Grep",
+      builtinTools: ["Read", "Glob", "Grep"],
+      sandbox: "danger-full-access",
+      off: ["features.multi_agent", "features.image_generation", "web_search"],
+    },
+    {
+      label: "Bash",
+      builtinTools: ["Bash"],
+      sandbox: "danger-full-access",
+      off: [
+        "features.view_image",
+        "features.multi_agent",
+        "features.image_generation",
+        "web_search",
+      ],
+    },
+    {
+      label: "Write and Edit",
+      builtinTools: ["Write", "Edit"],
+      sandbox: "danger-full-access",
+      off: Object.keys(CODEX_TOOLS_OFF),
+    },
+    {
+      label: "ImageGeneration",
+      builtinTools: ["ImageGeneration"],
+      sandbox: "read-only",
+      off: Object.keys(CODEX_TOOLS_OFF).filter((key) => key !== "features.image_generation"),
+    },
+    {
+      label: "every switch",
+      builtinTools: ["Read", "Write", "Bash", "WebSearch", "Task", "ImageGeneration"],
+      sandbox: "danger-full-access",
+      off: [],
+    },
+  ])("limits Codex's own tools to the declared builtins: $label", async ({
+    builtinTools,
+    sandbox,
+    off,
+  }) => {
+    await new CodexAppServerProvider().openSession(buildParams({ builtinTools }));
+
+    const start = threadRequest("thread/start")!;
+    expect(start.sandbox).toBe(sandbox);
+    expect(start.approvalPolicy).toBe("never");
+    expect(switchedOff(start.config)).toEqual(
+      Object.fromEntries(
+        off.map((key) => [key, CODEX_TOOLS_OFF[key as keyof typeof CODEX_TOOLS_OFF]]),
+      ),
+    );
+    expect(start.config).toMatchObject({ "tools.update_plan.enabled": true });
+  });
+
+  it.each([
+    ["discord", { "shell_environment_policy.set.ROME_CHANNEL": "discord" }],
+    [undefined, {}],
+  ])("passes channel %s to shell commands as ROME_CHANNEL", async (channel, expected) => {
+    await new CodexAppServerProvider().openSession(buildParams({ channel }));
+
+    const { config } = threadRequest("thread/start")!;
+    // Only the dotted key: a nested shell_environment_policy table would
+    // replace the server-wide exclude of ROME_CREDITS_TOKEN.
+    const policy = Object.entries(config).filter(([key]) => key.startsWith("shell_environment"));
+    expect(Object.fromEntries(policy)).toEqual(expected);
+  });
+
+  it("applies the agent's builtins when it resumes a thread opened with more", async () => {
+    await new CodexAppServerProvider().openSession(
+      buildParams({ builtinTools: [], isNewSession: false, providerThreadId: "old-thread" }),
+    );
+
+    const resume = threadRequest("thread/resume")!;
+    expect(resume).toMatchObject({ threadId: "old-thread", sandbox: "read-only" });
+    expect(switchedOff(resume.config)).toEqual(CODEX_TOOLS_OFF);
+  });
+
   it("handshakes once and starts a thread with Rome dynamic tools", async () => {
     const provider = new CodexAppServerProvider();
     await provider.openSession(buildParams());
@@ -258,7 +354,6 @@ describe("CodexAppServerProvider", () => {
     const startCall = requestMock.mock.calls.find((c) => c[0] === "thread/start");
     expect(startCall).toBeTruthy();
     expect(startCall![1]).toMatchObject({
-      sandbox: "danger-full-access",
       approvalPolicy: "never",
       baseInstructions: "system",
       historyMode: "paginated",
@@ -565,7 +660,7 @@ describe("CodexAppServerProvider", () => {
       }),
     );
     const fork = await source.fork({ sessionId: "isolated-session", mode: "ephemeral" });
-    const forkSession = await fork.open(buildForkOpenParams());
+    const forkSession = await fork.open(buildForkOpenParams({ builtinTools: ["Bash", "Write"] }));
     const collected = collectUntilTerminal(forkSession);
     await forkSession.sendUserInput({ text: "try the inherited tool" });
     await collected;
@@ -594,6 +689,8 @@ describe("CodexAppServerProvider", () => {
         baseInstructions: expect.stringContaining("Do not invoke any tool"),
       }),
     );
+    expect(switchedOff(threadRequest("thread/fork")!.config)).toEqual(CODEX_TOOLS_OFF);
+    expect(switchedOff(threadRequest("thread/resume")!.config)).toEqual(CODEX_TOOLS_OFF);
     expect(sourceExecuteSubagent).not.toHaveBeenCalled();
 
     await forkSession.close();
@@ -621,7 +718,7 @@ describe("CodexAppServerProvider", () => {
       configurationMode: "exact",
       sourceCheckpoint: "provider-turn-t2",
     });
-    const forkSession = await fork.open(buildForkOpenParams());
+    const forkSession = await fork.open(buildForkOpenParams({ builtinTools: ["Bash"] }));
 
     expect(requestMock).toHaveBeenCalledWith(
       "thread/fork",
@@ -944,7 +1041,7 @@ describe("CodexAppServerProvider", () => {
         // turn/start is acknowledged, then the process dies before
         // turn/completed ever arrives.
         captured.onNotification?.("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
-        captured.onExit?.(1);
+        captured.onExit?.(new Error("codex app-server exited (code 1)"));
       }
       return {};
     });
@@ -957,9 +1054,115 @@ describe("CodexAppServerProvider", () => {
 
     expect(msgs.find((m) => m.type === "error")).toMatchObject({
       type: "error",
-      error: "codex app-server exited",
+      error: "Codex stopped before the turn finished: codex app-server exited (code 1)",
     });
     // The settled turn released the coordinator, so shutdown does not hang.
+    await session.close();
+  });
+
+  it("keeps a model error that arrived before the app-server exited", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        captured.onNotification?.("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        captured.onNotification?.("error", {
+          threadId: "thr-1",
+          turnId: "turn-1",
+          error: { message: "upstream failed" },
+          willRetry: false,
+        });
+        captured.onExit?.(new Error("codex app-server exited (code 1)"));
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+
+    expect((await collected).find((m) => m.type === "error")).toMatchObject({
+      error: "upstream failed",
+    });
+    await session.close();
+  });
+
+  it("says Rome is shutting down when the provider closes before turn/start returns", async () => {
+    let provider!: CodexAppServerProvider;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        provider.close();
+        // The real client rejects its pending requests when it closes.
+        throw new Error("app-server client closed");
+      }
+      return {};
+    });
+
+    provider = new CodexAppServerProvider();
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+
+    expect((await collected).find((m) => m.type === "error")).toMatchObject({
+      error: "Codex stopped before the turn finished: Rome is shutting down",
+    });
+    await session.close();
+  });
+
+  it("names the payer change when Codex restarts before turn/start returns", async () => {
+    const appServerManager = new CodexAppServerManager();
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thr-1" } };
+      if (method === "turn/start") {
+        appServerManager.restart();
+        throw new Error("app-server client closed");
+      }
+      return {};
+    });
+    const provider = new CodexAppServerProvider({ appServerManager });
+    try {
+      const session = await provider.openSession(buildParams());
+      const collected = collectUntilTerminal(session);
+      await session.sendUserInput({ text: "hi" });
+
+      const error = (await collected).find((m) => m.type === "error");
+      expect(error).toMatchObject({
+        error:
+          "Codex stopped before the turn finished: the model payer or Rome instance credential changed",
+      });
+      expect(error).not.toHaveProperty("code");
+      await session.close();
+    } finally {
+      appServerManager.close();
+    }
+  });
+
+  it("says Rome is shutting down when the provider closes during a turn", async () => {
+    let provider!: CodexAppServerProvider;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        captured.onNotification?.("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        provider.close();
+      }
+      return {};
+    });
+
+    provider = new CodexAppServerProvider();
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+
+    expect((await collected).find((m) => m.type === "error")).toMatchObject({
+      error: "Codex stopped before the turn finished: Rome is shutting down",
+    });
     await session.close();
   });
 
@@ -990,7 +1193,11 @@ describe("CodexAppServerProvider", () => {
 
       appServerManager.setDefaultProvider("rome_credits");
       expect(await first).toEqual([
-        expect.objectContaining({ type: "error", error: "codex app-server exited" }),
+        expect.objectContaining({
+          type: "error",
+          error:
+            "Codex stopped before the turn finished: the model payer or Rome instance credential changed",
+        }),
       ]);
       expect(await collectUntilTerminal(session)).toEqual([
         expect.objectContaining({
@@ -1018,7 +1225,7 @@ describe("CodexAppServerProvider", () => {
         const turnId = `turn-${turnNumber}`;
         n("turn/started", { threadId: "thread-restart", turn: { id: turnId } });
         if (turnNumber === 1) {
-          captured.onExit?.(137);
+          captured.onExit?.(new Error("codex app-server exited (code 137)"));
         } else {
           n("item/completed", {
             item: {
@@ -1045,7 +1252,10 @@ describe("CodexAppServerProvider", () => {
     const failed = collectUntilTerminal(session);
     await session.sendUserInput({ text: "first" });
     expect(await failed).toEqual([
-      expect.objectContaining({ type: "error", error: "codex app-server exited" }),
+      expect.objectContaining({
+        type: "error",
+        error: "Codex stopped before the turn finished: codex app-server exited (code 137)",
+      }),
     ]);
 
     const recovered = collectUntilTerminal(session);
@@ -1072,11 +1282,11 @@ describe("CodexAppServerProvider", () => {
           threadId: "source-thread",
           turn: { id: "fork-turn" },
         });
-        captured.onExit?.(137);
+        captured.onExit?.(new Error("codex app-server exited (code 137)"));
       }
       // The real client rejects post-exit requests immediately instead of
       // leaving them pending (see AppServerClient.request).
-      if (method === "thread/revert") throw new Error("codex app-server exited");
+      if (method === "thread/revert") throw new Error("codex app-server exited (code 137)");
       return {};
     });
 
@@ -2405,6 +2615,46 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("classifies OpenAI's refusal of a model the ChatGPT login cannot call", async () => {
+    const provider = new CodexAppServerProvider();
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        n("turn/completed", {
+          threadId: "thr-1",
+          turn: {
+            id: "turn-1",
+            status: "failed",
+            error: {
+              message:
+                "The 'gpt-6-luna' model is not supported when using Codex with a ChatGPT account.",
+              codexErrorInfo: "badRequest",
+            },
+          },
+        });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+    const error = (await collected).find((m) => m.type === "error");
+
+    expect(error).toMatchObject({
+      type: "error",
+      error: "The 'gpt-6-luna' model is not supported when using Codex with a ChatGPT account.",
+      code: "model_unavailable",
+      provider: "openai",
+      reason: "model_access_denied",
+    });
+    await session.close();
+  });
+
   it("reports a failed turn's Codex turn id and reads funding when asked", async () => {
     let funding: UsageFunding = "byok";
     const provider = new CodexAppServerProvider({ funding: () => funding });
@@ -2530,6 +2780,42 @@ describe("CodexAppServerProvider", () => {
         "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.",
       code: "auth_revoked",
     });
+    await session.close();
+  });
+
+  it("finishes marking revoked credentials before reporting them after turn/start fails", async () => {
+    let authStateMarked = false;
+    const provider = new CodexAppServerProvider({
+      onAuthRevoked: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        authStateMarked = true;
+      },
+    });
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        captured.onNotification?.("error", {
+          threadId: "thr-1",
+          error: {
+            message:
+              "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.",
+          },
+          willRetry: false,
+        });
+        throw new Error("codex app-server exited (code 1)");
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+    const error = (await collected).find((m) => m.type === "error");
+
+    expect(authStateMarked).toBe(true);
+    expect(error).toMatchObject({ code: "auth_revoked" });
     await session.close();
   });
 

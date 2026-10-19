@@ -21,7 +21,13 @@ afterEach(async () => {
 
 async function fixture(dropReply = false) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-shared-"));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  cleanup.push(() =>
+    rm(root, { recursive: true, force: true, maxRetries: 5 }).catch((error) => {
+      // A stopped daemon can hold observe.db open a little longer, and Windows refuses to remove
+      // an open file. A leftover temporary directory is harmless there.
+      if (process.platform !== "win32") throw error;
+    }),
+  );
   const token = `romedev_${"a".repeat(43)}`;
   const gateway = createServer();
   const sockets = new WebSocketServer({ server: gateway });
@@ -169,7 +175,7 @@ describe("CLI and JavaScript clients sharing one caller daemon", () => {
       .split("\n")
       .map((line) => JSON.parse(line));
     expect(description).toMatchObject({ ok: true, result: { action: "system.info" } });
-    expect(initialStatus).toMatchObject({ protocolVersion: 2, connection: "online" });
+    expect(initialStatus).toMatchObject({ protocolVersion: 4, connection: "online" });
     const responses = await Promise.all([
       f.cli("device", "run", "target", "exec", "--args", '{"command":"from-cli"}'),
       f.api(

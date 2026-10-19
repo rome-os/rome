@@ -38,33 +38,49 @@ const bytesIn = async (filename) => {
   );
 };
 
-const mergeReports = async (source, destination) => {
-  await mkdir(destination, { recursive: true });
-  for (const entry of await readdir(source, { withFileTypes: true })) {
-    const from = path.join(source, entry.name);
-    const to = path.join(destination, entry.name);
-    if (entry.isDirectory()) {
-      await mergeReports(from, to);
-    } else if (entry.isFile()) {
-      if (await exists(to)) {
-        const [oldBytes, newBytes] = await Promise.all([readFile(to), readFile(from)]);
-        if (!oldBytes.equals(newBytes)) throw new Error(`Conflicting report asset: ${to}`);
-      } else {
-        await cp(from, to);
-      }
-    }
+// Each suite job runs Midscene once, so its artifact holds one result summary.
+// That summary names the native HTML report; return its path relative to the
+// suite directory, or null when the run produced no report.
+const readSuiteReport = async (suiteDirectory) => {
+  const results = path.join(suiteDirectory, ".midscene", "test-results");
+  if (!(await exists(results))) return null;
+  const summaries = [];
+  for (const entry of await readdir(results, { withFileTypes: true })) {
+    const file = path.join(results, entry.name, "summary.json");
+    if (entry.isDirectory() && (await exists(file))) summaries.push(file);
   }
+  if (summaries.length > 1) throw new Error(`Expected one Midscene run in ${suiteDirectory}`);
+  if (!summaries.length) return null;
+  const { report } = JSON.parse(await readFile(summaries[0], "utf8"));
+  if (!report) return null;
+  const reportFile = path.resolve(path.dirname(summaries[0]), report);
+  const relative = path.relative(path.join(suiteDirectory, "midscene_run", "report"), reportFile);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Native report escapes the report directory in ${suiteDirectory}`);
+  }
+  return (await exists(reportFile)) ? path.relative(suiteDirectory, reportFile) : null;
 };
 
-const copyShardReports = async (source, destination) => {
-  if (!(await exists(source))) return;
+const toHref = (filename) => filename.split(path.sep).map(encodeURIComponent).join("/");
+
+// Copy each suite's report directory to <current>/<suite>/ and return the
+// suites whose native report exists, keyed by suite name.
+const copySuiteReports = async (source, current) => {
+  const reports = {};
+  if (!(await exists(source))) return reports;
   for (const entry of await readdir(source, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^midscene-shard-\d+$/.test(entry.name)) continue;
-    const reports = path.join(source, entry.name, "midscene_run", "report");
-    if (!(await exists(reports))) continue;
-    const destinationReports = path.join(destination, entry.name, "midscene_run", "report");
-    await mergeReports(reports, destinationReports);
+    const suite = /^midscene-suite-([a-z]+)$/.exec(entry.name)?.[1];
+    if (!entry.isDirectory() || !suite) continue;
+    const suiteDirectory = path.join(source, entry.name);
+    const reportDirectory = path.join(suiteDirectory, "midscene_run", "report");
+    if (!(await exists(reportDirectory))) continue;
+    await cp(reportDirectory, path.join(current, suite, "midscene_run", "report"), {
+      recursive: true,
+    });
+    const report = await readSuiteReport(suiteDirectory);
+    if (report) reports[suite] = toHref(path.join(suite, report));
   }
+  return reports;
 };
 
 export async function preparePagesSite({
@@ -83,16 +99,17 @@ export async function preparePagesSite({
   const current = path.join(site, "runs", runId);
   await rm(current, { recursive: true, force: true });
   await mkdir(current, { recursive: true });
-  const nativeReport = path.join(reports, "native-report");
-  if (await exists(path.join(nativeReport, "index.html"))) {
-    await cp(path.join(nativeReport, "index.html"), path.join(current, "index.html"));
+  const suiteReports = await copySuiteReports(reports, current);
+  const suites = Object.keys(suiteReports).sort();
+  if (suites.length) {
+    const links = suites.map(
+      (suite) => `<li><a href="${suiteReports[suite]}">Midscene Test report: ${suite}</a></li>`,
+    );
+    await writeFile(
+      path.join(current, "index.html"),
+      `<!doctype html><html lang="en"><meta charset="utf-8"><title>Midscene run ${runId}</title><h1>Midscene run ${runId}</h1><ul>${links.join("")}</ul></html>`,
+    );
   }
-  if (await exists(path.join(nativeReport, "screenshots"))) {
-    await cp(path.join(nativeReport, "screenshots"), path.join(current, "screenshots"), {
-      recursive: true,
-    });
-  }
-  await copyShardReports(reports, current);
 
   const runsDirectory = path.join(site, "runs");
   const runIds = (await readdir(runsDirectory, { withFileTypes: true }))
@@ -111,7 +128,7 @@ export async function preparePagesSite({
     retainedRunIds.map(async (id) =>
       (await exists(path.join(runsDirectory, id, "index.html")))
         ? `<li><a href="runs/${id}/index.html">Run ${id}</a></li>`
-        : `<li>Run ${id}: partial shard reports are linked from its workflow Summary</li>`,
+        : `<li>Run ${id}: no report was published</li>`,
     ),
   );
   await writeFile(
@@ -122,7 +139,8 @@ export async function preparePagesSite({
   if (bytes > maxSiteBytes) {
     throw new Error(`Pages site is ${bytes} bytes, above the ${maxSiteBytes}-byte safety limit`);
   }
-  return { bytes, runIds: retainedRunIds };
+  // Links are relative to runs/<run-id>/ and only name reports that exist.
+  return { bytes, runIds: retainedRunIds, reports: suiteReports };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

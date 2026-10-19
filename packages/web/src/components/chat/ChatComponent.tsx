@@ -1,38 +1,34 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Chat, type SessionMessage } from "@/components/chat/Chat";
 import { AppStoreSheet } from "@/components/AppStoreSheet";
-import {
-  fetchRomeNewsDefinitions,
-  getQuickEntries,
-  type QuickEntry,
-  type QuickEntryDefinition,
-} from "@/config/quick-entries";
-import {
-  ChatComposer,
-  type ChatComposerHandle,
-  type ChatComposerSendControls,
-  type ChatComposerSnapshot,
-} from "@/components/chat/ChatComposer";
+import { fetchRomeNewsDefinitions, getQuickEntries, romeNewsConfig } from "@/config/quick-entries";
+import type {
+  ResolvedRomeNewsItem,
+  RomeNewsDefinition,
+} from "@rome-os/rome-web-components/news-item/schema";
+import type { ChatComposerHandle } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
 import { emitSessionsChanged, usePinSession, useSessionsChanged } from "@/lib/session-events";
-import {
-  ChatApiError,
-  createSession as apiCreateSession,
-  listSessions,
-  postSessionTurn,
-} from "@/lib/chat-api";
+import { listSessions } from "@/lib/chat-api";
 import { useSettings } from "@/hooks/use-settings";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
-import { dataTransferHasFiles, extractFilesFromDataTransfer } from "@/lib/clipboard-files";
-import type { AgentMention, ChatErrorNotice, ChatSession } from "@/lib/chat-types";
-import {
-  snapshotWorkspaceForSend,
-  useWorkspaceContextRegistry,
-} from "@/pages/free/workspace-context";
+import type { AgentMention, ChatSession } from "@/lib/chat-types";
 
 export type { SessionMessage };
+
+// The home's last known layout, so a reload starts where the previous visit
+// ended instead of moving the composer once its sessions arrive.
+export const GREETING_ONLY_HOME_KEY = "rome.chat.greeting-only-home";
+
+function readGreetingOnlyHome(): boolean {
+  try {
+    return window.localStorage.getItem(GREETING_ONLY_HOME_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
 
 export interface ChatComponentProps {
   sessionId?: string | null;
@@ -59,10 +55,7 @@ export function ChatComponent({
   initialDraftText,
   initialSkillName,
 }: ChatComponentProps) {
-  // `null` when the chat is mounted outside the workspace shell;
-  // the draft-send path simply skips workspace injection in that case.
-  const workspaceContextRegistry = useWorkspaceContextRegistry();
-  const { t, i18n } = useTranslation("chat");
+  const { i18n } = useTranslation("chat");
 
   const { data: settings } = useSettings();
   const coarsePointer = useCoarsePointer();
@@ -74,20 +67,35 @@ export function ChatComponent({
     emitSessionsChanged();
   }, []);
 
-  const draftComposerRef = useRef<ChatComposerHandle>(null);
+  // One <Chat> spans a draft and the session its first send creates, so the
+  // focused composer stays mounted through the navigation that send triggers
+  // and a phone keeps its soft keyboard open. Any other session gets its own
+  // instance, and so does every return to the draft.
+  const [createdSessionId, setCreatedSessionId] = useState<string | null>(null);
+  const [draftKey, setDraftKey] = useState(0);
+  const [previousSessionId, setPreviousSessionId] = useState(sessionId);
+  if (sessionId !== previousSessionId) {
+    setPreviousSessionId(sessionId);
+    if (!sessionId && previousSessionId) {
+      setDraftKey((key) => key + 1);
+      setCreatedSessionId(null);
+    }
+  }
+  const surfaceKey = !sessionId || sessionId === createdSessionId ? `draft-${draftKey}` : sessionId;
+  // Queued before the host's own update, so the render that receives the new
+  // sessionId already knows this surface created it and keeps the key.
+  const handleSessionCreated = useCallback(
+    (id: string) => {
+      setCreatedSessionId(id);
+      onSessionCreated(id);
+    },
+    [onSessionCreated],
+  );
+
+  const composerRef = useRef<ChatComposerHandle>(null);
   useEffect(() => {
-    if (!sessionId && !coarsePointer) draftComposerRef.current?.focus();
+    if (!sessionId && !coarsePointer) composerRef.current?.focus();
   }, [sessionId, coarsePointer]);
-  const draftDragDepthRef = useRef(0);
-  const [draftStreamError, setDraftStreamError] = useState<string | ChatErrorNotice | null>(null);
-  const [isDraggingDraftFiles, setIsDraggingDraftFiles] = useState(false);
-  const pendingDraftRef = useRef<{
-    sessionId: string;
-    projectPath: string;
-    largeModelSelection?: string;
-    agentName?: string;
-  } | null>(null);
-  const draftSendInFlightRef = useRef(false);
 
   // Seed the draft composer once per provided draft. insertText (vs. a
   // useState seed in the composer) also fixes up textarea height and cursor.
@@ -96,7 +104,7 @@ export function ChatComponent({
     if (!initialDraftText || sessionId) return;
     if (appliedDraftRef.current === initialDraftText) return;
     appliedDraftRef.current = initialDraftText;
-    draftComposerRef.current?.insertText(initialDraftText, { focus: !coarsePointer });
+    composerRef.current?.insertText(initialDraftText, { focus: !coarsePointer });
   }, [initialDraftText, sessionId, coarsePointer]);
 
   // Same once-per-value seeding for a structured skill selection — the chip
@@ -106,22 +114,37 @@ export function ChatComponent({
     if (!initialSkillName || sessionId) return;
     if (appliedSkillRef.current === initialSkillName) return;
     appliedSkillRef.current = initialSkillName;
-    draftComposerRef.current?.setSkillSelection({ name: initialSkillName });
+    composerRef.current?.setSkillSelection({ name: initialSkillName });
   }, [initialSkillName, sessionId]);
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
+  const handleSessionNotFound = useCallback(
+    (missingSessionId: string) => {
+      if (missingSessionId !== sessionId) return;
+      if (onSessionNotFound) {
+        onSessionNotFound();
+        return;
+      }
+      navigate(hideSidebar ? "/chat?hideSidebar=1" : "/chat", { replace: true });
+    },
+    [sessionId, onSessionNotFound, navigate, hideSidebar],
+  );
   const [cloudQuickEntryDefinitions, setCloudQuickEntryDefinitions] = useState<
-    QuickEntryDefinition[]
+    RomeNewsDefinition[]
   >([]);
   const quickEntries = useMemo(
     () => getQuickEntries(cloudQuickEntryDefinitions, i18n.language),
     [cloudQuickEntryDefinitions, i18n.language],
   );
   const [homeSessions, setHomeSessions] = useState<ChatSession[]>([]);
+  const [sessionsSettled, setSessionsSettled] = useState(false);
+  const [newsSettled, setNewsSettled] = useState(!romeNewsConfig.enabled);
   const setSessionPinned = usePinSession();
 
   useEffect(() => {
-    if (sessionId) return;
+    if (sessionId || !romeNewsConfig.enabled) return;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 3_000);
 
@@ -131,7 +154,10 @@ export function ChatComponent({
         // Rome News content is Cloud-owned. Keep the section hidden when the
         // feed is unavailable or invalid instead of carrying a second copy.
       })
-      .finally(() => window.clearTimeout(timeout));
+      .finally(() => {
+        window.clearTimeout(timeout);
+        setNewsSettled(true);
+      });
 
     return () => {
       window.clearTimeout(timeout);
@@ -145,6 +171,8 @@ export function ChatComponent({
       setHomeSessions(await listSessions());
     } catch {
       // Keep the empty state usable when recent chats cannot be loaded.
+    } finally {
+      setSessionsSettled(true);
     }
   }, [sessionId]);
 
@@ -169,6 +197,21 @@ export function ChatComponent({
     [homeSessions],
   );
 
+  // Center the greeting with the composer when the home has nothing else to
+  // show. Until the home data settles, keep the last known layout.
+  const homeSettled = sessionsSettled && newsSettled;
+  const loadedGreetingOnly = pinnedChats.length === 0 && quickEntries.length === 0;
+  const [rememberedGreetingOnly] = useState(readGreetingOnlyHome);
+  const greetingOnlyHome = homeSettled ? loadedGreetingOnly : rememberedGreetingOnly;
+  useEffect(() => {
+    if (!homeSettled) return;
+    try {
+      window.localStorage.setItem(GREETING_ONLY_HOME_KEY, String(loadedGreetingOnly));
+    } catch {
+      // Storage can be unavailable; the layout then just starts centered.
+    }
+  }, [homeSettled, loadedGreetingOnly]);
+
   const handleUnpinChat = useCallback(
     async (id: string) => {
       try {
@@ -188,17 +231,17 @@ export function ChatComponent({
   const [appStoreSrc, setAppStoreSrc] = useState<string | null>(null);
 
   const handleActivateQuickEntry = useCallback(
-    (entry: QuickEntry) => {
+    (entry: ResolvedRomeNewsItem) => {
       switch (entry.type) {
         case "chat": {
-          draftComposerRef.current?.setSkillSelection(
+          composerRef.current?.setSkillSelection(
             entry.skillName ? { name: entry.skillName } : null,
           );
           if (entry.mode === "start") {
             // Send immediately, carrying the composer's current selections.
-            draftComposerRef.current?.submit(entry.prompt, { skillName: entry.skillName });
+            composerRef.current?.submit(entry.prompt, { skillName: entry.skillName });
           } else {
-            draftComposerRef.current?.insertText(entry.prompt);
+            composerRef.current?.insertText(entry.prompt);
           }
           return;
         }
@@ -217,175 +260,29 @@ export function ChatComponent({
     [navigate],
   );
 
-  const handleDraftSend = useCallback(
-    async (snapshot: ChatComposerSnapshot, controls: ChatComposerSendControls) => {
-      if (draftSendInFlightRef.current) return;
-      draftSendInFlightRef.current = true;
-      setDraftStreamError(null);
-
-      try {
-        const cached = pendingDraftRef.current;
-        const requestedAgentName = snapshot.agentMention?.agentName;
-        const cacheUsable =
-          cached !== null &&
-          cached.projectPath === snapshot.projectPath &&
-          cached.largeModelSelection === snapshot.largeModelSelection &&
-          cached.agentName === requestedAgentName;
-        if (cached && !cacheUsable) {
-          pendingDraftRef.current = null;
-        }
-
-        let newSessionId = cacheUsable ? cached.sessionId : null;
-        if (!newSessionId) {
-          try {
-            const created = await apiCreateSession({
-              name: t("sidebar.newChat"),
-              personaId: snapshot.personaId,
-              projectPath: snapshot.projectPath,
-              largeModelSelection: snapshot.largeModelSelection,
-              reasoningEffort: snapshot.reasoningEffort,
-              agentName: requestedAgentName,
-            });
-            newSessionId = created.id;
-            pendingDraftRef.current = {
-              sessionId: newSessionId,
-              projectPath: snapshot.projectPath,
-              largeModelSelection: snapshot.largeModelSelection,
-              agentName: requestedAgentName,
-            };
-          } catch (error) {
-            setDraftStreamError(
-              error instanceof ChatApiError && error.message
-                ? error.message
-                : t("stream.errors.createChatFallback"),
-            );
-            throw error;
-          }
-        }
-
-        const formData = new FormData();
-        formData.set("text", snapshot.text);
-        if (snapshot.inputId) formData.set("inputId", snapshot.inputId);
-        if (snapshot.skillName) formData.set("skillName", snapshot.skillName);
-        if (snapshot.personaId) formData.set("personaId", snapshot.personaId);
-        if (snapshot.largeModelSelection) {
-          formData.set("largeModelSelection", snapshot.largeModelSelection);
-        }
-        formData.set("reasoningEffort", snapshot.reasoningEffort);
-        for (const upload of snapshot.uploads) {
-          formData.append("files", upload.file);
-        }
-        const ws = snapshotWorkspaceForSend(workspaceContextRegistry);
-        if (ws) formData.set("workspace", JSON.stringify(ws));
-
-        const result = await postSessionTurn(newSessionId, formData, {
-          onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
-          signal: controls.signal,
-        });
-        if (!result.ok) {
-          const message =
-            result.message ||
-            (result.status === 0
-              ? t("stream.errors.sendInvalidResponse")
-              : t("stream.errors.sendStatus", { status: result.status }));
-          setDraftStreamError({
-            message,
-            ...(result.code ? { code: result.code } : {}),
-            ...(result.provider ? { provider: result.provider } : {}),
-            ...(result.reason ? { reason: result.reason } : {}),
-          });
-          throw new Error(result.message || `post turn failed (${result.status})`);
-        }
-
-        pendingDraftRef.current = null;
-        notifySessionsChanged();
-        onSessionCreated(newSessionId);
-      } finally {
-        draftSendInFlightRef.current = false;
-      }
-    },
-    [workspaceContextRegistry, notifySessionsChanged, onSessionCreated, t],
-  );
-
-  const handleDraftDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    draftDragDepthRef.current += 1;
-    event.dataTransfer.dropEffect = "copy";
-    setIsDraggingDraftFiles(true);
-  }, []);
-
-  const handleDraftDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-  }, []);
-
-  const handleDraftDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    draftDragDepthRef.current = Math.max(0, draftDragDepthRef.current - 1);
-    if (draftDragDepthRef.current === 0) {
-      setIsDraggingDraftFiles(false);
-    }
-  }, []);
-
-  const handleDraftDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    draftDragDepthRef.current = 0;
-    setIsDraggingDraftFiles(false);
-
-    const files = extractFilesFromDataTransfer(event.dataTransfer);
-    if (files.length === 0) return;
-    draftComposerRef.current?.addFiles(files);
-    draftComposerRef.current?.focus();
-  }, []);
-
-  if (sessionId) {
-    return (
+  return (
+    <>
       <Chat
-        key={sessionId}
+        key={surfaceKey}
         sessionId={sessionId}
         mainAgentDisplayName={mainAgentDisplayName}
         onSessionsChanged={notifySessionsChanged}
-        onSessionNotFound={onSessionNotFound ? () => onSessionNotFound() : undefined}
+        onSessionNotFound={handleSessionNotFound}
         onSessionMessage={onSessionMessage}
-      />
-    );
-  }
-
-  return (
-    <div
-      className="relative flex h-full min-h-0 flex-col bg-chat-canvas [--background:var(--chat-canvas)]"
-      onDragEnter={handleDraftDragEnter}
-      onDragOver={handleDraftDragOver}
-      onDragLeave={handleDraftDragLeave}
-      onDrop={handleDraftDrop}
-    >
-      {isDraggingDraftFiles && (
-        <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-16 border-2 border-dashed border-info bg-info-bg/85 text-ui text-info-fg md:inset-6">
-          {t("composer.dropFiles")}
-        </div>
-      )}
-      <ChatEmptyState
-        guardianName={guardianName}
-        pinnedChats={pinnedChats}
-        onOpenPinnedChat={(id) => navigate(`/chat/${id}`)}
-        onUnpinChat={(id) => void handleUnpinChat(id)}
-        quickEntries={quickEntries}
-        onActivateQuickEntry={handleActivateQuickEntry}
-        composer={
-          <ChatComposer
-            ref={draftComposerRef}
-            // Box look lives on the composer so the chip row sits outside it.
-            boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
-            onSend={handleDraftSend}
-            showProjectSelector
-            showModelSelector
-            initialProjectName={initialProjectName}
-            initialAgentMention={initialAgentMention}
-            streamError={draftStreamError}
+        onSessionCreated={handleSessionCreated}
+        initialProjectName={initialProjectName}
+        initialAgentMention={initialAgentMention}
+        composerRef={composerRef}
+        centerDraftComposer={greetingOnlyHome}
+        emptyState={
+          <ChatEmptyState
+            guardianName={guardianName}
+            pinnedChats={pinnedChats}
+            onOpenPinnedChat={(id) => navigate(`/chat/${id}`)}
+            onUnpinChat={(id) => void handleUnpinChat(id)}
+            quickEntries={quickEntries}
+            onActivateQuickEntry={handleActivateQuickEntry}
+            hugComposer={greetingOnlyHome}
           />
         }
       />
@@ -397,6 +294,6 @@ export function ChatComponent({
         // after install is enough.
         onInstalled={() => setAppStoreSrc(null)}
       />
-    </div>
+    </>
   );
 }

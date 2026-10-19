@@ -4,15 +4,11 @@ import { parse as parseYaml } from "yaml";
 import type { AgentConfig } from "../types.js";
 import type { AppOwnedArtifactLoadFailure, ArtifactMetadata } from "../apps/types.js";
 import type { AppCatalog } from "../apps/catalog.js";
-import { listCoreArtifactsByKind } from "../apps/core-artifacts.js";
+import { listCoreAgents } from "../apps/core-artifacts.js";
 import { toArtifactMetadata } from "../apps/artifact-ref-adapter.js";
 import { AgentConfigSchema } from "../apps/packaging/index.js";
-import {
-  claimLegacyArtifactNames,
-  formatArtifactId,
-  resolveArtifactId,
-  type ArtifactIdentityContext,
-} from "../apps/artifact-id.js";
+import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
+import { loadArtifactRecords } from "../apps/artifact-records.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("agent-loader");
@@ -22,7 +18,7 @@ export class AgentLoader {
   private records: Map<string, { config: AgentConfig; metadata: ArtifactMetadata }> = new Map();
   private registryLoadFailures: AppOwnedArtifactLoadFailure[] = [];
 
-  constructor(private readonly identity?: ArtifactIdentityContext) {}
+  constructor(private readonly identity: ArtifactIdentityContext) {}
 
   /** Load all agent YAML files from a directory, validate, and store them. */
   async loadAll(dir: string = "agents"): Promise<Map<string, AgentConfig>> {
@@ -30,15 +26,12 @@ export class AgentLoader {
     const yamlFiles = entries
       .filter((f) => extname(f) === ".yaml" || extname(f) === ".yml")
       .map((file) => ({
-        filePath: join(dir, file),
-        metadata: {
-          kind: "agent" as const,
-          ownerType: "core" as const,
-          ownerId: "core",
-          publicName: file.replace(/\.(yaml|yml)$/u, ""),
-          aliases: [],
-          sourcePath: join(dir, file),
-        },
+        kind: "agent" as const,
+        ownerType: "core" as const,
+        ownerId: "core",
+        publicName: file.replace(/\.(yaml|yml)$/u, ""),
+        aliases: [],
+        sourcePath: join(dir, file),
       }));
 
     if (yamlFiles.length === 0) {
@@ -49,13 +42,9 @@ export class AgentLoader {
   }
 
   async loadFromCatalog(catalog: AppCatalog): Promise<Map<string, AgentConfig>> {
-    const coreRefs = await listCoreArtifactsByKind("agent");
+    const coreRefs = await listCoreAgents();
     const appRefs = catalog.listArtifacts("agent");
-    const sources = [...coreRefs, ...appRefs].map((ref) => {
-      const metadata = toArtifactMetadata(ref);
-      return { filePath: metadata.sourcePath, metadata };
-    });
-    return this.loadRecords(sources);
+    return this.loadRecords([...coreRefs, ...appRefs].map(toArtifactMetadata));
   }
 
   /** Get an agent config by name. Throws if not found. */
@@ -103,7 +92,6 @@ export class AgentLoader {
 
   getAllResolvableRecords(): Map<string, { config: AgentConfig; metadata: ArtifactMetadata }> {
     const records = this.getAllRecords();
-    if (!this.identity) return records;
 
     for (const [legacyName, artifactId] of Object.entries(this.identity.legacyBindings.agent)) {
       const record = this.records.get(artifactId);
@@ -116,79 +104,16 @@ export class AgentLoader {
     return [...this.registryLoadFailures];
   }
 
-  private async loadRecords(
-    sources: Array<{ filePath: string; metadata: ArtifactMetadata }>,
-  ): Promise<Map<string, AgentConfig>> {
-    const nextRecords = new Map<string, { config: AgentConfig; metadata: ArtifactMetadata }>();
-    const registryLoadFailures: AppOwnedArtifactLoadFailure[] = [];
-
-    for (const source of sources) {
-      let config: AgentConfig;
-      try {
-        config = await this.readAgentConfig(source.filePath);
-      } catch (err) {
-        if (source.metadata.ownerType !== "app") {
-          throw err;
-        }
-
-        registryLoadFailures.push({
-          kind: source.metadata.kind,
-          ownerId: source.metadata.ownerId,
-          publicName: source.metadata.publicName,
-          sourcePath: source.metadata.sourcePath,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        continue;
-      }
-
-      const artifactId = this.identity
-        ? formatArtifactId(source.metadata.ownerId, config.name)
-        : config.name;
-      if (
-        this.identity &&
-        (source.metadata.ownerType === "core" || source.metadata.formatVersion !== 2)
-      ) {
-        const claim = claimLegacyArtifactNames(
-          this.identity.legacyBindings,
-          "agent",
-          [config.name, source.metadata.publicName, ...source.metadata.aliases],
-          artifactId as ReturnType<typeof formatArtifactId>,
-        );
-        if (claim.conflicts.length > 0) {
-          const error = `Legacy agent name conflict: ${claim.conflicts
-            .map(
-              ({ legacyName, artifactId: owner }) =>
-                `${JSON.stringify(legacyName)} is bound to ${owner}`,
-            )
-            .join(", ")}`;
-          if (source.metadata.ownerType !== "app") throw new Error(error);
-          registryLoadFailures.push({
-            kind: source.metadata.kind,
-            ownerId: source.metadata.ownerId,
-            publicName: source.metadata.publicName,
-            sourcePath: source.metadata.sourcePath,
-            error,
-          });
-          continue;
-        }
-      }
-
-      if (nextRecords.has(artifactId)) {
-        if (source.metadata.ownerType !== "app") {
-          throw new Error(`Duplicate agent name "${config.name}" found in ${source.filePath}`);
-        }
-
-        registryLoadFailures.push({
-          kind: source.metadata.kind,
-          ownerId: source.metadata.ownerId,
-          publicName: source.metadata.publicName,
-          sourcePath: source.metadata.sourcePath,
-          error: `Duplicate agent name "${config.name}" found in ${source.filePath}`,
-        });
-        continue;
-      }
-      nextRecords.set(artifactId, { config, metadata: source.metadata });
-    }
+  private async loadRecords(sources: ArtifactMetadata[]): Promise<Map<string, AgentConfig>> {
+    const { records, failures: registryLoadFailures } = await loadArtifactRecords({
+      kind: "agent",
+      sources,
+      identity: this.identity,
+      read: (metadata) => this.readAgentConfig(metadata.sourcePath),
+    });
+    const nextRecords = new Map<string, { config: AgentConfig; metadata: ArtifactMetadata }>(
+      records,
+    );
 
     const nameSet = new Set(nextRecords.keys());
     for (const [name, { config, metadata }] of nextRecords.entries()) {
@@ -242,7 +167,6 @@ export class AgentLoader {
   }
 
   private resolveName(name: string): string {
-    if (!this.identity) return name;
     try {
       return resolveArtifactId({
         kind: "agent",

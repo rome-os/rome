@@ -8,9 +8,17 @@ import type { ActionEngine, ActionRunContext } from "../actions/engine.js";
 import { createLogger } from "../logger.js";
 import { withRomeSpan } from "../telemetry.js";
 import { runWithoutHookInvocationContext } from "../core/hook-recursion.js";
+import { actionExecutionContext } from "../actions/context.js";
+import { replayContext } from "../actions/replay.js";
 import type { Clock, ClockTimer } from "../lib/clock.js";
 
 const log = createLogger("routine-engine");
+
+// Matched by name, as apps/context.ts does, so the routine engine needs no
+// runtime import of the action engine.
+function isActionNotFound(err: unknown): boolean {
+  return err instanceof Error && err.name === "ActionNotFoundError";
+}
 
 export class RoutineEngine {
   private providers = new Map<string, TriggerProvider>();
@@ -124,8 +132,8 @@ export class RoutineEngine {
   /** Stop a routine's running run(s), forcing each to a terminal "cancelled".
    * Handles both an in-flight run (best-effort kill of the action's subprocess;
    * dispatch's catch then records it cancelled, not error, and skips retry) and
-   * a run left "running" after a restart (no process to kill — repair the status
-   * directly). Two correctness points:
+   * a "running" run with no live process to kill (repair the status directly).
+   * Two correctness points:
    *  - Cancels EVERY running run, not just the newest row: runs aren't serialized
    *    per routine, so an older run can still be live after a newer one finished.
    *  - Does NOT touch `pending_approval` runs. They have no live process, and
@@ -162,10 +170,24 @@ export class RoutineEngine {
     return { stopped: true, killedLiveProcess };
   }
 
-  private async dispatch(
+  /** A routine fire is its own root. Event-bus subscribers run in the
+   * publisher's async context; without exiting it, the run (and any retry timer
+   * it schedules) would nest under the publishing action and inherit its
+   * agentName. */
+  private dispatch(
     routine: Routine,
     payload: Record<string, unknown>,
     opts: { manual?: boolean } = {},
+  ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
+    return replayContext.exit(() =>
+      actionExecutionContext.exit(() => this.dispatchAsRoot(routine, payload, opts)),
+    );
+  }
+
+  private async dispatchAsRoot(
+    routine: Routine,
+    payload: Record<string, unknown>,
+    opts: { manual?: boolean },
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     const startTime = this.clock.now().getTime();
 
@@ -282,6 +304,19 @@ export class RoutineEngine {
                 name: routine.name,
                 error: errorMsg,
               });
+            } else if (isActionNotFound(err)) {
+              // An action leaves the registry when its app is uninstalled or
+              // fails to load, and it does not come back within the retry
+              // delay. The routine stays enabled so it recovers on its next
+              // fire once the action is registered again.
+              // The error names the missing action, which can be one the
+              // routine's action calls rather than the routine's own.
+              log.warn("an action the routine runs is not registered, skipping retry", {
+                routineId: routine.id,
+                name: routine.name,
+                action: routine.actionName,
+                error: errorMsg,
+              });
             } else if (this.retryDelayMs > 0) {
               log.warn("routine execution failed, scheduling retry", {
                 routineId: routine.id,
@@ -301,22 +336,35 @@ export class RoutineEngine {
                   },
                   async () => {
                     try {
-                      await runWithoutHookInvocationContext(() =>
+                      const retryResult = await runWithoutHookInvocationContext(() =>
                         this.actionEngine.run(routine.actionName, mergedArgs, {
                           initiator: `routine:${routine.name}`,
                           whenWorkersBusy: "queue",
                         }),
                       );
-                      log.info("routine retry succeeded", {
-                        routineId: routine.id,
-                        name: routine.name,
-                      });
+                      if (retryResult.status === "error") {
+                        log.warn("routine retry returned an error", {
+                          routineId: routine.id,
+                          name: routine.name,
+                          error: retryResult.error,
+                        });
+                      } else {
+                        log.info("routine retry succeeded", {
+                          routineId: routine.id,
+                          name: routine.name,
+                        });
+                      }
                     } catch (retryErr) {
-                      log.error("routine retry failed", {
+                      const retryFields = {
                         routineId: routine.id,
                         name: routine.name,
                         error: retryErr instanceof Error ? retryErr.message : String(retryErr),
-                      });
+                      };
+                      if (isActionNotFound(retryErr)) {
+                        log.warn("routine retry found the action unregistered", retryFields);
+                      } else {
+                        log.error("routine retry failed", retryFields);
+                      }
                     }
                   },
                 );

@@ -1,5 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { createAIToolState, type AIToolStateProbes } from "./ai-tool-state.js";
+import type { AIToolUsageStatus } from "../lib/provider-usage.js";
 
 function probes(overrides: Partial<AIToolStateProbes> = {}): AIToolStateProbes {
   return {
@@ -82,6 +83,70 @@ describe("AIToolState", () => {
     expect(state.get().codex.quotaExhausted).toBe(true);
     await state.refresh("openai");
     expect(state.get().codex.quotaExhausted).toBe(false);
+  });
+
+  it.each([
+    "anthropic",
+    "openai",
+  ] as const)("replaces stale %s usage on failed probes without clearing a quota signal", async (provider) => {
+    const exhausted = {
+      checkedAt: "2026-09-27T17:12:35.031Z",
+      source: "test",
+      sevenDay: { usedPercent: 100, resetsAt: "2099-01-01T04:59:59.955Z" },
+    };
+    const failed = {
+      checkedAt: "2026-09-28T17:00:00.000Z",
+      source: "test",
+      error: "Claude usage request failed with HTTP 429",
+    };
+    const usageProbe = rs.fn<AIToolStateProbes["claudeUsage"]>();
+    usageProbe.mockResolvedValueOnce(exhausted);
+    usageProbe.mockResolvedValueOnce(failed);
+    usageProbe.mockResolvedValueOnce(null);
+    usageProbe.mockRejectedValueOnce(new Error("usage timed out"));
+    usageProbe.mockResolvedValueOnce({ ...failed, sevenDay: exhausted.sevenDay });
+    usageProbe.mockResolvedValueOnce({
+      checkedAt: "2026-09-28T17:05:00.000Z",
+      source: "test",
+      sevenDay: { usedPercent: 2, resetsAt: "2099-01-08T04:59:59.955Z" },
+    });
+    const state = createAIToolState({
+      probes: probes({
+        [provider === "anthropic" ? "claudeUsage" : "codexUsage"]: usageProbe,
+      }),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    const current = () => state.get()[provider === "anthropic" ? "claude" : "codex"];
+    try {
+      await state.refresh(provider);
+      expect(current().usage?.sevenDay?.usedPercent).toBe(100);
+      expect(current().quotaExhausted).toBe(true);
+
+      await state.refresh(provider);
+      expect(current().usage).toEqual(failed);
+      expect(current().quotaExhausted).toBe(true);
+
+      // No usage source is not a failure: no bars and no error.
+      await state.refresh(provider);
+      expect(current().usage).toBeUndefined();
+      expect(current().quotaExhausted).toBe(true);
+
+      await state.refresh(provider);
+      expect(current().usage?.error).toBe("usage timed out");
+      expect(current().quotaExhausted).toBe(true);
+
+      await state.refresh(provider);
+      expect(current().usage).toEqual(failed);
+      expect(current().quotaExhausted).toBe(true);
+
+      await state.refresh(provider);
+      expect(current().usage?.error).toBeUndefined();
+      expect(current().usage?.sevenDay?.usedPercent).toBe(2);
+      expect(current().quotaExhausted).toBe(false);
+    } finally {
+      state.close();
+    }
   });
 
   it("notifies only when the Codex login changes", async () => {
@@ -298,6 +363,281 @@ describe("AIToolState", () => {
 
     state.markQuotaExhausted("anthropic");
     expect(state.get().claude.quotaExhausted).toBe(false);
+  });
+
+  describe("usage-derived quota exhaustion", () => {
+    const now = Date.parse("2026-10-11T12:00:00.000Z");
+    const at = (offsetMs: number) => new Date(now + offsetMs).toISOString();
+    const HOUR = 60 * 60 * 1000;
+
+    function exhaustedState(windows: Pick<AIToolUsageStatus, "fiveHour" | "sevenDay">) {
+      const claudeUsage = rs.fn<AIToolStateProbes["claudeUsage"]>(async () => ({
+        checkedAt: at(0),
+        source: "test",
+        ...windows,
+      }));
+      const state = createAIToolState({
+        probes: probes({ claudeUsage }),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+      return { state, claudeUsage };
+    }
+
+    it("ends at the latest reset among the exhausted windows", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+          sevenDay: { usedPercent: 100, resetsAt: at(3 * HOUR) },
+        });
+        await state.refresh("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + 3 * HOUR - 1);
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + 3 * HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+        expect(claudeUsage).toHaveBeenCalledTimes(1);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("ignores the reset of a window with capacity", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+          sevenDay: { usedPercent: 40, resetsAt: at(72 * HOUR) },
+        });
+        await state.refresh("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it.each([
+      ["no reset time", { fiveHour: { usedPercent: 100 } }],
+      ["an unparseable reset time", { fiveHour: { usedPercent: 100, resetsAt: "soon" } }],
+      [
+        "one exhausted window without a reset time",
+        {
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+          sevenDay: { remainingPercent: 0 },
+        },
+      ],
+    ])("blocks for one window after the window has %s, and longer while probes confirm it", async (_case, windows) => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState(windows);
+        await state.refresh("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        // A later probe that confirms the exhaustion pushes the end out.
+        rs.setSystemTime(now + 4 * HOUR);
+        await state.refresh("anthropic");
+        rs.setSystemTime(now + 9 * HOUR - 1);
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        // A probe with unknown usage, such as an expired CLI token, does not.
+        claudeUsage.mockResolvedValueOnce(null);
+        await state.refresh("anthropic");
+        rs.setSystemTime(now + 9 * HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("ends at the usage reset after a runtime quota failure before it", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        rs.setSystemTime(now + HOUR - 1);
+        state.markQuotaExhausted("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("judges a replayed runtime quota failure by when it happened", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        let releaseUsage!: () => void;
+        claudeUsage.mockImplementationOnce(async () => {
+          await new Promise<void>((resolve) => {
+            releaseUsage = resolve;
+          });
+          return { checkedAt: at(HOUR), source: "test", error: "HTTP 429" };
+        });
+        const olderRefresh = state.refresh("anthropic");
+        rs.setSystemTime(now + HOUR - 1);
+        state.markQuotaExhausted("anthropic");
+
+        rs.setSystemTime(now + HOUR);
+        releaseUsage();
+        await olderRefresh;
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("keeps the reset known at a runtime quota failure when an older probe shows capacity", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        let releaseUsage!: () => void;
+        claudeUsage.mockImplementationOnce(async () => {
+          await new Promise<void>((resolve) => {
+            releaseUsage = resolve;
+          });
+          return { checkedAt: at(0), source: "test", fiveHour: { usedPercent: 0 } };
+        });
+        const olderRefresh = state.refresh("anthropic");
+        state.markQuotaExhausted("anthropic");
+        releaseUsage();
+        await olderRefresh;
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("caps a replayed failure over an exhausted window with no reset at one window", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        let releaseUsage!: () => void;
+        claudeUsage.mockImplementationOnce(async () => {
+          await new Promise<void>((resolve) => {
+            releaseUsage = resolve;
+          });
+          return {
+            checkedAt: at(0),
+            source: "test",
+            fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+            sevenDay: { usedPercent: 100 },
+          };
+        });
+        const olderRefresh = state.refresh("anthropic");
+        state.markQuotaExhausted("anthropic");
+        releaseUsage();
+        await olderRefresh;
+
+        rs.setSystemTime(now + 5 * HOUR - 1);
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + 5 * HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("lets a runtime quota failure after the usage reset outlast it for one window", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        rs.setSystemTime(now + HOUR);
+        state.markQuotaExhausted("anthropic");
+
+        rs.setSystemTime(now + 6 * HOUR - 1);
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + 6 * HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("ends a runtime quota failure with no reset after one window while probes fail", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        // An expired CLI token: every probe reports unknown usage.
+        const claudeUsage = rs.fn<AIToolStateProbes["claudeUsage"]>(async () => null);
+        const state = createAIToolState({
+          probes: probes({ claudeUsage }),
+          startRefresh: false,
+          refreshIntervalMs: null,
+        });
+        state.markQuotaExhausted("anthropic");
+
+        rs.setSystemTime(now + 5 * HOUR - 1);
+        await state.refresh("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + 5 * HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("keeps a usage reset when a later probe fails", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        claudeUsage.mockResolvedValueOnce({
+          checkedAt: at(0),
+          source: "test",
+          error: "Claude usage request failed with HTTP 429",
+        });
+        await state.refresh("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
   });
 
   it("marks revoked auth after an older in-flight status refresh finishes", async () => {

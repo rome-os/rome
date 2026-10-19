@@ -70,7 +70,7 @@ describe("control scale", () => {
         </Button>
       </>,
     );
-    const trim = "has-data-[icon=inline-start]:pl-[var(--control-gap)]";
+    const trim = "has-data-[icon=inline-start]:pl-[var(--control-px-icon-md)]";
 
     expect(screen.getByRole("button", { name: "Leading" }).className).toContain(trim);
     expect(screen.getByRole("button", { name: "Start" }).className).not.toContain(trim);

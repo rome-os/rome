@@ -1,11 +1,16 @@
 import { Hono } from "hono";
-import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import { v4 as uuid } from "uuid";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
 import { toRoutine } from "../../db/repositories/routines.js";
-import { parseDateAndLocalTime } from "../../routines/schedule-trigger-provider.js";
+import {
+  parseDateAndLocalTime,
+  resolveOneOffDate,
+} from "../../routines/schedule-trigger-provider.js";
+import { resolveGuardianTimezone } from "../../routines/guardian-timezone.js";
 import type { ApiDeps } from "../deps.js";
+import { validateActionArgs } from "../../actions/validate-action-args.js";
+import { CHAT_ROUTINE_KEY_PREFIX } from "../../routines/chat-routine-key.js";
 import type { Trigger } from "../../routines/types.js";
 
 // The engine merges trigger payloads into action args under this key. Forbid
@@ -14,8 +19,6 @@ const RESERVED_ARG_KEY = "__triggerPayload";
 
 const LOCAL_TIME_RE = /^\d{2}:\d{2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const argsSchemaValidator = new Ajv2020({ allErrors: true, strict: false });
-const compiledArgsSchemas = new WeakMap<Record<string, unknown>, ValidateFunction>();
 
 /** Error when a routine names an action that isn't registered. Names the remedy
  * so the agent routes to building a workflow instead of guessing again. Kept in
@@ -39,31 +42,6 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   );
 }
 
-function validateActionArgs(
-  actionName: string,
-  args: Record<string, unknown>,
-  schema: Record<string, unknown> | undefined,
-): string | null {
-  if (!schema) return null;
-
-  let validator = compiledArgsSchemas.get(schema);
-  if (!validator) {
-    try {
-      validator = argsSchemaValidator.compile(schema);
-      compiledArgsSchemas.set(schema, validator);
-    } catch (error) {
-      return `cannot validate args for action "${actionName}": invalid input schema (${
-        error instanceof Error ? error.message : String(error)
-      })`;
-    }
-  }
-  if (validator(args)) return null;
-  return `args do not satisfy the input schema for action "${actionName}": ${argsSchemaValidator.errorsText(
-    validator.errors,
-    { dataVar: "args", separator: "; " },
-  )}`;
-}
-
 /** Validates against the engine's registered providers and per-type required
  * fields. Fails closed — anything unrecognized is rejected rather than
  * silently persisted as a never-firing routine. */
@@ -82,11 +60,14 @@ function validateTrigger(trigger: Trigger, hasProvider: (type: string) => boolea
     if (h < 0 || h > 23 || m < 0 || m > 59) {
       return "schedule.localTime hour/minute out of range";
     }
+    if (trigger.rrule !== undefined && typeof trigger.rrule !== "string") {
+      return "schedule.rrule must be a string";
+    }
     if (trigger.date !== undefined) {
       if (typeof trigger.date !== "string" || !DATE_RE.test(trigger.date)) {
         return 'schedule.date must match "YYYY-MM-DD"';
       }
-      if (trigger.rrule) {
+      if (trigger.rrule?.trim()) {
         return "schedule.date and schedule.rrule are mutually exclusive";
       }
     }
@@ -121,15 +102,28 @@ function datedOneOffError(trigger: {
   localTime: string;
   tzid: string;
 }): string | null {
-  if (!trigger.date) return null;
-  const fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
-  if (Number.isNaN(fireAt.getTime())) {
-    return "schedule.date / localTime is unparseable";
-  }
-  if (fireAt.getTime() < Date.now()) {
-    return "schedule.date is in the past";
-  }
+  const state = datedOneOffState(trigger);
+  if (state === "unparseable") return "schedule.date / localTime is unparseable";
+  if (state === "past") return "schedule.date is in the past";
   return null;
+}
+
+/** Whether a dated one-off can still fire. A stored tzid Intl rejects makes the
+ * parse throw rather than return NaN, so that counts as unparseable too. */
+function datedOneOffState(trigger: {
+  date?: string;
+  localTime: string;
+  tzid: string;
+}): "unparseable" | "past" | null {
+  if (!trigger.date) return null;
+  let fireAt: Date;
+  try {
+    fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
+  } catch {
+    return "unparseable";
+  }
+  if (Number.isNaN(fireAt.getTime())) return "unparseable";
+  return fireAt.getTime() < Date.now() ? "past" : null;
 }
 
 interface CreateRoutineBody {
@@ -138,14 +132,21 @@ interface CreateRoutineBody {
   actionName?: string;
   args?: Record<string, unknown>;
   enabled?: boolean;
+  /** Optional caller-assigned identity (the unique `routines.key`). A chat
+   * routine card sends the key minted with it, so retries and reloads find the
+   * routine it created instead of matching by name. */
+  key?: string;
 }
+
+const MAX_ROUTINE_KEY_LENGTH = 200;
+// Keys this route may assign start with CHAT_ROUTINE_KEY_PREFIX. Apps key their
+// own managed routines (briefing uses `briefing-*`) through create_routine;
+// keeping this route to its own prefix stops a chat card from claiming, or
+// being answered with, one of those.
 
 interface UpdateRoutineBody {
   name?: string;
   enabled?: boolean;
-  trigger?: Trigger;
-  actionName?: string;
-  args?: Record<string, unknown>;
 }
 
 // Rebuilds the action-execution tree for a run from the flat `action_executions`
@@ -232,9 +233,8 @@ export function buildActionTrace(rows: ActionExecutionRowLike[]): ActionTraceNod
 export function routinesRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
-  // Reject binding a routine to an action that isn't registered — at both
-  // create (POST) and re-bind (PATCH) time, so neither path can persist a
-  // routine that errors on every fire.
+  // Reject binding a routine to an action that isn't registered, so POST can't
+  // persist a routine that errors on every fire.
   const unregisteredActionError = (actionName: string): string | null =>
     !deps.actionRegistry.has(actionName) ? unknownActionError(actionName) : null;
   const canonicalActionName = (actionName: string): string =>
@@ -258,6 +258,32 @@ export function routinesRoutes(deps: ApiDeps): Hono {
 
   app.post("/routines", async (c) => {
     const body = await c.req.json<CreateRoutineBody>().catch(() => ({}) as CreateRoutineBody);
+
+    if (
+      body.key !== undefined &&
+      (typeof body.key !== "string" ||
+        !body.key.startsWith(CHAT_ROUTINE_KEY_PREFIX) ||
+        body.key.length <= CHAT_ROUTINE_KEY_PREFIX.length ||
+        body.key.length > MAX_ROUTINE_KEY_LENGTH)
+    ) {
+      return c.json(
+        {
+          error: `key must start with "${CHAT_ROUTINE_KEY_PREFIX}" and be at most ${MAX_ROUTINE_KEY_LENGTH} characters`,
+        },
+        400,
+      );
+    }
+    // A key that already names a routine means this create already happened
+    // (a retried click, a second tab). Answer 409 with the existing id so the
+    // caller can link to it rather than creating a duplicate. Checked before
+    // the create-time validation below, which can change after creation (a
+    // dated one-off's date passes, an action is uninstalled).
+    const existingIdForKey = async (key: string | undefined): Promise<string | undefined> =>
+      key === undefined ? undefined : (await deps.routinesRepo.findByKey(key))?.id;
+    const keyTaken = (id: string) =>
+      c.json({ error: "A routine with this key already exists", id }, 409);
+    const takenId = await existingIdForKey(body.key);
+    if (takenId) return keyTaken(takenId);
 
     if (!body.trigger || !body.trigger.type) {
       return c.json({ error: "trigger is required" }, 400);
@@ -294,6 +320,9 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     if (triggerError) {
       return c.json({ error: triggerError }, 400);
     }
+    body.trigger = await resolveOneOffDate(body.trigger, () =>
+      resolveGuardianTimezone(deps.settingsRepo),
+    );
     if (body.trigger.type === "schedule" && body.trigger.date) {
       body.trigger.tzMode = "fixed";
       const datedError = datedOneOffError(body.trigger);
@@ -305,6 +334,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     const now = new Date();
     const record = {
       id: uuid(),
+      key: body.key ?? null,
       name: body.name ?? "",
       enabled: body.enabled ?? true,
       trigger: body.trigger as unknown,
@@ -315,7 +345,15 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       nextRunAt: null,
     };
 
-    await deps.db.insert(routines).values(record);
+    try {
+      await deps.db.insert(routines).values(record);
+    } catch (err) {
+      // Lost a race with a concurrent create of the same key: the UNIQUE
+      // constraint is the backstop for the check above.
+      const existingId = await existingIdForKey(body.key);
+      if (existingId) return keyTaken(existingId);
+      throw err;
+    }
     const [inserted] = await deps.db.select().from(routines).where(eq(routines.id, record.id));
 
     if (inserted?.enabled) {
@@ -325,67 +363,52 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     return c.json(inserted, 201);
   });
 
+  // The dashboard only toggles and renames, so PATCH accepts just those two
+  // fields and needs none of POST's trigger, action or args validation.
   app.patch("/routines/:id", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json<UpdateRoutineBody>().catch(() => ({}) as UpdateRoutineBody);
 
-    if (body.args !== undefined) {
-      if (!isPlainObject(body.args)) {
-        return c.json({ error: "args must be a plain object" }, 400);
-      }
-      if (RESERVED_ARG_KEY in body.args) {
-        return c.json({ error: `args may not contain reserved key "${RESERVED_ARG_KEY}"` }, 400);
-      }
-    }
-    if (body.trigger !== undefined) {
-      if (!body.trigger.type) {
-        return c.json({ error: "trigger.type is required" }, 400);
-      }
-      const triggerError = validateTrigger(body.trigger, (t) => deps.routineEngine.hasProvider(t));
-      if (triggerError) {
-        return c.json({ error: triggerError }, 400);
-      }
-      // A dated one-off pins to a fixed absolute zone, same as POST,
-      // and must not be re-pointed to an already-past instant.
-      if (body.trigger.type === "schedule" && body.trigger.date) {
-        body.trigger.tzMode = "fixed";
-        const datedError = datedOneOffError(body.trigger);
-        if (datedError) {
-          return c.json({ error: datedError }, 400);
-        }
-      }
-    }
-    // Re-binding to an unregistered action would recreate the zombie the POST
-    // guard prevents, so validate the new actionName here too.
-    if (body.actionName !== undefined) {
-      const actionError = unregisteredActionError(body.actionName);
-      if (actionError) {
-        return c.json({ error: actionError }, 400);
-      }
-    }
-    if (body.actionName !== undefined || body.args !== undefined) {
-      const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
-      if (!current) {
-        return c.json({ error: "Routine not found" }, 404);
-      }
-      const actionName = canonicalActionName(body.actionName ?? current.actionName);
-      const args = body.args ?? toRoutine(current).args;
-      const argsError = validateActionArgs(
-        actionName,
-        args,
-        deps.actionRegistry.get(actionName)?.inputSchema,
+    const unsupported = Object.keys(body).filter((key) => key !== "name" && key !== "enabled");
+    if (unsupported.length > 0) {
+      return c.json(
+        { error: `Only name and enabled can be updated (got ${unsupported.join(", ")})` },
+        400,
       );
-      if (argsError) {
-        return c.json({ error: argsError }, 400);
+    }
+
+    // Turning a one-off back on after its date has passed would leave it
+    // enabled with nothing left to fire.
+    if (body.enabled === true) {
+      const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
+      const trigger = current ? toRoutine(current).trigger : undefined;
+      // Writers and migration 0076 date every one-off, so only a malformed row
+      // reaches here with neither date nor rrule, and the scheduler refuses it.
+      if (trigger?.type === "schedule" && !trigger.date && !trigger.rrule?.trim()) {
+        return c.json(
+          {
+            error: `This one-off at ${trigger.localTime} has no date and can no longer run. Create a new routine to run it.`,
+          },
+          400,
+        );
+      }
+      const state = trigger?.type === "schedule" ? datedOneOffState(trigger) : null;
+      if (state === "past" && trigger?.type === "schedule") {
+        return c.json(
+          {
+            error: `This one-off was set for ${trigger.date} at ${trigger.localTime}, which has passed. Create a new routine to run it again.`,
+          },
+          400,
+        );
+      }
+      if (state === "unparseable") {
+        return c.json({ error: "schedule.date / localTime is unparseable" }, 400);
       }
     }
 
     const updates: Record<string, unknown> = {};
     if (body.name !== undefined) updates.name = body.name;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
-    if (body.trigger !== undefined) updates.trigger = body.trigger;
-    if (body.actionName !== undefined) updates.actionName = canonicalActionName(body.actionName);
-    if (body.args !== undefined) updates.args = body.args;
 
     if (Object.keys(updates).length === 0) {
       return c.json({ error: "No fields to update" }, 400);
@@ -467,8 +490,8 @@ export function routinesRoutes(deps: ApiDeps): Hono {
   });
 
   // Kills a live execution if one exists in this process, and always repairs
-  // the persisted status to "cancelled" so a run left stuck "running" by a
-  // restart clears.
+  // the persisted status to "cancelled" so a "running" run with no live
+  // process clears.
   app.post("/routines/:id/cancel", async (c) => {
     const id = c.req.param("id");
     const routine = await deps.routinesRepo.findById(id);

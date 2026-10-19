@@ -6,7 +6,9 @@ import { defineProjectSetup, defineTestProject } from "@midscene/test/config";
 import { createMidsceneNodes } from "@midscene/test/midscene";
 import { PlaywrightAgent } from "@midscene/web/playwright/agent";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { checkBrowserBoundary } from "./browser-boundary.js";
 import { installBrowserNetworkGuard } from "./browser-network-guard.js";
+import { startMockServer } from "./mock-server.js";
 
 loadEnv({ path: fileURLToPath(new URL(".env", import.meta.url)) });
 
@@ -44,17 +46,41 @@ const getAgent = ({ context }: NodeExecutionContext<unknown, ProjectContext>) =>
   return context.agent;
 };
 
+// Setup starts the strict mock server unless one already answers at BASE_URL,
+// then checks the browser network boundary before any case runs.
 const setup = defineProjectSetup<ProjectContext>({
   name: "web",
-  async setup({ env, onTeardown }) {
-    const browser = await chromium.launch({ headless: env.HEADLESS !== "false" });
-    const context: ProjectContext = { browser };
-    onTeardown(async () => {
-      await context.agent?.destroy();
-      await context.browserContext?.close().catch(() => undefined);
-      await browser.close();
-    });
-    return context;
+  async setup({ env, onTeardown, signal }) {
+    const stopServer = await startMockServer(
+      BASE_URL,
+      fileURLToPath(new URL("midscene_run/rome-devmock.log", import.meta.url)),
+      signal,
+    );
+    let context: ProjectContext | undefined;
+    let cleanup: Promise<void> | undefined;
+    const close = () =>
+      (cleanup ??= (async () => {
+        try {
+          await context?.agent?.destroy();
+          await context?.browserContext?.close().catch(() => undefined);
+        } finally {
+          try {
+            await context?.browser.close();
+          } finally {
+            await stopServer();
+          }
+        }
+      })());
+    onTeardown(close);
+    try {
+      const browser = await chromium.launch({ headless: env.HEADLESS !== "false" });
+      context = { browser };
+      await checkBrowserBoundary(browser, BASE_URL);
+      return context;
+    } catch (error) {
+      await close();
+      throw error;
+    }
   },
 });
 
@@ -220,7 +246,7 @@ export default defineTestProject<ProjectContext>({
   test: { maxConcurrency: 1, testTimeout: 8 * 60_000 },
   projects: [
     {
-      name: process.env.MIDSCENE_PROJECT_NAME ?? "web",
+      name: "web-mock",
       retry: process.env.MIDSCENE_RETRY ? Number(process.env.MIDSCENE_RETRY) : 2,
       setup,
       files: { include: ["cases/**/*.{yaml,yml}"] },

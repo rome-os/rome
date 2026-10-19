@@ -13,6 +13,7 @@ import {
   describeTrigger,
   hasOwnName,
   isScheduleTrigger,
+  lastRunFailed,
   relativeTime,
   routineDisplayName,
   type Routine,
@@ -29,8 +30,12 @@ export default function RoutineDetailPage() {
   const { id = "" } = useParams();
   // Reuse the cached list rather than a per-routine endpoint — a deep link just
   // triggers the list fetch, which is small and already the source of truth.
-  const { routines, isLoading } = useRoutines();
+  const { routines, isLoading, isFetching, isFetchedAfterMount } = useRoutines();
   const routine = routines?.find((r) => r.id === id) ?? null;
+  // A cached list can predate a routine just created elsewhere (e.g. from a
+  // chat card), so only call it missing once the mount refetch has settled.
+  // Later background refetches don't count, so a real "not found" stays put.
+  const isResolving = isLoading || (isFetching && !isFetchedAfterMount);
   useDocumentTitle(routine === null ? null : [routineDisplayName(routine), t("header.title")]);
 
   return (
@@ -44,7 +49,7 @@ export default function RoutineDetailPage() {
           {t("detail.back")}
         </Link>
 
-        {isLoading && !routine ? (
+        {isResolving && !routine ? (
           <p className="text-ui text-subtle-foreground">{t("loading")}</p>
         ) : !routine ? (
           <p className="text-ui text-subtle-foreground">{t("detail.notFound")}</p>
@@ -72,7 +77,16 @@ function RoutineHeader({ routine, t }: { routine: Routine; t: TFunction }) {
   return (
     <PageHeader
       title={title}
-      titleAside={!routine.enabled && <Badge variant="muted">{t("routine.badgeDisabled")}</Badge>}
+      titleAside={
+        !routine.enabled ? (
+          <Badge variant="muted">{t("routine.badgeDisabled")}</Badge>
+        ) : lastRunFailed(routine) ? (
+          <Badge variant="destructive">
+            <X aria-hidden />
+            {t("status.failed")}
+          </Badge>
+        ) : null
+      }
       description={
         <span className="flex items-center gap-1">
           <TriggerIcon className="size-3.5 flex-shrink-0" aria-hidden />

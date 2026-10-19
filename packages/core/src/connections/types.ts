@@ -307,6 +307,20 @@ export interface ConnectionDescriptor {
   /** Grant-state-driven custody of out-of-process artifacts (token files, shell
    *  auth). Omitted by services with no such artifact — most descriptors. */
   custody?: GrantCustody;
+  /** True when the guardian can add another account of this service, each
+   *  with its own Connection and channel. A service that keeps its stores or
+   *  adapter state under one channel, or is a single presence by nature
+   *  (webchat, email), leaves it unset. Vocabulary:
+   *  docs/concepts/messaging.md#channels. */
+  severalAccounts?: boolean;
+  /** The platform account a grant's profile names (a bot id, an app id), or
+   *  null when the profile names none. It reads the one field rather than
+   *  parsing the strict profile schema, so a stored profile with an extra key
+   *  still names its account.
+   *  `ConnectionRegistry.confer` refuses a conferral whose account another
+   *  Connection of the service already holds in the same grant. A service that
+   *  leaves it unset is never refused. */
+  accountIdOf?(grant: GrantName, profile: ProfileRecord): string | null;
   capabilities: Partial<{
     talker: {
       needs: readonly GrantName[];
@@ -324,6 +338,15 @@ export interface ConnectionDescriptor {
        *  backs answers `messages.query` through it. Absent means it does not:
        *  the channel's messages come from a store, or from nowhere. */
       history?: boolean;
+      /** True when the surface that delivers this channel's next human turn
+       *  renders interactive cards, so an agent may pause on one for a reply.
+       *  Absent means it does not, and a card falls back to prose. */
+      interactiveCards?: boolean;
+      /** False when every message in a conversation already reaches the agent
+       *  as a turn, so a prompt needs no preamble of stored messages the agent
+       *  has not seen. Absent means the channel stores messages the agent
+       *  never saw, such as other people's lines in a group. */
+      promptContext?: boolean;
     };
     actor: {
       needs: readonly GrantName[];

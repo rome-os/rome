@@ -7,7 +7,12 @@ import {
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 
-import { isSupportedToolkit, loadConnectorClient, unsupportedToolkitHint } from "../../shared.js";
+import {
+  composioActionError,
+  isSupportedToolkit,
+  loadConnectorClient,
+  unsupportedToolkitHint,
+} from "../../shared.js";
 
 const log = createAppLogger("connector_search");
 
@@ -80,7 +85,15 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("tool search failed", { query, toolkit, error: message });
-        return { status: "error", error: `Composio tool search failed: ${message}` };
+        return {
+          status: "error",
+          error: await composioActionError(
+            client,
+            err,
+            "Composio tool search failed",
+            "connector_search",
+          ),
+        };
       }
     },
   });

@@ -26,9 +26,6 @@ const PeopleIndexRedirect = lazy(() =>
   import("./pages/PeoplePage").then((m) => ({ default: m.PeopleIndexRedirect })),
 );
 const PersonDetailPage = lazy(() => import("./pages/PersonDetailPage"));
-const PersonLegacyRedirect = lazy(() =>
-  import("./pages/PersonDetailPage").then((m) => ({ default: m.PersonLegacyRedirect })),
-);
 const MemoryPage = lazy(() => import("./pages/MemoryPage"));
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
 const RoutinesPage = lazy(() => import("./pages/RoutinesPage"));
@@ -49,6 +46,7 @@ const NamedDesktopPage = lazy(() =>
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SettingsTabPage = lazy(() => import("./pages/SettingsTabPage"));
 const ConnectionDetailPage = lazy(() => import("./pages/ConnectionDetailPage"));
+const DeviceActivityPage = lazy(() => import("./pages/DeviceActivityPage"));
 const AppKeysPage = lazy(() => import("./pages/AppKeysPage"));
 // Dev-only pages (src/pages/dev/). import.meta.env.DEV is statically false in
 // production builds, so the route entries below are dropped AND — because each
@@ -152,13 +150,11 @@ export default function App() {
                 than sharing theirs: a person id is a slug of the display name
                 the guardian gave them, so `latest` and `directory` are ids they
                 can mint, and a static view route would leave such a person
-                unreachable. The bare `/people/:personId` forwards, so an
-                address a person was already reached by keeps working. */}
+                unreachable. */}
             <Route path="/people" element={<PeopleIndexRedirect />} />
             <Route path="/people/latest" element={<PeoplePage view="latest" />} />
             <Route path="/people/directory" element={<PeoplePage view="directory" />} />
             <Route path="/people/person/:personId" element={<PersonDetailPage />} />
-            <Route path="/people/:personId" element={<PersonLegacyRedirect />} />
             <Route path="/memory/*" element={<MemoryPage />} />
             <Route path="/projects/*" element={<ProjectsPage />} />
             <Route path="/sessions/*" element={<SessionsPage />} />
@@ -195,6 +191,7 @@ export default function App() {
                 reaches ConnectionDetailPage's unknown-id redirect. */}
             <Route path="/settings/connections/app-keys" element={<AppKeysPage />} />
             <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />
+            <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
             <Route path="/settings/:tab" element={<SettingsTabPage />} />
           </Route>
 

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ActionLoader } from "./loader.js";
+import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 
 type TestActionConfig = {
   webhook?: boolean;
@@ -43,7 +44,7 @@ describe("ActionLoader", () => {
       ].join("\n"),
     );
 
-    const loader = new ActionLoader();
+    const loader = new ActionLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
     const config = await (loader as unknown as ActionLoaderPrivate).readActionConfig(yamlPath);
 
     expect(config.webhook).toBe(true);
@@ -63,7 +64,7 @@ describe("ActionLoader", () => {
       ].join("\n"),
     );
 
-    const loader = new ActionLoader();
+    const loader = new ActionLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
 
     await expect(
       (loader as unknown as ActionLoaderPrivate).readActionConfig(yamlPath),
@@ -84,7 +85,7 @@ describe("ActionLoader", () => {
       ].join("\n"),
     );
 
-    const loader = new ActionLoader();
+    const loader = new ActionLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
 
     await expect(
       (loader as unknown as ActionLoaderPrivate).readActionConfig(yamlPath),
@@ -106,7 +107,7 @@ describe("ActionLoader", () => {
       ].join("\n"),
     );
 
-    const loader = new ActionLoader();
+    const loader = new ActionLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
 
     await expect(
       (loader as unknown as ActionLoaderPrivate).readActionConfig(yamlPath),
@@ -130,7 +131,7 @@ describe("ActionLoader", () => {
       ].join("\n"),
     );
 
-    const loader = new ActionLoader();
+    const loader = new ActionLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
 
     await expect(
       (loader as unknown as ActionLoaderPrivate).readActionConfig(yamlPath),
@@ -158,7 +159,7 @@ describe("ActionLoader", () => {
   }
 
   it("accepts JSONPath favor display-field pointers", async () => {
-    const loader = new ActionLoader();
+    const loader = new ActionLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
     const config = (await (loader as unknown as ActionLoaderPrivate).readActionConfig(
       favorActionYaml("$.reportUrl"),
     )) as { favorRequirement?: { displayFields: Array<{ from: string }> } };
@@ -167,7 +168,7 @@ describe("ActionLoader", () => {
   });
 
   it("rejects bare-key favor display-field pointers", async () => {
-    const loader = new ActionLoader();
+    const loader = new ActionLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
 
     await expect(
       (loader as unknown as ActionLoaderPrivate).readActionConfig(favorActionYaml("reportUrl")),

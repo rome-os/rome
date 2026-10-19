@@ -15,12 +15,8 @@ import {
 import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
 import { AppLifecycleService } from "../apps/lifecycle-service.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
-import {
-  setWorkerRpcInProcessDispatcher,
-  WorkerRpcDisconnectError,
-  WorkerRpcSendError,
-  WorkerRpcTimeoutError,
-} from "./worker-rpc-client.js";
+import { setWorkerRpcInProcessDispatcher } from "./worker-rpc-client.js";
+import { IpcRpcDisconnectError, IpcRpcTimeoutError } from "./ipc.js";
 
 describe("ChannelsServiceProxy", () => {
   const originalSend = process.send;
@@ -152,7 +148,7 @@ describe("BackendTurnRunnerProxy", () => {
     expect(settled).toBe(false);
 
     const rejection = expect(promise).rejects.toThrow(
-      "WorkerRPC timeout: session.continue (1800000ms)",
+      "IpcRpc timeout: session.continue (1800000ms)",
     );
     await rs.advanceTimersByTimeAsync(20 * 60 * 1000);
     await rejection;
@@ -164,7 +160,7 @@ describe("NotifyServiceProxy", () => {
 
   afterEach(() => {
     rs.useRealTimers();
-    // getWorkerRpc() only uses the in-process dispatcher when process.send is
+    // callMain() only uses the in-process dispatcher when process.send is
     // undefined (Rstest's forks pool otherwise leaves it defined); restore both.
     process.send = originalSend;
     setWorkerRpcInProcessDispatcher(null);
@@ -191,7 +187,7 @@ describe("NotifyServiceProxy", () => {
     });
   });
 
-  it("configures a 150s RPC timeout, not the 30s WorkerRPC default", async () => {
+  it("configures a 150s RPC timeout, not the 30s default", async () => {
     rs.useFakeTimers();
     process.send = undefined;
     setWorkerRpcInProcessDispatcher(() => new Promise<never>(() => {})); // never settles
@@ -243,12 +239,11 @@ describe("NotifyServiceProxy", () => {
     expect(seenParams).toEqual(expectedParams);
   });
 
-  // The three delivery-uncertain worker→main transport failures all convert to
+  // Delivery-uncertain worker→main transport failures convert to
   // outcome_unknown; a later caller must not retry them.
   it.each([
-    new WorkerRpcTimeoutError("notify.send", 150_000),
-    new WorkerRpcDisconnectError(),
-    new WorkerRpcSendError("notify.send", new Error("EPIPE")),
+    new IpcRpcTimeoutError("notify.send", 150_000),
+    new IpcRpcDisconnectError(),
   ])("converts %s to outcome_unknown", async (err) => {
     process.send = undefined;
     setWorkerRpcInProcessDispatcher(async () => {
@@ -263,7 +258,7 @@ describe("NotifyServiceProxy", () => {
     // send that times out is just as delivery-ambiguous as a zero-arg one.
     process.send = undefined;
     setWorkerRpcInProcessDispatcher(async () => {
-      throw new WorkerRpcTimeoutError("notify.send", 150_000);
+      throw new IpcRpcTimeoutError("notify.send", 150_000);
     });
 
     expect(await new NotifyServiceProxy().send({ body: "Build failed" })).toEqual({
@@ -384,9 +379,8 @@ describe("FeedbackServiceProxy", () => {
     expect(await new FeedbackServiceProxy().send(input)).toEqual({ kind: "ok" });
   });
   it.each([
-    new WorkerRpcTimeoutError("feedback.send", 30_000),
-    new WorkerRpcDisconnectError(),
-    new WorkerRpcSendError("feedback.send", new Error("EPIPE")),
+    new IpcRpcTimeoutError("feedback.send", 30_000),
+    new IpcRpcDisconnectError(),
   ])("classifies transport uncertainty without retry: %s", async (err) => {
     process.send = undefined;
     const dispatch = rs.fn(async () => {

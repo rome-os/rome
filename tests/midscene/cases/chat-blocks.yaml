@@ -2,7 +2,6 @@ cases:
   - name: CHAT-06 Collapse the architecture diagram in a built-app reply
     tags:
       - chat
-      - shard-2
     steps:
       - app.open:
           path: /chat/mock-chat-build-app
@@ -15,7 +14,6 @@ cases:
   - name: CHAT-07 Open a linked market report from a recorded conversation
     tags:
       - chat
-      - shard-2
     steps:
       - app.open:
           path: /chat/mock-chat-market-brief
@@ -30,7 +28,6 @@ cases:
   - name: CHAT-08 Choose a tone on the live question card
     tags:
       - chat
-      - shard-2
     steps:
       - app.open:
           path: /chat/mock-chat-2
@@ -42,7 +39,6 @@ cases:
   - name: CHAT-09 Reject the plumber approval card
     tags:
       - chat
-      - shard-2
     steps:
       - app.open:
           path: /chat/mock-chat-4

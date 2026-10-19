@@ -8,6 +8,7 @@ import {
 } from "../../channels/api-request.js";
 import { createLogger } from "../../logger.js";
 import {
+  DISCORD_BROKER_CHANNEL_HEADER,
   DISCORD_BROKER_REQUEST_LIMIT_BYTES,
   DISCORD_BROKER_RESPONSE_LIMIT_BYTES,
   DISCORD_BROKER_VERSION,
@@ -19,10 +20,14 @@ import {
   type DiscordBrokerRequest,
 } from "@rome/api-types/discord-broker";
 import { CredentialRejected } from "../../connections/errors.js";
+import type { Connection } from "../../connections/types.js";
+import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 
 const log = createLogger("discord-cli-broker");
 
-type DiscordCliRouteDeps = Pick<ApiDeps, "connectionRegistry" | "setupManager">;
+type DiscordCliRouteDeps = Pick<ApiDeps, "connectionRegistry" | "setupManager"> & {
+  channelRecords?: Pick<ChannelRecordsRepository, "byId">;
+};
 
 export function isLoopbackInternalApiHost(host: string): boolean {
   const normalized = host.trim().toLowerCase();
@@ -52,7 +57,7 @@ export function discordCliRoutes(deps: DiscordCliRouteDeps, internalApiHost: str
       body: null,
       timeoutMs: DISCORD_DEFAULT_TIMEOUT_MS,
     };
-    const outcome = await execute(deps, request);
+    const outcome = await execute(deps, request, c.req.header(DISCORD_BROKER_CHANNEL_HEADER));
     return c.json(outcome.body, outcome.status as ContentfulStatusCode);
   });
 
@@ -90,7 +95,11 @@ export function discordCliRoutes(deps: DiscordCliRouteDeps, internalApiHost: str
       return c.json(errorEnvelope({ type: "invalid_request", message }), 400);
     }
 
-    const outcome = await execute(deps, toChannelApiRequest(brokerRequest));
+    const outcome = await execute(
+      deps,
+      toChannelApiRequest(brokerRequest),
+      c.req.header(DISCORD_BROKER_CHANNEL_HEADER),
+    );
     return c.json(outcome.body, outcome.status as ContentfulStatusCode);
   });
 
@@ -100,13 +109,15 @@ export function discordCliRoutes(deps: DiscordCliRouteDeps, internalApiHost: str
 async function execute(
   deps: DiscordCliRouteDeps,
   request: ChannelApiRequest,
+  channel: string | undefined,
 ): Promise<{ status: number; body: DiscordBrokerEnvelope }> {
   const startedAt = Date.now();
   let discordStatus: number | undefined;
   try {
-    const act = deps.connectionRegistry?.find("discord")[0]?.act;
+    const { bot, candidates, includeNewAccount } = discordBotFor(deps, channel);
+    const act = bot?.act;
     if (!act || !act.operations().some((operation) => operation.name === "discord.api.request")) {
-      return unavailableDiscordAuth(deps);
+      return unavailableDiscordAuth(deps, candidates, includeNewAccount);
     }
 
     const result = (await act.invoke({
@@ -158,6 +169,32 @@ async function execute(
       durationMs: Date.now() - startedAt,
     });
   }
+}
+
+/** The bot backing the caller's Discord channel, resolved per request because
+ * a reconnect re-backs a channel with a new Connection. A Discord channel never
+ * acts as another bot, so one whose bot is missing or locked is unavailable.
+ * A caller on no Discord channel gets the first bot that can act, so an
+ * unfinished account never hides a live one. The channel is the caller's
+ * claim, so this picks a bot rather than enforcing a boundary between them. */
+function discordBotFor(
+  deps: DiscordCliRouteDeps,
+  channel: string | undefined,
+): { bot: Connection | undefined; candidates: Connection[] | null; includeNewAccount: boolean } {
+  const bots = deps.connectionRegistry?.find("discord") ?? [];
+  const record = channel ? deps.channelRecords?.byId(channel) : null;
+  if (record?.service === "discord") {
+    const own = bots.find((bot) => bot.id === record.connectionId);
+    // A failure then describes the channel's own bot, not every Discord bot.
+    // A channel with no Connection waits for the service's next one, which
+    // may be mid-setup.
+    return { bot: own, candidates: own ? [own] : [], includeNewAccount: !record.connectionId };
+  }
+  return {
+    bot: bots.find((bot) => bot.isUnlocked("act")) ?? bots[0],
+    candidates: null,
+    includeNewAccount: true,
+  };
 }
 
 function projectFailure(result: Extract<ChannelApiResult, { error: unknown }>): {
@@ -219,27 +256,31 @@ function credentialRejected(): { status: number; body: DiscordBrokerEnvelope } {
   };
 }
 
-function unavailableDiscordAuth(deps: DiscordCliRouteDeps): {
+/** Why no bot can act. `candidates` narrows the diagnosis to a channel's own
+ *  bot, and null means every Discord bot. */
+function unavailableDiscordAuth(
+  deps: DiscordCliRouteDeps,
+  candidates: Connection[] | null,
+  includeNewAccount: boolean,
+): {
   status: number;
   body: DiscordBrokerEnvelope;
 } {
-  if (hasActiveDiscordSetup(deps)) return notPaired();
-  const rejected =
-    deps.connectionRegistry
-      ?.find("discord")
-      .some((connection) => connection.auth.grants().bot === "degraded") ?? false;
+  const bots = candidates ?? deps.connectionRegistry?.find("discord") ?? [];
+  if (hasActiveDiscordSetup(deps, bots, includeNewAccount)) return notPaired();
+  const rejected = bots.some((connection) => connection.auth.grants().bot === "degraded");
   return rejected ? credentialRejected() : notAuthenticated();
 }
 
-function hasActiveDiscordSetup(deps: DiscordCliRouteDeps): boolean {
+function hasActiveDiscordSetup(
+  deps: DiscordCliRouteDeps,
+  bots: Connection[],
+  includeNewAccount: boolean,
+): boolean {
   const manager = deps.setupManager;
   if (!manager) return false;
-  if (manager.activeFor("discord", "bot")) return true;
-  return (
-    deps.connectionRegistry
-      ?.find("discord")
-      .some((connection) => Boolean(manager.activeFor(connection.id, "bot"))) ?? false
-  );
+  if (includeNewAccount && manager.activeFor("discord", "bot")) return true;
+  return bots.some((connection) => Boolean(manager.activeFor(connection.id, "bot")));
 }
 
 function errorEnvelope(error: DiscordBrokerError): DiscordBrokerEnvelope {

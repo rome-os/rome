@@ -2,28 +2,24 @@
   "name": "rome-midscene-e2e",
   "private": true,
   "type": "module",
-  "description": "Product-flow E2E for rome-web against the MSW mock dev server, driven by Midscene.",
+  "description": "Product-flow E2E for rome-web, driven by Midscene: a mock suite against the MSW mock dev server and a backend suite against a real Rome container.",
   "scripts": {
     "test": "midscene-test",
+    "test:backend": "midscene-test --config midscene.backend.config.ts",
     "nodes": "midscene-test nodes",
     "typecheck": "tsc --noEmit",
-    "collect": "node scripts/collect-cases.mjs",
-    "check:browser-boundary": "node --experimental-strip-types scripts/check-browser-boundary.mjs",
-    "check:model-vision": "node scripts/check-model-vision.mjs",
-    "test:summary": "node --test scripts/render-ci-summary.test.mjs scripts/prepare-pages-site.test.mjs scripts/workflow-policy.test.mjs scripts/trusted-report-runs.test.mjs"
+    "check:model": "midscene-test model verify"
   },
   "engines": {
     "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
   },
   "devDependencies": {
-    "@midscene/core": "1.13.1",
-    "@midscene/test": "1.13.1",
-    "@midscene/web": "1.13.1",
+    "@midscene/test": "1.15.3",
+    "@midscene/web": "1.15.3",
     "@types/node": "^20.0.0",
     "dotenv": "^16.4.5",
-    "typescript": "^5.8.3",
     "playwright": "^1.45.0",
-    "sharp": "0.34.5"
+    "typescript": "^5.8.3"
   },
   "allowScripts": {
     "esbuild@0.28.2": true,

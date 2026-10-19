@@ -3,6 +3,7 @@ import type {
   Action,
   ActionConfig,
   ActionResult,
+  AgentRunnerInterface,
   AppActionRuntimeDeps,
   Routine,
   RoutineEngine,
@@ -23,7 +24,7 @@ const scheduleTriggerSchema = z.object({
   tzMode: z
     .enum(["fixed", "floating"])
     .describe(
-      "REQUIRED — how the timezone is bound; choose deliberately. 'floating' means the routine follows the guardian: it fires at localTime in their CURRENT timezone and re-targets automatically if they move (use this for almost everything — 'remind me at 9am' means 9am wherever they are). 'fixed' pins the absolute zone in tzid forever, ignoring where the guardian goes — only for a zone-anchored event (a travel reminder at the destination's time, a market open, a locale-tied broadcast).",
+      "REQUIRED — how the timezone is bound; choose deliberately. 'floating' means the routine follows the guardian: it fires at localTime in their CURRENT timezone and re-targets automatically if they move (use this for almost everything — 'remind me at 9am' means 9am wherever they are). 'fixed' pins the absolute zone in tzid forever, ignoring where the guardian goes — only for a zone-anchored event (a travel reminder at the destination's time, a market open, a locale-tied broadcast). A one-off is always stored as 'fixed': a dated one fires in tzid, and one with neither date nor rrule fires at the next localTime in tzid, or in the guardian's current zone when 'floating'.",
     ),
   localTime: z.string().describe("Time of day in HH:mm format (24-hour)"),
   rrule: z
@@ -34,7 +35,7 @@ const scheduleTriggerSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Calendar date (YYYY-MM-DD) for a one-off; omit both date and rrule to fire once at the next localTime",
+      "Calendar date (YYYY-MM-DD) for a one-off; omit both date and rrule to fire once at the next localTime, stored as that date",
     ),
 });
 
@@ -93,6 +94,13 @@ export interface CreateRoutineDeps {
    * fails the `actionEngine.run` lookup on every fire. Both the main process
    * and the action worker put a fully-populated registry in the action deps. */
   actionRegistry: ActionExistenceChecker;
+  /** Core's resolver that stores "once at the next localTime" as a dated
+   * one-off, the same one POST /routines uses. Each process binds it to its own
+   * guardian-timezone setting. */
+  resolveOneOffDate: (trigger: Trigger) => Promise<Trigger>;
+  /** Answers whether an agent may call an action, with the same resolution as
+   * the agent tool gate. Without it, agents cannot schedule explicit actions. */
+  agentRunner?: Pick<AgentRunnerInterface, "hasAction">;
 }
 
 /** The single capability create_routine needs from the action registry: ask
@@ -101,6 +109,8 @@ export interface CreateRoutineDeps {
  * which satisfies it. */
 export interface ActionExistenceChecker {
   has(name: string): boolean | Promise<boolean>;
+  /** True when the action is `visibility: explicit`. */
+  isExplicit(name: string): boolean | Promise<boolean>;
 }
 
 /** Error returned when a routine names an action that isn't registered. Names
@@ -251,9 +261,9 @@ function validateTrigger(trigger: Trigger): string | null {
       }
     }
     // A blank rrule ("") is neither a real recurrence nor an omitted one: with
-    // no date the scheduler reads it as the legacy "fire once at next localTime"
-    // shape, silently changing recurring intent into a one-off. Reject it; omit
-    // rrule entirely for a one-off.
+    // no date it reads as "fire once at the next localTime", silently changing
+    // recurring intent into a one-off. Reject it; omit rrule entirely for a
+    // one-off.
     if (trigger.rrule !== undefined && !trigger.rrule.trim()) {
       return "trigger.rrule must be a non-empty RRULE when provided (omit it for a one-off)";
     }
@@ -401,6 +411,20 @@ export async function createRoutine(
   if (!(await deps.actionRegistry.has(actionName))) {
     return { status: "error", error: unknownActionError(actionName) };
   }
+  // A routine fires its action outside the agent tool gate, so an explicit
+  // target needs a principal that may call it: the app code that owns the call
+  // (callerAppId), or an agent that holds the action. Unattributed calls, such
+  // as one fired by another routine, a webhook or a favor, fail closed.
+  const context = getCurrentActionContext();
+  if (!context?.callerAppId && (await deps.actionRegistry.isExplicit(actionName))) {
+    const agentName = context?.agentName;
+    if (!agentName || (await deps.agentRunner?.hasAction?.(agentName, actionName)) !== true) {
+      return {
+        status: "error",
+        error: `actionName "${actionName}" is explicit: only an agent granted it can schedule it`,
+      };
+    }
+  }
 
   // `name` is the human-readable display label; trim and reject blank so a
   // whitespace-only " " isn't persisted as a routine with no visible title.
@@ -424,16 +448,17 @@ export async function createRoutine(
     }
   }
 
-  const trigger = canonicalizeTrigger(input.trigger);
-  const triggerError = validateTrigger(trigger);
+  const canonical = canonicalizeTrigger(input.trigger);
+  const triggerError = validateTrigger(canonical);
   if (triggerError) {
     return { status: "error", error: triggerError };
   }
+  const trigger = await deps.resolveOneOffDate(canonical);
 
   // The runtime attributes the routine to the app that invoked this action (from
   // action ownership, not caller-supplied) — so any routine an app creates is
   // managed by that app, and a routine an agent/user creates stays unmanaged.
-  const managedBy = getCurrentActionContext()?.callerAppId;
+  const managedBy = context?.callerAppId;
 
   const enabled = input.enabled ?? true;
   const routineId = await deps.routinesRepo.create({
@@ -487,8 +512,17 @@ export function createAction(
   if (!deps.routinesRepo) {
     throw new Error("create_routine requires a routinesRepo dep");
   }
-  if (typeof deps.actionRegistry?.has !== "function") {
-    throw new Error("create_routine requires an actionRegistry dep with has()");
+  if (
+    typeof deps.actionRegistry?.has !== "function" ||
+    typeof deps.actionRegistry.isExplicit !== "function"
+  ) {
+    throw new Error("create_routine requires an actionRegistry dep with has() and isExplicit()");
+  }
+  if (!deps.agentRunner) {
+    throw new Error("create_routine requires an agentRunner dep");
+  }
+  if (typeof deps.resolveOneOffDate !== "function") {
+    throw new Error("create_routine requires a resolveOneOffDate dep");
   }
   return createCreateRoutineAction(config, deps);
 }

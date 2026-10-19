@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ConversationDescriptor, ConversationId, ConversationRef } from "@rome-os/app-runtime";
 import type { TalkDirectory } from "../connections/types.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, serviceChannelOf, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import type { Channels } from "../channels/channel.js";
@@ -53,7 +53,8 @@ function channelsOver(registry: ConnectionRegistry): () => Channels {
   const built = new Map<string, ReturnType<typeof connectionPorts>>();
   return () =>
     registry.registeredServices().flatMap((name) => {
-      if (!built.has(name)) built.set(name, connectionPorts({ registry }, name));
+      if (!built.has(name))
+        built.set(name, connectionPorts({ registry, channelOf: serviceChannelOf }, name));
       const ports = built.get(name);
       return ports ? [{ name, accounts: null, ...ports }] : [];
     });
@@ -95,6 +96,7 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository,
       connections: registry,
+      channelOf: serviceChannelOf,
       channels: channelsOver(registry),
       listAgents: () => ["pm-assistant"],
       onChanged,
@@ -158,7 +160,7 @@ describe("ConversationSettingsService", () => {
 
     // Simulate a stale child override written by the previous model. Thread
     // reads must ignore it and resolve the parent as the sole settings owner.
-    repository.mutate(childDescriptor, {
+    repository.mutate(childDescriptor, childDescriptor.service, {
       settings: {
         schemaVersion: 1,
         overrides: { enabled: true },
@@ -521,6 +523,52 @@ describe("ConversationSettingsService", () => {
     expect(repository.find("discord", "parent" as ConversationId)?.channelSettings).not.toBeNull();
   });
 
+  it("reads no row for, and refuses updates on, a Connection that backs no channel", async () => {
+    const { registry, service, discord, parent } = await setup();
+    await service.update({
+      ref: parent,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    // discord has lost its channel record, as while `registry.remove` evicts it.
+    const unrecorded = new ConversationSettingsService({
+      repository: new ConversationSettingsRepository(testDb!.db),
+      connections: registry,
+      channelOf: (connection) => (connection.id === discord.id ? null : connection.service),
+      channels: () => [],
+      listAgents: () => [],
+      onChanged: () => {},
+    });
+
+    expect((await unrecorded.get(parent)).overrides).toEqual({});
+    expect((await unrecorded.list({ connectionId: discord.id })).items).toEqual([]);
+    await expect(
+      unrecorded.update({
+        ref: parent,
+        set: { enabled: true },
+        clear: [],
+        actor: { kind: "guardian" },
+      }),
+    ).rejects.toThrow(`Connection "${discord.id}" backs no channel`);
+  });
+
+  it("still reads a seen conversation and its settings once its connection is removed", async () => {
+    const { registry, service, wechat } = await setup();
+    const ref: ConversationRef = {
+      connectionId: wechat.id,
+      conversationId: "wechat-group" as ConversationId,
+    };
+    service.observe({ ref, service: "wechat", kind: "group", displayName: "WeChat group" });
+    await service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } });
+
+    await registry.remove(wechat.id);
+
+    const snapshot = await service.get(ref);
+    expect(snapshot.conversation.displayName).toBe("WeChat group");
+    expect(snapshot.effective.enabled).toBe(false);
+  });
+
   it("serializes concurrent writers per conversation", async () => {
     let releaseFirst!: () => void;
     const onChanged = rs.fn(
@@ -576,6 +624,7 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository: new ConversationSettingsRepository(testDb.db),
       connections: registry,
+      channelOf: serviceChannelOf,
       channels: channelsOver(registry),
       listAgents: () => [],
       onChanged: () => {},
@@ -612,7 +661,7 @@ describe("ConversationSettingsService", () => {
       displayName: `channel-${index}`,
     }));
     for (const descriptor of descriptors) {
-      repository.mutate(descriptor, { settings: null, agentName: null });
+      repository.mutate(descriptor, descriptor.service, { settings: null, agentName: null });
     }
     repository.mutate(
       {
@@ -622,6 +671,7 @@ describe("ConversationSettingsService", () => {
         displayName: "topic-1",
         parent: descriptors[0]!.ref,
       },
+      "discord",
       { settings: null, agentName: null },
     );
     const find = rs.spyOn(repository, "find");
@@ -629,6 +679,7 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository,
       connections: registry,
+      channelOf: serviceChannelOf,
       channels: channelsOver(registry),
       listAgents: () => [],
       onChanged: () => {},
@@ -643,5 +694,26 @@ describe("ConversationSettingsService", () => {
     expect(find).toHaveBeenCalledTimes(2);
     expect(listKnown).toHaveBeenCalledTimes(1);
     expect(first.nextCursor).toBeTruthy();
+  });
+
+  it("keeps guardian chats out of conversation settings", async () => {
+    testDb = createTestDb();
+    await new WebChatRepository(testDb.db).createSession("chat-1", "Chat");
+    const repository = new ConversationSettingsRepository(testDb.db);
+
+    expect(repository.find("webchat", "chat-1" as ConversationId)).toBeNull();
+    expect(() =>
+      repository.mutate(
+        {
+          ref: { connectionId: "webchat", conversationId: "chat-2" as ConversationId },
+          service: "webchat",
+          kind: "channel",
+          displayName: "chat-2",
+        },
+        "webchat",
+        { settings: null, agentName: undefined },
+      ),
+    ).toThrow("Webchat chats have no conversation settings");
+    expect(await new WebChatRepository(testDb.db).getSession("chat-2")).toBeNull();
   });
 });

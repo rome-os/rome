@@ -27,7 +27,7 @@ const fakes = rs.hoisted(() => {
   return { failures, read, code, math, mermaid, configs, render };
 });
 
-rs.mock("@streamdown/code", () => ({
+rs.mock("./code-highlighter.js", () => ({
   get code() {
     return fakes.read("code", fakes.code);
   },

@@ -32,6 +32,7 @@ import type { AppKeyInjector } from "../app-keys/injector.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import type { SessionManager } from "../core/session-manager.js";
+import type { SessionsRepository } from "../db/repositories/sessions.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
 import type { ActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
@@ -131,6 +132,9 @@ export interface ApiDeps {
   feedback: FeedbackRelay;
   nodeDevices: Pick<ReturnType<typeof createNodeDevicesService>, "getStatus" | "start">;
   provisionNodeCaller?: () => Promise<void>;
+  /** Connects the Rome Cloud email inbox unless an email connection exists.
+   *  Never rejects. */
+  autoConnectEmail?: () => Promise<void>;
   computerUse: Pick<ComputerUseService, "getStatus">;
   /** The WeChat app on WeChat's own desktop. Null while WeChat is disabled. */
   wechatApp: Pick<WechatApp, "status" | "install" | "start"> | null;
@@ -144,6 +148,7 @@ export interface ApiDeps {
   sentinelLogRepo: SentinelLogRepository;
   actionExecutionsRepo: ActionExecutionsRepository;
   sessionManager: SessionManager;
+  sessionsRepo: SessionsRepository;
   agentSessionManager: AgentSessionManager;
   /** Lightweight, tool-free small-model request used to name a new chat. */
   conversationTitleGenerator: ConversationTitleGenerator;

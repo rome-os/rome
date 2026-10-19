@@ -15,11 +15,6 @@ export interface HookInvocationContext {
   chain: HookIdentity[];
 }
 
-export interface HookRecursionConfig {
-  maxHookDepth: number;
-  maxSameHookDepth: number;
-}
-
 export type HookSkipReason = "max_hook_depth" | "max_same_hook_depth";
 
 export interface HookInvocationAllowed {
@@ -47,36 +42,10 @@ export interface HookDispatchResult {
   skips: HookInvocationSkipped[];
 }
 
-export const DEFAULT_HOOK_RECURSION_CONFIG: HookRecursionConfig = {
-  maxHookDepth: 4,
-  maxSameHookDepth: 1,
-};
+const MAX_HOOK_DEPTH = 4;
+const MAX_SAME_HOOK_DEPTH = 1;
 
 const hookInvocationContext = new AsyncLocalStorage<HookInvocationContext | undefined>();
-
-export function validateHookRecursionConfig(config: HookRecursionConfig): HookRecursionConfig {
-  const maxHookDepth = Math.floor(config.maxHookDepth);
-  const maxSameHookDepth = Math.floor(config.maxSameHookDepth);
-  if (maxHookDepth < 1) {
-    throw new Error("maxHookDepth must be at least 1");
-  }
-  if (maxSameHookDepth < 1) {
-    throw new Error("maxSameHookDepth must be at least 1");
-  }
-  if (maxSameHookDepth > maxHookDepth) {
-    throw new Error("maxSameHookDepth must be less than or equal to maxHookDepth");
-  }
-  return { maxHookDepth, maxSameHookDepth };
-}
-
-export function resolveHookRecursionConfig(
-  config?: Partial<HookRecursionConfig>,
-): HookRecursionConfig {
-  return validateHookRecursionConfig({
-    ...DEFAULT_HOOK_RECURSION_CONFIG,
-    ...config,
-  });
-}
 
 export function getCurrentHookInvocationContext(): HookInvocationContext | undefined {
   const current = hookInvocationContext.getStore();
@@ -109,7 +78,6 @@ export function runWithoutHookInvocationContext<T>(fn: () => T): T {
 export function evaluateHookInvocation(
   parentContext: HookInvocationContext,
   identity: HookIdentity,
-  config: HookRecursionConfig,
 ): HookInvocationDecision {
   const nextContext: HookInvocationContext = {
     rootInvocationId: parentContext.rootInvocationId,
@@ -117,7 +85,7 @@ export function evaluateHookInvocation(
     chain: [...parentContext.chain, identity],
   };
   const sameHookCount = countSameHook(nextContext.chain, identity);
-  if (nextContext.depth > config.maxHookDepth) {
+  if (nextContext.depth > MAX_HOOK_DEPTH) {
     return {
       allowed: false,
       identity,
@@ -127,7 +95,7 @@ export function evaluateHookInvocation(
       reason: "max_hook_depth",
     };
   }
-  if (sameHookCount > config.maxSameHookDepth) {
+  if (sameHookCount > MAX_SAME_HOOK_DEPTH) {
     return {
       allowed: false,
       identity,
@@ -150,25 +118,18 @@ export function createHookDispatchResult(): HookDispatchResult {
   return { invoked: 0, skipped: 0, skips: [] };
 }
 
-export function recordHookSkip(
-  logger: Logger,
-  decision: HookInvocationSkipped,
-  config: HookRecursionConfig,
-): void {
-  const attrs = hookTelemetryAttrs(decision, config);
+export function recordHookSkip(logger: Logger, decision: HookInvocationSkipped): void {
+  const attrs = hookTelemetryAttrs(decision);
   logger.warn("hook skipped by recursion guard", attrs);
   trace.getActiveSpan()?.addEvent("hook.skipped", attrs);
 }
 
-export function hookTelemetryAttrs(
-  decision: HookInvocationDecision,
-  config: HookRecursionConfig,
-): Attributes {
+export function hookTelemetryAttrs(decision: HookInvocationDecision): Attributes {
   const attrs: Attributes = {
     "hook.root_invocation_id": decision.nextContext.rootInvocationId,
     "hook.depth": decision.nextContext.depth,
-    "hook.max_depth": config.maxHookDepth,
-    "hook.max_same_hook_depth": config.maxSameHookDepth,
+    "hook.max_depth": MAX_HOOK_DEPTH,
+    "hook.max_same_hook_depth": MAX_SAME_HOOK_DEPTH,
     "hook.type": decision.identity.hookType,
     "hook.app_id": decision.identity.appId,
     "hook.name": decision.identity.hookName,

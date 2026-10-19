@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "@tanstack/react-form";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -28,7 +28,7 @@ export default function LoginPage() {
   const { t } = useTranslation("auth");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { hash } = useLocation();
   const { bootstrap } = useAuthStateSnapshot();
   const [serverError, setServerError] = useState("");
@@ -61,6 +61,20 @@ export default function LoginPage() {
         : t(visitorErrorReasonKey(searchParams.get("reason")))
       : "";
   const cloudErrorMessage = cloudError || cloudCallbackError || visitorCallbackError;
+
+  // Rome Cloud's "Open your Rome" links land here with `?via=cloud`: the owner
+  // arrives signed in to Rome Cloud, which approves the owner without a
+  // consent screen, so the sign-in starts without waiting for the click. The
+  // hint is read once and dropped from the URL, so Back never restarts it. A
+  // failed attempt returns as `?cloud=error`, which shows the button instead.
+  const [cloudHint] = useState(() => searchParams.get("via") === "cloud");
+  const autoStartCloud = cloudHint && !cloudError && !cloudCallbackError && !visitorCallbackError;
+  useEffect(() => {
+    if (!searchParams.has("via")) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("via");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
   const visitorErrorMessage = visitorError || visitorCallbackError;
 
   const schema = z.object({
@@ -164,7 +178,7 @@ export default function LoginPage() {
                   <AlertDescription className="break-words">{cloudErrorMessage}</AlertDescription>
                 </Alert>
               )}
-              <CloudLoginButton onStartError={setCloudError} />
+              <CloudLoginButton onStartError={setCloudError} autoStart={autoStartCloud} />
               {localPasswordAvailable && !showLocalForm && (
                 <button
                   type="button"

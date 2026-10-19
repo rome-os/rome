@@ -63,6 +63,8 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
         turnContext: ROOT_CONTEXT,
       };
     },
+    submitInput: rs.fn(),
+    runForkedTurn: rs.fn(),
     subscribe: () => () => undefined,
     onStatusChange: () => () => undefined,
     interrupt,
@@ -102,10 +104,12 @@ describe("SubagentExecutionService", () => {
     const first = fakeChildSession("child-1", ["child-turn-1"]);
     const second = fakeChildSession("child-2", ["child-turn-2"]);
     const children = [first.session, second.session];
+    const recordConversation = rs.fn(async () => undefined);
     const childManager = {
       acquire: rs.fn(async () => children.shift()!),
       acquireBySessionId: rs.fn(),
       peek: rs.fn(),
+      recordConversation,
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const registry = createActiveSubagentRegistry();
@@ -179,9 +183,53 @@ describe("SubagentExecutionService", () => {
     expect(childTrace.some((message) => message.content.includes("working"))).toBe(true);
     await expect(repo.getSession("child-1")).resolves.toMatchObject({ type: "subagent" });
     await expect(repo.getSession("child-2")).resolves.toMatchObject({ type: "subagent" });
+    expect(recordConversation.mock.calls).toEqual([
+      ["child-1", "child-1"],
+      ["child-2", "child-2"],
+    ]);
     const homeChats = await repo.listSessions();
     expect(homeChats.map((session) => session.id)).not.toContain("child-1");
     expect(homeChats.map((session) => session.id)).not.toContain("child-2");
+  });
+
+  it("still runs a fresh Child when recording its conversation fails", async () => {
+    const child = fakeChildSession("child-unrecorded", ["child-turn"]);
+    const childManager = {
+      acquire: rs.fn(async () => child.session),
+      acquireBySessionId: rs.fn(),
+      peek: rs.fn(),
+      recordConversation: rs.fn(async () => {
+        throw new Error("database is locked");
+      }),
+      shutdown: rs.fn(async () => undefined),
+    } as unknown as AgentSessionManager;
+    const service = createSubagentExecutionService({
+      webchatRepo: repo,
+      activeRegistry: createActiveSubagentRegistry(),
+      turnStreams: createAgentTurnStreamRegistry(),
+    });
+
+    const execution = await service.startSubagent(
+      "researcher",
+      { prompt: "one" },
+      {
+        parentSessionId: "parent-1",
+        parentAgentSessionId: "parent-runtime-1",
+        parentTurnId: "parent-turn-1",
+        parentToolUseId: "tool-1",
+        parentAgentName: "main",
+        parentChannelThreadKey: "webchat:parent-1",
+        childManager,
+        workingDir: "/tmp/project-a",
+      },
+    );
+    child.releases[0].resolve();
+
+    await expect(execution.completion).resolves.toMatchObject({
+      status: "completed",
+      sessionId: "child-unrecorded",
+      output: "answer:one",
+    });
   });
 
   it("resumes only an existing Child owned by the same Parent", async () => {
@@ -200,6 +248,7 @@ describe("SubagentExecutionService", () => {
       acquire: rs.fn(),
       acquireBySessionId: rs.fn(async () => resumed.session),
       peek: rs.fn(),
+      recordConversation: rs.fn(async () => undefined),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const service = createSubagentExecutionService({
@@ -227,7 +276,7 @@ describe("SubagentExecutionService", () => {
     expect(childManager.acquireBySessionId).toHaveBeenCalledWith(
       "child-resume",
       "researcher",
-      expect.any(Object),
+      expect.objectContaining({ romeSessionId: "child-resume" }),
     );
     resumed.releases[0].resolve();
     await execution.completion;

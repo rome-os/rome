@@ -128,7 +128,6 @@ export function createChatGPTChatAction(config: ActionConfig, deps: ChatGPTChatD
           entrypointExpression: "chatWithChatGPT",
           args: [{ prompt, timeout }],
           autorunFlag: "__ROME_CHATGPT_CHAT_AUTORUN__",
-          missingEntrypointMessage: "chatWithChatGPT is not defined after loading the script",
         });
 
         let responseComplete = false;
@@ -224,7 +223,6 @@ async function runBrowserScriptInOpenPage<TResult>(
     entrypointExpression: string;
     args?: unknown[];
     autorunFlag?: string;
-    missingEntrypointMessage?: string;
   },
 ): Promise<TResult> {
   const scriptSource = await loadCachedScriptSource(options.scriptUrl);
@@ -233,7 +231,6 @@ async function runBrowserScriptInOpenPage<TResult>(
     entrypointExpression: options.entrypointExpression,
     args: options.args,
     autorunFlag: options.autorunFlag,
-    missingEntrypointMessage: options.missingEntrypointMessage,
   });
 
   return await page.session.evaluateByValue<TResult>(expression);
@@ -249,8 +246,6 @@ async function copyLatestChatGPTResponseWithRetry(
         scriptUrl: COPY_RESPONSE_SCRIPT_URL,
         entrypointExpression: "copyLatestChatGPTResponse",
         autorunFlag: "__ROME_CHATGPT_COPY_RESPONSE_AUTORUN__",
-        missingEntrypointMessage:
-          "copyLatestChatGPTResponse is not defined after loading the script",
       });
 
       if (copyResult.copyConfirmed) {
@@ -273,8 +268,6 @@ async function checkLatestChatGPTResponseComplete(
     entrypointExpression: "waitForLatestChatGPTResponseComplete",
     args: [{ timeout }],
     autorunFlag: "__ROME_CHATGPT_CHECK_RESPONSE_COMPLETE_AUTORUN__",
-    missingEntrypointMessage:
-      "waitForLatestChatGPTResponseComplete is not defined after loading the script",
   });
 
   return result.complete;

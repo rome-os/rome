@@ -39,13 +39,17 @@ import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
+import { getWidgetFullHref } from "./widget-links";
+import { useSessionNames } from "./use-session-names";
 import {
   autoPlaceApp,
   autoPlaceProjects,
   loadLayoutForSession,
   placeWidgetsIfSessionActive,
   setActiveSession,
+  type PlacementLink,
   updatePlacementLink,
+  updatePlacementLinks,
   type WidgetPlacement,
   type WidgetSeed,
   useFreeCells,
@@ -136,7 +140,15 @@ export function FreeGrid() {
   const { placements, addWidget, removeWidget, toolView, selectTool, setToolsCollapsed } =
     useFreeCells();
   const { apps } = useApps();
+  const sessionNames = useSessionNames(
+    placements.flatMap((widget) =>
+      widget.type === "chat" && widget.targetId ? [widget.targetId] : [],
+    ),
+  );
   const widgetLabel = (widget: WidgetPlacement) => {
+    if (widget.type === "chat" && widget.targetId) {
+      return sessionNames.get(widget.targetId) ?? t("nav.chat");
+    }
     if (widget.type === "app")
       return (
         apps?.find((app) => app.id === widget.targetId)?.displayName ??
@@ -188,12 +200,22 @@ export function FreeGrid() {
     return JSON.stringify(initialWidgets);
   }, [initialWidgets]);
   const [chatSessionId, setChatSessionId] = useState<string | undefined>(urlSessionId);
+  const flushAppLink = useCallback(
+    (p: WidgetPlacement) => {
+      if (p.type !== "app") return;
+      const link = workspaceContextRegistry.resolveLink(p.id);
+      if (link) updatePlacementLink(p.id, link.route, link.params);
+    },
+    [workspaceContextRegistry],
+  );
   const flushLayout = useCallback(() => {
+    const links: PlacementLink[] = [];
     for (const p of placementsRef.current) {
       if (p.type !== "app") continue;
       const link = workspaceContextRegistry.resolveLink(p.id);
-      if (link) updatePlacementLink(p.id, link.route, link.params);
+      if (link) links.push({ placementId: p.id, route: link.route, params: link.params });
     }
+    updatePlacementLinks(links);
   }, [workspaceContextRegistry]);
 
   const suppressProjectsRef = useRef(false);
@@ -203,7 +225,7 @@ export function FreeGrid() {
     setChatSessionId(urlSessionId);
     setActiveSession(urlSessionId ?? null);
     const applyInitialWidgets = (targetSessionId: string | null) => {
-      if (!initialWidgetsKey || !Array.isArray(initialWidgets) || initialWidgets.length === 0) {
+      if (!initialWidgetsKey || !initialWidgets) {
         return;
       }
       // A narrow workspace shows one pane at a time, so an expanded panel
@@ -230,7 +252,7 @@ export function FreeGrid() {
 
   useEffect(() => {
     return eventBus.on<{ paths: string[]; force?: boolean }>("projects:opened", (payload) => {
-      if (!payload?.paths || payload.paths.length === 0) return;
+      if (payload.paths.length === 0) return;
       // A forced open (an explicit click on a /projects link in chat) overrides
       // the user's earlier manual close of the panel; the passive agent-link
       // path (no force) still respects that close.
@@ -337,21 +359,11 @@ export function FreeGrid() {
             content={(widget, dragging) => (
               <WidgetContent widget={widget} dragging={dragging} sessionId={chatSessionId} />
             )}
+            fullHref={getWidgetFullHref}
+            // App tiles navigate inside a frozen iframe, so persist the live
+            // route before the link is followed; the href then carries it.
+            onOpenIntent={flushAppLink}
           >
-            {!chatSessionId && (
-              <div className="flex h-12 shrink-0 items-center justify-end border-b border-border px-2 max-md:hidden">
-                {toolView.collapsed && (
-                  <IconButton
-                    size="sm"
-                    data-coach="add-widget"
-                    aria-expanded={false}
-                    onClick={() => setToolsCollapsed(false)}
-                    label={t("chat.expandTools")}
-                    icon={<PanelRightOpen />}
-                  />
-                )}
-              </div>
-            )}
             <ChatWidget
               sessionId={chatSessionId}
               onSessionChosen={handleSessionChosen}

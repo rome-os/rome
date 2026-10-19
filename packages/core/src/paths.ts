@@ -194,10 +194,6 @@ export function getProfileInstalledAppsDir(): string {
   return join(getProfileAppsDir(), "installed");
 }
 
-export function getProfileAppInstallDir(appId: string): string {
-  return join(getProfileInstalledAppsDir(), appIdToPathSegment(appId));
-}
-
 export function getProfileAppDataDir(appId: string): string {
   return join(getProfileAppsDir(), "data", appIdToPathSegment(appId));
 }

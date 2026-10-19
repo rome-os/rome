@@ -73,3 +73,31 @@ Links and stored rows name the channel. A person Rome reaches through both Teleg
 A service holds at most one Connection, so a channel's live ports have one Connection behind them. Widening that is still its own decision. When it is taken, a second presence of one service is a second channel with its own name, never a second Connection merged into the first.
 
 This narrows the amendment above without withdrawing it. A channel's ports may still have several backers, such as synced tables and a Connection's Talk. "One presence" says whose channel it is, not how many things answer for it.
+
+## Amendment (2026-10-15): several Connections per service
+
+A service may hold several Connections, and the store does not limit it: the unique index on the service column, `connections_service_unique`, is dropped. The registry still guards every existing path. `ConnectionRegistry.connect` refuses a service that already holds a Connection, so the code that reads a service's one Connection keeps working. Only a caller that asks for another account of a service mints a second. `POST /connections` does so through `connectUnusedOrAnother`, which first hands back a Connection of the service that no conferral has ever filled, so an abandoned add-account attempt is reused rather than piling up, and mints through `connectAnother` only when there is none. The service's descriptor opts in with `severalAccounts`. A second Connection is a second presence, so it backs a second channel with its own name, as the amendment above requires.
+
+The first channel of a service carries the service's name, because data stored before channels were recorded spells it. Every later channel gets an opaque id, and a screen that shows a channel labels it from the account behind it, never from the name. When a Connection is removed, its channel keeps its name and its conversations, and the service's next Connection takes that channel back, the service-named one first, before a new one is made. People, pairing and channel policies key an account by its service, so an address reached through a later Telegram channel is the same account as on `telegram`.
+
+This narrows two earlier sentences. The decision above says "A service carries at most one Connection", and the 2026-10-08 amendment says "A service holds at most one Connection". Both now hold per channel: a channel's live ports have one Connection behind them, and a service may hold several.
+
+### Alternatives
+
+- **Hold several bots' grants on one Connection.** Rejected because several channels would then share one talker and one health state, so one revoked bot would take down every channel of that service.
+- **Merge a second backer into the service's existing channel.** Rejected because each bot is a separate member wherever it is added. A merged channel cannot tell the bots' conversations apart or link each bot to its own agent.
+
+### Consequences
+
+Uniqueness rests on the registry, not the database. Within the one Rome process, the per-service mint lock holds it, and `connect` refuses a second Connection under that lock. The "future diffs must respect" rule on Connection uniqueness becomes: a Connection backs exactly one channel, and a channel's live ports are backed by one Connection.
+
+## Amendment (2026-10-16): an agent linked to a channel
+
+A channel can be linked to an agent, which answers in that channel's conversations ([Linked agents](../architecture/channels.md#linked-agents)). A channel with no linked agent is silent and does not fall back to main. Main is linked like any other agent. On one platform an agent other than main is linked to at most one channel. Main is exempt because it answers a platform's bot and its signed-in user at once, as it does on Telegram. Every backed channel of a linkable service is linked to main on upgrade, and a linkable service's first channel is linked to main when it is made, so existing and first bots keep answering.
+
+Rome stores each channel's platform as a fixed value mapped from its service ([`platform.ts`](../../packages/api-types/src/platform.ts)). Feishu and Lark are one platform, `telegram` and `telegram_user` are one, and `wechat` and `wechat_user` are one. Every other service is its own platform. The one-agent-per-platform rule counts by it. The 2026-10-08 amendment's "the platform is not a name Rome stores" is withdrawn. Its rule that nothing above the channels of one platform merges them stands.
+
+### Alternatives
+
+- **Let main answer wherever no agent is linked.** Rejected because a guardian who moves an agent to another account would leave the old one answering as main, which is not what moving it means. Linking main makes who answers explicit on every account.
+- **Parse the platform out of a channel id.** Rejected because a later channel's id is opaque, and `telegram_user` would need a parsing rule of its own. A fixed mapping from the service answers the question once.

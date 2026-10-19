@@ -124,6 +124,7 @@ export interface ActionConfig {
   name: string;
   type: "system" | "custom";
   description: string;
+  /** Relative module entry path from the action directory (default: ./index.ts or ./index.js). */
   entry?: string;
   /** Defaults to public. Explicit actions require an exact agent allow-list entry. */
   visibility?: "public" | "explicit";
@@ -204,6 +205,7 @@ export class ActionInvocationEventOverflowError extends Error {
 
 export interface Action {
   config: ActionConfig;
+  /** Present = agent-callable action (tool). Absent = event-only action (workflow). */
   inputSchema?: Record<string, unknown>;
   execute(args: Record<string, unknown>, context?: ActionExecutionContext): Promise<ActionResult>;
   /**
@@ -1177,6 +1179,7 @@ export interface RunParams {
    * without it ignore them.
    */
   images?: string[];
+  /** Used for session reuse lookup: `${channel}:${threadId}` */
   channelThreadKey?: string;
   threadContext?: ThreadContext;
   /** Stable Rome conversation to bind to the provider/runtime session. */
@@ -1185,9 +1188,12 @@ export interface RunParams {
   platformMessageId?: string;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
+  /** Explicit session ID to continue */
   sessionId?: string;
+  /** Variable content appended to the end of the system prompt */
   contextSuffix?: string;
   sharedContext?: Record<string, unknown>;
+  /** Working directory for the agent. Defaults to project root. */
   workingDir?: string;
 }
 
@@ -1497,6 +1503,15 @@ export type MessagePart =
       type: "routine_draft_card";
       toolUseId: string;
       draft: RoutineDraftSpec;
+      /**
+       * Unique key minted by the server with the card. Turning the card on
+       * creates the routine with this `key`, so the card finds the exact
+       * routine it created (and links to its run history) after a reload.
+       * For `propose_routine` with `activate: true`, it is the key the agent
+       * already created the routine with, so the card opens saved.
+       * Absent on cards written before keys existed.
+       */
+      routineKey?: string;
     }
   | {
       /**
@@ -1896,7 +1911,22 @@ export interface ChannelMessageHookDeps {
   actionEngine: ActionEngineLike;
   conversationSettings: ConversationSettingsControl;
   chatStop: ChatStopHandler;
+  /** A live array: the host appends a channel added later, such as a second
+   *  bot, in place. Read it at each `register()` rather than keep a copy. */
   channels: readonly Channel[];
+  /**
+   * Who answers on the channel named `channelName`, read when each message
+   * arrives, since a relink changes it on the same channel:
+   * - a canonical agent id (`<app-id>:<local-name>`, `core:main` for main):
+   *   that agent answers, except in a group or channel that chose its own agent;
+   * - null: the channel takes a linked agent but has none, or that agent is
+   *   not loaded, so nothing answers;
+   * - undefined: the channel takes no linked agent, such as webchat or email,
+   *   and its conversations choose their agent, main by default.
+   * A host that predates linked agents passes no `linkedAgentOf`, which reads
+   * as undefined for every channel.
+   */
+  linkedAgentOf?: (channelName: string) => string | null | undefined;
 }
 
 export interface ChannelMessageHook {
@@ -1906,6 +1936,14 @@ export interface ChannelMessageHook {
    *  subscription follows whatever backs it, so the host never calls the hook
    *  per Connection. */
   register(): Promise<void>;
+  /** Subscribe to `channels`, which the host has just appended to the deps'
+   *  `channels`, such as a second bot whose Talk first unlocked. The host
+   *  calls it only on a hook that defines it. On a hook without it, the host
+   *  calls `unregister()` then `register()` at once, which drops events still
+   *  waiting on the hook's existing subscriptions. A hook with neither
+   *  `addChannels` nor `unregister()` hears those channels only after the
+   *  next restart. */
+  addChannels?(channels: readonly Channel[]): Promise<void>;
   /** Detach every subscription `register` took out, so
    * the host can swap in a replacement instance (e.g. after an app-keys
    * environment change) without double-handling inbound messages. A hook
@@ -2084,10 +2122,10 @@ export interface AppFavorCapability {
     | {
         status: "pending_consent";
         requestId: string;
-        authorizationUrl?: string;
-        request?: FavorActionRequestView;
+        authorizationUrl: string;
+        request: FavorActionRequestView;
       }
-    | { status: "declined"; requestId: string; request?: FavorActionRequestView }
+    | { status: "declined"; requestId: string; request: FavorActionRequestView }
     | { status: "error"; error: string }
   >;
 }
@@ -2193,9 +2231,6 @@ export interface WebChatRecapRepository {
   getMessages(sessionId: string): Promise<WebChatRecapMessage[]>;
   addTurnRecapMessage(input: AddTurnRecapMessageInput): Promise<WebChatRecapMessage>;
 }
-
-// @ts-expect-error The public recap port must not expose broader WebChat repository methods.
-type _WebChatRecapRepositoryDoesNotExposeDeleteSession = WebChatRecapRepository["deleteSession"];
 
 export interface RomeAppContext {
   app: RomeAppDefinition;
@@ -2555,9 +2590,9 @@ export interface ScheduleTrigger {
    * `fixed` is the "absolute zone" choice: it pins the schedule to the literal
    * `tzid`. */
   tzMode: "fixed" | "floating";
-  /** Specific calendar date for a true one-off ("YYYY-MM-DD"). Mutually
-   * exclusive with `rrule`. When neither is set, fires once at the next
-   * matching `localTime`. */
+  /** Calendar date for a one-off ("YYYY-MM-DD"). Mutually exclusive with
+   * `rrule`. A stored schedule has one or the other: writers resolve a
+   * trigger with neither to the date of the next `localTime`. */
   date?: string;
   rrule?: string;
 }

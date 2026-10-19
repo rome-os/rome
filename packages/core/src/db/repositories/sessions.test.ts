@@ -212,4 +212,55 @@ describe("SessionsRepository", () => {
       );
     expect(active.map((row) => row.id)).toEqual(["fresh"]);
   });
+
+  it("create() records the conversation the session serves", async () => {
+    const bound = await repo.create({
+      agentName: "main",
+      channelThreadKey: "webchat:conv-1:large-model:sel-a",
+      conversationId: "conv-1",
+    });
+    const unbound = await repo.create({ agentName: "main", channelThreadKey: "main:adhoc" });
+
+    expect((await repo.findById(bound))?.conversationId).toBe("conv-1");
+    expect((await repo.findById(unbound))?.conversationId).toBeNull();
+  });
+
+  it("rotation takes the caller's conversation and keeps the retired row's otherwise", async () => {
+    await repo.create({
+      id: "old",
+      agentName: "main",
+      channelThreadKey: "telegram:thread-1",
+      conversationId: "channel:telegram:thread-1",
+    });
+
+    const inherited = await repo.rotateProviderGeneration({
+      agentName: "main",
+      channelThreadKey: "telegram:thread-1",
+      newSessionId: "gen-2",
+    });
+    expect(inherited.conversationId).toBe("channel:telegram:thread-1");
+
+    const named = await repo.rotateProviderGeneration({
+      agentName: "main",
+      channelThreadKey: "telegram:thread-1",
+      newSessionId: "gen-3",
+      conversationId: "conv-renamed",
+    });
+    expect(named.conversationId).toBe("conv-renamed");
+  });
+
+  it("fillConversationId() fills a missing conversation and never overwrites one", async () => {
+    const legacy = await repo.create({ agentName: "main", channelThreadKey: "webchat:conv-1" });
+    const bound = await repo.create({
+      agentName: "main",
+      channelThreadKey: "webchat:conv-2",
+      conversationId: "conv-2",
+    });
+
+    expect(await repo.fillConversationId(legacy, "conv-1")).toBe(true);
+    expect(await repo.fillConversationId(bound, "other")).toBe(false);
+
+    expect((await repo.findById(legacy))?.conversationId).toBe("conv-1");
+    expect((await repo.findById(bound))?.conversationId).toBe("conv-2");
+  });
 });

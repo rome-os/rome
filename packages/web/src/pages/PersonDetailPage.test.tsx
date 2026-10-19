@@ -14,7 +14,7 @@ import {
   type PersonResource,
 } from "@rome/api-types/people";
 import i18n from "@/i18n";
-import PersonDetailPage, { PersonLegacyRedirect } from "./PersonDetailPage";
+import PersonDetailPage from "./PersonDetailPage";
 
 // The person page: who they are on top, the merged timeline below. What is under
 // test is that the page reads the two routes that own it — `GET /api/people/:id`
@@ -24,10 +24,6 @@ import PersonDetailPage, { PersonLegacyRedirect } from "./PersonDetailPage";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -241,6 +237,7 @@ function mockApi(
         state: options.send === "fail" ? "failed" : "unconfirmed",
         ref: `sent-${outbox.length + 1}`,
         error: options.send === "fail" ? "the channel rejected this message" : null,
+        dismissable: options.send === "fail",
       };
       outbox.push(row);
       if (options.send === "land") accept(row);
@@ -257,7 +254,7 @@ function mockApi(
       }
       // A retry reuses the row, so it never reads as a second message the
       // guardian did not write.
-      Object.assign(row, { state: "unconfirmed", error: null });
+      Object.assign(row, { state: "unconfirmed", error: null, dismissable: false });
       if (options.send !== "fail") accept(row);
       return json(row, 202);
     }
@@ -349,7 +346,6 @@ function renderPage(id = "wei-chen", before?: string) {
           <Route path="/people/latest" element={<div>the stream</div>} />
           <Route path="/people/directory" element={<div>the directory</div>} />
           <Route path="/people/person/:personId" element={<PersonDetailPage />} />
-          <Route path="/people/:personId" element={<PersonLegacyRedirect />} />
         </Routes>
         <Address />
         <BrowserBack />
@@ -752,34 +748,13 @@ describe("PersonDetailPage management", () => {
 
 // A person id is a slug of the guardian's own display name, so `latest` and
 // `directory` are ids a guardian can mint. The dossier answers under its own
-// segment for that reason, and the address a person was reached by keeps
-// working.
+// segment for that reason.
 describe("PersonDetailPage is reachable whatever the guardian named the person", () => {
   it("opens a person whose id collides with a view name", async () => {
     mockApi({ person: { ...PERSON, id: "latest", displayName: "Latest" } });
     renderPage("latest");
 
     expect(await screen.findByRole("heading", { name: "Latest" })).toBeTruthy();
-  });
-
-  it("forwards the address a person used to be reached by", async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    mockApi();
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/people/wei-chen"]}>
-          <Routes>
-            <Route path="/people/latest" element={<div>the stream</div>} />
-            <Route path="/people/person/:personId" element={<PersonDetailPage />} />
-            <Route path="/people/:personId" element={<PersonLegacyRedirect />} />
-          </Routes>
-          <Address />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(await screen.findByRole("heading", { name: "Wei Chen" })).toBeTruthy();
-    expect(screen.getByTestId("address").textContent).toBe("/people/person/wei-chen");
   });
 });
 
@@ -1060,6 +1035,7 @@ describe("PersonDetailPage, sending", () => {
           state: "failed",
           ref: null,
           error: stranded,
+          dismissable: true,
         },
       ],
     });
@@ -1159,25 +1135,30 @@ describe("PersonDetailPage, sending", () => {
   });
 
   it("gives a stuck unconfirmed row a way out, and a fresh one none", async () => {
-    const WINDOW = 5 * 60;
-    // Against the real clock, not the fixture's noon anchor: staleness is what
-    // is under test, and the block that renders it reads `Date.now()`. Noon is
-    // in the future for any run that starts before it.
-    const REAL_NOW = Math.floor(Date.now() / 1000);
+    // The server's answer decides, not the row's age. A retried row keeps the
+    // timestamp of its first attempt while the window runs from the retry, so
+    // the fresh row here is the older of the two.
     const stuck = {
       id: "outbox-stuck",
       channel: "whatsapp",
       channelUserId: "6591881123@s.whatsapp.net",
       text: "delivered but never seen",
-      timestamp: REAL_NOW - WINDOW - 10,
+      timestamp: NOW - 60,
       state: "unconfirmed" as const,
       ref: "sent-stuck",
       error: null,
+      dismissable: true,
     };
     mockApi({
       outbox: [
         stuck,
-        { ...stuck, id: "outbox-fresh", text: "just went out", timestamp: REAL_NOW - 5 },
+        {
+          ...stuck,
+          id: "outbox-fresh",
+          text: "just went out",
+          timestamp: NOW - 3600,
+          dismissable: false,
+        },
       ],
     });
     renderPage();

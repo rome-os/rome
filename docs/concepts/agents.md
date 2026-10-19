@@ -39,6 +39,31 @@ systemPromptPrefix: Complete the requested coding task.
 
 An agent model pin supplies the default for a new session, not an instruction to migrate existing history. Changing the YAML affects new sessions. Existing sessions retain their [session model pin](sessions.md#model-pin) unless the guardian explicitly selects another model.
 
+## Builtin tools
+
+A builtin tool is a tool the model provider runs itself, such as a file read or a shell command. An agent's `tools` list names the builtin tools it gets. Its actions, skills, and subagents are Rome tools, which `tools` does not control.
+
+Both providers use one set of names: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `WebSearch`, `WebFetch`, `TodoWrite`, and `Task`. `ImageGeneration` names Codex's image generation tool, which Claude does not have. A provider ignores a name it does not provide.
+
+**Contracts:**
+
+- With `tools: []`, an agent cannot read or write files, run commands, or search the web on either provider. It acts only through Rome tools.
+- On Claude, each name is one tool, and the agent gets exactly the tools it lists.
+- On Codex, a name grants a Codex capability, and some capabilities are coarser than the names. The table below lists them.
+- Codex has one shell for reading files, searching, and running commands. Any of `Read`, `Glob`, `Grep`, or `Bash` gives the agent that shell, and the shell can write files. An agent that must not run commands on Codex declares none of the four.
+- Codex offers its patch tool on every thread. An agent with no `Write`, `Edit`, or shell name runs in Codex's read-only sandbox, which rejects every patch.
+- Some Codex models carry collaboration tools that spawn Codex agents, and no setting removes them. A spawned Codex agent gets the same builtin tools as the agent that spawned it.
+- Codex's plan tool stays on for every agent, because Rome renders plan updates from it. `WebFetch` and `TodoWrite` grant nothing on Codex.
+
+| Declared on Codex | Codex capability |
+|---|---|
+| `Read`, `Glob`, `Grep`, or `Bash` | The shell, with write access to the filesystem |
+| `Read` | Viewing a local image |
+| `Write`, `Edit`, `Read`, `Glob`, `Grep`, or `Bash` | Patches that write files |
+| `WebSearch` | Web search |
+| `Task` | Codex's multi-agent tools, on models without collaboration tools |
+| `ImageGeneration` | Image generation |
+
 ## Structured output
 
 An agent may declare `outputSchema` when every model turn must end with data

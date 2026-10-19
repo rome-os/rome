@@ -1,5 +1,6 @@
 import type { SettingsRepository } from "@rome-os/app-runtime";
 
+export const RECAP_ENABLED_SETTING = "recap.enabled";
 export const RECAP_CREATE_AUDIO_SETTING = "recap.createAudio";
 export const RECAP_THRESHOLD_SETTING = "recap.threshold";
 export const RECAP_AUDIO_SPEED_SETTING = "recap.audioSpeed";
@@ -21,12 +22,14 @@ export const RECAP_AUDIO_SPEED_RATES: Record<RecapAudioSpeed, string> = {
 };
 
 export interface RecapSettings {
+  enabled: boolean;
   createAudio: boolean;
   threshold: RecapThreshold;
   audioSpeed: RecapAudioSpeed;
 }
 
 export const DEFAULT_RECAP_SETTINGS: RecapSettings = {
+  enabled: false,
   createAudio: false,
   threshold: "medium",
   audioSpeed: "faster",
@@ -35,12 +38,14 @@ export const DEFAULT_RECAP_SETTINGS: RecapSettings = {
 export async function getRecapSettings(
   settingsRepo: Pick<SettingsRepository, "get"> | undefined,
 ): Promise<RecapSettings> {
-  const [storedCreateAudio, storedThreshold, storedAudioSpeed] = await Promise.all([
+  const [storedEnabled, storedCreateAudio, storedThreshold, storedAudioSpeed] = await Promise.all([
+    settingsRepo?.get<unknown>(RECAP_ENABLED_SETTING),
     settingsRepo?.get<unknown>(RECAP_CREATE_AUDIO_SETTING),
     settingsRepo?.get<unknown>(RECAP_THRESHOLD_SETTING),
     settingsRepo?.get<unknown>(RECAP_AUDIO_SPEED_SETTING),
   ]);
   return {
+    enabled: typeof storedEnabled === "boolean" ? storedEnabled : DEFAULT_RECAP_SETTINGS.enabled,
     createAudio:
       typeof storedCreateAudio === "boolean"
         ? storedCreateAudio
@@ -59,6 +64,7 @@ export async function setRecapSettings(
   settings: RecapSettings,
 ): Promise<void> {
   await Promise.all([
+    settingsRepo.set(RECAP_ENABLED_SETTING, settings.enabled),
     settingsRepo.set(RECAP_CREATE_AUDIO_SETTING, settings.createAudio),
     settingsRepo.set(RECAP_THRESHOLD_SETTING, settings.threshold),
     settingsRepo.set(RECAP_AUDIO_SPEED_SETTING, settings.audioSpeed),

@@ -1,13 +1,9 @@
 import { readFile, stat } from "node:fs/promises";
 import { Hono } from "hono";
-import type { ResolvedApp } from "../../apps/state.js";
+import { isResolvedApp } from "../../apps/state.js";
 import { resolvePathWithinBase } from "../../apps/packaging/index.js";
 import type { ApiDeps } from "../deps.js";
 import { contentTypeForPath } from "../../lib/content-types.js";
-
-function isResolvedApp(view: unknown): view is ResolvedApp {
-  return (view as ResolvedApp).manifest !== undefined;
-}
 
 export function appAssetsRoutes(deps: Pick<ApiDeps, "appCatalog">): Hono {
   const app = new Hono();
@@ -23,7 +19,7 @@ export function appAssetsRoutes(deps: Pick<ApiDeps, "appCatalog">): Hono {
 
     try {
       const view = deps.appCatalog.get(appId);
-      if (!view || !isResolvedApp(view) || !view.web) {
+      if (!isResolvedApp(view) || !view.web) {
         return c.text(`Unknown app "${appId}" or no frontend bundle`, 404);
       }
 

@@ -5,6 +5,7 @@ import {
   startDaemon,
 } from "@rome-os/node-core/client";
 import { createLogger } from "../logger.js";
+import { withTracingSuppressed } from "../telemetry.js";
 import { getInstanceToken } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
@@ -28,7 +29,9 @@ export function createNodeCallerProvisioner(): () => Promise<void> {
           return;
         }
         try {
-          await startDaemon(config);
+          // Discovery is refused until the spawned daemon listens. A real
+          // failure rejects and is logged below.
+          await withTracingSuppressed(() => startDaemon(config));
           log.info("Node caller daemon started");
         } catch (error) {
           log.warn("Node caller daemon failed to start", {

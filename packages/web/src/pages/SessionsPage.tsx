@@ -60,9 +60,8 @@ import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
 import type {
   ChatMessage,
-  RomeSessionRecord,
+  RomeSessionExplorerRecord,
   RomeSessionsPageResult,
-  ChatEntry,
 } from "@/lib/chat-types";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
 import type {
@@ -97,7 +96,9 @@ function sessionAgentLabel(agentName: string | null | undefined): string {
   return artifactLocalName(agentName ?? "main");
 }
 
-function sessionTriggerLabel(session: RomeSessionRecord | RomeSessionDetail): string | null {
+function sessionTriggerLabel(
+  session: RomeSessionExplorerRecord | RomeSessionDetail,
+): string | null {
   return (
     session.triggerName ??
     (session.triggerActionName ? artifactLocalName(session.triggerActionName) : null)
@@ -254,8 +255,10 @@ function SessionsListFrame({ fullMode, children }: { fullMode: boolean; children
   );
 }
 
-export function sessionsViewportClass(fullMode: boolean): string {
-  return fullMode ? "h-dvh pt-safe" : "h-[var(--rome-mobile-content-height)] md:h-dvh";
+function sessionsViewportClass(fullMode: boolean): string {
+  return fullMode
+    ? "h-[var(--rome-viewport-height)] pt-safe"
+    : "h-[var(--rome-mobile-content-height)] md:h-[var(--rome-viewport-height)]";
 }
 
 function SessionsIndexPage({
@@ -372,7 +375,7 @@ function SessionsIndexPage({
   const recentInventory = useRomeSessions(recentOptions, view === "overview");
   const { data, loading, error } = inventory;
   const sessions = data?.sessions ?? [];
-  const columns = useMemo<DataTableColumn<RomeSessionRecord>[]>(
+  const columns = useMemo<DataTableColumn<RomeSessionExplorerRecord>[]>(
     () => [
       {
         id: "session",
@@ -600,7 +603,7 @@ function SessionsIndexPage({
   // not the drill-in filters the overview hands over, which the chip row shows.
   const popoverFilterCount = (type ? 1 : 0) + (source ? 1 : 0);
   const openSession = useCallback(
-    (session: RomeSessionRecord) => {
+    (session: RomeSessionExplorerRecord) => {
       navigate(
         view === "overview"
           ? encodeURIComponent(session.id)
@@ -655,7 +658,7 @@ function SessionsIndexPage({
       }}
       disabled={overviewRefreshing}
     >
-      <RefreshCw className={overviewRefreshing ? "animate-spin" : ""} />
+      <RefreshCw data-icon="inline-start" className={overviewRefreshing ? "animate-spin" : ""} />
       Refresh
     </Button>
   );
@@ -707,7 +710,7 @@ function SessionsIndexPage({
                 <ToolbarButton asChild>
                   <PopoverTrigger asChild>
                     <Button variant="outline">
-                      <ListFilter aria-hidden />
+                      <ListFilter data-icon="inline-start" aria-hidden />
                       Filter
                       {popoverFilterCount > 0 ? (
                         <Badge variant="muted" shape="pill">
@@ -1052,7 +1055,7 @@ function ReadOnlySessionChat({
   messages,
   liveTurn,
 }: {
-  session: RomeSessionRecord;
+  session: RomeSessionExplorerRecord;
   messages: ChatMessage[];
   liveTurn: { turnId: string; snapshot: TraceSnapshot; text: string } | null;
 }) {
@@ -1167,13 +1170,13 @@ function ReadOnlySessionChat({
           allowSubagentUsage
           readOnly
           renderInlineBlock={(block, key) =>
-            renderSingleEntry(block as ChatEntry, key, {
+            renderSingleEntry(block, key, {
               onApprovalResolved: NO_OP,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatEntries(blocks as ChatEntry[], {
+            renderFlatEntries(blocks, {
               onApprovalResolved: NO_OP,
               compact: true,
               live,
@@ -1336,6 +1339,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
   const location = useLocation();
   const navigate = useNavigate();
   const fullMode = location.pathname.startsWith("/full/apps/sessions");
+  const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const [session, setSession] = useState<RomeSessionDetail | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1374,6 +1378,11 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           setError("Session not found");
           setSession(null);
           setMessages([]);
+          // A saved workspace tile can outlive its session, so a framed page shows
+          // not-found in place: redirecting would nest chat in the tile.
+          if (window.parent === window) {
+            navigate(hideSidebar ? "/chat?hideSidebar=1" : "/chat", { replace: true });
+          }
           return;
         }
         setSession(sessionResult);
@@ -1388,7 +1397,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, navigate, hideSidebar]);
 
   useEffect(() => {
     if (!session) {
@@ -1547,7 +1556,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
               relative="path"
               state={location.state}
             >
-              <GitFork />
+              <GitFork data-icon="inline-start" />
               {session.type === "subagent" ? "Parent" : "Forked from"}
             </Link>
           </Button>
@@ -1555,7 +1564,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         {session?.type === "webchat" ? (
           <Button asChild variant="outline">
             <Link to={`/chat/${session.id}`}>
-              <ExternalLink />
+              <ExternalLink data-icon="inline-start" />
               Open chat
             </Link>
           </Button>

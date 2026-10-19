@@ -2,7 +2,6 @@ cases:
   - name: PPL-01 Open the people directory
     tags:
       - people
-      - shard-4
     steps:
       - app.open:
           path: /people
@@ -18,7 +17,6 @@ cases:
   - name: PPL-02 Filter a person timeline by channel
     tags:
       - people
-      - shard-4
     steps:
       - app.open:
           path: /people/person/ray-oster

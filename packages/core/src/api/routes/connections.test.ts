@@ -12,11 +12,17 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { tokenPaste } from "../../connections/schemes.js";
-import { makeGatedWatch, makePasteTalk, makeTwoGrant } from "../../connections/test-fixtures.js";
+import {
+  makeGatedWatch,
+  makePasteTalk,
+  makeTwoGrant,
+  makeZeroGrantTalk,
+} from "../../connections/test-fixtures.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
+import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb, identityServiceOf } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { connectionsRoutes } from "./connections.js";
 
@@ -48,7 +54,10 @@ function makeApp(
     "/",
     connectionsRoutes({
       db,
-      approvalsRepo: new ApprovalsRepository(db),
+      approvalsRepo: new ApprovalsRepository(
+        db,
+        new PersonMappingRepository(db, identityServiceOf),
+      ),
       connectionRegistry: registry,
       personMappingRepo,
       ...overrides,
@@ -113,6 +122,8 @@ describe("GET /connections", () => {
       },
       connect: null,
       setups: {},
+      channel: null,
+      severalAccounts: false,
     });
 
     // Nothing conferred on discord yet: both grants unauthorized, everything
@@ -205,6 +216,8 @@ describe("GET /connections", () => {
       },
       connect: null,
       setups: {},
+      channel: null,
+      severalAccounts: false,
     });
   });
 
@@ -410,6 +423,196 @@ describe("DELETE /connections/:id/grants/:name", () => {
   });
 });
 
+describe("POST /connections", () => {
+  const telegram = makePasteTalk();
+  function telegramRegistry(): ConnectionRegistry {
+    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    registry.register({ ...telegram.descriptor, service: "telegram", severalAccounts: true });
+    return registry;
+  }
+  const addAccount = (registry: ConnectionRegistry) =>
+    makeApp(registry).request("/connections", {
+      method: "POST",
+      headers: { ...SAME_ORIGIN, "content-type": "application/json" },
+      body: JSON.stringify({ service: "telegram" }),
+    });
+
+  it("mints another Connection of a service that offers several accounts", async () => {
+    const registry = telegramRegistry();
+    const first = await registry.connect("telegram");
+    await registry.importCredential(first.id, "bot", telegram.validCredential());
+
+    const res = await addAccount(registry);
+
+    expect(res.status).toBe(201);
+    const { connection } = await res.json();
+    expect(connection).toMatchObject({ service: "telegram", severalAccounts: true });
+    expect(connection.id).not.toBe(first.id);
+    expect(registry.find("telegram")).toHaveLength(2);
+  });
+
+  it("reports each account's channel: the service name first, an opaque id after", async () => {
+    const { db, close } = createTestDb();
+    openDbs.push(close);
+    const records = new ChannelRecordsRepository(db);
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(db),
+      onMint: (tx, record) => {
+        records.claim(tx, record, record.createdAt);
+      },
+    });
+    registry.register({ ...telegram.descriptor, service: "telegram", severalAccounts: true });
+    const first = await registry.connect("telegram");
+    await registry.importCredential(first.id, "bot", telegram.validCredential());
+    const app = makeApp(registry, undefined, { db });
+
+    const added = await app.request("/connections", {
+      method: "POST",
+      headers: { ...SAME_ORIGIN, "content-type": "application/json" },
+      body: JSON.stringify({ service: "telegram" }),
+    });
+    const { connection } = await added.json();
+    const { connections } = await (await app.request("/connections")).json();
+
+    const channelOf = (id: string) =>
+      connections.find((each: { id: string }) => each.id === id)?.channel;
+    expect(channelOf(first.id)).toBe("telegram");
+    expect(channelOf(connection.id)).toBe(records.idOf(connection.id));
+    expect(channelOf(connection.id)).not.toBe("telegram");
+  });
+
+  it("reports the agent linked to each account", async () => {
+    const { db, close } = createTestDb();
+    openDbs.push(close);
+    const records = new ChannelRecordsRepository(db);
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(db),
+      onMint: (tx, record) => {
+        records.claim(tx, record, record.createdAt);
+      },
+    });
+    registry.register({ ...telegram.descriptor, service: "telegram" });
+    const conn = await registry.connect("telegram");
+    records.link("telegram", "sales:agent");
+
+    const { connections } = await (
+      await makeApp(registry, undefined, { db }).request("/connections")
+    ).json();
+
+    expect(connections.find((each: { id: string }) => each.id === conn.id)).toMatchObject({
+      channel: "telegram",
+      linkedAgent: "sales:agent",
+    });
+
+    records.link("telegram", null);
+    const relisted = await (
+      await makeApp(registry, undefined, { db }).request("/connections")
+    ).json();
+    expect(
+      relisted.connections.find((each: { id: string }) => each.id === conn.id).linkedAgent,
+    ).toBeNull();
+  });
+
+  it("reports no linked agent for a service that takes no link", async () => {
+    const { db, close } = createTestDb();
+    openDbs.push(close);
+    const records = new ChannelRecordsRepository(db);
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(db),
+      onMint: (tx, record) => {
+        records.claim(tx, record, record.createdAt);
+      },
+    });
+    registry.register({ ...telegram.descriptor, service: "whatsapp" });
+    const conn = await registry.connect("whatsapp");
+
+    const { connections } = await (
+      await makeApp(registry, undefined, { db }).request("/connections")
+    ).json();
+
+    const listed = connections.find((each: { id: string }) => each.id === conn.id);
+    expect(listed.channel).toBe("whatsapp");
+    expect("linkedAgent" in listed).toBe(false);
+  });
+
+  it("hands back an account whose setup never finished instead of minting", async () => {
+    const registry = telegramRegistry();
+    const first = await registry.connect("telegram");
+    await registry.importCredential(first.id, "bot", telegram.validCredential());
+    const added = await (await addAccount(registry)).json();
+
+    const res = await addAccount(registry);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).connection.id).toBe(added.connection.id);
+    expect(registry.find("telegram")).toHaveLength(2);
+  });
+
+  it("mints rather than hand back an account whose bot was disconnected", async () => {
+    const registry = telegramRegistry();
+    const first = await registry.connect("telegram");
+    await registry.importCredential(first.id, "bot", telegram.validCredential());
+    await registry.revoke(first.id, "bot");
+
+    const res = await addAccount(registry);
+
+    expect(res.status).toBe(201);
+    expect((await res.json()).connection.id).not.toBe(first.id);
+  });
+
+  it("gives two overlapping requests the same new account", async () => {
+    const registry = telegramRegistry();
+    const first = await registry.connect("telegram");
+    await registry.importCredential(first.id, "bot", telegram.validCredential());
+
+    const [a, b] = await Promise.all([addAccount(registry), addAccount(registry)]);
+
+    const ids = [(await a.json()).connection.id, (await b.json()).connection.id];
+    expect(ids[0]).toBe(ids[1]);
+    expect(registry.find("telegram")).toHaveLength(2);
+  });
+
+  it("refuses a service that offers one account", async () => {
+    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    registry.register(makePasteTalk().descriptor);
+
+    const res = await makeApp(registry).request("/connections", {
+      method: "POST",
+      headers: { ...SAME_ORIGIN, "content-type": "application/json" },
+      body: JSON.stringify({ service: "fake-telegram" }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(registry.find("fake-telegram")).toEqual([]);
+  });
+
+  it("refuses a null body", async () => {
+    const registry = telegramRegistry();
+
+    const res = await makeApp(registry).request("/connections", {
+      method: "POST",
+      headers: { ...SAME_ORIGIN, "content-type": "application/json" },
+      body: "null",
+    });
+
+    expect(res.status).toBe(400);
+    expect(registry.find("telegram")).toEqual([]);
+  });
+
+  it("rejects cross-site requests without minting", async () => {
+    const registry = telegramRegistry();
+
+    const res = await makeApp(registry).request("/connections", {
+      method: "POST",
+      headers: { "sec-fetch-site": "cross-site", "content-type": "application/json" },
+      body: JSON.stringify({ service: "telegram" }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(registry.find("telegram")).toEqual([]);
+  });
+});
+
 describe("DELETE /connections/:id", () => {
   it("removes the connection from the list and the ledger", async () => {
     const ledger = makeLedger();
@@ -496,6 +699,101 @@ describe("DELETE /connections/:id", () => {
   });
 });
 
+describe("guardian links across Connections of one service", () => {
+  async function twoBots() {
+    const { db, close } = createTestDb();
+    openDbs.push(close);
+    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const fixture = makePasteTalk();
+    fixture.descriptor.service = "telegram";
+    registry.register(fixture.descriptor);
+    const first = await registry.connect("telegram");
+    const second = await registry.connectAnother("telegram");
+    await registry.importCredential(first.id, "bot", fixture.validCredential());
+    await registry.importCredential(second.id, "bot", fixture.validCredential());
+    const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
+    await personMappingRepo.create({
+      displayName: "Guardian",
+      bondLevel: "guardian",
+      channelMappings: [{ channel: "telegram", channelUserId: "guardian" }],
+    });
+    const app = makeApp(registry, personMappingRepo, {
+      db,
+      approvalsRepo: new ApprovalsRepository(db, personMappingRepo),
+    });
+    const del = (path: string) => app.request(path, { method: "DELETE", headers: SAME_ORIGIN });
+    return { registry, personMappingRepo, first, second, del };
+  }
+
+  it("keeps the guardian link when one of two bots is removed", async () => {
+    const { personMappingRepo, first, del } = await twoBots();
+
+    expect((await del(`/connections/${first.id}`)).status).toBe(200);
+    expect(await personMappingRepo.findByChannelUser("telegram", "guardian")).not.toBeNull();
+  });
+
+  it("keeps the guardian link when one of two bots loses Talk", async () => {
+    const { personMappingRepo, first, del } = await twoBots();
+
+    expect((await del(`/connections/${first.id}/grants/bot`)).status).toBe(200);
+    expect(await personMappingRepo.findByChannelUser("telegram", "guardian")).not.toBeNull();
+  });
+
+  it("keeps the guardian link while the other bot's Talk is only degraded", async () => {
+    const { registry, personMappingRepo, first, second, del } = await twoBots();
+    await registry.getLedger().updateGrant(second.id, "bot", {
+      state: "degraded",
+      degraded: { at: new Date(0), reason: "renewal rejected" },
+    });
+
+    expect((await del(`/connections/${first.id}`)).status).toBe(200);
+    expect(await personMappingRepo.findByChannelUser("telegram", "guardian")).not.toBeNull();
+  });
+
+  it("keeps the guardian link when one of two Connections whose Talk needs no grant is removed", async () => {
+    const { db, close } = createTestDb();
+    openDbs.push(close);
+    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    registry.register(makeZeroGrantTalk().descriptor);
+    const first = await registry.connect("fake-webchat");
+    await registry.connectAnother("fake-webchat");
+    const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
+    await personMappingRepo.create({
+      displayName: "Guardian",
+      bondLevel: "guardian",
+      channelMappings: [{ channel: "fake-webchat", channelUserId: "guardian" }],
+    });
+    const app = makeApp(registry, personMappingRepo, {
+      db,
+      approvalsRepo: new ApprovalsRepository(db, personMappingRepo),
+    });
+
+    const removed = await app.request(`/connections/${first.id}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+    expect(removed.status).toBe(200);
+    expect(await personMappingRepo.findByChannelUser("fake-webchat", "guardian")).not.toBeNull();
+  });
+
+  it("deletes the guardian link when the last bot is removed", async () => {
+    const { personMappingRepo, first, second, del } = await twoBots();
+
+    expect((await del(`/connections/${first.id}`)).status).toBe(200);
+    expect((await del(`/connections/${second.id}`)).status).toBe(200);
+    expect(await personMappingRepo.findByChannelUser("telegram", "guardian")).toBeNull();
+  });
+
+  it("deletes the guardian link when the other bot no longer has Talk", async () => {
+    const { personMappingRepo, first, second, del } = await twoBots();
+
+    expect((await del(`/connections/${second.id}/grants/bot`)).status).toBe(200);
+    expect(await personMappingRepo.findByChannelUser("telegram", "guardian")).not.toBeNull();
+    expect((await del(`/connections/${first.id}`)).status).toBe(200);
+    expect(await personMappingRepo.findByChannelUser("telegram", "guardian")).toBeNull();
+  });
+});
+
 describe("connection pairing teardown", () => {
   it.each([
     "connection",
@@ -514,13 +812,17 @@ describe("connection pairing teardown", () => {
     const conn = await registry.connect("discord");
     await registry.importCredential(conn.id, "bot", fixture.botCredential());
     await registry.importCredential(conn.id, "user", fixture.userCredential());
-    const personMappingRepo = new PersonMappingRepository(db);
+    const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
     await personMappingRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",
       channelMappings: [{ channel: "discord", channelUserId: "paired" }],
     });
-    const approvalsRepo = new ApprovalsRepository(db, () => Buffer.alloc(32, 1));
+    const approvalsRepo = new ApprovalsRepository(
+      db,
+      new PersonMappingRepository(db, identityServiceOf),
+      () => Buffer.alloc(32, 1),
+    );
     const input = {
       connectionId: conn.id,
       channel: "discord" as const,

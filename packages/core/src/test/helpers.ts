@@ -21,7 +21,7 @@ import { PromptBuilder } from "../core/prompt-builder.js";
 import { createAIToolState } from "../core/ai-tool-state.js";
 import type { CodexAccountService } from "../core/codex/account-service.js";
 import { createModelResolver } from "../core/model-resolver.js";
-import { fallbackConversationTitle } from "../core/conversation-title.js";
+import { normalizeConversationTitle } from "../core/conversation-title.js";
 import { createAgentSessionManager } from "../core/agent-session.js";
 import { createActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
@@ -52,6 +52,7 @@ import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { OutboxRepository } from "../db/repositories/outbox.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
@@ -60,12 +61,13 @@ import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
 import type { Accounts } from "../channels/accounts.js";
 import type { Channel, Channels } from "../channels/channel.js";
-import type { ConnectionPortsDeps } from "../channels/connection-ports.js";
+import type { ChannelOf, ConnectionPortsDeps } from "../channels/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
 import { createChannelsService } from "../channels/channels-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
+import type { ServiceOfChannel } from "../db/repositories/channel-records.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
@@ -76,7 +78,7 @@ import { ExecutionJournalRepository } from "../db/repositories/execution-journal
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
-import { ActionEngine } from "../actions/engine.js";
+import { ActionEngine, type ActionEngineRepositories } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionLoader } from "../actions/loader.js";
 import {
@@ -95,7 +97,7 @@ import {
   type RomeCloudListingClient,
 } from "../apps/rome-cloud-listing-client.js";
 import { createAppStoreService } from "../apps/store-service.js";
-import type { CatalogEvent } from "../apps/state.js";
+import { type CatalogEvent, isResolvedApp } from "../apps/state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
 import { assembleDiagnosticBundle } from "../lib/diagnostics.js";
@@ -134,6 +136,15 @@ function migratedSystemImage(): Buffer {
   return migratedImage;
 }
 
+/** Maps every channel to itself. Valid only where no service has a later channel. */
+export const identityServiceOf: ServiceOfChannel = (channel) => channel;
+
+/** Maps a channel to its service through `db`'s channel records, as Rome does. */
+export function recordedServiceOf(db: DrizzleDb): ServiceOfChannel {
+  const records = new ChannelRecordsRepository(db);
+  return (channel) => records.serviceOf(channel);
+}
+
 /** Opens a private in-memory database at the latest system schema. Each call
  *  starts from the same freshly migrated state, unaffected by writes to any
  *  other instance. */
@@ -147,6 +158,17 @@ export function createTestDb(): TestDb {
   return {
     db,
     close: () => sqlite.close(),
+  };
+}
+
+/** The repositories an `ActionEngine` records into, backed by `db` or a fresh test DB. */
+export function createActionEngineRepos(
+  db: DrizzleDb = createTestDb().db,
+): ActionEngineRepositories {
+  return {
+    executions: new ActionExecutionsRepository(db),
+    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, recordedServiceOf(db))),
+    journal: new ExecutionJournalRepository(db),
   };
 }
 
@@ -258,6 +280,10 @@ export class FakeTransport {
   }
 }
 
+/** Every Connection backs the channel named after its service, as when each
+ *  service holds one Connection. */
+export const serviceChannelOf: ChannelOf = (connection) => connection.service;
+
 /** What a test Connection's live talker offers: sending and its features. */
 export type TestTalker = Omit<Talker, "start" | "stop">;
 
@@ -343,7 +369,7 @@ export function testChannels(
     db: deps.db,
     whatsAppAccounts: deps.whatsAppAccounts,
     linkedInAccounts: deps.linkedInAccounts,
-    connections: { registry: connections },
+    connections: { registry: connections, channelOf: serviceChannelOf },
   });
 }
 
@@ -505,7 +531,7 @@ export async function buildTestDeps(
   }
 
   const sessionsRepo = new SessionsRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db);
+  const personMappingRepo = new PersonMappingRepository(db, recordedServiceOf(db));
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -515,7 +541,7 @@ export async function buildTestDeps(
   const connections = createTestConnections(transports);
   const channels = testChannels({ db, whatsAppAccounts, linkedInAccounts }, connections);
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
-  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
+  const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
   // A private env object per deps bag: route tests exercise apply/remove
   // without touching the real process.env of the test runner.
@@ -534,19 +560,17 @@ export async function buildTestDeps(
   const routinesRepo = new RoutinesRepository(db);
   const routineRunsRepo = new RoutineRunsRepository(db);
 
-  const actionRegistry = new ActionRegistryImpl([]);
+  const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(
     actionRegistry,
-    undefined,
-    actionExecutionsRepo,
-    approvalsRepo,
-    executionJournalRepo,
+    { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     { processRole: "main" },
   );
 
-  const actionLoader = new ActionLoader();
-  const agentLoader = new AgentLoader();
-  const skillCatalog = new SkillCatalog();
+  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+  const actionLoader = new ActionLoader(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity);
+  const skillCatalog = new SkillCatalog(artifactIdentity);
   const romeCloudListings = createRomeCloudListingClient();
   const appDomainRoot = join(tmpdir(), `rome-test-deps-${process.pid}-${++testDepsSeq}`);
   const { catalog: appCatalog, manager: appManager } = createAppDomain({
@@ -563,7 +587,7 @@ export async function buildTestDeps(
   // before startApi. Tests that exercise agent turns load fixture agents
   // explicitly (src/test/fixtures/agents/); a test that hits the default agent
   // path without doing so fails loudly with `Agent "main" not found`.
-  const sessionManager = new SessionManager(sessionsRepo);
+  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
   const promptBuilder = new PromptBuilder(appCatalog);
   const codexAccountChangedListeners = new Set<() => void>();
   const codexAccountService: CodexAccountService = {
@@ -625,6 +649,7 @@ export async function buildTestDeps(
   const agentSessionManager = createAgentSessionManager({
     agentLoader,
     sessionManager,
+    sessionsRepo,
     promptBuilder,
     actionRegistry,
     modelResolver,
@@ -632,6 +657,7 @@ export async function buildTestDeps(
     skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    channelSurface: testChannelSurface,
     subagentExecutionService,
     activeSubagentRegistry,
   });
@@ -672,6 +698,7 @@ export async function buildTestDeps(
   const channelsService = createChannelsService({
     channels: () => channels,
     registry: connections,
+    channelOf: serviceChannelOf,
   });
 
   return {
@@ -724,7 +751,7 @@ export async function buildTestDeps(
     agentSessionManager,
     conversationTitleGenerator: {
       async generate(firstMessage) {
-        return fallbackConversationTitle(firstMessage) ?? "New Chat";
+        return normalizeConversationTitle(firstMessage) ?? "New Chat";
       },
     },
     agentRunner,
@@ -867,6 +894,7 @@ import {
   setTelemetryBridge as setTelemetryBridgeOnSdk,
   type TelemetryBridge,
 } from "@rome-os/app-runtime";
+import { testChannelSurface } from "./channel-surface.js";
 export interface SpanHarness {
   exporter: InMemorySpanExporter;
   shutdown(): Promise<void>;
@@ -960,8 +988,6 @@ export function clearTestTelemetryBridge(): void {
   setTelemetryBridgeOnSdk(null);
 }
 
-import type { ResolvedApp } from "../apps/state.js";
-
 export interface AppLifecycleHarness {
   profileRoot: string;
   appsRoot: string;
@@ -1019,7 +1045,7 @@ export async function createAppLifecycleHarness(
       bundleFetcher: options.bundleFetcher,
       romeCloudListings: options.romeCloudListings,
     });
-    const actionRegistry = new ActionRegistryImpl([], artifactIdentity);
+    const actionRegistry = new ActionRegistryImpl(artifactIdentity);
     const actionLoader = new ActionLoader(artifactIdentity);
     const agentLoader = new AgentLoader(artifactIdentity);
     const skillCatalog = new SkillCatalog(artifactIdentity);
@@ -1050,8 +1076,8 @@ export async function createAppLifecycleHarness(
     // their DB tables.
     appCatalog.subscribe(async function migrationSubscriber(event: CatalogEvent) {
       if (event.change === "removed") return;
-      const current = event.current as ResolvedApp | null;
-      if (current == null || current.manifest === undefined || current.db == null) return;
+      const current = event.current;
+      if (!isResolvedApp(current) || current.db == null) return;
       try {
         await migrateAppByMetadata(db, current.db);
       } catch {
@@ -1059,14 +1085,9 @@ export async function createAppLifecycleHarness(
       }
     });
 
-    const actionEngine = new ActionEngine(
-      actionRegistry,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { processRole: "worker" },
-    );
+    const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(db), {
+      processRole: "worker",
+    });
     const settingsRepo = new SettingsRepository(db);
     const webchatRepo = new WebChatRepository(db);
     const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
@@ -1074,8 +1095,8 @@ export async function createAppLifecycleHarness(
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {
       actionRegistry.unregisterOwnedBy("app", event.appId);
       if (event.change === "removed") return;
-      const current = event.current as ResolvedApp | null;
-      if (current == null || current.manifest === undefined) return;
+      const current = event.current;
+      if (!isResolvedApp(current)) return;
       const result = await registerAppActions(
         actionLoader,
         actionRegistry,

@@ -6,6 +6,7 @@ import {
   count,
   desc,
   eq,
+  gt,
   gte,
   inArray,
   isNotNull,
@@ -25,11 +26,24 @@ import {
   webchatWorkspaceLayouts,
 } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
+import {
+  channelConversationId,
+  isWebchatChat,
+  romeSessionKind,
+  storedSessionType,
+  withSessionKind,
+} from "../session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
-import type { TurnFeedbackRating } from "@rome/api-types/trace-segments";
+import type {
+  TraceSubagentResultEvent,
+  TraceSubagentStartEvent,
+  TurnFeedbackRating,
+} from "@rome/api-types/trace-segments";
 import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
+import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
 
 export interface StoredTurnFeedback {
   rating: TurnFeedbackRating;
@@ -353,9 +367,7 @@ const SEARCH_MESSAGE_SCAN_LIMIT = 400;
 const SEARCH_SNIPPET_CONTEXT = 40;
 const SEARCH_SNIPPET_LENGTH = 160;
 
-export function channelConversationId(channel: string, threadId: string): string {
-  return `channel:${channel}:${threadId}`;
-}
+export { channelConversationId };
 
 /** The row id a recorded outbound message takes when the provider named it.
  *  Derived rather than random so a caller that knows the provider's id can
@@ -525,6 +537,8 @@ function mergeTraceContent(stubContent: string, blockContents: string[]): string
 
 /** Max rows per INSERT batch, keeping bound parameters well under SQLite limits. */
 const TRACE_BLOCK_INSERT_CHUNK = 200;
+export const INTERRUPTED_TURN_ERROR =
+  "Rome restarted while this was running. The task did not finish.";
 
 function traceAccountingColumns(role: string, content: string): TraceAccountingTotals | null {
   if (role !== "trace") return null;
@@ -809,7 +823,7 @@ export class WebChatRepository {
       .select({
         agentName: romeSessions.agentName,
         id: romeSessions.id,
-        type: romeSessions.type,
+        type: romeSessionKind,
         largeModelSelection: romeSessions.largeModelSelection,
         projectPath: romeSessions.projectPath,
       })
@@ -876,6 +890,7 @@ export class WebChatRepository {
     type: "webchat" | "webchat_handoff" = "webchat",
     // JSON handback contract for a 'webchat_handoff' session (see schema comment).
     handoffSpec: string | null = null,
+    ownership: { ownerKey?: string | null; inheritOwnerFrom?: string } = {},
   ) {
     const now = new Date();
     if (projectPath?.trim()) {
@@ -884,13 +899,17 @@ export class WebChatRepository {
 
     await this.db.insert(romeSessions).values({
       id,
+      ownerKey:
+        ownership.ownerKey !== undefined
+          ? ownership.ownerKey
+          : await this.getSessionOwnerKey(ownership.inheritOwnerFrom),
       name,
       personaId: personaId ?? null,
       projectName,
       projectPath,
       largeModelSelection: largeModelSelection ?? null,
       agentName,
-      type,
+      type: storedSessionType(type),
       sourceChannel: "webchat",
       sourceThreadId: id,
       sourceThreadName: name,
@@ -904,19 +923,24 @@ export class WebChatRepository {
 
   async ensureRomeSession(input: EnsureRomeSessionInput): Promise<void> {
     const now = new Date();
+    // A chat is a channel row on the webchat channel, at its own address,
+    // whichever of the two types the caller names it by.
+    const chat =
+      input.type === "webchat" || (input.type === "channel" && input.sourceChannel === "webchat");
     await this.db
       .insert(romeSessions)
       .values({
         id: input.id,
+        ownerKey: await this.getSessionOwnerKey(input.parentSessionId),
         name: input.name,
         personaId: null,
         projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
         projectPath: input.projectPath ?? null,
         largeModelSelection: null,
         agentName: input.agentName,
-        type: input.type,
-        sourceChannel: input.sourceChannel ?? null,
-        sourceThreadId: input.sourceThreadId ?? null,
+        type: storedSessionType(input.type),
+        sourceChannel: chat ? "webchat" : (input.sourceChannel ?? null),
+        sourceThreadId: chat ? input.id : (input.sourceThreadId ?? null),
         sourceThreadName: input.sourceThreadName ?? null,
         sourceThreadType: input.sourceThreadType ?? null,
         triggerKind: input.trigger?.triggerKind ?? null,
@@ -930,7 +954,7 @@ export class WebChatRepository {
         handoffSpec: null,
         createdAt: now,
         activityAt: now,
-        lastSeenActivityAt: input.type === "webchat" ? now : null,
+        lastSeenActivityAt: chat ? now : null,
       })
       .onConflictDoNothing({ target: romeSessions.id });
   }
@@ -955,7 +979,11 @@ export class WebChatRepository {
             threadType: "group",
           })
         : null;
-    const existing = await this.findChannelConversation(input.channel, input.threadId);
+    const found = await this.findChannelConversation(input.channel, input.threadId);
+    if (found && input.threadName) {
+      await this.backfillChannelConversationName(found, input, input.threadName);
+    }
+    const existing = found && { id: found.id, agentName: found.agentName };
     if (existing) {
       if (!parent) return existing;
       // A native thread has its own model session but not its own routing
@@ -965,6 +993,11 @@ export class WebChatRepository {
         .set({ parentSessionId: parent.id, agentName: parent.agentName })
         .where(eq(romeSessions.id, existing.id));
       return { ...existing, agentName: parent.agentName };
+    }
+    // Only the dashboard opens a chat, through `createSession`. A webchat
+    // address that names no chat is a deleted chat or a handoff, not a new one.
+    if (input.channel === "webchat") {
+      throw new Error(`No chat at webchat address ${input.threadId}`);
     }
 
     const id = channelConversationId(input.channel, input.threadId);
@@ -999,7 +1032,7 @@ export class WebChatRepository {
     if (!conversation) {
       throw new Error(`Failed to resolve conversation ${input.channel}:${input.threadId}`);
     }
-    return conversation;
+    return { id: conversation.id, agentName: conversation.agentName };
   }
 
   async addConversationMessage(input: {
@@ -1089,6 +1122,9 @@ export class WebChatRepository {
     turnId?: string;
     knownToProvider: boolean;
   }): Promise<void> {
+    // Sender-supplied content (send_message, the outbox): only the host may
+    // author routine cards, so a forged one never reaches the transcript.
+    input = { ...input, content: stripHostOnlyPartsFromContent(input.content) };
     if (input.platformMessageId) {
       const delivered = await this.db
         .select({ id: romeAgentMessages.id })
@@ -1293,12 +1329,59 @@ export class WebChatRepository {
       );
   }
 
+  /** Fill in a conversation's name when the row holds only its address, as
+   *  rows created before the channel reported a name do. A name already
+   *  recorded is kept, so email subjects and guardian renames stay put. */
+  private async backfillChannelConversationName(
+    row: { id: string; name: string; sourceThreadName: string | null },
+    address: { channel: string; threadId: string },
+    threadName: string,
+  ): Promise<void> {
+    const placeholders = [address.threadId, `${address.channel}:${address.threadId}`];
+    const sourceMissing =
+      row.sourceThreadName === null || placeholders.includes(row.sourceThreadName);
+    const nameMissing = placeholders.includes(row.name);
+    if (!sourceMissing && !nameMissing) return;
+    // Each column is rewritten only while it still holds a placeholder, so a
+    // concurrent message that already filled it in leaves nothing to change.
+    const updated = await this.db
+      .update(romeSessions)
+      .set({
+        sourceThreadName: sql`case when ${romeSessions.sourceThreadName} is null or ${inArray(romeSessions.sourceThreadName, placeholders)} then ${threadName} else ${romeSessions.sourceThreadName} end`,
+        name: sql`case when ${inArray(romeSessions.name, placeholders)} then ${threadName} else ${romeSessions.name} end`,
+      })
+      .where(
+        and(
+          eq(romeSessions.id, row.id),
+          or(
+            isNull(romeSessions.sourceThreadName),
+            inArray(romeSessions.sourceThreadName, placeholders),
+            inArray(romeSessions.name, placeholders),
+          ),
+        ),
+      )
+      .returning({ name: romeSessions.name });
+    if (nameMissing && updated[0]?.name === threadName) {
+      this.emitSessionNameChanged(row.id, threadName);
+    }
+  }
+
   private async findChannelConversation(
     channel: string,
     threadId: string,
-  ): Promise<{ id: string; agentName: string | null } | null> {
+  ): Promise<{
+    id: string;
+    agentName: string | null;
+    name: string;
+    sourceThreadName: string | null;
+  } | null> {
     const rows = await this.db
-      .select({ id: romeSessions.id, agentName: romeSessions.agentName })
+      .select({
+        id: romeSessions.id,
+        agentName: romeSessions.agentName,
+        name: romeSessions.name,
+        sourceThreadName: romeSessions.sourceThreadName,
+      })
       .from(romeSessions)
       .where(
         and(
@@ -1309,6 +1392,26 @@ export class WebChatRepository {
       )
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  /** The id of the conversation a channel address names, or null when none
+   *  exists yet. A webchat conversation's address is its own id. Forks and
+   *  subagent runs copy their parent's address, so only conversation types
+   *  match. */
+  async findConversationIdByAddress(channel: string, threadId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ id: romeSessions.id })
+      .from(romeSessions)
+      .where(
+        and(
+          inArray(romeSessions.type, ["webchat_handoff", "channel"]),
+          eq(romeSessions.sourceChannel, channel),
+          eq(romeSessions.sourceThreadId, threadId),
+        ),
+      )
+      .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
+      .limit(1);
+    return rows[0]?.id ?? null;
   }
 
   async deleteSession(id: string) {
@@ -1334,7 +1437,38 @@ export class WebChatRepository {
     });
   }
 
-  async listSessions(status: "active" | "archived" | "all" = "active") {
+  async getSessionOwnerKey(sessionId?: string | null): Promise<string | null> {
+    if (!sessionId) return null;
+    const [row] = await this.db
+      .select({ ownerKey: romeSessions.ownerKey })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, sessionId))
+      .limit(1);
+    return row?.ownerKey ?? null;
+  }
+
+  /** Attributes a person-created fork and its opening input without changing agent context. */
+  async attributePersonFork(sessionId: string, turnId: string, actor: SessionActor | undefined) {
+    await this.db.transaction((tx) => {
+      tx.update(romeSessions)
+        .set({ ownerKey: sessionOwnerKey(actor) })
+        .where(eq(romeSessions.id, sessionId))
+        .run();
+      tx.update(romeAgentMessages)
+        .set({ actor: actor ?? null })
+        .where(
+          and(
+            eq(romeAgentMessages.sessionId, sessionId),
+            eq(romeAgentMessages.turnId, turnId),
+            eq(romeAgentMessages.role, "user"),
+          ),
+        )
+        .run();
+    });
+  }
+
+  /** Omit ownerKey to list all owners. NULL matches none, and the guardian includes NULL-owned sessions. */
+  async listSessions(status: "active" | "archived" | "all" = "active", ownerKey?: string | null) {
     // Only top-level guardian chats. Handoff child sessions are reached through
     // their parent's handoff card, not the sidebar. `status` filters on the
     // reversible archive flag: "active" (default, preserves prior behavior)
@@ -1352,7 +1486,19 @@ export class WebChatRepository {
         awaitingGuardian: sessionAwaitingGuardian,
       })
       .from(romeSessions)
-      .where(and(eq(romeSessions.type, "webchat"), archivePredicate))
+      .where(
+        and(
+          isWebchatChat,
+          archivePredicate,
+          ownerKey === undefined
+            ? undefined
+            : ownerKey === null
+              ? sql`0`
+              : ownerKey === "guardian"
+                ? or(eq(romeSessions.ownerKey, ownerKey), isNull(romeSessions.ownerKey))
+                : eq(romeSessions.ownerKey, ownerKey),
+        ),
+      )
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id));
   }
 
@@ -1380,7 +1526,7 @@ export class WebChatRepository {
       .innerJoin(romeSessions, eq(romeAgentMessages.sessionId, romeSessions.id))
       .where(
         and(
-          eq(romeSessions.type, "webchat"),
+          isWebchatChat,
           inArray(romeAgentMessages.role, ["user", "assistant", "notification"]),
           ...likePredicates,
         ),
@@ -1426,14 +1572,14 @@ export class WebChatRepository {
     await this.db
       .update(romeSessions)
       .set({ archivedAt: now })
-      .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "webchat")));
+      .where(and(eq(romeSessions.id, id), isWebchatChat));
   }
 
   async unarchiveSession(id: string, _options: { now?: Date } = {}) {
     await this.db
       .update(romeSessions)
       .set({ archivedAt: null })
-      .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "webchat")));
+      .where(and(eq(romeSessions.id, id), isWebchatChat));
   }
 
   async pinSession(id: string, options: { now?: Date } = {}) {
@@ -1441,14 +1587,14 @@ export class WebChatRepository {
     await this.db
       .update(romeSessions)
       .set({ pinnedAt: now })
-      .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "webchat")));
+      .where(and(eq(romeSessions.id, id), isWebchatChat));
   }
 
   async unpinSession(id: string) {
     await this.db
       .update(romeSessions)
       .set({ pinnedAt: null })
-      .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "webchat")));
+      .where(and(eq(romeSessions.id, id), isWebchatChat));
   }
 
   async listProjectPaths() {
@@ -1477,11 +1623,7 @@ export class WebChatRepository {
           )
         )`
       : undefined;
-    const predicates = [
-      eq(romeSessions.projectPath, projectPath),
-      eq(romeSessions.type, "webchat"),
-      cursorPredicate,
-    ];
+    const predicates = [eq(romeSessions.projectPath, projectPath), isWebchatChat, cursorPredicate];
 
     const rows = await this.db
       .select(sessionSelectFields)
@@ -1498,7 +1640,7 @@ export class WebChatRepository {
     const countRows = await this.db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(romeSessions)
-      .where(and(eq(romeSessions.projectPath, projectPath), eq(romeSessions.type, "webchat")));
+      .where(and(eq(romeSessions.projectPath, projectPath), isWebchatChat));
 
     return {
       nextCursor,
@@ -1525,7 +1667,7 @@ export class WebChatRepository {
           )
         )`
       : undefined;
-    const predicates = [eq(romeSessions.type, "webchat"), cursorPredicate];
+    const predicates = [isWebchatChat, cursorPredicate];
 
     const rows = await this.db
       .select(sessionSelectFields)
@@ -1542,7 +1684,7 @@ export class WebChatRepository {
     const countRows = await this.db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(romeSessions)
-      .where(eq(romeSessions.type, "webchat"));
+      .where(isWebchatChat);
 
     return {
       nextCursor,
@@ -1553,7 +1695,7 @@ export class WebChatRepository {
 
   async getSession(id: string) {
     const rows = await this.db.select().from(romeSessions).where(eq(romeSessions.id, id));
-    return rows[0] ?? null;
+    return rows[0] ? withSessionKind(rows[0]) : null;
   }
 
   async markSessionRead(id: string) {
@@ -1568,15 +1710,19 @@ export class WebChatRepository {
   /**
    * A branch whose first answer completed on its own provider thread stops
    * being special: it becomes an ordinary chat, listed and managed like any
-   * other. Provenance columns are left in place — only the type and the
-   * unread clock change. Guarded on the current type so a double call, or a
-   * call racing a delete, is a no-op.
+   * other. It takes its own address in place of the parent's it copied, and
+   * the unread clock starts; lineage stays in `parent_session_id` and the
+   * trigger columns. Guarded on the current type so a double call, or a call
+   * racing a delete, is a no-op.
    */
   async promoteForkToChat(id: string): Promise<void> {
     await this.db
       .update(romeSessions)
       .set({
-        type: "webchat",
+        type: storedSessionType("webchat"),
+        // A fork carries its parent's address. As a chat it answers at its own.
+        sourceChannel: "webchat",
+        sourceThreadId: sql`${romeSessions.id}`,
         lastSeenActivityAt: sql`${romeSessions.activityAt}`,
       })
       .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "fork")));
@@ -1629,7 +1775,12 @@ export class WebChatRepository {
     return rows[0]?.count ?? 0;
   }
 
-  async recordUserInput(id: string, sessionId: string, content: string): Promise<boolean> {
+  async recordUserInput(
+    id: string,
+    sessionId: string,
+    content: string,
+    actor?: SessionActor,
+  ): Promise<boolean> {
     return this.db.transaction((tx) => {
       const createdAt = new Date();
       const inserted = tx
@@ -1640,6 +1791,7 @@ export class WebChatRepository {
           content,
           role: "user",
           inputState: "queued",
+          actor: actor ?? null,
           createdAt,
         })
         .onConflictDoNothing()
@@ -1661,6 +1813,120 @@ export class WebChatRepository {
       .update(romeAgentMessages)
       .set({ inputState: "unknown" })
       .where(inArray(romeAgentMessages.inputState, ["queued", "submitted", "accepted"]));
+  }
+
+  /**
+   * End the turns a stopped Rome process left open. A crash writes no
+   * `turn_end`, so the turn would look unfinished forever. Each trace started
+   * within `windowMs` of the newest trace whose last `turn_start` has no later
+   * `turn_end` gets an `error` block and a `turn_end` with status `error`.
+   * Before them, each `subagent_start` in that turn with no `subagent_result`
+   * gets a `subagent_result` with status `failed` and the same error, since no
+   * process is left to finish that subagent.
+   * Counting from the newest trace, not from now, keeps the stopped process's
+   * turns in range however long Rome was down. Older traces stay as they are.
+   * Returns how many turns it ended.
+   */
+  async endInterruptedTurns(windowMs: number): Promise<number> {
+    const newest = await this.db
+      .select({ createdAt: sql<number | null>`max(${romeAgentMessages.createdAt})` })
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.role, "trace"))
+      .get();
+    if (newest?.createdAt == null) return 0;
+    // `created_at` is stored in seconds.
+    const since = new Date(newest.createdAt * 1000 - windowMs);
+    const blockSeq = (type: string) => sql<number | null>`(
+      select max(b."seq") from "rome_agent_trace_blocks" b
+      where b."message_id" = ${romeAgentMessages.id}
+        and json_extract(b."content", '$.type') = ${type}
+    )`;
+    const traces = await this.db
+      .select({
+        id: romeAgentMessages.id,
+        sessionId: romeAgentMessages.sessionId,
+        turnId: romeAgentMessages.turnId,
+        lastStart: blockSeq("turn_start"),
+        lastEnd: blockSeq("turn_end"),
+        lastSeq: sql<number>`(
+          select max(b."seq") from "rome_agent_trace_blocks" b
+          where b."message_id" = ${romeAgentMessages.id}
+        )`,
+      })
+      .from(romeAgentMessages)
+      .where(and(eq(romeAgentMessages.role, "trace"), gte(romeAgentMessages.createdAt, since)));
+
+    let ended = 0;
+    for (const trace of traces) {
+      if (trace.lastStart === null || (trace.lastEnd !== null && trace.lastEnd > trace.lastStart)) {
+        continue;
+      }
+      const start = await this.db
+        .select({ content: romeAgentTraceBlocks.content })
+        .from(romeAgentTraceBlocks)
+        .where(
+          and(
+            eq(romeAgentTraceBlocks.messageId, trace.id),
+            eq(romeAgentTraceBlocks.seq, trace.lastStart),
+          ),
+        )
+        .get();
+      const turnStart = start
+        ? (JSON.parse(start.content) as { turnId?: string; agent?: string })
+        : {};
+      const agent = turnStart.agent ? { agent: turnStart.agent } : {};
+      const delegations = await this.db
+        .select({ content: romeAgentTraceBlocks.content })
+        .from(romeAgentTraceBlocks)
+        .where(
+          and(
+            eq(romeAgentTraceBlocks.messageId, trace.id),
+            gt(romeAgentTraceBlocks.seq, trace.lastStart),
+            inArray(sql`json_extract(${romeAgentTraceBlocks.content}, '$.type')`, [
+              "subagent_start",
+              "subagent_result",
+            ]),
+          ),
+        )
+        .orderBy(asc(romeAgentTraceBlocks.seq));
+      const running = new Map<string, TraceSubagentStartEvent>();
+      for (const row of delegations) {
+        const block = JSON.parse(row.content) as TraceSubagentStartEvent | TraceSubagentResultEvent;
+        if (block.type === "subagent_start") running.set(block.toolUseId, block);
+        else running.delete(block.toolUseId);
+      }
+      // No `endedAt`: the subagent's real end is unknown, and now would count the downtime.
+      const subagentEnds: TraceSubagentResultEvent[] = [...running.values()].map((call) => ({
+        type: "subagent_result",
+        toolUseId: call.toolUseId,
+        agentName: call.agentName,
+        sessionId: call.sessionId,
+        turnId: call.turnId,
+        status: "failed",
+        error: { message: INTERRUPTED_TURN_ERROR },
+        ...(call.agent ? { agent: call.agent } : {}),
+      }));
+      await this.appendTraceBlocks({
+        messageId: trace.id,
+        sessionId: trace.sessionId,
+        turnId: trace.turnId,
+        startSeq: trace.lastSeq + 1,
+        blocks: [
+          ...subagentEnds,
+          { type: "error", error: INTERRUPTED_TURN_ERROR, ...agent },
+          {
+            type: "turn_end",
+            turnId: turnStart.turnId ?? trace.turnId,
+            status: "error",
+            // The turn's real duration is unknown; elapsed time would count the downtime.
+            durationMs: 0,
+            ...agent,
+          },
+        ],
+      });
+      ended += 1;
+    }
+    return ended;
   }
 
   async getUserInput(sessionId: string, inputId: string) {
@@ -1743,16 +2009,17 @@ export class WebChatRepository {
    */
   private async insertBackendMessage(
     sessionId: string,
-    turnId: string,
+    turnId: string | null,
     role: string,
     parts: MessagePart[],
+    id: string = randomUUID(),
   ): Promise<StoredWebchatMessage> {
     const message = await this.db.transaction((tx) => {
       const createdAt = new Date();
       const rows = tx
         .insert(romeAgentMessages)
         .values({
-          id: randomUUID(),
+          id,
           sessionId,
           turnId,
           role,
@@ -1779,6 +2046,19 @@ export class WebChatRepository {
     }
     this.emitMessageInserted(message);
     return message;
+  }
+
+  /**
+   * Persist an assistant message a channel sends into a chat and notify
+   * subscribers, like {@link insertBackendMessage}.
+   */
+  async addSentMessage(
+    id: string,
+    sessionId: string,
+    parts: MessagePart[],
+    turnId: string | null,
+  ): Promise<void> {
+    await this.insertBackendMessage(sessionId, turnId, "assistant", parts, id);
   }
 
   async addTurnRecapMessage(input: AddTurnRecapMessageInput): Promise<StoredWebchatMessage> {
@@ -2044,7 +2324,7 @@ export class WebChatRepository {
     if (threadId !== null) {
       predicates.push(eq(romeAgentMessages.sessionId, threadId));
     } else {
-      predicates.push(eq(romeSessions.type, "webchat"));
+      predicates.push(isWebchatChat);
     }
 
     return this.db

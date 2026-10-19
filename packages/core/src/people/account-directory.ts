@@ -50,27 +50,6 @@ interface AccountLink {
 }
 
 /**
- * Every account there is, unordered and unfiltered — the whole directory a page
- * is cut out of (`sliceAccountDirectory`).
- *
- * Whole rather than paged: the fold that decides which addresses are one
- * account needs every address book entire, and an account past a channel's own
- * cutoff is one the guardian cannot find and no count includes. The cost is one
- * read of each address book for the fold and one more to name what it found.
- *
- * A contacts list's rows: who each account is, and nothing about what anyone
- * said. No message store is read — not a mirror's history and not the triage
- * record's — because the directory orders by name and previews nothing, so
- * every message-derived fact would be work no reader of this read ever renders.
- * {@link readAccountStream} is the read that does.
- */
-export async function readAccountDirectory(
-  deps: AccountDirectoryDeps,
-): Promise<DirectoryAccount[]> {
-  return observeAccounts(deps);
-}
-
-/**
  * Every account something has happened on, unordered and unfiltered — the whole
  * stream a page is cut out of (`sliceAccountStream`).
  *
@@ -90,7 +69,7 @@ export async function readAccountDirectory(
  * Read in rounds rather than all at once — see {@link ADDRESSES_PER_ROUND}.
  */
 export async function readAccountStream(deps: AccountDirectoryDeps): Promise<StreamAccount[]> {
-  const accounts = await observeAccounts(deps);
+  const accounts = await readAccountDirectory(deps);
   const stores = personMessageStores(deps);
 
   const heads = new Map<DirectoryAccount, Message>();
@@ -153,13 +132,24 @@ function* rounds(accounts: readonly DirectoryAccount[]): Generator<DirectoryAcco
 }
 
 /**
- * Which accounts there are, what each is called, and who holds it — the join
- * both reads share, so the two can never disagree about which accounts exist.
+ * Every account there is, unordered and unfiltered — the whole directory a page
+ * is cut out of (`sliceAccountDirectory`).
  *
- * No history is read here, for either caller. What each account last did is the
- * stream's own second read, over the message stores.
+ * Whole rather than paged: the fold that decides which addresses are one
+ * account needs every address book entire, and an account past a channel's own
+ * cutoff is one the guardian cannot find and no count includes. The cost is one
+ * read of each address book for the fold and one more to name what it found.
+ *
+ * A contacts list's rows: who each account is, and nothing about what anyone
+ * said. No message store is read — not a mirror's history and not the triage
+ * record's — because the directory orders by name and previews nothing, so
+ * every message-derived fact would be work no reader of this read ever renders.
+ * {@link readAccountStream} is the read that does, and it starts from this
+ * join so the two can never disagree about which accounts exist.
  */
-async function observeAccounts(deps: AccountDirectoryDeps): Promise<DirectoryAccount[]> {
+export async function readAccountDirectory(
+  deps: AccountDirectoryDeps,
+): Promise<DirectoryAccount[]> {
   const [senders, persons] = await Promise.all([
     // The triage record, for the senders it is the only source of: a channel
     // Rome mirrors no address book for has no other row saying the account

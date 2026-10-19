@@ -61,6 +61,15 @@ export default defineConfig({
       "import.meta.env.ROME_MOCK_STRICT_E2E": "false",
     },
   },
+  dev: {
+    ...baseConfig.dev,
+    // Compile every dynamic import at startup. By default Rsbuild compiles one
+    // only when a browser first requests it. If that rebuild changes the
+    // entry's initial chunks, the dev server reloads every open page. The
+    // layout suite runs parallel workers against one cold server, so one
+    // test's first visit to a route would reload another test's page.
+    lazyCompilation: false,
+  },
   server: {
     ...baseConfig.server,
     port: Number(process.env.MOCK_WEB_PORT ?? 3200),

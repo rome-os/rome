@@ -1,0 +1,48 @@
+[
+  {
+    "source": "http",
+    "match": {
+      "status": "^502$",
+      "path": "^/api/"
+    },
+    "reason": "The proxy accepts requests before the backend listens."
+  },
+  {
+    "source": "http",
+    "match": {
+      "status": "^404$",
+      "path": "^/api/chat/sessions/[^/]+/layout$"
+    },
+    "reason": "The route returns 404 when no layout is saved, and the client treats it as empty."
+  },
+  {
+    "source": "http",
+    "match": {
+      "status": "^401$",
+      "path": "^/api/(settings|auth/me)$"
+    },
+    "reason": "The dashboard probes these before a session exists."
+  },
+  {
+    "source": "console",
+    "match": {
+      "text": "status of (401|404) \\("
+    },
+    "reason": "Chromium echoes the expected HTTP entries above to the console."
+  },
+  {
+    "source": "rome-log",
+    "match": {
+      "message": "aborting with incomplete response"
+    },
+    "reason": "Caddy logs this when a browser context closes an open SSE stream."
+  },
+  {
+    "source": "requestfailed",
+    "match": {
+      "error": "^net::ERR_ABORTED$",
+      "path": "^/api/.*(events|stream)$"
+    },
+    "reason": "Closing or leaving a page aborts its open event stream."
+  }
+]

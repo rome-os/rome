@@ -10,7 +10,7 @@ export const RECENT_APPS_VISIBLE = 3;
 /** An app leaves the zone after this long without being installed or opened.
  *  14 days, not 7: a weekly habit would otherwise expire an hour before its
  *  next use. */
-export const RECENT_APPS_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+const RECENT_APPS_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 /** appId → ISO-8601 time of the last recorded open. */
 export type AppLastOpened = Record<string, string>;
 

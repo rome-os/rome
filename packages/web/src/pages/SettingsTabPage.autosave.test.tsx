@@ -9,10 +9,6 @@ import SettingsPage from "./SettingsTabPage";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -75,6 +71,7 @@ function mockSettingsBackend(initialSettings: Record<string, unknown> = {}) {
         previousVersion: null,
         instance: { auth: "no_token", accountId: null, instanceId: null },
         database: { ok: true },
+        relay: { configured: false, depositUrlConfigured: false },
         channels: [],
         apps: { total: 0, failed: [], broken: [] },
       });
@@ -92,20 +89,6 @@ function renderAdvancedSettings() {
       <MemoryRouter initialEntries={["/settings/advanced"]}>
         <Routes>
           <Route path="/settings/:tab" element={<SettingsPage />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
-
-function renderSettingsAt(path: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/settings/:tab" element={<SettingsPage />} />
-          <Route path="/apps/inbox" element={<div>Inbox dashboard</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -131,17 +114,6 @@ describe("SettingsPage Advanced autosave", () => {
 
     expect(await screen.findByText("Advanced Settings")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
-  });
-
-  it.each([
-    "/settings/trust",
-    "/settings/sentinel",
-    "/settings/sentinel-log",
-  ])("redirects relocated settings route %s to the Inbox page", async (path) => {
-    mockSettingsBackend();
-    renderSettingsAt(path);
-
-    expect(await screen.findByText("Inbox dashboard")).toBeTruthy();
   });
 
   it("autosaves the Fable developer setting when changed", async () => {

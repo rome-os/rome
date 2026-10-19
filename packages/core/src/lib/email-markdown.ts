@@ -12,7 +12,7 @@
 import DOMPurify from "dompurify";
 import { JSDOM } from "jsdom";
 import juice from "juice";
-import { marked } from "marked";
+import { marked, type Tokens } from "marked";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
 import type { RomeMailBody } from "./rome-cloud-mail.js";
@@ -156,7 +156,10 @@ export function inboundBodyToMarkdown(body: RomeMailBody, preview?: string): str
     const md = htmlToMarkdown(body.strippedHtml);
     if (md) return md;
   }
-  if (body.strippedText?.trim()) return cleanPlainText(body.strippedText);
+  if (body.strippedText?.trim()) {
+    const md = cleanPlainText(body.strippedText);
+    if (md) return md;
+  }
   return (preview ?? "").trim();
 }
 
@@ -182,6 +185,8 @@ const ROME = {
   primary: "#d86f4c", // primary/links = ember-brand
 } as const;
 
+// The footer's Settings link when the instance has no public origin to send
+// recipients to.
 const ROME_SETTINGS_URL = "https://romeos.cc";
 
 // Hosted logo PNGs (Gmail/Outlook render hosted PNG; they strip inline SVG and
@@ -285,8 +290,83 @@ export function sanitizeEmailHtml(html: string): string {
   });
 }
 
+const MARKDOWN_OPTIONS = { gfm: true, breaks: true } as const;
+
 function renderMarkdown(markdown: string): string {
-  return marked.parse(markdown, { async: false, gfm: true, breaks: true }) as string;
+  return marked.parse(markdown, { ...MARKDOWN_OPTIONS, async: false }) as string;
+}
+
+// A root-relative href is a dashboard route, the shape the agent charter gives
+// file links. A mail client has no dashboard page to resolve it against, so
+// outbound mail prefixes the instance origin. `//host` names another host and
+// stays as written.
+function isRootRelative(href: string): boolean {
+  return href.startsWith("/") && !href.startsWith("//");
+}
+
+let linkDocument: Document | null = null;
+
+// Prefixes the instance origin onto each root-relative `<a href>`, keeping the
+// path, query and fragment as written. Markup with no such link comes back
+// byte for byte.
+function resolveHtmlLinks(html: string, instanceOrigin: string | null): string {
+  if (!instanceOrigin) return html;
+  linkDocument ??= new JSDOM("").window.document;
+  const template = linkDocument.createElement("template");
+  template.innerHTML = html;
+  let resolved = false;
+  for (const anchor of template.content.querySelectorAll("a[href]")) {
+    const href = anchor.getAttribute("href")?.trim() ?? "";
+    if (!isRootRelative(href)) continue;
+    anchor.setAttribute("href", instanceOrigin + href);
+    resolved = true;
+  }
+  return resolved ? template.innerHTML : html;
+}
+
+// The text/plain alternative is markdown, so its link and definition
+// destinations get the same prefix. Only the lexer's link and definition
+// tokens are candidates, so code never is. A token is rewritten by replacing
+// its source text, which is exact only while every occurrence of that text is
+// the token itself. Text that also appears inside a code sample stays as
+// written.
+function resolveMarkdownLinks(markdown: string, instanceOrigin: string | null): string {
+  if (!instanceOrigin) return markdown;
+  const links = new Map<string, { resolved: string | null; count: number }>();
+  marked.walkTokens(marked.lexer(markdown, MARKDOWN_OPTIONS), (token) => {
+    if (token.type !== "link" && token.type !== "def") return;
+    const link = token as Tokens.Link | Tokens.Def;
+    if (!isRootRelative(link.href)) return;
+    const seen = links.get(link.raw);
+    if (seen) seen.count++;
+    else links.set(link.raw, { resolved: resolveDestination(link, instanceOrigin), count: 1 });
+  });
+  let text = markdown;
+  for (const [raw, { resolved, count }] of links) {
+    if (resolved && markdown.split(raw).length - 1 === count) text = text.split(raw).join(resolved);
+  }
+  return text;
+}
+
+// The destination follows the last `](` of `[label](dest "title")`, or the
+// `]:` of `[label]: dest`, after optional spaces and `<`. The last, because a
+// label can quote link syntax. A destination written with backslash escapes
+// does not read as `href` and stays as written, and so does a reference such
+// as `[label][ref]`, whose destination sits on its definition.
+function resolveDestination(
+  token: Tokens.Link | Tokens.Def,
+  instanceOrigin: string,
+): string | null {
+  const opener = token.raw.lastIndexOf(token.type === "link" ? "](" : "]:");
+  if (opener === -1) return null;
+  const lead = /^\s*<?/.exec(token.raw.slice(opener + 2))?.[0] ?? "";
+  const start = opener + 2 + lead.length;
+  if (!token.raw.startsWith(token.href, start)) return null;
+  return token.raw.slice(0, start) + instanceOrigin + token.raw.slice(start);
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
 
 function inlineStyles(bodyHtml: string): string {
@@ -301,11 +381,6 @@ function appendBeforeBodyClose(doc: string, fragment: string): string {
   return i === -1 ? doc + fragment : doc.slice(0, i) + fragment + doc.slice(i);
 }
 
-/**
- * Render an outbound message into a multipart pair. AgentMail's send API takes
- * `text` and `html` together, so we always produce both: the markdown source is
- * the `text/plain` alternative and `marked`+`juice` produces the inlined HTML.
- */
 // The branded "accent-band" shell wrapped around outbound markdown emails: a
 // centered white card on Rome's canvas, an ember top band carrying the Rome
 // logo tile + wordmark, the prose body, and a muted footer with the Rome glyph.
@@ -314,25 +389,26 @@ function appendBeforeBodyClose(doc: string, fragment: string): string {
 // The Rome sign-off shared by every outbound email: the transparent glyph plus
 // "Sent by Rome · Settings". Inside the markdown shell it's the card's footer
 // row; appended to app-supplied HTML it rides in `standaloneFooter` below.
-function footerContent(): string {
+function footerContent(instanceOrigin: string | null): string {
+  const settingsUrl = instanceOrigin ? `${instanceOrigin}/settings` : ROME_SETTINGS_URL;
   return (
     `<img src="${ROME_LOGO_GLYPH_URL}" width="16" height="16" alt="" class="rome-footer-logo" />` +
-    `<span class="rome-footer-text">Sent by Rome · <a href="${ROME_SETTINGS_URL}">Settings</a></span>`
+    `<span class="rome-footer-text">Sent by Rome · <a href="${escapeAttribute(settingsUrl)}">Settings</a></span>`
   );
 }
 
 // A centered, muted footer block appended below app-supplied HTML so those
 // emails carry the same Rome sign-off as the markdown ones. No card/band shell —
 // the app owns its body design; we only add the footer underneath it.
-function standaloneFooter(): string {
+function standaloneFooter(instanceOrigin: string | null): string {
   return [
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0">',
-    `<tr><td align="center" class="rome-standalone-footer">${footerContent()}</td></tr>`,
+    `<tr><td align="center" class="rome-standalone-footer">${footerContent(instanceOrigin)}</td></tr>`,
     "</table>",
   ].join("");
 }
 
-function wrapInShell(bodyHtml: string): string {
+function wrapInShell(bodyHtml: string, instanceOrigin: string | null): string {
   const band =
     `<img src="${ROME_LOGO_TILE_URL}" width="32" height="32" alt="" class="rome-band-logo" />` +
     `<span class="rome-band-mark">Rome</span>`;
@@ -342,16 +418,28 @@ function wrapInShell(bodyHtml: string): string {
     '<table role="presentation" cellpadding="0" cellspacing="0" class="rome-card">',
     `<tr><td class="rome-band">${band}</td></tr>`,
     `<tr><td class="rome-body">${bodyHtml}</td></tr>`,
-    `<tr><td class="rome-footer">${footerContent()}</td></tr>`,
+    `<tr><td class="rome-footer">${footerContent(instanceOrigin)}</td></tr>`,
     "</table>",
     "</td></tr></table>",
   ].join("");
 }
 
-export function markdownToEmailHtml(markdown: string): { html: string; text: string } {
-  const text = markdown.trim();
-  const html = inlineStyles(wrapInShell(renderMarkdown(text)));
-  return { html, text };
+/**
+ * Render an outbound message into a multipart pair. AgentMail's send API takes
+ * `text` and `html` together, so we always produce both: the markdown source is
+ * the `text/plain` alternative and `marked`+`juice` produces the inlined HTML.
+ * Root-relative links in both resolve against `instanceOrigin`, this instance's
+ * public web origin, and the footer's Settings link opens its settings page.
+ * Without an origin, links stay as written and Settings opens the Rome website.
+ */
+export function markdownToEmailHtml(
+  markdown: string,
+  instanceOrigin: string | null = null,
+): { html: string; text: string } {
+  const source = markdown.trim();
+  const body = resolveHtmlLinks(renderMarkdown(source), instanceOrigin);
+  const html = inlineStyles(wrapInShell(body, instanceOrigin));
+  return { html, text: resolveMarkdownLinks(source, instanceOrigin) };
 }
 
 /**
@@ -373,15 +461,19 @@ export function markdownToEmailHtml(markdown: string): { html: string; text: str
  * would inline generic selectors (e.g. `img { display:block }`, `td { padding:0 }`)
  * onto the footer and distort it. Giving the footer its own pass — seeing only
  * `OUTBOUND_BASE_CSS` — keeps it isolated regardless.
+ *
+ * Root-relative links in the app's HTML and in either text resolve against
+ * `instanceOrigin` as in {@link markdownToEmailHtml}.
  */
 export function htmlToEmailMultipart(
   html: string,
   fallbackText?: string,
+  instanceOrigin: string | null = null,
 ): { html: string; text: string } {
-  const sanitized = sanitizeEmailHtml(html);
+  const sanitized = resolveHtmlLinks(sanitizeEmailHtml(html), instanceOrigin);
   const inlinedBody = inlineStyles(sanitized);
-  const inlinedFooter = juice.inlineContent(standaloneFooter(), OUTBOUND_BASE_CSS);
+  const inlinedFooter = juice.inlineContent(standaloneFooter(instanceOrigin), OUTBOUND_BASE_CSS);
   const inlined = appendBeforeBodyClose(inlinedBody, inlinedFooter);
   const text = fallbackText?.trim() || htmlToMarkdown(sanitized, true);
-  return { html: inlined, text };
+  return { html: inlined, text: resolveMarkdownLinks(text, instanceOrigin) };
 }

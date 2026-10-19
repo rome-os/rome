@@ -30,20 +30,20 @@ interface FileBrowserPageProps {
   renderCreateExtra?: (ctx: { type: "file" | "folder"; parentPath: string | null }) => ReactNode;
   /**
    * Fires whenever the user's selection in the browser changes: the file
-   * currently displayed and any multi-select set in the tree. Used by hosts
-   * (e.g. the workspace `ProjectsWidget`) that need to mirror selection
-   * elsewhere — the browser stays the source of truth.
+   * currently displayed, the folder whose contents the browser is showing,
+   * and any multi-select set in the tree. Used by hosts (e.g. the workspace
+   * `ProjectsWidget`) that need to mirror selection elsewhere — the browser
+   * stays the source of truth.
    */
   onSelectionChange?: (selection: {
     selectedPath: string | null;
+    currentFolderPath: string | null;
     selectedTreePaths: string[];
   }) => void;
   rootLabel: string;
   rootPanelTrigger?: boolean;
-  selectInitialFolderOnMobile?: boolean;
   sidebarHeading?: string;
   searchPlaceholder: string;
-  title: string;
 }
 
 export function FileBrowserPage({
@@ -62,15 +62,9 @@ export function FileBrowserPage({
   onSelectionChange,
   rootLabel,
   rootPanelTrigger = false,
-  selectInitialFolderOnMobile = true,
   sidebarHeading,
   searchPlaceholder,
-  title,
 }: FileBrowserPageProps) {
-  // `title` is part of the public contract but rendered upstream — keep the
-  // prop so callers don't break, but don't reference it here.
-  void title;
-
   const { t } = useTranslation("files");
   const location = useLocation();
   const navigate = useNavigate();
@@ -89,7 +83,6 @@ export function FileBrowserPage({
     return resolveInitialSelectedFolderPath({
       initialSelectedFolderPath,
       isDesktopViewport: getIsDesktopViewport(),
-      selectInitialFolderOnMobile,
     });
   });
 
@@ -118,11 +111,9 @@ export function FileBrowserPage({
       t,
       embedded,
       getDeleteDescription,
-      onStartChatFromFolder,
       onPathsDeleted,
       onFolderCreated,
       renderCreateExtra,
-      onSelectionChange,
     }),
     [
       apiBasePath,
@@ -136,11 +127,9 @@ export function FileBrowserPage({
       t,
       embedded,
       getDeleteDescription,
-      onStartChatFromFolder,
       onPathsDeleted,
       onFolderCreated,
       renderCreateExtra,
-      onSelectionChange,
     ],
   );
 

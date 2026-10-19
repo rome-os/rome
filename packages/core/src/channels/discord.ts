@@ -6,6 +6,7 @@ import {
   MessageReferenceType,
   MessageType,
   AttachmentBuilder,
+  DiscordAPIError,
   REST,
   RESTEvents,
   Routes,
@@ -54,6 +55,7 @@ import {
   DISCORD_BROKER_RESPONSE_LIMIT_BYTES,
   normalizeDiscordEndpoint,
 } from "@rome/api-types/discord-broker";
+import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./linked-agents.js";
 import { preserveMentionOnlyText } from "./mention-only.js";
 
 interface DiscordRestMessage {
@@ -332,6 +334,39 @@ export interface DiscordAdapterLike {
   executeApiRequest(request: ChannelApiRequest): Promise<ChannelApiResult>;
 }
 
+function projectDiscordBody(
+  status: number,
+  headers: ResponseLike["headers"],
+  bytes: Uint8Array,
+): ChannelApiResult {
+  if (bytes.byteLength > DISCORD_BROKER_RESPONSE_LIMIT_BYTES) {
+    return {
+      error: {
+        type: "response_too_large",
+        message: "Discord response exceeded the 16 MiB broker limit.",
+      },
+    };
+  }
+
+  const text = new TextDecoder().decode(bytes);
+  let body: unknown = null;
+  if (text.length > 0) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+
+  return {
+    response: {
+      status,
+      headers: filterChannelApiResponseHeaders(headers.entries()),
+      body,
+    },
+  };
+}
+
 /**
  * The Discord bot transport. Inbound gateway messages arrive as the channel's
  * own record, a `ChannelMessage` whose `raw` is the discord.js `Message`, so
@@ -354,6 +389,8 @@ export class DiscordAdapter {
    * disappears later).
    */
   private listAgents?: () => string[];
+  private linkedAgent?: () => string | null | undefined;
+  private hasAgent?: (name: string) => boolean;
   private resolveDiscordPerson?: (
     channelUserId: string,
   ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
@@ -381,6 +418,12 @@ export class DiscordAdapter {
     };
     maxMessagesPerChannel?: number;
     listAgents?: () => string[];
+    /** The agent linked to this adapter's channel, as `linkedAgentResolver`
+     *  answers it. Absent, the channel reads as one that takes no link. */
+    linkedAgent?: () => string | null | undefined;
+    /** Whether an agent is loaded, aliases included. Absent, every agent
+     *  counts as loaded. */
+    hasAgent?: (name: string) => boolean;
     resolveDiscordPerson?: (
       channelUserId: string,
     ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
@@ -394,6 +437,8 @@ export class DiscordAdapter {
     this.conversationSettings = config.conversationSettings;
     this.maxMessagesPerChannel = config.maxMessagesPerChannel ?? 100;
     this.listAgents = config.listAgents;
+    this.linkedAgent = config.linkedAgent;
+    this.hasAgent = config.hasAgent;
     this.resolveDiscordPerson = config.resolveDiscordPerson;
     this.chatStop = config.chatStop;
     this.onGatewayFault = config.onGatewayFault;
@@ -513,7 +558,7 @@ export class DiscordAdapter {
       void queuedRequest.catch(() => undefined);
       const response = await Promise.race([queuedRequest, aborted]);
       return await this.projectDiscordResponse(response);
-    } catch {
+    } catch (error) {
       // A deadline or epoch teardown wins over any Response event emitted by an
       // intermediate discord.js attempt (for example, a 429 it plans to retry).
       if (controller.signal.aborted) {
@@ -543,10 +588,16 @@ export class DiscordAdapter {
         };
       }
       // discord.js parses and throws for non-2xx responses. Its Response event
-      // gives us a clone first, preserving status, safe headers, and the raw
-      // Discord error payload without serializing the thrown request object.
-      if (capturedResponse) {
-        const projected = await this.projectDiscordResponse(capturedResponse);
+      // gives us the status and safe headers. Under the default undici
+      // transport that event object shares its body with the response
+      // discord.js already read for a 4xx, so the Discord error payload comes
+      // from the thrown DiscordAPIError instead of the event body.
+      const observedResponse = capturedResponse as ResponseLike | null;
+      if (observedResponse) {
+        const projected =
+          error instanceof DiscordAPIError
+            ? this.projectDiscordApiError(error, observedResponse)
+            : await this.projectDiscordResponse(observedResponse);
         if (projected.response?.status === 401) {
           this.onGatewayFault?.({
             kind: "credential",
@@ -572,30 +623,20 @@ export class DiscordAdapter {
 
   private async projectDiscordResponse(response: ResponseLike): Promise<ChannelApiResult> {
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > DISCORD_BROKER_RESPONSE_LIMIT_BYTES) {
-      return {
-        error: {
-          type: "response_too_large",
-          message: "Discord response exceeded the 16 MiB broker limit.",
-        },
-      };
-    }
+    return projectDiscordBody(response.status, response.headers, bytes);
+  }
 
-    const text = new TextDecoder().decode(bytes);
-    let body: unknown = null;
-    if (text.length > 0) {
-      try {
-        body = JSON.parse(text);
-      } catch {
-        body = text;
-      }
+  private projectDiscordApiError(error: DiscordAPIError, response: ResponseLike): ChannelApiResult {
+    // discord.js keeps parsed JSON, or raw bytes for a non-JSON error body.
+    const raw: unknown = error.rawError;
+    if (raw instanceof ArrayBuffer) {
+      return projectDiscordBody(error.status, response.headers, new Uint8Array(raw));
     }
-
     return {
       response: {
-        status: response.status,
+        status: error.status,
         headers: filterChannelApiResponseHeaders(response.headers.entries()),
-        body,
+        body: raw,
       },
     };
   }
@@ -937,7 +978,7 @@ export class DiscordAdapter {
             "  `/channel bots none|mentions|all` — how to handle messages from other bots",
             "  `/channel quiet on|off` — stay silent when others are @mentioned",
             "  `/channel thread off|on` — disable/enable auto-thread for replies",
-            "  `/channel agent set <name>` — route this channel to a specific agent (default main)",
+            "  `/channel agent set <name>` — route this channel to a specific agent, or pin it to main (default: the bot's linked agent)",
             "  `/channel agent clear` — clear the agent binding for this channel",
             "  `/channel reset` — clear all overrides for this channel",
             "  `/channel status` — show current channel configuration",
@@ -982,6 +1023,13 @@ export class DiscordAdapter {
             ? (interaction.channel.name as string)
             : undefined;
         const mention = `${channelName ? `#${channelName}` : `<#${channelId}>`}`;
+        const answering = (choice: string | undefined) =>
+          answeringAgentOf(
+            this.linkedAgent?.(),
+            choice,
+            interaction.guildId ? "group" : "private",
+            this.hasAgent,
+          );
 
         if (sub === "status") {
           const snapshot = await this.getConversationSettings(
@@ -991,7 +1039,8 @@ export class DiscordAdapter {
             interaction.guild?.name,
           );
           const cfg = this.legacyConfig(snapshot);
-          const agentLine = `agent: ${cfg.agentName ?? "main"}${
+          const agent = answering(snapshot ? storedAgentChoice(snapshot) : undefined);
+          const agentLine = `agent: ${describeAnsweringAgent(agent)}${
             snapshot?.inheritedFrom ? " (inherited)" : ""
           }`;
           const lines = [
@@ -1114,7 +1163,7 @@ export class DiscordAdapter {
           if (sub === "clear") {
             await this.updateChannelConfig(channelId, { agentName: undefined, ...audit });
             await interaction.editReply({
-              content: `✓ ${mention} agent binding removed — messages now route to main`,
+              content: `✓ ${mention} agent binding removed — ${answersLine(answering(undefined))}`,
             });
             return;
           }
@@ -1127,12 +1176,13 @@ export class DiscordAdapter {
               });
               return;
             }
-            // "main" is the default — treat `set main` as a clear so we don't
-            // store a redundant named binding.
+            // `set main` pins the channel to main, so it stops following the
+            // bot's linked agent. `clear` is how it follows the link again.
             if (isCoreMainAgentId(name)) {
-              await this.updateChannelConfig(channelId, { agentName: undefined, ...audit });
+              await this.updateChannelConfig(channelId, { agentName: "main", ...audit });
               await interaction.editReply({
-                content: `✓ ${mention} binding removed — messages now route to main`,
+                content: `✓ ${mention} pinned to main — ${answersLine(answering("main"))}
+Use \`/channel agent clear\` to undo.`,
               });
               return;
             }
@@ -1147,9 +1197,12 @@ export class DiscordAdapter {
               return;
             }
             await this.updateChannelConfig(channelId, { agentName: name, ...audit });
+            const agent = answering(name);
             await interaction.editReply({
               content:
-                `✓ ${mention} now routes to agent \`${name}\`\n` +
+                (agent === name
+                  ? `✓ ${mention} now routes to agent \`${name}\`\n`
+                  : `✓ ${mention} stored agent \`${name}\`, but ${answersLine(agent)}\n`) +
                 `Use \`/channel agent clear\` to undo.`,
             });
             return;
@@ -1602,6 +1655,12 @@ export class DiscordAdapter {
     });
     return sent.id;
   }
+}
+
+function answersLine(agent: string | null): string {
+  return agent
+    ? `messages now route to ${agent}`
+    : "no agent answers here: this bot has no linked agent, or it is not loaded";
 }
 
 /** Breaks at newlines where possible. */

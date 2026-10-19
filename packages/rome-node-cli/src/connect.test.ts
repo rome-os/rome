@@ -33,7 +33,13 @@ async function listen(server: Server) {
 
 async function fixture(options: { pollError?: string; transientStatus?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-connect-"));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  cleanup.push(() =>
+    rm(root, { recursive: true, force: true, maxRetries: 5 }).catch((error) => {
+      // A stopped daemon can hold observe.db open a little longer, and Windows refuses to remove
+      // an open file. A leftover temporary directory is harmless there.
+      if (process.platform !== "win32") throw error;
+    }),
+  );
   const token = `romedev_${"a".repeat(43)}`;
   const deviceCode = "secret-device-code";
   let socket: WebSocket | undefined;

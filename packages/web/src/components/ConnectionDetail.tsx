@@ -5,6 +5,7 @@ import { AvailableToAddLabel, SoleSlotScope } from "@/components/connection-slot
 import { OAuthConnectionSection } from "@/components/connections/oauth-connection-section";
 import { ComposioConnectionSection } from "@/components/connections/composio-connection-section";
 import { WebchatConnectionCard } from "@/components/connections/webchat-connection-card";
+import { AccountControls } from "@/components/connections/account-controls";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import { CHANNEL_CONFIGS, ChannelConnectCard } from "@/components/channels/channel-connect-card";
@@ -30,12 +31,16 @@ export function ConnectionDetailBody({
   composio,
   onRefresh,
   onFlash,
+  onOpenAccount,
 }: {
   card: ConnectionCard;
   composio: ComposioCliStatus | null;
   /** Re-fetch `/api/connections` (and the Composio status where shown). */
   onRefresh: () => void;
   onFlash: (message: string) => void;
+  /** Open another account's card by its route, after "Add another account"
+   *  minted it. Without it, the add button is hidden. */
+  onOpenAccount?: (route: string) => void | Promise<void>;
 }) {
   // Always-on (webchat) has its own card — connected, ✓ bullets, no ceremony.
   if (card.alwaysOn) {
@@ -72,6 +77,12 @@ export function ConnectionDetailBody({
           </div>
         );
       })}
+      <AccountControls
+        card={card}
+        onRefresh={onRefresh}
+        onFlash={onFlash}
+        onOpenAccount={onOpenAccount}
+      />
     </div>
   );
 
@@ -154,12 +165,14 @@ export function ConnectionDetailDialog({
   onClose,
   onRefresh,
   onFlash,
+  onOpenAccount,
 }: {
   card: ConnectionCard | null;
   composio: ComposioCliStatus | null;
   onClose: () => void;
   onRefresh: () => void;
   onFlash: (message: string) => void;
+  onOpenAccount?: (route: string) => void | Promise<void>;
 }) {
   return (
     <Dialog open={card !== null} onClose={onClose} size="lg">
@@ -168,10 +181,12 @@ export function ConnectionDetailDialog({
           <ConnectionDetailHeader card={card} onClose={onClose} />
           <DialogBody>
             <ConnectionDetailBody
+              key={card.route}
               card={card}
               composio={composio}
               onRefresh={onRefresh}
               onFlash={onFlash}
+              onOpenAccount={onOpenAccount}
             />
           </DialogBody>
         </>

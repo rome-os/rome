@@ -2,7 +2,6 @@ cases:
   - name: FILE-01 Search the project tree
     tags:
       - files
-      - shard-4
     steps:
       - app.open:
           path: /projects
@@ -14,7 +13,6 @@ cases:
   - name: FILE-02 Open a project file
     tags:
       - files
-      - shard-4
     steps:
       - app.open:
           path: /projects
@@ -27,7 +25,6 @@ cases:
   - name: FILE-03 Handle a duplicate project-file rename
     tags:
       - files
-      - shard-4
     steps:
       - app.open:
           path: /projects
@@ -54,7 +51,6 @@ cases:
   - name: FILE-04 Open a Memory file
     tags:
       - files
-      - shard-4
     steps:
       - app.open:
           path: /memory

@@ -23,12 +23,10 @@ import {
   getCurrentOrCreateHookInvocationContext,
   hookTelemetryAttrs,
   recordHookSkip,
-  resolveHookRecursionConfig,
   runWithHookInvocationContext,
   type HookDispatchResult,
   type HookIdentity,
   type HookInvocationContext,
-  type HookRecursionConfig,
 } from "./hook-recursion.js";
 
 const log = createLogger("agent-lifecycle");
@@ -67,7 +65,6 @@ export interface AgentLifecycleDispatcher {
 
 export interface AgentLifecycleDispatcherOptions {
   appRuntimeServices?: RomeAppRuntimeServices;
-  hookRecursion?: Partial<HookRecursionConfig>;
 }
 
 export function toLifecycleThreadContext(
@@ -127,7 +124,6 @@ export function createAgentLifecycleDispatcher(
   let startedHooks: LoadedLifecycleHook[] = [];
   let finishedHooks: LoadedLifecycleHook[] = [];
   const finishedListeners = new Map<string, (event: AgentTurnFinishedEvent) => void>();
-  const hookRecursion = resolveHookRecursionConfig(options.hookRecursion);
 
   return {
     async loadFromCatalog(catalog) {
@@ -163,7 +159,7 @@ export function createAgentLifecycleDispatcher(
 
     dispatchStarted(event) {
       const parentContext = getCurrentOrCreateHookInvocationContext();
-      return dispatchToAppHooks(startedHooks, event, hookRecursion, parentContext);
+      return dispatchToAppHooks(startedHooks, event, parentContext);
     },
 
     dispatchFinished(event) {
@@ -181,7 +177,7 @@ export function createAgentLifecycleDispatcher(
           });
         }
       }
-      return dispatchToAppHooks(finishedHooks, event, hookRecursion, parentContext);
+      return dispatchToAppHooks(finishedHooks, event, parentContext);
     },
 
     onFinished(listener) {
@@ -229,7 +225,6 @@ function assertFinishedHook(hook: LoadedLifecycleHook["hook"], artifact: Artifac
 function dispatchToAppHooks(
   hooks: LoadedLifecycleHook[],
   event: AgentTurnStartedEvent | AgentTurnFinishedEvent,
-  hookRecursion: HookRecursionConfig,
   parentContext: HookInvocationContext,
 ): HookDispatchResult {
   const result = createHookDispatchResult();
@@ -239,11 +234,11 @@ function dispatchToAppHooks(
       appId: loaded.appId,
       hookName: loaded.hookName,
     };
-    const decision = evaluateHookInvocation(parentContext, identity, hookRecursion);
+    const decision = evaluateHookInvocation(parentContext, identity);
     if (!decision.allowed) {
       result.skipped += 1;
       result.skips.push(decision);
-      recordHookSkip(log, decision, hookRecursion);
+      recordHookSkip(log, decision);
       continue;
     }
 
@@ -251,7 +246,7 @@ function dispatchToAppHooks(
     void Promise.resolve()
       .then(async () => {
         await runWithHookInvocationContext(decision.nextContext, async () =>
-          wrapHookSpan(loaded.hookName, hookTelemetryAttrs(decision, hookRecursion), async () => {
+          wrapHookSpan(loaded.hookName, hookTelemetryAttrs(decision), async () => {
             const hookEvent = structuredClone(event) as
               | AgentTurnStartedEvent
               | AgentTurnFinishedEvent;

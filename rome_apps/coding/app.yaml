@@ -2,7 +2,7 @@ formatVersion: 1
 id: coding
 name: Coding
 icon: assets/icon.svg
-version: 0.3.1
+version: 0.3.2
 description: >-
   The coding agent, the app_creation skill, and a frontend gallery of live UI
   mocks. Use app_creation when visuals are important, such as for apps,
@@ -19,7 +19,6 @@ api:
   entry: api/index
 
 agents:
-  - agents/planning.yaml
   - agents/coding.yaml
 
 actions:

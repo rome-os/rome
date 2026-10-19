@@ -8,17 +8,17 @@ import {
   createTreeHandler,
   type FileBrowserScope,
 } from "../../lib/file-browser-server.js";
+import { PROJECTS_IGNORED_NAMES, PROJECTS_SEARCH_GLOBS } from "../../lib/project-entry-policy.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
-import { resolveWebchatProjectPath } from "../../webchat/projects.js";
+import {
+  resolveProjectWorkingDirWithinRoot,
+  resolveWebchatProjectPath,
+} from "../../webchat/projects.js";
 import { createLogger } from "../../logger.js";
 import type { StoredSharedChat } from "../../db/repositories/webchat.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:share");
-
-// Mirror of projects-files.ts; share projects are read-only so writers + the
-// file-watch SSE stream are intentionally omitted.
-const PROJECTS_IGNORED_NAMES = [".next", ".turbo", "build", "coverage", "dist", "node_modules"];
 
 /**
  * Public, login-free surface for shared chats. The auth edge waves through
@@ -67,15 +67,20 @@ export function shareRoutes(deps: ApiDeps): Hono {
     }
   };
 
-  // The project dir this share is scoped to, or null if it can't/shouldn't serve
-  // files (revoked, no projects tile, or no/invalid stored project path). A
-  // non-null result is guaranteed to sit inside the projects root.
-  const projectRootForShare = (share: StoredSharedChat): string | null => {
+  // The real project dir this share is scoped to, or null if it can't/shouldn't
+  // serve files (revoked, no projects tile, no/invalid stored project path, or a
+  // project dir that is missing or leaves the projects root through a symlink).
+  // A non-null result is guaranteed to sit inside the real projects root.
+  const projectRootForShare = async (share: StoredSharedChat): Promise<string | null> => {
     if (!share.projectPath || !layoutHasProjectsWidget(share.layout)) return null;
     try {
       // resolveWebchatProjectPath normalizes and rejects traversal (`..`,
-      // absolute, backslash), so the result can never escape the projects root.
-      return resolveWebchatProjectPath(share.projectPath, projectsRoot);
+      // absolute, backslash). The real-path check then catches a project dir, or
+      // a parent of a nested one, that is itself a symlink out of the root.
+      return await resolveProjectWorkingDirWithinRoot(
+        resolveWebchatProjectPath(share.projectPath, projectsRoot),
+        projectsRoot,
+      );
     } catch {
       return null;
     }
@@ -86,6 +91,7 @@ export function shareRoutes(deps: ApiDeps): Hono {
   // project-relative `selectedPath` (rewritten at share time) stays addressable.
   const scopeFor = (token: string, rootDir: string): FileBrowserScope => ({
     assetBasePath: `/api/share/${encodeURIComponent(token)}/projects/asset`,
+    confineToRealRoot: true,
     ignoredNames: PROJECTS_IGNORED_NAMES,
     logicalRoot: "projects",
     rootDir,
@@ -94,13 +100,15 @@ export function shareRoutes(deps: ApiDeps): Hono {
   // Read-only projects file browser, token-gated AND project-scoped: every
   // request resolves the share, 404s unless it's live with a projects tile and a
   // valid project, then roots the browser at that one project dir — so a link
-  // exposes that project's files read-only, never the whole projects root.
+  // exposes that project's files read-only, never the whole projects root. The
+  // scope confines real paths too, so a symlink inside the project cannot reach
+  // files outside it.
   const readHandler =
     (make: (scope: FileBrowserScope) => Handler): Handler =>
     async (c, next) => {
       const token = c.req.param("token") ?? "";
       const share = token ? await deps.webchatRepo.getSharedChat(token) : null;
-      const rootDir = share ? projectRootForShare(share) : null;
+      const rootDir = share ? await projectRootForShare(share) : null;
       if (!rootDir) return c.json({ error: "Share not found" }, 404);
       return make(scopeFor(token, rootDir))(c, next);
     };
@@ -116,15 +124,7 @@ export function shareRoutes(deps: ApiDeps): Hono {
     readHandler((scope) =>
       createSearchHandler({
         ...scope,
-        searchGlobs: [
-          "!**/.git/**",
-          "!**/.next/**",
-          "!**/.turbo/**",
-          "!**/build/**",
-          "!**/coverage/**",
-          "!**/dist/**",
-          "!**/node_modules/**",
-        ],
+        searchGlobs: PROJECTS_SEARCH_GLOBS,
       }),
     ),
   );

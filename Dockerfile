@@ -286,6 +286,13 @@ RUN set -eux; \
 ENV COREPACK_ENABLE_STRICT=0
 RUN corepack enable && corepack prepare pnpm@11.6.0 --activate
 
+# The image ships no uv, but rome can install it under ~/.local. uv's default
+# directories for its commands, tools and Pythons are already under ~/.local,
+# which an upgrade keeps. This system-wide default stops uv from building an
+# environment on /usr/bin/python3, which an upgrade replaces. An account's own
+# uv.toml takes precedence.
+RUN mkdir -p /etc/uv && printf 'python-preference = "only-managed"\n' > /etc/uv/uv.toml
+
 # Create rome user early so COPY --chown can avoid expensive recursive chown
 RUN groupadd --system rome && \
     useradd --system --no-log-init --gid rome --create-home --shell /bin/bash rome
@@ -380,6 +387,9 @@ COPY scripts/docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 COPY scripts/docker/rome-init.sh /etc/s6-overlay/scripts/rome-init
 COPY scripts/docker/rome-tailscale-setup.sh /etc/s6-overlay/scripts/rome-tailscale-setup
 COPY scripts/docker/rome-run-as.sh /usr/local/bin/rome-run-as
+# rome-init.sh has the rome and user shells source this. It sits outside /app
+# because user cannot read /app.
+COPY scripts/docker/rome-shell-path.sh /usr/local/share/rome/rome-shell-path.sh
 
 # Agent-facing Discord REST CLI. /app is populated from /opt/rome by
 # rome-init.sh; the package launcher always loads its compiled dist entrypoint.

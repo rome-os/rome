@@ -514,11 +514,9 @@ echo "dev-up: Rome Cloud is serving (host + in-container)"
 # Defaults — overridable via env:
 #   ROME_DEV_USERID         (default: dev)
 #   ROME_DEV_PASSWORD       (default: rome-dev-default; min 8 chars)
-#   ROME_DEV_GUARDIAN_NAME  (default: Dev)
 # ---------------------------------------------------------------------------
 ROME_DEV_USERID="${ROME_DEV_USERID:-dev}"
 ROME_DEV_PASSWORD="${ROME_DEV_PASSWORD:-rome-dev-default}"
-ROME_DEV_GUARDIAN_NAME="${ROME_DEV_GUARDIAN_NAME:-Dev}"
 
 if [ "${#ROME_DEV_PASSWORD}" -lt 8 ]; then
   echo "dev-up: ROME_DEV_PASSWORD must be at least 8 characters." >&2
@@ -560,17 +558,6 @@ done
 #     exit 1
 #   fi
 
-#   setup_payload="$(printf '{"profile":{"guardianName":"%s"}}' "$ROME_DEV_GUARDIAN_NAME")"
-#   if ! curl -fsS --max-time 10 \
-#       -b "$cookie_jar" -c "$cookie_jar" \
-#       -H "Content-Type: application/json" \
-#       -X POST \
-#       --data "$setup_payload" \
-#       "${ROME_API_BASE}/api/onboard/setup" >/dev/null; then
-#     echo "dev-up: /api/onboard/setup failed." >&2
-#     exit 1
-#   fi
-#
 #   if ! curl -fsS --max-time 10 \
 #       -b "$cookie_jar" -c "$cookie_jar" \
 #       -X POST \

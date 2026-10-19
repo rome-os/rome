@@ -8,6 +8,7 @@ import { ActionEngine } from "./engine.js";
 import { emitAgentMessage } from "./runtime-events.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
@@ -53,6 +54,9 @@ import {
   parseLegacyArtifactBindings,
 } from "../apps/artifact-id.js";
 import { createArtifactReferenceResolver } from "../apps/artifact-reference.js";
+import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
+import { resolveOneOffDate } from "../routines/schedule-trigger-provider.js";
+import type { Trigger } from "../routines/types.js";
 
 const log = createLogger("action-worker");
 
@@ -91,9 +95,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const agentLoader = new AgentLoader(artifactIdentity);
   const skillCatalog = new SkillCatalog(artifactIdentity);
   const actionLoader = new ActionLoader(artifactIdentity);
-  // The worker executes actions dispatched from main; it never resolves
-  // per-agent tool visibility, so it needs no globally-granted action names.
-  const actionRegistry = new ActionRegistryImpl([], artifactIdentity);
+  const actionRegistry = new ActionRegistryImpl(artifactIdentity);
   await hydrateCatalogFromLockfile({
     lockfilePath,
     catalog: appCatalog,
@@ -102,9 +104,11 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   await actionLoader.loadFromCatalog(appCatalog);
   await skillCatalog.loadFromCatalog(appCatalog);
 
-  const personMappingRepo = new PersonMappingRepository(db);
+  const channelRecords = new ChannelRecordsRepository(db);
+  const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
+  const personMappingRepo = new PersonMappingRepository(db, serviceOfChannel);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const approvalsRepo = new ApprovalsRepository(db);
+  const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
   const webchatRepo = new WebChatRepository(db);
   const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
   const policiesRepo = new PoliciesRepository(db);
@@ -114,14 +118,11 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
 
   const channelsService = new ChannelsServiceProxy();
   const conversationSettings = new ConversationSettingsControlProxy();
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo);
+  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, serviceOfChannel);
 
   const actionEngine = new ActionEngine(
     actionRegistry,
-    undefined,
-    actionExecutionsRepo,
-    approvalsRepo,
-    executionJournalRepo,
+    { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     {
       processRole: "worker",
       onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
@@ -157,6 +158,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       approvalsRepo,
       policyEngine,
       routinesRepo,
+      resolveOneOffDate: (trigger: Trigger) =>
+        resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
       // Worker actions reach the live main-process services over RPC. Injecting
       // the proxies here (the real coordinators are injected in the main
       // process) lets the event/app-lifecycle actions call their dep directly

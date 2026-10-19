@@ -74,10 +74,6 @@ function seed(nextApps: FixtureApp[], lastOpened: Record<string, string>) {
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 beforeEach(() => {
@@ -120,6 +116,22 @@ describe("Recent zone, expanded sidebar", () => {
     ).toEqual(["Bravo", "Alpha"]);
     expect(within(zone).getAllByRole("img", { name: "Not opened on this device" })).toHaveLength(1);
     expect(screen.queryByText("System Thing")).toBeNull();
+  });
+
+  it("leaves the user-skills carrier out even when it was just installed", async () => {
+    seed(
+      [
+        fixture("a", "Alpha", { installedAt: minutesAgo(1) }),
+        fixture("user-skills", "User Skills", { installedAt: minutesAgo(1) }),
+      ],
+      {},
+    );
+    renderSidebar();
+
+    const zone = await screen.findByRole("navigation", { name: "Recent apps" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/apps", expect.anything()));
+    expect(within(zone).getByText("Alpha")).toBeTruthy();
+    expect(screen.queryByText("User Skills")).toBeNull();
   });
 
   it("shows three, reveals the rest on Show more, and forgets that on remount", async () => {

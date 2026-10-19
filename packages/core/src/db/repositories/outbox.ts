@@ -32,6 +32,37 @@ export interface OutboxRow {
   updatedAt: Date;
 }
 
+/**
+ * How long an accepted send is given to land on the timeline before a reader
+ * may give up on it.
+ *
+ * Inside it an `unconfirmed` row is ordinary and usually clears itself, so a
+ * discard would race the clearing. Past it the message was delivered and will
+ * never be seen. Its own constant rather than the window a `sending` row is
+ * given to answer in, because the two waits are for different things and only
+ * happen to be equal.
+ */
+const SETTLES_WITHIN_MS = 5 * 60_000;
+
+/**
+ * Whether {@link OutboxRepository.discard} would take this row at `now`. The
+ * wire mapper sends the answer so the dashboard never re-derives it, and
+ * `discard` writes the same condition into its WHERE clause, which stays the
+ * authority when the two race.
+ */
+function isDismissable(row: Pick<OutboxRow, "state" | "updatedAt">, now: Date): boolean {
+  if (row.state === "failed") return true;
+  return row.state === "unconfirmed" && row.updatedAt.getTime() < settledBefore(now).getTime();
+}
+
+/**
+ * Floored to whole seconds, the granularity `updated_at` is stored at, so the
+ * predicate and the SQL bind agree right at the boundary.
+ */
+function settledBefore(now: Date): Date {
+  return new Date(Math.floor((now.getTime() - SETTLES_WITHIN_MS) / 1000) * 1000);
+}
+
 export interface OutboxAccount {
   channel: string;
   channelUserId: string;
@@ -141,15 +172,16 @@ export class OutboxRepository {
    * discard racing a retry could otherwise pass its check, have the retry claim
    * and deliver the row in between, and delete it a moment later — a message
    * sent with no record of it, which is the thing this table exists to prevent.
+   * The clause is {@link isDismissable} in SQL, and the two change together.
    */
-  async discard(id: string, settledBefore: Date): Promise<boolean> {
+  async discard(id: string, now = new Date()): Promise<boolean> {
     return this.retire(
       id,
       or(
         eq(outboundMessages.state, "failed"),
         and(
           eq(outboundMessages.state, "unconfirmed"),
-          lt(outboundMessages.updatedAt, settledBefore),
+          lt(outboundMessages.updatedAt, settledBefore(now)),
         ),
       ),
     );
@@ -191,7 +223,10 @@ export class OutboxRepository {
       .from(outboundSendReceipts)
       .where(and(eq(outboundSendReceipts.id, id), gt(outboundSendReceipts.expiresAt, now)))
       .get();
-    return receipt?.response ?? null;
+    // A receipt's row has left the outbox, so there is nothing to discard. Set
+    // here rather than stored, because receipts written before the field
+    // existed lack it.
+    return receipt ? { ...receipt.response, dismissable: false } : null;
   }
 
   private retire(id: string, condition?: SQL): boolean {
@@ -244,7 +279,7 @@ export class OutboxRepository {
   }
 }
 
-export function outboxMessage(row: OutboxRow): OutboxMessage {
+export function outboxMessage(row: OutboxRow, now = new Date()): OutboxMessage {
   return {
     id: row.id,
     channel: row.channel,
@@ -254,5 +289,6 @@ export function outboxMessage(row: OutboxRow): OutboxMessage {
     state: row.state,
     ref: row.providerMessageId ? `${row.conversationId}:${row.providerMessageId}` : null,
     error: row.error,
+    dismissable: isDismissable(row, now),
   };
 }

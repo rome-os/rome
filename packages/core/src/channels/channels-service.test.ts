@@ -6,8 +6,14 @@ import type {
   MessageReceipt,
 } from "@rome-os/app-runtime";
 import type { Channels } from "./channel.js";
-import { createChannelsService, type ChannelsServiceDeps } from "./channels-service.js";
+import {
+  backingConnection,
+  createChannelsService,
+  type ChannelsServiceDeps,
+} from "./channels-service.js";
+import { recordedChannelOf } from "./connection-ports.js";
 import type { Connection } from "../connections/types.js";
+import { serviceChannelOf } from "../test/helpers.js";
 
 // The name-keyed service app actions send and read through, in the main
 // process and, over RPC, in a worker. It finds the Connection itself.
@@ -57,6 +63,7 @@ function service(channels: unknown[] = []) {
   const channelsService = createChannelsService({
     channels: () => channels as Channels,
     registry: registryOf(CONNECTIONS, send),
+    channelOf: serviceChannelOf,
   });
   return { channelsService, send };
 }
@@ -82,6 +89,7 @@ describe("createChannelsService", () => {
     const early = createChannelsService({
       channels: () => undefined,
       registry: registryOf(CONNECTIONS, send),
+      channelOf: serviceChannelOf,
     });
 
     expect((await early.list()).map((channel) => channel.name)).toEqual([
@@ -110,6 +118,30 @@ describe("createChannelsService", () => {
     await expect(
       channelsService.send("whatsapp", "c1" as ConversationId, { text: "hi" }),
     ).rejects.toThrow('No Talk connection registered for "whatsapp"');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("neither lists nor sends through a Connection with no channel record", async () => {
+    const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
+    const registry = registryOf(CONNECTIONS, send);
+    // discord-1 has lost its record, as while `registry.remove` evicts it.
+    const channelOf = recordedChannelOf(
+      { idOf: (id) => (id === "tg-a" ? "telegram_user" : null) },
+      () => true,
+    );
+    const channelsService = createChannelsService({
+      channels: () => undefined,
+      registry,
+      channelOf,
+    });
+
+    expect(backingConnection(registry, "discord", channelOf)).toBeUndefined();
+    expect((await channelsService.list()).map((channel) => channel.name)).toEqual([
+      "telegram_user",
+    ]);
+    await expect(
+      channelsService.send("discord", "c1" as ConversationId, { text: "hi" }),
+    ).rejects.toThrow('No Talk connection registered for "discord"');
     expect(send).not.toHaveBeenCalled();
   });
 

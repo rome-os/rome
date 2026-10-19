@@ -4,7 +4,8 @@ tier: small
 provider: openai
 permissionMode: default
 maxTurns: 3
-tools: []
+tools:
+  - ImageGeneration
 systemPromptPrefix: |
   You are an image generation forwarder. Your only job, every turn:
 

@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
@@ -11,7 +11,10 @@ beforeEach(async () => {
   await i18n.changeLanguage("en");
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  rs.restoreAllMocks();
+});
 
 function renderLogin(url: string, method: "cloud" | "local" = "cloud") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -87,5 +90,60 @@ describe("dashboard access error account", () => {
     expect(screen.getByRole("alert").textContent).toContain(
       "你当前登录 Rome Cloud 的账号是 lin@example.com",
     );
+  });
+});
+
+describe("auto sign-in from Rome Cloud", () => {
+  // Rome Cloud refuses the start here so the page stays put: a refused start
+  // is the only outcome that does not navigate away.
+  function stubCloudStart() {
+    return rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(
+        (async () =>
+          new Response(JSON.stringify({ error: "unavailable" }), { status: 503 })) as typeof fetch,
+      );
+  }
+
+  function cloudStartCalls(fetchSpy: ReturnType<typeof stubCloudStart>): number {
+    return fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/auth/cloud/start")
+      .length;
+  }
+
+  it("starts the cloud sign-in once when opened from Rome Cloud", async () => {
+    const fetchSpy = stubCloudStart();
+
+    renderLogin("/login?via=cloud");
+
+    await waitFor(() => expect(cloudStartCalls(fetchSpy)).toBe(1));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(cloudStartCalls(fetchSpy)).toBe(1);
+  });
+
+  it("waits for the click without the hint", async () => {
+    const fetchSpy = stubCloudStart();
+
+    renderLogin("/login");
+
+    await screen.findByRole("button", { name: "Sign in with Rome Cloud" });
+    expect(cloudStartCalls(fetchSpy)).toBe(0);
+  });
+
+  it("does not start again after a failed attempt", async () => {
+    const fetchSpy = stubCloudStart();
+
+    renderLogin("/login?via=cloud&cloud=error&reason=state");
+
+    await screen.findByRole("alert");
+    expect(cloudStartCalls(fetchSpy)).toBe(0);
+  });
+
+  it("does not start on a local-first box", async () => {
+    const fetchSpy = stubCloudStart();
+
+    renderLogin("/login?via=cloud", "local");
+
+    await screen.findByLabelText("Password");
+    expect(cloudStartCalls(fetchSpy)).toBe(0);
   });
 });

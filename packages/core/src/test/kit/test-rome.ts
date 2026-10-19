@@ -13,7 +13,9 @@ import {
   channelNamed,
   createTestConnections,
   noAccounts,
+  serviceChannelOf,
   type TestConnections,
+  recordedServiceOf,
 } from "../helpers.js";
 import type { Channels } from "../../channels/channel.js";
 import { channelList } from "../../channels/channel-list.js";
@@ -45,6 +47,8 @@ import type { RunParams } from "../../core/types.js";
 import type { AgentConfig, AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
 import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
+import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
+import { testChannelSurface } from "../channel-surface.js";
 
 // createTestRome — boot the real runtime wiring over an in-memory DB and a
 // temp profile, faking only genuine process edges (model provider, channel
@@ -204,13 +208,14 @@ async function buildHarness(
   const testDb = createTestDb();
   const db = testDb.db;
 
+  const personMapping = new PersonMappingRepository(db, recordedServiceOf(db));
   const repos: TestRomeRepos = {
     sessions: new SessionsRepository(db),
-    approvals: new ApprovalsRepository(db),
+    approvals: new ApprovalsRepository(db, personMapping),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
     settings: new SettingsRepository(db),
-    personMapping: new PersonMappingRepository(db),
+    personMapping,
     policies: new PoliciesRepository(db),
   };
 
@@ -228,7 +233,8 @@ async function buildHarness(
       "utf-8",
     );
   }
-  const agentLoader = new AgentLoader();
+  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+  const agentLoader = new AgentLoader(artifactIdentity);
   await agentLoader.loadAll(agentsDir);
 
   const model = new FakeModel();
@@ -246,7 +252,7 @@ async function buildHarness(
     },
   });
 
-  const actionRegistry = new ActionRegistryImpl([]);
+  const actionRegistry = new ActionRegistryImpl();
   for (const action of options.actions ?? []) {
     actionRegistry.register(action);
   }
@@ -255,11 +261,13 @@ async function buildHarness(
   // fork is the edge the kit avoids.
   const actionEngine = new ActionEngine(
     actionRegistry,
-    options.engine?.tracer,
-    repos.actionExecutions,
-    repos.approvals,
-    repos.executionJournal,
     {
+      executions: repos.actionExecutions,
+      approvals: repos.approvals,
+      journal: repos.executionJournal,
+    },
+    {
+      tracer: options.engine?.tracer,
       processRole: options.engine?.processRole ?? "worker",
       onApprovalCreated: options.engine?.onApprovalCreated,
       clock: options.engine?.clock,
@@ -267,12 +275,13 @@ async function buildHarness(
     },
   );
 
-  const sessionManager = new SessionManager(repos.sessions);
+  const sessionManager = new SessionManager(repos.sessions, artifactIdentity);
   const promptBuilder = new PromptBuilder();
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
       sessionManager,
+      sessionsRepo: repos.sessions,
       promptBuilder,
       actionRegistry,
       modelResolver,
@@ -280,8 +289,9 @@ async function buildHarness(
       // Real but inert collaborators: CapabilityDiscovery is never start()ed
       // (no timers, empty CDP map) and the dispatcher has no hooks loaded.
       capabilityDiscovery: new CapabilityDiscovery(),
-      skillCatalog: new SkillCatalog(),
+      skillCatalog: new SkillCatalog(artifactIdentity),
       lifecycleDispatcher: createAgentLifecycleDispatcher(),
+      channelSurface: testChannelSurface,
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },
   );
@@ -296,7 +306,7 @@ async function buildHarness(
     db,
     whatsAppAccounts: noAccounts,
     linkedInAccounts: noAccounts,
-    connections: { registry: connections },
+    connections: { registry: connections, channelOf: serviceChannelOf },
   });
 
   const backendTurnRunner = createBackendTurnRunner({
@@ -322,7 +332,14 @@ async function buildHarness(
           typeof payload?.actionName === "string"
             ? `Execute ${payload.actionName}`
             : "test approval",
-        payload,
+        payload: payload && {
+          // The engine records the root call with every approval; a seed that
+          // names only the approved call is its own root, with nothing to replay.
+          rootActionName: payload.actionName,
+          rootArgs: payload.args,
+          replayJournal: [],
+          ...payload,
+        },
       }),
     approvedActionApproval: async (payload) => {
       const id = await seed.pendingActionApproval(payload);

@@ -95,85 +95,49 @@ type StatusStyle = {
   live?: boolean;
 };
 
-// Visual styling per status code; labels come from i18n at render time
-// via t("status.<code>").
-const STATUS_STYLE: Record<string, StatusStyle> = {
-  accepted: {
-    bar: "border-info",
-    dot: "bg-info",
-    pill: "bg-info-bg text-info-fg ring-info-border",
-  },
-  approved: {
-    bar: "border-success",
-    dot: "bg-success",
-    pill: "bg-success-bg text-success-fg ring-success-border",
-  },
-  rejected: {
-    bar: "border-destructive",
-    dot: "bg-destructive",
-    pill: "bg-destructive-bg text-destructive-fg ring-destructive-border",
-  },
-  auto_approved: {
-    bar: "border-info",
-    dot: "bg-info",
-    pill: "bg-info-bg text-info-fg ring-info-border",
-  },
-  pending: {
-    bar: "border-warning",
-    dot: "bg-warning",
-    pill: "bg-warning-bg text-warning-fg ring-warning-border",
-    live: true,
-  },
-  executed: {
-    bar: "border-success",
-    dot: "bg-success",
-    pill: "bg-success-bg text-success-fg ring-success-border",
-  },
-  execution_failed: {
-    bar: "border-destructive",
-    dot: "bg-destructive",
-    pill: "bg-destructive-bg text-destructive-fg ring-destructive-border",
-  },
-  awaiting_execution: {
-    bar: "border-warning",
-    dot: "bg-warning",
-    pill: "bg-warning-bg text-warning-fg ring-warning-border",
-    live: true,
-  },
-  running: {
-    bar: "border-info",
-    dot: "bg-info",
-    pill: "bg-info-bg text-info-fg ring-info-border",
-    live: true,
-  },
+const TONE_STYLE = {
+  info: { bar: "border-info", dot: "bg-info", pill: "bg-info-bg text-info-fg ring-info-border" },
   success: {
     bar: "border-success",
     dot: "bg-success",
     pill: "bg-success-bg text-success-fg ring-success-border",
   },
-  error: {
+  destructive: {
     bar: "border-destructive",
     dot: "bg-destructive",
     pill: "bg-destructive-bg text-destructive-fg ring-destructive-border",
   },
-  pending_approval: {
+  warning: {
     bar: "border-warning",
     dot: "bg-warning",
     pill: "bg-warning-bg text-warning-fg ring-warning-border",
-    live: true,
   },
-  cancelled: {
+  neutral: {
     bar: "border-border-strong",
     dot: "bg-border-strong",
     pill: "bg-surface-muted text-foreground ring-border",
   },
+} satisfies Record<string, StatusStyle>;
+
+// Visual styling per status code; labels come from i18n at render time
+// via t("status.<code>").
+const STATUS_STYLE: Record<string, StatusStyle> = {
+  accepted: TONE_STYLE.info,
+  approved: TONE_STYLE.success,
+  rejected: TONE_STYLE.destructive,
+  auto_approved: TONE_STYLE.info,
+  pending: { ...TONE_STYLE.warning, live: true },
+  executed: TONE_STYLE.success,
+  execution_failed: TONE_STYLE.destructive,
+  awaiting_execution: { ...TONE_STYLE.warning, live: true },
+  running: { ...TONE_STYLE.info, live: true },
+  success: TONE_STYLE.success,
+  error: TONE_STYLE.destructive,
+  pending_approval: { ...TONE_STYLE.warning, live: true },
+  cancelled: TONE_STYLE.neutral,
 };
 
-const FALLBACK_STYLE: StatusStyle = {
-  bar: "border-border-strong",
-  dot: "bg-border-strong",
-  pill: "bg-surface-muted text-foreground ring-border",
-};
+const FALLBACK_STYLE: StatusStyle = TONE_STYLE.neutral;
 
 const TYPE_TINTS: Record<string, string> = {
   person_mapping: "text-brand",

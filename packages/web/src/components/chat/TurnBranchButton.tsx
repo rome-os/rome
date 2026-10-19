@@ -15,7 +15,9 @@ import {
   PopoverTitle,
 } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { placeChatWidget } from "@/pages/free/use-free-cells";
+import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +34,7 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<false | "generic" | "notBranchable">(false);
+  const coarsePointer = useCoarsePointer();
 
   const submit = useCallback(
     async (rawPrompt: string) => {
@@ -128,6 +131,13 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           <Textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={(event) => {
+              // Same Enter rule as the chat composer.
+              if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
+                event.preventDefault();
+                void submit(prompt);
+              }
+            }}
             maxLength={TURN_BRANCH_PROMPT_MAX_LENGTH}
             rows={3}
             disabled={submitting}

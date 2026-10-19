@@ -527,7 +527,9 @@ describe("MessageList Plan placement", () => {
         sessionId: "s-1",
         role: "assistant",
         turnId: "turn-plan",
-        content: JSON.stringify([{ type: "turn_recap", content: "Concise recap" }]),
+        content: JSON.stringify([
+          { type: "turn_recap", turnId: "turn-plan", content: "Concise recap" },
+        ]),
         createdAt: "2026-06-13T00:00:03.000Z",
       },
     ];
@@ -648,7 +650,6 @@ describe("timeline anchors", () => {
     const question = questionTurn("still addressable", "u-share", "turn-9");
     const { container } = render(
       settledList([question], {
-        active: true,
         selectedTurns: new Set<string>(),
         selectableSessionId: "s-1",
         onToggleTurn: () => {},
@@ -667,7 +668,6 @@ describe("timeline anchors", () => {
     const question = questionTurn("no turn id", "u-dimmed");
     const { container } = render(
       settledList([question], {
-        active: true,
         selectedTurns: new Set<string>(),
         selectableSessionId: "s-1",
         onToggleTurn: () => {},

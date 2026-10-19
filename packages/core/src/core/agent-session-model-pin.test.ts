@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -22,6 +22,11 @@ import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
+import {
+  createEmptyLegacyArtifactBindings,
+  type ArtifactIdentityContext,
+} from "../apps/artifact-id.js";
+import { testChannelSurface } from "../test/channel-surface.js";
 
 const AGENT = "pinned_agent";
 const MODEL = "gpt-5.3-codex-spark";
@@ -77,10 +82,12 @@ describe("agent model pins through AgentSessionManager", () => {
   let testDb: TestDb;
   let loader: AgentLoader;
   let sessionManager: SessionManager;
+  let sessionsRepo: SessionsRepository;
   let openai: ReturnType<typeof createProvider>;
   let anthropic: ReturnType<typeof createProvider>;
   let state: ReturnType<typeof healthyState>;
   const managers: AgentSessionManager[] = [];
+  let artifactIdentity: ArtifactIdentityContext;
 
   async function writeConfig(overrides: Record<string, unknown> = {}): Promise<void> {
     const config = { ...baseConfig, ...overrides };
@@ -93,16 +100,17 @@ describe("agent model pins through AgentSessionManager", () => {
     isSubagent = false,
     useRomeCredits: boolean | (() => boolean) = false,
   ): AgentSessionManager {
-    const actionRegistry = new ActionRegistryImpl([]);
+    const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Model pin test prompt");
     const manager = createAgentSessionManager(
       {
         agentLoader: loader,
         sessionManager,
+        sessionsRepo,
         promptBuilder,
         actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry),
+        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
           aiToolState: { get: () => state, refresh: async () => state },
@@ -112,8 +120,9 @@ describe("agent model pins through AgentSessionManager", () => {
           },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(),
+        skillCatalog: new SkillCatalog(artifactIdentity),
         lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true, isSubagent },
     );
@@ -124,8 +133,10 @@ describe("agent model pins through AgentSessionManager", () => {
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-model-pin-"));
     testDb = createTestDb();
-    loader = new AgentLoader();
-    sessionManager = new SessionManager(new SessionsRepository(testDb.db));
+    artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+    loader = new AgentLoader(artifactIdentity);
+    sessionsRepo = new SessionsRepository(testDb.db);
+    sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
     openai = createProvider("openai");
     anthropic = createProvider("anthropic");
     state = healthyState();

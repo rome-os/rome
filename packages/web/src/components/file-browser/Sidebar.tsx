@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
 import { Tree } from "./Tree";
+import { UploadProgressFromStore } from "./UploadProgress";
 import { useSidebarResize } from "./hooks/useSidebarResize";
 import { usePersistedSidebarWidth } from "./hooks/usePersistedSidebarWidth";
 import {
@@ -20,11 +21,9 @@ import {
   MIN_SIDEBAR_WIDTH,
   getIsDesktopViewport,
 } from "./store/utils";
-import { shouldSyncRootPanelTriggerUrl } from "@/lib/file-browser-routing";
 import { SidebarRootContextMenu, type ContextMenuActions } from "./ContextMenu";
 
 interface SidebarProps {
-  embedded: boolean;
   rootLabel: string;
   rootPanelTrigger: boolean;
   sidebarHeading?: string;
@@ -33,7 +32,6 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  embedded,
   rootLabel,
   rootPanelTrigger,
   sidebarHeading,
@@ -50,7 +48,7 @@ export function Sidebar({
   const deleting = useFileBrowserStore((s) => s.ui.deleting);
   const moving = useFileBrowserStore((s) => s.ui.moving);
   const renaming = useFileBrowserStore((s) => s.ui.renaming);
-  const uploading = useFileBrowserStore((s) => s.ui.uploading);
+  const uploadActive = useFileBrowserStore((s) => s.ui.uploadProgress !== null);
   const searchQuery = useFileBrowserStore((s) => s.ui.searchQuery);
   const searching = useFileBrowserStore((s) => s.ui.searching);
 
@@ -90,8 +88,6 @@ export function Sidebar({
     }
   };
 
-  void embedded;
-
   return (
     <aside
       className="relative w-[var(--file-browser-sidebar-width)] flex-shrink-0 border-r border-border bg-surface"
@@ -107,7 +103,7 @@ export function Sidebar({
               size="sm"
               onClick={() => {
                 void store.getState().selection.guardedSelectFolder(logicalRootPath, {
-                  syncUrl: shouldSyncRootPanelTriggerUrl(getIsDesktopViewport()),
+                  syncUrl: getIsDesktopViewport(),
                 });
               }}
               // `shrink` defeats the primitive's base `shrink-0` so a long
@@ -175,9 +171,13 @@ export function Sidebar({
             </Button>
           </div>
         </div>
-        {(uploading || creating || deleting || moving || renaming) && (
+        {uploadActive && (
+          <div className="border-b border-border-subtle p-3">
+            <UploadProgressFromStore />
+          </div>
+        )}
+        {(creating || deleting || moving || renaming) && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border-subtle px-3 py-1 text-aux">
-            {uploading && <span className="text-muted-foreground">{t("status.uploading")}</span>}
             {creating && <span className="text-muted-foreground">{t("status.creating")}</span>}
             {deleting && <span className="text-muted-foreground">{t("status.deleting")}</span>}
             {moving && <span className="text-muted-foreground">{t("status.moving")}</span>}

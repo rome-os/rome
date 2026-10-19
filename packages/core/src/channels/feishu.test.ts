@@ -32,6 +32,11 @@ class FakeLarkChannel {
   removedReactions: Array<{ messageId: string; reactionId: string }> = [];
   connected = false;
   botIdentity = { openId: "ou_bot", name: "Rome" };
+  chatInfoCalls: string[] = [];
+  chatInfo: (chatId: string) => Promise<{ chatId: string; name?: string }> = async (chatId) => ({
+    chatId,
+    name: "Design Team",
+  });
 
   on(name: string, handler: (arg: unknown) => unknown): () => void {
     this.handlers.set(name, handler);
@@ -53,6 +58,11 @@ class FakeLarkChannel {
 
   async updateCard(messageId: string, card: object) {
     this.updatedCards.push({ messageId, card });
+  }
+
+  async getChatInfo(chatId: string) {
+    this.chatInfoCalls.push(chatId);
+    return this.chatInfo(chatId);
   }
 
   async addReaction(messageId: string, emojiType: string): Promise<string> {
@@ -159,7 +169,11 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
       } satisfies ConversationDescriptor),
     supportedFields: ["enabled", "activation.mode", "replies.placement", "routing.agentName"],
     effective: structuredClone(effective),
-    overrides: {},
+    // A pin to main is a null override, until an update stores an agent.
+    overrides:
+      initial.routing?.agentName === null && effective.routing.agentName === null
+        ? { routing: { agentName: null } }
+        : {},
   });
   const get = rs.fn(async (ref: { conversationId: ConversationId }) =>
     makeSnapshot(ref.conversationId),
@@ -267,8 +281,108 @@ describe("FeishuAdapter", () => {
 
   it("maps group chat type to a group thread", async () => {
     await channel.emit({ chatType: "group", mentionedBot: true });
-    expect(captured[0].thread).toStrictEqual({ kind: "group" });
+    expect(captured[0].thread).toStrictEqual({ kind: "group", name: "Design Team" });
     expect(captured[0].addressing).toBe("mention");
+  });
+
+  it("lists an observed group under its Feishu name, fetched once per chat", async () => {
+    await channel.emit({ chatType: "group", mentionedBot: true });
+    await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+    expect(adapter.listObservedConversations()).toStrictEqual([
+      { id: "oc_chat", displayName: "Design Team", kind: "group" },
+    ]);
+    expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
+  });
+
+  it("falls back to the chat id when the name lookup fails, and retries it later", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = async () => {
+        throw new Error("permission denied");
+      };
+      await channel.emit({ chatType: "group", mentionedBot: true });
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+      expect(captured).toHaveLength(2);
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+      expect(adapter.listObservedConversations()).toStrictEqual([
+        { id: "oc_chat", displayName: "oc_chat", kind: "group" },
+      ]);
+      expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
+
+      channel.chatInfo = async (chatId) => ({ chatId, name: "Design Team" });
+      rs.advanceTimersByTime(10 * 60_000);
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_789" });
+
+      expect(adapter.listObservedConversations()[0]?.displayName).toBe("Design Team");
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("retries a lookup that answered without a name", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = async (chatId) => ({ chatId });
+      await channel.emit({ chatType: "group", mentionedBot: true });
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+
+      channel.chatInfo = async (chatId) => ({ chatId, name: "Design Team" });
+      rs.advanceTimersByTime(10 * 60_000);
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+      expect(captured[1].thread).toStrictEqual({ kind: "group", name: "Design Team" });
+      expect(channel.chatInfoCalls).toStrictEqual(["oc_chat", "oc_chat"]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("stops waiting on a name lookup that does not answer", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = () => new Promise(() => {});
+      const delivered = channel.emit({ chatType: "group", mentionedBot: true });
+      await rs.advanceTimersByTimeAsync(5_000);
+      await delivered;
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("keeps a name that arrives after the lookup timed out", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = (chatId) =>
+        new Promise((resolve) => setTimeout(() => resolve({ chatId, name: "Design Team" }), 6_000));
+      const delivered = channel.emit({ chatType: "group", mentionedBot: true });
+      await rs.advanceTimersByTimeAsync(5_000);
+      await delivered;
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+
+      await rs.advanceTimersByTimeAsync(1_000);
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+      expect(captured[1].thread).toStrictEqual({ kind: "group", name: "Design Team" });
+      expect(adapter.listObservedConversations()[0]?.displayName).toBe("Design Team");
+      expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("drops an unaddressed group message without waiting on the name lookup", async () => {
+    channel.chatInfo = () => new Promise(() => {});
+    await channel.emit({ chatType: "group", mentionedBot: false });
+
+    expect(captured).toHaveLength(0);
+    expect(adapter.listObservedConversations()).toStrictEqual([
+      { id: "oc_chat", displayName: "oc_chat", kind: "group" },
+    ]);
   });
 
   it("carries the replied-to message and a fallback sender name", async () => {
@@ -521,6 +635,134 @@ describe("FeishuAdapter", () => {
     expect(inputJson).toContain('"content":"Reply placement:"');
     expect(inputJson).toContain('"name":"replyPlacement"');
     expect(inputJson).toContain('"initial_option":"inline"');
+  });
+
+  it("shows the linked agent and keeps it unpinned when the card saves it", async () => {
+    const conversationSettings = makeConversationSettings();
+    let linked = "sales:agent";
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        conversationSettings: conversationSettings.control,
+        personMappingRepo: guardianPersonRepo("ou_alice"),
+        listAgents: () => ["sales:agent", "support:agent"],
+        linkedAgent: () => linked,
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    // The adapter drops every message until an inbound handler is registered.
+    adapter.onInbound(async () => {});
+    await adapter.start();
+
+    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    const card = JSON.stringify(channel.sent[0].input);
+    expect(card).toContain('"initial_option":"sales:agent"');
+    expect(card).toContain('"shown":"sales:agent"');
+
+    // A relink while the card is open does not turn its shown agent into a pin.
+    linked = "support:agent";
+    const value = { action: "configure_feishu_group", op: "save", shown: "sales:agent" };
+    await channel.emitCardAction({
+      action: { tag: "button", value },
+      raw: { action: { value, form_value: { agentName: "sales:agent" } } },
+    });
+    expect(conversationSettings.update).toHaveBeenCalledWith(
+      expect.objectContaining({ set: {}, clear: [] }),
+    );
+    expect(JSON.stringify(channel.sent[1].input)).toContain("Agent: support:agent");
+  });
+
+  it("keeps a group's main pin on an unlinked bot when the card saves", async () => {
+    const conversationSettings = makeConversationSettings({ routing: { agentName: null } });
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        conversationSettings: conversationSettings.control,
+        personMappingRepo: guardianPersonRepo("ou_alice"),
+        linkedAgent: () => null,
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    // The adapter drops every message until an inbound handler is registered.
+    adapter.onInbound(async () => {});
+    await adapter.start();
+
+    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    expect(JSON.stringify(channel.sent[0].input)).toContain('"initial_option":"main"');
+
+    const value = { action: "configure_feishu_group", op: "save", shown: "main" };
+    for (const formValue of [{ agentName: "main" }, {}]) {
+      await channel.emitCardAction({
+        action: { tag: "button", value },
+        raw: { action: { value, form_value: formValue } },
+      });
+    }
+    expect(conversationSettings.update).toHaveBeenCalledTimes(2);
+    for (const [input] of conversationSettings.update.mock.calls) {
+      expect(input).toMatchObject({ set: {}, clear: [] });
+    }
+  });
+
+  it("says when a group's stored agent is not loaded and the linked agent answers", async () => {
+    const conversationSettings = makeConversationSettings({ routing: { agentName: "gone:agent" } });
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        conversationSettings: conversationSettings.control,
+        personMappingRepo: guardianPersonRepo("ou_alice"),
+        listAgents: () => ["sales:agent"],
+        hasAgent: (name) => name === "sales:agent",
+        linkedAgent: () => "sales:agent",
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    // The adapter drops every message until an inbound handler is registered.
+    adapter.onInbound(async () => {});
+    await adapter.start();
+
+    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    const card = JSON.stringify(channel.sent[0].input);
+    expect(card).toContain('"initial_option":"gone:agent"');
+    expect(card).toContain("gone:agent is not loaded, so sales:agent answers instead.");
+  });
+
+  it("says no agent answers a group whose bot has no linked agent", async () => {
+    const conversationSettings = makeConversationSettings();
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        conversationSettings: conversationSettings.control,
+        personMappingRepo: guardianPersonRepo("ou_alice"),
+        linkedAgent: () => null,
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    // The adapter drops every message until an inbound handler is registered.
+    adapter.onInbound(async () => {});
+    await adapter.start();
+
+    await channel.emit({ chatType: "group", mentionedBot: true, content: "settings" });
+    const card = JSON.stringify(channel.sent[0].input);
+    expect(card).toContain("No agent answers in this group");
+    expect(card).not.toContain('"initial_option":"main"');
+
+    await channel.emitCardAction({
+      action: { tag: "button", value: { action: "configure_feishu_group", op: "reset" } },
+      raw: { action: { value: { action: "configure_feishu_group", op: "reset" } } },
+    });
+    expect(JSON.stringify(channel.sent[1].input)).toContain("Agent: none");
   });
 
   it("resolves @mention placeholders to display names", async () => {

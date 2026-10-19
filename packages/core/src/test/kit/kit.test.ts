@@ -44,7 +44,7 @@ describe("testkit", () => {
       expect(init).toBeDefined();
       const session = await rome.repos.sessions.findById((init as { sessionId: string }).sessionId);
       expect(session).not.toBeNull();
-      expect(session!.agentName).toBe("main");
+      expect(session!.agentName).toBe("core:main");
       expect(session!.channelThreadKey).toBe("telegram:thread-7");
 
       // The model saw the real PromptBuilder output for the "main" agent.

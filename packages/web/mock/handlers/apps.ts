@@ -10,11 +10,12 @@ import { APP_MANAGER_ERROR_STATUS } from "@rome/api-types/app-manager-errors";
 import { deriveAppRuntimeStatus } from "@rome/api-types/apps-runtime";
 import { http, HttpResponse } from "msw";
 import type { UpgradeCandidate } from "@/hooks/use-apps";
+import { firstPartyApps } from "./first-party-apps";
 import { publicAccess } from "./settings";
 import { recordedApps } from "./recorded-apps";
 
 // Catalog scope and recording limitations: docs/dashboard-mock-mode.md.
-const apps: InstalledAppCard[] = structuredClone(recordedApps);
+const apps: InstalledAppCard[] = structuredClone([...firstPartyApps, ...recordedApps]);
 const upgradable: UpgradeCandidate[] = [];
 
 /** The app id a `POST /apps` source resolves to — the daemon derives it from
@@ -110,6 +111,12 @@ export const appHandlers = [
     const app = cardFor(String(params.appId));
     if (!app) return HttpResponse.json({ error: "Unknown app" }, { status: 404 });
     const body = (await request.json()) as { enabled: boolean };
+    if (!body.enabled && !app.canToggle) {
+      return HttpResponse.json(
+        { error: `app "${app.id}" cannot be disabled` },
+        { status: APP_MANAGER_ERROR_STATUS.SYSTEM_PROTECTED },
+      );
+    }
     // Only the flag is stored. Status and the open links are derived per read,
     // so enabling an app whose phase is `failed` cannot promote it to active.
     app.isEnabled = body.enabled;

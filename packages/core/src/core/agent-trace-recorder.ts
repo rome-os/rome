@@ -3,6 +3,7 @@ import {
   type CurrentActionContext,
   type RomeSessionType,
 } from "@rome-os/app-runtime";
+import { channelConversationId } from "../db/session-kind.js";
 import type {
   RomeAgentTranscriptMessageInput,
   RomeAgentTraceTriggerMetadata,
@@ -11,9 +12,12 @@ import type {
 import type { AgentEvent, MessagePart } from "../types.js";
 import type { ThreadContext } from "./types.js";
 import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
-import type { Logger } from "../logger.js";
+import { createLogger, type Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { isTransientDelta } from "./agent-message.js";
+import type { SessionConversation } from "./session-conversation.js";
+
+const log = createLogger("agent-trace-recorder");
 
 export interface AgentTraceRecorderInput {
   webchatRepo: WebChatRepository;
@@ -58,16 +62,69 @@ export function resolveRomeSessionId(input: RomeSessionIdInput): string {
   if (input.romeSessionId) return input.romeSessionId;
   if (input.existingSessionId) return input.existingSessionId;
   if (input.threadContext) {
-    if (input.threadContext.channel === "webchat") {
-      return input.threadContext.threadId;
-    }
-    return `channel:${input.threadContext.channel}:${input.threadContext.threadId}`;
+    if (input.threadContext.romeSessionId) return input.threadContext.romeSessionId;
+    return channelConversationId(input.threadContext.channel, input.threadContext.threadId);
   }
   const actionContext = input.actionContext ?? getCurrentActionContext();
   if (actionContext?.executionId) {
     return `action:${actionContext.executionId}:${input.agentName || "main"}`;
   }
   return `action:${input.channelThreadKey ?? input.agentName}:${input.agentName || "main"}`;
+}
+
+export interface TurnConversationInput extends RomeSessionIdInput {
+  /** The conversation the session serves, as it stood when the turn started. */
+  sessionConversation?: SessionConversation;
+}
+
+// Conversations whose turns only the recorder writes. A webchat conversation
+// belongs to the webchat route, and a channel one to the inbox, which also
+// injects its pending context on a channel turn.
+const RECORDER_OWNED_CONVERSATION_TYPES: ReadonlySet<RomeSessionType> = new Set([
+  "subagent",
+  "fork",
+]);
+
+/**
+ * The conversation a turn records into, and its type. A conversation the
+ * caller named wins. Otherwise a recorded subagent or fork conversation is
+ * used, and the id is derived as before for anything else. `existing` is true
+ * for a named or recorded conversation, which needs no creating.
+ * `promptPersisted` is true only for a named one, whose caller owns the prompt.
+ * `recorderOwned` is true for a recorded one, which only the recorder writes.
+ *
+ * A turn under a thread stays with that thread's conversation, as before. Its
+ * reply is delivered and recorded there under the turn's id, so the trace has
+ * to be found there too, and a webchat card is answered by looking its turn up
+ * in that chat. That covers backend and approval turns on a subagent or side
+ * chat.
+ */
+export function resolveTurnConversation(input: TurnConversationInput): {
+  romeSessionId: string;
+  romeSessionType: RomeSessionType;
+  existing: boolean;
+  promptPersisted: boolean;
+  recorderOwned: boolean;
+} {
+  const conversation = input.sessionConversation;
+  // The opener's named conversation wins over the one this turn's caller names.
+  const named = conversation?.origin === "named" ? conversation.id : input.romeSessionId;
+  const found = !named && conversation?.origin === "recorded" ? conversation : undefined;
+  const ownedByRecorder =
+    found !== undefined &&
+    RECORDER_OWNED_CONVERSATION_TYPES.has(found.type) &&
+    !input.threadContext;
+  const recorded = ownedByRecorder ? found : undefined;
+  return {
+    romeSessionId: resolveRomeSessionId({
+      ...input,
+      romeSessionId: named ?? recorded?.id,
+    }),
+    romeSessionType: recorded?.type ?? resolveRomeSessionType(input),
+    existing: Boolean(named ?? recorded),
+    promptPersisted: Boolean(named),
+    recorderOwned: Boolean(recorded),
+  };
 }
 
 export function resolveRomeSessionType(

@@ -1,21 +1,13 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import type { TFunction } from "i18next";
-import { linkConflict, type DirectoryAccount, type PersonResource } from "@rome/api-types/people";
+import { linkConflict, type DirectoryAccount } from "@rome/api-types/people";
 import i18n from "@/i18n";
-import {
-  createPerson,
-  dismissAccount,
-  linkAccount,
-  mergePeople,
-  restoreAccount,
-  updatePerson,
-} from "./writes";
+import { createPerson, dismissAccount, linkAccount, mergePeople } from "./writes";
 
-// The People page's writes, at the wire. What is pinned here is the request each
-// gesture sends — verb, path, body — and what each answer becomes, because those
-// are the two halves the page is written against and neither is visible from a
-// rendered row.
+// The People page's writes, at the wire: what each answer becomes, which is not
+// visible from a rendered row. The requests themselves run against the contract's
+// handlers in `writes-against-mock.test.ts`.
 //
 // The contract's own `linkConflict` phrases the 409s, so a fixture cannot drift
 // from the wording a route refuses in.
@@ -27,15 +19,6 @@ beforeAll(async () => {
 afterEach(() => rs.restoreAllMocks());
 
 const t = i18n.getFixedT("en", "people") as TFunction<"people">;
-
-const PERSON: PersonResource = {
-  id: "wei-chen",
-  displayName: "Wei Chen",
-  bondLevel: "acquaintance",
-  accounts: [],
-  messageCount: 0,
-  latest: null,
-};
 
 const ACCOUNT: DirectoryAccount = {
   channel: "whatsapp",
@@ -76,63 +59,7 @@ function stubFetch(payload: unknown, status = 200) {
   return sent;
 }
 
-describe("people writes — the request each verb sends", () => {
-  it("creates a person and links the account it came from, in one request", async () => {
-    const sent = stubFetch(PERSON, 201);
-
-    const result = await createPerson(
-      { displayName: "Rachel Lim", bondLevel: "acquaintance", accounts: [REF] },
-      t,
-    );
-
-    expect(result).toEqual({ ok: true, value: PERSON });
-    // Atomic create-and-link: one request, so a created person never exists
-    // without the account that was the reason to create them.
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ url: "/api/people", method: "POST" });
-    expect(sent[0]!.body).toEqual({
-      displayName: "Rachel Lim",
-      bondLevel: "acquaintance",
-      accounts: [REF],
-    });
-  });
-
-  it("links an account onto a person the roster already holds", async () => {
-    const sent = stubFetch(PERSON);
-
-    await linkAccount("wei-chen", REF, t);
-
-    expect(sent[0]).toMatchObject({ url: "/api/people/wei-chen/accounts", method: "POST" });
-    // No `transferFrom` when nobody holds it: the contract only asks for one
-    // when the link is a transfer.
-    expect(sent[0]!.body).toEqual(REF);
-  });
-
-  it("names the person a transfer takes the account from", async () => {
-    const sent = stubFetch(PERSON);
-
-    await linkAccount("wei-chen", { ...REF, transferFrom: "mira" }, t);
-
-    expect(sent[0]!.body).toEqual({ ...REF, transferFrom: "mira" });
-  });
-
-  it("dismisses and restores the same account at the same address", async () => {
-    const dismissed = stubFetch(ACCOUNT);
-    await dismissAccount(REF, t);
-    expect(dismissed[0]).toMatchObject({
-      method: "POST",
-      url: "/api/accounts/whatsapp/6591234472%40s.whatsapp.net/dismiss",
-    });
-
-    rs.restoreAllMocks();
-    const restored = stubFetch({ ...ACCOUNT, state: "unlinked" });
-    await restoreAccount(REF, t);
-    expect(restored[0]).toMatchObject({
-      method: "POST",
-      url: "/api/accounts/whatsapp/6591234472%40s.whatsapp.net/restore",
-    });
-  });
-
+describe("people writes — the account path", () => {
   it("leaves an identifier's own separators in the path", async () => {
     const sent = stubFetch(ACCOUNT);
 
@@ -142,26 +69,6 @@ describe("people writes — the request each verb sends", () => {
     // included — a channel mints its own addresses, and a percent-escaped "/"
     // would be a segment the route never sees.
     expect(sent[0]!.url).toBe("/api/accounts/matrix/room/42/dismiss");
-  });
-
-  it("merges the duplicate named in the body into the survivor named in the path", async () => {
-    const sent = stubFetch(PERSON);
-
-    await mergePeople("wei-chen", "wei-chen-duplicate", t);
-
-    expect(sent[0]).toMatchObject({ url: "/api/people/wei-chen/merge", method: "POST" });
-    expect(sent[0]!.body).toEqual({ from: "wei-chen-duplicate" });
-  });
-
-  it("changes a bond with a patch that names only the bond", async () => {
-    const sent = stubFetch({ ...PERSON, bondLevel: "inner-circle" });
-
-    await updatePerson("wei-chen", { bondLevel: "inner-circle" }, t);
-
-    expect(sent[0]).toMatchObject({ url: "/api/people/wei-chen", method: "PATCH" });
-    // An omitted field is one the update leaves alone, so a bond change must
-    // not carry a name and blank it.
-    expect(sent[0]!.body).toEqual({ bondLevel: "inner-circle" });
   });
 });
 

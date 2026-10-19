@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { artifactLocalName } from "../apps/artifact-id.js";
+import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
 import type {
   RomeSessionDetail,
   RomeSessionExplorerRecord,
@@ -67,8 +67,17 @@ export interface SessionQueryServiceOptions {
       iconAbsolutePath?: string | null;
     }[];
   };
+  /** The channel-message hook's `linkedAgentOf`, so a record names the agent
+   *  that answers its conversation. Without it, records show the stored agent. */
+  linkedAgentOf?: LinkedAgentOf;
+  /** Every channel `linkedAgentOf` may answer with an agent, so the agent
+   *  filter, search and metrics follow the link too. Without it, they read
+   *  the stored agent. */
+  channelNames?: () => Iterable<string>;
   now?: () => Date;
 }
+
+type LinkedAgentOf = (channelName: string) => string | null | undefined;
 
 function emptyUsage(): RunUsageSummary {
   return {
@@ -321,6 +330,33 @@ export class SessionQueryService {
     };
   }
 
+  /**
+   * The agent that answers a channel conversation, by the rules in
+   * docs/architecture/channels.md#linked-agents, with main as null like the
+   * stored column. A silent channel keeps the stored agent, since the record
+   * has no shape for no agent.
+   */
+  private answeringAgent(session: SessionRow, linkedAgentOf: LinkedAgentOf): string | null {
+    if (session.type !== "channel" || !session.sourceChannel) return session.agentName;
+    const linked = linkedAgentOf(session.sourceChannel);
+    if (!linked) return session.agentName;
+    if (session.sourceThreadType !== "private") {
+      // A null routing override is an explicit pin to main.
+      if (session.channelSettings?.overrides.routing?.agentName === null) return null;
+      if (session.agentName && !isCoreMainAgentId(session.agentName)) return session.agentName;
+    }
+    return isCoreMainAgentId(linked) ? null : linked;
+  }
+
+  /** A `linkedAgentOf` that reads each channel once, for one request. */
+  private linkedAgentLookup(): LinkedAgentOf {
+    const seen = new Map<string, string | null | undefined>();
+    return (channel) => {
+      if (!seen.has(channel)) seen.set(channel, this.options.linkedAgentOf?.(channel));
+      return seen.get(channel);
+    };
+  }
+
   private resolveTime(scope: SessionQueryScope): { from: Date | null; to: Date; timeZone: string } {
     const now = this.now();
     if (scope.time.kind === "all") return { from: null, to: now, timeZone: scope.timeZone };
@@ -363,11 +399,18 @@ export class SessionQueryService {
       }
     }
     const sources = scope.sessions?.sources;
+    const linkedAgentOf = this.linkedAgentLookup();
+    const linkedAgents: Record<string, string> = {};
+    for (const channel of this.options.channelNames?.() ?? []) {
+      const agent = linkedAgentOf(channel);
+      if (agent) linkedAgents[channel] = agent;
+    }
     return {
       ...time,
       sessionIds: scope.sessions?.ids,
       types: scope.sessions?.types,
       agentNames: scope.sessions?.agentNames,
+      linkedAgents,
       ownerAgentNames: scope.sessions?.owners ? Array.from(ownerAgentNames) : undefined,
       includeUninstalledOwners,
       knownAgentNames,
@@ -403,8 +446,10 @@ export class SessionQueryService {
     session: SessionRow,
     messageCount: number,
     stats: RomeSessionStats,
+    linkedAgentOf: LinkedAgentOf,
   ): RomeSessionExplorerRecord {
-    const owner = this.resolveOwner(session.agentName);
+    const agentName = this.answeringAgent(session, linkedAgentOf);
+    const owner = this.resolveOwner(agentName);
     return {
       id: session.id,
       name: session.name,
@@ -413,7 +458,7 @@ export class SessionQueryService {
       largeModelSelection: session.largeModelSelection,
       projectName: session.projectName,
       projectPath: session.projectPath,
-      agentName: session.agentName,
+      agentName,
       type: session.type as RomeSessionType,
       sourceChannel: session.sourceChannel,
       sourceThreadId: session.sourceThreadId,
@@ -449,8 +494,9 @@ export class SessionQueryService {
       offset,
       limit,
     });
+    const linkedAgentOf = this.linkedAgentLookup();
     const sessions = result.rows.map((row) =>
-      this.toRecord(row, row.messageCount, storageStats(row.stats)),
+      this.toRecord(row, row.messageCount, storageStats(row.stats), linkedAgentOf),
     );
     return {
       sessions,
@@ -749,19 +795,26 @@ export class SessionQueryService {
     const runs = await this.options.repository.queryRunAggregates(this.storageScope(allScope));
     const accumulator = emptyAccumulator();
     for (const run of runs) appendAggregate(accumulator, run);
+    const linkedAgentOf = this.linkedAgentLookup();
     const lineageEntry = (session: SessionRow) => {
-      const owner = this.resolveOwner(session.agentName);
+      const agentName = this.answeringAgent(session, linkedAgentOf);
+      const owner = this.resolveOwner(agentName);
       return {
         id: session.id,
         displayTitle: sessionDisplayTitle(session, owner),
         type: session.type as RomeSessionType,
-        agentName: session.agentName,
+        agentName,
         parentTurnId: session.parentTurnId,
         activityAt: session.activityAt.toISOString(),
       };
     };
     return {
-      ...this.toRecord(rows.session, rows.messageCount, accumulatorStats(accumulator)),
+      ...this.toRecord(
+        rows.session,
+        rows.messageCount,
+        accumulatorStats(accumulator),
+        linkedAgentOf,
+      ),
       lineage: {
         parent: rows.parent ? lineageEntry(rows.parent) : null,
         children: rows.children.map(lineageEntry),

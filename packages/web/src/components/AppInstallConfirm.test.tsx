@@ -14,10 +14,7 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function listingPayload(overrides?: {
-  iconUrl?: string | null;
-  iconPath?: string | null;
-}): ListingDetailPayload {
+function listingPayload(overrides?: { iconUrl?: string | null }): ListingDetailPayload {
   return {
     available: true,
     browseOrigin: "https://store.example",
@@ -29,7 +26,6 @@ function listingPayload(overrides?: {
       description: "Grounded customer-service agent.",
       longDescription: null,
       iconUrl: overrides?.iconUrl ?? null,
-      iconPath: overrides?.iconPath ?? null,
       categories: [],
       state: "published",
       highestVersion: "0.1.19",
@@ -77,8 +73,8 @@ describe("AppInstallConfirm", () => {
     expect(icon?.getAttribute("src")).toBe("https://cdn.example/icons/customer-service.png");
   });
 
-  it("resolves a relative legacy iconPath against browseOrigin", async () => {
-    mockListingFetch(listingPayload({ iconPath: "/icons/customer-service.png" }));
+  it("resolves a relative iconUrl against browseOrigin", async () => {
+    mockListingFetch(listingPayload({ iconUrl: "/icons/customer-service.png" }));
     const { container } = renderConfirm();
 
     await screen.findByText("Install this app?");

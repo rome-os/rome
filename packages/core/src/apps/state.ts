@@ -63,6 +63,11 @@ export interface ResolvedApp extends AppView {
   db: ResolvedRomeAppDbMetadata | null;
 }
 
+/** Unresolved views (installing, broken, disabled) carry no `manifest`. */
+export function isResolvedApp(view: AppView | null | undefined): view is ResolvedApp {
+  return view != null && "manifest" in view;
+}
+
 export interface InFlightOp {
   kind: "install" | "uninstall";
   source?: SpecSource;

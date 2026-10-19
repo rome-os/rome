@@ -7,7 +7,7 @@ build* (iteration loop, design rules, validation, delivery); this file covers
 patterns).
 
 For more public, end-to-end examples, see
-[`amantru/rome-apps`](https://github.com/amantru/rome-apps). Each app in that
+[`rome-os/rome-apps`](https://github.com/rome-os/rome-apps). Each app in that
 repo is a self-contained, readable sample covering different shapes:
 action / agent / api / web / db / hook.
 
@@ -246,6 +246,12 @@ concrete model based on the current provider.
 selected model should use. It accepts `low`, `high`, or `xhigh` and defaults to
 `high` when omitted.
 
+`tools` lists the builtin tools the model provider runs for the agent, such as
+`Read` or `Bash`. An empty list gives it none, so it acts only through its
+actions. On Codex, any of `Read`, `Glob`, `Grep`, or `Bash` gives the agent a
+shell that can run commands and write files. Leave all four out of an agent
+that reads untrusted input.
+
 #### Structured output: `outputSchema`
 
 When you want the agent to return **structured JSON** rather than free-form
@@ -258,7 +264,7 @@ name: sentinel
 description: Triages incoming messages from untrusted senders
 tier: small
 permissionMode: bypassPermissions
-tools: [Read, Glob, Grep]
+tools: []
 actions: ["*"]
 outputSchema:
   type: object
@@ -339,6 +345,8 @@ decide whether to load the skill.
   }
 }
 ```
+
+Before adding a dependency with a build script, read `system:custom-dependencies`.
 
 ### The `rome` CLI
 
@@ -621,7 +629,7 @@ fires. RRULE syntax follows the iCalendar spec. The action returns
 `{ status: "error", error }` for caller-fixable problems (bad `localTime`, a
 `date`/`rrule` conflict, array `args`) so you can surface the message.
 
-**Recurring routine** — e.g. a daily 03:00 UTC job:
+**Recurring routine** — e.g. a daily job at 03:00 in the guardian's timezone:
 
 ```ts
 await appContext.runAction("system:create_routine", {
@@ -629,7 +637,8 @@ await appContext.runAction("system:create_routine", {
   trigger: {
     type: "schedule",
     tzid: "UTC",               // IANA tz id, NOT "+00:00"
-    localTime: "03:00",        // "HH:mm" in tzid's local time
+    tzMode: "floating",        // follows the guardian's timezone, not tzid
+    localTime: "03:00",        // "HH:mm", 24-hour
     rrule: "FREQ=DAILY",       // iCal RRULE; recurring
   },
   actionName: "dream:dream",   // canonical action id to execute at trigger time
@@ -646,6 +655,7 @@ await appContext.runAction("system:create_routine", {
   trigger: {
     type: "schedule",
     tzid: "America/Los_Angeles",
+    tzMode: "fixed",           // a dated one-off always fires in tzid
     localTime: "09:00",
     date: "2026-06-01",        // "YYYY-MM-DD"; one-off on this calendar date
   },
@@ -662,10 +672,11 @@ authoritative reference):
 |---|---|---|---|
 | `name` | `string` | yes | Human-readable identifier; use for dedup. |
 | `trigger.type` | `"schedule" \| "event-bus"` | yes | Schedule or watched-event. |
-| `trigger.tzid` | string | schedule | IANA timezone (e.g. `"UTC"`, `"America/Los_Angeles"`). |
-| `trigger.localTime` | `"HH:mm"` | schedule | Local wall-clock time in `tzid`. |
+| `trigger.tzid` | string | schedule | IANA timezone (e.g. `"UTC"`, `"America/Los_Angeles"`). A `floating` schedule does not fire in it, but it must still be valid. |
+| `trigger.tzMode` | `"fixed" \| "floating"` | schedule | Picks the timezone for `localTime`. With `floating`, the routine fires in the guardian's current timezone and reschedules when that timezone changes. Use `floating` for most routines. With `fixed`, it fires in `tzid`, for a time tied to one place, such as a market open. `system:create_routine` stores a routine that has a `date` as `fixed`. |
+| `trigger.localTime` | `"HH:mm"` | schedule | Local wall-clock time in the timezone `tzMode` picks. |
 | `trigger.rrule` | string | recurring | iCal RRULE, e.g. `FREQ=DAILY`, `FREQ=WEEKLY;BYDAY=MO,WE,FR`. Mutually exclusive with `date`. `FREQ=MONTHLY` must pin `BYMONTHDAY=N`. |
-| `trigger.date` | `"YYYY-MM-DD"` | one-off | Mutually exclusive with `rrule`; omit both to fire once at the next `localTime`. |
+| `trigger.date` | `"YYYY-MM-DD"` | one-off | Mutually exclusive with `rrule`. Omit both to fire once at the next `localTime`; the routine stores that date. |
 | `trigger.eventName` | string | event-bus | Watchable event type — find it with `system:search_event_catalog`, which also returns each type's `payloadSchema` (JSON Schema for the fields a `trigger.filter` dot-path can match). |
 | `actionName` | string | yes | Canonical `<app-id>:<local-name>` action id to invoke at trigger time. |
 | `args` | `Record<string, unknown>` | no | A single arg object (not an array); defaults to `{}`. To fan out, create one routine per arg set. |
@@ -686,6 +697,9 @@ if (!alreadyScheduled) {
   await appContext.runAction("system:create_routine", { /* ...as above */ });
 }
 ```
+
+If the app cannot work without the routine, register it from an
+[`app-started` hook](#setting-up-on-start-app-started).
 
 ### Actions calling actions / agents
 
@@ -1304,7 +1318,7 @@ request, not to this hook.
 
 - [`AUTHORING.md`](./AUTHORING.md) (sibling file) — workflow guide: iteration loop, product design rules, icon design, recurring runs, validation, delivery checklist.
 - Community samples:
-  [`amantru/rome-apps`](https://github.com/amantru/rome-apps) — covers web
+  [`rome-os/rome-apps`](https://github.com/rome-os/rome-apps) — covers web
   + api + action + skill, multi-action + agent orchestration, channel
   hooks, etc.
 - SDK type definitions: jump to definition into `@rome-os/app-runtime` and

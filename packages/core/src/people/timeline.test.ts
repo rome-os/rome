@@ -4,7 +4,7 @@ import { parseMessageCursor, type Message } from "@rome/api-types/message";
 import { memoryMessages } from "../channels/messages-memory.js";
 import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 import { readPersonTimeline } from "./timeline.js";
-import { readPeopleActivity } from "./activity.js";
+import { readActivity } from "./activity.js";
 
 // The merge above the stores: what a page is, how it resumes, and which store
 // owns an account. Every store here is in-memory, so nothing below is about
@@ -182,7 +182,9 @@ describe("readPersonTimeline", () => {
 
 // The same precedence, read as a summary instead of a page: what a directory
 // row shows for a person without opening their dossier.
-describe("readPeopleActivity", () => {
+describe("readActivity", () => {
+  const perPerson = async (...args: Parameters<typeof readActivity>) =>
+    (await readActivity(...args)).perPerson;
   const waAccount = account("whatsapp", "wa-1");
   const tgAccount = account("telegram", "tg-1");
 
@@ -195,10 +197,7 @@ describe("readPeopleActivity", () => {
       "tg-1": [entry("telegram", 400, "typed")],
     });
 
-    const [whatsapp, telegram] = await readPeopleActivity(
-      [mirror, transcript],
-      [[waAccount], [tgAccount]],
-    );
+    const [whatsapp, telegram] = await perPerson([mirror, transcript], [[waAccount], [tgAccount]]);
     expect(whatsapp).toEqual({
       messageCount: 1,
       latest: { source: "whatsapp", timestamp: 500, preview: "mirrored@500" },
@@ -212,7 +211,7 @@ describe("readPeopleActivity", () => {
       "tg-1": [entry("telegram", 400, "tg:d")],
     });
 
-    const [both] = await readPeopleActivity([held], [[waAccount, tgAccount]]);
+    const [both] = await perPerson([held], [[waAccount, tgAccount]]);
     expect(both).toEqual({
       messageCount: 3,
       // The head of the merged timeline, not of whichever account came first.
@@ -222,7 +221,7 @@ describe("readPeopleActivity", () => {
 
   it("answers one activity per group, in the order given", async () => {
     const held = store({ "tg-1": [entry("telegram", 400, "tg:d")] });
-    expect(await readPeopleActivity([held], [[waAccount], [], [tgAccount]])).toEqual([
+    expect(await perPerson([held], [[waAccount], [], [tgAccount]])).toEqual([
       { latest: null, messageCount: 0 },
       { latest: null, messageCount: 0 },
       { latest: { source: "telegram", timestamp: 400, preview: "tg:d@400" }, messageCount: 1 },
@@ -247,7 +246,7 @@ describe("readPeopleActivity", () => {
     const stores = [mirror, transcript];
     const accounts = [waAccount, tgAccount];
 
-    const [activity] = await readPeopleActivity(stores, [accounts]);
+    const [activity] = await perPerson(stores, [accounts]);
     const timeline = await readPersonTimeline(stores, accounts, { limit: 100 });
 
     expect(timeline.entries.map((e) => e.ref)).toEqual([
@@ -263,7 +262,7 @@ describe("readPeopleActivity", () => {
   it("asks a store for nothing but read, count and latest", async () => {
     const asked: Array<{ store: string; verb: string }> = [];
     const only = watched("only", store({ "wa-1": [entry("whatsapp", 500, "mirrored")] }), asked);
-    await readPeopleActivity([only], [[waAccount]]);
+    await perPerson([only], [[waAccount]]);
 
     expect(asked.length).toBeGreaterThan(0);
     expect(new Set(asked.map((call) => call.verb))).toEqual(new Set(["count", "latest"]));

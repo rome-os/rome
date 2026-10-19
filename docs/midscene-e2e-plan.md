@@ -3,9 +3,11 @@
 > Onboarding attachment for Rome maintainers.
 >
 > Status: all 38 cases catalogued in section 5 are defined as AI-native YAML
-> workflows under `tests/midscene/cases/`. Six CI shards split them
-> 5/8/7/7/6/5. Each case uses `aiAct` for interaction and `aiAssert` for
-> its visible outcome.
+> workflows under `tests/midscene/cases/` and form the mock suite, which runs
+> as one CI job. Each case uses `aiAct` for interaction and `aiAssert` for its
+> visible outcome. A second suite, the
+> [backend suite](midscene-e2e-cases.md#backend-suite), runs against a real
+> Rome container and shares the same report flow.
 
 ## 1. Background and Goals
 
@@ -33,23 +35,25 @@ Goals:
 - Establish a long-lived AI-native E2E baseline for Rome's core product
   stories.
 - Serve as a reference implementation for offering Midscene CI to open-source
-  projects (deterministic fixtures + visual-semantic assertions + sharded CI).
+  projects (deterministic fixtures + visual-semantic assertions + one report flow).
 - Keep browser traffic local, repeatable and mutually non-polluting. The
   Node-side Midscene agent still calls the configured model endpoint.
 
 ## 2. Architecture
 
 ```
-GitHub Actions (6 shards)
-  └─ pnpm --filter rome-web dev:mock:e2e    # strict MSW mode, localhost:3200
-       └─ tests/midscene (standalone npm package)
-            ├─ midscene.config.ts           # Playwright + Midscene config
-            ├─ cases/**.yaml                # cases (suite + shard tags)
-            └─ Playwright Chromium (1440×900, en-US)
-                 └─ fresh BrowserContext per case
-                      ├─ localStorage: rome.lang=en
-                      ├─ localStorage: rome-sidebar-pins=<full set>
-                      └─ in-memory MSW state reset with the context
+GitHub Actions (job: mock)
+  └─ tests/midscene (standalone npm package)
+       ├─ midscene.config.ts           # Playwright + Midscene config
+       │    └─ project setup
+       │         ├─ pnpm --filter rome-web dev:mock:e2e   # strict MSW mode, localhost:3200
+       │         └─ browser network boundary check
+       ├─ cases/**.yaml                # cases (topic tags)
+       └─ Playwright Chromium (1440×900, en-US)
+            └─ fresh BrowserContext per case
+                 ├─ localStorage: rome.lang=en
+                 ├─ localStorage: rome-sidebar-pins=<full set>
+                 └─ in-memory MSW state reset with the context
 ```
 
 ### 2.1 Why a standalone npm package
@@ -81,7 +85,7 @@ GitHub Actions (6 shards)
   outcomes. `app.open` handles isolated setup.
 - **Env-driven selection**: `MIDSCENE_INCLUDE_TAGS` / `MIDSCENE_EXCLUDE_TAGS`
   (comma-separated, OR semantics), `MIDSCENE_RETRY`, `HEADLESS` — the same
-  entry point serves local single-case iteration and CI sharding.
+  entry point serves local single-case iteration and the CI job.
 
 The harness registers two custom nodes used by committed cases. Each case
 uses one `app.open`. Run `npm run nodes` in `tests/midscene` to generate a
@@ -132,30 +136,24 @@ reasons behind them.
   suite nightly against the latest upstream `main` commit. Its daily schedule
   is `0 6 * * *` (06:00 UTC / 14:00 Beijing), matching `nightly.yml`.
   It does not depend on the ordinary CI or Nightly workflow.
-  Pushes do not trigger it. Pull requests use a scoped path set: the workflow
-  itself, `tests/midscene/**`, the [case catalog](midscene-e2e-cases.md),
-  `packages/web/**`, `packages/ui/**`, `packages/web-content/**`,
-  `packages/api-types/**`, `packages/app-runtime-sdk/**`, and `pnpm-lock.yaml`.
-  A matching PR runs two secret-free jobs. `harness-validation` installs the
-  package, type-checks it, collects YAML cases, checks the catalog, and tests
-  report scripts without starting a browser or model.
-  `mock-boundary-validation` starts the mock server and checks MSW, browser
-  HTTP, and WebSocket blocking without model credentials.
+  Pushes and pull requests do not trigger it. Each suite job type-checks the
+  package before it runs cases, and the `mock` project setup checks MSW,
+  browser HTTP, and WebSocket blocking before the first case. A broken harness
+  or mock boundary fails the next nightly run, so a PR check would only report
+  it a day earlier.
   Manual `workflow_dispatch` also runs the full suite on upstream `main`.
   A fork owner may manually dispatch a fork branch using that fork's secrets.
-  Set `report_source_run_id` to rebuild reports from an existing run's shard
-  artifacts without model calls. Report publishing requires the repository to
-  match `MIDSCENE_PUBLISH_REPO`.
-  The matrix does not run on `pull_request`: model calls are billable and a PR job checks out
+  Report publishing requires the repository to match `MIDSCENE_PUBLISH_REPO`.
+  The suite jobs do not run on `pull_request`: model calls are billable and a PR job checks out
   contributor-controlled code. Note that merely naming a protected
   environment in the workflow does **not** create its reviewer gate — an
   absent environment is provisioned open — so until a maintainer actually
   configures a protected environment with required reviewers (ideally with
-  environment-scoped secrets), the secret-bearing matrix stays fail-closed
+  environment-scoped secrets), the secret-bearing suite jobs stay fail-closed
   and runs only against code on the protected default branch. To enable
   model-backed PR runs later, create the protected environment in Settings
-  first, then add an environment-gated `pull_request` matrix job back to
-  the workflow.
+  first, then add environment-gated `pull_request` suite jobs back to
+  the workflow under a `pull_request` trigger.
 - **Runtime**: Ubuntu + Node.js 24. Pnpm is enabled (reading the root
   `packageManager` version) **before** `setup-node`, whose `cache: pnpm`
   requires pnpm to already exist on a clean runner. Product dependencies
@@ -165,50 +163,44 @@ reasons behind them.
   `playwright install --with-deps chromium`.
 - **Secret handling and trust boundary**: the four `MIDSCENE_MODEL_*` values
   come from repository secrets and are scoped only to the steps that actually
-  call the model (configuration check, connectivity preflight, shard run).
-  Dependency installation and the mock server never see them. The job starts
-  with a non-empty check and a `/chat/completions` connectivity preflight
-  (90-second timeout) so a missing secret or bad endpoint fails in seconds
-  instead of burning the full 45-minute budget.
-- **Network reachability (important)**: the preflight dials
+  call the model (configuration check, `midscene-test model verify`, suite
+  run). Dependency installation and the mock server never see them. The job
+  starts with a non-empty check and `model verify`, which checks connectivity
+  and Midscene compatibility, so a missing secret or bad endpoint fails in
+  seconds instead of burning the job's full time budget.
+- **Network reachability (important)**: `model verify` dials
   `MIDSCENE_MODEL_BASE_URL` directly from the runner. Hosted GitHub runners can
   only reach public endpoints. If the model gateway lives on an intranet (for
-  example a corporate-internal hostname), the preflight fails with a connect
+  example a corporate-internal hostname), `model verify` fails with a connect
   timeout. The workflow then requires a **self-hosted runner** that can reach
   that intranet (change the `runs-on` label) or a publicly reachable model
-  endpoint. Correct credentials with no network route fail at the preflight
+  endpoint. Correct credentials with no network route fail at `model verify`
   just as quickly.
-- **Mock server**: `pnpm --filter rome-web dev:mock:e2e` starts in the background
-  (it runs `build:kit` first, so first-request readiness is polled for several
-  minutes). Its log is uploaded as an artifact on failure.
-- **Sharding**: a 6-entry matrix selected by `MIDSCENE_INCLUDE_TAGS=shard-N`.
-  Every case carries exactly one `shard-N` tag. `fail-fast: false`,
-  `max-parallel: 1`, a 45-minute per-job timeout, and 2 case-level retries.
-- **Evidence**: every model-backed run uploads the `midscene_run/` and
-  `.midscene/` shard artifacts, including failed runs. A read-only job writes
-  results after aggregation without waiting for Pages approval or deployment.
-  It shows total and per-shard counts, abnormal cases first, and passed cases
-  in a collapsed appendix. After Pages completes, a second Summary adds publication
-  status and the native report, screenshot, and exact report-step links when available.
-  If Pages fails or is skipped, results and artifact links remain available.
-  If aggregation fails, the final job recovers available trusted shard data.
-  Shard and publication jobs do not write separate Summaries.
+- **Mock server**: the `mock` project setup starts
+  `pnpm --filter rome-web dev:mock:e2e` without the model variables and stops
+  it in teardown. It runs `build:kit` first, so readiness is polled for up to
+  six minutes. If a server already answers at `ROME_E2E_BASE_URL`, setup uses
+  it. The log is `midscene_run/rome-devmock.log`, part of the suite artifact.
+- **Suites**: each suite is one job. The `mock` job runs every mock case in
+  one Midscene project (`web-mock`) with a 90-minute job timeout and 2
+  case-level retries.
+  The `backend` job runs after it with the same step order, pulling the
+  published image instead of starting the mock server. Each suite's config
+  selects its cases by path: `cases/` for `mock`, `backend/cases/` for
+  `backend`.
+- **Evidence**: each suite job uploads its `midscene_run/` and `.midscene/`
+  directories as `midscene-suite-<suite>`, including failed runs, and writes
+  Midscene's native `result.md` (counts, failed cases, execution errors) to
+  its own job Summary. The `publish` job copies each suite's native HTML
+  report to Pages under `runs/<run-id>/<suite>/` and links the reports that
+  exist. If Pages fails or is skipped, the suite Summaries and artifacts
+  remain available.
+- **Timeouts**: `timeout --signal=TERM` stops a suite before its job limit.
+  Midscene handles `SIGTERM`: it stops the running case, marks the rest not
+  run, and still writes `summary.json`, `result.md`, and the HTML report.
 - **Network stability**: `NODE_OPTIONS=--dns-result-order=ipv4first
   --no-network-family-autoselection` works around runner-side IPv6 racing when
   the model endpoint is only stable over IPv4.
-Shard split:
-
-| Shard | Cases | CI job topic |
-| --- | --- | --- |
-| shard-1 | 5 | Chat interactions |
-| shard-2 | 8 | Apps and chat cards |
-| shard-3 | 7 | Routines and sessions |
-| shard-4 | 7 | Files, people and activity |
-| shard-5 | 6 | Account and settings |
-| shard-6 | 5 | Recorded apps and navigation |
-
-The PoC stories also carry their shard tags (E2E-01/02 → shard-3, E2E-03 →
-shard-2, AUTH-01 → shard-5).
 
 ## 5. Case Catalog
 
@@ -218,9 +210,8 @@ shard-2, AUTH-01 → shard-5).
 
 <!-- CASE-CATALOG -->
 The suite contains **38** ✅ mock-drivable cases in 15 YAML files. The
-[case catalog](midscene-e2e-cases.md#case-catalog) lists their names and shard
-assignments. `npm run collect` validates the expected total and each shard
-count against a committed manifest.
+[case catalog](midscene-e2e-cases.md#case-catalog) lists their names and suite
+assignments.
 
 ### ⚠️ Candidates blocked by section 6 mock gaps (no YAML yet)
 
@@ -321,8 +312,7 @@ real external services.
 See `tests/midscene/README.md`. In short:
 
 ```bash
-pnpm start:web:mock:e2e         # terminal 1: localhost:3200, from repository root
-cd tests/midscene
+cd tests/midscene                # setup starts the mock server on localhost:3200
 npm install && npx playwright install chromium
 cp .env.example .env             # fill in model credentials; .env is gitignored
 npm test
@@ -333,13 +323,13 @@ MIDSCENE_INCLUDE_TAGS=poc npm test   # PoC stories only
 
 1. Every case starts with exactly one `app.open`. Use `aiAct` for navigation
    within the case.
-2. Every case contains at least one `aiAct` and one `aiAssert`. The collection
-   check rejects atomic AI nodes and operational `app.*` nodes.
+2. Every case contains at least one `aiAct` and one `aiAssert`. Do not use
+   atomic AI nodes or operational `app.*` nodes beyond the two listed above.
 3. Write each `aiAct` as a user goal. Combine related clicks, typing,
    scrolling, and navigation when they serve one intent.
 4. Write `aiAssert` prompts against visible outcomes and stable product text.
-5. A case carries exactly one `shard-N` tag. Add functional tags such as
-   `chat` or `routines` as needed.
+5. Add functional tags such as `chat` or `routines` as needed. The directory,
+   not a tag, decides the suite.
 6. New cases must pass repeatedly in a fresh context. Inter-case dependencies
    are forbidden.
 7. When fixtures change, update case assertions in lockstep. When a new product

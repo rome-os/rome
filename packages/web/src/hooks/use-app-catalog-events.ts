@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { useSseEvents } from "./use-sse-events";
+import { appCatalogTopic, useLiveEvents } from "./use-live-events";
 
 const catalogChangeSchema = z.object({
   appId: z.string(),
@@ -8,8 +8,8 @@ const catalogChangeSchema = z.object({
 
 /**
  * Subscribes the open embedded app view to the guardian-gated catalog-change
- * stream (`GET /api/apps/events`, revived in #1646) and pokes `onChange`
- * whenever the app it is displaying changes (#1640).
+ * topic (`apps.catalog`, with `GET /api/apps/events` as the SSE fallback) and
+ * pokes `onChange` whenever the app it is displaying changes (#1640).
  *
  * `onChange` fires on two triggers:
  *  - a `catalog-change` frame whose `appId` matches this view's app, and
@@ -22,16 +22,16 @@ const catalogChangeSchema = z.object({
  *
  * The connection opens only when `enabled` is true. The caller passes the
  * manifest-derived guardian check, so visitor/anonymous views never open a
- * stream the backend would only reject. Native EventSource reconnection covers
- * transient drops, so a brief blip stays invisible.
+ * stream the backend would only reject. The live-events client reconnects on
+ * its own, so a brief blip stays invisible.
  */
 export function useAppCatalogEvents(
   appId: string | undefined,
   enabled: boolean,
   onChange: () => void,
 ): void {
-  useSseEvents(
-    "/api/apps/events",
+  useLiveEvents(
+    appCatalogTopic,
     {
       "catalog-change": {
         schema: catalogChangeSchema,
@@ -52,8 +52,8 @@ export function useAppCatalogEvents(
  * and the backend refuses them this stream.
  */
 export function useAppCatalogChanges(enabled: boolean, onChange: () => void): void {
-  useSseEvents(
-    "/api/apps/events",
+  useLiveEvents(
+    appCatalogTopic,
     {
       "catalog-change": {
         schema: catalogChangeSchema,

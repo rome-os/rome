@@ -107,6 +107,11 @@ export interface DiscordDeps {
   chatStop?: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   listAgents: () => string[];
+  /** The agent linked to a Connection's channel, as `linkedAgentResolver`
+   *  answers it for that channel. */
+  linkedAgentOf?: (connectionId: string) => string | null | undefined;
+  /** Whether an agent is loaded, aliases included. */
+  hasAgent?: (name: string) => boolean;
   /** Injectable token validator so the connect route / tests can drive the
    *  users/@me probe without hitting the network. Production pings the Discord
    *  REST API; a 401/!ok means the pasted token is not accepted. */
@@ -232,7 +237,9 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
 
   return {
     service: "discord",
+    severalAccounts: true,
     reviveProfile: (_grant, record) => reviveDiscordProfile(record),
+    accountIdOf: (_grant, record) => (typeof record.botId === "string" && record.botId) || null,
     auth: {
       bot: botScheme,
     },
@@ -250,6 +257,8 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             conversationSettings: deps.conversationSettings,
             chatStop: deps.chatStop,
             listAgents: deps.listAgents,
+            linkedAgent: () => deps.linkedAgentOf?.(kit.connectionId),
+            hasAgent: deps.hasAgent,
             resolveDiscordPerson: (channelUserId) =>
               deps.personMappingRepo.findByChannelUser("discord", channelUserId),
             // Live gateway faults (post-login) route through here; the descriptor

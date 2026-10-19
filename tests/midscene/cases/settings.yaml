@@ -2,7 +2,6 @@ cases:
   - name: SET-01 Open the appearance-mode choices
     tags:
       - settings
-      - shard-5
     steps:
       - app.open:
           path: /settings/appearance
@@ -13,7 +12,6 @@ cases:
   - name: SET-02 Open connection details
     tags:
       - settings
-      - shard-5
     steps:
       - app.open:
           path: /settings/connections
@@ -26,7 +24,6 @@ cases:
   - name: SET-03 Inspect channel activation settings
     tags:
       - settings
-      - shard-5
     steps:
       - app.open:
           path: /settings/channels
@@ -39,7 +36,6 @@ cases:
   - name: SET-04 Open advanced developer settings
     tags:
       - settings
-      - shard-5
     steps:
       - app.open:
           path: /settings/advanced

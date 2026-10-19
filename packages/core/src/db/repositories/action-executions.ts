@@ -149,6 +149,34 @@ export class ActionExecutionsRepository {
     return Number(result.changes ?? 0);
   }
 
+  /**
+   * Ends every `running` execution as `error` at `finishedAt`, with the message
+   * `errorFor` returns for it, and returns how many it ended. Call only at boot,
+   * before anything can start an execution: every row still `running` then was
+   * left by a process that is gone. An approval replay resumes a pre-boot row,
+   * so a timestamp cutoff cannot stand in for that ordering. `pending_approval`
+   * rows are kept: they wait on a guardian approval, which outlives a restart.
+   */
+  async markRunningInterrupted(
+    finishedAt: Date,
+    errorFor: (row: { id: string; actionName: string }) => string,
+  ): Promise<number> {
+    return this.db.transaction((tx) => {
+      const rows = tx
+        .select({ id: actionExecutions.id, actionName: actionExecutions.actionName })
+        .from(actionExecutions)
+        .where(eq(actionExecutions.status, "running"))
+        .all();
+      for (const row of rows) {
+        tx.update(actionExecutions)
+          .set({ status: "error", finishedAt, error: errorFor(row) })
+          .where(eq(actionExecutions.id, row.id))
+          .run();
+      }
+      return rows.length;
+    });
+  }
+
   async findRecent(limit = 50, offset = 0) {
     return this.db
       .select()

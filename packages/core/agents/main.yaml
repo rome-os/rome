@@ -17,6 +17,9 @@ tools:
   - TodoWrite
 actions:
   - "*"
+  # Root-on-host actions are explicit, so only an exact reference grants them.
+  - system:execute_root_script
+  - system:manage_root_script
 networkDiscovery: true
 allowedSubagents:
   - assistant:assistant

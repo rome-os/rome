@@ -1,34 +1,31 @@
 name: E2E Testing by Midscene
 
-# Visual E2E against the strict MSW mock build (pnpm --filter rome-web dev:mock:e2e,
-# port 3200). Every case uses only synthetic in-repo fixtures; no real backend
-# or personal data is involved. Model credentials come from repository secrets.
+# Visual E2E in two suites, each one job and one report artifact:
+# - mock: the strict MSW mock build (pnpm --filter rome-web dev:mock:e2e, port
+#   3200) with synthetic in-repo fixtures and no real backend. Project setup in
+#   midscene.config.ts starts the mock server.
+# - backend: a real Rome container from the published image, with a real model
+#   configured from ROME_E2E_ANTHROPIC_ENV_JSON.
+# Each suite writes Midscene's native result to its job Summary, and both
+# native HTML reports are published to Pages together.
+# Model credentials come from repository secrets.
 
 on:
   schedule:
     - cron: "0 6 * * *" # 06:00 UTC / 14:00 Beijing daily
-  pull_request:
-    paths:
-      - ".github/workflows/midscene.yml"
-      - "tests/midscene/**"
-      - "docs/midscene-e2e-cases.md"
-      - "packages/web/**"
-      - "packages/api-types/**"
-      - "packages/app-runtime-sdk/**"
-      - "packages/ui/**"
-      - "packages/web-content/**"
-      - "pnpm-lock.yaml"
   workflow_dispatch:
     inputs:
-      report_source_run_id:
-        description: Rebuild the Summary from an existing run's shard artifacts without model calls
-        required: false
-        type: string
       publish_pages:
         description: Publish reports to Pages when this repository is enabled
         required: false
         type: boolean
         default: true
+      suite:
+        description: Which suites to run
+        required: false
+        type: choice
+        options: [all, mock, backend]
+        default: all
 
 # Credential trust model:
 # The four MIDSCENE_MODEL_* secrets are billable, and a pull_request job runs
@@ -36,11 +33,13 @@ on:
 # protected environment in the workflow does not create its reviewer gate — an
 # absent environment is provisioned open — so until a maintainer actually
 # configures a protected environment with required reviewers, the secret-
-# bearing path (the `midscene` matrix) is restricted to the protected main
+# bearing path (the `mock` and `backend` jobs) is restricted to the protected main
 # branch in the upstream repository. Fork owners may explicitly dispatch a
-# fork branch with their fork's own secrets. Pull requests run secret-free
-# harness and mock-browser boundary jobs. Reports are always aggregated after
-# model runs. Pages publication is enabled upstream and opt-in for forks.
+# fork branch with their fork's own secrets. Pull requests do not trigger
+# this workflow. Pages publication is enabled upstream and opt-in for forks.
+#
+# Job-level `if` cannot read workflow `env`, so the gates spell out the
+# upstream repository that MIDSCENE_UPSTREAM_REPOSITORY also names.
 
 permissions:
   contents: read
@@ -53,141 +52,19 @@ env:
   MIDSCENE_UPSTREAM_REPOSITORY: rome-os/rome
 
 jobs:
-  harness-validation:
-    name: Midscene harness validation (no secrets)
-    outputs:
-      upstream-repository: ${{ env.MIDSCENE_UPSTREAM_REPOSITORY }}
-    # Runs on path-filtered PRs, nightly, and manual dispatch: validates the package
-    # without model secrets, a browser download, the Rome workspace install,
-    # or the mock server. Loading the config and collecting YAML cases never
-    # calls chromium.launch or the model, so contributor-controlled PR code
-    # reaches no credentials here.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-
-      - name: Activate Node.js 24
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: tests/midscene/package-lock.json
-
-      - name: Install Midscene test dependencies
-        # This job never launches a browser; skip the playwright postinstall
-        # download. Importing the playwright package (for its types/API) does
-        # not require the browser binaries.
-        working-directory: tests/midscene
-        env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-        run: npm ci --strict-allow-scripts
-
-      - name: Type-check custom nodes
-        working-directory: tests/midscene
-        run: npm run typecheck
-
-      - name: Collect workflow cases
-        # Parses every cases/**/*.yaml and resolves node references exactly
-        # like the runner; fails on schema errors or unknown nodes.
-        working-directory: tests/midscene
-        run: npm run collect
-
-      - name: Test CI Summary renderer
-        working-directory: tests/midscene
-        run: npm run test:summary
-
-  mock-boundary-validation:
-    name: Midscene mock browser boundary (no secrets)
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-
-      - name: Enable pnpm
-        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
-
-      - name: Activate Node.js 24 and pnpm
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "24"
-          cache: pnpm
-
-      - name: Install Rome workspace dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: Install browser test dependencies
-        working-directory: tests/midscene
-        run: |
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --strict-allow-scripts
-          npx playwright install --with-deps chromium
-
-      - name: Start Rome mock server
-        run: |
-          nohup pnpm --filter rome-web dev:mock:e2e > /tmp/rome-devmock.log 2>&1 &
-          for _ in $(seq 1 180); do
-            if curl -sf http://localhost:3200/ -o /dev/null; then
-              echo "dev:mock:e2e is ready"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "dev:mock:e2e failed to become ready" >&2
-          tail -n 100 /tmp/rome-devmock.log >&2
-          exit 1
-
-      - name: Check browser network boundary
-        working-directory: tests/midscene
-        run: npm run check:browser-boundary
-
-      - name: Upload mock server log on failure
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: rome-devmock-pr
-          path: /tmp/rome-devmock.log
-          if-no-files-found: ignore
-
-  midscene:
-    needs: harness-validation
-    name: "Midscene visual: ${{ matrix.label }} (${{ matrix.shard }})"
-    # Fail-closed trust gate: contributor-controlled pull request code never
-    # runs automatically with billable model credentials. Upstream runs only
-    # on main; a fork owner may explicitly dispatch a fork ref with that fork's
-    # own secrets.
+  # The two model-backed suites. Both jobs follow the same step order and each
+  # uploads one `midscene-suite-<suite>` artifact for the `publish` job below;
+  # only the target each suite tests differs.
+  mock:
+    name: "Midscene suite: mock"
+    # Fail-closed trust gate: upstream runs only on main; a fork owner may
+    # explicitly dispatch a fork ref with that fork's own secrets.
     if: >-
-      inputs.report_source_run_id == '' &&
-      needs.harness-validation.outputs.upstream-repository != '' &&
-      (github.repository == needs.harness-validation.outputs.upstream-repository && github.ref == 'refs/heads/main' ||
-      (github.event_name == 'workflow_dispatch' && github.repository != needs.harness-validation.outputs.upstream-repository))
+      inputs.suite != 'backend' &&
+      (github.repository == 'rome-os/rome' && github.ref == 'refs/heads/main' ||
+      github.repository != 'rome-os/rome' && github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      # The shared endpoint has a low tokens-per-minute ceiling. Serial visual
-      # shards prevent concurrent screenshots from causing HTTP 429 failures.
-      max-parallel: 1
-      matrix:
-        # Shards are selected by YAML tags (MIDSCENE_INCLUDE_TAGS), see
-        # tests/midscene/README.md and docs/midscene-e2e-plan.md.
-        include:
-          - shard: shard-1
-            label: Chat interactions
-          - shard: shard-2
-            label: Apps and chat cards
-          - shard: shard-3
-            label: Routines and sessions
-          - shard: shard-4
-            label: Files, people and activity
-          - shard: shard-5
-            label: Account and settings
-          - shard: shard-6
-            label: Recorded apps and navigation
+    timeout-minutes: 90
     env:
       HEADLESS: "true"
       ROME_E2E_BASE_URL: http://localhost:3200
@@ -211,7 +88,7 @@ jobs:
 
       - name: Require Midscene model configuration
         env: &model-env
-          # Scoped to the steps that actually call the model; install and the
+          # Scoped to the steps that actually call the model; installs and the
           # mock server never see these variables.
           MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
           MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
@@ -223,9 +100,6 @@ jobs:
           test -n "$MIDSCENE_MODEL_BASE_URL"
           test -n "$MIDSCENE_MODEL_FAMILY"
 
-      - name: Install Rome workspace dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
       - name: Install Midscene test dependencies
         # allowScripts for esbuild/sharp is declared in this package.json, so
         # npm ci runs their (approved) install scripts non-interactively.
@@ -234,77 +108,39 @@ jobs:
           npm ci --strict-allow-scripts
           npx playwright install --with-deps chromium
 
-      - name: Check Midscene model vision
+      - name: Verify the Midscene model
         working-directory: tests/midscene
         env: *model-env
-        run: npm run check:model-vision
+        run: npm run check:model
 
       - name: Type-check Midscene custom nodes
         # npm test loads midscene.config.ts via tsx/esbuild without semantic
         # TS checks, so run the standalone package's tsc before the expensive
-        # browser shards.
+        # browser run.
         working-directory: tests/midscene
         run: npm run typecheck
 
-      # dev:mock:e2e runs build:kit before rsbuild dev, so first-request readiness
-      # can take a few minutes after the job starts.
-      - name: Start Rome mock server
-        run: |
-          nohup pnpm --filter rome-web dev:mock:e2e > /tmp/rome-devmock.log 2>&1 &
-          for _ in $(seq 1 180); do
-            if curl -sf http://localhost:3200/ -o /dev/null; then
-              echo "dev:mock:e2e is ready"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "dev:mock:e2e failed to become ready" >&2
-          tail -n 100 /tmp/rome-devmock.log >&2
-          exit 1
+      - name: Install Rome workspace dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Check browser network boundary
-        working-directory: tests/midscene
-        run: npm run check:browser-boundary
-
-      - name: Run Midscene shard
-        id: run-shard
+      # Project setup starts dev:mock:e2e, waits for it, and checks the browser
+      # network boundary before the first case; its log lands in midscene_run/.
+      - name: Run the suite
         working-directory: tests/midscene
         env:
           MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
           MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
           MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
           MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
-          MIDSCENE_INCLUDE_TAGS: ${{ matrix.shard }}
-          MIDSCENE_PROJECT_NAME: web-${{ matrix.shard }}
           MIDSCENE_REPLANNING_CYCLE_LIMIT: "40"
           MIDSCENE_RETRY: "2"
-        run: timeout --signal=TERM --kill-after=10s 35m npm test
+        run: timeout --signal=TERM --kill-after=60s 80m npm test
 
-      - name: Record report model
-        if: always()
-        working-directory: tests/midscene
-        env:
-          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
-          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
-        run: |
-          node --input-type=module <<'NODE'
-          import { mkdir, writeFile } from 'node:fs/promises';
-          await mkdir('midscene_run', { recursive: true });
-          await writeFile(
-            'midscene_run/model.json',
-            `${JSON.stringify({
-              modelName: process.env.MIDSCENE_MODEL_NAME,
-              modelFamily: process.env.MIDSCENE_MODEL_FAMILY,
-            }, null, 2)}\n`,
-          );
-          NODE
-
-      - name: Upload Midscene shard report
-        id: upload-shard
+      - name: Upload the suite report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: midscene-${{ matrix.shard }}
+          name: midscene-suite-mock
           path: |
             tests/midscene/midscene_run/
             tests/midscene/.midscene/
@@ -312,29 +148,30 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload mock server log on failure
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: rome-devmock-${{ matrix.shard }}
-          path: /tmp/rome-devmock.log
-          if-no-files-found: warn
-          retention-days: 14
+      - name: Write the result to the Summary
+        if: always()
+        run: tests/midscene/scripts/write-summary.sh mock
 
-  report-summary:
-    name: Merge Midscene reports
-    needs: midscene
+  backend:
+    needs: mock
+    name: "Midscene suite: backend"
+    # The same trust gate as `mock`. It runs after `mock`, never beside it,
+    # because both share the Midscene endpoint's tokens-per-minute ceiling; a
+    # failed or skipped `mock` does not stop it.
     if: >-
-      always() && !cancelled() &&
-      github.event_name != 'pull_request' &&
-      (needs.midscene.result != 'skipped' || inputs.report_source_run_id != '')
+      always() && !cancelled() && inputs.suite != 'mock' &&
+      (github.repository == 'rome-os/rome' && github.ref == 'refs/heads/main' ||
+      github.repository != 'rome-os/rome' && github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    permissions:
-      actions: read
-      contents: read
-    outputs:
-      report-artifact-name: ${{ steps.upload-report.outcome == 'success' && 'midscene-e2e-report' || '' }}
+    timeout-minutes: 45
+    env:
+      HEADLESS: "true"
+      ROME_E2E_BASE_URL: http://127.0.0.1:8090
+      NODE_OPTIONS: "--dns-result-order=ipv4first --no-network-family-autoselection"
+      # The image published from main twice a day; the Summary records which
+      # commit it was built from.
+      ROME_E2E_IMAGE: zoolsher/rome:latest
+      ROME_E2E_EVENTS_FILE: ${{ github.workspace }}/tests/midscene/midscene_run/backend/events.jsonl
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -347,146 +184,133 @@ jobs:
           cache: npm
           cache-dependency-path: tests/midscene/package-lock.json
 
-      - name: Install Midscene report merger
-        working-directory: tests/midscene
+      - name: Require Midscene and Rome model configuration
         env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-        run: npm ci --strict-allow-scripts
-
-      - name: Validate report source run
-        if: inputs.report_source_run_id != ''
-        env:
-          REPORT_SOURCE_RUN_ID: ${{ inputs.report_source_run_id }}
-          GH_TOKEN: ${{ github.token }}
-        run: node tests/midscene/scripts/trusted-report-runs.mjs validate-source
-
-      # Separate directories preserve reports whose generated filenames match
-      # across serial shards.
-      - name: Download every Midscene shard
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: midscene-shard-*
-          run-id: ${{ inputs.report_source_run_id || github.run_id }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/midscene-report-shards
-          merge-multiple: false
-
-      - name: Merge native Midscene Test reports
-        id: native-report
-        continue-on-error: true
-        working-directory: tests/midscene
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
+          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+          ROME_E2E_ANTHROPIC_ENV_JSON: ${{ secrets.ROME_E2E_ANTHROPIC_ENV_JSON }}
         run: |
-          node scripts/merge-native-reports.mjs \
-            "$RUNNER_TEMP/midscene-report-shards" \
-            "web-shard-1,web-shard-2,web-shard-3,web-shard-4,web-shard-5,web-shard-6" \
-            "case-manifest.json"
-          if [ -f "$RUNNER_TEMP/midscene-report-shards/native-report/index.html" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Discard output from a failed native merge
-        if: steps.native-report.outcome == 'failure'
-        run: |
+          test -n "$MIDSCENE_MODEL_API_KEY"
+          test -n "$MIDSCENE_MODEL_NAME"
+          test -n "$MIDSCENE_MODEL_BASE_URL"
+          test -n "$MIDSCENE_MODEL_FAMILY"
+          test -n "$ROME_E2E_ANTHROPIC_ENV_JSON"
+          # GitHub masks the secret as a whole, not a token printed on its own.
           node --input-type=module <<'NODE'
-          import { rm } from 'node:fs/promises';
-          import path from 'node:path';
-          await rm(path.join(process.env.RUNNER_TEMP, 'midscene-report-shards', 'native-report'), {
-            recursive: true,
-            force: true,
-          });
+          const parsed = JSON.parse(process.env.ROME_E2E_ANTHROPIC_ENV_JSON);
+          for (const value of Object.values(parsed.env ?? parsed)) {
+            if (typeof value === "string" && value.length >= 8) console.log(`::add-mask::${value}`);
+          }
           NODE
 
-      - name: Render case table
-        id: case-table
-        continue-on-error: true
-        env:
-          PRODUCER_RESULT: ${{ inputs.report_source_run_id != '' && 'success' || needs.midscene.result }}
+      - name: Install Midscene test dependencies
+        working-directory: tests/midscene
         run: |
-          node tests/midscene/scripts/render-ci-summary.mjs \
-            --reports-dir "$RUNNER_TEMP/midscene-report-shards" \
-            --expected-projects "web-shard-1,web-shard-2,web-shard-3,web-shard-4,web-shard-5,web-shard-6" \
-            --case-manifest "tests/midscene/case-manifest.json" \
-            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --producer-result "$PRODUCER_RESULT" \
-            --output "$RUNNER_TEMP/midscene-report-shards/summary.md"
+          npm ci --strict-allow-scripts
+          npx playwright install --with-deps chromium
 
-      - name: Upload combined Midscene report
-        id: upload-report
+      - name: Verify the Midscene model
+        working-directory: tests/midscene
+        env: *model-env
+        run: npm run check:model
+
+      - name: Type-check Midscene custom nodes
+        working-directory: tests/midscene
+        run: npm run typecheck
+
+      - name: Pull the published image
+        run: |
+          docker pull "$ROME_E2E_IMAGE"
+          docker image inspect "$ROME_E2E_IMAGE" \
+            --format 'Image built from {{ index .Config.Labels "org.opencontainers.image.revision" }} at {{ .Created }}'
+
+      - name: Start the target (Rome container)
+        run: tests/midscene/backend/instance.sh up
+
+      - name: Run the suite
+        working-directory: tests/midscene
+        env:
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
+          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+          MIDSCENE_REPLANNING_CYCLE_LIMIT: "40"
+          ROME_E2E_ANTHROPIC_ENV_JSON: ${{ secrets.ROME_E2E_ANTHROPIC_ENV_JSON }}
+        run: timeout --signal=TERM --kill-after=60s 35m npm run test:backend
+
+      - name: Collect the container log and anomalies
         if: always()
+        run: |
+          tests/midscene/backend/instance.sh collect tests/midscene/midscene_run/backend
+          revision=$(docker image inspect "$ROME_E2E_IMAGE" \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' || true)
+          node tests/midscene/scripts/backend-anomalies.mjs \
+            --rome-log tests/midscene/midscene_run/backend/rome.log \
+            --events "$ROME_E2E_EVENTS_FILE" \
+            --image "$ROME_E2E_IMAGE@$revision" \
+            --out tests/midscene/midscene_run/backend
+
+      # The report is published like the mock report, so nothing is uploaded
+      # unless this scan passes: GitHub masks secrets in step logs but not
+      # inside artifacts.
+      - name: Scan the suite report for secrets
+        id: secret-scan
+        if: always()
+        working-directory: tests/midscene
+        env:
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          ROME_E2E_ANTHROPIC_ENV_JSON: ${{ secrets.ROME_E2E_ANTHROPIC_ENV_JSON }}
+        run: node scripts/backend-secret-scan.mjs midscene_run .midscene
+
+      - name: Upload the suite report
+        if: always() && steps.secret-scan.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: midscene-e2e-report
+          name: midscene-suite-backend
+          path: |
+            tests/midscene/midscene_run/
+            tests/midscene/.midscene/
           include-hidden-files: true
-          path: ${{ runner.temp }}/midscene-report-shards/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
-      - name: Require complete native report
-        if: >-
-          steps.native-report.outcome != 'success' ||
-          steps.native-report.outputs.available != 'true' ||
-          steps.case-table.outcome != 'success'
+      - name: Write the result to the Summary
+        if: always() && steps.secret-scan.outcome == 'success'
         run: |
-          echo "The native Midscene Test report is incomplete; see the run Summary and shard artifacts." >&2
-          exit 1
+          tests/midscene/scripts/write-summary.sh backend
+          summary=tests/midscene/midscene_run/backend/backend-summary.md
+          if [ -f "$summary" ]; then cat "$summary" >> "$GITHUB_STEP_SUMMARY"; fi
 
-  available-results:
-    name: Midscene results before publication
-    needs: [midscene, report-summary]
+  publish:
+    name: Publish Midscene reports to Pages
+    needs: [mock, backend]
+    # Upstream publishes from main; a fork opts in by its exact full name and
+    # publishes only from manual dispatch.
     if: >-
-      always() && !cancelled() && github.event_name != 'pull_request' &&
-      (needs.midscene.result != 'skipped' || inputs.report_source_run_id != '')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      actions: read
-    steps:
-      - name: Download available results
-        id: report
-        if: needs.report-summary.outputs.report-artifact-name != ''
-        continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.report-summary.outputs.report-artifact-name }}
-          path: ${{ runner.temp }}/midscene-results
-
-      - name: Show results without waiting for Pages
-        if: always()
-        env:
-          REPORT_RESULT: ${{ needs.report-summary.result }}
-        run: |
-          if [ -f "$RUNNER_TEMP/midscene-results/summary.md" ]; then
-            cat "$RUNNER_TEMP/midscene-results/summary.md" >> "$GITHUB_STEP_SUMMARY"
-          else
-            {
-              echo "## Midscene results"
-              echo
-              echo "Report aggregation: $REPORT_RESULT. Case counts are unavailable."
-              echo
-              echo "[Inspect this run and available shard artifacts]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts)."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-  prepare-pages:
-    name: Prepare optional Midscene Pages publication
-    needs: [harness-validation, report-summary]
-    # Publication never runs on contributor-controlled pull request code.
-    # Upstream is enabled in code; each fork must opt in by its exact full name.
-    if: >-
-      always() && !cancelled() && github.event_name != 'pull_request' &&
+      always() && !cancelled() &&
+      (needs.mock.result != 'skipped' || needs.backend.result != 'skipped') &&
       (github.event_name != 'workflow_dispatch' || inputs.publish_pages) &&
-      needs.harness-validation.outputs.upstream-repository != '' &&
-      (github.repository == needs.harness-validation.outputs.upstream-repository && github.ref == 'refs/heads/main' ||
-      github.repository != needs.harness-validation.outputs.upstream-repository && github.repository == vars.MIDSCENE_PUBLISH_REPO && github.event_name == 'workflow_dispatch') &&
-      needs.report-summary.outputs.report-artifact-name != ''
+      (github.repository == 'rome-os/rome' && github.ref == 'refs/heads/main' ||
+      github.repository != 'rome-os/rome' && github.repository == vars.MIDSCENE_PUBLISH_REPO &&
+      github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
+    # The site carries the last few runs forward from the previous deployment,
+    # so reading that history and deploying must not interleave across runs.
+    # The lock covers this job only, not the suite runs.
+    concurrency:
+      group: midscene-pages-report
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: read
-      pages: read
-    outputs:
-      pages-artifact-name: ${{ steps.upload-pages.outcome == 'success' && steps.pages-artifact.outputs.name || '' }}
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -509,12 +333,15 @@ jobs:
         run: |
           echo "::warning::GitHub Pages is unavailable. A maintainer must select Settings > Pages > Build and deployment > Source > GitHub Actions."
 
-      - name: Download combined Midscene report
+      # Separate directories keep reports whose generated filenames match
+      # across suites apart.
+      - name: Download the suite reports
         if: steps.pages.outcome == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.report-summary.outputs.report-artifact-name }}
-          path: ${{ runner.temp }}/midscene-report-shards
+          pattern: midscene-suite-*
+          path: ${{ runner.temp }}/midscene-reports
+          merge-multiple: false
 
       - name: Find the latest published report artifact
         id: previous-report
@@ -538,148 +365,49 @@ jobs:
           mkdir -p "$RUNNER_TEMP/previous-pages"
           tar -xf "$RUNNER_TEMP/previous-pages-artifact/artifact.tar" -C "$RUNNER_TEMP/previous-pages"
 
-      - name: Prepare published report
+      - name: Prepare the Pages site
+        id: site
         if: steps.pages.outcome == 'success'
         run: |
           node tests/midscene/scripts/prepare-pages-site.mjs \
             --site "$RUNNER_TEMP/midscene-pages" \
-            --reports "$RUNNER_TEMP/midscene-report-shards" \
+            --reports "$RUNNER_TEMP/midscene-reports" \
             --run-id "$GITHUB_RUN_ID" \
-            --previous "$RUNNER_TEMP/previous-pages"
+            --previous "$RUNNER_TEMP/previous-pages" > "$RUNNER_TEMP/midscene-site.json"
+          cat "$RUNNER_TEMP/midscene-site.json"
 
-      - name: Name GitHub Pages artifact
-        id: pages-artifact
-        if: steps.pages.outcome == 'success'
-        run: echo "name=midscene-e2e-report-pages-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-
-      - name: Upload GitHub Pages report
+      - name: Upload the Pages site
         id: upload-pages
-        if: steps.pages.outcome == 'success'
+        if: steps.site.outcome == 'success'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          name: ${{ steps.pages-artifact.outputs.name }}
+          name: midscene-e2e-report-pages-${{ github.run_attempt }}
           path: ${{ runner.temp }}/midscene-pages
           retention-days: 90
 
-  deploy-report:
-    name: Publish Midscene HTML report
-    needs: prepare-pages
-    if: >-
-      always() && !cancelled() &&
-      needs.prepare-pages.outputs.pages-artifact-name != ''
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    concurrency:
-      group: midscene-pages-report
-      cancel-in-progress: false
-    permissions:
-      pages: write
-      id-token: write
-    outputs:
-      page-url: ${{ steps.deployment.outputs.page_url }}
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy report to GitHub Pages
+      - name: Deploy the Pages site
         id: deployment
+        if: steps.upload-pages.outcome == 'success'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
-          artifact_name: ${{ needs.prepare-pages.outputs.pages-artifact-name }}
+          artifact_name: midscene-e2e-report-pages-${{ github.run_attempt }}
 
-  report-results:
-    name: Midscene results
-    needs: [midscene, report-summary, prepare-pages, deploy-report]
-    # Results are already visible in available-results while Pages awaits approval.
-    # This Summary adds publication status and verified report links.
-    if: >-
-      always() && !cancelled() && github.event_name != 'pull_request' &&
-      (needs.midscene.result != 'skipped' || inputs.report_source_run_id != '')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-
-      - name: Activate Node.js 24
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "24"
-
-      - name: Validate report source run
-        id: source-run
-        if: inputs.report_source_run_id != ''
-        continue-on-error: true
+      # Links come from prepare-pages-site, which names only reports that exist.
+      - name: Link the published reports in the Summary
+        if: steps.deployment.outcome == 'success'
         env:
-          REPORT_SOURCE_RUN_ID: ${{ inputs.report_source_run_id }}
-          GH_TOKEN: ${{ github.token }}
-        run: node tests/midscene/scripts/trusted-report-runs.mjs validate-source
-
-      - name: Download combined Midscene report
-        id: combined-report
-        if: >-
-          needs.report-summary.outputs.report-artifact-name != '' &&
-          (inputs.report_source_run_id == '' || steps.source-run.outcome == 'success')
-        continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.report-summary.outputs.report-artifact-name }}
-          path: ${{ runner.temp }}/midscene-combined-report
-
-      - name: Recover available shard reports
-        if: >-
-          steps.combined-report.outcome != 'success' &&
-          (inputs.report_source_run_id == '' || steps.source-run.outcome == 'success')
-        continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: midscene-shard-*
-          run-id: ${{ inputs.report_source_run_id || github.run_id }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/midscene-report-shards
-          merge-multiple: false
-
-      - name: Write the consolidated run Summary
-        if: always()
-        env:
-          PAGE_URL: ${{ needs.deploy-report.result == 'success' && needs.deploy-report.outputs.page-url || '' }}
-          REPORT_SOURCE_RUN_ID: ${{ inputs.report_source_run_id }}
-          REPORTS_DIR: ${{ steps.combined-report.outcome == 'success' && 'midscene-combined-report' || 'midscene-report-shards' }}
-          PRODUCER_RESULT: ${{ needs.report-summary.result == 'success' && (inputs.report_source_run_id != '' || needs.midscene.result == 'success') && 'success' || 'failure' }}
-          REPORT_RESULT: ${{ needs.report-summary.result }}
-          PUBLICATION_RESULT: ${{ needs.prepare-pages.result == 'failure' && 'failure' || needs.deploy-report.result }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
-          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          pages_url=""
-          if [ -n "$PAGE_URL" ]; then
-            pages_url="${PAGE_URL%/}/runs/$GITHUB_RUN_ID/"
-          fi
-          if node tests/midscene/scripts/render-ci-summary.mjs \
-            --reports-dir "$RUNNER_TEMP/$REPORTS_DIR" \
-            --expected-projects "web-shard-1,web-shard-2,web-shard-3,web-shard-4,web-shard-5,web-shard-6" \
-            --case-manifest "tests/midscene/case-manifest.json" \
-            --run-url "$run_url" \
-            --pages-url "$pages_url" \
-            --source-run-id "$REPORT_SOURCE_RUN_ID" \
-            --producer-result "$PRODUCER_RESULT" \
-            --report-result "$REPORT_RESULT" \
-            --publication-result "$PUBLICATION_RESULT" \
-            --output "$RUNNER_TEMP/midscene-summary.md"; then
-            cat "$RUNNER_TEMP/midscene-summary.md" >> "$GITHUB_STEP_SUMMARY"
-          else
-            {
-              echo "## Rome × Midscene · Summary unavailable"
-              echo
-              echo "Case counts could not be read. Aggregation: $REPORT_RESULT. Pages: $PUBLICATION_RESULT."
-              echo
-              echo "[Inspect this run and available artifacts]($run_url#artifacts)."
-              if [[ "$REPORT_SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
-                echo "[Inspect source-run artifacts]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$REPORT_SOURCE_RUN_ID#artifacts)."
-              fi
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
+          node --input-type=module <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          import { readFileSync } from "node:fs";
+          const { reports } = JSON.parse(
+            readFileSync(`${process.env.RUNNER_TEMP}/midscene-site.json`, "utf8"),
+          );
+          const base = `${process.env.PAGE_URL.replace(/\/$/, "")}/runs/${process.env.GITHUB_RUN_ID}`;
+          const suites = Object.keys(reports).sort();
+          console.log("## Midscene reports\n");
+          if (!suites.length) console.log("No suite produced an HTML report.");
+          for (const suite of suites) {
+            console.log(`- [Open the ${suite} report ↗](${base}/${reports[suite]})`);
+          }
+          NODE

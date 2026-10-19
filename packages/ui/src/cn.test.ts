@@ -38,6 +38,11 @@ describe("cn", () => {
     );
   });
 
+  it.each(["4", "8", "12", "16"])("lets rounded-%s override another radius utility", (radius) => {
+    expect(cn("rounded-full", `rounded-${radius}`)).toBe(`rounded-${radius}`);
+    expect(cn(`rounded-${radius}`, "rounded-full")).toBe("rounded-full");
+  });
+
   // The kit's hosts are on Tailwind 4, whose utilities tailwind-merge only
   // understands from v3 onwards. Under v2 each of these pairs survives intact,
   // so the winner is decided by generated CSS order rather than by the caller —

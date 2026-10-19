@@ -230,7 +230,8 @@
     "active": "Active",
     "running": "Running",
     "paused": "Paused",
-    "failed": "Failed"
+    "failed": "Failed",
+    "failedAriaLabel": "{{name}}, last run failed"
   },
   "failedLine": "Last run failed · {{when}}",
   "footer": {

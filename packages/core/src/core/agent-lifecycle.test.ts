@@ -305,57 +305,44 @@ describe("AgentLifecycleDispatcher", () => {
     ]);
   });
 
-  it("enforces maxHookDepth independently for every nested sibling candidate", async () => {
-    const recursive = await createHookDir(
-      "max-depth",
-      `
+  it("skips every candidate once a hook chain exceeds the depth limit", async () => {
+    // Hook N re-dispatches turn-N as turn-(N+1), so each nested dispatch is
+    // one level deeper and runs a different hook. Turn-5 sits at depth 5.
+    const refs: ArtifactRef[] = [];
+    for (let step = 1; step <= 4; step++) {
+      const dir = await createHookDir(
+        `depth-${step}`,
+        `
   return {
     onAgentTurnFinished(event) {
-      if (!event.turn.turnId.endsWith("-nested")) {
-        const nested = structuredClone(event);
-        nested.turn.turnId = \`\${event.turn.turnId}-nested\`;
-        const result = globalThis.__agentLifecycleNestedDispatcher.dispatchFinished(nested);
-        globalThis.__agentLifecycleHookDispatchResults ??= [];
-        globalThis.__agentLifecycleHookDispatchResults.push(result);
-      }
+      if (event.turn.turnId !== "turn-${step}") return;
+      const nested = structuredClone(event);
+      nested.turn.turnId = "turn-${step + 1}";
+      const result = globalThis.__agentLifecycleNestedDispatcher.dispatchFinished(nested);
+      globalThis.__agentLifecycleHookDispatchResults ??= [];
+      globalThis.__agentLifecycleHookDispatchResults.push(result);
     },
   };
   `,
-    );
-    const observer = await createHookDir("observer-depth");
-    const dispatcher = createAgentLifecycleDispatcher({
-      hookRecursion: { maxHookDepth: 1, maxSameHookDepth: 1 },
-    });
+      );
+      refs.push(hookRef(`app.step${step}`, "agent-turn-finished", dir));
+    }
+    const dispatcher = createAgentLifecycleDispatcher();
     (globalThis as LifecycleHookGlobal).__agentLifecycleNestedDispatcher = dispatcher;
-    const failures = await dispatcher.loadFromCatalog(
-      catalogWithHooks([
-        hookRef("app.recursive", "agent-turn-finished", recursive),
-        hookRef("app.observer", "agent-turn-finished", observer),
-      ]),
-    );
+    expect(await dispatcher.loadFromCatalog(catalogWithHooks(refs))).toEqual([]);
 
-    expect(failures).toEqual([]);
+    dispatcher.dispatchFinished(finishedEvent());
+    for (let i = 0; i < 5; i++) await flushHookDispatch();
 
-    const result = dispatcher.dispatchFinished(finishedEvent());
-    await flushHookDispatch();
-
-    expect(result).toMatchObject({ invoked: 2, skipped: 0 });
-    expect((globalThis as LifecycleHookGlobal).__agentLifecycleHookDispatchResults).toEqual([
+    const results = (globalThis as LifecycleHookGlobal).__agentLifecycleHookDispatchResults;
+    expect(results).toHaveLength(4);
+    expect(results?.at(-1)).toEqual(
       expect.objectContaining({
         invoked: 0,
-        skipped: 2,
-        skips: [
-          expect.objectContaining({ reason: "max_hook_depth" }),
-          expect.objectContaining({ reason: "max_hook_depth" }),
-        ],
+        skipped: 4,
+        skips: Array(4).fill(expect.objectContaining({ reason: "max_hook_depth" })),
       }),
-    ]);
-    expect(
-      (globalThis as LifecycleHookGlobal).__agentLifecycleHookEvents?.map((entry) => [
-        entry.appId,
-        entry.event.turn.turnId,
-      ]),
-    ).toEqual([["app.observer", "turn-1"]]);
+    );
   });
 
   async function createHookDir(name: string, body?: string): Promise<string> {

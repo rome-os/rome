@@ -218,7 +218,10 @@ export default function App({ bootstrap }: { bootstrap: RomeAppBootstrap }) {
           className={cn("group", starting && "opacity-80")}
         >
           {starting ? copy.landing.opening : copy.landing.start}
-          <ArrowRight className="transition-transform group-hover:translate-x-0.5" />
+          <ArrowRight
+            data-icon="inline-end"
+            className="transition-transform group-hover:translate-x-0.5"
+          />
         </Button>
         {error ? <span className="text-xs text-destructive">{error}</span> : null}
       </div>

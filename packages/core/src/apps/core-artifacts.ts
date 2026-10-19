@@ -2,31 +2,13 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { getCoreRoot } from "../paths.js";
-import type { ArtifactKind, ArtifactRef } from "./state.js";
+import type { ArtifactRef } from "./state.js";
 
 /**
- * Core (non-app) artifacts shipped inside `packages/core/`. Today this is
- * limited to agents under `packages/core/agents/`; actions / skills / hooks
- * are all app-owned. Loaders merge this list with app artifacts pulled from
- * the AppCatalog — the catalog does not own core artifacts.
+ * Core agents shipped under `packages/core/agents/`. Every other artifact kind
+ * is app-owned, so loaders merge only agents with the AppCatalog's artifacts.
  */
-export async function listCoreArtifacts(
-  coreRoot: string = getCoreRoot(),
-): Promise<readonly ArtifactRef[]> {
-  const out: ArtifactRef[] = [];
-  out.push(...(await listCoreAgents(coreRoot)));
-  return out;
-}
-
-export async function listCoreArtifactsByKind(
-  kind: ArtifactKind,
-  coreRoot: string = getCoreRoot(),
-): Promise<readonly ArtifactRef[]> {
-  if (kind === "agent") return listCoreAgents(coreRoot);
-  return [];
-}
-
-async function listCoreAgents(coreRoot: string): Promise<ArtifactRef[]> {
+export async function listCoreAgents(coreRoot: string = getCoreRoot()): Promise<ArtifactRef[]> {
   const dir = join(coreRoot, "agents");
   if (!existsSync(dir)) return [];
   const entries = await readdir(dir, { withFileTypes: true });

@@ -28,34 +28,19 @@ import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { renameSession } from "@/lib/chat-api";
+import { deleteSession, listSessions, renameSession, type SessionScope } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
+import type { ChatSession } from "@/lib/chat-types";
+import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
+import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
-import { useSseEvents } from "@/hooks/use-sse-events";
+import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import {
   emitSessionsChanged,
   useArchiveSession,
   usePinSession,
   useSessionsChanged,
 } from "@/lib/session-events";
-import { chatSearchShortcutForPlatform } from "./ChatSearchDialog";
-
-interface ChatSession {
-  id: string;
-  name: string;
-  createdAt: string;
-  activityAt: string;
-  lastSeenActivityAt: string | null;
-  unread: boolean;
-  running?: boolean;
-  lastTurnFailed?: boolean;
-  awaitingGuardian?: boolean;
-  projectName: string;
-  projectPath: string;
-  archivedAt: string | null;
-  archived: boolean;
-  pinnedAt: string | null;
-}
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
  *  so they show even while it is open; done means unseen replies, so the open
@@ -168,6 +153,7 @@ interface SessionGroup {
 }
 
 const GROUP_MODE_STORAGE_KEY = "rome-recent-chats-group-mode";
+const SCOPE_STORAGE_KEY = "rome-recent-chats-scope";
 const STATUS_FILTER_STORAGE_KEY = "rome-recent-chats-status-filter";
 const COLLAPSED_GROUPS_STORAGE_KEY = "rome-recent-chats-collapsed-groups";
 
@@ -181,9 +167,9 @@ const DATE_BUCKETS = [
 
 type DateBucketId = (typeof DATE_BUCKETS)[number]["id"];
 
-function activeSessionFromPath(pathname: string): string | null {
-  const match = pathname.match(/^\/chat\/([^/?#]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
+function readScope(): SessionScope {
+  if (typeof window === "undefined") return "all";
+  return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "mine" ? "mine" : "all";
 }
 
 function readGroupMode(): GroupMode {
@@ -223,13 +209,6 @@ function dateBucketFor(createdAt: string, now: number): DateBucketId {
   if (t >= today - 7 * 86_400_000) return "previous7Days";
   if (t >= today - 30 * 86_400_000) return "previous30Days";
   return "older";
-}
-
-function sessionActivityTime(session: ChatSession): number {
-  const activity = new Date(session.activityAt || session.createdAt).getTime();
-  if (Number.isFinite(activity)) return activity;
-  const created = new Date(session.createdAt).getTime();
-  return Number.isFinite(created) ? created : 0;
 }
 
 function projectNameFromPath(projectPath: string): string {
@@ -310,6 +289,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [phase, setPhase] = useState<LoadPhase>("loading");
   const [groupMode, setGroupMode] = useState<GroupMode>(() => readGroupMode());
+  const [scope, setScope] = useState<SessionScope>(() => readScope());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => readStatusFilter());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
     readStringSetFromStorage(COLLAPSED_GROUPS_STORAGE_KEY),
@@ -329,28 +309,26 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   // response can be older than an event that arrived while it was in flight,
   // so the stream's word wins over the row's.
   const liveRunning = useRef(new Map<string, boolean>());
+  // Only the latest request may update the list or phase, including event-driven refetches.
+  const listRequest = useRef(0);
   const loadSessions = useCallback(async () => {
+    const request = ++listRequest.current;
     try {
-      const query = statusFilter === "active" ? "" : `?status=${statusFilter}`;
-      const res = await fetch(`/api/chat/sessions${query}`, { credentials: "include" });
-      if (!res.ok) {
-        setPhase("error");
-        return;
-      }
-      const data = (await res.json()) as ChatSession[];
-      setSessions(
-        data.map((s) =>
-          withLiveRunning({ ...s, archived: Boolean(s.archivedAt) }, liveRunning.current),
-        ),
-      );
+      const data = await listSessions(statusFilter, scope);
+      if (request !== listRequest.current) return;
+      setSessions(data.map((s) => withLiveRunning(s, liveRunning.current)));
       setPhase("ready");
     } catch {
+      if (request !== listRequest.current) return;
       setPhase("error");
     }
-  }, [statusFilter]);
+  }, [statusFilter, scope]);
 
   useEffect(() => {
     void loadSessions();
+    return () => {
+      listRequest.current += 1;
+    };
   }, [loadSessions]);
 
   useSessionsChanged(() => {
@@ -359,8 +337,8 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
 
   // Live running state. A stop refetches the list for unread and
   // lastTurnFailed, and a reconnect refetches whatever changed meanwhile.
-  useSseEvents(
-    "/api/chat/status/events",
+  useLiveEvents(
+    chatStatusTopic,
     {
       session_running: {
         schema: sessionRunningSchema,
@@ -400,6 +378,11 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
       JSON.stringify(Array.from(collapsedGroups)),
     );
   }, [collapsedGroups]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SCOPE_STORAGE_KEY, scope);
+  }, [scope]);
 
   const pinnedChats = useMemo(
     () =>
@@ -472,7 +455,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     const now = Date.now();
     const buckets = new Map<DateBucketId, ChatSession[]>();
     for (const session of regularSessions) {
-      const id = dateBucketFor(session.activityAt || session.createdAt, now);
+      const id = dateBucketFor(session.activityAt, now);
       const existing = buckets.get(id);
       if (existing) existing.push(session);
       else buckets.set(id, [session]);
@@ -528,9 +511,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
           return prev.filter((s) => s.id !== id);
         }
         return prev.map((s) =>
-          s.id === id
-            ? { ...s, archived, archivedAt: archived ? new Date().toISOString() : null }
-            : s,
+          s.id === id ? { ...s, archivedAt: archived ? new Date().toISOString() : null } : s,
         );
       });
     },
@@ -565,10 +546,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const handleDelete = useCallback(
     async (id: string) => {
       try {
-        await fetch(`/api/chat/sessions/${id}`, {
-          method: "DELETE",
-          credentials: "include",
-        });
+        await deleteSession(id);
       } catch {
         // ignore — refetch anyway
       }
@@ -634,7 +612,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     const isEditing = editingId === session.id;
     const togglePin = () => void setPinned(session.id, !session.pinnedAt);
     const beginRename = () => startRename(session);
-    const toggleArchive = session.archived
+    const toggleArchive = session.archivedAt
       ? () => void handleUnarchive(session.id)
       : () => void setArchived(session.id, true);
     const shortcuts: Record<string, () => void> = {
@@ -647,7 +625,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
         key={session.id}
         data-chat-row
         className={`group flex h-8 items-center gap-1 rounded-8 text-ui transition min-h-[var(--control-min-h)] ${
-          session.archived ? "text-subtle-foreground" : "text-foreground"
+          session.archivedAt ? "text-subtle-foreground" : "text-foreground"
         } ${
           isActive
             ? "bg-surface shadow-1 dark:bg-surface-hover"
@@ -747,7 +725,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 {t("recentChats.rename")}
                 <DropdownMenuShortcut aria-hidden>R</DropdownMenuShortcut>
               </DropdownMenuItem>
-              {session.archived ? (
+              {session.archivedAt ? (
                 <DropdownMenuItem aria-keyshortcuts="A" onSelect={toggleArchive}>
                   <ArchiveRestore className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   {t("recentChats.unarchive")}
@@ -903,6 +881,23 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 />
               </DropdownMenuTrigger>
               <DropdownMenuContent side="bottom" align="end" className="min-w-[180px]">
+                {[
+                  { value: "all" as const, label: t("recentChats.allChats") },
+                  { value: "mine" as const, label: t("recentChats.myChats") },
+                ].map(({ value, label }) => (
+                  <DropdownMenuItem
+                    key={value}
+                    onSelect={() => setScope(value)}
+                    className={
+                      scope === value ? "text-ui text-foreground" : "text-ui text-foreground/85"
+                    }
+                  >
+                    <span>{label}</span>
+                    {scope === value ? (
+                      <Check className="ml-auto h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
                 <div className="px-2 pb-1 pt-1 text-aux text-subtle-foreground">
                   {t("recentChats.groupBy")}
                 </div>

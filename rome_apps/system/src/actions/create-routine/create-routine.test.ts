@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
 import { RoutinesRepository } from "../../../../../packages/core/src/db/repositories/routines.js";
@@ -7,7 +7,8 @@ import { RoutinesRepository } from "../../../../../packages/core/src/db/reposito
 // reads whatever store we wrap the call in.
 import { actionExecutionContext } from "../../../../../packages/core/src/actions/context.js";
 import type { RoutineEngine } from "../../../../../packages/core/src/routines/engine.js";
-import type { Routine } from "../../../../../packages/core/src/routines/types.js";
+import type { Routine, Trigger } from "../../../../../packages/core/src/routines/types.js";
+import { resolveOneOffDate as resolveInZone } from "../../../../../packages/core/src/routines/schedule-trigger-provider.js";
 import { createAction, createRoutine } from "./index.js";
 
 /** Run `fn` as if invoked by app `callerAppId` via its app-context runAction —
@@ -41,7 +42,11 @@ function makeThrowingEngine(): RoutineEngine {
 
 /** Registry stub that recognizes every action — the default for tests whose
  * subject isn't action-existence validation. */
-const allActions = { has: () => true };
+const allActions = { has: () => true, isExplicit: () => false };
+
+/** Core's one-off resolver with the guardian in UTC, for tests that don't
+ * depend on the zone. */
+const resolveOneOffDate = (trigger: Trigger) => resolveInZone(trigger, async () => "UTC");
 
 let testDb: TestDb;
 let repo: RoutinesRepository;
@@ -72,7 +77,7 @@ describe("create_routine — engine activation", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -105,7 +110,12 @@ describe("create_routine — engine activation", () => {
           actionName: "send_message",
           args: {},
         },
-        { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine },
+        {
+          routinesRepo: repo,
+          actionRegistry: allActions,
+          routineEngine: engine,
+          resolveOneOffDate,
+        },
       ),
     );
 
@@ -126,7 +136,7 @@ describe("create_routine — engine activation", () => {
         actionName: "summon",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -149,7 +159,7 @@ describe("create_routine — engine activation", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -172,13 +182,48 @@ describe("create_routine — engine activation", () => {
         actionName: "summon",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const row = await repo.findById((result.data as { routineId: string }).routineId);
     // The one-off is an absolute instant — its zone is pinned at creation.
     expect(row!.trigger).toMatchObject({ type: "schedule", tzMode: "fixed", date: "2099-01-01" });
+  });
+
+  it("dates a floating schedule with neither date nor rrule to the next localTime in the guardian's zone", async () => {
+    // At 16:00Z it is already 2026-06-24 01:00 in Tokyo, so 09:00 is still
+    // ahead today and 00:30 has passed until tomorrow. The UTC tzid is only a
+    // seed: a floating one-off follows the guardian.
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-06-23T16:00:00Z"));
+      const engine = makeFakeEngine();
+      const create = async (localTime: string) => {
+        const result = await createRoutine(
+          {
+            name: `next-${localTime}`,
+            trigger: { type: "schedule", tzid: "UTC", tzMode: "floating", localTime },
+            actionName: "summon",
+            args: {},
+          },
+          {
+            routinesRepo: repo,
+            actionRegistry: allActions,
+            routineEngine: engine,
+            resolveOneOffDate: (trigger: Trigger) =>
+              resolveInZone(trigger, async () => "Asia/Tokyo"),
+          },
+        );
+        if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+        return (await repo.findById((result.data as { routineId: string }).routineId))!.trigger;
+      };
+      const pinned = { tzid: "Asia/Tokyo", tzMode: "fixed" };
+      expect(await create("09:00")).toMatchObject({ date: "2026-06-24", ...pinned });
+      expect(await create("00:30")).toMatchObject({ date: "2026-06-25", ...pinned });
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("preserves an explicit fixed tzMode", async () => {
@@ -196,7 +241,7 @@ describe("create_routine — engine activation", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -218,7 +263,7 @@ describe("create_routine — engine activation", () => {
         actionName: "summon",
         args: { agentName: "main", prompt: "summarize it" },
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     expect(result.status).toBe("ok");
@@ -244,7 +289,7 @@ describe("create_routine — engine activation", () => {
         args: {},
         enabled: false,
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -270,7 +315,12 @@ describe("create_routine — engine activation", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeThrowingEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeThrowingEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -318,13 +368,27 @@ describe("create_routine — action factory", () => {
       } as unknown as Parameters<typeof createAction>[1]),
     ).toThrow(/actionRegistry/);
   });
+
+  it("createAction refuses to load without a resolveOneOffDate dep", () => {
+    expect(() =>
+      createAction(actionConfig, {
+        routinesRepo: repo,
+        routineEngine: makeFakeEngine(),
+        actionRegistry: allActions,
+        agentRunner: { hasAction: () => true },
+      } as unknown as Parameters<typeof createAction>[1]),
+    ).toThrow(/resolveOneOffDate/);
+  });
 });
 
 describe("create_routine — validation and fail-closed", () => {
   it("rejects a routine bound to an unregistered action, persisting nothing", async () => {
     const engine = makeFakeEngine();
     // Registry knows the built-ins but not a workflow action that hasn't been built.
-    const registry = { has: (n: string) => n === "summon" || n === "send_message" };
+    const registry = {
+      has: (n: string) => n === "summon" || n === "send_message",
+      isExplicit: () => false,
+    };
 
     const result = await createRoutine(
       {
@@ -339,7 +403,7 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "morning_brief_run",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine },
+      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -352,7 +416,7 @@ describe("create_routine — validation and fail-closed", () => {
 
   it("accepts a routine bound to a built-in action the registry knows", async () => {
     const engine = makeFakeEngine();
-    const registry = { has: (n: string) => n === "summon" };
+    const registry = { has: (n: string) => n === "summon", isExplicit: () => false };
 
     const result = await createRoutine(
       {
@@ -367,7 +431,7 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "summon",
         args: { agentName: "assistant", prompt: "review emails" },
       },
-      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine },
+      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine, resolveOneOffDate },
     );
 
     expect(result.status).toBe("ok");
@@ -379,6 +443,9 @@ describe("create_routine — validation and fail-closed", () => {
     const registry = {
       async has(name: string) {
         return name === "summon";
+      },
+      async isExplicit() {
+        return false;
       },
     };
 
@@ -395,7 +462,7 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "summon",
         args: { agentName: "assistant", prompt: "review emails" },
       },
-      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine },
+      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine, resolveOneOffDate },
     );
 
     expect(result.status).toBe("ok");
@@ -416,7 +483,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -438,7 +510,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "report",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -459,7 +536,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -481,7 +563,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -503,7 +590,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     expect(result.status).toBe("ok");
@@ -522,7 +614,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "summon",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -551,7 +648,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -573,7 +675,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -594,7 +701,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/INTERVAL/);
@@ -614,7 +726,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/BYMONTHDAY/);
@@ -634,7 +751,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/BYDAY/);
@@ -648,7 +770,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/rrule/);
@@ -669,7 +796,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/INTERVAL/);
@@ -689,7 +821,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/BYMONTHDAY/);
@@ -709,7 +846,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/BYMONTH/);
@@ -729,7 +871,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/BYDAY/);
@@ -749,7 +896,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/YEARLY|BYMONTHDAY/);
@@ -769,7 +921,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     expect(result.status).toBe("ok");
   });
@@ -788,7 +945,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/repeat/i);
@@ -806,7 +968,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/empty path segment/);
@@ -826,7 +993,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (blank.status !== "error") throw new Error(`expected error, got ${blank.status}`);
     expect(blank.error).toMatch(/name/);
@@ -844,7 +1016,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (padded.status !== "ok") throw new Error(`expected ok, got ${padded.status}`);
     const row = await repo.findById((padded.data as { routineId: string }).routineId);
@@ -865,7 +1042,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "   ",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/actionName/);
@@ -886,7 +1068,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "  dream  ",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const row = await repo.findById((result.data as { routineId: string }).routineId);
@@ -907,7 +1094,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "send_notification",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     expect(result.status).toBe("ok");
   });
@@ -926,7 +1118,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/does not support/);
@@ -946,7 +1143,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/INTERVAL/);
@@ -966,7 +1168,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/COUNT|does not support/);
@@ -986,7 +1193,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     expect(result.status).toBe("ok");
   });
@@ -1005,7 +1217,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     expect(result.status).toBe("ok");
@@ -1023,7 +1240,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "summon",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -1046,7 +1268,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -1061,7 +1288,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "summon",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -1081,7 +1313,12 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "summon",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -1104,7 +1341,12 @@ describe("create_routine — validation and fail-closed", () => {
         // Force the unsupported array shape past the typed boundary.
         args: [{}] as unknown as Record<string, unknown>,
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -1129,7 +1371,12 @@ describe("create_routine — key dedup", () => {
   it("persists the key and exposes it on the routine", async () => {
     const result = await createRoutine(
       { name: "Morning brief", key: "briefing-morning", ...scheduleArgs },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -1141,13 +1388,23 @@ describe("create_routine — key dedup", () => {
   it("rejects a second routine with an already-used key and does not insert it", async () => {
     const first = await createRoutine(
       { name: "Morning brief", key: "briefing-morning", ...scheduleArgs },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
     if (first.status !== "ok") throw new Error(`expected ok, got ${first.status}`);
 
     const second = await createRoutine(
       { name: "Another brief", key: "briefing-morning", ...scheduleArgs },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
     );
 
     if (second.status !== "error") throw new Error(`expected error, got ${second.status}`);
@@ -1160,12 +1417,109 @@ describe("create_routine — key dedup", () => {
     for (const name of ["one", "two"]) {
       const result = await createRoutine(
         { name, key: "   ", ...scheduleArgs },
-        { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },
+        {
+          routinesRepo: repo,
+          actionRegistry: allActions,
+          routineEngine: makeFakeEngine(),
+          resolveOneOffDate,
+        },
       );
       if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     }
     const all = await repo.findAll();
     expect(all).toHaveLength(2);
     expect(all.every((r) => r.key === null)).toBe(true);
+  });
+});
+
+describe("create_routine — explicit action targets (#679)", () => {
+  const rootScript = "system:execute_root_script";
+  const explicitRoot = { has: () => true, isExplicit: (n: string) => n === rootScript };
+  const input = {
+    name: "root-once",
+    trigger: {
+      type: "schedule" as const,
+      tzid: "UTC",
+      tzMode: "fixed" as const,
+      localTime: "03:00",
+    },
+    actionName: rootScript,
+    args: {},
+  };
+  const asAgent = <T>(agentName: string, fn: () => Promise<T>, callerAppId?: string) =>
+    actionExecutionContext.run(
+      { executionId: "exec", rootExecutionId: "root", agentName, callerAppId },
+      fn,
+    );
+
+  it("rejects an explicit target the calling agent does not hold", async () => {
+    const engine = makeFakeEngine();
+    const result = await asAgent("inbox:sentinel", () =>
+      createRoutine(input, {
+        routinesRepo: repo,
+        actionRegistry: explicitRoot,
+        agentRunner: { hasAction: () => false },
+        routineEngine: engine,
+        resolveOneOffDate,
+      }),
+    );
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/is explicit/);
+    expect(await repo.findAll()).toHaveLength(0);
+    expect(engine.activated).toHaveLength(0);
+  });
+
+  it("rejects an explicit target from a routine-fired call (two-stage scheduling)", async () => {
+    // Stage 1: an agent schedules create_routine itself (a public target).
+    // Stage 2: that routine fires with no agent principal and asks for the
+    // explicit action; it must fail closed even though no agent is named.
+    const engine = makeFakeEngine();
+    const result = await actionExecutionContext.run(
+      { executionId: "exec", rootExecutionId: "root", initiator: "routine:stage-1" },
+      () =>
+        createRoutine(input, {
+          routinesRepo: repo,
+          actionRegistry: explicitRoot,
+          agentRunner: { hasAction: () => true },
+          routineEngine: engine,
+          resolveOneOffDate,
+        }),
+    );
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/is explicit/);
+    expect(await repo.findAll()).toHaveLength(0);
+    expect(engine.activated).toHaveLength(0);
+  });
+
+  it("allows an explicit target the calling agent holds", async () => {
+    const hasAction = (agent: string, action: string) => agent === "main" && action === rootScript;
+    const result = await asAgent("main", () =>
+      createRoutine(input, {
+        routinesRepo: repo,
+        actionRegistry: explicitRoot,
+        agentRunner: { hasAction },
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      }),
+    );
+    expect(result.status).toBe("ok");
+  });
+
+  it("trusts app code binding an explicit action", async () => {
+    const result = await asAgent(
+      "inbox:sentinel",
+      () =>
+        createRoutine(input, {
+          routinesRepo: repo,
+          actionRegistry: explicitRoot,
+          agentRunner: { hasAction: () => false },
+          routineEngine: makeFakeEngine(),
+          resolveOneOffDate,
+        }),
+      "system",
+    );
+    expect(result.status).toBe("ok");
   });
 });

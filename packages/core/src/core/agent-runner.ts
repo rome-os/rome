@@ -1,22 +1,24 @@
-import { v4 as uuidv4 } from "uuid";
 import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../types.js";
-import type { ActionConfig } from "../actions/types.js";
+import type { ActionConfig, ActionRegistry } from "../actions/types.js";
 import type { DeferInput } from "./defer.js";
+import type { RoutineActivationGate } from "./mcp-facade.js";
 import type { UsageFunding } from "../usage/events.js";
-import { type ForkRunParams, type RunParams } from "./types.js";
+import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
 import type { AgentSessionManager } from "./agent-session.js";
 import type { AgentLoader } from "./agent-loader.js";
 import { createLogger } from "../logger.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
+import { channelConversationId } from "../db/session-kind.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import {
   AgentTraceRecorder,
   recordAgentTraceBestEffort,
-  resolveRomeSessionId,
-  resolveRomeSessionType,
+  resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
+import { findRecordedConversation } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
+import { adhocSessionKey } from "./agent-session-key.js";
 
 const log = createLogger("agent-runner");
 
@@ -55,14 +57,9 @@ export interface ActionMcpDefinition {
   inputSchema: Record<string, unknown>;
 }
 
-export interface SkillMcpDefinition {
-  name: string;
-  description: string;
-  tools?: string[];
-  content: string;
-  ownerType: "core" | "app";
-  ownerId: string;
-}
+// One definition, owned by the skill catalog that produces it.
+import type { SkillMcpDefinition } from "./skill-catalog.js";
+export type { SkillMcpDefinition };
 
 export interface HandbackSpec {
   /** JSON Schema describing a candidate shown for guardian approval. */
@@ -149,14 +146,21 @@ export interface ModelSessionParams {
   maxTurns?: number;
   reasoningEffort?: ModelReasoningEffort;
   workingDir?: string;
+  /** The channel the session's turns are delivered on, from its key. Shell
+   *  tools such as the Discord CLI read it to act as that channel's account. */
+  channel?: string;
   externalMcpServers?: Record<string, McpServerConfig>;
   /**
-   * The session identifier; `isNewSession` selects whether the provider
-   * treats it as fresh or as a resumed session. (Resume vs. new is a generic
-   * streaming-provider concept — not Anthropic-specific.)
+   * The session identifier, a bare UUID. The Anthropic provider passes a new
+   * session's id to Claude Code as `--session-id`, which rejects anything
+   * else.
    */
   sessionId: string;
-  /** When true, treat `sessionId` as a fresh id; otherwise resume it. */
+  /**
+   * When true, the provider has never seen `sessionId`, so it may use it as
+   * the new conversation's id. When false, the id may already be taken, and
+   * the provider resumes only through `providerThreadId`.
+   */
   isNewSession?: boolean;
   /**
    * Provider-specific thread/session id from a previous session, used for
@@ -179,6 +183,8 @@ export interface ModelSessionParams {
    * one-off wakeup back into this same thread. Absent for sessions with no
    * live thread to wake. */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
+  /** See FacadeParams.routineActivation. */
+  routineActivation?: RoutineActivationGate;
   /**
    * Whether the consuming surface can render interactive inline UI
    * (`propose_routine` cards, app components). True only for webchat-bound
@@ -471,27 +477,44 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
 export class AgentRunner {
   constructor(
     private agentSessionManager: AgentSessionManager,
-    private agentLoader?: AgentLoader,
+    private agentLoader: AgentLoader,
     private webchatRepo?: WebChatRepository,
     private turnStreams?: AgentTurnStreamRegistry,
+    private actionRegistry?: Pick<ActionRegistry, "getForAgent" | "getCanonicalName">,
   ) {}
 
   /**
    * Returns true when the named agent is loaded in the catalog. Lets callers
    * (e.g. the inbox message handler) gracefully fall back when a channel is
-   * configured to route to an agent that has been uninstalled. Returns true
-   * when no AgentLoader was injected (legacy construction paths in tests) so
-   * behaviour is unchanged for those callers.
+   * configured to route to an agent that has been uninstalled.
    */
   hasAgent(name: string): boolean {
-    if (!this.agentLoader) return true;
     return this.agentLoader.has(name);
+  }
+
+  /**
+   * Returns true when the named agent may call the named action, through the
+   * same `getForAgent` resolution the agent session uses for its tool catalog
+   * and execution gate. Unknown agent or action → false.
+   */
+  hasAction(agentName: string, actionName: string): boolean {
+    if (!this.actionRegistry) return false;
+    let actions: string[];
+    try {
+      actions = this.agentLoader.getRecord(agentName).config.actions ?? [];
+    } catch {
+      return false;
+    }
+    const canonical = this.actionRegistry.getCanonicalName?.(actionName) ?? actionName;
+    return this.actionRegistry
+      .getForAgent(actions)
+      .some((action) => action.config.name === canonical);
   }
 
   async *run(params: RunParams): AsyncIterable<AgentEvent> {
     // Synthetic key for keyless invocations (e.g. ad-hoc envoy validation
     // runs). Real conversations always pass a `channelThreadKey`.
-    const requestedChannelThreadKey = params.channelThreadKey ?? `${params.agentName}:${uuidv4()}`;
+    const requestedChannelThreadKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
     const explicitSessionId = params.sessionId;
 
     log.info("agent run started", {
@@ -501,16 +524,17 @@ export class AgentRunner {
       promptPreview: params.prompt.slice(0, 200),
     });
 
+    const threadContext = await this.withConversationId(params.threadContext);
     const init = {
       workingDir: params.workingDir,
-      threadContext: params.threadContext,
+      threadContext,
       romeSessionId: params.romeSessionId,
       sharedContext: params.sharedContext,
       contextSuffix: params.contextSuffix,
-      platformMessageId: params.platformMessageId,
+      applyProviderSessionReset: Boolean(params.platformMessageId),
     };
     const session = explicitSessionId
-      ? await this.acquireExplicitSession(explicitSessionId, params.agentName, init)
+      ? await this.agentSessionManager.acquireBySessionId(explicitSessionId, params.agentName, init)
       : await this.agentSessionManager.acquire(
           { agentName: params.agentName, channelThreadKey: requestedChannelThreadKey },
           init,
@@ -521,22 +545,22 @@ export class AgentRunner {
     // to carry a duplicate channelThreadKey that can drift from it.
     const channelThreadKey = session.key.channelThreadKey;
 
-    const boundRomeSessionId = session.romeSessionId ?? params.romeSessionId;
-    const romeSessionId = resolveRomeSessionId({
+    const conversation = resolveTurnConversation({
       agentName,
       agentSessionId: session.sessionId,
-      romeSessionId: boundRomeSessionId,
+      romeSessionId: params.romeSessionId,
+      sessionConversation: session.conversation,
       channelThreadKey,
-      threadContext: params.threadContext,
+      threadContext,
     });
-    const romeSessionType = resolveRomeSessionType({ threadContext: params.threadContext });
+    const { romeSessionId, romeSessionType } = conversation;
 
     // sendTurn is sync — turnId is allocated by AgentSession
     // and surfaced on the stream's turn_start event.
     const handle = session.sendTurn(
       { prompt: params.prompt, images: params.images },
       {
-        threadContext: params.threadContext,
+        threadContext,
         sharedContext: params.sharedContext,
         romeSessionId,
         romeSessionType,
@@ -544,7 +568,7 @@ export class AgentRunner {
         initiatedBy: params.initiatedBy ?? "user",
       },
     );
-    if (this.webchatRepo && boundRomeSessionId && params.platformMessageId) {
+    if (this.webchatRepo && conversation.promptPersisted && params.platformMessageId) {
       await this.webchatRepo.assignConversationMessageTurn(
         romeSessionId,
         params.platformMessageId,
@@ -552,19 +576,22 @@ export class AgentRunner {
       );
     }
 
+    const persistTrace = params.persistTrace ?? shouldPersistAgentTrace(threadContext);
     const recorder =
-      this.webchatRepo && shouldPersistAgentTrace(params.threadContext)
+      this.webchatRepo && persistTrace
         ? new AgentTraceRecorder({
             webchatRepo: this.webchatRepo,
             agentName,
             agentSessionId: session.sessionId,
             romeSessionId,
-            existingSessionId: boundRomeSessionId ? romeSessionId : undefined,
+            existingSessionId: conversation.existing ? romeSessionId : undefined,
             channelThreadKey,
             turnId: handle.turnId,
-            threadContext: params.threadContext,
-            persistTranscript: true,
-            persistUserTranscript: !boundRomeSessionId,
+            threadContext,
+            // A recorder-owned conversation has no other transcript, whatever
+            // the caller's channel keeps.
+            persistTranscript: conversation.recorderOwned || (params.persistTranscript ?? true),
+            persistUserTranscript: !conversation.promptPersisted,
           })
         : null;
 
@@ -584,15 +611,21 @@ export class AgentRunner {
     });
   }
 
-  private async acquireExplicitSession(
-    sessionId: string,
-    agentName: string,
-    init: Parameters<AgentSessionManager["acquire"]>[1],
-  ) {
-    if (!this.agentSessionManager.acquireBySessionId) {
-      throw new Error("AgentSessionManager cannot resume by explicit session id");
-    }
-    return await this.agentSessionManager.acquireBySessionId(sessionId, agentName, init);
+  /**
+   * The thread context with its conversation id filled in from the address
+   * when the caller left it out. Re-entries such as backend turns and approval
+   * resumes carry only the channel address, and an approval saved before
+   * callers set the id carries no id at all.
+   */
+  private async withConversationId(
+    threadContext: ThreadContext | undefined,
+  ): Promise<ThreadContext | undefined> {
+    if (!threadContext || threadContext.romeSessionId || !this.webchatRepo) return threadContext;
+    const romeSessionId = await this.webchatRepo.findConversationIdByAddress(
+      threadContext.channel,
+      threadContext.threadId,
+    );
+    return romeSessionId ? { ...threadContext, romeSessionId } : threadContext;
   }
 
   async *runForked(params: ForkRunParams): AsyncIterable<AgentEvent> {
@@ -605,11 +638,6 @@ export class AgentRunner {
     }
     if (source.sessionId !== params.sourceSessionId) {
       throw new Error("Cannot fork agent session because the source session id does not match");
-    }
-    if (!source.runForkedTurn) {
-      throw new Error(
-        "Cannot fork agent session because the source session does not support forks",
-      );
     }
 
     log.info("forked agent run started", {
@@ -641,7 +669,7 @@ export class AgentRunner {
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
-          recorder = await this.createForkTraceRecorder(params, message, source.romeSessionId);
+          recorder = await this.createForkTraceRecorder(params, message, source.conversation?.id);
           if (this.turnStreams) {
             try {
               // Forks have their own session and trace, so publish them through
@@ -691,21 +719,21 @@ export class AgentRunner {
   private async createForkTraceRecorder(
     params: ForkRunParams,
     turnStart: Extract<AgentEvent, { type: "turn_start" }>,
-    sourceRomeSessionId?: string,
+    sourceConversationId?: string,
   ): Promise<AgentTraceRecorder | null> {
     if (!this.webchatRepo) return null;
     try {
       const thread = params.threadContext;
-      // Prefer the source's persisted conversation binding. The fallbacks
-      // cover older/non-conversation callers that did not acquire with one.
+      // Prefer the source's conversation while it exists. Read again rather
+      // than trusting the session's cached row, which can outlive a deletion.
+      // The fallbacks cover rows that recorded none, or one since deleted.
+      const recorded = await findRecordedConversation(this.webchatRepo, sourceConversationId);
       const parentSessionId =
-        sourceRomeSessionId ??
-        (thread?.channel === "webchat"
-          ? thread.threadId
-          : thread
-            ? `channel:${thread.channel}:${thread.threadId}`
-            : null);
-      const parent = parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null;
+        recorded?.id ??
+        thread?.romeSessionId ??
+        (thread ? channelConversationId(thread.channel, thread.threadId) : null);
+      const parent =
+        recorded ?? (parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null);
       const parentName = parent?.name ?? thread?.threadName ?? params.sourceSessionId;
       const label = params.label ?? "fork";
       const trigger = { triggerKind: "fork", triggerName: label };

@@ -11,7 +11,7 @@ export async function fetchAppKeys(): Promise<AppKeyDto[]> {
   const payload = await fetchJson<AppKeysListResponse>("/api/app-keys", {
     fallback: "Failed to load app keys.",
   });
-  return Array.isArray(payload.keys) ? payload.keys : [];
+  return payload.keys;
 }
 
 export async function saveAppKey(input: {

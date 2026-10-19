@@ -1,6 +1,3 @@
-import type { Context } from "hono";
-import { getConnInfo } from "@hono/node-server/conninfo";
-
 // Classifies a request as "trusted in-container caller" — an agent-driven
 // browser, headless CDP page, or script hitting the loopback listener
 // directly. Two signals, both required:
@@ -18,6 +15,9 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 //    from 127.0.0.1 on behalf of an external user" from a genuine
 //    in-container caller.
 //
+// `isLoopbackAddress` is signal 1; callers such as lib/guardian-session.ts
+// check signal 2 themselves.
+//
 // INVARIANT: every proxy that fronts the Hono listener must set
 // `X-Forwarded-For` (Caddy and Traefik do by default). A proxy layer that
 // drops it would make external traffic look in-container.
@@ -28,16 +28,4 @@ export function isLoopbackAddress(address: string | undefined): boolean {
   const v4 = address.startsWith("::ffff:") ? address.slice("::ffff:".length) : address;
   if (v4 === "::1") return true;
   return v4.startsWith("127.");
-}
-
-export function isTrustedLoopbackRequest(c: Context): boolean {
-  if (c.req.header("x-forwarded-for")) return false;
-
-  // getConnInfo requires the @hono/node-server bindings; anything else
-  // (tests without an env, non-node adapters) fails closed.
-  try {
-    return isLoopbackAddress(getConnInfo(c).remote.address);
-  } catch {
-    return false;
-  }
 }

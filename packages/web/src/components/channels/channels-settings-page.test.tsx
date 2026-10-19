@@ -8,11 +8,6 @@ import { ChannelsSettingsPage } from "./channels-settings-page";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  // Radix/jsdom polyfills for the pointer/scroll events Select relies on.
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 /**
@@ -254,6 +249,164 @@ describe("ChannelsSettingsPage", () => {
     expect(fetchMock.mock.calls.some(([request]) => String(request).includes("cursor=next"))).toBe(
       true,
     );
+  });
+
+  it("shows a silent account instead of the agent picker", async () => {
+    const connection = (service: string, linked: { linkedAgent?: string | null }) => ({
+      id: `${service}-1`,
+      service,
+      label: service,
+      grants: {},
+      display: {},
+      capabilities: {
+        talk: { state: "unlocked" },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
+      },
+      connect: null,
+      ...linked,
+    });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/connections") {
+        return ok({
+          connections: [
+            connection("discord", { linkedAgent: null }),
+            connection("feishu", { linkedAgent: "sales:agent" }),
+          ],
+        });
+      }
+      if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
+      if (url.startsWith("/api/conversation-settings?")) {
+        return ok({
+          items: [
+            item({
+              id: "engineering",
+              name: "engineering",
+              overrides: { routing: { agentName: "coding:build" } },
+            }),
+            item({ id: "support", service: "feishu", name: "support" }),
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch);
+
+    renderPage();
+    const silent = await findCard();
+    expect(within(silent).queryByLabelText(/Agent/)).toBeNull();
+    expect(within(silent).getByText("None. This account stays silent.")).toBeTruthy();
+    expect(
+      within(silent).getByRole("link", { name: "Link one on the account" }).getAttribute("href"),
+    ).toBe("/settings/connections/discord");
+    // The stored agent choice has no effect yet, so it is not counted, but the
+    // card says it applies once an agent is linked.
+    expect(within(silent).queryByText(/override/)).toBeNull();
+    expect(
+      within(silent).getByText(/This conversation's choice, build · coding, applies/),
+    ).toBeTruthy();
+
+    // A chat's own choice wins over a linked agent, so the picker stays.
+    const linked = (await screen.findByRole("heading", { name: /support/ })).closest(
+      "article",
+    ) as HTMLElement;
+    expect(within(linked).getByLabelText(/Agent/)).toBeTruthy();
+  });
+
+  it("offers a linked account's agent for a conversation with no agent of its own", async () => {
+    const patchBodies: unknown[] = [];
+    const row = item({ id: "engineering", name: "engineering" });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url === "/api/connections") {
+        return ok({
+          connections: [
+            {
+              id: "discord-1",
+              service: "discord",
+              label: "Discord · Rome",
+              grants: {},
+              display: {},
+              capabilities: {
+                talk: { state: "unlocked" },
+                act: { state: "unsupported" },
+                watch: { state: "unsupported" },
+              },
+              connect: null,
+              linkedAgent: "sales:agent",
+            },
+          ],
+        });
+      }
+      if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
+      if (url.startsWith("/api/conversation-settings?")) return ok({ items: [row] });
+      if (url === "/api/conversation-settings" && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        patchBodies.push(body);
+        return ok({
+          ...row.snapshot,
+          overrides: body.clear.length > 0 ? {} : { routing: { agentName: null } },
+        });
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    }) as typeof fetch);
+
+    renderPage();
+    const user = userEvent.setup();
+    const card = await findCard();
+    const picker = within(card).getByLabelText(/Agent/);
+    expect(picker.textContent).toBe("agent · sales (linked agent)");
+
+    // Main is a choice of its own here, which keeps the conversation on main.
+    await choose(user, picker, "main");
+    await waitFor(() => expect(patchBodies).toHaveLength(1));
+    expect(patchBodies[0]).toMatchObject({ set: { routing: { agentName: "main" } }, clear: [] });
+    await waitFor(() => expect(picker.textContent).toBe("main"));
+
+    await choose(user, picker, "agent · sales (linked agent)");
+    await waitFor(() => expect(patchBodies).toHaveLength(2));
+    expect(patchBodies[1]).toMatchObject({ set: {}, clear: ["routing.agentName"] });
+    await waitFor(() => expect(picker.textContent).toBe("agent · sales (linked agent)"));
+  });
+
+  it("restores the linked agent when moving off it fails", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url === "/api/connections") {
+        return ok({
+          connections: [
+            {
+              id: "discord-1",
+              service: "discord",
+              label: "Discord · Rome",
+              grants: {},
+              display: {},
+              capabilities: { talk: { state: "unlocked" } },
+              connect: null,
+              linkedAgent: "sales:agent",
+            },
+          ],
+        });
+      }
+      if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
+      if (url.startsWith("/api/conversation-settings?")) {
+        return ok({ items: [item({ id: "engineering", name: "engineering" })] });
+      }
+      if (init?.method === "PATCH") throw new Error("network down");
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    }) as typeof fetch);
+
+    renderPage();
+    const user = userEvent.setup();
+    const picker = within(await findCard()).getByLabelText(/Agent/);
+    await choose(user, picker, "main");
+    await waitFor(() => expect(picker.textContent).toBe("agent · sales (linked agent)"));
   });
 
   it("creates no override when an edit is undone before the debounce elapses", async () => {

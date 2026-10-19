@@ -162,7 +162,14 @@ async function attempt(
     });
   }
 
-  return wire({ ...row, state: "unconfirmed", providerMessageId: receipt.messageId });
+  // `accepted` restarted the row's clock, and the window a discard waits out
+  // runs from it.
+  return wire({
+    ...row,
+    state: "unconfirmed",
+    providerMessageId: receipt.messageId,
+    updatedAt: new Date(),
+  });
 }
 
 /**
@@ -203,9 +210,7 @@ export async function discardSend(
   id: string,
 ): Promise<boolean> {
   if (!(await heldBy(deps, accounts, id))) return false;
-  // The same window a send is given to arrive in. Inside it an unconfirmed row
-  // is ordinary and usually clears itself; past it, it is stuck.
-  return await deps.outboxRepo.discard(id, new Date(Date.now() - STRANDED_AFTER_MS));
+  return await deps.outboxRepo.discard(id);
 }
 
 /** Whether a row is addressed to one of these accounts. */
@@ -266,7 +271,8 @@ export async function readOutbox(
   // it, so the read that notices says so: it becomes a failed row the guardian
   // can see and retry, carrying the only honest error there is. It is not
   // cleared — the message may well have gone out.
-  const stale = Date.now() - STRANDED_AFTER_MS;
+  const now = new Date();
+  const stale = now.getTime() - STRANDED_AFTER_MS;
   const stranded = rows.filter((row) => row.state === "sending" && row.updatedAt.getTime() < stale);
   for (const row of stranded) {
     await deps.outboxRepo.stranded(row.id, STRANDED_SEND_ERROR);
@@ -275,7 +281,7 @@ export async function readOutbox(
   }
 
   const awaiting = rows.filter((row) => row.state === "unconfirmed");
-  if (awaiting.length === 0) return rows.map(wire);
+  if (awaiting.length === 0) return rows.map((row) => wire(row, now));
 
   const { entries } = await readPersonTimeline(stores, accounts, { limit: LANDING_WINDOW });
   const arrived = new Set(entries.map((entry) => entry.ref));
@@ -292,7 +298,7 @@ export async function readOutbox(
   await Promise.all(landed.map((row) => deps.outboxRepo.remove(row.id)));
 
   const cleared = new Set(landed.map((row) => row.id));
-  return rows.filter((row) => !cleared.has(row.id)).map(wire);
+  return rows.filter((row) => !cleared.has(row.id)).map((row) => wire(row, now));
 }
 
 /**

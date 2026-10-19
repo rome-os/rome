@@ -8,5 +8,11 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["midscene.config.ts", "browser-network-guard.ts"]
+  "include": [
+    "midscene.config.ts",
+    "midscene.backend.config.ts",
+    "browser-boundary.ts",
+    "browser-network-guard.ts",
+    "mock-server.ts"
+  ]
 }

@@ -20,7 +20,6 @@ import type {
   RuntimeAction,
   RuntimeHostProbe,
   RuntimePhase,
-  RuntimeProvider,
   RuntimePullProgress,
   RuntimeStatus,
 } from "./provider";
@@ -59,24 +58,20 @@ export type {
   RuntimeStatus,
 } from "./provider";
 
-export interface RuntimeManagerOptions {
-  provider?: RuntimeProvider;
-}
-
 export class RuntimeManager extends EventEmitter {
   private readonly paths: RuntimePaths;
   private readonly image: string;
-  private readonly provider: RuntimeProvider;
+  private readonly provider: LimaRuntimeProvider;
   private activeOperation: Promise<void> | null = null;
   private stopPromise: Promise<void> | null = null;
   private status: RuntimeStatus;
   private localProxy: LocalProxy | null = null;
 
-  constructor(options: RuntimeManagerOptions = {}) {
+  constructor() {
     super();
     this.paths = resolveRuntimePaths();
     this.image = DEFAULT_RUNTIME_IMAGE;
-    this.provider = options.provider ?? selectProvider(this.paths);
+    this.provider = selectProvider(this.paths);
     this.status = this.createStatus(
       "checking_host",
       "Checking your computer",
@@ -592,7 +587,7 @@ export interface SelectProviderHost {
 export function selectProvider(
   paths: RuntimePaths,
   host: SelectProviderHost = {},
-): RuntimeProvider {
+): LimaRuntimeProvider {
   const platform = host.platform ?? process.platform;
   const arch = host.arch ?? process.arch;
   const release_ = host.release ?? release();

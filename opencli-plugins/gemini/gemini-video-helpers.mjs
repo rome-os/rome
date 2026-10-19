@@ -1,0 +1,290 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+export const GEMINI_VIDEO_URL = "https://gemini.google.com/videos";
+export const GEMINI_VIDEO_DEFAULT_OUTPUT = "~/tmp/gemini-videos";
+export const GEMINI_VIDEO_RATIOS = ["16:9", "9:16"];
+export const GEMINI_VIDEO_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"];
+export const GEMINI_VIDEO_MAX_IMAGES = 10;
+
+const RATIO_MENU_LABELS = {
+  "16:9": "Landscape (16:9)",
+  "9:16": "Portrait (9:16)",
+};
+
+/** Menu entry Gemini shows for an aspect ratio in the video composer. */
+export function geminiVideoRatioLabel(ratio) {
+  const label = RATIO_MENU_LABELS[String(ratio ?? "").trim()];
+  if (!label) throw new Error(`ratio must be one of: ${GEMINI_VIDEO_RATIOS.join(", ")}`);
+  return label;
+}
+
+export function integerInRange(value, name, min, max) {
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < min || num > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}`);
+  }
+  return num;
+}
+
+export function expandHomePath(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (raw === "~") return os.homedir();
+  if (raw.startsWith("~/")) return path.join(os.homedir(), raw.slice(2));
+  return path.resolve(raw);
+}
+
+export function resolveGeminiVideoOutputDir(value) {
+  const expanded = expandHomePath(value);
+  return expanded || expandHomePath(GEMINI_VIDEO_DEFAULT_OUTPUT);
+}
+
+/**
+ * `--image` carries a comma-separated list because OpenCLI options are single
+ * valued. Paths are resolved against the working directory and must exist, so a
+ * typo fails before the browser session is touched.
+ */
+export function parseGeminiVideoImages(value, { exists = fs.existsSync } = {}) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return [];
+  const files = raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => expandHomePath(item));
+  if (files.length > GEMINI_VIDEO_MAX_IMAGES) {
+    throw new Error(`image accepts at most ${GEMINI_VIDEO_MAX_IMAGES} files`);
+  }
+  for (const file of files) {
+    const ext = path.extname(file).toLowerCase();
+    if (!GEMINI_VIDEO_IMAGE_EXTENSIONS.includes(ext)) {
+      throw new Error(`image ${file} must be one of: ${GEMINI_VIDEO_IMAGE_EXTENSIONS.join(", ")}`);
+    }
+    if (!exists(file)) throw new Error(`image not found: ${file}`);
+  }
+  return files;
+}
+
+/** Seconds the download keeps back from the overall `--timeout` budget. */
+export const GEMINI_VIDEO_DOWNLOAD_RESERVE = 90;
+
+/**
+ * Split what is left of the overall `--timeout` budget. OpenCLI treats an arg
+ * named `timeout` as the whole command's budget (it aborts at timeout + 30s),
+ * so the generation wait gets the remainder minus the download's share, and
+ * the download fits in that share, leaving OpenCLI's padding for teardown.
+ */
+export function geminiVideoPhaseBudgets(remainingSeconds, { skipDownload = false } = {}) {
+  const remaining = Math.max(0, Number(remainingSeconds) || 0);
+  const reserve = skipDownload ? 0 : Math.min(GEMINI_VIDEO_DOWNLOAD_RESERVE, remaining / 2);
+  return {
+    generationSeconds: Math.max(1, Math.floor(remaining - reserve)),
+    downloadSeconds: Math.max(15, Math.ceil(reserve)),
+  };
+}
+
+/** Seconds kept back for typing, sending, and confirming the prompt. */
+export const GEMINI_VIDEO_SUBMIT_ALLOWANCE = 35;
+/** Generation below this budget cannot finish; a clip takes a minute or more. */
+export const GEMINI_VIDEO_MIN_GENERATION = 60;
+/** Smallest `--timeout` that leaves room for setup, generation, and download. */
+export const GEMINI_VIDEO_MIN_TIMEOUT = 240;
+
+/**
+ * Why the run must stop before sending the prompt, or null. Sending spends
+ * the account's daily video allowance, so a budget that setup already used up
+ * fails here instead of submitting a request the command cannot wait for.
+ */
+export function geminiVideoBudgetError(remainingSeconds, { skipDownload = false } = {}) {
+  const { generationSeconds } = geminiVideoPhaseBudgets(
+    Number(remainingSeconds) - GEMINI_VIDEO_SUBMIT_ALLOWANCE,
+    { skipDownload },
+  );
+  if (generationSeconds >= GEMINI_VIDEO_MIN_GENERATION) return null;
+  return `Setup left ${Math.max(0, Math.floor(remainingSeconds))}s of the --timeout budget, too little to generate a clip; the prompt was not sent. Rerun with a higher --timeout`;
+}
+
+const SAFE_NAME = /[^a-z0-9._-]+/gi;
+
+/** File name for the saved clip: explicit `--name` wins, else a timestamp. */
+export function buildGeminiVideoFileName(name, stamp = Date.now()) {
+  const raw = String(name ?? "").trim();
+  if (!raw) return `gemini_video_${stamp}.mp4`;
+  const cleaned = raw.replace(SAFE_NAME, "_").replace(/^_+|_+$/g, "");
+  if (!cleaned) return `gemini_video_${stamp}.mp4`;
+  return cleaned.toLowerCase().endsWith(".mp4") ? cleaned : `${cleaned}.mp4`;
+}
+
+// Failures Gemini words specifically enough to read anywhere on the page.
+const PAGE_ERROR_PATTERNS = [
+  /couldn['’]t (?:generate|create)/i,
+  /can['’]t (?:generate|create)/i,
+  /unable to (?:generate|create)/i,
+  /daily limit/i,
+  /reached your limit/i,
+  /limit for (?:today|video)/i,
+  /something went wrong/i,
+];
+
+// Generic wording that only means failure inside Gemini's own reply; the page
+// chrome around the composer may carry it for unrelated reasons.
+const RESPONSE_ERROR_PATTERNS = [
+  ...PAGE_ERROR_PATTERNS,
+  /not available/i,
+  /wasn['’]t able to/i,
+  /violat/i,
+];
+
+const GENERATING_PATTERNS = [/generating your video/i, /could take a few minutes/i];
+
+function normalizeText(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * The text that describes the current turn: the newest model response, or the
+ * end of the page when no response has rendered yet (page-level failures such
+ * as "Something went wrong" show up there). The page reader leaves the user's
+ * own turns out of that fallback, so words in the prompt cannot read as errors.
+ */
+export function geminiVideoStatusText(snapshot) {
+  return normalizeText(snapshot?.responseText) || normalizeText(snapshot?.bodyTail);
+}
+
+const CONVERSATION_PATH = /\/app\/[a-z0-9]+/i;
+
+/** Whether a page URL is a Gemini conversation (`/app/<id>`), which a sent prompt opens. */
+export function isGeminiConversationUrl(url) {
+  return CONVERSATION_PATH.test(String(url ?? ""));
+}
+
+/**
+ * Why a sent prompt was not accepted, or null when it was. An accepted
+ * submission both clears the editor and opens a conversation URL; anything
+ * else must fail now rather than after the whole generation timeout.
+ */
+export function geminiVideoSubmissionError(state) {
+  if (String(state?.editorText ?? "").length > 0) {
+    return "Gemini did not accept the prompt; the composer still holds it";
+  }
+  if (!isGeminiConversationUrl(state?.url)) {
+    return "Gemini did not open a conversation for the prompt; it was likely dropped";
+  }
+  return null;
+}
+
+/** Pick the generated clip: the first `<video>` with a fetchable http(s) source. */
+export function pickGeminiVideoSource(videos) {
+  if (!Array.isArray(videos)) return null;
+  for (const video of videos) {
+    const src = String(video?.src ?? "").trim();
+    if (/^https?:\/\//i.test(src)) {
+      const duration = Number(video?.duration);
+      return {
+        src,
+        duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+      };
+    }
+  }
+  return null;
+}
+
+function findGeminiVideoFailure(text, patterns) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const start = Math.max(0, match.index - 80);
+      return text.slice(start, match.index + 160).trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Reduce a page snapshot to one of `ready`, `error`, `generating`, or `pending`.
+ * A rendered video wins over any wording because Gemini keeps the earlier
+ * progress copy on screen while the player mounts.
+ */
+export function classifyGeminiVideoState(snapshot) {
+  const source = pickGeminiVideoSource(snapshot?.videos);
+  if (source) return { status: "ready", source };
+  const response = normalizeText(snapshot?.responseText);
+  // Gemini's reply is checked with every pattern; the end of the page only
+  // with the specific ones, and always, because a page-level failure can
+  // appear while the reply still shows its progress copy.
+  const failure =
+    findGeminiVideoFailure(response, RESPONSE_ERROR_PATTERNS) ||
+    findGeminiVideoFailure(normalizeText(snapshot?.bodyTail), PAGE_ERROR_PATTERNS);
+  if (failure) return { status: "error", message: failure };
+  const text = geminiVideoStatusText(snapshot);
+  if (GENERATING_PATTERNS.some((pattern) => pattern.test(text))) {
+    return { status: "generating" };
+  }
+  return { status: "pending" };
+}
+
+function cookieDomainMatches(cookieDomain, hostname) {
+  const domain = String(cookieDomain ?? "")
+    .replace(/^\./, "")
+    .toLowerCase();
+  if (!domain) return false;
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+/**
+ * Gemini serves clips from a usercontent host that redirects anonymous
+ * requests to a sign-in page, so the download needs the session cookies the
+ * browser would send. Only cookies whose domain covers the host are forwarded.
+ */
+export function buildGeminiVideoCookieHeader(cookies, url) {
+  let hostname;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+  const parts = [];
+  for (const cookie of Array.isArray(cookies) ? cookies : []) {
+    if (!cookie || typeof cookie.name !== "string" || typeof cookie.value !== "string") continue;
+    if (!cookieDomainMatches(cookie.domain, hostname)) continue;
+    parts.push(`${cookie.name}=${cookie.value}`);
+  }
+  return parts.join("; ");
+}
+
+export function isVideoContentType(value) {
+  const type = String(value ?? "").toLowerCase();
+  return type.startsWith("video/") || type.includes("octet-stream");
+}
+
+export function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  return `${seconds.toFixed(1)}s`;
+}
+
+export function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+export function displayPath(filePath) {
+  const home = os.homedir();
+  return filePath.startsWith(home) ? `~${filePath.slice(home.length)}` : filePath;
+}
+
+export function summarizeGeminiVideoResult({ status, file, bytes, duration, link, images }) {
+  return {
+    status,
+    file: file ? displayPath(file) : "-",
+    size: bytes ? formatBytes(bytes) : "",
+    duration: formatDuration(duration),
+    images: Array.isArray(images) ? images.length : 0,
+    link: link || "",
+  };
+}

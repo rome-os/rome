@@ -2,7 +2,6 @@ cases:
   - name: ROUT-01 Open the routine calendar
     tags:
       - routines
-      - shard-3
     steps:
       - app.open:
           path: /routines
@@ -15,7 +14,6 @@ cases:
   - name: ROUT-02 Filter the routine list
     tags:
       - routines
-      - shard-3
     steps:
       - app.open:
           path: /routines

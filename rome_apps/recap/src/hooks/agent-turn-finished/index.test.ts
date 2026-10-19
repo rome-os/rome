@@ -231,6 +231,7 @@ describe("recap agent-turn-finished hook", () => {
       webchatRecapRepo: repo,
       settingsRepo: {
         get: rs.fn(async (key: string) => {
+          if (key === "recap.enabled") return true;
           if (key === "recap.createAudio") return false;
           if (key === "recap.audioSpeed") return "normal";
           return "medium";
@@ -264,6 +265,23 @@ describe("recap agent-turn-finished hook", () => {
     ]);
   });
 
+  it("skips every turn until recaps are enabled", async () => {
+    const runner = createRunner();
+    const repo = createRepo([]);
+    const hook = new RecapTurnFinishedHook({
+      agentRunner: runner,
+      webchatRecapRepo: repo,
+      settingsRepo: { get: rs.fn(async () => null) },
+      logger: { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() },
+    });
+
+    await hook.onAgentTurnFinished(createEvent());
+
+    expect(runner.forkCalls).toHaveLength(0);
+    expect(repo.sessionLookups).toHaveLength(0);
+    expect(repo.recaps).toHaveLength(0);
+  });
+
   it("skips turns below the selected recap threshold", async () => {
     const runner = createRunner();
     const repo = createRepo([]);
@@ -272,6 +290,7 @@ describe("recap agent-turn-finished hook", () => {
       webchatRecapRepo: repo,
       settingsRepo: {
         get: rs.fn(async (key: string) => {
+          if (key === "recap.enabled") return true;
           if (key === "recap.createAudio") return false;
           if (key === "recap.audioSpeed") return "normal";
           return "medium";
@@ -310,6 +329,7 @@ describe("recap agent-turn-finished hook", () => {
       webchatRecapRepo: repo,
       settingsRepo: {
         get: rs.fn(async (key: string) => {
+          if (key === "recap.enabled") return true;
           if (key === "recap.createAudio") return true;
           if (key === "recap.audioSpeed") return "faster";
           return "medium";
@@ -353,6 +373,7 @@ describe("recap agent-turn-finished hook", () => {
       webchatRecapRepo: repo,
       settingsRepo: {
         get: rs.fn(async (key: string) => {
+          if (key === "recap.enabled") return true;
           if (key === "recap.createAudio") return true;
           if (key === "recap.audioSpeed") return "fastest";
           return "medium";

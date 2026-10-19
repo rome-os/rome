@@ -3,7 +3,6 @@ cases:
     tags:
       - poc
       - auth
-      - shard-5
     steps:
       - app.open:
           path: /
@@ -16,7 +15,6 @@ cases:
   - name: AUTH-02 Login validation and failed submission preserve the form
     tags:
       - auth
-      - shard-5
     steps:
       - app.open:
           path: /dev/login

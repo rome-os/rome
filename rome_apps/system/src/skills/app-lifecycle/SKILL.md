@@ -1,11 +1,23 @@
 ---
 name: app-lifecycle
-description: Install, reinstall, uninstall, enable, or disable Rome apps, including deployment after app edits and the first-party build and restart procedure.
+description: Install, reinstall, uninstall, enable, or disable Rome apps, share an app with other people through its URL (private, public, or a Rome Cloud email list), and publish it to the Rome App Store. Includes deployment after app edits and the first-party build and restart procedure.
 ---
 
 # App lifecycle
 
 Read `system:app_management` with `read_action` before calling it through `execute_action`. For new app scaffolding, also read `coding:app_creation`.
+
+## Three different endpoints
+
+An app can reach three separate states. Each one is a different decision. Do not treat one as another.
+
+| Endpoint | Who can use it | How |
+|---|---|---|
+| **Installed** | Only the guardian, in this Rome dashboard | `install` (below) |
+| **Shared** | Other people, through this Rome's public URL. A hosted Rome needs no extra hosting or domain. A desktop or local Rome may have no public URL. | Change the app's access mode. Read [`SHARING.md`](./SHARING.md). |
+| **In the App Store** | Anyone, who installs a copy into their own Rome | Publish a version. Read [`PUBLISHING.md`](./PUBLISHING.md). |
+
+Installing does not share or publish. Sharing and publishing are visible outside this Rome, so do them only when the guardian asks for that app and that endpoint. When you describe how to release an app, name the endpoint first. Rome has no Apple App Store or Google Play path. Say that instead of improvising one.
 
 ## Install or reinstall a standalone app
 
@@ -26,6 +38,8 @@ Use this path for a custom app under `~/.rome/<profile>/projects/apps/<id>/` or 
 The daemon derives the app ID from `app.yaml`, runs the workspace's build, and packs it into `<repo>/.rome/artifact`. It installs the bundle and awaits the runtime reload before returning. The guardian can also use Install/Upgrade on the Apps dashboard.
 
 The `bundle` source mode accepts an already-packed artifact, not a raw source workspace. A raw workspace fails with "not a packed artifact".
+
+If an install error carries a native-build hint or `ERR_PNPM_IGNORED_BUILDS`, follow the hint and `system:custom-dependencies`.
 
 For a Rome App Store install, discover the listing with `system:app_store_search` and follow the `appstore` source schema in `system:app_management`.
 

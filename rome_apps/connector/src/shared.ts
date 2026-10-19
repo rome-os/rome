@@ -1,6 +1,10 @@
 import { SUPPORTED_CONNECTORS } from "@rome-os/app-runtime";
 
-import { ComposioClient, isComposioNotFoundError } from "./api/composio-client.js";
+import {
+  ComposioClient,
+  isComposioAuthenticationError,
+  isComposioNotFoundError,
+} from "./api/composio-client.js";
 import { readSessionApiKey } from "./api/composio-login.js";
 import { buildTopic } from "./api/topic.js";
 
@@ -237,6 +241,31 @@ export async function loadConnectorClient(): Promise<ComposioClient | null> {
   const apiKey = await readSessionApiKey();
   if (!apiKey) return null;
   return new ComposioClient({ apiKey });
+}
+
+/**
+ * The agent-facing error for a Composio call that threw. Points the agent at
+ * `connector_login` only when a fresh `ping()` gets a 401, which is the same
+ * check `connector_login` uses to decide the saved sign-in is rejected. A 401
+ * that the ping does not confirm is about something other than the saved key,
+ * so it keeps the `<fallbackPrefix>: <message>` form and the agent is never
+ * sent to a login that would answer `signed_in`. Pings only on a 401, and keeps
+ * the upstream message in every case.
+ */
+export async function composioActionError(
+  client: Pick<ComposioClient, "ping">,
+  err: unknown,
+  fallbackPrefix: string,
+  rerun: string,
+): Promise<string> {
+  const message = err instanceof Error ? err.message : String(err);
+  if (isComposioAuthenticationError(err)) {
+    const ping = await client.ping();
+    if (!ping.ok && ping.status === 401) {
+      return `Composio rejected Rome's saved sign-in (HTTP 401). Call connector_login to sign in again, then re-run ${rerun}. Upstream: ${message}`;
+    }
+  }
+  return `${fallbackPrefix}: ${message}`;
 }
 
 export type SubscribeFeedErrorCode =

@@ -36,6 +36,7 @@ export const AREA_PATHS = {
     "packages/web/",
     "packages/ui/",
     "packages/web-content/",
+    "packages/rome-node-ui/",
     "packages/api-types/",
     "packages/app-runtime-sdk/",
     // Every package launches its suite through this wrapper, so a change to it
@@ -55,9 +56,10 @@ export const AREA_PATHS = {
     "packages/web/",
     "packages/app-web-sdk/",
     "packages/app-template/",
-    // The token gates compile packages/web/src/globals.css, which pulls this
-    // package's stylesheets into the design system they check.
+    // The token gates compile packages/web/src/globals.css, which pulls these
+    // packages' stylesheets into the design system they check.
     "packages/web-content/",
+    "packages/rome-node-ui/",
     "rome_apps/",
     "scripts/",
     "infra/",
@@ -120,10 +122,7 @@ export function changedFiles(env = process.env) {
     return null;
   }
 
-  return git(["diff", "--name-only", base, "HEAD"])
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  return git(["diff", "--name-only", "-z", base, "HEAD"]).split("\0").filter(Boolean);
 }
 
 function main() {

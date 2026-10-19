@@ -15,17 +15,10 @@ export const THEME_NAME_STORAGE_KEY = "rome-theme-name";
  *  The suffix versions the payload's shape. A cached entry outlives the build
  *  that wrote it, so a deploy that changes what `buildThemeCss` emits could
  *  otherwise replay an incompatible payload until the bundle boots. Bump the
- *  suffix whenever the emitted shape changes, and add the old key below. */
+ *  suffix whenever the emitted shape changes. The bootstrap ignores the old
+ *  key, so its payload stays in localStorage unless `applyThemeName` also
+ *  removes it. */
 export const THEME_CSS_CACHE_KEY = "rome-theme-css-5";
-
-/** Cache keys written by earlier payload shapes. `applyThemeName` clears them on
- *  the next write, so a superseded entry does not sit in storage forever. */
-export const SUPERSEDED_THEME_CSS_CACHE_KEYS = [
-  "rome-theme-css",
-  "rome-theme-css-2",
-  "rome-theme-css-3",
-  "rome-theme-css-4",
-];
 
 /** The product default theme — explicit, not "whichever is first in
  *  BUILTIN_THEMES", so reordering the array for picker presentation can't
@@ -96,7 +89,6 @@ export function applyThemeName(name: ThemeName): void {
   if (def && typeof window !== "undefined") {
     try {
       window.localStorage.setItem(THEME_CSS_CACHE_KEY, buildThemeCss([def]));
-      for (const key of SUPERSEDED_THEME_CSS_CACHE_KEYS) window.localStorage.removeItem(key);
     } catch {
       // localStorage may be unavailable (private mode / quota); a flash on the
       // next reload is the only consequence, not a correctness break.

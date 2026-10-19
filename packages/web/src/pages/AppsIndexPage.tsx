@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { AppStoreSheet } from "@/components/AppStoreSheet";
 import { TileIcon } from "@/components/app-tile-icon";
 import { getHostAppRoute } from "@/lib/auth-routing";
+import { isCarrierApp } from "@/lib/chat-helpers";
 import { isImeCompositionEvent } from "@/lib/keyboard-submit";
 import { cn } from "@/lib/utils";
 import { ListToolbar } from "@rome-os/ui/layout-list";
@@ -43,7 +44,7 @@ import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { useSidebarPins } from "@/hooks/use-sidebar-pins";
-import { APP_NAV } from "@/shell/AppGrid";
+import { APP_NAV } from "@/shell/builtin-nav";
 
 function isInFlight(phase: AppViewState): boolean {
   return phase === "installing" || phase === "uninstalling";
@@ -317,6 +318,7 @@ export default function AppsIndexPage() {
       tCommon(entry.labelKey),
       t(`builtinDescriptions.${entry.id}`, { defaultValue: "" }),
       entry.id,
+      ...(entry.aliases ?? []),
     ]
       .join(" ")
       .toLowerCase();
@@ -330,7 +332,9 @@ export default function AppsIndexPage() {
   // `null` while the installed list is still loading — kept distinct from the
   // empty array so the skeleton (loading) and the empty state (no matches) don't
   // collide. Filtering applies live once the list lands.
-  const visibleApps = apps === null ? null : apps.filter(matchesApp);
+  // Carrier apps (e.g. user-skills) are installed plumbing, not destinations.
+  const launcherApps = apps === null ? null : apps.filter((app) => !isCarrierApp(app.id));
+  const visibleApps = launcherApps === null ? null : launcherApps.filter(matchesApp);
   // The grid is sectioned by the server-derived provenance (`AppOrigin`):
   // apps built on this instance, App Store installs, and the built-in group,
   // which pairs first-party apps with Rome's own surfaces (APP_NAV).
@@ -477,20 +481,21 @@ export default function AppsIndexPage() {
       ? null
       : isSearching
         ? visibleMyApps.length
-        : apps.filter((app) => app.origin === "local").length;
+        : (launcherApps ?? []).filter((app) => app.origin === "local").length;
   const storeAppsCount =
     apps === null
       ? null
       : isSearching
         ? visibleStoreApps.length
-        : apps.filter((app) => app.origin === "appstore").length;
+        : (launcherApps ?? []).filter((app) => app.origin === "appstore").length;
   // Built-in = Rome's own surfaces plus the first-party apps shipped with it.
   const builtinCount =
     apps === null
       ? null
       : isSearching
         ? visibleBuiltins.length + visibleBuiltinApps.length
-        : builtinPages.length + apps.filter((app) => app.origin === "builtin").length;
+        : builtinPages.length +
+          (launcherApps ?? []).filter((app) => app.origin === "builtin").length;
   const updatesCount = lifecycle.upgradeTargets.length;
 
   return (
@@ -516,7 +521,7 @@ export default function AppsIndexPage() {
               onClick={lifecycle.upgradeAll}
               disabled={updatesCount === 0 || menusDisabled}
             >
-              <Download className="h-3.5 w-3.5" aria-hidden />
+              <Download data-icon="inline-start" className="h-3.5 w-3.5" aria-hidden />
               {lifecycle.bulkUpgradePending
                 ? t("installed.updateAllUpdating")
                 : t("installed.updateAll")}
@@ -560,12 +565,9 @@ export default function AppsIndexPage() {
                 onClick={() => setQuery("")}
                 aria-label={t("search.clear")}
                 title={t("search.clear")}
-                // Centered with `inset-y-0 my-auto`, not `-translate-y-1/2`:
-                // Button's base carries an active-press `translate-y-px` on a
-                // different variant prefix, so a centering transform survives
-                // the merge and the glyph drops half its height while pressed.
-                // Auto margins split the 36px field's spare 12px evenly around
-                // the 24px button without naming an off-scale 6px offset.
+                // Centered with `inset-y-0 my-auto`: auto margins split the
+                // 36px field's spare 12px evenly around the 24px button
+                // without naming an off-scale 6px offset.
                 className="absolute inset-y-0 right-2 my-auto text-subtle-foreground hover:bg-surface-muted hover:text-foreground dark:hover:bg-surface-muted"
               >
                 <X className="size-3.5" aria-hidden />

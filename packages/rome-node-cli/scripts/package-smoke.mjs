@@ -41,7 +41,7 @@ try {
   assert.deepEqual(await client.listDevices(), { items: [{ id: "target" }] });
   const status = await client.getConnectionStatus();
   assert.equal(status.connection, "stopped");
-  assert.equal(status.protocolVersion, 2);
+  assert.equal(status.protocolVersion, 4);
   assert.notEqual(status.pid, process.pid);
   const events = [];
   const unsubscribe = await client.subscribe("connection", (event) => events.push(event));
@@ -56,5 +56,9 @@ try {
   await stopDaemon(config);
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
-  await rm(directory, { recursive: true, force: true });
+  await rm(directory, { recursive: true, force: true, maxRetries: 5 }).catch((error) => {
+    // A stopped daemon can hold observe.db open a little longer, and Windows refuses to remove
+    // an open file. A leftover temporary directory is harmless there.
+    if (process.platform !== "win32") throw error;
+  });
 }

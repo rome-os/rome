@@ -17,6 +17,7 @@ agents:
 
 skills:
   - skills/app-lifecycle
+  - skills/custom-dependencies
 
 actions:
   - actions/add-person-mapping

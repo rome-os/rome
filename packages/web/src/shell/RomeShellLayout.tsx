@@ -8,7 +8,8 @@ import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
 import { SlotOutlet } from "../components/slot";
 import { SLIDE_MS, useSwipeSidebar } from "./use-swipe-sidebar";
-import { AppGrid, APP_NAV } from "./AppGrid";
+import { AppGrid } from "./AppGrid";
+import { APP_NAV } from "./builtin-nav";
 import { ChatSearchDialog } from "./ChatSearchDialog";
 import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
@@ -18,6 +19,7 @@ import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSettings } from "@/hooks/use-settings";
 import { routeTitle } from "@/lib/page-title";
+import { isApplePlatform } from "@/lib/platform";
 
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 const SIDEBAR_COLLAPSED_KEY = "rome-sidebar-collapsed";
@@ -35,7 +37,7 @@ function readSidebarCollapsed(): boolean {
 
 function sidebarShortcutForPlatform(): string {
   const platform = typeof navigator === "undefined" ? "" : navigator.platform;
-  return /Mac|iPhone|iPad|iPod/i.test(platform) ? "⌘B" : "Ctrl B";
+  return isApplePlatform(platform) ? "⌘B" : "Ctrl B";
 }
 
 export function RomeShellLayout() {

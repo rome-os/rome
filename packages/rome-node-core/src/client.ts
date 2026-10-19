@@ -1,3 +1,4 @@
+import { encodeFrame, FRAME_TYPE, frameFits, isUuid, parseFrame, type Frame } from "./frame.js";
 import { parseGatewayUrl } from "./gateway-url.js";
 import {
   CLOSE,
@@ -11,7 +12,7 @@ import {
 // cannot do that; do not fall back to a URL token or subprotocol credential.
 export interface ClientSocket {
   readyState: number;
-  send(data: string): void;
+  send(data: string | Uint8Array): void;
   close(code?: number, reason?: string): void;
   addEventListener(type: "open", listener: () => void): void;
   addEventListener(type: "message", listener: (event: { data: unknown }) => void): void;
@@ -30,6 +31,8 @@ export interface GatewayClientOptions {
   deviceToken: string;
   createSocket(url: string, authorization: string): ClientSocket;
   onMessage(message: GatewayMessage): void;
+  /** Receives parsed binary frames. Unparseable binary messages are dropped. */
+  onFrame?(frame: Frame): void;
   onStatus?(status: ConnectionStatus): void;
   random?(): number;
   beforeConnect?(): Promise<string | null>;
@@ -108,7 +111,18 @@ export function connectGateway(options: GatewayClientOptions) {
       status("online");
     });
     current.addEventListener("message", ({ data }) => {
-      if (stopped || socket !== current || typeof data !== "string") return;
+      if (stopped || socket !== current) return;
+      if (typeof data !== "string") {
+        const bytes =
+          data instanceof Uint8Array
+            ? data
+            : data instanceof ArrayBuffer
+              ? new Uint8Array(data)
+              : null;
+        const frame = bytes && parseFrame(bytes);
+        if (frame) options.onFrame?.(frame);
+        return;
+      }
       let message;
       try {
         message = gatewayMessage(JSON.parse(data));
@@ -139,6 +153,22 @@ export function connectGateway(options: GatewayClientOptions) {
       }
       try {
         socket.send(text);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    /**
+     * Sends a request or response frame with the same no-queue semantics as send. Returns false
+     * without sending a frame larger than MAX_FRAME_BYTES, so the connection stays open.
+     */
+    sendFrame(frame: Frame): boolean {
+      if (stopped || !socket || socket.readyState !== 1) return false;
+      if (!frameFits(frame.meta.byteLength, frame.body.byteLength)) return false;
+      if (frame.type !== FRAME_TYPE.request && frame.type !== FRAME_TYPE.response) return false;
+      if (!isUuid(frame.id) || !isUuid(frame.peer)) return false;
+      try {
+        socket.send(encodeFrame(frame));
         return true;
       } catch {
         return false;

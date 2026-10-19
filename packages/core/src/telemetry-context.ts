@@ -19,10 +19,6 @@ export interface SessionContext {
 
 const store = new AsyncLocalStorage<SessionContext>();
 
-export function currentSession(): SessionContext | undefined {
-  return store.getStore();
-}
-
 export function currentSessionId(): string | undefined {
   return store.getStore()?.sessionId;
 }

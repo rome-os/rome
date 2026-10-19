@@ -97,16 +97,6 @@ async function loadStartupSurface(
   await win.loadURL(startupSurface.url);
 }
 
-// Re-evaluate and load the startup surface for an existing window. Called when
-// the runtime transitions to ready so the booting splash flips to the dashboard
-// without recreating the window.
-export async function reloadStartupSurface(
-  win: BrowserWindow,
-  runtimeManager: RuntimeManager,
-): Promise<void> {
-  await loadStartupSurface(win, runtimeManager);
-}
-
 export async function loadOnboarding(win: BrowserWindow): Promise<void> {
   await win.loadFile(ONBOARDING_HTML);
 }

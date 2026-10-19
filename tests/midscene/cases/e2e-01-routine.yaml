@@ -4,7 +4,6 @@ cases:
       - poc
       - story
       - routines
-      - shard-3
     steps:
       - app.open:
           path: /chat/mock-chat-3
@@ -12,6 +11,6 @@ cases:
           Enable the visible "Scheduled routine" proposal by clicking its orange "Turn it on"
           button once. Stop immediately after the click.
       - aiAssert: >-
-          The routine proposal card shows a green "On" badge and the footer "Saved. Next time it
-          matches, Rome will run it within a minute. Manage it in Routines." There is no "Turn it
-          on" button anymore.
+          The routine proposal card shows a green "On" badge, the footer "Saved. Next time it
+          matches, Rome will run it within a minute.", and a "View run history" action. There is
+          no "Turn it on" button anymore.

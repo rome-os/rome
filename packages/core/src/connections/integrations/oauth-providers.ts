@@ -10,7 +10,7 @@
 // ledger becomes the system of record for whether a provider is connected, while
 // the legacy consumers (the tmpfs token files written at connect time, the
 // gh/git shell auth, `connector_proxy`'s direct proxy path) are untouched and
-// keep reading the legacy providerAccounts row/file. The Act seam (registry-built
+// keep reading the token file. The Act seam (registry-built
 // Actors) is a follow-up — `capabilities` is deliberately empty, which the
 // registry supports (`capabilities` is `Partial<…>`); a capability-less
 // connection still carries full grant state.
@@ -197,8 +197,7 @@ const OAUTH_PROVIDER_LABELS: Record<OAuthProvider, string> = {
 
 /**
  * The db-bound halves of the Rome Cloud-OAuth setup, injected from the wire stage
- * (index.ts) so the descriptor module stays free of the DB handle and the
- * transitional `provider_accounts` mappers.
+ * (index.ts) so the descriptor module stays free of the DB handle.
  */
 export interface OAuthProviderSetupDeps {
   /** Mint the PKCE attempt and return the broker authorize URL the guardian is
@@ -275,8 +274,7 @@ export function makeOAuthProviderSetup(
  * Build a provider's ConnectionDescriptor: one Rome Cloud-OAuth grant, no
  * capabilities, and grant-state-driven custody of its out-of-process artifacts
  * (the tmpfs token file + gh/git shell auth). The descriptor holds the provider's
- * connection/grant state (imported by the oauth redeem route and the boot
- * providerAccounts import); Actor/Watcher capabilities land in follow-ups.
+ * connection/grant state (imported by the oauth redeem route); Actor/Watcher capabilities land in follow-ups.
  *
  * `setupDeps` attaches the conferral setup (the redirect cutover) to the
  * grant's scheme. Omitted in tests that exercise connection state only;

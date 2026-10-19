@@ -1,15 +1,10 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { join, relative, sep } from "node:path";
 import type { AppOwnedArtifactLoadFailure, ArtifactMetadata } from "../apps/types.js";
 import type { AppCatalog } from "../apps/catalog.js";
-import { listCoreArtifactsByKind } from "../apps/core-artifacts.js";
 import { toArtifactMetadata } from "../apps/artifact-ref-adapter.js";
-import {
-  claimLegacyArtifactNames,
-  formatArtifactId,
-  resolveArtifactId,
-  type ArtifactIdentityContext,
-} from "../apps/artifact-id.js";
+import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
+import { loadArtifactRecords } from "../apps/artifact-records.js";
 import { parseSkillFrontmatterResult } from "../apps/packaging/skill-frontmatter.js";
 export {
   parseSkillFrontmatter,
@@ -26,6 +21,10 @@ export interface LoadedSkill {
   description: string;
   tools?: string[];
   content: string;
+  /** Absolute skill directory; set only when the skill ships companion files. */
+  directory?: string;
+  /** Companion files relative to `directory` (everything except SKILL.md). */
+  files?: string[];
 }
 
 export interface SkillMcpDefinition {
@@ -33,6 +32,8 @@ export interface SkillMcpDefinition {
   description: string;
   tools?: string[];
   content: string;
+  directory?: string;
+  files?: string[];
   ownerType: ArtifactMetadata["ownerType"];
   ownerId: string;
 }
@@ -45,74 +46,39 @@ export class SkillCatalog {
   private skills: LoadedSkill[] = [];
   private registryLoadFailures: AppOwnedArtifactLoadFailure[] = [];
 
-  constructor(private readonly identity?: ArtifactIdentityContext) {}
+  constructor(private readonly identity: ArtifactIdentityContext) {}
 
   async loadFromCatalog(catalog: AppCatalog): Promise<LoadedSkill[]> {
-    const coreRefs = await listCoreArtifactsByKind("skill");
-    const appRefs = catalog.listArtifacts("skill");
-    const refs = [...coreRefs, ...appRefs];
-    const registryLoadFailures: AppOwnedArtifactLoadFailure[] = [];
-    const loaded = refs
-      .map((ref) => toArtifactMetadata(ref))
-      .flatMap((metadata) => {
+    const { records, failures } = await loadArtifactRecords({
+      kind: "skill",
+      sources: catalog.listArtifacts("skill").map(toArtifactMetadata),
+      identity: this.identity,
+      read: async (metadata) => {
         const skillFile = join(metadata.sourcePath, "SKILL.md");
-        try {
-          const content = readFileSync(skillFile, "utf-8").trim();
-          const parsed = parseSkillFrontmatterResult(content);
-          if (!parsed.ok) {
-            throw new Error(`Skill ${skillFile} has invalid frontmatter: ${parsed.message}`);
-          }
-          const meta = parsed.value;
-          const artifactId = this.identity
-            ? formatArtifactId(metadata.ownerId, meta.name)
-            : meta.name;
-          if (this.identity && (metadata.ownerType === "core" || metadata.formatVersion !== 2)) {
-            const claim = claimLegacyArtifactNames(
-              this.identity.legacyBindings,
-              "skill",
-              [meta.name, metadata.publicName, ...metadata.aliases],
-              artifactId as ReturnType<typeof formatArtifactId>,
-            );
-            if (claim.conflicts.length > 0) {
-              throw new Error(
-                `Legacy skill name conflict: ${claim.conflicts
-                  .map(
-                    ({ legacyName, artifactId: owner }) =>
-                      `${JSON.stringify(legacyName)} is bound to ${owner}`,
-                  )
-                  .join(", ")}`,
-              );
-            }
-          }
-          return [
-            {
-              metadata,
-              name: artifactId,
-              localName: meta.name,
-              description: meta.description,
-              tools: meta.tools,
-              content,
-            },
-          ];
-        } catch (err) {
-          if (metadata.ownerType !== "app") {
-            throw err;
-          }
-
-          registryLoadFailures.push({
-            kind: metadata.kind,
-            ownerId: metadata.ownerId,
-            publicName: metadata.publicName,
-            sourcePath: metadata.sourcePath,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return [];
+        const content = (await readFile(skillFile, "utf-8")).trim();
+        const parsed = parseSkillFrontmatterResult(content);
+        if (!parsed.ok) {
+          throw new Error(`Skill ${skillFile} has invalid frontmatter: ${parsed.message}`);
         }
-      })
-      .sort((left, right) => left.name.localeCompare(right.name));
+        const files = await listCompanionFiles(metadata.sourcePath);
+        return {
+          ...parsed.value,
+          content,
+          ...(files.length > 0 ? { directory: metadata.sourcePath, files } : {}),
+        };
+      },
+    });
 
-    this.skills = loaded;
-    this.registryLoadFailures = registryLoadFailures;
+    this.skills = Array.from(records, ([artifactId, { config, metadata }]) => ({
+      metadata,
+      name: artifactId,
+      localName: config.name,
+      description: config.description,
+      tools: config.tools,
+      content: config.content,
+      ...(config.directory ? { directory: config.directory, files: config.files } : {}),
+    })).sort((left, right) => left.name.localeCompare(right.name));
+    this.registryLoadFailures = failures;
     return this.getAll();
   }
 
@@ -135,13 +101,13 @@ export class SkillCatalog {
       description: skill.description,
       tools: skill.tools,
       content: stripSkillStructuredSection(skill.content),
+      ...(skill.directory ? { directory: skill.directory, files: skill.files } : {}),
       ownerType: skill.metadata.ownerType,
       ownerId: skill.metadata.ownerId,
     }));
   }
 
   private resolveName(name: string): string {
-    if (!this.identity) return name;
     try {
       return resolveArtifactId({
         kind: "skill",
@@ -152,4 +118,41 @@ export class SkillCatalog {
       return name;
     }
   }
+}
+
+const MAX_COMPANION_FILES = 200;
+const SKIPPED_COMPANION_DIRS = new Set(["node_modules"]);
+
+/**
+ * Lists the files a skill ships beside its SKILL.md (reference docs, assets),
+ * relative to the skill directory. `read_skill` returns only SKILL.md, so
+ * without this list an agent cannot open the companion docs SKILL.md links
+ * to — progressive disclosure stops at the first level.
+ */
+export async function listCompanionFiles(skillDir: string): Promise<string[]> {
+  const files: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    // Code-point order: locale-independent, and upper-case docs lead.
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      if (files.length >= MAX_COMPANION_FILES) return;
+      // Hidden entries (.DS_Store, a stray .env) are never skill docs.
+      if (entry.name.startsWith(".")) continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIPPED_COMPANION_DIRS.has(entry.name)) await walk(path);
+      } else if (entry.isFile()) {
+        const rel = relative(skillDir, path).split(sep).join("/");
+        if (rel !== "SKILL.md") files.push(rel);
+      }
+    }
+  };
+  await walk(skillDir);
+  return files;
 }

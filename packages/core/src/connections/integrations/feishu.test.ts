@@ -68,6 +68,9 @@ class FakeLarkChannel {
     return { messageId: "om_sent" };
   }
   async updateCard(): Promise<void> {}
+  async getChatInfo(chatId: string) {
+    return { chatId, name: "Design Team", chatType: "group" as const };
+  }
   async addReaction(messageId: string, emojiType: string): Promise<string> {
     const reactionId = `reaction-${this.addedReactions.length + 1}`;
     this.addedReactions.push({ messageId, emojiType, reactionId });
@@ -291,7 +294,7 @@ describe("feishu inbound delivery", () => {
         attachments: [],
         timestamp: new Date(1700000000000),
         replyTo: { messageId: "om_6" },
-        thread: { kind: "group" },
+        thread: { kind: "group", name: "Design Team" },
         addressing: "mention",
         raw: wire,
       },

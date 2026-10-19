@@ -14,7 +14,7 @@ import {
   getRepoAppsDir,
 } from "../paths.js";
 import { getInternalApiBaseUrl } from "../internal-api-url.js";
-import { getWebchatProjectPath, getWebchatProjectsRoot } from "../webchat/projects.js";
+import { getWebchatProjectsRoot, resolveWebchatProjectPath } from "../webchat/projects.js";
 
 // Workspace context injection.
 //
@@ -388,7 +388,7 @@ export class PromptBuilder {
    * @-mentionable core agent gets the same behavior.
    *
    * Gated on the agent holding the `*` action grant — the conversational agents
-   * (main, assistant, planning, coding, explore) that actually talk to the
+   * (main, assistant, coding, explore) that actually talk to the
    * guardian. The tool itself is registered per-session on interactive surfaces
    * (`supportsInteractiveSurface`); the cached prefix can't see the surface, so
    * `*` is the closest stable per-agent proxy for "should reach for the card".
@@ -551,7 +551,7 @@ export class PromptBuilder {
    */
   private resolveProjectLocation(projectName: string): string | null {
     const candidates = [
-      getWebchatProjectPath(projectName),
+      resolveWebchatProjectPath(projectName),
       join(this.customAppAuthoringRoot, projectName),
     ];
     for (const candidate of candidates) {

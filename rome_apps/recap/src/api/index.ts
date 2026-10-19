@@ -40,6 +40,14 @@ class RecapApiHandler implements RomeAppApiHandler {
         return Response.json({ error: "invalid_json" }, { status: 400 });
       }
 
+      // A cached older web bundle omits `enabled`, so keep the stored value rather than reset it.
+      const enabled =
+        (payload as { enabled?: unknown } | null)?.enabled ??
+        (await getRecapSettings(this.ctx.repositories.settings)).enabled;
+      if (typeof enabled !== "boolean") {
+        return Response.json({ error: "enabled_boolean_required" }, { status: 400 });
+      }
+
       const createAudio = (payload as { createAudio?: unknown } | null)?.createAudio;
       if (typeof createAudio !== "boolean") {
         return Response.json({ error: "createAudio_boolean_required" }, { status: 400 });
@@ -55,7 +63,7 @@ class RecapApiHandler implements RomeAppApiHandler {
         return Response.json({ error: "audio_speed_invalid" }, { status: 400 });
       }
 
-      const settings = { createAudio, threshold, audioSpeed };
+      const settings = { enabled, createAudio, threshold, audioSpeed };
       await setRecapSettings(this.ctx.repositories.settings, settings);
       return Response.json(settings);
     }

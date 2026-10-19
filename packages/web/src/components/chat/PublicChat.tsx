@@ -8,7 +8,7 @@ import {
 import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/chat-view";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
-import type { ChatMessage, ChatEntry } from "@/lib/chat-types";
+import type { ChatMessage } from "@/lib/chat-types";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
 // Default agent identity for the public feed. The frozen snapshot doesn't carry
@@ -79,7 +79,7 @@ export function PublicChat({ messages, mainSessionId, traces, hasApps = false }:
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="@container/chat relative flex min-h-full md:min-h-dvh">
+      <div className="@container/chat relative flex min-h-full md:min-h-[var(--rome-viewport-height)]">
         {/* Mirror Chat.tsx: in the wide / no-apps layout (@5xl/chat) the trace
             drawer is `fixed` and out of flow, so reserve its 480px here to keep
             the messages clear of it. */}
@@ -112,13 +112,13 @@ export function PublicChat({ messages, mainSessionId, traces, hasApps = false }:
           allowSubagentUsage={false}
           readOnly
           renderInlineBlock={(block, key) =>
-            renderSingleEntry(block as ChatEntry, key, {
+            renderSingleEntry(block, key, {
               onApprovalResolved: NO_OP,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatEntries(blocks as ChatEntry[], {
+            renderFlatEntries(blocks, {
               onApprovalResolved: NO_OP,
               compact: true,
               live,

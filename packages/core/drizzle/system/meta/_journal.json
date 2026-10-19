@@ -498,6 +498,76 @@
       "when": 1791331737062,
       "tag": "0071_drop_events",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1791625172515,
+      "tag": "0072_drop_provider_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1791637153137,
+      "tag": "0073_webchat_thread_key_without_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1791640000000,
+      "tag": "0074_session_conversation_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1791640100000,
+      "tag": "0075_backfill_session_conversation_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "6",
+      "when": 1791640101000,
+      "tag": "0076_date_undated_one_off_routines",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "6",
+      "when": 1791854550298,
+      "tag": "0077_webchat_person_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1791865125442,
+      "tag": "0078_webchat_chats_as_channel_rows",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "6",
+      "when": 1791865185442,
+      "tag": "0079_several_connections_per_service",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "6",
+      "when": 1791865245442,
+      "tag": "0080_channel_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "6",
+      "when": 1792117060937,
+      "tag": "0081_channel_linked_agents",
+      "breakpoints": true
     }
   ]
 }

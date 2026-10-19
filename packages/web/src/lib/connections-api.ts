@@ -7,6 +7,11 @@
  * `connection-cards.ts`, not here.
  */
 
+import type {
+  ConnectionAccountFields,
+  LinkAccountAgentRequest,
+  LinkAccountAgentResult,
+} from "@rome/api-types/channel-accounts";
 import { fetchJson } from "@/lib/fetch-json";
 
 /** Runtime health can change without a grant ceremony (for example, a long-poll
@@ -47,7 +52,7 @@ export interface ConnectHint {
   unavailableReason: string | null;
 }
 
-export interface ApiConnection {
+export interface ApiConnection extends ConnectionAccountFields {
   /** Ledger connection id, or null for an offerable placeholder — a registered
    *  service the guardian has never connected. */
   id: string | null;
@@ -59,15 +64,15 @@ export interface ApiConnection {
   connect: ConnectHint | null;
   /** Active-setup discovery: per grant, the id of the live conferral
    *  setup (if any). Lets a reopened dashboard re-attach instead of starting
-   *  a fresh one. Absent/empty when no setup is in progress. */
-  setups?: Record<string, string>;
+   *  a fresh one. Empty when no setup is in progress. */
+  setups: Record<string, string>;
 }
 
 export async function fetchConnections(): Promise<ApiConnection[]> {
-  const payload = await fetchJson<{ connections?: ApiConnection[] }>("/api/connections", {
+  const payload = await fetchJson<{ connections: ApiConnection[] }>("/api/connections", {
     fallback: "Failed to load connections.",
   });
-  return Array.isArray(payload.connections) ? payload.connections : [];
+  return payload.connections;
 }
 
 /** Structured, non-throwing result from a teardown call. */
@@ -91,14 +96,28 @@ export async function revokeConnectionGrant(
   return { ok: true };
 }
 
-/** Remove the whole connection (row + grants). */
-export async function removeConnection(connectionId: string): Promise<TeardownResult> {
-  const response = await fetch(`/api/connections/${encodeURIComponent(connectionId)}`, {
-    method: "DELETE",
+/** Mint a fresh, unauthorized Connection for a service that offers several
+ *  accounts. The dashboard then runs the ordinary setup against its id.
+ *  `fallback` is the error message when the server gives none. */
+export async function createConnection(service: string, fallback: string): Promise<ApiConnection> {
+  const payload = await fetchJson<{ connection: ApiConnection }>("/api/connections", {
+    method: "POST",
+    json: { service },
+    fallback,
   });
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-    return { ok: false, error: payload?.error || "Failed to remove the connection." };
-  }
-  return { ok: true };
+  return payload.connection;
+}
+
+/** Link an agent to an account by its channel id, or pass null so the account
+ *  stays silent. `fallback` is the error message when the server gives none. */
+export async function linkAccountAgent(
+  id: string,
+  agent: string | null,
+  fallback: string,
+): Promise<LinkAccountAgentResult> {
+  const body: LinkAccountAgentRequest = { agent };
+  return fetchJson<LinkAccountAgentResult>(
+    `/api/channels/accounts/${encodeURIComponent(id)}/agent`,
+    { method: "PUT", json: body, fallback },
+  );
 }

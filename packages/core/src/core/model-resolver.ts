@@ -111,7 +111,7 @@ export interface CreateModelResolverOptions {
   providers: ModelProvider[];
   settingsRepo?: Pick<SettingsRepository, "get">;
   romeCreditsPayer?: Pick<RomeCreditsPayer, "isUsingRomeCredits"> &
-    Partial<Pick<RomeCreditsPayer, "servedModels" | "servedModelsSettled">>;
+    Partial<Pick<RomeCreditsPayer, "servedModels" | "settled">>;
 }
 
 const CLAUDE_TIER_TO_MODEL: Record<ModelTier, string> = {
@@ -271,12 +271,13 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
 
   return {
     async getModelProvider(request) {
-      // Credits just started paying and the gateway has not answered yet.
-      // Wait for its list rather than assume Sol and Luna and send a turn the
-      // gateway may refuse. Only a Codex resolution can spend credits, so only
-      // that waits. The read is bounded by its request timeout.
+      // ChatGPT just disconnected or the credential changed, and the first
+      // read of the account's credits has not answered yet. Wait for it: it
+      // decides whether credits pay at all, and which models they serve. Only
+      // a Codex resolution can spend credits, so only that waits. The read is
+      // bounded by its request timeout.
       const settleServedModels = async (): Promise<void> => {
-        if (usingRomeCredits()) await options.romeCreditsPayer?.servedModelsSettled?.();
+        await options.romeCreditsPayer?.settled?.();
       };
       if (request.exact) {
         if (request.exact.providerId === "openai") await settleServedModels();

@@ -43,19 +43,10 @@ export interface PeopleActivity {
 }
 
 /**
- * One activity per group of accounts, in the order the groups were given.
- *
  * Positional, and over every group at once: the stores are read for all of
  * them together, so a listing of curated people costs the same handful of
  * queries as a single person.
  */
-export async function readPeopleActivity(
-  stores: readonly AccountMessages[],
-  accountsByPerson: readonly (readonly MessageAccount[])[],
-): Promise<PersonActivity[]> {
-  return (await readActivity(stores, accountsByPerson)).perPerson;
-}
-
 export async function readActivity(
   stores: readonly AccountMessages[],
   accountsByPerson: readonly (readonly MessageAccount[])[],

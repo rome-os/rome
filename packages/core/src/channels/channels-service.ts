@@ -4,8 +4,8 @@
  * a worker (where `ChannelsServiceProxy` reaches this one over RPC).
  *
  * Connections are the service's own business. A channel is one presence, so
- * at most one Connection backs it (one per service), and nothing above the
- * service names a Connection.
+ * at most one Connection backs it, and nothing above the service names a
+ * Connection.
  */
 
 import type {
@@ -20,7 +20,7 @@ import type {
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { Connection } from "../connections/types.js";
 import type { Channels } from "./channel.js";
-import { sendThrough } from "./connection-ports.js";
+import { sendThrough, type ChannelOf } from "./connection-ports.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 
 // TODO(0.8): remove, with the service's and the proxy's uses.
@@ -41,6 +41,9 @@ export interface ChannelsServiceDeps {
   channels: () => Channels | undefined;
   /** The Connections that back sending. */
   registry: Pick<ConnectionRegistry, "all">;
+  /** Names the channel each Connection backs. A Connection it answers null
+   *  for backs no channel and is skipped. */
+  channelOf: ChannelOf;
 }
 
 /** Every Connection that can talk, whether or not it is unlocked now. */
@@ -48,13 +51,14 @@ function talking(registry: Pick<ConnectionRegistry, "all">): Connection[] {
   return registry.all().filter((connection) => connection.status().talk.state !== "unsupported");
 }
 
-/** The Connection backing a channel, or undefined when none does. A service
- *  holds at most one Connection, so a channel has at most one. */
+/** The Connection backing a channel, or undefined when none does. A channel
+ *  is one presence, so at most one Connection backs it. */
 export function backingConnection(
   registry: Pick<ConnectionRegistry, "all">,
   channel: string,
+  channelOf: ChannelOf,
 ): Connection | undefined {
-  return talking(registry).find((connection) => connection.service === channel);
+  return talking(registry).find((connection) => channelOf(connection) === channel);
 }
 
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
@@ -70,8 +74,10 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     {
       async list(): Promise<ChannelSummary[]> {
         const summaries = new Map<string, ChannelSummary>();
-        for (const { service } of talking(deps.registry)) {
-          summaries.set(service, { name: service, sendable: true });
+        for (const connection of talking(deps.registry)) {
+          const name = deps.channelOf(connection);
+          if (name === null) continue;
+          summaries.set(name, { name, sendable: true });
         }
         for (const channel of deps.channels() ?? []) {
           if (!summaries.has(channel.name)) {
@@ -88,7 +94,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
         conversationId: ConversationId,
         message: OutgoingMessage,
       ): Promise<MessageReceipt> {
-        const backing = backingConnection(deps.registry, channel);
+        const backing = backingConnection(deps.registry, channel, deps.channelOf);
         if (!backing) throw new Error(`No Talk connection registered for "${channel}"`);
         return sendThrough(backing, conversationId, message);
       },

@@ -62,6 +62,7 @@ import {
   Radio,
   Search,
   Square,
+  X,
 } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -72,6 +73,7 @@ import {
   describeOutcome,
   describeTrigger,
   hasOwnName,
+  lastRunFailed,
   relativeTime,
   routineDisplayName,
   type EventBusTrigger,
@@ -183,7 +185,8 @@ function DatePickerInput({
           id={id}
           onBlur={onBlur}
           aria-invalid={invalid || undefined}
-          className="w-full justify-between"
+          align="between"
+          className="w-full"
         >
           <span className={date ? "" : "text-muted-foreground"}>
             {date ? format(date, "PPP") : placeholder}
@@ -911,9 +914,13 @@ function RunNowButton({
       className={`gap-2 text-muted-foreground ${inFlight ? "" : "max-sm:hidden"}`}
     >
       {inFlight ? (
-        <Spinner size="sm" label={t("run.loadingLabel", { name: label })} />
+        <Spinner
+          data-icon="inline-start"
+          size="sm"
+          label={t("run.loadingLabel", { name: label })}
+        />
       ) : (
-        <Play className="h-3.5 w-3.5" aria-hidden />
+        <Play data-icon="inline-start" className="h-3.5 w-3.5" aria-hidden />
       )}
       {t("run.now")}
     </Button>
@@ -961,9 +968,13 @@ function StopButton({
       className="gap-2 border-destructive/30 text-destructive-fg hover:bg-destructive/10 hover:text-destructive-fg"
     >
       {inFlight ? (
-        <Spinner size="sm" label={t("stop.loadingLabel", { name: label })} />
+        <Spinner
+          data-icon="inline-start"
+          size="sm"
+          label={t("stop.loadingLabel", { name: label })}
+        />
       ) : (
-        <Square className="h-3.5 w-3.5" aria-hidden />
+        <Square data-icon="inline-start" className="h-3.5 w-3.5" aria-hidden />
       )}
       {t("stop.now")}
     </Button>
@@ -996,6 +1007,8 @@ function RoutineCard({
   // Only a truly-running run is stoppable. A pending_approval run has no live
   // process to kill, so it keeps the normal Run-now control.
   const isStoppable = routine.lastRun?.status === "running";
+  // A Done card never fires again, so it would carry the mark for good (#345).
+  const failed = !done && lastRunFailed(routine);
 
   // A routine owned by an app is the app's to remove: the delete control is
   // disabled (and the server refuses it too), so the user can't prune something
@@ -1043,12 +1056,12 @@ function RoutineCard({
           interactive elements live inside the link. */}
       <Link
         to={`/routines/${routine.id}`}
-        aria-label={accessibleName}
+        aria-label={failed ? t("status.failedAriaLabel", { name: accessibleName }) : accessibleName}
         className="group flex min-w-0 flex-1 items-center gap-3 rounded-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--control-min-h)]"
       >
         <span
           className={`h-2 w-2 flex-none rounded-full ${
-            routine.enabled ? "bg-success" : "bg-muted-foreground"
+            failed ? "bg-destructive" : routine.enabled ? "bg-success" : "bg-muted-foreground"
           }`}
           aria-hidden
         />
@@ -1059,6 +1072,12 @@ function RoutineCard({
               <Badge variant="success" className="shrink-0">
                 <Check aria-hidden />
                 {t("done.badge")}
+              </Badge>
+            )}
+            {failed && (
+              <Badge variant="destructive" className="shrink-0">
+                <X aria-hidden />
+                {t("status.failed")}
               </Badge>
             )}
           </div>
@@ -1240,8 +1259,9 @@ function ActionPicker({
           role="combobox"
           aria-expanded={open}
           aria-invalid={invalid || undefined}
+          align="between"
           className={cn(
-            "w-full justify-between",
+            "w-full",
             invalid && "border-destructive focus-visible:ring-destructive/20",
           )}
         >
@@ -1915,7 +1935,8 @@ function CreateRoutineModal({
                             variant="outline"
                             disabled
                             aria-label={t("modal.actionPicker.loading")}
-                            className="w-full justify-between"
+                            align="between"
+                            className="w-full"
                           >
                             <span aria-hidden className="text-muted-foreground">
                               {t("modal.actionPicker.loading")}
@@ -2213,7 +2234,7 @@ export default function RoutinesPage() {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="justify-between gap-2">
+                      <Button variant="outline" align="between" className="gap-2">
                         <span className="flex items-center gap-2 text-muted-foreground">
                           <Filter className="size-4" aria-hidden />
                           <span className="text-foreground">

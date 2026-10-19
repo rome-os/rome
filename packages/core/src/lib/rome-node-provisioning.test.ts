@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { context, propagation, trace } from "@opentelemetry/api";
+import { isTracingSuppressed } from "@opentelemetry/core";
+import { node as nodeTracing } from "@opentelemetry/sdk-node";
 
 const auth = rs.hoisted(() => ({ authorizeServer: rs.fn() }));
 const daemon = rs.hoisted(() => ({
@@ -10,6 +13,7 @@ rs.mock("@rome-os/node-core/auth", () => auth);
 rs.mock("@rome-os/node-core/client", () => daemon);
 
 import { createNodeCallerProvisioner } from "./rome-node-provisioning.js";
+import { createNodeDevicesService } from "./node-devices.js";
 import { setInstanceTokenInMemory } from "./instance-identity.js";
 
 const originalEnv = { ...process.env };
@@ -109,5 +113,47 @@ describe("Rome Node startup authorization", () => {
     finish(null);
     await next;
     expect(daemon.startDaemon).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Rome Node caller daemon tracing", () => {
+  // Registers a real context manager, so a suppressed context survives the
+  // awaits between the caller and startDaemon.
+  const provider = new nodeTracing.NodeTracerProvider();
+  let startSuppressed: boolean[];
+  let authorizeSuppressed: boolean[];
+
+  beforeAll(() => {
+    provider.register();
+  });
+
+  afterAll(async () => {
+    context.disable();
+    propagation.disable();
+    trace.disable();
+    await provider.shutdown();
+  });
+
+  beforeEach(() => {
+    startSuppressed = [];
+    authorizeSuppressed = [];
+    daemon.startDaemon.mockImplementation(async () => {
+      startSuppressed.push(isTracingSuppressed(context.active()));
+      return { pid: 1234 };
+    });
+    auth.authorizeServer.mockImplementation(async () => {
+      authorizeSuppressed.push(isTracingSuppressed(context.active()));
+    });
+  });
+
+  it("starts the caller daemon untraced at boot and keeps Rome Cloud authorization traced", async () => {
+    await createNodeCallerProvisioner()();
+    expect(authorizeSuppressed).toEqual([false]);
+    expect(startSuppressed).toEqual([true]);
+  });
+
+  it("starts the caller daemon untraced from the devices service", async () => {
+    await createNodeDevicesService().start();
+    expect(startSuppressed).toEqual([true]);
   });
 });

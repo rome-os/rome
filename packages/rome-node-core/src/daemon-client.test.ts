@@ -13,6 +13,8 @@ import {
   stopDaemon,
 } from "./daemon-client.js";
 import { writePrivateJson } from "./storage.js";
+import { DAEMON_PROTOCOL_VERSION } from "./daemon-protocol.js";
+import { encodeMeta, FRAME_HEADER_BYTES, MAX_FRAME_BYTES } from "./frame.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -21,7 +23,13 @@ afterEach(async () => {
 
 async function fixture(handle: (req: IncomingMessage, res: ServerResponse) => void) {
   const directory = await mkdtemp(join(tmpdir(), "rome-node-client-"));
-  cleanup.push(() => rm(directory, { force: true, recursive: true }));
+  cleanup.push(() =>
+    rm(directory, { recursive: true, force: true, maxRetries: 5 }).catch((error) => {
+      // A stopped daemon can hold observe.db open a little longer, and Windows refuses to remove
+      // an open file. A leftover temporary directory is harmless there.
+      if (process.platform !== "win32") throw error;
+    }),
+  );
   const server = createServer(handle);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   cleanup.push(async () => {
@@ -52,9 +60,14 @@ async function rpcFixture(
     pid: process.pid,
     port: f.config.port,
     token: `romenode_${"a".repeat(43)}`,
-    protocolVersion: 2,
+    protocolVersion: DAEMON_PROTOCOL_VERSION,
   });
-  const status = { pid: process.pid, protocolVersion: 2, connection: "online", token: "private" };
+  const status = {
+    pid: process.pid,
+    protocolVersion: DAEMON_PROTOCOL_VERSION,
+    connection: "online",
+    token: "private",
+  };
   let subscriptions = 0;
   sockets.on("connection", (socket) =>
     socket.on("message", async (data) => {
@@ -100,6 +113,52 @@ describe("caller client boundaries", () => {
     expect(stops).toBe(1);
   });
 
+  it("refuses an older RPC daemon and stops it with a hello in its own protocol version", async () => {
+    const f = await fixture((_req, res) => res.writeHead(426).end());
+    const sockets = new WebSocketServer({ server: f.server });
+    cleanup.push(async () => {
+      for (const socket of sockets.clients) socket.terminate();
+      await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    });
+    await writePrivateJson(join(f.config.directory, "daemon.json"), {
+      pid: process.pid,
+      port: f.config.port,
+      token: `romenode_${"a".repeat(43)}`,
+      protocolVersion: 2,
+    });
+    const hellos: unknown[] = [];
+    let stops = 0;
+    sockets.on("connection", (socket) =>
+      socket.on("message", (data) => {
+        const request = JSON.parse(data.toString());
+        const reply = (body: object) =>
+          socket.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, ...body }));
+        if (request.method === "daemon.hello") {
+          hellos.push(request.params.protocolVersion);
+          if (request.params.protocolVersion !== 2)
+            reply({ error: { code: -32002, message: "Incompatible daemon protocol." } });
+          else reply({ result: { pid: process.pid, protocolVersion: 2, connection: "stopped" } });
+        } else if (request.method === "daemon.stop") {
+          stops++;
+          reply({ result: { stopped: true } });
+          setImmediate(() => {
+            for (const client of sockets.clients) client.terminate();
+            f.server.closeAllConnections();
+            f.server.close();
+          });
+        }
+      }),
+    );
+    const client = createNodeClient(f.config);
+    cleanup.push(async () => client.disconnect());
+    await expect(client.run("target", "system.info")).rejects.toBeInstanceOf(DaemonVersionError);
+    expect(stops).toBe(0);
+    await stopDaemon(f.config);
+    expect(stops).toBe(1);
+    expect(hellos).toContain(DAEMON_PROTOCOL_VERSION);
+    expect(hellos).toContain(2);
+  });
+
   it("restores subscriptions without replaying an action whose local response was lost", async () => {
     let requests = 0;
     const f = await rpcFixture((method, _params, socket) => {
@@ -120,15 +179,44 @@ describe("caller client boundaries", () => {
     expect(events).toEqual([
       {
         transport: "connected",
-        daemon: { pid: process.pid, protocolVersion: 2, connection: "online" },
+        daemon: {
+          pid: process.pid,
+          protocolVersion: DAEMON_PROTOCOL_VERSION,
+          connection: "online",
+        },
       },
       { transport: "disconnected", daemon: null, reason: "connection_lost" },
       {
         transport: "connected",
-        daemon: { pid: process.pid, protocolVersion: 2, connection: "online" },
+        daemon: {
+          pid: process.pid,
+          protocolVersion: DAEMON_PROTOCOL_VERSION,
+          connection: "online",
+        },
       },
     ]);
     expect(requests).toBe(1);
+  });
+
+  it("refuses binary input that cannot fit in one Gateway frame before contacting the daemon", async () => {
+    let requests = 0;
+    const f = await rpcFixture(() => {
+      requests++;
+    });
+    const device = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    const meta = encodeMeta({ type: "request", action: "exec", args: { command: "cat" } });
+    const fits = MAX_FRAME_BYTES - FRAME_HEADER_BYTES - meta.byteLength;
+    const refused = await f.client.runBinary(
+      device,
+      "exec",
+      { command: "cat" },
+      new Uint8Array(fits + 1),
+    );
+    expect(refused).toMatchObject({
+      response: { ok: false, error: { code: "message_too_large" } },
+    });
+    expect(refused.body.byteLength).toBe(0);
+    expect(requests).toBe(0);
   });
 
   it("rejects non-JSON input before discovery and strips credentials from status", async () => {
@@ -143,7 +231,7 @@ describe("caller client boundaries", () => {
     expect(requests).toBe(0);
     expect(await f.client.getConnectionStatus()).toEqual({
       pid: process.pid,
-      protocolVersion: 2,
+      protocolVersion: DAEMON_PROTOCOL_VERSION,
       connection: "online",
     });
     f.client.disconnect();

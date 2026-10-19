@@ -5,6 +5,7 @@ import { channelLabel } from "./channel-meta";
 import { sendRefusalKey } from "./send-copy";
 import { usePeopleWrites } from "./use-writes";
 import type { AccountRef } from "./writes";
+import { randomUUID } from "@/lib/random-uuid";
 
 interface LocalSend {
   id: string;
@@ -40,7 +41,10 @@ export function useConversationSends(personId: string, serverMessages: readonly 
     setRequests((current) =>
       current.map((request) =>
         request.id === id
-          ? { ...request, message: { ...request.message, state: "sending", error: null } }
+          ? {
+              ...request,
+              message: { ...request.message, state: "sending", error: null, dismissable: false },
+            }
           : request,
       ),
     );
@@ -65,7 +69,10 @@ export function useConversationSends(personId: string, serverMessages: readonly 
       setRequests((current) =>
         current.map((request) =>
           request.id === id
-            ? { ...request, message: { ...request.message, state: "failed", error } }
+            ? {
+                ...request,
+                message: { ...request.message, state: "failed", error, dismissable: true },
+              }
             : request,
         ),
       );
@@ -77,7 +84,7 @@ export function useConversationSends(personId: string, serverMessages: readonly 
   return {
     messages: requests.map((request) => request.message),
     send(account: AccountRef, text: string) {
-      const id = crypto.randomUUID();
+      const id = randomUUID();
       const message: OutboxMessage = {
         id,
         channel: account.channel,
@@ -87,6 +94,7 @@ export function useConversationSends(personId: string, serverMessages: readonly 
         state: "sending",
         ref: null,
         error: null,
+        dismissable: false,
       };
       setRequests((current) => [{ id, message }, ...current]);
       void attempt(id, account, text);

@@ -11,7 +11,7 @@ function broker(body: unknown, status = 200): typeof fetch {
   ) as unknown as typeof fetch;
 }
 
-async function run(argv: string[], fetchImpl: typeof fetch) {
+async function run(argv: string[], fetchImpl: typeof fetch, channel?: string) {
   let stdout = "";
   let stderr = "";
   const exitCode = await runDiscordCli(argv, {
@@ -25,6 +25,7 @@ async function run(argv: string[], fetchImpl: typeof fetch) {
       stderr += text;
     },
     internalApiPort: "5151",
+    channel,
     now: () => 100,
   });
   return { exitCode, stdout, stderr };
@@ -52,6 +53,23 @@ describe("discord CLI output contract", () => {
     expect(fetchImpl).toHaveBeenCalledWith("http://127.0.0.1:5151/_internal/discord/auth", {
       method: "GET",
     });
+  });
+
+  it("names the session's channel to the broker on auth and API requests", async () => {
+    const fetchImpl = broker({ version: 1, status: 200, headers: {}, body: { id: "123" } });
+    await run(["auth", "--json"], fetchImpl, "discord-2");
+    await run(["api", "users/@me", "--json"], fetchImpl, "discord-2");
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, expect.any(String), {
+      method: "GET",
+      headers: { "x-rome-channel": "discord-2" },
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({
+        headers: { "content-type": "application/json", "x-rome-channel": "discord-2" },
+      }),
+    );
   });
 
   it("prints the documented auth status in text mode", async () => {

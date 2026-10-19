@@ -13,6 +13,9 @@ import type {
 
 const log = createAppLogger("channel-message-hook");
 
+/** Core's `AGENTS_SERVICE`, which an app cannot import. */
+const AGENTS_CHANNEL = "agents";
+
 /**
  * How long a turn may run before the hook reports it as still running: the
  * same ten minutes a channel waits before reporting a stuck handler (R4). The
@@ -22,25 +25,44 @@ const log = createAppLogger("channel-message-hook");
 export const SLOW_TURN_MS = 10 * 60_000;
 
 export class ChannelMessageHook implements ChannelMessageHookInterface {
-  private readonly subscriptions: Array<() => void> = [];
+  /** Unsubscribe functions by channel name, one per channel this hook holds. */
+  private readonly subscriptions = new Map<string, () => void>();
 
   constructor(
     private readonly actionEngine: ActionEngineLike,
     private readonly conversationSettings: ConversationSettingsControl,
     private readonly chatStop: ChatStopHandler,
     private readonly channels: readonly Channel[],
-    private readonly options: { slowTurnMs?: number; log?: Pick<typeof log, "warn"> } = {},
+    private readonly options: {
+      slowTurnMs?: number;
+      log?: Pick<typeof log, "warn">;
+      linkedAgentOf?: ChannelMessageHookDeps["linkedAgentOf"];
+    } = {},
   ) {}
 
-  /** Subscribe once to every channel that can receive. A channel's
-   *  subscription follows whatever backs it, so a Connection that appears or
-   *  reconnects later needs nothing more from the hook. */
+  /** Subscribe to every channel that can receive. A channel's subscription
+   *  follows whatever backs it, so a Connection that appears or reconnects
+   *  later needs nothing more from the hook. */
   async register(): Promise<void> {
-    if (this.subscriptions.length > 0) return;
-    for (const channel of this.channels) {
+    this.subscribe(this.channels);
+  }
+
+  /** Subscribe to channels the host added after `register`, such as a second
+   *  bot whose Talk first unlocked. */
+  async addChannels(channels: readonly Channel[]): Promise<void> {
+    this.subscribe(channels);
+  }
+
+  /** Subscribe to each channel that can receive and that this hook does not
+   *  hold yet, so no channel is ever subscribed twice. */
+  private subscribe(channels: readonly Channel[]): void {
+    for (const channel of channels) {
       const inbound = channel.inbound;
-      if (!inbound) continue;
-      this.subscriptions.push(inbound.subscribe((event) => this.handleMessage(channel, event)));
+      if (!inbound || this.subscriptions.has(channel.name)) continue;
+      this.subscriptions.set(
+        channel.name,
+        inbound.subscribe((event) => this.handleMessage(channel, event)),
+      );
     }
   }
 
@@ -48,7 +70,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
    *  channel; a turn already running finishes, and the agent session queues
    *  the successor hook's turns for that conversation behind it. */
   unregister(): void {
-    for (const unsubscribe of this.subscriptions.splice(0)) unsubscribe();
+    const unsubscribes = [...this.subscriptions.values()];
+    this.subscriptions.clear();
+    for (const unsubscribe of unsubscribes) unsubscribe();
   }
 
   /**
@@ -70,7 +94,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       return;
     }
 
-    if (isStopCommand(message.text)) {
+    // A program sends on `agents`, not a person, so `/stop` there is text for
+    // the model, and `message_handler` decides whether Rome answers it.
+    if (service !== AGENTS_CHANNEL && isStopCommand(message.text)) {
       const addressing =
         message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
       if (addressing === "ambient") {
@@ -102,19 +128,32 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       return;
     }
 
-    let enabled = true;
-    let routedAgentName: string | undefined;
+    // Read per message, since a relink changes it on the same channel. `/stop`
+    // above still reaches a turn that started before an unlink.
+    const linkedAgent = this.options.linkedAgentOf?.(service);
+    if (linkedAgent === null) {
+      log.debug("account has no linked agent; not answering", {
+        service,
+        messageId: message.messageId,
+      });
+      return;
+    }
+
     const snapshot = await this.conversationSettings.get(ref);
-    enabled = snapshot.effective.enabled;
-    routedAgentName = snapshot.effective.routing.agentName ?? undefined;
+    const enabled = snapshot.effective.enabled;
+    // A group's own agent choice, which wins over the account's linked agent.
+    // An explicit pin to main is stored as null, apart from no choice at all.
+    const routedAgentName =
+      snapshot.overrides.routing?.agentName === null
+        ? "core:main"
+        : (snapshot.effective.routing.agentName ?? undefined);
     if (!enabled) {
       log.debug("conversation disabled", { connectionId, conversationId: message.conversationId });
       return;
     }
 
     let attachments = message.attachments;
-    // Through the service's Connection, which is `ref`'s: a service holds at
-    // most one Connection.
+    // Through the channel's Connection, which is `ref`'s.
     const inboundMedia = channel.inbound?.media ?? null;
     if (inboundMedia && attachments.length > 0) {
       try {
@@ -149,7 +188,10 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         });
         return null;
       });
-    void this.runTurn(message, service, connectionId, attachments, routedAgentName, activity);
+    void this.runTurn(message, service, connectionId, attachments, activity, {
+      routedAgentName,
+      linkedAgentName: linkedAgent,
+    });
   }
 
   private async runTurn(
@@ -157,8 +199,8 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     service: string,
     connectionId: string,
     attachments: InboundEvent["message"]["attachments"],
-    routedAgentName: string | undefined,
     activity: Promise<ChannelActivitySession | null>,
+    agents: { routedAgentName: string | undefined; linkedAgentName: string | undefined },
   ): Promise<void> {
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
     const slow = setTimeout(() => {
@@ -186,7 +228,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           attachments,
           messageId: message.messageId,
           replyTo: message.replyTo,
-          routedAgentName,
+          ...agents,
         },
         {
           initiator: `connection:${connectionId}`,
@@ -224,8 +266,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
   }
 
   /** Answer in a conversation on the channel it arrived on, where it can send.
-   *  The channel sends through its service's Connection, not `ref`'s: a
-   *  service holds at most one Connection, so they are the same one. */
+   *  The channel sends through the Connection backing it, which is `ref`'s. */
   private async reply(
     channel: Channel,
     conversationId: ConversationId,
@@ -258,5 +299,6 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
     deps.conversationSettings,
     deps.chatStop,
     deps.channels,
+    { linkedAgentOf: deps.linkedAgentOf },
   );
 }

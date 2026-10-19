@@ -22,12 +22,11 @@ import {
 // The page's own write functions against a backend that implements the /people
 // contract, rather than against a stub written from the same reading of it.
 //
-// `writes.test.ts` pins the request each verb sends. That leaves one thing it
-// cannot see: whether the request a route can answer is the request this client
-// builds. An account identifier is escaped into the path — a WhatsApp jid
-// carries an `@`, and channels are free to mint worse — so the escaping and the
-// decoding have to agree, and a test that asserts a URL string proves only that
-// the client is self-consistent.
+// This is where the request each verb sends is checked: whether the request a
+// route can answer is the request this client builds. An account identifier is
+// escaped into the path — a WhatsApp jid carries an `@`, and channels are free
+// to mint worse — so the escaping and the decoding have to agree, and a test
+// that asserts a URL string proves only that the client is self-consistent.
 
 const server = setupServer(...peopleHandlers);
 
@@ -177,9 +176,13 @@ describe("Sending, against the contract's own handlers", () => {
     expect(await sendMessage(RAY, request, t)).toMatchObject({ ok: true });
     rs.setSystemTime(startedAt + 10_000);
     const failed = (await readOutbox(RAY)).messages.find((message) => message.id === request.id)!;
-    expect(failed.state).toBe("failed");
+    expect(failed).toMatchObject({ state: "failed", dismissable: true });
     expect(await discardSend(RAY, request.id, t)).toMatchObject({ ok: true });
-    expect(await sendMessage(RAY, request, t)).toEqual({ ok: true, value: failed });
+    // The same send replayed, with nothing left to discard.
+    expect(await sendMessage(RAY, request, t)).toEqual({
+      ok: true,
+      value: { ...failed, dismissable: false },
+    });
     expect(holds(await readOutbox(RAY), request.id)).toBe(false);
   });
 
@@ -287,10 +290,14 @@ describe("Sending, against the contract's own handlers", () => {
     const stuck = await outboxUntil(RAY, (page) =>
       page.messages.some((m) => m.id === sent.value.id && m.state === "unconfirmed"),
     );
-    expect(stuck.messages.find((m) => m.id === sent.value.id)?.error).toBeNull();
+    expect(stuck.messages.find((m) => m.id === sent.value.id)).toMatchObject({
+      error: null,
+      dismissable: true,
+    });
 
     // Not retryable — a refusal is what can be tried again, and this was
     // accepted — but dismissable, because it has outlived the landing window.
+    // The row said so, and the route agrees.
     expect(await retrySend(RAY, sent.value.id, t)).toMatchObject({ ok: false });
     expect(await discardSend(RAY, sent.value.id, t)).toMatchObject({ ok: true });
     expect(holds(await readOutbox(RAY), sent.value.id)).toBe(false);

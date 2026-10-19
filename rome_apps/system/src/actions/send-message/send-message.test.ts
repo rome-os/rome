@@ -100,7 +100,12 @@ describe("send_message attachments", () => {
 
 describe("send_message email union", () => {
   function makeEmailAdapter(): ChannelsService {
-    return makeAdapter("email");
+    const adapter = makeAdapter("email");
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
+      conversationId: "t1",
+      messageId: "msg_1",
+    });
+    return adapter;
   }
 
   it("maps email-specific fields into OutgoingMessage.email for a new email", async () => {
@@ -153,6 +158,26 @@ describe("send_message email union", () => {
     });
     const [, , message] = (adapter.send as ReturnType<typeof rs.fn>).mock.calls[0];
     expect(message.html).toBe("<p>hi</p>");
+  });
+
+  it("rejects email attachments before checking their sources or the body", async () => {
+    const adapter = makeEmailAdapter();
+    await expect(
+      executeSendMessage(adapter, {
+        channel: "email",
+        to: "x@y.com",
+        attachments: [{ type: "document", source: "/outside/any/workspace.txt" }],
+      }),
+    ).rejects.toThrow("Email attachments are not supported by the mail transport");
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects an email whose text and html are blank", async () => {
+    const adapter = makeEmailAdapter();
+    await expect(
+      executeSendMessage(adapter, { channel: "email", to: "x@y.com", text: " ", html: "" }),
+    ).rejects.toThrow("Email requires non-empty `text` or `html`");
+    expect(adapter.send).not.toHaveBeenCalled();
   });
 });
 
@@ -323,6 +348,33 @@ describe("send_message conversation recording", () => {
       turnId: undefined,
       knownToProvider: false,
     });
+  });
+
+  it("leaves a webchat send to the channel, which writes it into the chat", async () => {
+    const adapter = makeAdapter("webchat");
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
+      messageId: "webchat-out-1",
+      conversationId: "session-1",
+    });
+    const ensureChannelConversation = rs.fn();
+    const recordOutboundMessage = rs.fn();
+
+    const result = await executeSendMessage(
+      adapter,
+      { channel: "webchat", threadId: "session-1", text: "Background update" },
+      {
+        conversations: {
+          ensureChannelConversation,
+          recordOutboundMessage,
+          addMessage: rs.fn(),
+          promoteMessageToUser: rs.fn(),
+        },
+      },
+    );
+
+    expect(result).toEqual({ status: "ok", data: { messageId: "webchat-out-1" } });
+    expect(ensureChannelConversation).not.toHaveBeenCalled();
+    expect(recordOutboundMessage).not.toHaveBeenCalled();
   });
 
   it("keeps a confirmed delivery successful when transcript recording fails", async () => {

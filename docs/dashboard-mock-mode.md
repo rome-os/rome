@@ -1,6 +1,6 @@
 # Dashboard Mock Mode
 
-`pnpm --filter rome-web dev:mock` (from the root, `pnpm start:web:mock`) serves the full dashboard SPA with no backend at http://localhost:3200. An MSW service worker answers `/api` calls from fixtures in `packages/web/mock/handlers/`.
+`pnpm --filter rome-web dev:mock` (from the root, `pnpm start:web:mock`) serves the full dashboard SPA with no backend at http://localhost:3200. An MSW service worker answers `/api` calls from fixtures in `packages/web/mock/handlers/`, and accepts the `/ws/events` live-events socket (`live-events.ts`), acknowledging each subscription without sending events. The `/ws/node` rome-node console socket (`node-console.ts`) answers status and history queries from fixtures and sends only the subscription snapshot.
 
 `index.ts` holds the shell probes (`/api/health`, `/api/bootstrap`), chat, and the connection routes. It composes the per-surface modules beside it: `apps.ts`, `activity.ts`, `people.ts`, `routines.ts`, `sessions.ts`, `settings.ts`. The two file browsers go through `file-browser.ts`, an in-memory filesystem the projects tree and the memory dir (`memory-files.ts`) are each served from — `/api/projects` and `/api/memory` are the same routes over a different root, so one factory answers both. The connection ledger itself lives in `connections-store.ts`, because the People page's send routes have to see a grant the Connections page revoked. Unhandled requests pass through the normal dev proxy. With a real backend running on `INTERNAL_API_PORT`, mock mode therefore doubles as an "override one endpoint" tool.
 
@@ -65,7 +65,7 @@ The seeded chats carry populated transcripts. Four showcase conversations cover 
 
 YouTube Distill, Code Review, Issue Triage, Fitness Tracker, and Stock Daily load recorded frontend bundles through the normal app host. Their API fixtures live in `mock/fixtures/` and `mock/handlers/recorded-apps.ts`.
 The bundles live in `mock/public/recorded-apps/` and ship only with the mock build.
-The Apps catalog includes only these five recordings, alongside the dashboard's built-in navigation entries.
+The Apps catalog lists these five recordings as App Store installs. It also lists every first-party app a fresh instance installs at boot, from `mock/handlers/first-party-apps.ts`. That set is each `rome_apps/<id>/` with an `app.yaml`, the same set `pnpm build:apps` packs. Their cards and icons come from each app's manifest and icon file. Their capability lists and READMEs are empty, and opening one needs the real backend.
 
 The September 15, 2026 sample contains:
 

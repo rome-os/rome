@@ -20,10 +20,6 @@ function ToolContent({ id }: { id: string }) {
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.scrollIntoView = () => {};
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
 });
 
 beforeEach(() => {
@@ -57,7 +53,12 @@ const placements: WidgetPlacement[] = [
   { id: "b", type: "projects", order: 1 },
 ];
 
-function workspace(view: ToolView, items = placements, addWidget = rs.fn()) {
+function workspace(
+  view: ToolView,
+  items = placements,
+  addWidget = rs.fn(),
+  onOpenIntent = rs.fn(),
+) {
   return (
     <ToolWorkspace
       placements={items}
@@ -69,6 +70,8 @@ function workspace(view: ToolView, items = placements, addWidget = rs.fn()) {
       label={(widget) => widget.type}
       icon={() => null}
       content={(widget) => <ToolContent id={widget.id} />}
+      fullHref={(widget) => (widget.type === "desktop" ? "/desktop" : null)}
+      onOpenIntent={onOpenIntent}
     >
       <input aria-label="Chat draft" />
     </ToolWorkspace>
@@ -142,5 +145,26 @@ describe("ToolWorkspace", () => {
     rerender(workspace({ ...view, collapsed: true }));
     expect(screen.getByRole("textbox", { name: "Chat draft" })).toBeTruthy();
     expect(screen.queryByRole("tabpanel")).toBeNull();
+  });
+
+  it("links the active tool to its full page and refreshes it before opening", async () => {
+    const user = userEvent.setup();
+    const onOpenIntent = rs.fn();
+    const { rerender } = render(
+      workspace(
+        { activeId: "a", collapsed: false, unreadIds: [] },
+        placements,
+        rs.fn(),
+        onOpenIntent,
+      ),
+    );
+    const link = screen.getByRole("link", { name: "Open desktop in new tab" });
+    expect(link.getAttribute("href")).toBe("/desktop");
+    expect(link.getAttribute("target")).toBe("_blank");
+    await user.hover(link);
+    expect(onOpenIntent).toHaveBeenCalledWith(placements[0]);
+
+    rerender(workspace({ activeId: "b", collapsed: false, unreadIds: [] }));
+    expect(screen.queryByRole("link", { name: /in new tab/ })).toBeNull();
   });
 });

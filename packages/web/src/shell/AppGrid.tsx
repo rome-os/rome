@@ -1,31 +1,17 @@
 import {
-  ActivityLogIcon,
-  ArchiveIcon,
-  CalendarIcon,
-  DashboardIcon,
-  GearIcon,
-  PersonIcon,
-  Pencil2Icon,
-} from "@radix-ui/react-icons";
-import {
   AppWindow,
-  Chrome as ChromeIcon,
   Ellipsis,
   ExternalLink,
-  FolderKanban,
   GripVertical,
   Info,
   MessageCircle,
-  MessagesSquare,
   Pencil,
   Pin,
   PinOff,
   Plus,
   Search,
-  Store,
   X,
 } from "lucide-react";
-import type { ComponentType } from "react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -64,7 +50,9 @@ import {
   SortableItemHandle,
   SortableOverlay,
 } from "@/components/ui/sortable";
-import { chatSearchShortcutForPlatform } from "./ChatSearchDialog";
+import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
+import { isCarrierApp } from "@/lib/chat-helpers";
+import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
 import { RecentAppsRail, RecentAppsZone } from "./RecentAppsZone";
 import {
   ACTIVE_CLASS,
@@ -73,40 +61,6 @@ import {
   RAIL_LINK_CLASS,
   isEntryActive,
 } from "./sidebar-shared";
-
-interface BuiltinNavEntry {
-  id: string;
-  href: string;
-  labelKey: string;
-  Icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
-  sidebarIconMotion?: "apps" | "chat";
-}
-
-export const APP_NAV: readonly BuiltinNavEntry[] = [
-  {
-    id: "apps",
-    href: "/apps",
-    labelKey: "nav.apps",
-    Icon: DashboardIcon,
-    sidebarIconMotion: "apps",
-  },
-  { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: FolderKanban },
-  { id: "sessions", href: "/sessions", labelKey: "nav.sessions", Icon: MessagesSquare },
-  { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: ArchiveIcon },
-  { id: "people", href: "/people", labelKey: "nav.people", Icon: PersonIcon },
-  { id: "routines", href: "/routines", labelKey: "nav.routines", Icon: CalendarIcon },
-  { id: "activity", href: "/activity", labelKey: "nav.activity", Icon: ActivityLogIcon },
-  { id: "store", href: "/apps/store", labelKey: "nav.store", Icon: Store },
-  { id: "desktop", href: "/desktop", labelKey: "nav.desktop", Icon: ChromeIcon },
-  {
-    id: "chat",
-    href: "/chat",
-    labelKey: "nav.chat",
-    Icon: Pencil2Icon,
-    sidebarIconMotion: "chat",
-  },
-  { id: "settings", href: "/settings", labelKey: "nav.settings", Icon: GearIcon },
-] as const;
 
 export interface PinnedEntry {
   type: "builtin" | "app";
@@ -182,7 +136,7 @@ function readLocalApps(): CachedApp[] {
     const stored = localStorage.getItem(APPS_CACHE_KEY);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.filter((app) => !isCarrierApp(app?.id)) : [];
   } catch {
     return [];
   }
@@ -274,8 +228,10 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
 
   useEffect(() => {
     if (!appsFromQuery) return;
-    setInstalledApps(appsFromQuery);
-    writeLocalApps(appsFromQuery);
+    // Carriers (e.g. user-skills) never reach Recent, pins or the pin picker.
+    const sidebarApps = appsFromQuery.filter((app) => !isCarrierApp(app.id));
+    setInstalledApps(sidebarApps);
+    writeLocalApps(sidebarApps);
   }, [appsFromQuery]);
 
   useEffect(() => {

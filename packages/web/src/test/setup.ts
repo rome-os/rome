@@ -1,7 +1,7 @@
-// jsdom implements neither ResizeObserver nor scrollIntoView; cmdk's Command
-// constructs the first on mount and calls the second whenever the roving
-// selection moves. Every test rendering a `ui/command` surface needs both, so
-// they are stubbed once here instead of in each file's beforeAll. Individual
+// jsdom implements neither ResizeObserver, scrollIntoView nor pointer capture.
+// cmdk's Command constructs the first on mount and calls the second whenever the
+// roving selection moves; Radix Select, Dialog and menus poke pointer capture.
+// They are stubbed once here instead of in each file's beforeAll. Individual
 // files may still override these. Node-environment tests are untouched.
 if (typeof window !== "undefined") {
   if (typeof globalThis.ResizeObserver === "undefined") {
@@ -14,4 +14,16 @@ if (typeof window !== "undefined") {
   if (typeof Element.prototype.scrollIntoView !== "function") {
     Element.prototype.scrollIntoView = () => {};
   }
+  if (typeof Element.prototype.hasPointerCapture !== "function") {
+    Element.prototype.hasPointerCapture = () => false;
+    Element.prototype.setPointerCapture = () => {};
+    Element.prototype.releasePointerCapture = () => {};
+  }
+}
+
+// jsdom's WebSocket dials real sockets, so the live-events client would reach
+// for whatever listens on the test origin. Without it, components stream over
+// the SSE fallback their tests stub. Live-events tests inject a fake socket.
+if (typeof window !== "undefined") {
+  Reflect.deleteProperty(globalThis, "WebSocket");
 }

@@ -1,0 +1,11 @@
+{
+  // The build config keeps tests out of `dist`. Rstest transpiles without
+  // type-checking, so this config type-checks the sources plus the tests.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "rstest.config.mts"],
+  "exclude": ["node_modules", "dist"]
+}

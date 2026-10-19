@@ -1,12 +1,15 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
 import type { ApiConnection, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+
+/** A later account's channel id, opaque as core mints it. */
+const SECOND_FEISHU = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -45,6 +48,10 @@ function connection(
       watch: { state: "unsupported" },
     },
     connect: null,
+    setups: {},
+    channel: null,
+    linkedAgent: null,
+    severalAccounts: false,
     ...overrides,
   };
 }
@@ -105,25 +112,56 @@ function composioStatus(overrides: Partial<ComposioCliStatus> = {}): ComposioCli
 function renderSection(
   connections: ApiConnection[] = minimalConnections(),
   composio: ComposioCliStatus | null = null,
+  onRefresh: (backgroundRefresh?: boolean) => Promise<ApiConnection[] | null> = rs.fn(
+    async () => null,
+  ),
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <ConnectionsSection connections={connections} composio={composio} />
+        <ConnectionsSection
+          connections={connections}
+          composio={composio}
+          loading={false}
+          error={null}
+          onRefresh={onRefresh}
+          onFlash={rs.fn()}
+        />
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
+function sectionWith(
+  connections: ApiConnection[],
+  onRefresh: (backgroundRefresh?: boolean) => Promise<ApiConnection[] | null>,
+) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <ConnectionsSection
+          connections={connections}
+          composio={null}
+          loading={false}
+          error={null}
+          onRefresh={onRefresh}
+          onFlash={rs.fn()}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
 describe("ConnectionsSection — list of rows", () => {
   it("renders a row for every connection the registry reports including webchat", () => {
-    renderSection();
+    renderSection([...minimalConnections(), oauth("github"), oauth("google")]);
 
     // telegram and whatsapp from minimalConnections, webchat always-on
-    expect(screen.getByText("Telegram")).toBeTruthy();
-    expect(screen.getByText("WhatsApp")).toBeTruthy();
-    expect(screen.getByText("Webchat")).toBeTruthy();
+    for (const label of ["Telegram", "WhatsApp", "Webchat", "GitHub", "Google"]) {
+      expect(screen.getByRole("button", { name: `Open ${label}` })).toBeTruthy();
+    }
   });
 
   it("shows the Rome mark for webchat and a mail glyph for email", () => {
@@ -135,11 +173,10 @@ describe("ConnectionsSection — list of rows", () => {
     const webchatRow = screen.getByRole("button", { name: "Open Webchat" });
     const emailRow = screen.getByRole("button", { name: "Open Email" });
 
+    // The Rome mark is the only non-Lucide glyph a row can carry.
     const webchatLogo = webchatRow.querySelector("svg");
-    expect(webchatLogo?.querySelectorAll("path")).toHaveLength(6);
-    expect(webchatLogo?.parentElement?.className).toContain("bg-foreground text-background");
-    expect(webchatLogo?.parentElement?.className).not.toContain("[--background:");
-    expect(webchatLogo?.getAttribute("class")).toContain("[--background:var(--foreground)]");
+    expect(webchatLogo).toBeTruthy();
+    expect(webchatLogo?.classList.contains("lucide")).toBe(false);
     expect(emailRow.querySelector("svg.lucide-mail")).toBeTruthy();
   });
 
@@ -164,25 +201,6 @@ describe("ConnectionsSection — list of rows", () => {
 
     // The dialog mounts the ceremony body.
     expect(screen.getByText("Connect")).toBeTruthy();
-  });
-
-  it("rows use dot+text status — not a filled Badge element", () => {
-    // A connected github row renders "Connected" as plain text next to a dot span.
-    renderSection([...minimalConnections(), oauth("github", "authorized")]);
-
-    // Both github and the always-on webchat read as "Connected"; every one is
-    // plain text inside the row, not a <badge> wrapper.
-    const statusTexts = screen.getAllByText("Connected");
-    expect(statusTexts.length).toBeGreaterThan(0);
-    // StatusIndicator wraps in a plain <span>, not a <div role="status"> or Badge.
-    // Verify no ancestor carries data-slot="badge" (shadcn Badge marker).
-    for (const statusText of statusTexts) {
-      let el: Element | null = statusText;
-      while (el) {
-        expect(el.getAttribute("data-slot")).not.toBe("badge");
-        el = el.parentElement;
-      }
-    }
   });
 
   it("a degraded OAuth grant reads Not connected with an attention-toned dot on the row (#1472)", () => {
@@ -223,36 +241,6 @@ describe("ConnectionsSection — list of rows", () => {
     expect(within(row).getByText("Degraded")).toBeTruthy();
     expect(within(row).queryByText("Connected")).toBeNull();
     expect(row.querySelector("span[aria-hidden]")?.className).toContain("bg-warning");
-  });
-
-  it("does not render inline ceremonies or accordion content", () => {
-    // No QR codes, no token input, no expand-in-place sections.
-    const { container } = renderSection();
-    expect(container.querySelector("[aria-expanded]")).toBeNull();
-    expect(screen.queryByRole("textbox")).toBeNull();
-  });
-
-  it("shows a row for each OAuth service the registry reports", () => {
-    renderSection([...minimalConnections(), oauth("github"), oauth("google")]);
-    expect(screen.getByText("GitHub")).toBeTruthy();
-    expect(screen.getByText("Google")).toBeTruthy();
-  });
-
-  it("renders no row for a service absent from the registry feed", () => {
-    // The old `integrationsLoaded` gate is gone — the registry-native list is
-    // the single source, so a service simply has no row until the feed
-    // reports it.
-    renderSection(minimalConnections());
-    expect(screen.queryByText("GitHub")).toBeNull();
-  });
-
-  it("renders one open-button per connection row", () => {
-    renderSection([...minimalConnections(), oauth("slack")]);
-
-    // Each connection is a full-width "Open <label>" button (no table roles).
-    expect(screen.getByRole("button", { name: "Open Slack" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open Telegram" })).toBeTruthy();
-    expect(screen.queryAllByRole("row")).toHaveLength(0);
   });
 });
 
@@ -317,5 +305,108 @@ describe("ConnectionsSection — Composio row", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
     fireEvent.click(screen.getByRole("button", { name: "Open Composio" }));
     expect(screen.getByText("Connect")).toBeTruthy();
+  });
+});
+
+describe("ConnectionsSection — several accounts", () => {
+  function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
+    return connection({
+      service: "feishu",
+      channel: "feishu",
+      grants: { app: "authorized" },
+      severalAccounts: true,
+      ...overrides,
+    });
+  }
+
+  it("lists each account as its own row and opens the one clicked", () => {
+    renderSection([
+      feishu(),
+      feishu({
+        id: "conn-feishu-2",
+        channel: SECOND_FEISHU,
+        display: { app: grantDisplay({ displayName: "Sales Bot" }) },
+      }),
+    ]);
+
+    expect(screen.getByRole("button", { name: "Open Feishu" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu · Sales Bot" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Feishu · Sales Bot")).toBeTruthy();
+  });
+
+  it("moves the dialog to a new account once the refreshed list has it", async () => {
+    const second = feishu({
+      id: "conn-feishu-2",
+      channel: SECOND_FEISHU,
+      display: { app: grantDisplay({ displayName: "Sales Bot" }) },
+    });
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      }
+      if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    const onRefresh = rs.fn(async () => [feishu(), second]);
+    const view = renderSection([feishu()], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
+    // The parent re-renders with the refreshed list, as SettingsTabPage does.
+    view.rerender(sectionWith([feishu(), second], onRefresh));
+    await waitFor(() =>
+      expect(within(screen.getByRole("dialog")).getByText("Feishu · Sales Bot")).toBeTruthy(),
+    );
+  });
+
+  it("keeps the dialog on the current account when the new one is not listed yet", async () => {
+    const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      }
+      if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    const onRefresh = rs.fn(async () => [feishu()]);
+    renderSection([feishu()], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
+    expect(within(screen.getByRole("dialog")).getByText("Feishu")).toBeTruthy();
+  });
+
+  it("leaves the dialog closed when the guardian closed it during the add", async () => {
+    const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      }
+      if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    let finishRefresh: (list: ApiConnection[]) => void = () => {};
+    const onRefresh = rs.fn(
+      () =>
+        new Promise<ApiConnection[] | null>((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+    const view = renderSection([feishu()], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    finishRefresh([feishu(), second]);
+    view.rerender(sectionWith([feishu(), second], onRefresh));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

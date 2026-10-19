@@ -52,20 +52,6 @@ function ensureClipboardFileName(file: File, index: number): File {
   });
 }
 
-export function extractFilesFromClipboard(source: ClipboardFileSource): File[] {
-  const directFiles = toArray(source.files);
-  if (directFiles.length > 0) {
-    return directFiles.map(ensureClipboardFileName);
-  }
-
-  const itemFiles = toArray(source.items).flatMap((item) => {
-    if (item.kind !== "file") return [];
-    const file = item.getAsFile?.();
-    return file ? [file] : [];
-  });
-  return itemFiles.map(ensureClipboardFileName);
-}
-
 export function extractFilesFromDataTransfer(source: ClipboardFileSource): File[] {
   const directFiles = toArray(source.files);
   if (directFiles.length > 0) {
@@ -77,6 +63,11 @@ export function extractFilesFromDataTransfer(source: ClipboardFileSource): File[
     const file = item.getAsFile?.();
     return file ? [file] : [];
   });
+}
+
+// A pasted screenshot or clipboard blob often arrives with an empty name.
+export function extractFilesFromClipboard(source: ClipboardFileSource): File[] {
+  return extractFilesFromDataTransfer(source).map(ensureClipboardFileName);
 }
 
 export function dataTransferHasFiles(source: ClipboardFileSource): boolean {

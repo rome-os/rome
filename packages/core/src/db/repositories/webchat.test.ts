@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq, sql } from "drizzle-orm";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb, identityServiceOf } from "../../test/helpers.js";
 import { ApprovalsRepository } from "./approvals.js";
+import { PersonMappingRepository } from "./person-mapping.js";
+import { ConversationSettingsRepository } from "../../conversation-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema.js";
 import {
+  INTERRUPTED_TURN_ERROR,
   WebChatRepository,
   channelConversationId,
   sessionAwaitingGuardian,
@@ -51,6 +54,227 @@ describe("WebChatRepository", () => {
     testDb.close();
   });
 
+  it("filters owners before returning chats and preserves the all-owner default", async () => {
+    await repo.createSession("legacy", "Legacy");
+    await repo.createSession(
+      "guardian",
+      "Guardian",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await repo.createSession(
+      "visitor-a",
+      "Visitor A",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await repo.createSession(
+      "visitor-b",
+      "Visitor B",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:b" },
+    );
+    const ids = async (ownerKey?: string | null) =>
+      (await repo.listSessions("all", ownerKey)).map((s) => s.id).sort();
+    expect(await ids()).toEqual(["guardian", "legacy", "visitor-a", "visitor-b"]);
+    expect(await ids("guardian")).toEqual(["guardian", "legacy"]);
+    expect(await ids("visitor:a")).toEqual(["visitor-a"]);
+    expect(await ids("visitor:b")).toEqual(["visitor-b"]);
+    expect(await ids(null)).toEqual([]);
+    await repo.archiveSession("visitor-a");
+    expect(await repo.listSessions("active", "visitor:a")).toEqual([]);
+    expect((await repo.listSessions("archived", "visitor:a")).map((s) => s.id)).toEqual([
+      "visitor-a",
+    ]);
+  });
+
+  it.each([
+    "fork",
+    "subagent",
+  ] as const)("inherits %s ownership without overwriting an existing owner", async (type) => {
+    await repo.createSession(
+      "parent",
+      "Parent",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await repo.ensureRomeSession({
+      id: "child",
+      name: "Child",
+      type,
+      agentName: null,
+      parentSessionId: "parent",
+    });
+    expect(await repo.getSessionOwnerKey("child")).toBe("visitor:a");
+    expect((await repo.getSession("child"))?.parentSessionId).toBe("parent");
+    await repo.ensureRomeSession({ id: "child", name: "Child", type, agentName: null });
+    expect(await repo.getSessionOwnerKey("child")).toBe("visitor:a");
+    await repo.ensureRomeSession({ id: "autonomous", name: "Autonomous", type, agentName: null });
+    expect(await repo.getSessionOwnerKey("autonomous")).toBeNull();
+  });
+
+  it("inherits handoff ownership without setting branch lineage", async () => {
+    await repo.createSession(
+      "parent",
+      "Parent",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await repo.createSession(
+      "handoff",
+      "Handoff",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat_handoff",
+      null,
+      { inheritOwnerFrom: "parent" },
+    );
+    expect(await repo.getSessionOwnerKey("handoff")).toBe("visitor:a");
+    expect((await repo.getSession("handoff"))?.parentSessionId).toBeNull();
+  });
+
+  it("keeps the first input actor on retries by another person", async () => {
+    await repo.createSession("chat", "Chat");
+    const actor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    expect(await repo.recordUserInput("input", "chat", "[]", actor)).toBe(true);
+    expect(await repo.recordUserInput("input", "chat", "[]", { kind: "anonymous" })).toBe(false);
+    const [message] = await testDb.db
+      .select()
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.id, "input"));
+    expect(message.actor).toEqual(actor);
+    const guardian = {
+      kind: "guardian" as const,
+      userId: "seat",
+      via: "cookie" as const,
+      accountId: "guardian-account",
+      email: "guardian@example.com",
+    };
+    await repo.recordUserInput("guardian-input", "chat", "[]", guardian);
+    const [guardianMessage] = await testDb.db
+      .select()
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.id, "guardian-input"));
+    expect(guardianMessage.actor).toEqual(guardian);
+    expect(await repo.getSessionOwnerKey("chat")).toBeNull();
+  });
+
+  it("attributes a person-created fork and only its opening user input", async () => {
+    await repo.createSession("fork", "Fork");
+    await repo.addMessage("prompt", "fork", "user", "[]", "fork-turn");
+    await repo.addMessage("reply", "fork", "assistant", "[]", "fork-turn");
+    const actor = { kind: "visitor" as const, accountId: "b", email: "b@example.com" };
+    await repo.attributePersonFork("fork", "fork-turn", actor);
+    expect(await repo.getSessionOwnerKey("fork")).toBe("visitor:b");
+    const messages = await testDb.db.select().from(romeAgentMessages);
+    expect(messages.find((m) => m.id === "prompt")?.actor).toEqual(actor);
+    expect(messages.find((m) => m.id === "reply")?.actor).toBeNull();
+  });
+
+  it("pushes every sent message to open chats", async () => {
+    await repo.createSession("sent-session", "Sent");
+    const pushed: string[] = [];
+    const stop = repo.onMessageInserted((message) => pushed.push(message.id));
+    try {
+      await repo.addSentMessage(
+        "live",
+        "sent-session",
+        [{ type: "text", content: "a" }],
+        "live-turn",
+      );
+      await repo.addSentMessage(
+        "later",
+        "sent-session",
+        [{ type: "text", content: "b" }],
+        "turn-2",
+      );
+      await repo.addSentMessage("bare", "sent-session", [{ type: "text", content: "c" }], null);
+    } finally {
+      stop();
+    }
+
+    expect(pushed).toEqual(["live", "later", "bare"]);
+    const messages = await repo.getMessages("sent-session");
+    expect(messages.map((message) => [message.id, message.turnId]).sort()).toEqual([
+      ["bare", null],
+      ["later", "turn-2"],
+      ["live", "live-turn"],
+    ]);
+  });
+
+  // A chat is stored as a channel row, and every chat reader still reports it
+  // as `webchat`.
+  it("stores a chat as a webchat channel row and reads it as a chat", async () => {
+    await repo.createSession("chat-1", "Chat", undefined, "Rome", null, "/work/rome");
+    await repo.addMessage(
+      "m-1",
+      "chat-1",
+      "user",
+      JSON.stringify([{ type: "text", content: "find the needle" }]),
+    );
+
+    const [stored] = await testDb.db
+      .select({ type: romeSessions.type, sourceChannel: romeSessions.sourceChannel })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, "chat-1"));
+    expect(stored).toEqual({ type: "channel", sourceChannel: "webchat" });
+
+    const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id);
+    expect((await repo.getSession("chat-1"))?.type).toBe("webchat");
+    expect(ids(await repo.listSessions())).toEqual(["chat-1"]);
+    expect(ids((await repo.listSessionsPage()).sessions)).toEqual(["chat-1"]);
+    expect(ids((await repo.listSessionsByProjectPath("/work/rome")).sessions)).toEqual(["chat-1"]);
+    expect((await repo.searchSessionMessages("needle")).map((hit) => hit.session.id)).toEqual([
+      "chat-1",
+    ]);
+    expect(
+      (await repo.getHistoryMessages(null, new Date(0))).map((message) => message.sessionId),
+    ).toEqual(["chat-1"]);
+
+    await repo.archiveSession("chat-1");
+    await repo.pinSession("chat-1");
+    const archived = await repo.getSession("chat-1");
+    expect(archived?.archivedAt).not.toBeNull();
+    expect(archived?.pinnedAt).not.toBeNull();
+    expect(ids(await repo.listSessions("archived"))).toEqual(["chat-1"]);
+
+    const settings = new ConversationSettingsRepository(testDb.db);
+    expect(settings.listKnown({})).toEqual([]);
+  });
+
   it("persists input identity, consumption binding, and uncertain recovery without replay", async () => {
     await repo.createSession("input-session", "Inputs");
     expect(await repo.recordUserInput("first", "input-session", "[]")).toBe(true);
@@ -91,6 +315,140 @@ describe("WebChatRepository", () => {
     ]);
   });
 
+  it("ends the turns a stopped process left open, however long Rome was down", async () => {
+    const start = (turnId: string) => ({ type: "turn_start", turnId, agent: "main" });
+    const end = (turnId: string) => ({
+      type: "turn_end",
+      turnId,
+      status: "completed",
+      durationMs: 1,
+    });
+    const trace = (sessionId: string, messageId: string, blocks: unknown[]) =>
+      repo.appendTraceBlocks({ messageId, sessionId, turnId: messageId, startSeq: 0, blocks });
+    for (const id of ["sess-crashed", "sess-done", "sess-second", "sess-old"]) {
+      await repo.createSession(id, id);
+    }
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      rs.setSystemTime(new Date("2026-09-25T12:00:00Z"));
+      await trace("sess-old", "trace-old", [start("turn-old"), { type: "text", content: "…" }]);
+      rs.setSystemTime(new Date("2026-10-01T11:00:00Z"));
+      await trace("sess-crashed", "trace-crashed", [
+        start("turn-crashed"),
+        { type: "tool_use", id: "tu-1", tool: "execute_action", input: {} },
+      ]);
+      await trace("sess-done", "trace-done", [start("turn-done"), end("turn-done")]);
+      await trace("sess-second", "trace-second", [start("turn-1"), end("turn-1"), start("turn-2")]);
+    } finally {
+      rs.useRealTimers();
+    }
+
+    // Rome comes back with real timers, weeks after these traces: the window
+    // counts from the newest trace, not from now.
+    const day = 24 * 60 * 60 * 1000;
+    await expect(repo.endInterruptedTurns(day)).resolves.toBe(2);
+
+    const blocks = async (sessionId: string) =>
+      JSON.parse((await repo.getTraceContents(sessionId))[0]!.content) as Record<string, unknown>[];
+    expect((await blocks("sess-crashed")).slice(-2)).toEqual([
+      { type: "error", error: INTERRUPTED_TURN_ERROR, agent: "main" },
+      {
+        type: "turn_end",
+        turnId: "turn-crashed",
+        status: "error",
+        durationMs: 0,
+        agent: "main",
+      },
+    ]);
+    expect((await blocks("sess-second")).at(-1)).toMatchObject({
+      type: "turn_end",
+      turnId: "turn-2",
+      status: "error",
+    });
+    expect(await blocks("sess-done")).toHaveLength(2);
+    expect(await blocks("sess-old")).toHaveLength(2);
+
+    const failed = Object.fromEntries(
+      (await repo.listSessions()).map((row) => [row.id, row.lastTurnFailed]),
+    );
+    expect(failed).toMatchObject({
+      "sess-crashed": true,
+      "sess-second": true,
+      "sess-done": false,
+      "sess-old": false,
+    });
+    await expect(repo.endInterruptedTurns(day)).resolves.toBe(0);
+  });
+
+  it("fails the subagents an interrupted turn was still waiting on", async () => {
+    const call = (toolUseId: string, agentName: string) => ({
+      toolUseId,
+      agentName,
+      sessionId: `child-${toolUseId}`,
+      turnId: `child-turn-${toolUseId}`,
+    });
+    const started = (toolUseId: string, agentName: string) => ({
+      type: "subagent_start",
+      ...call(toolUseId, agentName),
+      input: { prompt: "Look it up" },
+      agent: "main",
+    });
+    await repo.createSession("sess-parent", "Parent");
+    await repo.appendTraceBlocks({
+      messageId: "trace-parent",
+      sessionId: "sess-parent",
+      turnId: "trace-parent",
+      startSeq: 0,
+      blocks: [
+        // A turn that already ended keeps what it recorded.
+        { type: "turn_start", turnId: "turn-1", agent: "main" },
+        started("tu-earlier", "assistant:explore"),
+        { type: "turn_end", turnId: "turn-1", status: "error", durationMs: 5 },
+        { type: "turn_start", turnId: "turn-2", agent: "main" },
+        started("tu-done", "assistant:explore"),
+        started("tu-explore", "assistant:explore"),
+        {
+          type: "subagent_result",
+          ...call("tu-done", "assistant:explore"),
+          status: "completed",
+          output: "notes",
+          agent: "main",
+        },
+        started("tu-assistant", "assistant:assistant"),
+      ],
+    });
+
+    const day = 24 * 60 * 60 * 1000;
+    await expect(repo.endInterruptedTurns(day)).resolves.toBe(1);
+
+    const blocks = async () =>
+      JSON.parse((await repo.getTraceContents("sess-parent"))[0]!.content) as Record<
+        string,
+        unknown
+      >[];
+    const failed = (toolUseId: string, agentName: string) => ({
+      type: "subagent_result",
+      ...call(toolUseId, agentName),
+      status: "failed",
+      error: { message: INTERRUPTED_TURN_ERROR },
+      agent: "main",
+    });
+    expect((await blocks()).slice(-4)).toEqual([
+      failed("tu-explore", "assistant:explore"),
+      failed("tu-assistant", "assistant:assistant"),
+      { type: "error", error: INTERRUPTED_TURN_ERROR, agent: "main" },
+      { type: "turn_end", turnId: "turn-2", status: "error", durationMs: 0, agent: "main" },
+    ]);
+
+    await expect(repo.endInterruptedTurns(day)).resolves.toBe(0);
+    const results = (await blocks()).filter((block) => block.type === "subagent_result");
+    expect(results.map((block) => block.toolUseId)).toEqual([
+      "tu-done",
+      "tu-explore",
+      "tu-assistant",
+    ]);
+  });
+
   it("lists sessions with message counts and project names", async () => {
     await repo.createSession("sess-1", "Chat A", "guardian-1");
     await repo.createSession("sess-2", "Chat B");
@@ -120,6 +478,84 @@ describe("WebChatRepository", () => {
 
   describe("channel conversation continuity", () => {
     const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
+
+    it("finds a conversation by its channel address", async () => {
+      await repo.createSession("chat-1", "Webchat chat");
+      const channel = await repo.ensureChannelConversation({
+        channel: "telegram",
+        threadId: "thread-1",
+        agentName: "main",
+      });
+      // A fork copies its parent's address but is not the conversation.
+      await repo.ensureRomeSession({
+        id: "fork-1",
+        name: "recap: Webchat chat",
+        type: "fork",
+        agentName: null,
+        sourceChannel: "webchat",
+        sourceThreadId: "chat-1",
+        parentSessionId: "chat-1",
+      });
+
+      expect(await repo.findConversationIdByAddress("webchat", "chat-1")).toBe("chat-1");
+      expect(await repo.findConversationIdByAddress("telegram", "thread-1")).toBe(channel.id);
+      expect(await repo.findConversationIdByAddress("telegram", "thread-2")).toBeNull();
+    });
+
+    it("finds a chat by its webchat address like any channel conversation", async () => {
+      await repo.createSession("chat-1", "Webchat chat");
+
+      const conversation = await repo.ensureChannelConversation({
+        channel: "webchat",
+        threadId: "chat-1",
+        agentName: "main",
+      });
+
+      expect(conversation.id).toBe("chat-1");
+      expect(await repo.getSession("channel:webchat:chat-1")).toBeNull();
+    });
+
+    it("refuses a webchat address that names no chat", async () => {
+      await repo.createSession("chat-1", "Webchat chat");
+      await repo.deleteSession("chat-1");
+
+      await expect(
+        repo.ensureChannelConversation({
+          channel: "webchat",
+          threadId: "chat-1",
+          agentName: "main",
+        }),
+      ).rejects.toThrow("No chat at webchat address chat-1");
+      expect(await repo.getSession("chat-1")).toBeNull();
+    });
+
+    it("places a chat at its own address whatever thread id the caller names", async () => {
+      await repo.ensureRomeSession({
+        id: "chat-1",
+        type: "webchat",
+        name: "Chat",
+        agentName: null,
+        sourceChannel: "webchat",
+        sourceThreadId: "another-chat",
+      });
+
+      expect((await repo.getSession("chat-1"))?.sourceThreadId).toBe("chat-1");
+    });
+
+    it("places a webchat channel row at its own address with an unread clock", async () => {
+      await repo.ensureRomeSession({
+        id: "chat-1",
+        type: "channel",
+        name: "Chat",
+        agentName: null,
+        sourceChannel: "webchat",
+        sourceThreadId: "another-chat",
+      });
+
+      const row = await repo.getSession("chat-1");
+      expect(row?.sourceThreadId).toBe("chat-1");
+      expect(row?.lastSeenActivityAt).not.toBeNull();
+    });
 
     it("keeps one thread session while refreshing its routing from the parent", async () => {
       const first = await repo.ensureChannelConversation({
@@ -160,6 +596,57 @@ describe("WebChatRepository", () => {
         .from(romeSessions)
         .where(eq(romeSessions.id, channelConversationId("discord", "channel-1")));
       expect(parentRows[0]?.agentName).toBe("release-agent");
+    });
+
+    it("backfills a conversation saved under its address, then keeps the name", async () => {
+      const address = { channel: "feishu", threadId: "oc_chat", agentName: "main" };
+      const { id } = await repo.ensureChannelConversation(address);
+      const read = async () =>
+        (
+          await testDb.db
+            .select({ name: romeSessions.name, sourceThreadName: romeSessions.sourceThreadName })
+            .from(romeSessions)
+            .where(eq(romeSessions.id, id))
+        )[0];
+
+      await repo.ensureChannelConversation({ ...address, threadName: "Design Team" });
+      expect(await read()).toEqual({ name: "Design Team", sourceThreadName: "Design Team" });
+
+      await repo.ensureChannelConversation({ ...address, threadName: "Design Guild" });
+      expect(await read()).toEqual({ name: "Design Team", sourceThreadName: "Design Team" });
+    });
+
+    it("backfills a row the settings page saved under the bare chat id", async () => {
+      const id = channelConversationId("feishu", "oc_chat");
+      await repo.ensureRomeSession({
+        id,
+        name: "oc_chat",
+        type: "channel",
+        agentName: null,
+        sourceChannel: "feishu",
+        sourceThreadId: "oc_chat",
+        sourceThreadName: "oc_chat",
+      });
+
+      await repo.ensureChannelConversation({
+        channel: "feishu",
+        threadId: "oc_chat",
+        threadName: "Design Team",
+        agentName: "main",
+      });
+
+      const [row] = await testDb.db.select().from(romeSessions).where(eq(romeSessions.id, id));
+      expect(row).toMatchObject({ name: "Design Team", sourceThreadName: "Design Team" });
+    });
+
+    it("keeps an email thread named after its first subject", async () => {
+      const address = { channel: "email", threadId: "thread-1", agentName: "main" };
+      const { id } = await repo.ensureChannelConversation({ ...address, threadName: "Budget" });
+
+      await repo.ensureChannelConversation({ ...address, threadName: "Re: Budget" });
+
+      const [row] = await testDb.db.select().from(romeSessions).where(eq(romeSessions.id, id));
+      expect(row).toMatchObject({ name: "Budget", sourceThreadName: "Budget" });
     });
 
     it("deduplicates webhook retries within a conversation but not across conversations", async () => {
@@ -463,6 +950,33 @@ describe("WebChatRepository", () => {
         omittedNotificationCount: 0,
         repliedTo: null,
       });
+    });
+
+    // send_message stores the parts it was given here as well as delivering
+    // them; a sender-supplied routine card must not reach the transcript.
+    it("strips routine cards from recorded outbound content", async () => {
+      await repo.createSession("forged-card-thread", "Webchat chat");
+      const conversation = await repo.ensureChannelConversation({
+        channel: "webchat",
+        threadId: "forged-card-thread",
+        agentName: "main",
+      });
+      await repo.recordOutboundConversationMessage({
+        sessionId: conversation.id,
+        content: JSON.stringify([
+          { type: "routine_draft_card", toolUseId: "tu-x", routineKey: "chat-routine:x" },
+          { type: "text", content: "hello" },
+        ]),
+        platformMessageId: "forged-1",
+        senderId: "rome",
+        senderName: "Rome",
+        knownToProvider: true,
+      });
+
+      const rows = await repo.getMessages(conversation.id);
+      expect(rows.map((row) => JSON.parse(row.content))).toEqual([
+        [{ type: "text", content: "hello" }],
+      ]);
     });
 
     it("keeps the pending Rome notification when its referenced parent message is missing", async () => {
@@ -1141,7 +1655,10 @@ describe("WebChatRepository", () => {
       await repo.addMessage("m-7", "sess-bad", "assistant", "not json");
       await repo.addMessage("m-8", "sess-bad", "assistant", '"plain text"');
       await repo.addMessage("m-9", "sess-bad", "assistant", '["plain text"]');
-      const approvals = new ApprovalsRepository(testDb.db);
+      const approvals = new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, identityServiceOf),
+      );
       const approval = (sessionId: string, status?: "approved") =>
         approvals.create({
           type: "action_execution",

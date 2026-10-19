@@ -23,16 +23,10 @@ import type {
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { actionExecutionContext } from "./context.js";
-import {
-  replayContext,
-  ReplayDivergenceError,
-  hashArgs,
-  type JournalEntry,
-  type ReplayStore,
-} from "./replay.js";
+import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../logger.js";
 import { currentSessionId } from "../telemetry-context.js";
-import { getChannelFromThreadKey } from "../core/session-manager.js";
+import { sessionKeyChannel } from "../core/agent-session-key.js";
 import { artifactLocalName } from "../apps/artifact-id.js";
 import {
   isActionWorkerMessage,
@@ -47,6 +41,7 @@ import {
 } from "./runtime-events.js";
 import type { ThreadContext } from "../core/types.js";
 import type { WorkerRpcServer } from "./worker-rpc.js";
+import { IpcRpc, createChildProcessTransport } from "./ipc.js";
 import type { AgentSessionChildBridge } from "../core/agent-session-bridge.js";
 import { actionDurationMetric } from "../telemetry.js";
 import { systemClock, type Clock, type ClockTimer } from "../lib/clock.js";
@@ -91,7 +86,7 @@ function buildRomeSpanAttrs(ctx?: ActionRunContext): Record<string, string> {
   if (ctx.turnId) out["turn.id"] = ctx.turnId;
   if (ctx.channelThreadKey) {
     out["channel.thread_key"] = ctx.channelThreadKey;
-    const name = getChannelFromThreadKey(ctx.channelThreadKey);
+    const name = sessionKeyChannel(ctx.channelThreadKey);
     if (name) out["channel.name"] = name;
   }
   return out;
@@ -141,7 +136,6 @@ export interface ActionRunContext {
   replayJournal?: JournalEntry[];
   /** Original root execution ID to reuse during replay */
   replayRootExecutionId?: string;
-  divergenceMode?: "fallthrough" | "strict";
   /** Session info for agent-level resumption on approval */
   sessionId?: string;
   agentName?: string;
@@ -181,7 +175,15 @@ export interface InterruptedAction {
   rootExecutionId: string;
 }
 
+/** Where the engine records executions, approvals, and replay journals. */
+export interface ActionEngineRepositories {
+  executions: ActionExecutionsRepository;
+  approvals: ApprovalsRepository;
+  journal: ExecutionJournalRepository;
+}
+
 interface ActionEngineOptions {
+  tracer?: Tracer;
   processRole?: "main" | "worker";
   /**
    * Hard cap for every live action-worker process owned by main, including
@@ -236,6 +238,18 @@ interface ExecutionInvocation {
   actor?: SessionActor;
   context?: ActionRunContext;
   isRoot: boolean;
+}
+
+/** Whether a process with `pid` exists. A zombie still counts, and so does a
+ * reused pid. */
+function isProcessAlive(pid: number | undefined): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 function mergeSharedContext(
@@ -293,7 +307,9 @@ interface ActionWorkerProcess {
   useCount: number;
   hasBeenReady: boolean;
   attached: boolean;
-  sessionRpc?: { dispose(): void };
+  /** Clock time of the fork, in epoch milliseconds. */
+  forkedAt: number;
+  rpc?: IpcRpc;
 }
 
 /** Thrown by {@link ActionEngine.run} when `name` is not in the registry.
@@ -308,9 +324,9 @@ export class ActionNotFoundError extends Error {
 
 export class ActionEngine {
   private tracer: Tracer | null;
-  private executionsRepo: ActionExecutionsRepository | null;
-  private approvalsRepo: ApprovalsRepository | null;
-  private journalRepo: ExecutionJournalRepository | null;
+  private executionsRepo: ActionExecutionsRepository;
+  private approvalsRepo: ApprovalsRepository;
+  private journalRepo: ExecutionJournalRepository;
   private activeRootProcesses = new Map<string, ActiveRootProcess>();
   private processRole: "main" | "worker";
   private workerRpcServer: WorkerRpcServer | null = null;
@@ -333,16 +349,13 @@ export class ActionEngine {
 
   constructor(
     private registry: ActionRegistry,
-    tracer?: Tracer,
-    executionsRepo?: ActionExecutionsRepository,
-    approvalsRepo?: ApprovalsRepository,
-    journalRepo?: ExecutionJournalRepository,
+    repos: ActionEngineRepositories,
     options?: ActionEngineOptions,
   ) {
-    this.tracer = tracer ?? null;
-    this.executionsRepo = executionsRepo ?? null;
-    this.approvalsRepo = approvalsRepo ?? null;
-    this.journalRepo = journalRepo ?? null;
+    this.tracer = options?.tracer ?? null;
+    this.executionsRepo = repos.executions;
+    this.approvalsRepo = repos.approvals;
+    this.journalRepo = repos.journal;
     this.processRole = options?.processRole ?? "worker";
     this.onApprovalCreated = options?.onApprovalCreated;
     this.onWorkerInterrupted = options?.onWorkerInterrupted;
@@ -514,7 +527,7 @@ export class ActionEngine {
       return false;
     }
 
-    await this.executionsRepo?.markCancelRequested(rootExecutionId);
+    await this.executionsRepo.markCancelRequested(rootExecutionId);
 
     active.worker.cancelRequested = true;
     this.sendCancelSignal(active.worker.child, "SIGTERM");
@@ -547,7 +560,7 @@ export class ActionEngine {
     // HTTP/WS scope) reuses a root row that already names the accountable
     // requester — inherit it, so children executed during the replay carry
     // the same actor as the root they extend.
-    if (!actor && isReplay && context?.replayRootExecutionId && this.executionsRepo) {
+    if (!actor && isReplay && context?.replayRootExecutionId) {
       const priorRoot = await this.executionsRepo.findById(context.replayRootExecutionId);
       actor = (priorRoot?.actor as SessionActor | null | undefined) ?? undefined;
     }
@@ -568,7 +581,6 @@ export class ActionEngine {
       nextSequence: 0,
       replayIndex: 0,
       mode: isReplay ? "replay" : "record",
-      divergenceMode: context?.divergenceMode ?? "fallthrough",
     };
 
     let preloadedEntryCount = 0;
@@ -765,10 +777,6 @@ export class ActionEngine {
           actualArgsHash: actual.argsHash,
         });
 
-        if (store.divergenceMode === "strict") {
-          throw new ReplayDivergenceError(expected, actual, store.replayIndex);
-        }
-
         store.mode = "record";
       }
     }
@@ -930,12 +938,12 @@ export class ActionEngine {
             : String(err);
       try {
         if (err instanceof ActionCancelledError) {
-          await this.executionsRepo?.markRootCancelled(
+          await this.executionsRepo.markRootCancelled(
             rootExecutionId,
             this.clock.now(),
             err.message,
           );
-        } else if (isRoot && mode === "subprocess" && this.executionsRepo) {
+        } else if (isRoot && mode === "subprocess") {
           await this.executionsRepo.markRootErrored(
             rootExecutionId,
             this.clock.now(),
@@ -1266,6 +1274,7 @@ export class ActionEngine {
           log.warn("queued root timed out waiting for an action worker", {
             rootExecutionId,
             waitedMs,
+            workers: this.describeLiveWorkers(),
           });
           reject(new ActionWorkerCapacityError(this.maxWorkerProcesses, waitedMs));
         }, this.queuedRootMaxWaitMs),
@@ -1442,6 +1451,10 @@ export class ActionEngine {
       throw new Error("Only the main ActionEngine can fork action workers");
     }
     if (this.liveWorkers.size >= this.maxWorkerProcesses) {
+      log.warn("action worker capacity reached", {
+        maxWorkers: this.maxWorkerProcesses,
+        workers: this.describeLiveWorkers(),
+      });
       throw new ActionWorkerCapacityError(this.maxWorkerProcesses);
     }
     const child = this.actionWorkerFork(WORKER_ENTRY_PATH, {
@@ -1462,11 +1475,12 @@ export class ActionEngine {
       useCount: 0,
       hasBeenReady: false,
       attached: false,
+      forkedAt: this.clock.now().getTime(),
     };
     this.liveWorkers.add(worker);
     this.attachWorkerServices(worker);
     child.once("exit", () => {
-      worker.sessionRpc?.dispose();
+      worker.rpc?.dispose();
       this.warmWorkers.delete(worker);
       this.liveWorkers.delete(worker);
       this.admitQueuedRoots();
@@ -1474,16 +1488,55 @@ export class ActionEngine {
         this.ensureWorkerWarmPool();
       }
     });
+    // A fork that fails to spawn (EAGAIN, EMFILE) emits `error` without a pid
+    // and never emits `exit`. No run listens on a warm worker, so without this
+    // listener that `error` is an uncaught exception that stops main.
+    child.on("error", (err) => {
+      log.warn("action worker process error", {
+        pid: child.pid ?? null,
+        error: err.message,
+      });
+      if (!child.pid) void this.stopWorker(worker);
+    });
     return worker;
+  }
+
+  /** One entry per worker that holds a slot, logged when the cap turns work
+   * away. A pid with `alive: false` marks a slot whose process is gone but
+   * whose `exit` listener never released it. */
+  private describeLiveWorkers() {
+    const rootByWorker = new Map<ActionWorkerProcess, string>();
+    for (const [rootExecutionId, active] of this.activeRootProcesses) {
+      rootByWorker.set(active.worker, rootExecutionId);
+    }
+    const now = this.clock.now().getTime();
+    return [...this.liveWorkers].map((worker) => ({
+      pid: worker.child.pid ?? null,
+      alive: isProcessAlive(worker.child.pid),
+      state: worker.state,
+      pooled: worker.pooled,
+      generation: worker.generation,
+      useCount: worker.useCount,
+      ageMs: now - worker.forkedAt,
+      connected: worker.child.connected,
+      rootExecutionId: rootByWorker.get(worker) ?? null,
+    }));
   }
 
   private attachWorkerServices(worker: ActionWorkerProcess): void {
     if (worker.attached) return;
-    this.workerRpcServer?.attach(worker.child);
-    const sessionRpc = this.agentSessionBridge?.attach(worker.child);
-    if (sessionRpc) {
-      worker.sessionRpc = sessionRpc;
-    }
+    // A pooled ChildProcess keeps the async resource created by fork(). If
+    // that fork happened while an action replay/execution context was active,
+    // every later `message` callback on the reused worker re-enters that old
+    // context. Worker IPC is an independent ingress boundary, so never let a
+    // creator action's ALS state leak into a main-process service call.
+    const rpc = new IpcRpc(createChildProcessTransport(worker.child), "main", {
+      runInbound: async (callback) =>
+        await replayContext.exit(() => actionExecutionContext.exit(callback)),
+    });
+    this.workerRpcServer?.register(rpc);
+    this.agentSessionBridge?.attach(rpc, worker.child);
+    worker.rpc = rpc;
     worker.attached = true;
   }
 
@@ -1673,7 +1726,6 @@ export class ActionEngine {
     startedAt: Date;
   }): Promise<void> {
     const repo = this.executionsRepo;
-    if (!repo) return;
 
     const existing = await repo.findById(data.executionId);
     if (existing) {
@@ -1718,7 +1770,6 @@ export class ActionEngine {
     error?: string;
   }): Promise<void> {
     const repo = this.executionsRepo;
-    if (!repo) return;
 
     const existing = await repo.findById(data.executionId);
     if (existing) {
@@ -1763,7 +1814,7 @@ export class ActionEngine {
     parentId?: string;
     startedAt: Date;
   }): Promise<void> {
-    await this.executionsRepo?.update(data.executionId, {
+    await this.executionsRepo.update(data.executionId, {
       status: data.status,
       error: data.error ?? null,
       durationMs: this.clock.now().getTime() - data.startedAt.getTime(),
@@ -1786,7 +1837,7 @@ export class ActionEngine {
   }
 
   private async persistNewEntries(rootExecutionId: string, entries: JournalEntry[]): Promise<void> {
-    if (!this.journalRepo || entries.length === 0) return;
+    if (entries.length === 0) return;
     try {
       await this.journalRepo.saveJournal(rootExecutionId, entries);
     } catch (err) {
@@ -1804,7 +1855,6 @@ export class ActionEngine {
     result: ActionResult,
     status: string,
   ): Promise<void> {
-    if (!this.journalRepo) return;
     try {
       await this.journalRepo.updateEntry(rootExecutionId, sequence, result, status);
     } catch (err) {
@@ -1858,9 +1908,6 @@ export class ActionEngine {
     store: ReplayStore,
     context: ActionRunContext | undefined,
   ): Promise<string> {
-    if (!this.approvalsRepo) {
-      return "no-approvals-repo";
-    }
     const approvalId = await this.approvalsRepo.create({
       type: "action_execution",
       requestedBy: context?.initiator ?? "unknown",

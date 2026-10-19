@@ -6,13 +6,16 @@ import {
   startDaemon,
 } from "@rome-os/node-core/client";
 import { devicesStatusSchema, type DevicesStatus } from "@rome/api-types/devices";
+import { withTracingSuppressed } from "../telemetry.js";
 
 export function createNodeDevicesService(
   createClient: () => Pick<
     ReturnType<typeof createNodeClient>,
     "getDevicesStatus" | "disconnect"
   > = () => createNodeClient(nodeConfigFromEnvironment(process.env)),
-  start: () => Promise<unknown> = () => startDaemon(nodeConfigFromEnvironment(process.env)),
+  // Discovery is refused until the spawned daemon listens. A real failure rejects.
+  start: () => Promise<unknown> = () =>
+    withTracingSuppressed(() => startDaemon(nodeConfigFromEnvironment(process.env))),
 ) {
   let client: ReturnType<typeof createClient> | undefined;
   return {

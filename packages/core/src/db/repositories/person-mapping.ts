@@ -1,6 +1,7 @@
 import { eq, and, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { persons, channelMappings } from "../schema.js";
+import type { ServiceOfChannel } from "./channel-records.js";
 import type { DrizzleDb, DrizzleTx, SqliteExec } from "../index.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import {
@@ -96,7 +97,13 @@ export interface NewPersonData {
  * for one thing rather than one.
  */
 export class PersonMappingRepository {
-  constructor(private db: DrizzleDb) {}
+  /** `serviceOf` maps a channel to the service a link is keyed by: People keys
+   *  an account by service, so a later channel of a service reads and writes
+   *  the service's links. */
+  constructor(
+    private db: DrizzleDb,
+    private readonly serviceOf: ServiceOfChannel,
+  ) {}
 
   private async generatePersonId(displayName: string): Promise<string> {
     const base = generatePersonSlug(displayName);
@@ -116,7 +123,15 @@ export class PersonMappingRepository {
     return nextAvailablePersonId(base, [base, ...conflicts.map((row) => row.id)]);
   }
 
+  /**
+   * The person `channelUserId` on `channel` is linked to. A later channel of a
+   * service reads the service's links, which is where pairing
+   * writes them: People keys an account by service. Telegram and Discord give a
+   * person one id across bots. Feishu's open_id is issued per app, so a sender
+   * on a second Feishu bot pairs once there.
+   */
   async findByChannelUser(channel: string, channelUserId: string) {
+    channel = this.serviceOf(channel);
     const rows = await this.db
       .select({
         person: persons,
@@ -325,7 +340,7 @@ export class PersonMappingRepository {
         });
       }
       claims.push({
-        channel: mapping.channel,
+        channel: this.serviceOf(mapping.channel),
         channelUserId: mapping.channelUserId,
         // The name belongs to the channel, so a caller with none to offer
         // carries the dismissed row's forward rather than clearing it.
@@ -348,6 +363,7 @@ export class PersonMappingRepository {
    *  or null when nobody holds it. The join loses nothing — every mapping
    *  references a person row. */
   private async findChannelMapping(channel: string, channelUserId: string) {
+    channel = this.serviceOf(channel);
     const rows = await this.db
       .select({ mapping: channelMappings, personName: persons.displayName })
       .from(channelMappings)
@@ -399,6 +415,7 @@ export class PersonMappingRepository {
     channelUserId: string,
     displayName: string,
   ): boolean {
+    channel = this.serviceOf(channel);
     const holder = exec
       .select()
       .from(channelMappings)
@@ -424,6 +441,7 @@ export class PersonMappingRepository {
     channelUserId: string,
     displayName?: string,
   ): string {
+    channel = this.serviceOf(channel);
     // Claiming an account is one statement, not a read followed by a write:
     // `(channel, channel_user_id)` is unique, so a second writer re-points the
     // mapping instead of adding a rival one, whatever order the two arrive in.
@@ -472,6 +490,7 @@ export class PersonMappingRepository {
     channelUserIds: readonly string[],
   ): number {
     if (channelUserIds.length === 0) return 0;
+    channel = this.serviceOf(channel);
     return exec
       .delete(channelMappings)
       .where(
@@ -509,6 +528,7 @@ export class PersonMappingRepository {
     from: string,
     to: string,
   ): boolean {
+    channel = this.serviceOf(channel);
     // The row this call re-points, as a subquery so the guard runs inside the
     // caller's transaction rather than as a read before it (see
     // {@link writeDeleteGuardianChannelMappings}).
@@ -587,6 +607,7 @@ export class PersonMappingRepository {
   }
 
   async deleteChannelMapping(channel: string, channelUserId: string) {
+    channel = this.serviceOf(channel);
     await this.db
       .delete(channelMappings)
       .where(
@@ -606,6 +627,7 @@ export class PersonMappingRepository {
    * subquery, so nothing executes outside `exec`.
    */
   writeDeleteGuardianChannelMappings(exec: SqliteExec, channel: string): void {
+    channel = this.serviceOf(channel);
     const guardianIds = this.db
       .select({ id: persons.id })
       .from(persons)
@@ -639,7 +661,8 @@ export class PersonMappingRepository {
     channelUserId: string;
     transferFrom?: string | null;
   }): Promise<LinkAccountResult> {
-    const { personId, channel, channelUserId } = params;
+    const { personId, channelUserId } = params;
+    const channel = this.serviceOf(params.channel);
     const expected = params.transferFrom ?? null;
 
     return this.db.transaction((tx): LinkAccountResult => {
@@ -760,6 +783,7 @@ export class PersonMappingRepository {
    *  every other link they hold alone. Reports whether the link was theirs to
    *  drop, which is the only way a caller can tell an unlink from a no-op. */
   async unlinkAccount(personId: string, channel: string, channelUserId: string): Promise<boolean> {
+    channel = this.serviceOf(channel);
     const result = this.db
       .delete(channelMappings)
       .where(
@@ -772,8 +796,4 @@ export class PersonMappingRepository {
       .run();
     return result.changes > 0;
   }
-}
-
-export function createPersonMappingRepository(db: DrizzleDb) {
-  return new PersonMappingRepository(db);
 }

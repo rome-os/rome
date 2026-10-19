@@ -32,6 +32,12 @@ export type DrizzleTx = Parameters<Parameters<DrizzleDb["transaction"]>[0]>[0];
 // only by construction.
 export type SqliteExec = Pick<DrizzleDb, "insert" | "update" | "delete">;
 
+/** Whether a transaction is open on `db`'s connection. `drizzle()` attaches
+ *  the better-sqlite3 client as `$client`, which `DrizzleDb` does not type. */
+export function inTransaction(db: DrizzleDb): boolean {
+  return (db as DrizzleDb & { $client: Database.Database }).$client.inTransaction;
+}
+
 export function createDb(config: DatabaseConfig): DrizzleDb {
   if (config.type === "sqlite") {
     const sqlitePath = config.sqlitePath ?? DEFAULT_SQLITE_PATH;

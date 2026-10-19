@@ -2,7 +2,6 @@ cases:
   - name: ACT-03 Review requests and inspect an accepted webhook payload
     tags:
       - activity
-      - shard-4
     steps:
       - app.open:
           path: /activity

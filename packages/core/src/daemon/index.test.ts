@@ -1,5 +1,8 @@
 import { EventEmitter } from "node:events";
-import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { context, propagation, trace } from "@opentelemetry/api";
+import { isTracingSuppressed } from "@opentelemetry/core";
+import { node as nodeTracing } from "@opentelemetry/sdk-node";
 
 const spawnMock = rs.fn();
 
@@ -159,5 +162,63 @@ describe("HealthCheckDaemon", () => {
     } finally {
       await daemon.stop();
     }
+  });
+
+  describe("health probe tracing", () => {
+    // Registers a real context manager, so a suppressed context survives the
+    // awaits between the caller and fetch.
+    const provider = new nodeTracing.NodeTracerProvider();
+
+    beforeAll(() => {
+      provider.register();
+    });
+
+    afterAll(async () => {
+      context.disable();
+      propagation.disable();
+      trace.disable();
+      await provider.shutdown();
+    });
+
+    it("probes the starting server untraced and steady-state health traced", async () => {
+      const probes: boolean[] = [];
+      let refuseNext = true;
+      rs.stubGlobal(
+        "fetch",
+        rs.fn(async () => {
+          probes.push(isTracingSuppressed(context.active()));
+          if (refuseNext) {
+            refuseNext = false;
+            throw new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:4141");
+          }
+          return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
+        }),
+      );
+
+      const { HealthCheckDaemon } = await import("./index.js");
+      const { HostFilesystemManager } = await import("./host-filesystem.js");
+      rs.spyOn(HostFilesystemManager.prototype, "restore").mockResolvedValue(undefined);
+
+      const daemon = new HealthCheckDaemon({
+        appDir: "/tmp/rome",
+        healthCheckIntervalMs: 60_000,
+        healthRetryDelayMs: 100,
+        healthTimeoutMs: 1_000,
+        actionHost: "127.0.0.1",
+        actionPort: 0,
+        romePort: 4141,
+      });
+
+      await daemon.start();
+      try {
+        expect(probes).toEqual([true, true]);
+
+        probes.length = 0;
+        await (daemon as never as { runHealthChecks: () => Promise<void> }).runHealthChecks();
+        expect(probes).toEqual([false]);
+      } finally {
+        await daemon.stop();
+      }
+    });
   });
 });

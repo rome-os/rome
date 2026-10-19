@@ -28,7 +28,8 @@
 // coroutine provisions the `<slug>@romeos.cc` inbox via
 // `MailProvider.provision()` (get-or-create) inside `ctx.step`, and the
 // terminal conferral is the single ledger write. No credential ever touches the
-// settings table, so `confer()` here throws (see cross-stage notes).
+// settings table, so `confer()` here throws (see cross-stage notes). The first
+// Rome Cloud sign-in makes the same write without the click (`autoConnectEmail`).
 
 import type { TalkFeatures } from "../types.js";
 import {
@@ -38,7 +39,6 @@ import {
 } from "../../channels/email.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { InboundDedup } from "../../channels/inbound-dedup.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
 import { z } from "zod";
 import type { SetupFn } from "../setup/types.js";
@@ -90,24 +90,6 @@ export function emailGrantProfile(address: string): EmailGrantProfile {
   return emailGrantProfileSchema.parse({ address });
 }
 
-/** The identity field a LEGACY (pre-4c) email settings row carries — the
- *  provisioned address a pre-direct-conferral connect wrote next to the secret.
- *  Only the boot bridge reads this shape; fresh rows are pure config and carry
- *  no address. */
-export interface EmailProfileSource {
-  address?: string;
-}
-
-/** Build the parsed grant profile from a legacy settings row, or null when the
- *  row carries no provisioned address (fresh config-only rows). */
-export function emailProfileFromSettings(settings: EmailProfileSource): EmailGrantProfile | null {
-  // null / undefined / "" are the absent cases; any other present value flows
-  // through untouched so the strict parse rejects a wrong-typed address loudly
-  // instead of silently dropping it.
-  if (settings.address == null || settings.address === "") return null;
-  return emailGrantProfileSchema.parse({ address: settings.address });
-}
-
 /** The `inbox` grant material (grant table): exactly the
  *  Rome Cloud-provisioned coordinates the connect route confers. `guardianEmail`
  *  is NOT here — it is durable settings config that survives revoke, sourced
@@ -129,8 +111,6 @@ export interface EmailDescriptorDeps {
   /** Defaults to the whoami lookup (see EmailAdapter). Injectable for
    *  tests and for the descriptor-factory call site to share one resolver. */
   ownerEmailResolver?: () => Promise<string | undefined>;
-  /** Defaults to an in-memory LRU (see EmailAdapter). */
-  inboundDedup?: InboundDedup;
   /**
    * Called synchronously right after each fresh `EmailAdapter` is built (every
    * epoch — birth, relock/re-authorize, and Disconnected backoff rebuild).
@@ -167,17 +147,35 @@ export interface EmailSetupSettings {
   set(key: string, value: unknown): Promise<void>;
 }
 
+/** Write the pure-config settings row `{ enabled: true }` for a freshly
+ *  provisioned inbox and return its terminal conferral. Call it BEFORE the
+ *  conferral is committed: the epoch build that commit triggers starts the
+ *  adapter, which reads this row. `guardianEmail` survives (amendment 2), and
+ *  stale pre-4c credential fields are stripped so the row never carries a
+ *  credential. */
+async function emailConferral(
+  settings: EmailSetupSettings,
+  inbox: EmailInboxMaterial,
+): Promise<{ credential: Credential; profile: EmailGrantProfile }> {
+  const existing = (await settings.get<Record<string, unknown>>(EMAIL_SETTINGS_KEY)) ?? {};
+  const { address: _address, inboundSecret: _inboundSecret, ...config } = existing;
+  await settings.set(EMAIL_SETTINGS_KEY, { ...config, enabled: true });
+  return {
+    credential: {
+      material: { address: inbox.address, inboundSecret: inbox.inboundSecret },
+      expiresAt: "never",
+    },
+    profile: emailGrantProfile(inbox.address),
+  };
+}
+
 /**
  * Build the Email conferral setup. Near-degenerate: the
  * guardian's Connect click is the confirmation, so the coroutine is linear:
  *   1. show the provisioning progress view,
  *   2. `ctx.step("provision")` — the Rome Cloud mail provision (get-or-create;
  *      a cancel interrupts the wait and leaves zero durable state),
- *   3. persist the pure-config settings row `{ enabled, guardianEmail }` —
- *      BEFORE the terminal conferral, whose epoch build starts the adapter
- *      that reads this row; `guardianEmail` is preserved (it survives revoke —
- *      amendment 2) and any stale pre-4c credential fields are
- *      stripped so the row can never reintroduce a credential,
+ *   3. persist the pure-config settings row (see `emailConferral`),
  *   4. return the terminal conferral: the provisioned coordinates as the
  *      `inbox` material + the address as the grant profile.
  *
@@ -188,7 +186,7 @@ export interface EmailSetupSettings {
  * grant epochs, and retrying the failed setup converges.
  */
 export function makeEmailSetup(deps: {
-  provision: () => Promise<{ address: string; inboundSecret: string }>;
+  provision: () => Promise<EmailInboxMaterial>;
   settings: EmailSetupSettings;
 }): SetupFn {
   return async (interact, ctx) => {
@@ -197,21 +195,57 @@ export function makeEmailSetup(deps: {
       body: ["Provisioning your Rome email address…"],
       progress: true,
     });
-    const { address, inboundSecret } = await ctx.step("provision", () => deps.provision());
-
-    const existing = (await deps.settings.get<Record<string, unknown>>(EMAIL_SETTINGS_KEY)) ?? {};
-    const { address: _address, inboundSecret: _inboundSecret, ...config } = existing;
-    await deps.settings.set(EMAIL_SETTINGS_KEY, { ...config, enabled: true });
-
+    const inbox = await ctx.step("provision", () => deps.provision());
+    const { credential, profile } = await emailConferral(deps.settings, inbox);
     return {
-      credential: { material: { address, inboundSecret }, expiresAt: "never" },
-      profile: emailGrantProfile(address),
+      credential,
+      profile,
       summary: {
         title: "Email connected",
-        body: [`Your agent's address is ${address}.`],
+        body: [`Your agent's address is ${inbox.address}.`],
       },
     };
   };
+}
+
+/** The narrow registry surface `autoConnectEmail` drives. Every
+ *  `ConnectionRegistry` satisfies it structurally. */
+export interface EmailAutoConnectRegistry {
+  find(service: string): readonly unknown[];
+  withGrantSection<T>(service: string, grant: string, fn: () => Promise<T>): Promise<T>;
+  confer(
+    service: string,
+    connectionId: string | undefined,
+    grant: string,
+    credential: Credential,
+    profile: ProfileRecord | undefined,
+  ): Promise<unknown>;
+}
+
+/**
+ * Connect email without the guardian's Connect click: provision the inbox and
+ * confer the `inbox` grant, the same terminal write the setup makes.
+ *
+ * Resolves `false` and provisions nothing when any email connection exists,
+ * whatever its grant state, so a connection the guardian set up or revoked is
+ * never touched. Resolves `true` once the grant is conferred. Rejects when the
+ * provision or the conferral fails; the guardian can still connect by hand.
+ */
+export async function autoConnectEmail(deps: {
+  registry: EmailAutoConnectRegistry;
+  provision: () => Promise<EmailInboxMaterial>;
+  settings: EmailSetupSettings;
+}): Promise<boolean> {
+  if (deps.registry.find("email").length > 0) return false;
+  const inbox = await deps.provision();
+  return deps.registry.withGrantSection("email", "inbox", async () => {
+    // The provision ran outside the section, so a Connect click can have
+    // committed meanwhile. Re-check under the section the setup commits in.
+    if (deps.registry.find("email").length > 0) return false;
+    const { credential, profile } = await emailConferral(deps.settings, inbox);
+    await deps.registry.confer("email", undefined, "inbox", credential, profile);
+    return true;
+  });
 }
 
 /**
@@ -251,7 +285,6 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
             personMappingRepo: deps.personMappingRepo,
             config,
             ownerEmailResolver: deps.ownerEmailResolver,
-            inboundDedup: deps.inboundDedup,
           });
           deps.onAdapterBuilt?.(adapter);
 

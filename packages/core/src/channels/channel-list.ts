@@ -5,10 +5,11 @@
  * taking an entry here. Vocabulary: docs/concepts/messaging.md.
  */
 
+import type { Connection } from "../connections/types.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { Accounts } from "./accounts.js";
 import type { Channel, Channels } from "./channel.js";
-import { connectionPorts, type ConnectionPortsDeps } from "./connection-ports.js";
+import { type ChannelOf, connectionPorts, type ConnectionPortsDeps } from "./connection-ports.js";
 import { linkedInMessages } from "./linkedin-messages.js";
 import type { WechatUserReader } from "./wechat-user.js";
 import {
@@ -54,7 +55,11 @@ export function channelList(deps: {
   /** Address books for channels a Connection backs, by service. A service
    *  absent here has no address book. */
   connectionAccounts?: Record<string, Accounts>;
-}): Channels {
+  /** The later channels of a service a Connection backs, such as a second
+   *  Feishu bot. Each service's first channel is named after it and is built
+   *  whether or not anything backs it yet. */
+  laterChannels?: ReadonlyArray<{ name: string; service: string }>;
+}): Channel[] {
   const reads: Array<Pick<Channel, "name" | "accounts" | "messages">> = [
     { name: "whatsapp", accounts: deps.whatsAppAccounts, messages: whatsAppMessages(deps.db) },
     { name: "linkedin", accounts: deps.linkedInAccounts, messages: linkedInMessages(deps.db) },
@@ -86,5 +91,51 @@ export function channelList(deps: {
     if (!backed.send && !backed.inbound && !backed.messages) continue;
     channels.push({ name, accounts: deps.connectionAccounts?.[name] ?? null, ...backed });
   }
+  if (connections) {
+    for (const later of deps.laterChannels ?? []) {
+      if (channels.some((channel) => channel.name === later.name)) continue;
+      const channel = laterChannel(connections, later.service, later.name);
+      if (channel) channels.push(channel);
+    }
+  }
   return channels;
+}
+
+/**
+ * A later channel of `service`, named `name`, backed by its own Connection.
+ * Null when the service has no Talk. It has no address book or store of its
+ * own: those a service keeps are its first channel's.
+ *
+ * Build it once per registry and name, as `channelList` does for the first
+ * channel of each service: its inbound port runs admission for every message.
+ */
+export function laterChannel(
+  connections: ConnectionPortsDeps,
+  service: string,
+  name: string,
+): Channel | null {
+  const backed = connectionPorts(connections, service, name);
+  if (!backed || (!backed.send && !backed.inbound && !backed.messages)) return null;
+  return { name, accounts: null, ...backed };
+}
+
+/**
+ * The channel a Connection backs, added to `channels` when its Talk unlocks
+ * and none of them is that channel yet. Null when one already is, or when the
+ * service has no Talk, or the Connection backs no channel.
+ *
+ * Call it from the registry's `onUnlocked("talk")`. The new channel's inbound
+ * port registers its own unlock handler while that one is still firing, so the
+ * registry hands it this Connection twice. The port keeps one subscription per
+ * Connection, so each message still arrives once.
+ */
+export function joinLaterChannel(
+  deps: ConnectionPortsDeps & { channelOf: ChannelOf; channels: Channel[] },
+  connection: Pick<Connection, "id" | "service">,
+): Channel | null {
+  const name = deps.channelOf(connection);
+  if (name === null || deps.channels.some((channel) => channel.name === name)) return null;
+  const channel = laterChannel(deps, connection.service, name);
+  if (channel) deps.channels.push(channel);
+  return channel;
 }

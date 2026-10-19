@@ -10,6 +10,8 @@ import { renderAppIdentity, renderSocialMeta } from "../lib/social-meta.js";
 import { buildAppIdentity } from "./app-home-screen.js";
 import { buildAppSocialCard } from "./app-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
+import { attachLiveEventsServer } from "../live-events-server.js";
+import { attachNodeConsoleServer } from "../node-console-server.js";
 import { attachDesktopProxy } from "../desktop-proxy-server.js";
 import { attachAppWebSocket } from "../apps/websocket-server.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -20,12 +22,13 @@ import { sessionActorMiddleware } from "../lib/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
 import { actionsRoutes } from "./routes/actions.js";
-import { appsRoutes } from "./routes/apps.js";
+import { appsRoutes, subscribeCatalogChanges } from "./routes/apps.js";
 import { agentsRoutes } from "./routes/agents.js";
 import { skillsRoutes } from "./routes/skills.js";
 import { discordCliRoutes } from "./routes/discord-cli.js";
 import { conversationSettingsRoutes } from "./routes/conversation-settings.js";
 import { connectionsRoutes } from "./routes/connections.js";
+import { channelAccountsRoutes } from "./routes/channel-accounts.js";
 import { setupsRoutes } from "./routes/setups.js";
 import { approvalsRoutes } from "./routes/approvals.js";
 import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
@@ -75,6 +78,8 @@ import { eventCatalogRoutes } from "./routes/event-catalog.js";
 import { favorRoutes } from "./routes/favors.js";
 import { sessionsRoutes } from "./routes/sessions.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
+import { readLinkedAgent } from "../channels/linked-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
@@ -89,7 +94,13 @@ export function buildApp(
 
   // Same-container Agent surface. This is deliberately outside `/api`, which
   // is Caddy-proxied, and refuses to register on a non-loopback listener.
-  app.route("/", discordCliRoutes(deps, config.host));
+  app.route(
+    "/",
+    discordCliRoutes(
+      { ...deps, channelRecords: new ChannelRecordsRepository(deps.db) },
+      config.host,
+    ),
+  );
 
   // External webhooks — X-API-Key auth, no /api/ prefix. Intentionally outside
   // sessionActorMiddleware: a machine-credential surface records no session
@@ -145,6 +156,7 @@ export function buildApp(
   api.route("/", appApiPublicRoutes(deps));
   api.route("/", integrationsRoutes(deps));
   api.route("/", connectionsRoutes(deps));
+  api.route("/", channelAccountsRoutes(deps));
   api.route("/", setupsRoutes(deps));
   api.route("/", capabilityDiscoveryRoutes(hostCapabilityDiscoverySource));
   api.route("/", desktopRoutes());
@@ -181,10 +193,15 @@ export function buildApp(
   api.route("/", projectsFilesRoutes(deps));
   api.route("/", syncRoutes(deps));
   api.route("/", shareRoutes(deps));
+  const sessionChannelRecords = new ChannelRecordsRepository(deps.db);
   const sessionQueries = new SessionQueryService({
     repository: new SessionQueryRepository(deps.db),
     agentLoader: deps.agentLoader,
     appCatalog: deps.appCatalog,
+    linkedAgentOf: (channel) => readLinkedAgent(sessionChannelRecords, deps.agentLoader, channel),
+    // A channel with no record answers no agent, so the records are every
+    // channel that can.
+    channelNames: () => sessionChannelRecords.all().map((record) => record.id),
   });
   api.route("/", sessionsRoutes(sessionQueries));
 
@@ -270,6 +287,8 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           port: info.port,
           close: async () => {
             terminalServer.close();
+            liveEvents.close();
+            nodeConsole.close();
             desktopProxy.close();
             appWebSocket.close();
             await webchatRuntime.flushAll();
@@ -287,6 +306,19 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           void deps.aiToolState.refresh().catch(() => {});
         },
       });
+      const liveEvents = attachLiveEventsServer(
+        server as Server,
+        deps.db,
+        deps.dashboardAccessState,
+        {
+          subscribeChatStatus: (emit) => webchatRuntime.subscribeStatusEvents(emit),
+          hasChatSession: (sessionId) => webchatRuntime.hasStoredSession(sessionId),
+          subscribeChatSession: (sessionId, emit) =>
+            webchatRuntime.subscribeSessionEvents(sessionId, emit),
+          subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
+        },
+      );
+      const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
       const desktopProxy = attachDesktopProxy(server as Server, deps.db);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       server.on("error", (err) => {

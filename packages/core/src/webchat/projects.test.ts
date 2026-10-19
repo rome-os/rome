@@ -5,15 +5,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
-  createWebchatProject,
-  ensureWebchatProjectExists,
   getWebchatProjectDisplayName,
-  listWebchatProjects,
   normalizeSelectedWebchatProjectPath,
   normalizeWebchatProjectPath,
   resolveProjectWorkingDirWithinRoot,
   resolveWebchatContinuationWorkingDir,
-  resolveWebchatWorkingDir,
   resolveWebchatProjectPath,
 } from "./projects.js";
 
@@ -23,45 +19,6 @@ describe("webchat project helpers", () => {
   afterEach(async () => {
     await Promise.all(tempRoots.map((root) => rm(root, { recursive: true, force: true })));
     tempRoots.length = 0;
-  });
-
-  it("lists only first-level project directories", async () => {
-    const root = mkdtempSync(join(tmpdir(), "rome-webchat-projects-"));
-    tempRoots.push(root);
-    mkdirSync(join(root, "alpha"));
-    mkdirSync(join(root, "beta"));
-    writeFileSync(join(root, "README.txt"), "ignore", "utf-8");
-
-    const catalog = await listWebchatProjects(root);
-
-    expect(catalog.rootPath).toBe(root);
-    expect(catalog.projects).toEqual([
-      { name: "default", path: join(root, "default") },
-      { name: "alpha", path: join(root, "alpha") },
-      { name: "beta", path: join(root, "beta") },
-    ]);
-  });
-
-  it("creates and reports the default working directory from the projects root", async () => {
-    const root = mkdtempSync(join(tmpdir(), "rome-webchat-projects-"));
-    tempRoots.push(root);
-
-    const catalog = await listWebchatProjects(root);
-
-    expect(catalog.defaultPath).toBe(join(root, "default"));
-    expect(catalog.projects).toEqual([{ name: "default", path: join(root, "default") }]);
-  });
-
-  it("creates a new project folder", async () => {
-    const root = mkdtempSync(join(tmpdir(), "rome-webchat-projects-"));
-    tempRoots.push(root);
-
-    await expect(createWebchatProject("new-app", root)).resolves.toEqual({
-      name: "new-app",
-      path: join(root, "new-app"),
-    });
-
-    await expect(ensureWebchatProjectExists("new-app", root)).resolves.toBe(join(root, "new-app"));
   });
 
   it("normalizes nested relative project paths", () => {
@@ -91,27 +48,11 @@ describe("webchat project helpers", () => {
     );
   });
 
-  it("rejects creating the default project because it already exists", async () => {
-    const root = mkdtempSync(join(tmpdir(), "rome-webchat-projects-"));
-    tempRoots.push(root);
-
-    await expect(createWebchatProject("default", root)).rejects.toThrow(
-      'Project "default" already exists',
-    );
-  });
-
   it("resolves a valid project path under the projects root", () => {
     expect(resolveWebchatProjectPath("alpha", "/tmp/projects")).toBe("/tmp/projects/alpha");
     expect(resolveWebchatProjectPath("landingpage/content", "/tmp/projects")).toBe(
       "/tmp/projects/landingpage/content",
     );
-  });
-
-  it("resolves the default project inside the projects root", async () => {
-    const root = mkdtempSync(join(tmpdir(), "rome-webchat-projects-"));
-    tempRoots.push(root);
-
-    await expect(resolveWebchatWorkingDir("default", root)).resolves.toBe(join(root, "default"));
   });
 
   describe("resolveWebchatContinuationWorkingDir", () => {

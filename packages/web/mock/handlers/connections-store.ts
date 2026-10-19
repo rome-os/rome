@@ -1,4 +1,5 @@
 import type { ApiConnection } from "@/lib/connections-api";
+import { MAIN_AGENT_ID } from "@rome/api-types/linked-agents";
 
 // The connection ledger. In its own module because two surfaces read it and one
 // of them writes it: the Connections page revokes a grant, and the send routes
@@ -27,13 +28,23 @@ export const connections: { connections: ApiConnection[] } = {
         watch: { state: "unlocked" },
       },
       connect: null,
+      setups: {},
+      channel: null,
+      linkedAgent: null,
+      severalAccounts: false,
     },
     ...[
-      { service: "email", label: "Email", grant: "inbox", email: "guardian@example.com" },
-      { service: "wechat", label: "WeChat", grant: "account", email: null },
-      { service: "feishu", label: "Feishu", grant: "bot", email: null },
+      {
+        service: "email",
+        label: "Email",
+        grant: "inbox",
+        email: "guardian@example.com",
+        severalAccounts: false,
+      },
+      { service: "wechat", label: "WeChat", grant: "account", email: null, severalAccounts: false },
+      { service: "feishu", label: "Feishu", grant: "bot", email: null, severalAccounts: true },
     ].map(
-      ({ service, label, grant, email }): ApiConnection => ({
+      ({ service, label, grant, email, severalAccounts }): ApiConnection => ({
         id: `${service}-demo`,
         service,
         label: `${label} · Rome Demo`,
@@ -47,6 +58,11 @@ export const connections: { connections: ApiConnection[] } = {
           watch: { state: "unsupported" },
         },
         connect: null,
+        setups: {},
+        channel: service,
+        // Core links main to every existing linkable bot on upgrade.
+        linkedAgent: service === "feishu" ? MAIN_AGENT_ID : null,
+        severalAccounts,
       }),
     ),
     {
@@ -63,6 +79,10 @@ export const connections: { connections: ApiConnection[] } = {
         watch: { state: "unsupported" },
       },
       connect: null,
+      setups: {},
+      channel: "discord",
+      linkedAgent: MAIN_AGENT_ID,
+      severalAccounts: true,
     },
     {
       id: "telegram-1",
@@ -78,6 +98,10 @@ export const connections: { connections: ApiConnection[] } = {
         watch: { state: "unsupported" },
       },
       connect: null,
+      setups: {},
+      channel: "telegram",
+      linkedAgent: MAIN_AGENT_ID,
+      severalAccounts: true,
     },
     {
       // The channel behind the People page's WhatsApp section: the address-book
@@ -97,6 +121,10 @@ export const connections: { connections: ApiConnection[] } = {
         watch: { state: "unsupported" },
       },
       connect: null,
+      setups: {},
+      channel: "whatsapp",
+      linkedAgent: null,
+      severalAccounts: false,
     },
     {
       id: "linkedin-1",
@@ -112,6 +140,10 @@ export const connections: { connections: ApiConnection[] } = {
         watch: { state: "unsupported" },
       },
       connect: null,
+      setups: {},
+      channel: "linkedin",
+      linkedAgent: null,
+      severalAccounts: false,
     },
   ],
 };

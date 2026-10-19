@@ -17,9 +17,9 @@ export interface DuplicateServiceConnectionGroup {
 }
 
 /**
- * The v1 connection model permits exactly one authority-bearing connection per
- * Service. IDs are included so an operator can resolve legacy duplicates
- * explicitly; the registry never selects, merges, or deletes one on its own.
+ * `ConnectionRegistry.connect` mints a Service's first Connection only. IDs are
+ * included so an operator can resolve the duplicate explicitly; the registry
+ * never selects, merges, or deletes one on its own.
  */
 export class DuplicateServiceConnectionsError extends Error {
   readonly duplicates: readonly DuplicateServiceConnectionGroup[];
@@ -29,23 +29,33 @@ export class DuplicateServiceConnectionsError extends Error {
       .map(({ service, connectionIds }) => `${service}: ${connectionIds.join(", ")}`)
       .join("; ");
     super(
-      `Duplicate Service connections found (${detail}). Rome supports exactly one connection per Service; explicitly remove the unwanted connection before creating another.`,
+      `Duplicate Service connections found (${detail}). connect mints only a Service's first connection; remove the existing one first, or add another account of a Service that offers several.`,
     );
     this.name = "DuplicateServiceConnectionsError";
     this.duplicates = duplicates;
   }
 }
 
-/** Typed persistence-boundary translation of a `connections.service` unique
- *  constraint violation. The registry turns this into the operator-facing
- *  duplicate error after reading safe connection metadata. */
-export class ServiceConnectionWriteConflict extends Error {
+/**
+ * `ConnectionRegistry.confer` refuses a conferral whose account another
+ * Connection of the service already holds, because two Connections of one bot
+ * run two transports that conflict. The message reads to the guardian on a
+ * failed setup, and the conferral writes nothing.
+ */
+export class AccountAlreadyConnectedError extends Error {
   readonly service: string;
+  readonly accountId: string;
+  /** The Connection that already holds the account. */
+  readonly connectionId: ConnectionId;
 
-  constructor(service: string, cause: unknown) {
-    super(`Service "${service}" already has a connection`, { cause });
-    this.name = "ServiceConnectionWriteConflict";
+  constructor(service: string, accountId: string, connectionId: ConnectionId) {
+    super(
+      "This bot is already connected as another account. Set up a different bot, or remove that account first.",
+    );
+    this.name = "AccountAlreadyConnectedError";
     this.service = service;
+    this.accountId = accountId;
+    this.connectionId = connectionId;
   }
 }
 

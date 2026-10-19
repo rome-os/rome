@@ -5,7 +5,6 @@ export interface ThemeContextValue {
   preference: ThemePreference;
   resolved: ResolvedTheme;
   setPreference: (next: ThemePreference) => void;
-  toggle: () => void;
   theme: ThemeName;
   setTheme: (next: ThemeName) => void;
   themes: { id: ThemeName; label: string }[];

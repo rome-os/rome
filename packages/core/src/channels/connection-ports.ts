@@ -1,8 +1,9 @@
 /**
  * The `send`, `inbound`, `messages` and `directory` ports of a channel a
  * Connection backs.
- * The channel is named by the service; the Connection that backs it is looked
- * up when a port is used, so a port outlives any one Connection epoch.
+ * A service's channels each have their own name, and the Connection that backs
+ * one is looked up by that name when a port is used, so a port outlives any
+ * one Connection epoch.
  * Contract: `Channel` (channel.ts), `ChannelInbound` (the apps SDK), `Messages`
  * (messages.ts).
  */
@@ -21,6 +22,7 @@ import type {
 import type { Connection, TalkFeatureName, Talker } from "../connections/types.js";
 import { historyWindowHours } from "../connections/integrations/talk-features.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
+import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
 import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
 import { ChannelNotConnected, type ChannelDirectory, type ChannelSend } from "./channel.js";
@@ -28,6 +30,10 @@ import { ConversationBuffers } from "./conversation-buffer.js";
 import { MAX_QUERY_LIMIT, queryLimit, type Messages } from "./messages.js";
 
 const log = createLogger("channel-ports");
+
+/** Talk Connections already reported as unlocking with no channel record, so
+ *  each is reported once, not once per port of its service. */
+const reportedUnrecorded = new Set<string>();
 
 export interface ConnectionPortsDeps {
   registry: Pick<
@@ -39,6 +45,29 @@ export interface ConnectionPortsDeps {
    *  is admitted. */
   admit?: Admission;
   admission?: OrderedAdmissionOptions;
+  /** Names the channel each Connection backs. A Connection it answers null
+   *  for backs no port. */
+  channelOf: ChannelOf;
+}
+
+/** The name of the channel a Connection backs, or null when it backs none.
+ *  A null matches no channel, so such a Connection backs no port. */
+export type ChannelOf = (connection: Pick<Connection, "id" | "service">) => string | null;
+
+/**
+ * The channel each Connection backs, as `records` holds it. A Connection of a
+ * service with a Talk that has no record backs no channel, rather than its
+ * service's first one: it has none while `registry.remove` evicts it after
+ * vacating its row, and taking the first channel then would merge it with the
+ * Connection that backs that one. A Connection of a service without a Talk
+ * backs no recorded channel, and answers its service's name.
+ */
+export function recordedChannelOf(
+  records: Pick<ChannelRecordsRepository, "idOf">,
+  talks: (service: string) => boolean,
+): ChannelOf {
+  return (connection) =>
+    records.idOf(connection.id) ?? (talks(connection.service) ? null : connection.service);
 }
 
 export interface ConnectionPorts {
@@ -49,25 +78,43 @@ export interface ConnectionPorts {
 }
 
 /**
- * The ports a service's Talk backs, or null when the service has no Talk.
+ * The ports a service's Talk backs for the channel named `channel`, or null
+ * when the service has no Talk. `channel` defaults to the service's own name,
+ * its first channel.
  *
- * Building the ports subscribes the inbound port to the service's talkers for
+ * Building the ports subscribes the inbound port to the channel's talkers for
  * the registry's lifetime, and admission runs once per message for each
- * subscription. So build one set per registry and service, as `channelList`
+ * subscription. So build one set per registry and channel, as `channelList`
  * does: a second set would run admission (pairing replies included) twice.
  */
 export function connectionPorts(
   deps: ConnectionPortsDeps,
   service: string,
+  channel: string = service,
 ): ConnectionPorts | null {
   const talker = deps.registry.getDescriptor(service)?.capabilities.talker;
   if (!talker) return null;
+  const backing: Backing = { deps, service, channel };
   return {
-    send: talker.sends === false ? null : connectionSend(deps, service),
-    inbound: talker.receives === false ? null : connectionInbound(deps, service),
-    messages: talker.history === true ? connectionMessages(deps, service) : null,
-    directory: connectionDirectory(deps, service),
+    send: talker.sends === false ? null : connectionSend(backing),
+    inbound: talker.receives === false ? null : connectionInbound(backing),
+    messages: talker.history === true ? connectionMessages(backing) : null,
+    directory: connectionDirectory(backing),
   };
+}
+
+/** One channel's ports: the service whose Talk backs them, and the channel's
+ *  name, which picks out the Connections behind it. */
+interface Backing {
+  deps: ConnectionPortsDeps;
+  service: string;
+  channel: string;
+}
+
+/** The Connections backing the channel now, in registry order. */
+function connectionsOf(backing: Backing): Connection[] {
+  const { deps, service, channel } = backing;
+  return deps.registry.find(service).filter((connection) => deps.channelOf(connection) === channel);
 }
 
 /**
@@ -75,12 +122,13 @@ export function connectionPorts(
  * whether it lists conversations, so the port is present for every channel a
  * Talk backs, and one whose Connection lists none answers empty.
  */
-function connectionDirectory(deps: ConnectionPortsDeps, service: string): ChannelDirectory {
+function connectionDirectory(backing: Backing): ChannelDirectory {
+  const { service } = backing;
   return {
     async listConversations({ connectionId, ...input }) {
-      const connections = deps.registry
-        .find(service)
-        .filter((connection) => !connectionId || connection.id === connectionId);
+      const connections = connectionsOf(backing).filter(
+        (connection) => !connectionId || connection.id === connectionId,
+      );
       const listed = await Promise.all(
         connections.map(async (connection) => {
           try {
@@ -135,8 +183,8 @@ function connectionDirectory(deps: ConnectionPortsDeps, service: string): Channe
  * A reused read answers what a fresh one would, older by at most that long,
  * and `fetch_channel_history` reads through it like any other caller.
  *
- * The port reads the channel's one Connection: a service holds at most one,
- * and a second presence on a platform is a second channel.
+ * The port reads the channel's one Connection. A service may hold several,
+ * and each backs a channel of its own.
  */
 export const LIVE_DEFAULT_WINDOW_MS = 24 * 3_600_000;
 
@@ -149,7 +197,8 @@ interface SharedRead {
   lines: Promise<ChannelMessage[]>;
 }
 
-function connectionMessages(deps: ConnectionPortsDeps, service: string): Messages {
+function connectionMessages(backing: Backing): Messages {
+  const { channel } = backing;
   const shared = new Map<string, SharedRead>();
 
   /** The read `key` names, shared while it is fresh. */
@@ -170,13 +219,13 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
 
   return {
     async query({ conversationId, since, limit }) {
-      const connection = connectionFor(deps, service);
-      if (!connection) throw new ChannelNotConnected(service);
+      const connection = connectionFor(backing);
+      if (!connection) throw new ChannelNotConnected(channel);
       const connectionId = connection.id;
       // A Connection whose talker is not built yet (a credential missing or
       // degraded) backs nothing, the same as no Connection at all.
       if (!connection.withTalker((talker) => talker.history !== undefined)) {
-        throw new ChannelNotConnected(service);
+        throw new ChannelNotConnected(channel);
       }
       const from = since ?? new Date(Date.now() - LIVE_DEFAULT_WINDOW_MS);
       // The Connection reads whole hours back, so the window it will read
@@ -191,7 +240,7 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
               since: from,
               limit: MAX_QUERY_LIMIT,
             }),
-          ) ?? Promise.reject(new ChannelNotConnected(service)),
+          ) ?? Promise.reject(new ChannelNotConnected(channel)),
       );
       // Reversed before the sort, so lines sharing a timestamp come newest
       // first too.
@@ -200,7 +249,7 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
         .reverse()
         .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
         .slice(0, queryLimit(limit))
-        .map(copyOf);
+        .map((message) => copyOf(message, channel));
     },
     byAccount: null,
   };
@@ -209,10 +258,12 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
 /** A shared read's message, copied for one caller, so a caller that edits what
  *  it was answered leaves the others' answers as read: every field, the
  *  timestamp, attachments, thread and reply included. `raw` alone stays
- *  shared: it is the provider's own, which no caller edits. */
-function copyOf(message: ChannelMessage): ChannelMessage {
+ *  shared: it is the provider's own, which no caller edits. A talker names
+ *  its service, so the copy names the channel it was read on. */
+function copyOf(message: ChannelMessage, channel: string): ChannelMessage {
   return {
     ...message,
+    channel,
     timestamp: new Date(message.timestamp.getTime()),
     attachments: message.attachments.map((attachment) => ({ ...attachment })),
     ...(message.thread ? { thread: { ...message.thread } } : {}),
@@ -220,9 +271,10 @@ function copyOf(message: ChannelMessage): ChannelMessage {
   };
 }
 
-/** The Connection that backs the channel now: the first of its service. */
-function connectionFor(deps: ConnectionPortsDeps, service: string): Connection | null {
-  return deps.registry.find(service)[0] ?? null;
+/** The Connection that backs the channel now. A channel is one presence, so
+ *  at most one Connection backs it. */
+function connectionFor(backing: Backing): Connection | null {
+  return connectionsOf(backing)[0] ?? null;
 }
 
 /** Sends on `connection`'s live talker. A Connection whose credentials are
@@ -253,21 +305,22 @@ async function callTalker<T>(
   return called;
 }
 
-function connectionSend(deps: ConnectionPortsDeps, service: string): ChannelSend {
+function connectionSend(backing: Backing): ChannelSend {
+  const { channel } = backing;
   // What `direct` answers while no Connection exists for the channel: the
   // lookup itself says so, the way `send` does, rather than passing for a
   // channel that cannot reach an account directly.
   const unbacked: ChannelDirectMessaging = {
-    conversationFor: () => Promise.reject(new ChannelNotConnected(service)),
+    conversationFor: () => Promise.reject(new ChannelNotConnected(channel)),
   };
   return {
     async send(conversationId, message) {
-      const connection = connectionFor(deps, service);
-      if (!connection) throw new ChannelNotConnected(service);
+      const connection = connectionFor(backing);
+      if (!connection) throw new ChannelNotConnected(channel);
       return sendThrough(connection, conversationId, message);
     },
     get direct() {
-      const connection = connectionFor(deps, service);
+      const connection = connectionFor(backing);
       if (!connection) return unbacked;
       if (!offers(connection, "directMessaging")) return null;
       const direct: ChannelDirectMessaging = {
@@ -279,7 +332,7 @@ function connectionSend(deps: ConnectionPortsDeps, service: string): ChannelSend
       return direct;
     },
     get activity() {
-      const connection = connectionFor(deps, service);
+      const connection = connectionFor(backing);
       if (!connection || !offers(connection, "activity")) return null;
       const activity: ChannelActivity = {
         begin: (input) => callTalker(connection, (talker) => talker.activity?.begin(input)),
@@ -294,7 +347,8 @@ function isAnswerable(message: ChannelMessage): boolean {
   return Boolean(message.text?.trim()) || message.attachments.length > 0;
 }
 
-function connectionInbound(deps: ConnectionPortsDeps, service: string): ChannelInbound {
+function connectionInbound(backing: Backing): ChannelInbound {
+  const { deps, channel } = backing;
   // One buffer set per subscription, so two subscriptions of one handler stay
   // two, and each subscription's conversations wait only on themselves (R4).
   const subscriptions = new Set<ConversationBuffers<InboundEvent>>();
@@ -315,10 +369,11 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): ChannelI
     (connectionId: string) =>
     async (message: ChannelMessage): Promise<void> => {
       if (!isAnswerable(message)) return;
-      // A talker delivers the channel's own record, named and inbound.
+      // A talker delivers the channel's own record, inbound, named after its
+      // service. The event names the channel it arrived on.
       const event: InboundEvent = {
         kind: "message",
-        message,
+        message: message.channel === channel ? message : { ...message, channel },
         ref: { connectionId, conversationId: message.conversationId },
       };
       // A Connection id is a UUID, so the first colon ends it.
@@ -332,7 +387,7 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): ChannelI
     attached.get(connection.id)?.();
     attached.delete(connection.id);
     // A removed Connection's subscription goes when its successor attaches.
-    const live = new Set(deps.registry.find(service).map((each) => each.id));
+    const live = new Set(connectionsOf(backing).map((each) => each.id));
     for (const [id, detach] of attached) {
       if (live.has(id)) continue;
       detach();
@@ -347,14 +402,25 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): ChannelI
 
   // Fires now for each Connection already unlocked, then at every unlock.
   deps.registry.onUnlocked("talk", (connection) => {
-    if (connection.service === service) attach(connection);
+    if (connection.service !== backing.service) return;
+    const named = deps.channelOf(connection);
+    if (named === channel) attach(connection);
+    // A record is claimed before a Talk Connection first unlocks, so a missing
+    // one is a wiring fault, and this Connection's messages go unheard.
+    if (named === null && !reportedUnrecorded.has(connection.id)) {
+      reportedUnrecorded.add(connection.id);
+      log.warn("channel_ports.unrecorded_connection", {
+        connectionId: connection.id,
+        service: connection.service,
+      });
+    }
   });
 
   return {
     subscribe(handler) {
       const subscription = new ConversationBuffers<InboundEvent>(handler, {
         log,
-        describe: (event) => ({ channel: service, messageId: event.message.messageId }),
+        describe: (event) => ({ channel, messageId: event.message.messageId }),
       });
       subscriptions.add(subscription);
       return () => {
@@ -363,7 +429,7 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): ChannelI
       };
     },
     get media() {
-      const connection = connectionFor(deps, service);
+      const connection = connectionFor(backing);
       if (!connection || !offers(connection, "inboundMedia")) return null;
       const media: ChannelInboundMedia = {
         materialize: (message) =>

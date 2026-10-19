@@ -1,17 +1,20 @@
 // @rstest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
+import { LiveEventsClientContext } from "@/hooks/use-live-events";
+import type { LiveEventsClient } from "@/lib/live-events";
+import {
+  acceptLatestSocket,
+  FakeWebSocket,
+  fakeSocketLiveEventsClient,
+} from "@/test/fake-websocket";
 import { RecentChats } from "./RecentChats";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -92,12 +95,19 @@ function mockSessions(sessions: MockSession[]) {
   return spy;
 }
 
-function renderRecentChats(initialEntry = "/chat", onSearch = () => {}) {
-  return render(
+function renderRecentChats(initialEntry = "/chat", onSearch = () => {}, live?: LiveEventsClient) {
+  const routed = (
     <MemoryRouter initialEntries={[initialEntry]}>
       <RecentChats onSearch={onSearch} />
       <LocationProbe />
-    </MemoryRouter>,
+    </MemoryRouter>
+  );
+  return render(
+    live ? (
+      <LiveEventsClientContext.Provider value={live}>{routed}</LiveEventsClientContext.Provider>
+    ) : (
+      routed
+    ),
   );
 }
 
@@ -111,6 +121,81 @@ function textIndex(container: HTMLElement, text: string): number {
 }
 
 describe("RecentChats", () => {
+  it("defaults to All chats and persists a scope toggle across remounts", async () => {
+    const fetchSpy = mockSessions([]);
+    const user = userEvent.setup();
+    const view = renderRecentChats();
+    const requestedScope = () =>
+      new URL(String(fetchSpy.mock.calls.at(-1)?.[0]), "http://localhost").searchParams.get(
+        "scope",
+      );
+    await waitFor(() => expect(requestedScope()).toBe("all"));
+    await user.click(screen.getByRole("button", { name: "List settings" }));
+    const all = screen.getByRole("menuitem", { name: "All chats" });
+    expect(all.querySelector("svg")).not.toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "My chats" }));
+    await waitFor(() => expect(requestedScope()).toBe("mine"));
+    expect(localStorage.getItem("rome-recent-chats-scope")).toBe("mine");
+    view.unmount();
+    const remounted = renderRecentChats();
+    await waitFor(() => expect(requestedScope()).toBe("mine"));
+    await user.click(screen.getByRole("button", { name: "List settings" }));
+    expect(screen.getByRole("menuitem", { name: "My chats" }).querySelector("svg")).not.toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "All chats" }));
+    await waitFor(() => expect(requestedScope()).toBe("all"));
+    expect(localStorage.getItem("rome-recent-chats-scope")).toBe("all");
+    remounted.unmount();
+  });
+
+  it.each([
+    ["My chats", 200],
+    ["My chats", 500],
+    ["Archived", 200],
+    ["Archived", 500],
+  ])("ignores a stale %s list response with status %s", async (selection, status) => {
+    let respond!: (response: Response) => void;
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            respond = resolve;
+          }),
+      )
+      .mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
+    const user = userEvent.setup();
+    renderRecentChats();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+
+    await user.click(screen.getByRole("button", { name: "List settings" }));
+    await user.click(screen.getByRole("menuitem", { name: selection }));
+    await screen.findByText("No chats yet");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      respond(
+        new Response(
+          JSON.stringify([
+            {
+              id: "stale",
+              name: "Stale chat",
+              createdAt: "2026-07-01T00:00:00.000Z",
+              activityAt: "2026-07-01T00:00:00.000Z",
+              lastSeenActivityAt: null,
+              unread: false,
+              projectName: "alpha",
+              projectPath: "alpha",
+            },
+          ]),
+          { status },
+        ),
+      );
+    });
+    expect(screen.queryByText("Stale chat")).toBeNull();
+    expect(screen.queryByText("Chats couldn't be loaded")).toBeNull();
+    expect(screen.getByText("No chats yet")).toBeTruthy();
+  });
+
   it("keeps search and list settings visible together", async () => {
     mockSessions([]);
     const onSearch = rs.fn();
@@ -119,9 +204,11 @@ describe("RecentChats", () => {
     renderRecentChats("/chat", onSearch);
 
     await screen.findByText("No chats yet");
-    const searchButton = screen.getByRole("button", { name: "Search apps and chats" });
+    const searchButton = screen.getByRole("button", { name: "Search pages, apps, and chats" });
     expect(searchButton).toBeTruthy();
-    expect(searchButton.getAttribute("title")).toMatch(/^Search apps and chats \((⌘K|Ctrl K)\)$/);
+    expect(searchButton.getAttribute("title")).toMatch(
+      /^Search pages, apps, and chats \((⌘K|Ctrl K)\)$/,
+    );
     expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
 
     await user.click(searchButton);
@@ -329,6 +416,65 @@ describe("RecentChats", () => {
       send(true);
       await act(async () => respond());
       expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+    });
+  });
+
+  describe("status over the live-events socket", () => {
+    const live = {
+      id: "live-chat",
+      name: "Live chat",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-09T10:00:00.000Z",
+      lastSeenActivityAt: "2026-07-09T10:00:00.000Z",
+      unread: false,
+      projectName: "alpha",
+      projectPath: "alpha",
+    };
+    const send = (socket: FakeWebSocket, running: boolean) =>
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: "chat.status",
+          event: "session_running",
+          data: { sessionId: "live-chat", running },
+        }),
+      );
+    const listCalls = (spy: { mock: { calls: unknown[][] } }) =>
+      spy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions")).length;
+
+    beforeEach(() => {
+      FakeWebSocket.instances = [];
+    });
+
+    it("spins on start, refetches on stop, and starts over from the list after a reconnect", async () => {
+      const fetchSpy = mockSessions([live]);
+      renderRecentChats("/chat", () => {}, fakeSocketLiveEventsClient());
+      await screen.findByText("Live chat");
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      expect(socket.sent).toEqual([{ type: "subscribe", topic: "chat.status" }]);
+
+      send(socket, true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      const beforeStop = listCalls(fetchSpy);
+      send(socket, false);
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(beforeStop + 1));
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
+
+      // A start seen before the drop is dropped too, since its stop may have
+      // been missed: the new socket's snapshot names the chats still running.
+      send(socket, true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      act(() => socket.close());
+      await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+      const beforeReconnect = listCalls(fetchSpy);
+      act(() => {
+        acceptLatestSocket();
+      });
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(beforeReconnect + 1));
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
     });
   });
 
@@ -630,7 +776,9 @@ describe("RecentChats", () => {
     await waitFor(() => expect(screen.getByText("Archived chat")).toBeTruthy());
     expect(screen.queryByText("Active chat")).toBeNull();
     expect(
-      spy.mock.calls.some(([url]) => String(url) === "/api/chat/sessions?status=archived"),
+      spy.mock.calls.some(
+        ([url]) => String(url) === "/api/chat/sessions?status=archived&scope=all",
+      ),
     ).toBe(true);
   });
 

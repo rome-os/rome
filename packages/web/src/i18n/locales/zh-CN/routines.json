@@ -230,7 +230,8 @@
     "active": "运行中",
     "running": "正在执行",
     "paused": "已暂停",
-    "failed": "失败"
+    "failed": "失败",
+    "failedAriaLabel": "{{name}}，上次运行失败"
   },
   "failedLine": "上次运行失败 · {{when}}",
   "footer": {

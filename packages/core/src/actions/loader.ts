@@ -4,15 +4,10 @@ import { parse as parseYaml } from "yaml";
 import type { ActionConfig } from "./types.js";
 import type { AppOwnedArtifactLoadFailure, ArtifactMetadata } from "../apps/types.js";
 import type { AppCatalog } from "../apps/catalog.js";
-import { listCoreArtifactsByKind } from "../apps/core-artifacts.js";
 import { toArtifactMetadata } from "../apps/artifact-ref-adapter.js";
 import { ActionConfigSchema } from "../apps/packaging/index.js";
-import {
-  claimLegacyArtifactNames,
-  formatArtifactId,
-  resolveArtifactId,
-  type ArtifactIdentityContext,
-} from "../apps/artifact-id.js";
+import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
+import { loadArtifactRecords } from "../apps/artifact-records.js";
 
 export class ActionLoader {
   private records = new Map<
@@ -21,20 +16,22 @@ export class ActionLoader {
   >();
   private registryLoadFailures: AppOwnedArtifactLoadFailure[] = [];
 
-  constructor(private readonly identity?: ArtifactIdentityContext) {}
+  constructor(private readonly identity: ArtifactIdentityContext) {}
 
   async loadFromCatalog(catalog: AppCatalog): Promise<void> {
-    const coreRefs = await listCoreArtifactsByKind("action");
-    const appRefs = catalog.listArtifacts("action");
-    const sources = [...coreRefs, ...appRefs].map((ref) => {
-      const metadata = toArtifactMetadata(ref);
-      return {
-        yamlPath: join(metadata.sourcePath, "action.yaml"),
-        directory: metadata.sourcePath,
-        metadata,
-      };
+    const { records, failures } = await loadArtifactRecords({
+      kind: "action",
+      sources: catalog.listArtifacts("action").map(toArtifactMetadata),
+      identity: this.identity,
+      read: (metadata) => this.readActionConfig(join(metadata.sourcePath, "action.yaml")),
     });
-    await this.loadRecords(sources);
+    this.records = new Map(
+      Array.from(records, ([id, { config, metadata }]) => [
+        id,
+        { config, metadata, directory: metadata.sourcePath },
+      ]),
+    );
+    this.registryLoadFailures = failures;
   }
 
   get(name: string): ActionConfig | undefined {
@@ -52,93 +49,7 @@ export class ActionLoader {
     return [...this.registryLoadFailures];
   }
 
-  private async loadRecords(
-    sources: Array<{ yamlPath: string; directory: string; metadata: ArtifactMetadata }>,
-  ): Promise<void> {
-    const nextRecords = new Map<
-      string,
-      { config: ActionConfig; metadata: ArtifactMetadata; directory: string }
-    >();
-    const registryLoadFailures: AppOwnedArtifactLoadFailure[] = [];
-
-    for (const source of sources) {
-      let config: ActionConfig;
-      try {
-        config = await this.readActionConfig(source.yamlPath);
-      } catch (err) {
-        if (source.metadata.ownerType !== "app") {
-          throw err;
-        }
-
-        registryLoadFailures.push({
-          kind: source.metadata.kind,
-          ownerId: source.metadata.ownerId,
-          publicName: source.metadata.publicName,
-          sourcePath: source.metadata.sourcePath,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        continue;
-      }
-
-      const artifactId = this.identity
-        ? formatArtifactId(source.metadata.ownerId, config.name)
-        : config.name;
-      if (
-        this.identity &&
-        (source.metadata.ownerType === "core" || source.metadata.formatVersion !== 2)
-      ) {
-        const claim = claimLegacyArtifactNames(
-          this.identity.legacyBindings,
-          "action",
-          [config.name, source.metadata.publicName, ...source.metadata.aliases],
-          artifactId as ReturnType<typeof formatArtifactId>,
-        );
-        if (claim.conflicts.length > 0) {
-          const error = `Legacy action name conflict: ${claim.conflicts
-            .map(
-              ({ legacyName, artifactId: owner }) =>
-                `${JSON.stringify(legacyName)} is bound to ${owner}`,
-            )
-            .join(", ")}`;
-          if (source.metadata.ownerType !== "app") throw new Error(error);
-          registryLoadFailures.push({
-            kind: source.metadata.kind,
-            ownerId: source.metadata.ownerId,
-            publicName: source.metadata.publicName,
-            sourcePath: source.metadata.sourcePath,
-            error,
-          });
-          continue;
-        }
-      }
-
-      if (nextRecords.has(artifactId)) {
-        if (source.metadata.ownerType !== "app") {
-          throw new Error(`Duplicate action name "${config.name}" found in ${source.yamlPath}`);
-        }
-
-        registryLoadFailures.push({
-          kind: source.metadata.kind,
-          ownerId: source.metadata.ownerId,
-          publicName: source.metadata.publicName,
-          sourcePath: source.metadata.sourcePath,
-          error: `Duplicate action name "${config.name}" found in ${source.yamlPath}`,
-        });
-        continue;
-      }
-      nextRecords.set(artifactId, {
-        config,
-        metadata: source.metadata,
-        directory: source.directory,
-      });
-    }
-
-    this.records = nextRecords;
-    this.registryLoadFailures = registryLoadFailures;
-  }
-
   private resolveName(name: string): string {
-    if (!this.identity) return name;
     try {
       return resolveArtifactId({
         kind: "action",

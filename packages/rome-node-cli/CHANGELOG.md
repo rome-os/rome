@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.1.4](https://github.com/rome-os/rome/compare/node-v0.1.3...node-v0.1.4) (2026-10-16)
+
+
+### Features
+
+* **node:** record daemon activity and show it in Settings → Devices ([#1032](https://github.com/rome-os/rome/issues/1032)) ([c3e6a8f](https://github.com/rome-os/rome/commit/c3e6a8f7f0c79de276fa43acfabb511b75dfc62c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/node-core bumped to 0.1.3
+
+## [0.1.3](https://github.com/rome-os/rome/compare/node-v0.1.1...node-v0.1.3) (2026-10-10)
+
+
+### Features
+
+* **node:** send raw bytes between devices and add rome-node cp ([#821](https://github.com/rome-os/rome/issues/821)) ([617a42a](https://github.com/rome-os/rome/commit/617a42abd95dab06e7600ae4e7638dcdb27c5a8c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/node-core bumped to 0.1.2
+
 ## [0.1.1](https://github.com/rome-os/rome/compare/node-v0.1.0...node-v0.1.1) (2026-09-25)
 
 

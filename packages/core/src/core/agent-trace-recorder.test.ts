@@ -11,14 +11,29 @@ import {
 } from "./agent-trace-recorder.js";
 
 describe("resolveRomeSessionId", () => {
-  it("resolves webchat, channel, and action runtime identities", () => {
+  it("resolves conversation, channel, and action runtime identities", () => {
     expect(
       resolveRomeSessionId({
         agentName: "main",
         agentSessionId: "runtime-webchat-session",
-        threadContext: { channel: "webchat", threadId: "durable-webchat-session" },
+        threadContext: {
+          channel: "webchat",
+          threadId: "durable-webchat-session",
+          romeSessionId: "durable-webchat-session",
+        },
       }),
     ).toBe("durable-webchat-session");
+    expect(
+      resolveRomeSessionId({
+        agentName: "main",
+        agentSessionId: "runtime-channel-session",
+        threadContext: {
+          channel: "telegram",
+          threadId: "thread-1",
+          romeSessionId: "conversation-1",
+        },
+      }),
+    ).toBe("conversation-1");
     expect(
       resolveRomeSessionId({
         agentName: "main",

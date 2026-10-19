@@ -53,7 +53,13 @@ export function CardHeader({ className, ...props }: ComponentProps<"div">) {
 }
 
 export function CardTitle({ className, ...props }: ComponentProps<"h3">) {
-  return <h3 data-slot="card-title" className={cn("text-section", className)} {...props} />;
+  return (
+    <h3
+      data-slot="card-title"
+      className={cn("text-section [text-wrap-style:balance]", className)}
+      {...props}
+    />
+  );
 }
 
 export function CardDescription({ className, ...props }: ComponentProps<"div">) {
@@ -62,7 +68,7 @@ export function CardDescription({ className, ...props }: ComponentProps<"div">) 
       data-slot="card-description"
       // UI, like the Dialog and EmptyState descriptions: a description sits at
       // the size of the controls it explains and leads by ink, not by size.
-      className={cn("text-ui text-muted-foreground", className)}
+      className={cn("text-ui [text-wrap-style:pretty] text-muted-foreground", className)}
       {...props}
     />
   );

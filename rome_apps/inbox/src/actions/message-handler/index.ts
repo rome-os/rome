@@ -1,4 +1,4 @@
-import { createAppLogger, getCurrentActionContext } from "@rome-os/app-runtime";
+import { createAppLogger, getCurrentActionContext, isCoreMainAgentId } from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -306,20 +306,31 @@ function requireConversationRepository(deps: MessageHandlerRuntimeDeps): Convers
   return repository;
 }
 
-async function resolveRequestedAgent(
+/**
+ * `requested` while it is loaded, or `fallback` when it is not. Main, in
+ * either spelling, is always loaded and resolves to `main`. A failed check
+ * honors `requested`.
+ */
+async function resolveAgent<F extends string | null>(
   deps: MessageHandlerRuntimeDeps,
-  requestedAgent: string,
-): Promise<string> {
-  if (requestedAgent === "main") return "main";
+  requested: string,
+  fallback: F,
+): Promise<string | F> {
+  if (isCoreMainAgentId(requested)) return "main";
   try {
-    return (await deps.agentRunner.hasAgent?.(requestedAgent)) === false ? "main" : requestedAgent;
+    if ((await deps.agentRunner.hasAgent?.(requested)) === false) {
+      // Core already warns, once per channel, for a linked agent that is not
+      // loaded, and falling back to main is routine after an app is removed.
+      log.debug("agent is not loaded", { agent: requested, fallback });
+      return fallback;
+    }
   } catch (err) {
     log.warn("hasAgent check failed; honoring requested agent", {
-      requestedAgent,
+      agent: requested,
       error: err instanceof Error ? err.message : String(err),
     });
-    return requestedAgent;
   }
+  return requested;
 }
 
 // ---------------------------------------------------------------------------
@@ -598,6 +609,19 @@ export function createMessageHandlerAction(
       try {
         log.info("message received", { channel, channelUserId, displayName });
 
+        const linkedAgent =
+          typeof args.linkedAgentName === "string" && args.linkedAgentName.trim()
+            ? args.linkedAgentName.trim()
+            : undefined;
+        // The host passes no agent it knows is not loaded, so a null here
+        // means the linked agent was unloaded since, and the account is silent.
+        const answeringAgent = linkedAgent
+          ? await resolveAgent(deps, linkedAgent, null)
+          : undefined;
+        if (answeringAgent === null) {
+          return { status: "ok", data: { action: "silent" } };
+        }
+
         // Only a link resolves a sender (docs/concepts/people.md#link). The
         // display name is whatever the sender typed, so an unlinked account
         // stays a stranger until the guardian links or pairs it, even when
@@ -629,7 +653,7 @@ export function createMessageHandlerAction(
           typeof args.routedAgentName === "string" && args.routedAgentName.trim()
             ? args.routedAgentName.trim()
             : "main";
-        const initialAgent = await resolveRequestedAgent(deps, requestedAgent);
+        const initialAgent = await resolveAgent(deps, requestedAgent, "main");
         const parentThreadId =
           typeof args.parentThreadId === "string" && args.parentThreadId
             ? args.parentThreadId
@@ -644,9 +668,32 @@ export function createMessageHandlerAction(
           projectName: selectedProjectName,
           projectPath: selectedProjectPath,
         });
-        // Root conversations retain their persisted binding. Native thread
-        // sessions are refreshed by the repository from their parent binding.
-        const targetAgent = conversation.agentName ?? "main";
+        // Root conversations retain their persisted override, and native
+        // thread sessions are refreshed from their parent's. A group's or
+        // channel's override wins over the account's linked agent, which
+        // answers private chats and the rest, and is never stored, so a relink
+        // takes effect on the next message.
+        const storedAgent =
+          conversation.agentName && !isCoreMainAgentId(conversation.agentName)
+            ? conversation.agentName
+            : undefined;
+        // The conversation row stores main as null, so only the hook's routing
+        // tells a group pinned to main apart from one with no choice.
+        const pinnedMain =
+          typeof args.routedAgentName === "string" &&
+          isCoreMainAgentId(args.routedAgentName.trim());
+        const override =
+          answeringAgent && threadType === "private"
+            ? undefined
+            : pinnedMain
+              ? "main"
+              : storedAgent;
+        // An override whose app was removed falls back to the linked agent.
+        const targetAgent = !override
+          ? (answeringAgent ?? "main")
+          : answeringAgent
+            ? await resolveAgent(deps, override, answeringAgent)
+            : override;
         const platformMessageId =
           typeof args.messageId === "string" && args.messageId
             ? args.messageId

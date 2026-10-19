@@ -7,6 +7,7 @@ type RecapThreshold = "short" | "medium" | "long";
 type RecapAudioSpeed = "slower" | "normal" | "faster" | "fastest";
 
 interface RecapSettings {
+  enabled: boolean;
   createAudio: boolean;
   threshold: RecapThreshold;
   audioSpeed: RecapAudioSpeed;
@@ -66,6 +67,11 @@ export default function RecapApp({ bootstrap }: { bootstrap: RomeAppBootstrap })
     }
   }
 
+  async function updateEnabled(enabled: boolean) {
+    if (!settings) return;
+    await updateSettings({ ...settings, enabled });
+  }
+
   async function updateCreateAudio(createAudio: boolean) {
     if (!settings) return;
     await updateSettings({ ...settings, createAudio });
@@ -85,6 +91,7 @@ export default function RecapApp({ bootstrap }: { bootstrap: RomeAppBootstrap })
     void loadSettings();
   }, []);
 
+  const recapsEnabled = settings?.enabled === true;
   const audioEnabled = settings?.createAudio === true;
   const selectedThreshold = settings?.threshold ?? "medium";
   const selectedAudioSpeed = settings?.audioSpeed ?? "faster";
@@ -129,97 +136,104 @@ export default function RecapApp({ bootstrap }: { bootstrap: RomeAppBootstrap })
         <div className="space-y-4">
           <section className={panelClass}>
             <div className="min-w-0">
-              <h2 className="mb-2 text-base font-semibold">Audio generation</h2>
+              <h2 className="mb-2 text-section font-semibold">Recaps</h2>
               <p className="max-w-[560px] leading-relaxed text-muted-foreground">
-                Text recaps are saved after completed WebChat turns. Audio files use Edge Text to
-                Speech when this control is enabled.
+                Save a recap after each substantial WebChat turn. Each recap runs an extra model
+                call.
               </p>
             </div>
 
-            <button
-              className="inline-flex min-w-[132px] shrink-0 items-center gap-2.5 rounded-8 border border-border bg-surface-muted px-2.5 py-2 font-bold text-surface-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-60 max-md:justify-between"
-              type="button"
-              role="switch"
-              aria-checked={audioEnabled}
+            <Switch
+              checked={recapsEnabled}
               disabled={!settings || saving}
-              onClick={() => void updateCreateAudio(!audioEnabled)}
-            >
-              <span
-                className={`relative inline-flex h-6 w-[42px] rounded-full transition-colors ${
-                  audioEnabled ? "bg-primary" : "bg-border-strong"
-                }`}
-              >
-                <span
-                  className={`absolute left-[3px] top-[3px] size-[18px] rounded-full bg-surface shadow transition-transform ${
-                    audioEnabled ? "translate-x-[18px]" : ""
-                  }`}
-                />
-              </span>
-              <span>{audioEnabled ? "Audio on" : "Audio off"}</span>
-            </button>
+              onLabel="Recaps on"
+              offLabel="Recaps off"
+              onToggle={() => void updateEnabled(!recapsEnabled)}
+            />
           </section>
 
-          {audioEnabled && (
-            <section className={panelClass}>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <Gauge size={18} aria-hidden="true" />
-                  <h2 className="text-base font-semibold">Audio speed</h2>
+          {recapsEnabled && (
+            <>
+              <section className={panelClass}>
+                <div className="min-w-0">
+                  <h2 className="mb-2 text-section font-semibold">Audio generation</h2>
+                  <p className="max-w-[560px] leading-relaxed text-muted-foreground">
+                    Also save each recap as audio, spoken with Edge Text to Speech.
+                  </p>
                 </div>
-                <p className="leading-relaxed text-muted-foreground">
-                  Set the speaking pace for newly generated recap audio.
-                </p>
-              </div>
 
-              <div
-                className="grid min-w-[260px] shrink-0 grid-cols-3 gap-1 rounded-8 border border-border bg-surface-muted p-1 max-md:w-full max-md:min-w-0"
-                role="group"
-                aria-label="Audio speed"
-              >
-                {audioSpeedOptions.map((audioSpeed) => (
-                  <button
-                    key={audioSpeed}
-                    type="button"
-                    className={segmentClass(audioSpeed === selectedAudioSpeed)}
-                    disabled={!settings || saving}
-                    onClick={() => void updateAudioSpeed(audioSpeed)}
-                  >
-                    {audioSpeedLabels[audioSpeed]}
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
-          <section className={panelClass}>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <Gauge size={18} aria-hidden="true" />
-                <h2 className="text-base font-semibold">Recap threshold</h2>
-              </div>
-              <p className="leading-relaxed text-muted-foreground">
-                Choose how substantial a completed WebChat turn should be before saving a recap.
-              </p>
-            </div>
-
-            <div
-              className="grid min-w-[260px] shrink-0 grid-cols-3 gap-1 rounded-8 border border-border bg-surface-muted p-1 max-md:w-full max-md:min-w-0"
-              role="group"
-              aria-label="Recap threshold"
-            >
-              {thresholdOptions.map((threshold) => (
-                <button
-                  key={threshold}
-                  type="button"
-                  className={segmentClass(threshold === selectedThreshold)}
+                <Switch
+                  checked={audioEnabled}
                   disabled={!settings || saving}
-                  onClick={() => void updateThreshold(threshold)}
+                  onLabel="Audio on"
+                  offLabel="Audio off"
+                  onToggle={() => void updateCreateAudio(!audioEnabled)}
+                />
+              </section>
+
+              {audioEnabled && (
+                <section className={panelClass}>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Gauge size={18} aria-hidden="true" />
+                      <h2 className="text-section font-semibold">Audio speed</h2>
+                    </div>
+                    <p className="leading-relaxed text-muted-foreground">
+                      Set the speaking pace for newly generated recap audio.
+                    </p>
+                  </div>
+
+                  <div
+                    className="grid min-w-[260px] shrink-0 grid-cols-3 gap-1 rounded-8 border border-border bg-surface-muted p-1 max-md:w-full max-md:min-w-0"
+                    role="group"
+                    aria-label="Audio speed"
+                  >
+                    {audioSpeedOptions.map((audioSpeed) => (
+                      <button
+                        key={audioSpeed}
+                        type="button"
+                        className={segmentClass(audioSpeed === selectedAudioSpeed)}
+                        disabled={!settings || saving}
+                        onClick={() => void updateAudioSpeed(audioSpeed)}
+                      >
+                        {audioSpeedLabels[audioSpeed]}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <section className={panelClass}>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Gauge size={18} aria-hidden="true" />
+                    <h2 className="text-section font-semibold">Recap threshold</h2>
+                  </div>
+                  <p className="leading-relaxed text-muted-foreground">
+                    Choose how substantial a completed WebChat turn should be before saving a recap.
+                  </p>
+                </div>
+
+                <div
+                  className="grid min-w-[260px] shrink-0 grid-cols-3 gap-1 rounded-8 border border-border bg-surface-muted p-1 max-md:w-full max-md:min-w-0"
+                  role="group"
+                  aria-label="Recap threshold"
                 >
-                  {threshold}
-                </button>
-              ))}
-            </div>
-          </section>
+                  {thresholdOptions.map((threshold) => (
+                    <button
+                      key={threshold}
+                      type="button"
+                      className={segmentClass(threshold === selectedThreshold)}
+                      disabled={!settings || saving}
+                      onClick={() => void updateThreshold(threshold)}
+                    >
+                      {threshold}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </>
+          )}
         </div>
 
         <section className="mt-[18px] grid grid-cols-3 gap-px overflow-hidden rounded-12 border border-border bg-border max-md:grid-cols-1">
@@ -242,5 +256,43 @@ export default function RecapApp({ bootstrap }: { bootstrap: RomeAppBootstrap })
         )}
       </div>
     </main>
+  );
+}
+
+function Switch({
+  checked,
+  disabled,
+  onLabel,
+  offLabel,
+  onToggle,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onLabel: string;
+  offLabel: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      className="inline-flex min-w-[132px] shrink-0 items-center gap-2.5 rounded-8 border border-border bg-surface-muted px-2.5 py-2 font-bold text-surface-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-60 max-md:justify-between"
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onToggle}
+    >
+      <span
+        className={`relative inline-flex h-6 w-[42px] rounded-full transition-colors ${
+          checked ? "bg-primary" : "bg-border-strong"
+        }`}
+      >
+        <span
+          className={`absolute left-[3px] top-[3px] size-[18px] rounded-full bg-surface shadow transition-transform ${
+            checked ? "translate-x-[18px]" : ""
+          }`}
+        />
+      </span>
+      <span>{checked ? onLabel : offLabel}</span>
+    </button>
   );
 }

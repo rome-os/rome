@@ -1,9 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import {
+  createTestDb,
+  type TestDb,
+  identityServiceOf,
+  recordedServiceOf,
+} from "../../test/helpers.js";
 import { AccountHeldError, PersonMappingRepository } from "./person-mapping.js";
 import { eq } from "drizzle-orm";
 import { persons, channelMappings } from "../schema.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
+import { ChannelRecordsRepository } from "./channel-records.js";
 
 describe("PersonMappingRepository", () => {
   let testDb: TestDb;
@@ -11,7 +17,7 @@ describe("PersonMappingRepository", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new PersonMappingRepository(testDb.db);
+    repo = new PersonMappingRepository(testDb.db, identityServiceOf);
   });
 
   afterEach(() => {
@@ -123,6 +129,54 @@ describe("PersonMappingRepository", () => {
     // Without the transaction the person row would survive, unreachable: no
     // inbound message resolves to it and no API can repair or delete it.
     expect(await repo.findById("erin")).toBeNull();
+  });
+
+  it("findByChannelUser() reads a later channel's sender from its service's links", async () => {
+    const records = new ChannelRecordsRepository(testDb.db);
+    repo = new PersonMappingRepository(testDb.db, recordedServiceOf(testDb.db));
+    const now = new Date();
+    records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
+    const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).id;
+    const personId = await repo.create({
+      displayName: "Erin",
+      bondLevel: "guardian",
+      channelMappings: [{ channel: "telegram", channelUserId: "tg-erin" }],
+    });
+
+    const found = await repo.findByChannelUser(second, "tg-erin");
+    expect(found?.id).toBe(personId);
+  });
+
+  it("writes a later channel's links under its service", async () => {
+    const records = new ChannelRecordsRepository(testDb.db);
+    repo = new PersonMappingRepository(testDb.db, recordedServiceOf(testDb.db));
+    const now = new Date();
+    records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
+    const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).id;
+    const personId = await repo.create({ displayName: "Erin", bondLevel: "inner-circle" });
+
+    await repo.addChannelMapping(personId, second, "tg-erin");
+    expect((await repo.findByChannelUser("telegram", "tg-erin"))?.id).toBe(personId);
+
+    await repo.deleteChannelMapping(second, "tg-erin");
+    expect(await repo.findByChannelUser("telegram", "tg-erin")).toBeNull();
+
+    await expect(
+      repo.linkAccount({ personId, channel: second, channelUserId: "tg-erin" }),
+    ).resolves.toEqual({ linked: true });
+    expect((await repo.findById(personId))?.channelMappings).toEqual([
+      expect.objectContaining({ channel: "telegram", channelUserId: "tg-erin" }),
+    ]);
+
+    await expect(repo.unlinkAccount(personId, second, "tg-erin")).resolves.toBe(true);
+    expect(await repo.findByChannelUser("telegram", "tg-erin")).toBeNull();
+
+    const created = await repo.create({
+      displayName: "Finn",
+      bondLevel: "inner-circle",
+      channelMappings: [{ channel: second, channelUserId: "tg-finn" }],
+    });
+    expect((await repo.findByChannelUser(second, "tg-finn"))?.id).toBe(created);
   });
 
   it("findByChannelUser() returns person for channel+userId", async () => {

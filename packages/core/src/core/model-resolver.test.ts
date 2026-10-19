@@ -1,6 +1,10 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ModelProvider } from "./agent-runner.js";
-import type { AIToolStateValue } from "./ai-tool-state.js";
+import {
+  createAIToolState,
+  type AIToolStateProbes,
+  type AIToolStateValue,
+} from "./ai-tool-state.js";
 import {
   createModelResolver,
   ENABLE_FABLE_SETTING_KEY,
@@ -185,12 +189,43 @@ describe("ModelResolver", () => {
         romeCreditsPayer: {
           isUsingRomeCredits: () => true,
           servedModels: () => served,
-          servedModelsSettled: () => settled,
+          settled: () => settled,
         },
       });
       const resolution = r.getModelProvider({ tier: "large" });
       finish();
       await expect(resolution).resolves.toMatchObject({ model: "gpt-5.6-terra" });
+    });
+
+    it("waits for the first credits read to decide whether credits pay", async () => {
+      let paying = false;
+      let finish: () => void = () => {};
+      const settled = new Promise<void>((resolve) => {
+        finish = () => {
+          paying = true;
+          resolve();
+        };
+      });
+      const value: AIToolStateValue = {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: false, quotaExhausted: false },
+      };
+      const r = createModelResolver({
+        aiToolState: { get: () => value, refresh: async () => value },
+        providers: [claude, codex],
+        romeCreditsPayer: {
+          isUsingRomeCredits: () => paying,
+          servedModels: () => (paying ? ["gpt-5.6-terra"] : null),
+          settled: () => settled,
+        },
+      });
+      const resolution = r.getModelProvider({ tier: "large" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      finish();
+      await expect(resolution).resolves.toMatchObject({
+        modelProvider: codex,
+        model: "gpt-5.6-terra",
+      });
     });
 
     it("does not wait for the served list when Claude serves the turn", async () => {
@@ -204,7 +239,7 @@ describe("ModelResolver", () => {
         romeCreditsPayer: {
           isUsingRomeCredits: () => true,
           servedModels: () => null,
-          servedModelsSettled: () => new Promise<void>(() => {}),
+          settled: () => new Promise<void>(() => {}),
         },
       });
       await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
@@ -733,6 +768,58 @@ describe("ModelResolver", () => {
       provider: "anthropic",
       reason: "quota_exhausted",
     });
+  });
+
+  it("serves an exact Claude request once usage-derived exhaustion resets, even while usage probes fail", async () => {
+    const now = Date.parse("2026-10-11T12:00:00.000Z");
+    const resetsAt = new Date(now + 60 * 60 * 1000).toISOString();
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    rs.setSystemTime(now);
+    try {
+      const claudeUsage = rs.fn<AIToolStateProbes["claudeUsage"]>(async () => ({
+        checkedAt: new Date().toISOString(),
+        source: "test",
+        error: "Claude usage request failed with HTTP 429",
+      }));
+      claudeUsage.mockResolvedValueOnce({
+        checkedAt: new Date(now).toISOString(),
+        source: "test",
+        fiveHour: { usedPercent: 100, resetsAt },
+      });
+      const aiToolState = createAIToolState({
+        probes: {
+          codexStatus: async () => ({ loggedIn: false }),
+          codexUsage: async () => null,
+          claudeStatus: async () => ({ loggedIn: true, authMethod: "oauth" }),
+          claudeUsage,
+        },
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+      await aiToolState.refresh("anthropic");
+      let failureRefresh: Promise<AIToolStateValue> | undefined;
+      const r = createModelResolver({
+        providers: [claude, codex],
+        aiToolState: {
+          get: aiToolState.get,
+          refresh: (provider) => (failureRefresh = aiToolState.refresh(provider)),
+        },
+      });
+      const request = { exact: { providerId: "anthropic" as const, model: "claude-sonnet-5-5" } };
+
+      await expect(r.getModelProvider(request)).rejects.toMatchObject({
+        provider: "anthropic",
+        reason: "quota_exhausted",
+      });
+      await failureRefresh;
+      expect(claudeUsage).toHaveBeenCalledTimes(2);
+
+      rs.setSystemTime(Date.parse(resetsAt));
+      await expect(r.getModelProvider(request)).resolves.toMatchObject({ modelProvider: claude });
+      expect(claudeUsage).toHaveBeenCalledTimes(2);
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("rejects ambiguous exact-and-tier requests at the type level", () => {

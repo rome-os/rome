@@ -8,22 +8,17 @@ export function TraceTrigger({
   turnId,
   summary,
   onOpen,
-  compact = false,
 }: {
   messageId: string;
   sessionId: string;
   turnId: string | null;
   summary: TraceSummary;
   onOpen: (target: TraceDrawerTarget) => void;
-  compact?: boolean;
 }) {
-  const button = (
+  return (
     <CollapsedTraceButton
       summary={summary}
-      compact={compact}
       onClick={() => onOpen({ kind: "stored", messageId, sessionId, turnId, summary })}
     />
   );
-  if (compact) return button;
-  return <div className="mb-2 w-full md:max-w-[85%]">{button}</div>;
 }

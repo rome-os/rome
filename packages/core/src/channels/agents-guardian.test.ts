@@ -7,7 +7,7 @@ import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { persons } from "../db/schema.js";
 import type { AgentMessageEnvelope } from "../lib/rome-cloud-agents.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb, identityServiceOf } from "../test/helpers.js";
 import { AGENTS_GUARDIAN_LINKED_KEY, createAgentsGuardianLink } from "./agents-guardian.js";
 
 /** A message from an agent, by default one of this Rome's own dots. */
@@ -39,7 +39,7 @@ describe("linking same-account agents to the guardian", () => {
 
   beforeEach(async () => {
     testDb = createTestDb();
-    people = new PersonMappingRepository(testDb.db);
+    people = new PersonMappingRepository(testDb.db, identityServiceOf);
     settings = new SettingsRepository(testDb.db);
     await ensureSentinelPersons(people);
     testDb.db

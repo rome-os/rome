@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { getCoreAgentsRoot, getSeedAppsRoot } from "./authoring.js";
+import { getRepoAppsDir } from "../paths.js";
+import { getCoreAgentsRoot } from "./authoring.js";
 
 /**
  * Core apps that must be present even when no current core agent references
@@ -167,7 +168,7 @@ export async function deriveCoreRequiredApps(
   options: DeriveCoreRequiredAppsOptions,
 ): Promise<readonly string[]> {
   const coreAgentsRoot = options.coreAgentsRoot ?? getCoreAgentsRoot(options.projectRoot);
-  const seedAppsRoot = options.seedAppsRoot ?? getSeedAppsRoot(options.projectRoot);
+  const seedAppsRoot = options.seedAppsRoot ?? getRepoAppsDir(options.projectRoot);
 
   const [subagentRefs, romeAppAgents] = await Promise.all([
     readCoreAgentSubagentRefs(coreAgentsRoot),

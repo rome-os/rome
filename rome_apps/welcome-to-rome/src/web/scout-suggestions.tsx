@@ -171,11 +171,15 @@ function ScoutSuggestions({ ctx }: { ctx: AppComponentContext }) {
                   onClick={() => void add(scout)}
                 >
                   {state.kind === "adding" ? (
-                    <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                    <Loader2
+                      data-icon="inline-start"
+                      className="size-3.5 animate-spin"
+                      aria-hidden
+                    />
                   ) : isAdded ? (
-                    <Check className="size-3.5" aria-hidden />
+                    <Check data-icon="inline-start" className="size-3.5" aria-hidden />
                   ) : (
-                    <Plus className="size-3.5" aria-hidden />
+                    <Plus data-icon="inline-start" className="size-3.5" aria-hidden />
                   )}
                   {state.kind === "adding"
                     ? copy.scouts.adding
@@ -207,12 +211,12 @@ function ScoutSuggestions({ ctx }: { ctx: AppComponentContext }) {
         >
           {addedTitles.length > 0 ? (
             <>
-              <Check className="size-3.5" aria-hidden />
+              <Check data-icon="inline-start" className="size-3.5" aria-hidden />
               {copy.scouts.continue}
             </>
           ) : (
             <>
-              <SkipForward className="size-3.5" aria-hidden />
+              <SkipForward data-icon="inline-start" className="size-3.5" aria-hidden />
               {copy.scouts.skip}
             </>
           )}

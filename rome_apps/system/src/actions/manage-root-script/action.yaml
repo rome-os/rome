@@ -11,3 +11,4 @@ speed: fast
 reliability: high
 sideEffects: write
 cancellable: false
+visibility: explicit
