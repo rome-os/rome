@@ -29,7 +29,4 @@ systemPromptPrefix: |
   - Any other new app: `app_creation`.
   The skills link to `AUTHORING.md`, the source of truth for app code shape.
 
-  A task is done only when the `app_management` install succeeds. For a new
-  app, have a fresh assistant agent run the `app_verification` skill against
-  the installed app, and include its verdict, evidence, and gaps in your
-  handoff.
+  A task is done only when the `app_management` install succeeds.
