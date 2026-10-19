@@ -76,29 +76,9 @@ describe("ReplyAssembler", () => {
     assembler.apply({ type: "turn_start", turnId: "t2", sessionId: "s", userPrompt: "" });
     assembler.apply({ type: "text_delta", content: "Next" });
 
-    expect(assembler.blocks.map((block) => [block.text, block.complete, block.revision])).toEqual([
-      ["Cut off", true, 0],
-      ["Next", false, 0],
+    expect(assembler.blocks.map((block) => [block.text, block.complete])).toEqual([
+      ["Cut off", true],
+      ["Next", false],
     ]);
-  });
-
-  it("counts each time a block's text is replaced, and not each time it grows", () => {
-    const assembler = new ReplyAssembler();
-    assembler.apply({ type: "text_delta", content: "Hel", blockId: "a" });
-    assembler.apply({ type: "text_delta", content: "lo", blockId: "a" });
-    expect(assembler.blocks[0]!.revision).toBe(0);
-    assembler.apply(text("Hello", "a"));
-    expect(assembler.blocks[0]!.revision).toBe(1);
-  });
-
-  it("gives a block's text from any offset, across the deltas it grew by and after it is replaced", () => {
-    const assembler = new ReplyAssembler();
-    for (const piece of ["Hel", "lo ", "", "wor", "ld"])
-      assembler.apply({ type: "text_delta", content: piece, blockId: "a" });
-    const [block] = assembler.blocks;
-    for (let start = 0; start <= 12; start++)
-      expect(block!.from(start)).toBe("Hello world".slice(start));
-    assembler.apply(text("Goodbye", "a"));
-    expect(block!.from(4)).toBe("bye");
   });
 });

@@ -1,45 +1,11 @@
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 
 /** One piece of reply text the agent produced: a commentary, or the answer. */
-export class TextBlock {
-  /** The text so far. Reading the characters of a text that grew by deltas
-   *  copies it whole, so a reader that runs on every delta uses `from`. */
-  text = "";
+export interface TextBlock {
+  text: string;
   /** The agent finished the block, or a new turn began after it, so its text
    *  will not change again. */
-  complete = false;
-  /** How many times the block's text was replaced rather than grown. Text
-   *  that only grows keeps every earlier offset, and a replacement does not. */
-  revision = 0;
-  /** The pieces the text was built from, and the offset where each ends. */
-  private pieces: string[] = [];
-  private ends: number[] = [];
-
-  /** The text from `start` on, at the cost of that much of it. */
-  from(start: number): string {
-    let first = this.pieces.length;
-    while (first > 0 && this.ends[first - 1]! > start) first -= 1;
-    const offset = first > 0 ? this.ends[first - 1]! : 0;
-    return this.pieces
-      .slice(first)
-      .join("")
-      .slice(start - offset);
-  }
-
-  grow(content: string): void {
-    this.text += content;
-    this.pieces.push(content);
-    this.ends.push(this.text.length);
-  }
-
-  /** Replaces the text with the block's complete text. */
-  finish(content: string): void {
-    this.text = content;
-    this.pieces = [content];
-    this.ends = [content.length];
-    this.complete = true;
-    this.revision += 1;
-  }
+  complete: boolean;
 }
 
 /**
@@ -81,12 +47,13 @@ export class ReplyAssembler {
     }
     if (event.type === "text_delta") {
       const block = this.blockFor(event.blockId);
-      if (!block.complete) block.grow(event.content);
+      if (!block.complete) block.text += event.content;
       return;
     }
     if (event.type === "text") {
       const block = this.blockFor(event.blockId);
-      block.finish(event.content);
+      block.text = event.content;
+      block.complete = true;
       if (event.turnPhase === "final") this.finalSeen = true;
       if (block === this.open) this.open = undefined;
       return;
@@ -99,16 +66,14 @@ export class ReplyAssembler {
       // which may not be what streamed. Which of the two is authoritative is
       // decided where the engine is wired into runs.
       if (!answer || this.finalSeen || this.blocks.some((block) => block.text === answer)) return;
-      const block = new TextBlock();
-      block.finish(answer);
-      this.blocks.push(block);
+      this.blocks.push({ text: answer, complete: true });
     }
   }
 
   private blockFor(id: string | undefined): TextBlock {
     const known = id === undefined ? this.open : this.byId.get(id);
     if (known) return known;
-    const block = new TextBlock();
+    const block: TextBlock = { text: "", complete: false };
     this.blocks.push(block);
     if (id === undefined) this.open = block;
     else this.byId.set(id, block);
