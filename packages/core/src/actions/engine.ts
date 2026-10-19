@@ -127,16 +127,18 @@ const QUEUE_MEMORY_RECHECK_MS = 5_000;
 /** A reading that hovers at the line crosses it on many rechecks. The gate logs
  * a crossing at most this often, so a long hold costs two lines, not hundreds. */
 const MEMORY_LOG_INTERVAL_MS = 60_000;
-/** First-party coordination actions that main runs in-process instead of in a
- * worker. Each is a short write to a main-owned service that starts no agent
- * and calls no action, so a worker added a fork and an IPC hop and made a
- * 50 ms call compete with hour-long jobs for the capped budget (#830). The
- * list grows only with actions that keep both properties. */
+/** Coordination actions that main runs in-process instead of in a worker,
+ * by canonical id so no other app's action of the same local name joins by
+ * accident. Each is a short write to a main-owned service, so a worker added
+ * a fork and an IPC hop and made a 50 ms call compete with hour-long jobs for
+ * the capped budget (#830). An action joins the list only when it starts no
+ * agent, calls and dispatches no action, and leaves behind no timer, listener
+ * or client that would later call one from inside its action context. */
 const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
-  "send_message",
-  "send_user_message",
-  "create_routine",
-  "send_feedback",
+  "system:send_message",
+  "system:send_user_message",
+  "system:create_routine",
+  "system:send_feedback",
 ]);
 
 export interface ActionRunContext {
@@ -531,6 +533,12 @@ export class ActionEngine {
     const action = this.registry.get(name);
     if (!action) {
       throw new ActionNotFoundError(name);
+    }
+    const coordinationRoot = replayContext.getStore();
+    if (coordinationRoot?.coordinationRoot) {
+      throw new Error(
+        `Action "${coordinationRoot.rootActionName}" runs in the main process as a coordination action and may not dispatch other actions (it dispatched "${action.config.name}")`,
+      );
     }
     const resolvedName = action.config.name;
     const executionId = uuid();
@@ -1770,7 +1778,9 @@ export class ActionEngine {
   private resolveExecutionMode(action: Action, isRoot: boolean): "in_process" | "subprocess" {
     if (isRoot) {
       if (this.processRole !== "main") return "in_process";
-      return this.runsRootInMain(action) ? "in_process" : "subprocess";
+      // Decided once, when the root's replay store was built, so the nested-
+      // call guard and the placement can never disagree.
+      return replayContext.getStore()?.coordinationRoot ? "in_process" : "subprocess";
     }
     return action.config.cancellable ? "subprocess" : "in_process";
   }
@@ -1781,7 +1791,7 @@ export class ActionEngine {
    * worker, as before. */
   private runsRootInMain(action: Action): boolean {
     if (action.config.cancellable) return false;
-    if (!COORDINATION_ACTIONS.has(artifactLocalName(action.config.name))) return false;
+    if (!COORDINATION_ACTIONS.has(action.config.name)) return false;
     if (!this.isFirstPartyAction) return false;
     try {
       return this.isFirstPartyAction(action.config.name);

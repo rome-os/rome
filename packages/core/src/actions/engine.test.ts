@@ -477,6 +477,19 @@ describe("ActionEngine", () => {
         expect(actionWorkerFork).toHaveBeenCalledTimes(1);
       });
 
+      it("forks a worker for the same local name on another first-party app", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [buildAction("coding:send_message", { type: "system", execute: inMain })],
+          () => true,
+        );
+
+        await expect(engine.run("coding:send_message", {})).resolves.toEqual({
+          status: "ok",
+          data: "coding:send_message",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+      });
+
       it("forks a worker for an allowlisted name owned by a non-first-party app", async () => {
         const { engine, actionWorkerFork } = engineWith(
           [buildAction("store-app:send_message", { type: "system", execute: inMain })],
@@ -535,6 +548,27 @@ describe("ActionEngine", () => {
 
         await expect(engine.run("system:send_feedback", {})).rejects.toThrow(
           /may not call other actions/,
+        );
+        expect(actionWorkerFork).not.toHaveBeenCalled();
+      });
+
+      it("refuses a detached dispatch from a coordination root", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [
+            buildAction("other"),
+            buildAction("system:send_message", {
+              type: "system",
+              execute: async () => {
+                await engine.dispatch("other", {});
+                return { status: "ok", data: "dispatched" };
+              },
+            }),
+          ],
+          (name) => name === "system:send_message",
+        );
+
+        await expect(engine.run("system:send_message", {})).rejects.toThrow(
+          /may not dispatch other actions/,
         );
         expect(actionWorkerFork).not.toHaveBeenCalled();
       });
