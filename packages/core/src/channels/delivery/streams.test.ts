@@ -138,6 +138,45 @@ describe("ReplyStreams", () => {
     );
   });
 
+  it("shows the answer WebChat shows, for a structured result and for a turn that ends mid-block", async () => {
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    const conversations = {
+      ensureChannelConversation: rs.fn(async () => ({ id: "conversation-1" })),
+      recordOutboundMessage,
+    } as unknown as ConversationRepository;
+    const streams = new ReplyStreams({
+      streaming: async () => true,
+      replies,
+      clock: systemClock,
+      conversations,
+    });
+    const shown = () =>
+      recordOutboundMessage.mock.calls.map(
+        (call) =>
+          (
+            JSON.parse((call as unknown as [{ content: string }])[0].content) as [
+              { content: string },
+            ]
+          )[0].content,
+      );
+
+    // An agent with an output schema streams no text. Its answer is the
+    // result's JSON.
+    const structured = (await streams.open(target))!;
+    structured.accept({ type: "result", content: '{"ok":true}' });
+    await structured.settle(false);
+
+    // A turn can end before its block's text event. The text that streamed is
+    // the answer, and the result repeats it.
+    const cut = (await streams.open(target))!;
+    cut.accept({ type: "text_delta", content: "one " });
+    cut.accept({ type: "text_delta", content: "two" });
+    cut.accept({ type: "result", content: "one two" });
+    await cut.settle(false);
+
+    expect(shown()).toEqual(['{"ok":true}', "one two"]);
+  });
+
   it("records nothing when no message was written, so a failed stream leaves no history", async () => {
     const recordOutboundMessage = rs.fn(async () => undefined);
     const conversations = {
