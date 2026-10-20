@@ -292,11 +292,14 @@ export function buildConnectionCards(
   // `session` slot of its brand's card. The brand card may be absent — a
   // service can be registered without the bot half ever being connected — so
   // the fold creates it rather than dropping the account. The fold lands on
-  // the brand's first account, whose route is the brand itself.
+  // the brand's first account: the one whose route is the brand itself, or
+  // else the first listed, since a bot that is not the brand's first
+  // connected one has a route of its own.
   for (const [service, connection] of folded) {
     const brand = FOLDED_ACCOUNT_SERVICES[service]!;
     const sessionSlots = toSlots(connection, "session");
-    const card = cards.get(brand);
+    const card =
+      cards.get(brand) ?? [...cards.values()].find((candidate) => candidate.service === brand);
     if (card) {
       card.slots.push(...sessionSlots);
       card.degradation ??= runtimeDegradation(connection);
