@@ -57,9 +57,11 @@
       "add": "Add another account",
       "addedNotShown": "Account connected. Find it in the Connections list.",
       "newAccount": "New account",
-      "agent": "Agent",
       "noAgent": "None. This account stays silent.",
-      "changeInEnvoys": "Change in Envoys"
+      "changeInEnvoys": "Change in Envoys",
+      "agentAnswers": "Answers messages on this account",
+      "noAgentTitle": "No agent",
+      "agentNone": "This account stays silent"
     },
     "headings": {
       "connected": "This connection lets your agent",

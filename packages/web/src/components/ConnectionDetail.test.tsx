@@ -435,7 +435,7 @@ describe("ConnectionDetailBody — accounts", () => {
 
     expect(screen.getByText("sales:agent")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
-    expect(screen.getByRole("link", { name: "Change in Envoys" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
       `/envoys/${encodeURIComponent("sales:agent")}/settings`,
     );
   });
@@ -444,7 +444,7 @@ describe("ConnectionDetailBody — accounts", () => {
     renderAccountBody(cardFor([feishu({ agent: "main" })], "feishu"));
 
     expect(screen.getByText("main")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Change in Envoys" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
       `/envoys/${encodeURIComponent("core:main")}/settings`,
     );
   });
@@ -452,8 +452,8 @@ describe("ConnectionDetailBody — accounts", () => {
   it("sends an account with no agent to the Envoys list", () => {
     renderAccountBody(cardFor([feishu()], "feishu"));
 
-    expect(screen.getByText("None. This account stays silent.")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Change in Envoys" }).getAttribute("href")).toBe(
+    expect(screen.getByText("No agent")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
       "/envoys",
     );
   });
@@ -461,7 +461,7 @@ describe("ConnectionDetailBody — accounts", () => {
   it("hides the agent until the server reports links", () => {
     const { agent: _omitted, ...older } = feishu();
     renderAccountBody(cardFor([older], "feishu"), { onOpenAccount: rs.fn() });
-    expect(screen.queryByRole("link", { name: "Change in Envoys" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Change in Envoys/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Add another account" })).toBeTruthy();
   });
 
@@ -563,7 +563,7 @@ describe("ConnectionDetailBody — accounts", () => {
     renderAccountBody(cardFor([feishu({ grants: { app: "unauthorized" } })], "feishu"), {
       onOpenAccount: rs.fn(),
     });
-    expect(screen.queryByRole("link", { name: "Change in Envoys" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Change in Envoys/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add another account" })).toBeNull();
   });
 

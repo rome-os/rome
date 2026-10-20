@@ -2,9 +2,16 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { LINKABLE_SERVICES, agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
 import { useTranslation } from "react-i18next";
-import { Plus } from "lucide-react";
+import { Bot, ChevronRight, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  List,
+  ListRow,
+  ListRowContent,
+  ListRowDescription,
+  ListRowTitle,
+} from "@/components/ui/list-row";
 import { CHANNEL_CONFIGS, ChannelConnectCard } from "@/components/channels/channel-connect-card";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 
@@ -43,19 +50,43 @@ export function AccountControls({
     adding || (card.severalAccounts && connected && CHANNEL_CONFIGS[card.service] !== undefined);
   if (!showLink && !(showAdd && onOpenAccount)) return null;
 
+  const canAdd = showAdd && onOpenAccount !== undefined && addable(card);
+  const showRows = showLink || (canAdd && !adding);
+
   return (
     <div className="space-y-4">
-      {showLink && <AccountAgentField card={card} />}
-      {showAdd && onOpenAccount && (
+      {showRows && (
+        <List className="overflow-hidden rounded-12 border border-border-subtle">
+          {showLink && <AccountAgentRow card={card} />}
+          {canAdd && !adding && <AddAccountRow onAdd={() => setAdding(true)} />}
+        </List>
+      )}
+      {canAdd && adding && onOpenAccount && (
         <AddAccount
           card={card}
-          adding={adding}
           setAdding={setAdding}
           onRefresh={onRefresh}
           onOpenAccount={onOpenAccount}
         />
       )}
     </div>
+  );
+}
+
+/** Whether this service has a connect flow a new account can go through. */
+function addable(card: ConnectionCard): boolean {
+  return CHANNEL_CONFIGS[card.service] !== undefined && newAccountSlot(card) !== null;
+}
+
+function AddAccountRow({ onAdd }: { onAdd: () => void }) {
+  const { t } = useTranslation("settings");
+  return (
+    <ListRow asChild interactive>
+      <button type="button" onClick={onAdd}>
+        <Plus className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <ListRowContent>{t("connections.accounts.add")}</ListRowContent>
+      </button>
+    </ListRow>
   );
 }
 
@@ -76,13 +107,11 @@ function newAccountSlot(card: ConnectionCard): ConnectionSlot | null {
 
 function AddAccount({
   card,
-  adding,
   setAdding,
   onRefresh,
   onOpenAccount,
 }: {
   card: ConnectionCard;
-  adding: boolean;
   setAdding: (adding: boolean) => void;
   onRefresh: () => void;
   onOpenAccount: (connectionId: string) => void | Promise<void>;
@@ -91,15 +120,6 @@ function AddAccount({
   const config = CHANNEL_CONFIGS[card.service];
   const slot = newAccountSlot(card);
   if (!config || !slot) return null;
-
-  if (!adding) {
-    return (
-      <Button type="button" variant="outline" onClick={() => setAdding(true)}>
-        <Plus data-icon="inline-start" aria-hidden />
-        {t("connections.accounts.add")}
-      </Button>
-    );
-  }
 
   const opened = async (connectionId: string | null) => {
     setAdding(false);
@@ -136,26 +156,30 @@ function AddAccount({
 
 /** The account's agent, read-only. Envoys is where it changes, since that is
  *  where the confirmation and the one-account-per-platform warning live. */
-function AccountAgentField({ card }: { card: ConnectionCard }) {
+function AccountAgentRow({ card }: { card: ConnectionCard }) {
   const { t } = useTranslation("settings");
   const agent = card.agent === null ? null : canonicalAgent(card.agent);
   return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="min-w-0">
-        <p className="text-aux text-muted-foreground">{t("connections.accounts.agent")}</p>
-        <p className="truncate text-ui text-foreground">
-          {agent ? (
-            <span className="font-mono">{agentLabel(agent)}</span>
-          ) : (
-            t("connections.accounts.noAgent")
-          )}
-        </p>
-      </div>
-      <Button asChild variant="outline" size="sm" className="shrink-0">
-        <Link to={agent ? `/envoys/${encodeURIComponent(agent)}/settings` : "/envoys"}>
+    <ListRow asChild interactive>
+      <Link to={agent ? `/envoys/${encodeURIComponent(agent)}/settings` : "/envoys"}>
+        <Bot className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <ListRowContent>
+          <ListRowTitle className="truncate">
+            {agent ? (
+              <span className="font-mono">{agentLabel(agent)}</span>
+            ) : (
+              t("connections.accounts.noAgentTitle")
+            )}
+          </ListRowTitle>
+          <ListRowDescription>
+            {agent ? t("connections.accounts.agentAnswers") : t("connections.accounts.agentNone")}
+          </ListRowDescription>
+        </ListRowContent>
+        <span className="sr-only shrink-0 text-aux text-muted-foreground sm:not-sr-only">
           {t("connections.accounts.changeInEnvoys")}
-        </Link>
-      </Button>
-    </div>
+        </span>
+        <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      </Link>
+    </ListRow>
   );
 }
