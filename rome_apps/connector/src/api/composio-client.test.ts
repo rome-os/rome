@@ -195,6 +195,34 @@ describe("auth config selection", () => {
     ).toBe("ac_neon");
   });
 
+  it("reuses a guardian-created OAuth config when Rome cannot create one", () => {
+    expect(
+      selectReusableAuthConfig(
+        [
+          {
+            id: "ac_shopify",
+            status: "ENABLED",
+            toolkit: { slug: "shopify" },
+            auth_scheme: "OAUTH2",
+          },
+        ],
+        "shopify",
+      ),
+    ).toBe("ac_shopify");
+  });
+
+  it("prefers an API-key config over a guardian-created OAuth config", () => {
+    expect(
+      selectReusableAuthConfig(
+        [
+          { id: "ac_oauth", status: "ENABLED", toolkit: { slug: "neon" }, auth_scheme: "OAUTH2" },
+          { id: "ac_key", status: "ENABLED", toolkit: { slug: "neon" }, auth_scheme: "API_KEY" },
+        ],
+        "neon",
+      ),
+    ).toBe("ac_key");
+  });
+
   it("ignores disabled and wrong-toolkit auth configs", () => {
     expect(
       selectReusableAuthConfig(

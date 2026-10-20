@@ -265,6 +265,38 @@ const GLYPHS: Record<string, ReactNode> = {
       <path d="M5 18.2h4.4M14.6 5.8H19" />
     </svg>
   ),
+  shopify: (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      width="22"
+      height="22"
+      aria-hidden="true"
+    >
+      <path d="M5.5 8h13l-1 11.2a1.5 1.5 0 0 1-1.5 1.3H8a1.5 1.5 0 0 1-1.5-1.3L5.5 8Z" />
+      <path d="M9 10.5V7a3 3 0 0 1 6 0v3.5" />
+    </svg>
+  ),
+  otter: (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      width="22"
+      height="22"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M8.5 10.5v3M12 8.5v7M15.5 10.5v3" />
+    </svg>
+  ),
 };
 
 /** A marble tile holding a provider's ink glyph. Falls back to a generic plug

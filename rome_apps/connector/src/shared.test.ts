@@ -60,6 +60,9 @@ describe("connector_proxy endpoint validation", () => {
     ).toBeNull();
     expect(validateProxyEndpoint("metaads", "https://graph.facebook.com/v20.0/me")).toBeNull();
     expect(validateProxyEndpoint("supabase", "https://abcdef.supabase.co/rest/v1/x")).toBeNull();
+    expect(
+      validateProxyEndpoint("shopify", "https://acme.myshopify.com/admin/api/2026-10/graphql.json"),
+    ).toBeNull();
   });
 
   it("rejects an off-provider host (credential exfiltration)", () => {
@@ -159,11 +162,11 @@ describe("connector_proxy path/host assembly", () => {
     expect(rejected.message).toMatch(/begin/);
   });
 
-  it("supabase is the only connectable toolkit without a default host", () => {
+  it("only per-connection and tool-only toolkits lack a default host", () => {
     const withoutDefault = [...SUPPORTED_TOOLKITS]
       .filter((t) => !TOOLKIT_DEFAULT_API_HOST[t])
       .sort();
-    expect(withoutDefault).toEqual(["supabase"]);
+    expect(withoutDefault).toEqual(["otter_ai_mcp", "shopify", "supabase"]);
   });
 
   it("every default host clears its toolkit's allowlist (default route never fails open)", () => {

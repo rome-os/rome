@@ -118,6 +118,8 @@ export const SUPPORTED_CONNECTORS: readonly SupportedConnector[] = [
   { toolkit: "neon", displayName: "Neon", apiHost: "console.neon.tech" },
   { toolkit: "hubspot", displayName: "HubSpot", apiHost: "api.hubapi.com" },
   { toolkit: "stripe", displayName: "Stripe", apiHost: "api.stripe.com" },
+  { toolkit: "shopify", displayName: "Shopify" },
+  { toolkit: "otter_ai_mcp", displayName: "Otter.ai" },
 ];
 
 export interface ActionConfig {

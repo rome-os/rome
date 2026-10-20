@@ -314,7 +314,11 @@ export function selectReusableAuthConfig(
   if (managed) return managed.id;
 
   const apiKeyConfig = enabledForToolkit.find((row) => row.auth_scheme === AUTH_SCHEME_API_KEY);
-  return apiKeyConfig?.id ?? null;
+  if (apiKeyConfig) return apiKeyConfig.id;
+
+  // A bring-your-own OAuth provider (Shopify) has no config Rome can create, so
+  // the guardian's own dashboard config is the only path to a connection.
+  return enabledForToolkit[0]?.id ?? null;
 }
 
 /** A connected-account row reduced to the fields the reconcile loop reasons on. */
@@ -698,9 +702,11 @@ export class ComposioClient {
    * API-key-only providers (Neon, etc.) it creates a custom API_KEY config so the
    * Composio connect link can collect the user's account credential.
    *
-   * Note: BYO OAuth providers still require dashboard-side credential setup; if
-   * a toolkit has neither managed auth nor API_KEY auth, this surfaces a clear
-   * unsupported-auth error instead of trying the wrong auth mode.
+   * BYO OAuth providers (Shopify) need an auth config the guardian creates in
+   * the Composio dashboard with their own app credentials; once it exists it is
+   * reused here. Until then, a toolkit with neither managed auth nor API_KEY
+   * auth surfaces a clear unsupported-auth error instead of trying the wrong
+   * auth mode.
    */
   async ensureAuthConfig(toolkit: string): Promise<string> {
     const key = toolkit.toLowerCase();
