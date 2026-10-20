@@ -119,7 +119,9 @@ export function buildEnvoys(
 
 /** The account `agent` stops speaking through when it is linked to `account`.
  *  On one platform an agent other than main speaks through at most one
- *  account, so linking it moves it off the other one. */
+ *  account, so linking it moves it off the other one. This sees only the
+ *  accounts listed here, so it misses a disconnected account core still
+ *  holds the agent on. */
 export function displacedAccount(
   envoys: readonly Envoy[],
   account: EnvoyAccount,

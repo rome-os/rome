@@ -1,13 +1,5 @@
 import type { ReactNode } from "react";
-import {
-  Link,
-  Navigate,
-  Route,
-  Routes,
-  useLocation,
-  useNavigate,
-  useParams,
-} from "react-router-dom";
+import { Link, Navigate, Route, Routes, useMatch, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
@@ -36,6 +28,7 @@ import {
   EmptyStateDescription,
   EmptyStateTitle,
 } from "@/components/ui/empty-state";
+import { FormError } from "@/components/ui/field";
 import { List, ListRow, ListRowContent } from "@/components/ui/list-row";
 import {
   ConnectionBrandBadge,
@@ -289,13 +282,19 @@ function AccountAgentRow({
         account={account}
         envoys={data.envoys}
         agents={data.agents}
-        agentsFailed={data.agentsFailed}
         onChanged={onChanged}
       >
         <AccountSummary account={account} />
       </AgentChange>
     </div>
   );
+}
+
+/** Shown once above the selects when the agent list failed to load, since each
+ *  select then offers only main and the agents already linked. */
+function AgentsFailed({ data }: { data: EnvoysData }) {
+  const { t } = useTranslation("envoys");
+  return data.agentsFailed ? <FormError>{t("change.agentsFailed")}</FormError> : null;
 }
 
 /** Accounts Rome has access to but no agent speaks through. Linking an agent
@@ -311,6 +310,7 @@ function UnlinkedAccounts({ data }: { data: EnvoysData }) {
           <SectionDescription>{t("unlinked.description")}</SectionDescription>
         </SectionHeading>
       </SectionHeader>
+      <AgentsFailed data={data} />
       <Card className="max-w-3xl">
         <CardContent className="divide-y divide-border-subtle">
           {data.unlinked.map((account) => (
@@ -336,7 +336,7 @@ function EnvoyDetail() {
   const query = useEnvoys();
   const envoy = query.data?.envoys.find((candidate) => candidate.agent === agent);
   const name = agentLabel(agent);
-  const activeTab = useLocation().pathname.endsWith("/settings") ? "settings" : "overview";
+  const activeTab = useMatch("/envoys/:agent/settings") ? "settings" : "overview";
   useDocumentTitle([name, t("index.title")]);
 
   return (
@@ -416,15 +416,17 @@ function Settings({ envoy, data }: { envoy: Envoy; data: EnvoysData }) {
         <CardTitle>{t("overview.accounts")}</CardTitle>
       </CardHeader>
       <CardContent className="divide-y divide-border-subtle">
+        <AgentsFailed data={data} />
         {envoy.accounts.map((account) => (
           <AccountAgentRow
             key={account.channel}
             account={account}
             data={data}
             onChanged={(agent) => {
-              // The account now belongs to another agent's page, or to none.
-              if (agent) navigate(`${envoyPath(agent)}/settings`);
-              else if (envoy.accounts.length <= 1) navigate("/envoys");
+              // Stay while this agent keeps other accounts. Otherwise follow the
+              // account to its new agent's page, or back to the list.
+              if (envoy.accounts.length > 1) return;
+              navigate(agent ? `${envoyPath(agent)}/settings` : "/envoys");
             }}
           />
         ))}

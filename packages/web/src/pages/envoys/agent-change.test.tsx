@@ -51,7 +51,6 @@ function renderChange(props: {
         account={props.account}
         envoys={props.envoys ?? []}
         agents={[MAIN_AGENT_ID, "sales:agent"]}
-        agentsFailed={false}
         onChanged={props.onChanged ?? (() => {})}
       >
         {props.account.name}

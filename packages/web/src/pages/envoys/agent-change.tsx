@@ -48,15 +48,12 @@ export function AgentChange({
   account,
   envoys,
   agents,
-  agentsFailed,
   onChanged,
   children,
 }: {
   account: EnvoyAccount;
   envoys: readonly Envoy[];
   agents: readonly string[];
-  /** The agent list failed to load, so only main and linked agents are offered. */
-  agentsFailed: boolean;
   onChanged: (agent: string | null) => void;
   /** The account as the row shows it, beside the select. */
   children: ReactNode;
@@ -127,7 +124,6 @@ export function AgentChange({
           </SelectContent>
         </Select>
       </div>
-      {agentsFailed && <FormError>{t("change.agentsFailed")}</FormError>}
       {link.error && !pending && (
         <FormError>{errorMessage(link.error, t("change.failed"))}</FormError>
       )}
