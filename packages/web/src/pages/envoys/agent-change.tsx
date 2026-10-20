@@ -122,7 +122,12 @@ export function AgentChange({
         <div className="flex min-w-0 flex-1 items-center gap-3">{children}</div>
         {/* Radix shows the placeholder only for an empty value. */}
         <Select
-          value={pending ?? (link.isPending ? link.variables?.agent : null) ?? account.agent ?? ""}
+          value={
+            pending ??
+            (link.isPending ? (link.variables?.agent ?? NO_AGENT) : null) ??
+            account.agent ??
+            ""
+          }
           disabled={disabled || link.isPending}
           onValueChange={choose}
         >
