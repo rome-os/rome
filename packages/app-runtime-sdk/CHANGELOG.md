@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.7.7](https://github.com/rome-os/rome/compare/app-runtime-v0.7.6...app-runtime-v0.7.7) (2026-10-20)
+
+
+### Features
+
+* **app-runtime:** say account and agent, not linked agent, bot or channel ([#1157](https://github.com/rome-os/rome/issues/1157)) ([e5f9464](https://github.com/rome-os/rome/commit/e5f94640c7c206c0296da76295fe4aa03e4ab30c))
+
 ## [0.7.6](https://github.com/rome-os/rome/compare/app-runtime-v0.7.5...app-runtime-v0.7.6) (2026-10-19)
 
 
