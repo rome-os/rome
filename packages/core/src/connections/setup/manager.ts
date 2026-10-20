@@ -27,6 +27,7 @@ import {
   applyGuardianMappingWithinTx,
   planGuardianMapping,
 } from "../../channels/guardian-mapping.js";
+import type { ConferOptions } from "../registry.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupSession, type SetupInputOutcome } from "./session.js";
 import type { SetupConferral, SetupState } from "./types.js";
@@ -45,7 +46,7 @@ export interface SetupRegistry {
     grant: string,
     credential: Credential,
     profile: ProfileRecord | undefined,
-    opts?: { inTx?: (tx: DrizzleTx) => void; another?: boolean },
+    opts?: ConferOptions,
   ): Promise<Connection>;
 }
 

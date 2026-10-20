@@ -418,6 +418,23 @@ describe("DELETE /connections/:id/grants/:name", () => {
     expect(records.idOf(conn.id)).toBeNull();
   });
 
+  it("answers a second disconnect of the same account as done", async () => {
+    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const fixture = makePasteTalk();
+    registry.register(fixture.descriptor);
+    const conn = await registry.connect("fake-telegram");
+    await registry.importCredential(conn.id, "bot", fixture.validCredential());
+    const app = makeApp(registry);
+    const disconnect = () =>
+      app.request(`/connections/${conn.id}/grants/bot`, { method: "DELETE", headers: SAME_ORIGIN });
+
+    const [first, second] = await Promise.all([disconnect(), disconnect()]);
+
+    expect([first.status, second.status]).toEqual([200, 200]);
+    expect((await second.json()).connection).toBeNull();
+    expect(registry.find("fake-telegram")).toEqual([]);
+  });
+
   it("keeps a connection whose service has no Talk when its last grant goes", async () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     const fixture = makeRenewableAct();

@@ -359,6 +359,8 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     // it. The revoke runs first either way, since it is what clears the
     // grant's custody artifacts.
     const removed = await registry.withGrantSection(conn.service, name, async () => {
+      // A disconnect that ran while this one waited may have removed it.
+      if (!registry.all().some((held) => held.id === conn.id)) return true;
       await registry.revoke(conn.id, name, { inTx: guardianMappingTeardown(registry, conn, name) });
       if (!(await isUnconnectedAccount(registry, conn))) return false;
       await registry.remove(conn.id);

@@ -80,4 +80,47 @@ describe("useSetup stale-state handling", () => {
     expect(polls).toBeGreaterThan(1);
     expect(onDone).toHaveBeenCalled();
   });
+
+  it("cancels a new account's live setup when the card goes away", async () => {
+    const fetchMock = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({
+              cid: "cid-new",
+              state: { status: "presenting", view: { title: "x" } },
+            }),
+            { status: 200 },
+          ),
+      );
+    const { result, unmount } = renderHook(() =>
+      useSetup({ idOrService: "feishu", grant: "bot", another: true }),
+    );
+    act(() => result.current.start());
+    await waitFor(() => expect(result.current.cid).toBe("cid-new"));
+
+    unmount();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/setups/cid-new/cancel",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("leaves an existing connection's setup running when the card goes away", async () => {
+    const fetchMock = rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ state: { status: "presenting", view: { title: "x" } } }), {
+        status: 200,
+      }),
+    );
+    const { result, unmount } = renderHook(() =>
+      useSetup({ idOrService: "discord", grant: "bot", activeCid: "cid-1" }),
+    );
+    await waitFor(() => expect(result.current.state?.status).toBe("presenting"));
+
+    unmount();
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/cancel"))).toBe(false);
+  });
 });

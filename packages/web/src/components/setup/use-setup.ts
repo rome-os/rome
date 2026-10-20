@@ -178,5 +178,18 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
     if (settled) setBusy(false);
   }, [settled]);
 
+  // A new account's setup has no connection a reopened card could find it
+  // through, so it ends with the card that started it. Otherwise a flow left
+  // running (a QR code still on a phone) could connect an account after the
+  // guardian closed the card.
+  const liveCidRef = useRef<string | null>(null);
+  liveCidRef.current = cid && !settled ? cid : null;
+  useEffect(() => {
+    if (!another) return;
+    return () => {
+      if (liveCidRef.current) void cancelSetup(liveCidRef.current);
+    };
+  }, [another]);
+
   return { cid, state, busy, error, start, submit, cancel, reset };
 }
