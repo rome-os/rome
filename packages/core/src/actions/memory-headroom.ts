@@ -17,8 +17,8 @@ export type MemoryHeadroomReader = () => MemoryHeadroom | null;
 
 /** The instance is short on memory while less than this share of its limit is
  * available. One line, no latch: the action engine judges each queued start
- * against a fresh reading, and the System tab paints the same line, so what a
- * guardian sees as short is exactly what holds queued work. */
+ * against a fresh reading, and the system diagnosis card paints the same line,
+ * so what a guardian sees as short is exactly what holds queued work. */
 export const MEMORY_HOLD_FRACTION = 0.15;
 
 /** cgroup v1 reports "no limit" as a value near the address-space maximum. */

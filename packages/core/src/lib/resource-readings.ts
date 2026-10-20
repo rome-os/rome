@@ -5,9 +5,9 @@ import {
 } from "../actions/memory-headroom.js";
 import { DISK_LOW_FRACTION, type DiskUsage, readDiskUsage } from "./disk-usage.js";
 
-/** The instance's memory and disk, as the System tab shows them. A null reading
- * means the host offers none (a bare macOS process has no memory reading), and
- * the tab leaves that row out rather than showing a wrong number. */
+/** The instance's memory and disk, as the system diagnosis card shows them. A
+ * null reading means the host offers none (a bare macOS process has no memory
+ * reading), and the card leaves that row out rather than showing a wrong number. */
 export interface ResourceReadings {
   memory: {
     limitBytes: number;

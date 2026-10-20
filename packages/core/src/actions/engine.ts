@@ -114,14 +114,13 @@ const DEFAULT_QUEUED_ROOT_MAX_WAIT_MS = 10 * 60_000;
  * callers — agent tool calls, nested delegations, interactive turns — whose
  * caller often holds a worker of its own and cannot wait for one. */
 const RESERVED_WORKER_SLOTS = 2;
-/** A queued root starts only while the instance's available memory is at least
- * MEMORY_HOLD_FRACTION of its limit. Each start is judged against a reading
- * taken just before it, so a started root stops the next start once its usage
- * shows in a later reading, and a finished root lets the next one go. Roots
- * admitted on one reading start together. Fail-fast callers never see the
- * gate: their caller may hold a worker and cannot wait. */
-/** How often a held queue re-reads memory. Memory can recover without any
- * worker exiting, so the queue cannot rely on slot changes alone. */
+/** How often a held queue re-reads memory. A queued root starts only while the
+ * instance's available memory is at least MEMORY_HOLD_FRACTION of its limit,
+ * judged against a reading taken just before it, so a started root stops the
+ * next start once its usage shows and a finished root lets the next one go.
+ * Memory can recover without any worker exiting, so the queue cannot rely on
+ * slot changes alone. Fail-fast callers never see the gate: their caller may
+ * hold a worker and cannot wait. */
 const QUEUE_MEMORY_RECHECK_MS = 5_000;
 /** A reading that hovers at the line crosses it on many rechecks. The gate logs
  * a crossing at most this often, so a long hold costs two lines, not hundreds. */

@@ -25,7 +25,9 @@ interface DiagnosisResponse {
   relay: { configured: boolean; depositUrlConfigured: boolean };
   channels: string[];
   apps: { total: number; failed: string[]; broken: string[] };
-  resources: {
+  /** Absent from a core that predates the readings, so the card renders without
+   * the rows rather than failing. */
+  resources?: {
     memory: { limitBytes: number; availableBytes: number; short: boolean } | null;
     disk: { path: string; totalBytes: number; freeBytes: number; low: boolean } | null;
   };
@@ -194,7 +196,7 @@ export function SystemDiagnosisSection() {
                   </span>
                 )}
               </DiagRow>
-              {d.resources.memory && (
+              {d.resources?.memory && (
                 <ResourceRow
                   label={t("advanced.diagnosis.memory")}
                   reading={t("advanced.diagnosis.free", {
@@ -208,7 +210,7 @@ export function SystemDiagnosisSection() {
                   hint={t("advanced.diagnosis.memoryShortHint")}
                 />
               )}
-              {d.resources.disk && (
+              {d.resources?.disk && (
                 <ResourceRow
                   label={t("advanced.diagnosis.disk")}
                   reading={t("advanced.diagnosis.free", {
