@@ -475,6 +475,20 @@ describe("addressed-connection targeting (#3)", () => {
     const [account] = registry.find("fake-telegram");
     expect(account?.id).not.toBe(leftover.id);
   });
+
+  it("leaves a leftover account alone when the start names a grant with no setup", async () => {
+    const { app, registry } = harness();
+    const leftover = await registry.connect("fake-telegram");
+
+    const res = await app.request(`/connections/${leftover.id}/grants/nope/setup`, {
+      method: "POST",
+      headers: SAME_ORIGIN,
+      body: "{}",
+    });
+
+    expect(res.status).toBe(404);
+    expect(registry.find("fake-telegram").map((conn) => conn.id)).toEqual([leftover.id]);
+  });
 });
 
 // Finding #4 — tearing down a grant must cancel a live setup on it and revoke
