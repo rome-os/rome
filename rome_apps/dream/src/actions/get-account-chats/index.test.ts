@@ -126,7 +126,8 @@ describe("get_account_chats", () => {
   });
 
   it("shortens a chat that does not fit to its newest lines", async () => {
-    const long = "z".repeat(1000);
+    // Short enough that no line is cut.
+    const long = "z".repeat(900);
     const big = Array.from({ length: 50 }, (_, i) =>
       row({
         session_id: "big",
@@ -237,10 +238,10 @@ describe("get_account_chats against the system schema", () => {
     return { appContext: { db: { connection: testDb.db } } } as unknown as AppActionRuntimeDeps;
   }
 
-  function seedChannel(id: string, service: string, platform: string): void {
+  function seedChannel(id: string, service: string, platform: string, agent?: string): void {
     testDb.db.run(sql`
-      INSERT INTO channels (id, service, platform, created_at)
-      VALUES (${id}, ${service}, ${platform}, ${Math.floor(Date.now() / 1000)})
+      INSERT INTO channels (id, service, platform, agent, created_at)
+      VALUES (${id}, ${service}, ${platform}, ${agent ?? null}, ${Math.floor(Date.now() / 1000)})
     `);
   }
 
@@ -280,13 +281,14 @@ describe("get_account_chats against the system schema", () => {
     seedChannel("telegram", "telegram", "telegram");
     seedChannel("telegram_user", "telegram_user", "telegram");
     seedChannel("discord", "discord", "discord");
-    seedChannel("d-second", "discord", "discord");
+    // An account linked to another agent: a chat stored as main is answered by it.
+    seedChannel("d-second", "discord", "discord", "helpdesk");
     seedChannel("feishu", "feishu", "feishu");
     seedChannel("whatsapp", "whatsapp", "whatsapp");
     seedSession("tg", "channel", "telegram", "Telegram DM", now - 60);
     seedSession("tgu", "channel", "telegram_user", "Friend", now - 60);
     seedSession("dc1", "channel", "discord", "general", now - 60);
-    seedSession("dc2", "channel", "d-second", "support", now - 60, "helpdesk");
+    seedSession("dc2", "channel", "d-second", "support", now - 60, "main");
     seedSession("fs", "channel", "feishu", "Team group", now - 60);
     seedSession("web", "channel", "webchat", null, now - 60);
     seedSession("wa", "channel", "whatsapp", "Mum", now - 60);

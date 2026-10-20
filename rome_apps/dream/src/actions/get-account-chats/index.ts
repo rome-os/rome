@@ -7,6 +7,7 @@ import {
   type ActionConfig,
   type ActionResult,
   type AppActionRuntimeDeps,
+  isCoreMainAgentId,
 } from "@rome-os/app-runtime";
 import { onRomeAccount } from "../../lib/chat-activity.js";
 import { extractText } from "../../lib/message-text.js";
@@ -22,6 +23,19 @@ const CHARS_IN_ALL = 60_000;
 
 const ACCOUNT_SEPARATOR = "\n\n---\n\n";
 
+// The agent that answers a chat, over `rome_sessions s` and `channels c`, by
+// core's rule (`answeringAgentName` in
+// packages/core/src/db/repositories/session-query.ts): on an account with an
+// agent, a private chat and a chat stored as main take the account's agent,
+// unless the chat is pinned to main. Main reads as null.
+const ACCOUNT_AGENT = sql`CASE WHEN c.agent IN ('main', 'core:main') THEN NULL ELSE c.agent END`;
+const ANSWERING_AGENT = sql`CASE WHEN c.agent IS NOT NULL THEN CASE
+    WHEN s.source_thread_type IS 'private' THEN ${ACCOUNT_AGENT}
+    WHEN coalesce(json_type(s.channel_settings, '$.overrides.routing.agentName') = 'null', 0) = 1 THEN NULL
+    WHEN coalesce(s.agent_name, 'main') IN ('main', 'core:main') THEN ${ACCOUNT_AGENT}
+    ELSE s.agent_name END
+  ELSE s.agent_name END`;
+
 interface MessageRow {
   session_id: string;
   session_name: string;
@@ -30,7 +44,7 @@ interface MessageRow {
   service: string;
   platform: string;
   role: string;
-  /** The agent linked to the chat's account; null for the main agent. */
+  /** The agent that answers the chat, by core's rule; null for main. */
   agent_name: string | null;
   outbound: number;
   sender_name: string | null;
@@ -66,7 +80,8 @@ function speakerOf(row: MessageRow): string {
   if (row.outbound) {
     // An account can be linked to an agent other than main, whose lines are
     // not Rome's own.
-    const agent = row.agent_name && row.agent_name !== "main" ? ` ${named(row.agent_name)}` : "";
+    const agent =
+      row.agent_name && !isCoreMainAgentId(row.agent_name) ? ` ${named(row.agent_name)}` : "";
     return `Agent${agent} (Rome)`;
   }
   return `Person ${named(row.sender_name || row.sender_id || "unknown")}`;
@@ -195,7 +210,8 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               SELECT m.session_id, s.name AS session_name, s.source_thread_name AS thread_name,
                 s.source_channel AS channel,
                 coalesce(c.service, s.source_channel) AS service,
-                coalesce(c.platform, s.source_channel) AS platform, m.role, s.agent_name,
+                coalesce(c.platform, s.source_channel) AS platform, m.role,
+                ${ANSWERING_AGENT} AS agent_name,
                 CASE
                   WHEN m.role = 'assistant' THEN 1
                   WHEN m.role = 'notification' AND m.sender_id = 'rome' THEN 1
