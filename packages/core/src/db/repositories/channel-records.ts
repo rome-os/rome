@@ -55,10 +55,17 @@ export class ChannelNotLinkable extends Error {
 
 type Exec = DrizzleDb | DrizzleTx;
 
-/** The agent a newly backed channel starts linked to: main on a linkable
- *  service's first account, the one carrying the service's name. */
-function firstAccountAgent(id: string, service: string): string | null {
-  return id === service && LINKABLE_SERVICES.has(service) ? MAIN_AGENT_ID : null;
+/** The agent a newly backed channel starts linked to: main when it is a
+ *  linkable service's only connected account, so a guardian's first account
+ *  answers. A later account starts with none. */
+function firstAccountAgent(exec: Exec, service: string): string | null {
+  if (!LINKABLE_SERVICES.has(service)) return null;
+  const backed = exec
+    .select({ id: channels.id })
+    .from(channels)
+    .where(and(eq(channels.service, service), isNotNull(channels.connectionId)))
+    .get();
+  return backed === undefined ? MAIN_AGENT_ID : null;
 }
 
 /** The service a channel belongs to. A service's first channel carries the
@@ -82,8 +89,11 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
  * A channel's id is minted once and never changes, since every stored row
  * spells it. It is an opaque id, except that a service's first channel carries
  * the service's name, which is what data stored before channels were recorded
- * spells. A row stays when its Connection goes, and the service's next
- * Connection takes it back before a new id is minted.
+ * spells. A row stays when its Connection goes, so its id is never minted
+ * again. An account of a linkable service starts fresh: the service's next
+ * Connection gets a channel of its own. Another service's next Connection
+ * takes the row back, since apps address that service's one channel by its
+ * name.
  */
 export class ChannelRecordsRepository {
   /** Channel id by Connection id, read on every port use. Every write that
@@ -128,14 +138,13 @@ export class ChannelRecordsRepository {
 
   /**
    * The channel `connection` backs, recorded in `exec` (the transaction that
-   * mints the Connection). A Connection that already has one keeps it. Else
-   * it takes back the service's unbacked channel, the one carrying the
-   * service's name first, so a deleted and re-added bot keeps its channel.
-   * Failing that, it gets the service's name if no channel holds it, and a
-   * fresh opaque id otherwise. A channel it gets that carries the service's
-   * name, the service's first account, is linked to main when the service is
-   * linkable, so a guardian's first bot answers. A later account starts
-   * unlinked.
+   * mints the Connection). A Connection that already has one keeps it. A
+   * Connection of a linkable service never takes over another account's
+   * channel, so it starts with no history. A Connection of any other service
+   * takes back the service's unbacked channel, the one carrying the service's
+   * name first. Failing that, it gets the service's name if no channel holds
+   * it, and a fresh opaque id otherwise. A linkable service's only connected
+   * account is linked to main, so a guardian's first account answers.
    */
   claim(exec: Exec, connection: { id: string; service: string }, now: Date): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
@@ -143,18 +152,20 @@ export class ChannelRecordsRepository {
     this.ids.clear();
 
     const service = connection.service;
-    const vacant = exec
-      .select()
-      .from(channels)
-      .where(and(eq(channels.service, service), isNull(channels.connectionId)))
-      .all()
-      .sort(
-        (a, b) =>
-          Number(b.id === service) - Number(a.id === service) ||
-          a.createdAt.getTime() - b.createdAt.getTime(),
-      )[0];
+    const vacant = LINKABLE_SERVICES.has(service)
+      ? undefined
+      : exec
+          .select()
+          .from(channels)
+          .where(and(eq(channels.service, service), isNull(channels.connectionId)))
+          .all()
+          .sort(
+            (a, b) =>
+              Number(b.id === service) - Number(a.id === service) ||
+              a.createdAt.getTime() - b.createdAt.getTime(),
+          )[0];
     if (vacant) {
-      const agent = firstAccountAgent(vacant.id, service);
+      const agent = firstAccountAgent(exec, service);
       exec
         .update(channels)
         .set({ connectionId: connection.id, agent })
@@ -172,7 +183,7 @@ export class ChannelRecordsRepository {
       service,
       platform: platformOf(service),
       connectionId: connection.id,
-      agent: firstAccountAgent(id, service),
+      agent: firstAccountAgent(exec, service),
       createdAt: now,
     };
     exec.insert(channels).values(row).run();

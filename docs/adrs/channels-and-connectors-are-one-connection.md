@@ -106,6 +106,8 @@ Rome stores each channel's platform as a fixed value mapped from its service ([`
 
 Adding another account of a service no longer mints a Connection ahead of its setup. The setup starts addressed to a new account of the service, and its terminal conferral mints the Connection and its channel, as it already does for a service's first Connection. `POST /connections` and `connectUnusedOrAnother` from the 2026-10-15 amendment are withdrawn. Revoking the last grant a Connection holds removes the Connection when its service has a Talk, and boot removes any such Connection an earlier version left holding no grant. A Connection whose service has no Talk keeps today's behaviour and stays after its last grant goes.
 
+A linkable service's next Connection no longer takes back a released channel, so a new account starts fresh and never inherits another account's conversations, settings or agent sessions (#1073). Its channel gets an opaque id, the service-named one included once released, and it is linked to main when it is the service's only connected account. Services that take no agent keep taking their released channel back, since apps address their one channel by the service's name.
+
 ### Alternatives
 
 - **Keep minting ahead of setup, and hide accounts that hold no grant.** Rejected because the hidden rows still back channels, take names and count against the one-agent-per-platform rule.

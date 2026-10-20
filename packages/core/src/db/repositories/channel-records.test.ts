@@ -49,7 +49,7 @@ describe("ChannelRecordsRepository", () => {
     expect(records.all()).toHaveLength(1);
   });
 
-  it("gives a re-added bot the channel its deleted one held, linked to main again", () => {
+  it("gives a re-added bot a fresh channel, linked to main as the only account", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
@@ -58,11 +58,11 @@ describe("ChannelRecordsRepository", () => {
     records.vacate(db, "c1");
     expect(records.byId("feishu")).toMatchObject({ connectionId: null, agent: null });
 
-    expect(records.claim(db, { id: "c2", service: "feishu" }, NOW)).toMatchObject({
-      id: "feishu",
-      agent: "core:main",
-    });
-    expect(records.all()).toHaveLength(1);
+    const readded = records.claim(db, { id: "c2", service: "feishu" }, NOW);
+    expect(readded.id).toMatch(UUID);
+    expect(readded.agent).toBe("core:main");
+    // The released channel keeps its id, so no later account is given it.
+    expect(records.byId("feishu")).toMatchObject({ connectionId: null, agent: null });
   });
 
   it("links main to a linkable service's first account only", () => {
@@ -76,7 +76,7 @@ describe("ChannelRecordsRepository", () => {
     expect(records.claim(db, { id: "c5", service: "agents" }, NOW).agent).toBeNull();
   });
 
-  it("takes back a later account unlinked", () => {
+  it("never gives a later account's channel to the next account", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
@@ -84,22 +84,21 @@ describe("ChannelRecordsRepository", () => {
     records.link(later, "sales:agent");
     records.vacate(db, "c2");
 
-    expect(records.claim(db, { id: "c3", service: "feishu" }, NOW)).toMatchObject({
-      id: later,
-      agent: null,
-    });
+    const next = records.claim(db, { id: "c3", service: "feishu" }, NOW);
+    expect(next.id).not.toBe(later);
+    expect(next.agent).toBeNull();
   });
 
-  it("takes back the service-named channel before a later one", () => {
+  it("takes back a service's released channel when the service takes no agent", () => {
     const records = repository();
     const db = testDb!.db;
-    records.claim(db, { id: "c1", service: "feishu" }, NOW);
-    const later = records.claim(db, { id: "c2", service: "feishu" }, NOW).id;
+    records.claim(db, { id: "c1", service: "email" }, NOW);
+    const later = records.claim(db, { id: "c2", service: "email" }, NOW).id;
     records.vacate(db, "c2");
     records.vacate(db, "c1");
 
-    expect(records.claim(db, { id: "c3", service: "feishu" }, NOW).id).toBe("feishu");
-    expect(records.claim(db, { id: "c4", service: "feishu" }, NOW).id).toBe(later);
+    expect(records.claim(db, { id: "c3", service: "email" }, NOW).id).toBe("email");
+    expect(records.claim(db, { id: "c4", service: "email" }, NOW).id).toBe(later);
   });
 
   it("names the service behind a channel, and passes an unrecorded name through", () => {
