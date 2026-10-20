@@ -18,12 +18,12 @@
   },
   "kinds": {
     "own": "自有账号",
-    "delegate": "代理"
+    "delegate": "代理",
+    "yours": "你的账号"
   },
   "unlinked": {
     "title": "已连接，无智能体",
     "description": "Rome 可以访问这些账号，但没有智能体通过它们发言，所以发给它们的消息无人回复。",
-    "yours": "你的账号",
     "link": "关联智能体",
     "linkTo": "为 {{account}} 关联智能体"
   }

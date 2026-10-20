@@ -17,3 +17,15 @@ export const LINKABLE_SERVICES: ReadonlySet<string> = new Set([
  *  linked to an account like any agent, but unlike any other agent it may be
  *  linked to several accounts on one platform. */
 export const MAIN_AGENT_ID = "core:main";
+
+/** The canonical id of an agent named in a request or a URL. `/api/agents` and
+ *  the link route also know main by its short name, `main`. */
+export function canonicalAgent(name: string): string {
+  return name === "main" ? MAIN_AGENT_ID : name;
+}
+
+/** The name an agent is shown under: main by its short name, any other agent
+ *  by its canonical id. */
+export function agentLabel(agent: string): string {
+  return agent === MAIN_AGENT_ID ? "main" : agent;
+}

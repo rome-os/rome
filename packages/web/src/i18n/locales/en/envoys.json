@@ -18,12 +18,12 @@
   },
   "kinds": {
     "own": "Own account",
-    "delegate": "Delegate"
+    "delegate": "Delegate",
+    "yours": "your account"
   },
   "unlinked": {
     "title": "Connected, no agent",
     "description": "Rome has access to these accounts, but no agent speaks through them, so they go unanswered.",
-    "yours": "your account",
     "link": "Link an agent",
     "linkTo": "Link an agent to {{account}}"
   }

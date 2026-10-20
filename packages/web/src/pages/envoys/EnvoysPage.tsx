@@ -39,13 +39,8 @@ import { CONNECTIONS_REFRESH_INTERVAL_MS, fetchConnections } from "@/lib/connect
 import { serviceLabel } from "@/lib/connection-cards";
 import { fetchJson } from "@/lib/fetch-json";
 import { Avatar } from "../people/avatar";
-import {
-  type AgentListing,
-  type Envoy,
-  type EnvoyAccount,
-  agentLabel,
-  buildEnvoys,
-} from "./envoys-model";
+import { agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
+import { type AgentListing, type Envoy, type EnvoyAccount, buildEnvoys } from "./envoys-model";
 
 /**
  * Envoys: the agents people can reach on chat platforms, each listed with the
@@ -66,8 +61,7 @@ const CONNECTIONS_PATH = "/settings/connections";
 
 const envoyPath = (agent: string) => `/envoys/${encodeURIComponent(agent)}`;
 
-const accountPath = (account: EnvoyAccount) =>
-  `${CONNECTIONS_PATH}/${encodeURIComponent(account.route)}`;
+const accountPath = (route: string) => `${CONNECTIONS_PATH}/${encodeURIComponent(route)}`;
 
 function useEnvoys() {
   const { t } = useTranslation("envoys");
@@ -238,28 +232,34 @@ function EnvoyCard({ envoy }: { envoy: Envoy }) {
 
 function AccountRow({ account, action }: { account: EnvoyAccount; action?: string }) {
   const { t } = useTranslation("envoys");
-  const platform = serviceLabel(account.platform);
+  const content = (
+    <>
+      <ConnectionBrandBadge connection={account.platform} />
+      <ListRowContent>
+        <div className="font-medium">{account.name}</div>
+        <div className="truncate text-aux text-muted-foreground">
+          {serviceLabel(account.platform)}
+          {account.kind === "delegate" && ` · ${t("kinds.yours")}`}
+        </div>
+      </ListRowContent>
+      {action ? (
+        <span className="text-ui text-muted-foreground">{action}</span>
+      ) : (
+        <Badge variant={account.kind === "delegate" ? "info" : "success"}>
+          {t(`kinds.${account.kind}`)}
+        </Badge>
+      )}
+    </>
+  );
+  // No Connections card shows a delegate's agent yet, so its row opens nothing.
+  if (account.route === null) return <ListRow>{content}</ListRow>;
   return (
     <ListRow asChild interactive>
       <Link
-        to={accountPath(account)}
+        to={accountPath(account.route)}
         aria-label={action ? t("unlinked.linkTo", { account: account.name }) : undefined}
       >
-        <ConnectionBrandBadge connection={account.platform} />
-        <ListRowContent>
-          <div className="font-medium">{account.name}</div>
-          <div className="truncate text-aux text-muted-foreground">
-            {platform}
-            {account.kind === "delegate" && ` · ${t("unlinked.yours")}`}
-          </div>
-        </ListRowContent>
-        {action ? (
-          <span className="text-ui text-muted-foreground">{action}</span>
-        ) : (
-          <Badge variant={account.kind === "delegate" ? "info" : "success"}>
-            {t(`kinds.${account.kind}`)}
-          </Badge>
-        )}
+        {content}
       </Link>
     </ListRow>
   );
@@ -292,7 +292,8 @@ function UnlinkedAccounts({ accounts }: { accounts: EnvoyAccount[] }) {
 
 function EnvoyDetail() {
   const { t } = useTranslation("envoys");
-  const agent = useParams<{ agent: string }>().agent ?? "";
+  // A shared link may name main by its short name.
+  const agent = canonicalAgent(useParams<{ agent: string }>().agent ?? "");
   const query = useEnvoys();
   const envoy = query.data?.envoys.find((candidate) => candidate.agent === agent);
   const name = agentLabel(agent);

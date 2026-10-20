@@ -1,4 +1,9 @@
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import {
+  LINKABLE_SERVICES,
+  MAIN_AGENT_ID,
+  agentLabel,
+  canonicalAgent,
+} from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
 import type { ApiConnection } from "@/lib/connections-api";
 import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
@@ -14,12 +19,6 @@ export type LinkKind = "own" | "delegate";
 /** The guardian's own signed-in accounts. An agent linked to one is a delegate. */
 const DELEGATE_SERVICES: ReadonlySet<string> = new Set(["telegram_user"]);
 
-/** A personal account opens on its brand's Connections card, where it is folded
- *  in as a slot (`buildConnectionCards`). */
-const CARD_ROUTE_BY_SERVICE: Readonly<Record<string, string>> = {
-  telegram_user: "telegram",
-};
-
 export interface EnvoyAccount {
   /** The account's channel id, which the link route addresses. */
   channel: string;
@@ -30,8 +29,10 @@ export interface EnvoyAccount {
   kind: LinkKind;
   /** Canonical id of the account's agent, or null when it has none. */
   agent: string | null;
-  /** Where the account's Connections card opens. */
-  route: string;
+  /** Where the account's Connections card opens, or null when no card shows
+   *  or sets this account's agent. A delegate's account is folded into its
+   *  brand's card as a slot, and that card shows only the bot's agent. */
+  route: string | null;
 }
 
 export interface Envoy {
@@ -44,16 +45,6 @@ export interface Envoy {
 export interface AgentListing {
   name: string;
   description?: string | null;
-}
-
-/** `/api/agents` and the link route also know main as `main`. */
-export function canonicalAgent(name: string): string {
-  return name === "main" ? MAIN_AGENT_ID : name;
-}
-
-/** The name an agent is shown under. */
-export function agentLabel(agent: string): string {
-  return agent === MAIN_AGENT_ID ? "main" : agent;
 }
 
 function accountName(connection: ApiConnection): string | null {
@@ -72,19 +63,22 @@ function toAccount(connection: ApiConnection): EnvoyAccount | null {
   const connected = Object.values(connection.grants).some((state) => state !== "unauthorized");
   if (!connected) return null;
   const platform = platformOf(connection.service);
+  const kind = DELEGATE_SERVICES.has(connection.service) ? "delegate" : "own";
   return {
     channel: connection.channel,
     service: connection.service,
     platform,
     name: accountName(connection) ?? serviceLabel(platform),
-    kind: DELEGATE_SERVICES.has(connection.service) ? "delegate" : "own",
+    kind,
     agent: connection.agent === null ? null : canonicalAgent(connection.agent),
-    route: CARD_ROUTE_BY_SERVICE[connection.service] ?? connectionRoute(connection),
+    route: kind === "delegate" ? null : connectionRoute(connection),
   };
 }
 
 /** Groups the connected accounts by the agent speaking through them. Agents
- *  sort by name with main first, and accounts with no agent are listed apart. */
+ *  sort by name with main first, and accounts with no agent are listed apart.
+ *  A delegate's account with no agent is left out, since no card links one to
+ *  it yet. */
 export function buildEnvoys(
   connections: readonly ApiConnection[],
   agents: readonly AgentListing[],
@@ -98,7 +92,7 @@ export function buildEnvoys(
     const account = toAccount(connection);
     if (!account) continue;
     if (account.agent === null) {
-      unlinked.push(account);
+      if (account.route !== null) unlinked.push(account);
       continue;
     }
     let envoy = byAgent.get(account.agent);

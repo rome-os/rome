@@ -68,23 +68,22 @@ describe("buildEnvoys", () => {
     expect(unlinked).toEqual([]);
   });
 
-  it("marks the guardian's own account as a delegate on its brand's card", () => {
-    const { envoys } = buildEnvoys(
-      [
-        connection({
-          service: "telegram_user",
-          channel: "telegram_user",
-          grants: { session: "authorized" },
-          display: { session: null },
-          agent: MAIN_AGENT_ID,
-        }),
-      ],
-      [],
-    );
+  it("marks the guardian's own account as a delegate with no card to open", () => {
+    const own = (agent: string | null) =>
+      connection({
+        service: "telegram_user",
+        channel: "telegram_user",
+        grants: { session: "authorized" },
+        display: { session: null },
+        agent,
+      });
+    const { envoys } = buildEnvoys([own(MAIN_AGENT_ID)], []);
     expect(envoys[0]!.accounts[0]).toMatchObject({
       kind: "delegate",
       platform: "telegram",
-      route: "telegram",
+      route: null,
     });
+    // Nowhere links an agent to it yet, so it is not offered as unlinked.
+    expect(buildEnvoys([own(null)], []).unlinked).toEqual([]);
   });
 });
