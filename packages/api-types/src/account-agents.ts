@@ -14,6 +14,5 @@ export const LINKABLE_SERVICES: ReadonlySet<string> = new Set([
 ]);
 
 /** The canonical id of main, the id core stores when main is linked. Main is
- *  linked to an account like any agent, but unlike any other agent it may be
- *  linked to several accounts on one platform. */
+ *  linked to an account like any agent. */
 export const MAIN_AGENT_ID = "core:main";

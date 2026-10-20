@@ -1230,9 +1230,8 @@ export const handlers = [
     HttpResponse.json({ agents: mockAgentNames.map((name) => ({ name })) }),
   ),
   http.get("/api/connections", () => HttpResponse.json(connections)),
-  // Link an agent to an account. On one platform an agent other than main
-  // links to at most one account, so linking it here takes the link off the
-  // other one.
+  // Link an agent to an account. Only this account changes: an agent may be
+  // linked to any number of accounts, several on one platform included.
   http.put("/api/channels/accounts/:id/agent", async ({ params, request }) => {
     const id = String(params.id);
     const body = (await request.json()) as { agent: string | null };
@@ -1256,27 +1255,15 @@ export const handlers = [
         { status: 409 },
       );
     }
-    const platform = platformOf(target.service);
-    let unlinkedFrom: string | null = null;
-    // Main may answer on several accounts, so only other agents move.
-    if (agent !== null && agent !== MAIN_AGENT_ID) {
-      for (const other of connections.connections) {
-        if (other === target || other.agent !== agent) continue;
-        if (platformOf(other.service) !== platform) continue;
-        other.agent = null;
-        unlinkedFrom = other.channel ?? null;
-      }
-    }
     target.agent = agent;
     return HttpResponse.json({
       account: {
         id,
         service: target.service,
-        platform,
+        platform: platformOf(target.service),
         connectionId: target.id,
         agent,
       },
-      unlinkedFrom,
     });
   }),
   // An authorized grant is what puts Disconnect on a card, so seeding the three

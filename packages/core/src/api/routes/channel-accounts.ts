@@ -44,10 +44,9 @@ export function channelAccountsRoutes(deps: Pick<ApiDeps, "db" | "agentLoader">)
     return c.json({ accounts: channels.all().map(accountView) });
   });
 
-  // Link an agent to an account, or unlink it with `null`. Linking an agent
-  // other than main that has an account on the same platform takes it off
-  // that account. Only an account of a linkable service takes a link;
-  // unlinking is always open.
+  // Link an agent to an account, or unlink it with `null`. Only this account
+  // changes: the agent keeps every other account it is linked to. Only an
+  // account of a linkable service takes a link; unlinking is always open.
   app.put("/channels/accounts/:id/agent", async (c) => {
     if (!isSameOriginMutationRequest(c.req.raw)) {
       return c.json({ error: "Cross-site requests are not allowed." }, 403);
@@ -66,11 +65,7 @@ export function channelAccountsRoutes(deps: Pick<ApiDeps, "db" | "agentLoader">)
     }
     const id = c.req.param("id");
     try {
-      const outcome = channels.link(id, agent);
-      const result: LinkAccountAgentResult = {
-        account: accountView(outcome.channel),
-        unlinkedFrom: outcome.unlinkedFrom,
-      };
+      const result: LinkAccountAgentResult = { account: accountView(channels.link(id, agent)) };
       return c.json(result);
     } catch (err) {
       if (err instanceof ChannelRecordNotFound) return c.json({ error: err.message }, 404);

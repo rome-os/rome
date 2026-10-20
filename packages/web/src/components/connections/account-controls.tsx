@@ -180,8 +180,8 @@ function AccountAgentField({
   // back to the old link in between.
   const [pending, setPending] = useState<{ value: string; replaced: string | null } | null>(null);
   // Once the refreshed card reports another link, the server's value takes
-  // over. Dropping the choice then keeps a later move of the link from
-  // bringing it back.
+  // over. Dropping the choice then keeps a later switch or unlink made
+  // elsewhere from bringing it back.
   if (pending && pending.replaced !== card.agent) setPending(null);
   const shown = pending && pending.replaced === card.agent ? pending.value : null;
   const linked = card.agent === null ? null : canonicalAgent(card.agent);
@@ -210,13 +210,11 @@ function AccountAgentField({
     setSaving(true);
     setPending({ value, replaced: card.agent });
     try {
-      const result = await linkAccountAgent(channel, agent, t("connections.accounts.linkFailed"));
+      await linkAccountAgent(channel, agent, t("connections.accounts.linkFailed"));
       const account = card.label;
       // Confirmations, not errors, so they skip `onFlash`.
       if (agent === null) {
         toast(t("connections.accounts.linkCleared", { account }));
-      } else if (result.unlinkedFrom) {
-        toast(t("connections.accounts.linkMoved", { agent: agentLabel(agent), account }));
       } else {
         toast(t("connections.accounts.linked", { agent: agentLabel(agent), account }));
       }

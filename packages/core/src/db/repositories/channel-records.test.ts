@@ -137,20 +137,37 @@ describe("ChannelRecordsRepository", () => {
     expect(records.idOf("c1")).toBeNull();
   });
 
-  it("moves an agent between channels of one platform", () => {
+  it("links one agent to several channels of one platform and keeps each link", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "telegram" }, NOW);
     records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
+    const later = records.claim(db, { id: "c3", service: "telegram" }, NOW).id;
     records.link("telegram", "sales:agent");
 
-    const outcome = records.link("telegram_user", "sales:agent");
-
-    expect(outcome).toMatchObject({
-      channel: { id: "telegram_user", agent: "sales:agent" },
-      unlinkedFrom: "telegram",
+    expect(records.link("telegram_user", "sales:agent")).toMatchObject({
+      id: "telegram_user",
+      agent: "sales:agent",
     });
-    expect(records.byId("telegram")?.agent).toBeNull();
+    records.link(later, "sales:agent");
+
+    expect(records.byId("telegram")?.agent).toBe("sales:agent");
+    expect(records.byId("telegram_user")?.agent).toBe("sales:agent");
+    expect(records.byId(later)?.agent).toBe("sales:agent");
+  });
+
+  it("unlinks one channel of an agent and leaves its other channels linked", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    const second = records.claim(db, { id: "c2", service: "feishu" }, NOW).id;
+    records.link("feishu", "sales:agent");
+    records.link(second, "sales:agent");
+
+    records.link("feishu", null);
+
+    expect(records.byId("feishu")?.agent).toBeNull();
+    expect(records.byId(second)?.agent).toBe("sales:agent");
   });
 
   it("links main to several channels of one platform, by its canonical id", () => {
@@ -159,9 +176,7 @@ describe("ChannelRecordsRepository", () => {
     records.claim(db, { id: "c1", service: "telegram" }, NOW);
     const later = records.claim(db, { id: "c2", service: "telegram" }, NOW).id;
 
-    const outcome = records.link(later, "main");
-
-    expect(outcome).toMatchObject({ channel: { agent: "core:main" }, unlinkedFrom: null });
+    expect(records.link(later, "main")).toMatchObject({ agent: "core:main" });
     expect(records.byId("telegram")?.agent).toBe("core:main");
     expect(() =>
       db.update(channels).set({ agent: "core:main" }).where(eq(channels.service, "telegram")).run(),
@@ -175,7 +190,9 @@ describe("ChannelRecordsRepository", () => {
     records.claim(db, { id: "c2", service: "telegram" }, NOW);
     records.link("feishu", "sales:agent");
 
-    expect(records.link("telegram", "sales:agent").unlinkedFrom).toBeNull();
+    records.link("telegram", "sales:agent");
+
+    expect(records.byId("telegram")?.agent).toBe("sales:agent");
     expect(records.byId("feishu")?.agent).toBe("sales:agent");
   });
 
@@ -209,19 +226,17 @@ describe("ChannelRecordsRepository", () => {
     records.claim(db, { id: "c1", service: "agents" }, NOW);
 
     expect(() => records.link("agents", "sales:agent")).toThrow(ChannelNotLinkable);
-    expect(records.link("agents", null).channel.agent).toBeNull();
+    expect(records.link("agents", null).agent).toBeNull();
   });
 
-  it("rejects a direct write that links one agent twice on a platform", () => {
+  it("accepts a direct write that links one agent to every channel of a platform", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
     records.claim(db, { id: "c2", service: "feishu" }, NOW);
-    records.link("feishu", "sales:agent");
 
-    expect(() => db.update(channels).set({ agent: "sales:agent" }).run()).toThrow(
-      /UNIQUE constraint failed/,
-    );
+    expect(() => db.update(channels).set({ agent: "sales:agent" }).run()).not.toThrow();
+    expect(records.all().map((record) => record.agent)).toEqual(["sales:agent", "sales:agent"]);
   });
 
   it("lists the Connections no channel records yet", () => {

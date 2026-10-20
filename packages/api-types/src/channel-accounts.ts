@@ -39,9 +39,9 @@ export interface LinkAccountAgentRequest {
   agent: string | null;
 }
 
+/** The account as it stands after the link. A link changes no other account:
+ *  an agent may be linked to any number of accounts, several on one platform
+ *  included. */
 export interface LinkAccountAgentResult {
   account: ChannelAccount;
-  /** Id of the account the agent was linked to before, if any. On one platform
-   *  an agent links to at most one account, so the server moves the link. */
-  unlinkedFrom: string | null;
 }

@@ -114,3 +114,13 @@ A linkable service's next Connection never takes back a released channel, the sa
 
 - **Keep minting ahead of setup, and hide accounts that hold no grant.** Rejected because the hidden rows still back channels, take names and count against the one-agent-per-platform rule.
 - **Give a released channel back to the same account when it connects again.** Rejected to keep one rule for every account that connects: it starts empty.
+
+## Amendment (2026-10-20): an agent linked to any number of channels
+
+An agent can be linked to any number of channels, several on one platform included. The one-agent-per-platform rule from the 2026-10-16 amendment is withdrawn, and so is its partial unique index `channels_platform_agent_unique`. A link changes only the channel it names: linking agent X to channel B leaves X linked to channel A. Main's exemption goes with the rule, so main is linked like any other agent in every respect.
+
+Each channel keeps its stored platform, mapped from its service as the 2026-10-16 amendment sets out, and `GET /api/channels/accounts` reports it. No rule counts links by it.
+
+### Alternatives
+
+- **Keep the rule and let a guardian lift it per agent.** Rejected because the rule protects nothing: each channel answers only its own conversations, so an agent on two channels of one platform answers two separate sets of conversations, as main already does.

@@ -57,7 +57,7 @@ describe("channel account routes", () => {
     });
   });
 
-  it("links an agent and reports the account it moved from", async () => {
+  it("links an agent to a second account of a platform and keeps the first", async () => {
     const { records, link, db } = setup();
     records.claim(db, { id: "c1", service: "telegram" }, NOW);
     records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
@@ -66,11 +66,16 @@ describe("channel account routes", () => {
     const res = await link("telegram_user", "sales:agent");
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
-      account: { id: "telegram_user", agent: "sales:agent" },
-      unlinkedFrom: "telegram",
+    expect(await res.json()).toEqual({
+      account: {
+        id: "telegram_user",
+        service: "telegram_user",
+        platform: "telegram",
+        connectionId: "c2",
+        agent: "sales:agent",
+      },
     });
-    expect(records.byId("telegram")?.agent).toBeNull();
+    expect(records.byId("telegram")?.agent).toBe("sales:agent");
   });
 
   it("stores the agent's canonical id", async () => {
@@ -89,7 +94,7 @@ describe("channel account routes", () => {
     const res = await link("feishu", null);
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ account: { agent: null }, unlinkedFrom: null });
+    expect(await res.json()).toMatchObject({ account: { agent: null } });
     expect(records.byId("feishu")?.agent).toBeNull();
   });
 
@@ -117,7 +122,6 @@ describe("channel account routes", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       account: { id: "feishu", agent: "core:main" },
-      unlinkedFrom: null,
     });
     records.link("feishu", null);
     expect((await link("feishu", "assistant")).status).toBe(200);
@@ -140,9 +144,7 @@ describe("channel account routes", () => {
     records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
     records.link("telegram_user", null);
 
-    const res = await link("telegram_user", "main");
-
-    expect(await res.json()).toMatchObject({ unlinkedFrom: null });
+    expect((await link("telegram_user", "main")).status).toBe(200);
     expect(records.byId("telegram")?.agent).toBe("core:main");
     expect(records.byId("telegram_user")?.agent).toBe("core:main");
   });

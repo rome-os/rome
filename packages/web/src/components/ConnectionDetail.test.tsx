@@ -462,7 +462,6 @@ describe("ConnectionDetailBody — accounts", () => {
         connectionId: "conn-feishu",
         agent,
       },
-      unlinkedFrom: null,
     };
   }
 
@@ -475,7 +474,6 @@ describe("ConnectionDetailBody — accounts", () => {
         connectionId: "conn-feishu",
         agent: "sales:agent",
       },
-      unlinkedFrom: null,
     });
     const onFlash = rs.fn();
     const onRefresh = rs.fn();
@@ -496,7 +494,7 @@ describe("ConnectionDetailBody — accounts", () => {
     expect(toast).toHaveBeenCalledWith("sales:agent now answers on Feishu.");
   });
 
-  it("says the link moved off another account when the server moved it", async () => {
+  it("confirms a link to a second account of a platform like any other link", async () => {
     mockAccountsFetch({
       account: {
         id: SECOND_FEISHU,
@@ -505,11 +503,10 @@ describe("ConnectionDetailBody — accounts", () => {
         connectionId: "conn-feishu-2",
         agent: "sales:agent",
       },
-      unlinkedFrom: "feishu",
     });
     const onFlash = rs.fn();
     const card = buildConnectionCards([
-      feishu(),
+      feishu({ agent: "sales:agent" }),
       feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU }),
     ]).find((entry) => entry.route === SECOND_FEISHU);
     if (!card) throw new Error("no second Feishu card");
@@ -520,9 +517,7 @@ describe("ConnectionDetailBody — accounts", () => {
     await user.click(await screen.findByRole("option", { name: "sales:agent" }));
 
     await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith(
-        "sales:agent now answers on Feishu · Support Bot. Its link to another account on this platform was removed, since an agent other than main links to one account per platform.",
-      ),
+      expect(toast).toHaveBeenCalledWith("sales:agent now answers on Feishu · Support Bot."),
     );
   });
 
@@ -535,7 +530,6 @@ describe("ConnectionDetailBody — accounts", () => {
         connectionId: "conn-feishu",
         agent: "sales:agent",
       },
-      unlinkedFrom: null,
     });
     const onRefresh = rs.fn();
     renderAccountBody(cardFor([feishu()], "feishu"), { onRefresh });
@@ -548,7 +542,7 @@ describe("ConnectionDetailBody — accounts", () => {
     expect(screen.getByRole("combobox", { name: "Agent" }).textContent).toContain("sales:agent");
   });
 
-  it("shows the server's link once it moves off this account after a save", async () => {
+  it("shows the server's link once it changes elsewhere after a save", async () => {
     mockAccountsFetch(linkResult("sales:agent"));
     const onRefresh = rs.fn();
     const { rerenderCard } = renderAccountBody(cardFor([feishu()], "feishu"), { onRefresh });
@@ -558,7 +552,7 @@ describe("ConnectionDetailBody — accounts", () => {
     await user.click(await screen.findByRole("option", { name: "sales:agent" }));
     await waitFor(() => expect(onRefresh).toHaveBeenCalled());
     rerenderCard(cardFor([feishu({ agent: "sales:agent" })], "feishu"));
-    // Linking sales:agent to another account later moves the link off this one.
+    // Another tab unlinks the account later.
     rerenderCard(cardFor([feishu({ agent: null })], "feishu"));
 
     expect(screen.getByRole("combobox", { name: "Agent" }).textContent).toContain(
@@ -642,7 +636,6 @@ describe("ConnectionDetailBody — accounts", () => {
         connectionId: "conn-feishu",
         agent: null,
       },
-      unlinkedFrom: null,
     });
     const onFlash = rs.fn();
     renderAccountBody(cardFor([feishu({ agent: "sales:agent" })], "feishu"), { onFlash });
