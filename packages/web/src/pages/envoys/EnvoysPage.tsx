@@ -245,13 +245,24 @@ function EnvoyCard({ envoy }: { envoy: Envoy }) {
   );
 }
 
-function AccountSummary({ account }: { account: EnvoyAccount }) {
+/** `linked` makes the name open the account's Connections card, for rows
+ *  that are not a link as a whole. */
+function AccountSummary({ account, linked = false }: { account: EnvoyAccount; linked?: boolean }) {
   const { t } = useTranslation("envoys");
   return (
     <>
       <ConnectionBrandBadge connection={account.platform} />
       <ListRowContent>
-        <div className="truncate font-medium">{account.name}</div>
+        {linked && account.route !== null ? (
+          <Link
+            to={accountPath(account.route)}
+            className="block truncate rounded-4 font-medium underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {account.name}
+          </Link>
+        ) : (
+          <div className="truncate font-medium">{account.name}</div>
+        )}
         <div className="truncate text-aux text-muted-foreground">
           {serviceLabel(account.platform)}
           {account.kind === "delegate" && ` · ${t("kinds.yours")}`}
@@ -299,7 +310,7 @@ function AccountAgentRow({
         disabled={data.agentsPending}
         onChanged={onChanged}
       >
-        <AccountSummary account={account} />
+        <AccountSummary account={account} linked />
       </AgentChange>
     </div>
   );

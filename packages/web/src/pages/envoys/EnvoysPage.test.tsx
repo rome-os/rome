@@ -97,6 +97,14 @@ describe("EnvoysPage", () => {
     await rs.waitFor(() => expect(location()).toBe(`/envoys/${encodeURIComponent("sales:agent")}`));
   });
 
+  it("links an account's name to its Connections card", async () => {
+    mockServer([connection("discord", "Sales", null)]);
+    renderAt("/envoys");
+
+    const link = await screen.findByRole("link", { name: "Sales" });
+    expect(link.getAttribute("href")).toBe("/settings/connections/discord");
+  });
+
   it("stays on Settings while the agent keeps other accounts", async () => {
     mockServer([
       connection("discord", "Sales", "sales:agent"),
