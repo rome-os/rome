@@ -387,7 +387,7 @@ describe("buildConnectionCards — several accounts per service", () => {
         channel: SECOND,
         grants: { app: "authorized" },
         display: { app: display({ displayName: "Sales Bot" }) },
-        linkedAgent: "sales:agent",
+        agent: "sales:agent",
         severalAccounts: true,
       }),
       conn({
@@ -403,11 +403,11 @@ describe("buildConnectionCards — several accounts per service", () => {
     const [first, second] = cards;
     expect(first.label).toBe("Feishu");
     expect(first.channel).toBe("feishu");
-    expect(first.linkedAgent).toBeNull();
+    expect(first.agent).toBeNull();
     expect(second.label).toBe("Feishu · Sales Bot");
     expect(second.service).toBe("feishu");
     expect(second.slots[0].connectionId).toBe("conn-feishu-2");
-    expect(second.linkedAgent).toBe("sales:agent");
+    expect(second.agent).toBe("sales:agent");
     expect(second.severalAccounts).toBe(true);
   });
 

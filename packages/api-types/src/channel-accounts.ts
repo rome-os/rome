@@ -1,6 +1,6 @@
 /**
  * The wire shapes of accounts and the agents linked to them. Screens call a
- * channel an account. Vocabulary: docs/concepts/messaging.md#channels.
+ * channel an account. Vocabulary: docs/concepts/messaging.md#romes-accounts.
  */
 
 /**
@@ -16,7 +16,7 @@ export interface ConnectionAccountFields {
   /** Canonical id of the agent linked to this account (`sales:agent`,
    *  `core:main`), or null when none is, which leaves the account silent.
    *  Absent for placeholders and for a service that takes no link. */
-  linkedAgent?: string | null;
+  agent?: string | null;
   /** Whether the service offers "add another account". */
   severalAccounts?: boolean;
 }
@@ -29,7 +29,7 @@ export interface ChannelAccount {
   platform: string;
   /** The Connection backing the account, or null once it was deleted. */
   connectionId: string | null;
-  /** Canonical id of the linked agent, or null when the account is silent. */
+  /** Canonical id of the account's agent, or null when the account is silent. */
   agent: string | null;
 }
 

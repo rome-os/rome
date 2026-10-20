@@ -8,7 +8,7 @@ import {
   type NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
 import { isStopCommand } from "@rome-os/app-runtime";
-import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./linked-agents.js";
+import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./account-agents.js";
 import { preserveMentionOnlyText } from "./mention-only.js";
 import type { OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
@@ -44,9 +44,9 @@ export interface FeishuConfig {
   };
   personMappingRepo?: PersonMappingRepository;
   listAgents?: () => string[];
-  /** The agent linked to this adapter's channel, as `linkedAgentResolver`
+  /** The agent linked to this adapter's channel, as `accountAgentResolver`
    *  answers it. Absent, the channel reads as one that takes no link. */
-  linkedAgent?: () => string | null | undefined;
+  accountAgent?: () => string | null | undefined;
   /** Whether an agent is loaded, aliases included. Absent, every agent counts
    *  as loaded. */
   hasAgent?: (name: string) => boolean;
@@ -138,7 +138,7 @@ export class FeishuAdapter {
   };
   private readonly personMappingRepo?: PersonMappingRepository;
   private readonly listAgents?: () => string[];
-  private readonly linkedAgent?: () => string | null | undefined;
+  private readonly accountAgent?: () => string | null | undefined;
   private readonly hasAgent?: (name: string) => boolean;
   private readonly onFault?: (err: unknown) => void;
   private readonly observedConversations = new Map<
@@ -173,7 +173,7 @@ export class FeishuAdapter {
     this.conversationSettings = config.conversationSettings;
     this.personMappingRepo = config.personMappingRepo;
     this.listAgents = config.listAgents;
-    this.linkedAgent = config.linkedAgent;
+    this.accountAgent = config.accountAgent;
     this.hasAgent = config.hasAgent;
     this.onFault = config.onFault;
   }
@@ -467,7 +467,7 @@ export class FeishuAdapter {
     }
 
     // Saving the agent the card showed leaves routing alone, so a group with no
-    // choice keeps following the link, a relink since the card was sent included.
+    // choice keeps following the link, an agent switched since the card was sent included.
     if (patch?.agentName && patch.agentName === value.shown) delete patch.agentName;
     if (patch?.agentName) {
       const available = this.listAgents?.();
@@ -566,7 +566,7 @@ export class FeishuAdapter {
     const storedAgent = storedAgentChoice(snapshot);
     return {
       storedAgent,
-      answeringAgent: answeringAgentOf(this.linkedAgent?.(), storedAgent, "group", this.hasAgent),
+      answeringAgent: answeringAgentOf(this.accountAgent?.(), storedAgent, "group", this.hasAgent),
     };
   }
 
@@ -575,7 +575,7 @@ export class FeishuAdapter {
   private async getChannelConfig(chatId: string, withAgents = false): Promise<FeishuChannelConfig> {
     if (!this.conversationSettings || !this.connectionId) {
       return withAgents
-        ? { answeringAgent: answeringAgentOf(this.linkedAgent?.(), undefined, "group") }
+        ? { answeringAgent: answeringAgentOf(this.accountAgent?.(), undefined, "group") }
         : {};
     }
     const observed = this.observedConversations.get(chatId);
@@ -695,8 +695,7 @@ function buildGroupConfigCard(
       tag: "div",
       text: {
         tag: "plain_text",
-        content:
-          "No agent answers in this group: this bot has no linked agent, or it is not loaded.",
+        content: "No agent answers in this group: this account has no agent, or it is not loaded.",
       },
     });
   } else if (cfg.storedAgent && cfg.storedAgent !== cfg.answeringAgent) {

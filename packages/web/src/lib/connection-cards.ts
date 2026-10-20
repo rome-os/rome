@@ -72,9 +72,9 @@ export interface ConnectionCard {
   channel: string | null;
   /** Canonical id of the agent linked to this account, or null when the account
    *  stays silent. */
-  linkedAgent: string | null;
+  agent: string | null;
   /** Whether the server reports links, so the link route exists. A core that
-   *  serves accounts before agent links omits `linkedAgent`, and the picker
+   *  serves accounts before agent links omits `agent`, and the picker
    *  stays hidden. */
   linkReported: boolean;
   /** Whether the service offers "add another account". */
@@ -212,8 +212,8 @@ function toCard(connection: ApiConnection): ConnectionCard {
     channel: connection.channel ?? null,
     // The bot's link only. A folded personal account (`telegram_user`) keeps
     // its own link, which this card does not show or set yet.
-    linkedAgent: connection.linkedAgent ?? null,
-    linkReported: connection.linkedAgent !== undefined,
+    agent: connection.agent ?? null,
+    linkReported: connection.agent !== undefined,
     severalAccounts: connection.severalAccounts === true,
   };
 }
@@ -243,7 +243,7 @@ function composioCard(status: ComposioCliStatus): ConnectionCard {
     ],
     connect: null,
     channel: null,
-    linkedAgent: null,
+    agent: null,
     linkReported: false,
     severalAccounts: false,
   };
@@ -302,7 +302,7 @@ export function buildConnectionCards(
         slots: sessionSlots,
         connect: null,
         channel: null,
-        linkedAgent: null,
+        agent: null,
         linkReported: false,
         severalAccounts: false,
       });

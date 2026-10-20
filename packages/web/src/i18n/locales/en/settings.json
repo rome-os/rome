@@ -57,8 +57,8 @@
       "add": "Add another account",
       "addFailed": "Could not add an account",
       "addedNotShown": "Account added. Find it in the Connections list.",
-      "linkedAgent": "Linked agent",
-      "linkedAgentDescription": "The linked agent answers messages on this account. Without one, the account stays silent. Main can link to several accounts on a platform; any other agent links to one.",
+      "agent": "Agent",
+      "agentDescription": "The agent answers messages on this account. Without one, the account stays silent. Main can be linked to several accounts on a platform; any other agent to one.",
       "noAgent": "None. This account stays silent.",
       "agentsFailed": "Could not load agents",
       "linked": "{{agent}} now answers on {{account}}.",
@@ -86,14 +86,14 @@
     "cards": {
       "telegram": {
         "bot": {
-          "titleFallback": "Your Telegram bot",
-          "subtitle": "Add a bot from @BotFather.",
+          "titleFallback": "Your agent's Telegram account",
+          "subtitle": "Create the account with @BotFather.",
           "bullets": {
             "reply": "Reply when people message {{identity}}",
             "start": "Start a task when a new message arrives"
           },
           "bulletsFallback": {
-            "reply": "Reply when people message your bot",
+            "reply": "Reply when people message this account",
             "start": "Start a task when a new message arrives"
           }
         },
@@ -146,20 +146,20 @@
       },
       "discord": {
         "bot": {
-          "titleFallback": "Your Discord bot",
+          "titleFallback": "Your agent's Discord account",
           "bullets": {
             "reply": "Reply when people message {{identity}} in your servers",
             "start": "Start a task when a new message arrives"
           },
           "bulletsFallback": {
-            "reply": "Reply when people message your bot in your servers",
+            "reply": "Reply when people message this account in your servers",
             "start": "Start a task when a new message arrives"
           }
         }
       },
       "feishu": {
         "bot": {
-          "title": "Your Feishu app",
+          "title": "Your agent's Feishu account",
           "bullets": {
             "reply": "Reply when people message your agent on Feishu",
             "start": "Start a task when a new message arrives"
@@ -370,7 +370,7 @@
         "inline": "Inline"
       },
       "mainAgent": "main (default)",
-      "linkedAgent": "{{agent}} (linked agent)",
+      "accountAgent": "{{agent}} (this account's agent)",
       "silentAccount": "The agent linked to this account answers here.",
       "silentAccountLink": "<account>Link one on the account</account>.",
       "silentAccountOverride": "This conversation's choice, {{agent}}, applies once one is linked.",

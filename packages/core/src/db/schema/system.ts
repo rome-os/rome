@@ -14,7 +14,7 @@ import type { OutboxMessage } from "@rome/api-types/people";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
-import { MAIN_AGENT_ID } from "@rome/api-types/linked-agents";
+import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import {
   APPROVAL_EXECUTION_STATES,
   APPROVAL_STATUSES,
@@ -880,7 +880,7 @@ export const connections = sqliteTable("connections", {
 // an id minted once and never changed. The first channel of a service takes
 // the service's name as its id, and later ones get an opaque id. A row
 // outlives its Connection, unbacked and unlinked, so the service's next
-// Connection takes it back. `agent` is the linked agent's canonical id.
+// Connection takes it back. `agent` is the canonical id of the account's agent.
 // `platform` is stored, not derived on read, so the partial unique index can
 // hold that on one platform an agent other than main is linked to at most one
 // channel; a row keeps the platform it was minted on. Main is exempt, since

@@ -322,7 +322,7 @@ async function resolveAgent<F extends string | null>(
   if (isCoreMainAgentId(requested)) return "main";
   try {
     if ((await deps.agentRunner.hasAgent?.(requested)) === false) {
-      // Core already warns, once per channel, for a linked agent that is not
+      // Core already warns, once per channel, for an account's agent that is not
       // loaded, and falling back to main is routine after an app is removed.
       log.debug("agent is not loaded", { agent: requested, fallback });
       return fallback;
@@ -629,14 +629,16 @@ export function createMessageHandlerAction(
       try {
         log.info("message received", { channel, channelUserId, displayName });
 
-        const linkedAgent =
-          typeof args.linkedAgentName === "string" && args.linkedAgentName.trim()
-            ? args.linkedAgentName.trim()
+        // An action queued before the rename carries `linkedAgentName`.
+        const accountAgentName = args.accountAgentName ?? args.linkedAgentName;
+        const accountAgent =
+          typeof accountAgentName === "string" && accountAgentName.trim()
+            ? accountAgentName.trim()
             : undefined;
         // The host passes no agent it knows is not loaded, so a null here
-        // means the linked agent was unloaded since, and the account is silent.
-        const answeringAgent = linkedAgent
-          ? await resolveAgent(deps, linkedAgent, null)
+        // means the account's agent was unloaded since, and the account is silent.
+        const answeringAgent = accountAgent
+          ? await resolveAgent(deps, accountAgent, null)
           : undefined;
         if (answeringAgent === null) {
           return { status: "ok", data: { action: "silent" } };
@@ -690,8 +692,8 @@ export function createMessageHandlerAction(
         });
         // Root conversations retain their persisted override, and native
         // thread sessions are refreshed from their parent's. A group's or
-        // channel's override wins over the account's linked agent, which
-        // answers private chats and the rest, and is never stored, so a relink
+        // channel's override wins over the account's agent, which answers
+        // private chats and the rest, and is never stored, so switching it
         // takes effect on the next message.
         const storedAgent =
           conversation.agentName && !isCoreMainAgentId(conversation.agentName)
@@ -708,7 +710,7 @@ export function createMessageHandlerAction(
             : pinnedMain
               ? "main"
               : storedAgent;
-        // An override whose app was removed falls back to the linked agent.
+        // An override whose app was removed falls back to the account's agent.
         const targetAgent = !override
           ? (answeringAgent ?? "main")
           : answeringAgent

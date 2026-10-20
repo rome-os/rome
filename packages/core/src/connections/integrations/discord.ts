@@ -107,9 +107,9 @@ export interface DiscordDeps {
   chatStop?: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   listAgents: () => string[];
-  /** The agent linked to a Connection's channel, as `linkedAgentResolver`
+  /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */
-  linkedAgentOf?: (connectionId: string) => string | null | undefined;
+  accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
   /** Injectable token validator so the connect route / tests can drive the
@@ -257,7 +257,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             conversationSettings: deps.conversationSettings,
             chatStop: deps.chatStop,
             listAgents: deps.listAgents,
-            linkedAgent: () => deps.linkedAgentOf?.(kit.connectionId),
+            accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,
             resolveDiscordPerson: (channelUserId) =>
               deps.personMappingRepo.findByChannelUser("discord", channelUserId),

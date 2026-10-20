@@ -3,7 +3,7 @@
  * Lark are one platform, and a Telegram bot and a signed-in Telegram user are
  * one platform. It is a fixed value, never parsed out of a channel's name, and
  * the one-agent-per-platform rule keys on it. Vocabulary:
- * docs/concepts/messaging.md#channels.
+ * docs/concepts/messaging.md#romes-accounts.
  */
 
 /** Services whose platform is another service's name. Feishu and Lark already

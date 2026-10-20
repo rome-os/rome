@@ -200,14 +200,14 @@ describe("Discord configuration command authorization", () => {
     });
   });
 
-  it("names the linked agent in status and after a clear", async () => {
+  it("names the account's agent in status and after a clear", async () => {
     const settings = makeConversationSettings();
     const adapter = new DiscordAdapter({
       botToken: "test-token",
       connectionId: CONNECTION_ID,
       conversationSettings: settings.control,
       resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
-      linkedAgent: () => "sales:agent",
+      accountAgent: () => "sales:agent",
     });
     const status = makeInteraction({ userId: GUARDIAN_ID, subcommand: "status" });
     await runCommand(adapter, status.interaction);
@@ -226,7 +226,7 @@ describe("Discord configuration command authorization", () => {
     });
   });
 
-  it("names the linked agent in status when the stored agent is not loaded", async () => {
+  it("names the account's agent in status when the stored agent is not loaded", async () => {
     const settings = makeConversationSettings();
     const snapshot = await settings.get();
     snapshot.effective.routing.agentName = "gone:agent";
@@ -235,7 +235,7 @@ describe("Discord configuration command authorization", () => {
       connectionId: CONNECTION_ID,
       conversationSettings: settings.control,
       resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
-      linkedAgent: () => "sales:agent",
+      accountAgent: () => "sales:agent",
       hasAgent: (name) => name === "sales:agent",
     });
     const { interaction, editReply } = makeInteraction({
@@ -248,14 +248,14 @@ describe("Discord configuration command authorization", () => {
     });
   });
 
-  it("says no agent answers when the bot has no linked agent", async () => {
+  it("says no agent answers when the bot has no agent", async () => {
     const settings = makeConversationSettings();
     const adapter = new DiscordAdapter({
       botToken: "test-token",
       connectionId: CONNECTION_ID,
       conversationSettings: settings.control,
       resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
-      linkedAgent: () => null,
+      accountAgent: () => null,
     });
     const { interaction, editReply } = makeInteraction({
       userId: GUARDIAN_ID,
@@ -276,7 +276,7 @@ describe("Discord configuration command authorization", () => {
       connectionId: CONNECTION_ID,
       conversationSettings: settings.control,
       resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
-      linkedAgent: () => "sales:agent",
+      accountAgent: () => "sales:agent",
     });
     const { interaction, editReply } = makeInteraction({
       userId: GUARDIAN_ID,
@@ -293,7 +293,7 @@ describe("Discord configuration command authorization", () => {
     });
   });
 
-  it("follows the linked agent in a DM, whatever agent is stored", async () => {
+  it("follows the account's agent in a DM, whatever agent is stored", async () => {
     const settings = makeConversationSettings();
     const snapshot = await settings.get();
     snapshot.effective.routing.agentName = "pm-assistant";
@@ -302,7 +302,7 @@ describe("Discord configuration command authorization", () => {
       connectionId: CONNECTION_ID,
       conversationSettings: settings.control,
       resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
-      linkedAgent: () => "sales:agent",
+      accountAgent: () => "sales:agent",
       listAgents: () => ["pm-assistant", "sales:agent"],
     });
     const status = makeInteraction({ userId: GUARDIAN_ID, subcommand: "status", guildId: null });

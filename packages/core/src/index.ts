@@ -80,7 +80,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
-import { linkedAgentResolver } from "./channels/linked-agents.js";
+import { accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectionPacing } from "./channels/delivery/connection-pacing.js";
@@ -1176,7 +1176,7 @@ async function main() {
   //
   // Register every built-in descriptor now (before load()/import), threading the
   // runtime deps the factories need from here where the repos/adapters exist.
-  const linkedAgentOf = linkedAgentResolver(channelRecords, agentLoader);
+  const accountAgentOf = accountAgentResolver(channelRecords, agentLoader);
   const { RomeCloudMailProvider } = await import("./lib/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
@@ -1194,9 +1194,9 @@ async function main() {
     listAgents: () => Array.from(agentLoader.getAll().keys()),
     hasAgent: (name) => agentLoader.has(name),
     // A Connection with no channel record backs no channel, so nothing answers it.
-    linkedAgentOf: (connectionId) => {
+    accountAgentOf: (connectionId) => {
       const channel = channelRecords.idOf(connectionId);
-      return channel === null ? null : linkedAgentOf(channel);
+      return channel === null ? null : accountAgentOf(channel);
     },
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
@@ -1253,7 +1253,8 @@ async function main() {
         conversationSettings,
         chatStop,
         channels: hookChannels,
-        linkedAgentOf,
+        accountAgentOf,
+        linkedAgentOf: accountAgentOf,
       });
       if (loadedHook) {
         messageHook = loadedHook;
@@ -1293,7 +1294,8 @@ async function main() {
           conversationSettings,
           chatStop,
           channels: hookChannels,
-          linkedAgentOf,
+          accountAgentOf,
+          linkedAgentOf: accountAgentOf,
         },
         getCurrent: () => messageHook,
         setCurrent: (hook) => {

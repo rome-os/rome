@@ -10,7 +10,7 @@ describe("SessionQueryService", () => {
   let testDb: TestDb;
   let webchat: WebChatRepository;
   let service: SessionQueryService;
-  // Each channel's linked agent, as the hook's `linkedAgentOf` answers it.
+  // The agent of each channel's account, as the hook's `accountAgentOf` answers it.
   const links: Record<string, string | null> = {
     telegram: "code-review:skill_review",
     feishu: "core:main",
@@ -55,7 +55,7 @@ describe("SessionQueryService", () => {
           },
         ],
       },
-      linkedAgentOf: (channel) => (channel in links ? links[channel] : undefined),
+      accountAgentOf: (channel) => (channel in links ? links[channel] : undefined),
       channelNames: () => Object.keys(links),
       now: () => new Date("2026-07-15T12:00:00.000Z"),
     });

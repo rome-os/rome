@@ -36,7 +36,7 @@ describe("channel account routes", () => {
     return { records, app, link, db: testDb.db };
   }
 
-  it("lists each account with its linked agent", async () => {
+  it("lists each account with its agent", async () => {
     const { records, app, db } = setup();
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
     records.link("feishu", "sales:agent");

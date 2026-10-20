@@ -637,7 +637,7 @@ describe("FeishuAdapter", () => {
     expect(inputJson).toContain('"initial_option":"inline"');
   });
 
-  it("shows the linked agent and keeps it unpinned when the card saves it", async () => {
+  it("shows the account's agent and keeps it unpinned when the card saves it", async () => {
     const conversationSettings = makeConversationSettings();
     let linked = "sales:agent";
     channel = new FakeLarkChannel();
@@ -649,7 +649,7 @@ describe("FeishuAdapter", () => {
         conversationSettings: conversationSettings.control,
         personMappingRepo: guardianPersonRepo("ou_alice"),
         listAgents: () => ["sales:agent", "support:agent"],
-        linkedAgent: () => linked,
+        accountAgent: () => linked,
       },
       () => channel as unknown as LarkChannel,
     );
@@ -662,7 +662,7 @@ describe("FeishuAdapter", () => {
     expect(card).toContain('"initial_option":"sales:agent"');
     expect(card).toContain('"shown":"sales:agent"');
 
-    // A relink while the card is open does not turn its shown agent into a pin.
+    // Switching the agent while the card is open does not turn its shown agent into a pin.
     linked = "support:agent";
     const value = { action: "configure_feishu_group", op: "save", shown: "sales:agent" };
     await channel.emitCardAction({
@@ -685,7 +685,7 @@ describe("FeishuAdapter", () => {
         connectionId: FEISHU_CONNECTION_ID,
         conversationSettings: conversationSettings.control,
         personMappingRepo: guardianPersonRepo("ou_alice"),
-        linkedAgent: () => null,
+        accountAgent: () => null,
       },
       () => channel as unknown as LarkChannel,
     );
@@ -709,7 +709,7 @@ describe("FeishuAdapter", () => {
     }
   });
 
-  it("says when a group's stored agent is not loaded and the linked agent answers", async () => {
+  it("says when a group's stored agent is not loaded and the account's agent answers", async () => {
     const conversationSettings = makeConversationSettings({ routing: { agentName: "gone:agent" } });
     channel = new FakeLarkChannel();
     adapter = new FeishuAdapter(
@@ -721,7 +721,7 @@ describe("FeishuAdapter", () => {
         personMappingRepo: guardianPersonRepo("ou_alice"),
         listAgents: () => ["sales:agent"],
         hasAgent: (name) => name === "sales:agent",
-        linkedAgent: () => "sales:agent",
+        accountAgent: () => "sales:agent",
       },
       () => channel as unknown as LarkChannel,
     );
@@ -735,7 +735,7 @@ describe("FeishuAdapter", () => {
     expect(card).toContain("gone:agent is not loaded, so sales:agent answers instead.");
   });
 
-  it("says no agent answers a group whose bot has no linked agent", async () => {
+  it("says no agent answers a group whose bot has no agent", async () => {
     const conversationSettings = makeConversationSettings();
     channel = new FakeLarkChannel();
     adapter = new FeishuAdapter(
@@ -745,7 +745,7 @@ describe("FeishuAdapter", () => {
         connectionId: FEISHU_CONNECTION_ID,
         conversationSettings: conversationSettings.control,
         personMappingRepo: guardianPersonRepo("ou_alice"),
-        linkedAgent: () => null,
+        accountAgent: () => null,
       },
       () => channel as unknown as LarkChannel,
     );

@@ -79,7 +79,7 @@ import { favorRoutes } from "./routes/favors.js";
 import { sessionsRoutes } from "./routes/sessions.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
-import { readLinkedAgent } from "../channels/linked-agents.js";
+import { readAccountAgent } from "../channels/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
@@ -198,7 +198,7 @@ export function buildApp(
     repository: new SessionQueryRepository(deps.db),
     agentLoader: deps.agentLoader,
     appCatalog: deps.appCatalog,
-    linkedAgentOf: (channel) => readLinkedAgent(sessionChannelRecords, deps.agentLoader, channel),
+    accountAgentOf: (channel) => readAccountAgent(sessionChannelRecords, deps.agentLoader, channel),
     // A channel with no record answers no agent, so the records are every
     // channel that can.
     channelNames: () => sessionChannelRecords.all().map((record) => record.id),

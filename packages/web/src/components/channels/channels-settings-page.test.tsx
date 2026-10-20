@@ -252,7 +252,7 @@ describe("ChannelsSettingsPage", () => {
   });
 
   it("shows a silent account instead of the agent picker", async () => {
-    const connection = (service: string, linked: { linkedAgent?: string | null }) => ({
+    const connection = (service: string, linked: { agent?: string | null }) => ({
       id: `${service}-1`,
       service,
       label: service,
@@ -271,8 +271,8 @@ describe("ChannelsSettingsPage", () => {
       if (url === "/api/connections") {
         return ok({
           connections: [
-            connection("discord", { linkedAgent: null }),
-            connection("feishu", { linkedAgent: "sales:agent" }),
+            connection("discord", { agent: null }),
+            connection("feishu", { agent: "sales:agent" }),
           ],
         });
       }
@@ -306,7 +306,7 @@ describe("ChannelsSettingsPage", () => {
       within(silent).getByText(/This conversation's choice, build · coding, applies/),
     ).toBeTruthy();
 
-    // A chat's own choice wins over a linked agent, so the picker stays.
+    // A chat's own choice wins over the account's agent, so the picker stays.
     const linked = (await screen.findByRole("heading", { name: /support/ })).closest(
       "article",
     ) as HTMLElement;
@@ -336,7 +336,7 @@ describe("ChannelsSettingsPage", () => {
                 watch: { state: "unsupported" },
               },
               connect: null,
-              linkedAgent: "sales:agent",
+              agent: "sales:agent",
             },
           ],
         });
@@ -358,7 +358,7 @@ describe("ChannelsSettingsPage", () => {
     const user = userEvent.setup();
     const card = await findCard();
     const picker = within(card).getByLabelText(/Agent/);
-    expect(picker.textContent).toBe("agent · sales (linked agent)");
+    expect(picker.textContent).toBe("agent · sales (this account's agent)");
 
     // Main is a choice of its own here, which keeps the conversation on main.
     await choose(user, picker, "main");
@@ -366,13 +366,13 @@ describe("ChannelsSettingsPage", () => {
     expect(patchBodies[0]).toMatchObject({ set: { routing: { agentName: "main" } }, clear: [] });
     await waitFor(() => expect(picker.textContent).toBe("main"));
 
-    await choose(user, picker, "agent · sales (linked agent)");
+    await choose(user, picker, "agent · sales (this account's agent)");
     await waitFor(() => expect(patchBodies).toHaveLength(2));
     expect(patchBodies[1]).toMatchObject({ set: {}, clear: ["routing.agentName"] });
-    await waitFor(() => expect(picker.textContent).toBe("agent · sales (linked agent)"));
+    await waitFor(() => expect(picker.textContent).toBe("agent · sales (this account's agent)"));
   });
 
-  it("restores the linked agent when moving off it fails", async () => {
+  it("restores the account's agent when moving off it fails", async () => {
     rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
       init?: RequestInit,
@@ -389,7 +389,7 @@ describe("ChannelsSettingsPage", () => {
               display: {},
               capabilities: { talk: { state: "unlocked" } },
               connect: null,
-              linkedAgent: "sales:agent",
+              agent: "sales:agent",
             },
           ],
         });
@@ -406,7 +406,7 @@ describe("ChannelsSettingsPage", () => {
     const user = userEvent.setup();
     const picker = within(await findCard()).getByLabelText(/Agent/);
     await choose(user, picker, "main");
-    await waitFor(() => expect(picker.textContent).toBe("agent · sales (linked agent)"));
+    await waitFor(() => expect(picker.textContent).toBe("agent · sales (this account's agent)"));
   });
 
   it("creates no override when an edit is undone before the debounce elapses", async () => {

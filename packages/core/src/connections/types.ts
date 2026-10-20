@@ -314,7 +314,7 @@ export interface ConnectionDescriptor {
    *  with its own Connection and channel. A service that keeps its stores or
    *  adapter state under one channel, or is a single presence by nature
    *  (webchat, email), leaves it unset. Vocabulary:
-   *  docs/concepts/messaging.md#channels. */
+   *  docs/concepts/messaging.md#romes-accounts. */
   severalAccounts?: boolean;
   /** The platform account a grant's profile names (a bot id, an app id), or
    *  null when the profile names none. It reads the one field rather than

@@ -134,9 +134,9 @@ export interface FeishuDescriptorDeps {
   conversationSettings: ConversationSettingsService;
   personMappingRepo: PersonMappingRepository;
   listAgents: () => string[];
-  /** The agent linked to a Connection's channel, as `linkedAgentResolver`
+  /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */
-  linkedAgentOf?: (connectionId: string) => string | null | undefined;
+  accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
   createChannel?: CreateLarkChannel;
@@ -547,7 +547,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             conversationSettings: deps.conversationSettings,
             personMappingRepo: deps.personMappingRepo,
             listAgents: deps.listAgents,
-            linkedAgent: () => deps.linkedAgentOf?.(kit.connectionId),
+            accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,
             onFault: routeFault,
           };

@@ -57,8 +57,8 @@
       "add": "添加另一个账号",
       "addFailed": "无法添加账号",
       "addedNotShown": "账号已添加，可在连接列表中找到。",
-      "linkedAgent": "关联的智能体",
-      "linkedAgentDescription": "关联的智能体负责回复此账号上的消息。未关联时，此账号不回复。同一平台上，main 可以关联多个账号；其他智能体只能关联一个。",
+      "agent": "智能体",
+      "agentDescription": "智能体负责回复此账号上的消息。没有智能体时，此账号不回复。同一平台上，main 可以关联多个账号；其他智能体只能关联一个。",
       "noAgent": "无。此账号不回复。",
       "agentsFailed": "无法加载智能体",
       "linked": "{{agent}} 现在负责回复 {{account}}。",
@@ -86,14 +86,14 @@
     "cards": {
       "telegram": {
         "bot": {
-          "titleFallback": "你的 Telegram 机器人",
-          "subtitle": "通过 @BotFather 添加一个机器人。",
+          "titleFallback": "智能体的 Telegram 账号",
+          "subtitle": "通过 @BotFather 创建账号。",
           "bullets": {
             "reply": "有人给 {{identity}} 发消息时自动回复",
             "start": "收到新消息时启动任务"
           },
           "bulletsFallback": {
-            "reply": "有人给你的机器人发消息时自动回复",
+            "reply": "有人给这个账号发消息时自动回复",
             "start": "收到新消息时启动任务"
           }
         },
@@ -146,20 +146,20 @@
       },
       "discord": {
         "bot": {
-          "titleFallback": "你的 Discord 机器人",
+          "titleFallback": "智能体的 Discord 账号",
           "bullets": {
             "reply": "有人在你的服务器里给 {{identity}} 发消息时自动回复",
             "start": "收到新消息时启动任务"
           },
           "bulletsFallback": {
-            "reply": "有人在你的服务器里给你的机器人发消息时自动回复",
+            "reply": "有人在你的服务器里给这个账号发消息时自动回复",
             "start": "收到新消息时启动任务"
           }
         }
       },
       "feishu": {
         "bot": {
-          "title": "你的飞书应用",
+          "title": "智能体的飞书账号",
           "bullets": {
             "reply": "有人在飞书上给你的 agent 发消息时自动回复",
             "start": "收到新消息时启动任务"
@@ -370,7 +370,7 @@
         "inline": "会话内"
       },
       "mainAgent": "main（默认）",
-      "linkedAgent": "{{agent}}（关联的智能体）",
+      "accountAgent": "{{agent}}（此账号的智能体）",
       "silentAccount": "此账号关联的智能体在这里回复。",
       "silentAccountLink": "<account>在账号页面关联</account>。",
       "silentAccountOverride": "关联后，此对话选择的 {{agent}} 将生效。",

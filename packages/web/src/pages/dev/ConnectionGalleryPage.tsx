@@ -146,7 +146,7 @@ function apiConnection(
     connect: options.connect ?? null,
     setups: {},
     channel: null,
-    linkedAgent: null,
+    agent: null,
     severalAccounts: false,
   };
 }

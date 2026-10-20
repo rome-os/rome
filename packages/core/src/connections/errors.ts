@@ -50,7 +50,7 @@ export class AccountAlreadyConnectedError extends Error {
 
   constructor(service: string, accountId: string, connectionId: ConnectionId) {
     super(
-      "This bot is already connected as another account. Set up a different bot, or remove that account first.",
+      "This account is already connected. Connect a different account, or disconnect that one first.",
     );
     this.name = "AccountAlreadyConnectedError";
     this.service = service;

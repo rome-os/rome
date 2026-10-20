@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/linked-agents";
+import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -19,12 +19,12 @@ import { type ConnectionCard, connectionRoute } from "@/lib/connection-cards";
 
 /**
  * Account controls on a channel card: "Add another account" for services that
- * offer several, and the "Linked agent" picker for a linkable service's account
+ * offer several, and the "Agent" picker for a linkable service's account
  * whose Talk is connected. Both act on the account (the card's channel), not on
  * a slot, so they sit below the slot cards.
  */
 
-/** Radix Select reserves the empty string, so "no linked agent" needs a value of its own. */
+/** Radix Select reserves the empty string, so "no agent" needs a value of its own. */
 const NO_AGENT = "__none__";
 
 const AGENTS_QUERY_KEY = ["connection-accounts", "agents"] as const;
@@ -74,7 +74,7 @@ export function AccountControls({
   return (
     <div className="space-y-4">
       {showLink && card.channel && (
-        <LinkedAgentField
+        <AccountAgentField
           card={card}
           channel={card.channel}
           onRefresh={onRefresh}
@@ -136,7 +136,7 @@ function AddAccountButton({
   );
 }
 
-function LinkedAgentField({
+function AccountAgentField({
   card,
   channel,
   onRefresh,
@@ -156,9 +156,9 @@ function LinkedAgentField({
   // Once the refreshed card reports another link, the server's value takes
   // over. Dropping the choice then keeps a later move of the link from
   // bringing it back.
-  if (pending && pending.replaced !== card.linkedAgent) setPending(null);
-  const shown = pending && pending.replaced === card.linkedAgent ? pending.value : null;
-  const linked = card.linkedAgent === null ? null : canonicalAgent(card.linkedAgent);
+  if (pending && pending.replaced !== card.agent) setPending(null);
+  const shown = pending && pending.replaced === card.agent ? pending.value : null;
+  const linked = card.agent === null ? null : canonicalAgent(card.agent);
   const current = shown ?? linked ?? NO_AGENT;
   const agentsQuery = useQuery({
     queryKey: AGENTS_QUERY_KEY,
@@ -168,7 +168,7 @@ function LinkedAgentField({
       const payload = await fetchJson<{ agents: AgentOption[] }>("/api/agents", {
         fallback: t("connections.accounts.agentsFailed"),
       });
-      // Main links like any agent. An account with no linked agent stays silent.
+      // Main links like any agent. An account with no agent stays silent.
       return [...new Set(payload.agents.map((agent) => canonicalAgent(agent.name)))];
     },
   });
@@ -182,7 +182,7 @@ function LinkedAgentField({
     if (value === current) return;
     const agent = value === NO_AGENT ? null : value;
     setSaving(true);
-    setPending({ value, replaced: card.linkedAgent });
+    setPending({ value, replaced: card.agent });
     try {
       const result = await linkAccountAgent(channel, agent, t("connections.accounts.linkFailed"));
       const account = card.label;
@@ -203,10 +203,10 @@ function LinkedAgentField({
     }
   };
 
-  const triggerId = `linked-agent-${channel}`;
+  const triggerId = `account-agent-${channel}`;
   return (
     <Field>
-      <FieldLabel htmlFor={triggerId}>{t("connections.accounts.linkedAgent")}</FieldLabel>
+      <FieldLabel htmlFor={triggerId}>{t("connections.accounts.agent")}</FieldLabel>
       <Select value={current} onValueChange={(value) => void change(value)} disabled={saving}>
         <SelectTrigger id={triggerId} className="w-full">
           <SelectValue />
@@ -225,7 +225,7 @@ function LinkedAgentField({
           errors={[errorMessage(agentsQuery.error, t("connections.accounts.agentsFailed"))]}
         />
       ) : (
-        <FieldDescription>{t("connections.accounts.linkedAgentDescription")}</FieldDescription>
+        <FieldDescription>{t("connections.accounts.agentDescription")}</FieldDescription>
       )}
     </Field>
   );

@@ -106,7 +106,7 @@ export function ConnectionSlotCard({
   const copyTitle = copy.title ? t(copy.title.key, copy.title.params) : null;
   const title = identityTitle ?? (bare && !connected ? null : copyTitle);
 
-  // The setup subtitle ("Sign in with GitHub", "Add a bot from @BotFather") is
+  // The setup subtitle ("Sign in with GitHub", "Create the account with @BotFather") is
   // the slot's descriptor in a framed multi-slot card. A bare card drops it too:
   // the ceremony instructions right below say the same thing in more detail.
   const subtitle = connected

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/linked-agents";
+import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { and, asc, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
@@ -9,7 +9,7 @@ import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
 /**
  * A channel a Connection backs, as stored: its id, the service and platform
  * it is on, the Connection behind it now (null once that Connection is gone),
- * and the agent linked to it. Vocabulary: docs/concepts/messaging.md#channels.
+ * and the agent linked to it. Vocabulary: docs/concepts/messaging.md#romes-accounts.
  */
 export interface ChannelRecord {
   id: string;
@@ -42,7 +42,7 @@ export class ChannelUnbacked extends Error {
   }
 }
 
-/** A link asked of a channel whose service takes no linked agent. */
+/** A link asked of a channel whose service takes no agent. */
 export class ChannelNotLinkable extends Error {
   constructor(
     readonly channel: string,

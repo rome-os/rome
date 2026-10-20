@@ -43,7 +43,7 @@ import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/linked-agents";
+import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
@@ -1271,7 +1271,7 @@ export const handlers = [
       connect: null,
       setups: {},
       channel,
-      linkedAgent: null,
+      agent: null,
       severalAccounts: true,
     };
     connections.connections.push(connection);
@@ -1292,7 +1292,7 @@ export const handlers = [
     }
     if (!LINKABLE_SERVICES.has(target.service)) {
       return HttpResponse.json(
-        { error: `${target.service} accounts do not take a linked agent.` },
+        { error: `${target.service} accounts do not take an agent.` },
         { status: 400 },
       );
     }
@@ -1308,13 +1308,13 @@ export const handlers = [
     // Main may answer on several accounts, so only other agents move.
     if (agent !== null && agent !== MAIN_AGENT_ID) {
       for (const other of connections.connections) {
-        if (other === target || other.linkedAgent !== agent) continue;
+        if (other === target || other.agent !== agent) continue;
         if (platformOf(other.service) !== platform) continue;
-        other.linkedAgent = null;
+        other.agent = null;
         unlinkedFrom = other.channel ?? null;
       }
     }
-    target.linkedAgent = agent;
+    target.agent = agent;
     return HttpResponse.json({
       account: {
         id,

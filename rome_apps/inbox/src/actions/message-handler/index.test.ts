@@ -965,12 +965,12 @@ describe("per-channel agent routing (trusted path)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// A conversation's own agent choice wins. The account's linked agent answers
+// A conversation's own agent choice wins. The account's agent answers
 // the rest.
-// An account whose linked agent is not loaded answers nothing.
+// An account whose agent is not loaded answers nothing.
 // ---------------------------------------------------------------------------
 
-describe("linked agent", () => {
+describe("account agent", () => {
   beforeEach(() => {
     rs.clearAllMocks();
   });
@@ -1004,7 +1004,7 @@ describe("linked agent", () => {
       ],
     });
 
-  it("answers with the linked agent, in groups and private chats", async () => {
+  it("answers with the account's agent, in groups and private chats", async () => {
     const { deps, agentRunner, approvals } = guardianDeps([
       "main",
       "sentinel",
@@ -1013,13 +1013,13 @@ describe("linked agent", () => {
     ]);
     const action = createAction(actionConfig, deps);
 
-    await action.execute(inbound({ linkedAgentName: "sales:agent" }));
+    await action.execute(inbound({ accountAgentName: "sales:agent" }));
     await action.execute(
       inbound({
         threadId: "g-feishu",
         threadType: "private",
         messageId: "msg-2",
-        linkedAgentName: "sales:agent",
+        accountAgentName: "sales:agent",
       }),
     );
 
@@ -1031,13 +1031,13 @@ describe("linked agent", () => {
     const { deps, agentRunner } = guardianDeps(["main", "sentinel", "envoy"]);
     const action = createAction(actionConfig, deps);
 
-    await action.execute(inbound({ linkedAgentName: "core:main" }));
+    await action.execute(inbound({ accountAgentName: "core:main" }));
 
     expect(agentRunner.calls[0].agentName).toBe("main");
   });
 
-  it("answers with a conversation's stored agent over the linked agent, main included", async () => {
-    for (const linkedAgentName of ["sales:agent", "core:main"]) {
+  it("answers with a conversation's stored agent over the account's agent, main included", async () => {
+    for (const accountAgentName of ["sales:agent", "core:main"]) {
       const { deps, agentRunner, conversations } = guardianDeps([
         "main",
         "sentinel",
@@ -1051,13 +1051,13 @@ describe("linked agent", () => {
       }));
       const action = createAction(actionConfig, deps);
 
-      await action.execute(inbound({ linkedAgentName }));
+      await action.execute(inbound({ accountAgentName }));
 
       expect(agentRunner.calls[0].agentName).toBe("pm:assistant");
     }
   });
 
-  it("answers with the linked agent when the stored agent is not loaded", async () => {
+  it("answers with the account's agent when the stored agent is not loaded", async () => {
     const { deps, agentRunner, conversations } = guardianDeps([
       "main",
       "sentinel",
@@ -1070,7 +1070,7 @@ describe("linked agent", () => {
     }));
     const action = createAction(actionConfig, deps);
 
-    await action.execute(inbound({ linkedAgentName: "sales:agent" }));
+    await action.execute(inbound({ accountAgentName: "sales:agent" }));
 
     expect(agentRunner.calls[0].agentName).toBe("sales:agent");
   });
@@ -1079,12 +1079,14 @@ describe("linked agent", () => {
     const { deps, agentRunner } = guardianDeps(["main", "sentinel", "envoy", "sales:agent"]);
     const action = createAction(actionConfig, deps);
 
-    await action.execute(inbound({ routedAgentName: "core:main", linkedAgentName: "sales:agent" }));
+    await action.execute(
+      inbound({ routedAgentName: "core:main", accountAgentName: "sales:agent" }),
+    );
 
     expect(agentRunner.calls[0].agentName).toBe("main");
   });
 
-  it("answers a private chat with the linked agent over its stored agent", async () => {
+  it("answers a private chat with the account's agent over its stored agent", async () => {
     const { deps, agentRunner, conversations } = guardianDeps([
       "main",
       "sentinel",
@@ -1099,7 +1101,7 @@ describe("linked agent", () => {
     const action = createAction(actionConfig, deps);
 
     await action.execute(
-      inbound({ threadId: "g-feishu", threadType: "private", linkedAgentName: "sales:agent" }),
+      inbound({ threadId: "g-feishu", threadType: "private", accountAgentName: "sales:agent" }),
     );
 
     expect(agentRunner.calls[0].agentName).toBe("sales:agent");
@@ -1116,7 +1118,7 @@ describe("linked agent", () => {
     const action = createAction(actionConfig, deps);
 
     await action.execute(
-      inbound({ routedAgentName: "pm:assistant", linkedAgentName: "sales:agent" }),
+      inbound({ routedAgentName: "pm:assistant", accountAgentName: "sales:agent" }),
     );
 
     expect(conversations.ensureChannelConversation).toHaveBeenCalledWith(
@@ -1124,22 +1126,22 @@ describe("linked agent", () => {
     );
   });
 
-  it("never stores the linked agent on the conversation", async () => {
+  it("never stores the account's agent on the conversation", async () => {
     const { deps, conversations } = guardianDeps(["main", "sentinel", "envoy", "sales:agent"]);
     const action = createAction(actionConfig, deps);
 
-    await action.execute(inbound({ linkedAgentName: "sales:agent" }));
+    await action.execute(inbound({ accountAgentName: "sales:agent" }));
 
     expect(conversations.ensureChannelConversation).toHaveBeenCalledWith(
       expect.objectContaining({ channel: "feishu-2", threadId: "group-1", agentName: "main" }),
     );
   });
 
-  it("stays silent, storing nothing, when the linked agent is not loaded", async () => {
+  it("stays silent, storing nothing, when the account's agent is not loaded", async () => {
     const { deps, agentRunner, conversations } = guardianDeps(["main", "sentinel", "envoy"]);
     const action = createAction(actionConfig, deps);
 
-    const result = await action.execute(inbound({ linkedAgentName: "sales:agent" }));
+    const result = await action.execute(inbound({ accountAgentName: "sales:agent" }));
 
     expect(result).toEqual({ status: "ok", data: { action: "silent" } });
     expect(agentRunner.calls).toHaveLength(0);

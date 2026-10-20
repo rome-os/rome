@@ -1,7 +1,7 @@
-// Accounts and their linked agents. An account is a channel, as the dashboard
+// Accounts and their agents. An account is a channel, as the dashboard
 // shows it; one whose Connection was deleted is listed with no Connection.
-// Vocabulary: docs/concepts/messaging.md#channels.
-// Invariants: docs/architecture/channels.md#linked-agents.
+// Vocabulary: docs/concepts/messaging.md#romes-accounts.
+// Invariants: docs/architecture/channels.md#an-accounts-agent.
 
 import type {
   ChannelAccount,

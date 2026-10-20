@@ -75,7 +75,7 @@ function connection(
     connect: null,
     setups: {},
     channel: null,
-    linkedAgent: null,
+    agent: null,
     severalAccounts: false,
     ...overrides,
   };
@@ -119,11 +119,11 @@ describe("ConnectionDetailBody — Telegram reference (bot slot)", () => {
     // single-slot and renders bare: no fallback title (the dialog header
     // already names the service) and no setup subtitle (the ceremony below
     // carries the how-to).
-    expect(screen.queryByText("Your Telegram bot")).toBeNull();
-    expect(screen.queryByText("Add a bot from @BotFather.")).toBeNull();
+    expect(screen.queryByText("Your agent's Telegram account")).toBeNull();
+    expect(screen.queryByText("Create the account with @BotFather.")).toBeNull();
     // Unconnected heading + `+` bullets (identity fallback).
     expect(screen.getByText("This connection will let your agent")).toBeTruthy();
-    expect(screen.getByText("Reply when people message your bot")).toBeTruthy();
+    expect(screen.getByText("Reply when people message this account")).toBeTruthy();
     expect(screen.getByText("Start a task when a new message arrives")).toBeTruthy();
     // Bare sole slot: no inner card box.
     const card = container.querySelector("section");
@@ -352,8 +352,8 @@ describe("ConnectionDetailBody — webchat and remaining channels", () => {
 
     expect(discord.slots.map((slot) => slot.key)).toEqual(["bot"]);
     // Sole slot renders bare — no title echo of the dialog header.
-    expect(screen.queryByText("Your Discord bot")).toBeNull();
-    expect(screen.getByText("Reply when people message your bot in your servers")).toBeTruthy();
+    expect(screen.queryByText("Your agent's Discord account")).toBeNull();
+    expect(screen.getByText("Reply when people message this account in your servers")).toBeTruthy();
     // The token form is server-authored by the setup — before it
     // starts, the card offers the connect action only.
     expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy();
@@ -488,7 +488,7 @@ describe("ConnectionDetailBody — accounts", () => {
     renderAccountBody(cardFor([feishu()], "feishu"), { onFlash, onRefresh });
     const user = userEvent.setup();
 
-    const picker = screen.getByRole("combobox", { name: "Linked agent" });
+    const picker = screen.getByRole("combobox", { name: "Agent" });
     expect(picker.textContent).toContain("None. This account stays silent.");
     await user.click(picker);
     await user.click(await screen.findByRole("option", { name: "sales:agent" }));
@@ -522,7 +522,7 @@ describe("ConnectionDetailBody — accounts", () => {
     renderAccountBody(card, { onFlash });
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("combobox", { name: "Linked agent" }));
+    await user.click(screen.getByRole("combobox", { name: "Agent" }));
     await user.click(await screen.findByRole("option", { name: "sales:agent" }));
 
     await waitFor(() =>
@@ -547,13 +547,11 @@ describe("ConnectionDetailBody — accounts", () => {
     renderAccountBody(cardFor([feishu()], "feishu"), { onRefresh });
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("combobox", { name: "Linked agent" }));
+    await user.click(screen.getByRole("combobox", { name: "Agent" }));
     await user.click(await screen.findByRole("option", { name: "sales:agent" }));
 
     await waitFor(() => expect(onRefresh).toHaveBeenCalled());
-    expect(screen.getByRole("combobox", { name: "Linked agent" }).textContent).toContain(
-      "sales:agent",
-    );
+    expect(screen.getByRole("combobox", { name: "Agent" }).textContent).toContain("sales:agent");
   });
 
   it("shows the server's link once it moves off this account after a save", async () => {
@@ -562,14 +560,14 @@ describe("ConnectionDetailBody — accounts", () => {
     const { rerenderCard } = renderAccountBody(cardFor([feishu()], "feishu"), { onRefresh });
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("combobox", { name: "Linked agent" }));
+    await user.click(screen.getByRole("combobox", { name: "Agent" }));
     await user.click(await screen.findByRole("option", { name: "sales:agent" }));
     await waitFor(() => expect(onRefresh).toHaveBeenCalled());
-    rerenderCard(cardFor([feishu({ linkedAgent: "sales:agent" })], "feishu"));
+    rerenderCard(cardFor([feishu({ agent: "sales:agent" })], "feishu"));
     // Linking sales:agent to another account later moves the link off this one.
-    rerenderCard(cardFor([feishu({ linkedAgent: null })], "feishu"));
+    rerenderCard(cardFor([feishu({ agent: null })], "feishu"));
 
-    expect(screen.getByRole("combobox", { name: "Linked agent" }).textContent).toContain(
+    expect(screen.getByRole("combobox", { name: "Agent" }).textContent).toContain(
       "None. This account stays silent.",
     );
   });
@@ -580,10 +578,10 @@ describe("ConnectionDetailBody — accounts", () => {
     renderAccountBody(cardFor([feishu()], "feishu"), { onRefresh });
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("combobox", { name: "Linked agent" }));
+    await user.click(screen.getByRole("combobox", { name: "Agent" }));
     await user.click(await screen.findByRole("option", { name: "sales:agent" }));
     await waitFor(() => expect(onRefresh).toHaveBeenCalled());
-    await user.click(screen.getByRole("combobox", { name: "Linked agent" }));
+    await user.click(screen.getByRole("combobox", { name: "Agent" }));
     await user.click(
       await screen.findByRole("option", { name: "None. This account stays silent." }),
     );
@@ -602,7 +600,7 @@ describe("ConnectionDetailBody — accounts", () => {
     renderAccountBody(cardFor([feishu()], "feishu"), { onRefresh });
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("combobox", { name: "Linked agent" }));
+    await user.click(screen.getByRole("combobox", { name: "Agent" }));
     expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
       "None. This account stays silent.",
       "main",
@@ -617,10 +615,10 @@ describe("ConnectionDetailBody — accounts", () => {
 
   it("shows main once when the server reports it by its short name", async () => {
     mockAccountsFetch(linkResult("core:main"), ["core:main", "sales:agent"]);
-    renderAccountBody(cardFor([feishu({ linkedAgent: "main" })], "feishu"));
+    renderAccountBody(cardFor([feishu({ agent: "main" })], "feishu"));
     const user = userEvent.setup();
 
-    const picker = screen.getByRole("combobox", { name: "Linked agent" });
+    const picker = screen.getByRole("combobox", { name: "Agent" });
     expect(picker.textContent).toContain("main");
     await user.click(picker);
     expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
@@ -653,10 +651,10 @@ describe("ConnectionDetailBody — accounts", () => {
       unlinkedFrom: null,
     });
     const onFlash = rs.fn();
-    renderAccountBody(cardFor([feishu({ linkedAgent: "sales:agent" })], "feishu"), { onFlash });
+    renderAccountBody(cardFor([feishu({ agent: "sales:agent" })], "feishu"), { onFlash });
     const user = userEvent.setup();
 
-    const picker = screen.getByRole("combobox", { name: "Linked agent" });
+    const picker = screen.getByRole("combobox", { name: "Agent" });
     expect(picker.textContent).toContain("sales:agent");
     await user.click(picker);
     await user.click(
@@ -669,9 +667,9 @@ describe("ConnectionDetailBody — accounts", () => {
 
   it("hides the picker until the server reports links", () => {
     mockAccountsFetch(null);
-    const { linkedAgent: _omitted, ...older } = feishu();
+    const { agent: _omitted, ...older } = feishu();
     renderAccountBody(cardFor([older], "feishu"), { onOpenAccount: rs.fn() });
-    expect(screen.queryByRole("combobox", { name: "Linked agent" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Agent" })).toBeNull();
     expect(screen.getByRole("button", { name: "Add another account" })).toBeTruthy();
   });
 
@@ -752,7 +750,7 @@ describe("ConnectionDetailBody — accounts", () => {
     renderAccountBody(cardFor([feishu({ grants: { app: "unauthorized" } })], "feishu"), {
       onOpenAccount: rs.fn(),
     });
-    expect(screen.queryByRole("combobox", { name: "Linked agent" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Agent" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add another account" })).toBeNull();
   });
 

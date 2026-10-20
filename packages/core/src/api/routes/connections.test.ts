@@ -501,7 +501,7 @@ describe("POST /connections", () => {
 
     expect(connections.find((each: { id: string }) => each.id === conn.id)).toMatchObject({
       channel: "telegram",
-      linkedAgent: "sales:agent",
+      agent: "sales:agent",
     });
 
     records.link("telegram", null);
@@ -509,11 +509,11 @@ describe("POST /connections", () => {
       await makeApp(registry, undefined, { db }).request("/connections")
     ).json();
     expect(
-      relisted.connections.find((each: { id: string }) => each.id === conn.id).linkedAgent,
+      relisted.connections.find((each: { id: string }) => each.id === conn.id).agent,
     ).toBeNull();
   });
 
-  it("reports no linked agent for a service that takes no link", async () => {
+  it("reports no agent for a service that takes no link", async () => {
     const { db, close } = createTestDb();
     openDbs.push(close);
     const records = new ChannelRecordsRepository(db);
@@ -532,7 +532,7 @@ describe("POST /connections", () => {
 
     const listed = connections.find((each: { id: string }) => each.id === conn.id);
     expect(listed.channel).toBe("whatsapp");
-    expect("linkedAgent" in listed).toBe(false);
+    expect("agent" in listed).toBe(false);
   });
 
   it("hands back an account whose setup never finished instead of minting", async () => {

@@ -63,7 +63,7 @@ export interface BuiltinConnectionDeps {
   /** Loaded-agent lister (Discord/Feishu agent-binding validation + autocomplete). */
   listAgents: () => string[];
   /** The agent linked to a Connection's channel (Discord/Feishu in-chat settings). */
-  linkedAgentOf?: (connectionId: string) => string | null | undefined;
+  accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
   /** Guardian auto-map on WhatsApp connect (canonical self JID → channel mapping). */
@@ -102,7 +102,7 @@ export function registerBuiltinConnections(
       chatStop: deps.chatStop,
       personMappingRepo: deps.personMappingRepo,
       listAgents: deps.listAgents,
-      linkedAgentOf: deps.linkedAgentOf,
+      accountAgentOf: deps.accountAgentOf,
       hasAgent: deps.hasAgent,
     }),
   );
@@ -121,7 +121,7 @@ export function registerBuiltinConnections(
       conversationSettings: deps.conversationSettings,
       personMappingRepo: deps.personMappingRepo,
       listAgents: deps.listAgents,
-      linkedAgentOf: deps.linkedAgentOf,
+      accountAgentOf: deps.accountAgentOf,
       hasAgent: deps.hasAgent,
     }),
   );

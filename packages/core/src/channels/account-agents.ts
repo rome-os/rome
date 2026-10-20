@@ -1,20 +1,20 @@
 // The agent linked to a channel, as the channel-message hook reads it.
-// Vocabulary: docs/concepts/messaging.md#channels. Invariants:
-// docs/architecture/channels.md#linked-agents.
+// Vocabulary: docs/concepts/messaging.md#romes-accounts. Invariants:
+// docs/architecture/channels.md#an-accounts-agent.
 
 import type { ChannelMessageHookDeps, ConversationSettingsSnapshot } from "@rome-os/app-runtime";
-import { LINKABLE_SERVICES } from "@rome/api-types/linked-agents";
+import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
 
-const log = createLogger("linked-agents");
+const log = createLogger("account-agents");
 
 /**
- * The answer `linkedAgentResolver` gives for the channel, read with no logging
+ * The answer `accountAgentResolver` gives for the channel, read with no logging
  * and no state, for read-only callers such as the sessions explorer.
  */
-export function readLinkedAgent(
+export function readAccountAgent(
   records: Pick<ChannelRecordsRepository, "byId">,
   agents: { has(name: string): boolean },
   channelName: string,
@@ -28,22 +28,22 @@ export function readLinkedAgent(
 }
 
 /**
- * The hook's `linkedAgentOf`, reading the channel's record on each call, so a
- * relink, or a channel whose record lands after wiring, is right on the next
+ * The hook's `accountAgentOf`, reading the channel's record on each call, so a
+ * switched agent, or a channel whose record lands after wiring, is right on the next
  * message. It answers undefined for a channel whose service is outside
  * `LINKABLE_SERVICES`, the stored agent for a linked one, and null for one with
  * no agent or whose agent is not loaded. Each silent state logs once per
- * channel until the channel answers again: an account with no linked agent at
+ * channel until the channel answers again: an account with no agent at
  * info, since a newly added one starts that way, and one whose agent is not
  * loaded as a warning.
  */
-export function linkedAgentResolver(
+export function accountAgentResolver(
   records: Pick<ChannelRecordsRepository, "byId">,
   agents: { has(name: string): boolean },
-): NonNullable<ChannelMessageHookDeps["linkedAgentOf"]> {
+): NonNullable<ChannelMessageHookDeps["accountAgentOf"]> {
   const silent = new Map<string, string | null>();
   return (channelName) => {
-    const answering = readLinkedAgent(records, agents, channelName);
+    const answering = readAccountAgent(records, agents, channelName);
     if (answering !== null) {
       silent.delete(channelName);
       return answering;
@@ -52,11 +52,11 @@ export function linkedAgentResolver(
     if (silent.has(channelName) && silent.get(channelName) === agent) return null;
     silent.set(channelName, agent);
     if (agent === null) {
-      log.info("account has no linked agent; it stays silent until one is linked", {
+      log.info("account has no agent; it stays silent until one is linked", {
         channel: channelName,
       });
     } else {
-      log.warn("linked agent is not loaded; the account stays silent", {
+      log.warn("account's agent is not loaded; the account stays silent", {
         channel: channelName,
         agent,
       });
@@ -67,11 +67,11 @@ export function linkedAgentResolver(
 
 /**
  * The agent that answers a conversation by the rules in
- * docs/architecture/channels.md#linked-agents, or null when none does. `linked`
- * is the {@link linkedAgentResolver} answer for the conversation's channel, and
+ * docs/architecture/channels.md#an-accounts-agent, or null when none does. `linked`
+ * is the {@link accountAgentResolver} answer for the conversation's channel, and
  * `choice` the conversation's stored agent, "main" for a pin to main. Main reads
  * as "main". On a linked channel, a choice that `isLoaded` rejects reads as the
- * linked agent, as the message handler falls back to it. Without `isLoaded`,
+ * account's agent, as the message handler falls back to it. Without `isLoaded`,
  * every choice counts as loaded.
  */
 export function answeringAgentOf(
@@ -101,5 +101,5 @@ export function storedAgentChoice(
 
 /** How an in-chat settings reply names the {@link answeringAgentOf} result. */
 export function describeAnsweringAgent(agent: string | null): string {
-  return agent ?? "none (this bot has no linked agent, or it is not loaded)";
+  return agent ?? "none (this account has no agent, or it is not loaded)";
 }

@@ -1,6 +1,6 @@
 /**
  * The boot pass that records a channel for each Connection from before
- * channels were recorded. Vocabulary: docs/concepts/messaging.md#channels.
+ * channels were recorded. Vocabulary: docs/concepts/messaging.md#romes-accounts.
  */
 
 import type { DrizzleDb } from "../db/index.js";

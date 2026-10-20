@@ -46,7 +46,7 @@ import { Switch } from "@/components/ui/switch";
 import { artifactLocalName, artifactOwnerId } from "@/lib/artifact-name";
 import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
 import { fetchConnections, type ApiConnection } from "@/lib/connections-api";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/linked-agents";
+import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 
 interface PageResponse {
   items: ConversationSettingsListItem[];
@@ -136,8 +136,8 @@ export function ChannelsSettingsPage() {
     [connections],
   );
 
-  // A linkable account with no linked agent answers nothing, whatever agent a
-  // conversation on it picks. A core that predates links omits `linkedAgent`.
+  // A linkable account with no agent answers nothing, whatever agent a
+  // conversation on it picks. A core that predates links omits `agent`.
   // Each maps to the page that links its agent.
   const silentAccounts = useMemo(
     () =>
@@ -145,7 +145,7 @@ export function ChannelsSettingsPage() {
         connections.flatMap((connection) =>
           connection.id !== null &&
           LINKABLE_SERVICES.has(connection.service) &&
-          connection.linkedAgent === null
+          connection.agent === null
             ? [
                 [
                   connection.id,
@@ -158,16 +158,16 @@ export function ChannelsSettingsPage() {
     [connections],
   );
 
-  // A linkable account's linked agent answers each conversation on it that has
+  // A linkable account's agent answers each conversation on it that has
   // no agent of its own.
-  const linkedAgents = useMemo(
+  const accountAgents = useMemo(
     () =>
       new Map(
         connections.flatMap((connection) =>
           connection.id !== null &&
           LINKABLE_SERVICES.has(connection.service) &&
-          typeof connection.linkedAgent === "string"
-            ? [[connection.id, connection.linkedAgent]]
+          typeof connection.agent === "string"
+            ? [[connection.id, connection.agent]]
             : [],
         ),
       ),
@@ -286,7 +286,7 @@ export function ChannelsSettingsPage() {
                 item={item}
                 agentNames={agentNames}
                 silentAccount={silentAccounts.get(item.snapshot.conversation.ref.connectionId)}
-                linkedAgent={linkedAgents.get(item.snapshot.conversation.ref.connectionId)}
+                accountAgent={accountAgents.get(item.snapshot.conversation.ref.connectionId)}
                 onSaved={handleSaved}
               />
             ))}
@@ -312,7 +312,7 @@ function ConversationRow({
   item,
   agentNames,
   silentAccount,
-  linkedAgent,
+  accountAgent,
   onSaved,
 }: {
   item: ConversationSettingsListItem;
@@ -322,7 +322,7 @@ function ConversationRow({
   silentAccount: string | undefined;
   /** The agent linked to the conversation's account, which answers while the
    *  conversation has no agent of its own. */
-  linkedAgent: string | undefined;
+  accountAgent: string | undefined;
   onSaved: (snapshot: ConversationSettingsSnapshot) => void;
 }) {
   const { t } = useTranslation("settings");
@@ -342,7 +342,7 @@ function ConversationRow({
     structuredClone(snapshot.effective),
   );
   const [saving, setSaving] = useState(false);
-  // Whether the conversation follows its account's linked agent, kept beside
+  // Whether the conversation follows its account's agent, kept beside
   // the draft: effective settings read the same for no choice and a pin to
   // main, so only the override tells them apart. `projectedFollow` is to
   // `followsLink` what `projected` is to the draft.
@@ -408,8 +408,8 @@ function ConversationRow({
     const clear: ConversationSettingField[] = [];
     const ahead = structuredClone(projected.current);
     // Only a linked account has a link to follow.
-    const follow = linkedAgent !== undefined && followRef.current;
-    const previousFollow = linkedAgent !== undefined && projectedFollow.current;
+    const follow = accountAgent !== undefined && followRef.current;
+    const previousFollow = accountAgent !== undefined && projectedFollow.current;
     for (const field of fields) {
       const value = settingValue(draftRef.current, field);
       const previous = settingValue(projected.current, field);
@@ -491,7 +491,7 @@ function ConversationRow({
         if (mounted.current) setSaving(false);
       });
     return inFlight.current;
-  }, [applyDraft, conversation.ref, linkedAgent, onSaved, setFollowsLink, t]);
+  }, [applyDraft, conversation.ref, accountAgent, onSaved, setFollowsLink, t]);
 
   // Lets the retry action and the unmount cleanup reach the current flush
   // without taking it as a dependency — see the unmount effect below.
@@ -680,9 +680,11 @@ function ConversationRow({
             controlId={agentFieldId}
           >
             <Select
-              value={linkedAgent && followsLink ? FOLLOW_LINK : (draft.routing.agentName ?? "main")}
+              value={
+                accountAgent && followsLink ? FOLLOW_LINK : (draft.routing.agentName ?? "main")
+              }
               onValueChange={(name) => {
-                if (linkedAgent) setFollowsLink(name === FOLLOW_LINK);
+                if (accountAgent) setFollowsLink(name === FOLLOW_LINK);
                 change("routing.agentName", name === FOLLOW_LINK ? null : name);
               }}
             >
@@ -690,10 +692,10 @@ function ConversationRow({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {linkedAgent && (
+                {accountAgent && (
                   <SelectItem value={FOLLOW_LINK}>
-                    {t("channels.conversationSettings.linkedAgent", {
-                      agent: overriddenAgentLabel(linkedAgent),
+                    {t("channels.conversationSettings.accountAgent", {
+                      agent: overriddenAgentLabel(accountAgent),
                     })}
                   </SelectItem>
                 )}
@@ -701,7 +703,7 @@ function ConversationRow({
                   <SelectItem key={name} value={name}>
                     {name !== "main"
                       ? agentLabel(name)
-                      : linkedAgent
+                      : accountAgent
                         ? "main"
                         : t("channels.conversationSettings.mainAgent")}
                   </SelectItem>

@@ -4,7 +4,7 @@
  * channel that carries Rome's own traffic (the Cloud `agents` channel, webchat,
  * email) takes no link. Core checks it when it links an agent, and the
  * dashboard reads it to offer the picker. Invariants:
- * docs/architecture/channels.md#linked-agents.
+ * docs/architecture/channels.md#an-accounts-agent.
  */
 export const LINKABLE_SERVICES: ReadonlySet<string> = new Set([
   "feishu",

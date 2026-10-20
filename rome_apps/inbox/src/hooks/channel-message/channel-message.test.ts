@@ -442,15 +442,15 @@ describe("ChannelMessageHook", () => {
     expect(harness.subscribes).toHaveBeenCalledTimes(8);
   });
 
-  describe("on accounts that take a linked agent", () => {
+  describe("on accounts that take an agent", () => {
     // feishu-2 takes a link, and telegram stands for a channel that takes none.
     let linked: string | null;
-    const linkedAgentOf = rs.fn((name: string) => (name === "feishu-2" ? linked : undefined));
+    const accountAgentOf = rs.fn((name: string) => (name === "feishu-2" ? linked : undefined));
 
     beforeEach(async () => {
       linked = "sales:agent";
-      linkedAgentOf.mockClear();
-      harness = createHarness({ linkedAgentOf });
+      accountAgentOf.mockClear();
+      harness = createHarness({ accountAgentOf });
       harness.channels.push(harness.channel("feishu-2", FEISHU_2_ID));
       await harness.hook.register();
       harness.get.mockImplementation(async ({ connectionId, conversationId }) =>
@@ -464,7 +464,7 @@ describe("ChannelMessageHook", () => {
       expect.anything(),
     ];
 
-    it("passes the linked agent read per message, with the group's choice", async () => {
+    it("passes the account's agent read per message, with the group's choice", async () => {
       await harness.emit(FEISHU_2_ID, message({ messageId: "m-1" }));
       linked = "support:agent";
       await harness.emit(FEISHU_2_ID, message({ messageId: "m-2" }));
@@ -472,17 +472,17 @@ describe("ChannelMessageHook", () => {
 
       expect(harness.run).toHaveBeenNthCalledWith(
         1,
-        ...passed({ linkedAgentName: "sales:agent", routedAgentName: "override" }),
+        ...passed({ accountAgentName: "sales:agent", routedAgentName: "override" }),
       );
       expect(harness.run).toHaveBeenNthCalledWith(
         2,
-        ...passed({ linkedAgentName: "support:agent", routedAgentName: "override" }),
+        ...passed({ accountAgentName: "support:agent", routedAgentName: "override" }),
       );
       expect(harness.run).toHaveBeenNthCalledWith(
         3,
-        ...passed({ linkedAgentName: undefined, routedAgentName: "override" }),
+        ...passed({ accountAgentName: undefined, routedAgentName: "override" }),
       );
-      expect(linkedAgentOf).toHaveBeenCalledWith("feishu-2");
+      expect(accountAgentOf).toHaveBeenCalledWith("feishu-2");
     });
 
     it("passes a group's explicit pin to main as its choice", async () => {
@@ -494,11 +494,11 @@ describe("ChannelMessageHook", () => {
       await harness.emit(FEISHU_2_ID, message());
 
       expect(harness.run).toHaveBeenCalledWith(
-        ...passed({ linkedAgentName: "sales:agent", routedAgentName: "core:main" }),
+        ...passed({ accountAgentName: "sales:agent", routedAgentName: "core:main" }),
       );
     });
 
-    it("answers nothing on an account with no linked agent", async () => {
+    it("answers nothing on an account with no agent", async () => {
       linked = null;
 
       await harness.emit(FEISHU_2_ID, message({ messageId: "m-1" }));
@@ -510,7 +510,7 @@ describe("ChannelMessageHook", () => {
       linked = "sales:agent";
       await harness.emit(FEISHU_2_ID, message({ messageId: "m-2" }));
       expect(harness.run).toHaveBeenCalledWith(
-        ...passed({ channel: "feishu-2", linkedAgentName: "sales:agent" }),
+        ...passed({ channel: "feishu-2", accountAgentName: "sales:agent" }),
       );
     });
 
@@ -527,7 +527,7 @@ describe("ChannelMessageHook", () => {
     });
   });
 
-  it("reads every channel as taking no link on a host that passes no linkedAgentOf", async () => {
+  it("reads every channel as taking no link on a host that passes no accountAgentOf", async () => {
     const hook = createHook({
       actionEngine: { run: harness.run } as unknown as ActionEngineLike,
       conversationSettings: { get: harness.get } as unknown as ConversationSettingsControl,
@@ -541,7 +541,7 @@ describe("ChannelMessageHook", () => {
 
     expect(harness.run).toHaveBeenCalledWith(
       "message_handler",
-      expect.objectContaining({ channel: "telegram", linkedAgentName: undefined }),
+      expect.objectContaining({ channel: "telegram", accountAgentName: undefined }),
       expect.anything(),
     );
   });

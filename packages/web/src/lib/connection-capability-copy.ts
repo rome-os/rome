@@ -17,7 +17,7 @@
  *     per slot lives in {@link BULLET_KEYS} here (i18n JSON has no arrays), so the
  *     card renders them in a stable order. Bullets may interpolate `{{identity}}`.
  *   - `bulletsFallback.*` — the bullet set to use before the identity is known
- *     (so an unconnected bot reads "Reply when people message your bot", not a
+ *     (so an unconnected bot reads "Reply when people message this account", not a
  *     dangling `{{identity}}`). Only services that interpolate identity carry it.
  *   - `privacyNote` — the lock-box reassurance line, only where warranted
  *     (personal-account sessions, OAuth token storage).
