@@ -112,6 +112,28 @@ it.each([
   expect(screen.queryByText(/linked as guardian/)).toBeNull();
 });
 
+it("renews a degraded account in place instead of only offering Disconnect", async () => {
+  const fetchMock = stubFetch();
+  renderCard(
+    <ChannelConnectCard
+      config={CHANNEL_CONFIGS.discord}
+      slot={{ ...connected("bot", "@rome_helper"), state: "degraded" }}
+      role="primary"
+      onRefresh={() => {}}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+
+  await waitFor(() => expect(screen.getByLabelText("Discord bot token")).toBeTruthy());
+  expect(
+    fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/connections/conn-1/grants/bot/setup"),
+    ),
+  ).toBe(true);
+});
+
 // ── Shared frame (via Discord) ──────────────────────────────────────────────
 
 describe("ChannelConnectCard — shared frame", () => {

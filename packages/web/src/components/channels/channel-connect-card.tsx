@@ -179,6 +179,9 @@ export function ChannelConnectCard({
 }: ChannelConnectCardProps) {
   const { t } = useTranslation("settings");
   const connected = slot.state !== "unauthorized";
+  // A degraded credential is renewed in place: disconnecting would remove the
+  // account, and an account that connects again starts with no history.
+  const degraded = slot.state === "degraded";
 
   const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -217,11 +220,22 @@ export function ChannelConnectCard({
     setDisconnecting(false);
   }
 
-  const disconnectAction = connected ? (
+  const disconnectButton = connected ? (
     <Button variant="destructive" size="sm" onClick={handleDisconnect} disabled={disconnecting}>
       {disconnecting ? t("common.disconnecting") : t("common.disconnect")}
     </Button>
   ) : undefined;
+  const disconnectAction =
+    degraded && !setup.state ? (
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={() => setup.start(true)} disabled={setup.busy}>
+          {setup.busy ? t("common.connecting") : t("channels.reconnect")}
+        </Button>
+        {disconnectButton}
+      </div>
+    ) : (
+      disconnectButton
+    );
 
   const configureAction =
     connected && slot.connectionId && config.conversationSettings ? (
@@ -257,7 +271,10 @@ export function ChannelConnectCard({
     >
       {error && <p className="text-aux text-destructive-fg">{error}</p>}
 
-      {connected ? (
+      {degraded && setup.error && !setup.state ? (
+        <p className="text-aux text-destructive-fg">{setup.error}</p>
+      ) : null}
+      {connected && !(degraded && setup.state) ? (
         config.guardianLinkedKey ? (
           <div>
             <p className="text-aux text-success-fg">{t(config.guardianLinkedKey)}</p>

@@ -393,6 +393,7 @@
     },
     "restartNeededFallback": "后端不可达 — 需要重启以应用更改",
     "disconnectFailedFallback": "断开失败。",
+    "reconnect": "重新连接",
     "status": {
       "connected": "已连接",
       "disconnected": "未连接",

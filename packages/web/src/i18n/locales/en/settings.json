@@ -393,6 +393,7 @@
     },
     "restartNeededFallback": "Backend unreachable — restart required to apply changes",
     "disconnectFailedFallback": "Failed to disconnect.",
+    "reconnect": "Reconnect",
     "status": {
       "connected": "Connected",
       "disconnected": "Disconnected",
