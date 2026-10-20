@@ -20,8 +20,9 @@ import { type Envoy, type EnvoyAccount, displacedAccount } from "./envoys-model"
 /** Radix Select reserves the empty string, so "no agent" needs a value of its own. */
 const NO_AGENT = "__none__";
 
-/** Links, switches or unlinks an account's agent. Every read of accounts and
- *  their agents is stale once it lands, the Connections cards' included. */
+/** Links, switches or unlinks an account's agent. Envoys and the Connections
+ *  cards (`connection-detail`, ConnectionDetailPage's key root) are stale once
+ *  it lands. */
 function useLinkAgent() {
   const { t } = useTranslation("envoys");
   const queryClient = useQueryClient();
@@ -30,7 +31,7 @@ function useLinkAgent() {
       linkAccountAgent(vars.channel, vars.agent, t("change.failed")),
     onSuccess: () =>
       Promise.all(
-        [["envoys"], ["connection-detail"], ["connection-accounts"]].map((queryKey) =>
+        [["envoys"], ["connection-detail"]].map((queryKey) =>
           queryClient.invalidateQueries({ queryKey }),
         ),
       ),
@@ -121,7 +122,7 @@ export function AgentChange({
         <div className="flex min-w-0 flex-1 items-center gap-3">{children}</div>
         {/* Radix shows the placeholder only for an empty value. */}
         <Select
-          value={pending ?? account.agent ?? ""}
+          value={pending ?? (link.isPending ? link.variables?.agent : null) ?? account.agent ?? ""}
           disabled={disabled || link.isPending}
           onValueChange={choose}
         >
@@ -153,7 +154,11 @@ export function AgentChange({
           <p>
             {pending === NO_AGENT ? (
               <AgentText
-                k="change.unlinkConfirm"
+                k={
+                  account.kind === "delegate"
+                    ? "change.delegateUnlinkConfirm"
+                    : "change.unlinkConfirm"
+                }
                 values={{ account: account.name, agent: agentLabel(account.agent ?? "") }}
               />
             ) : (
