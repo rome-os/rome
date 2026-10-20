@@ -67,6 +67,13 @@ async function pick(option: string) {
 }
 
 describe("AgentChange", () => {
+  it("keeps the account's own agent selectable when core no longer loads it", async () => {
+    renderChange({ account: account({ agent: "gone:agent" }) });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "Agent for Sales" }));
+    expect(await screen.findByRole("option", { name: "gone:agent" })).toBeTruthy();
+  });
+
   it("links an agent to an account with none in one step", async () => {
     const puts = mockLink();
     const onChanged = rs.fn();

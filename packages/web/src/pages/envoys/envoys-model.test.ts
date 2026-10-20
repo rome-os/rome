@@ -69,15 +69,23 @@ describe("buildEnvoys", () => {
   });
 
   it("offers main even before the agent list loads", () => {
-    expect(buildEnvoys([], []).agents).toEqual([MAIN_AGENT_ID]);
+    expect(buildEnvoys([], null).agents).toEqual([MAIN_AGENT_ID]);
   });
 
-  it("offers every loaded agent and every linked one, main first", () => {
+  it("offers the loaded agents, main first, and not a linked one core no longer loads", () => {
     const { agents } = buildEnvoys(
       [connection({ service: "discord", agent: "sales:agent" })],
       [{ name: "build" }, { name: "main" }],
     );
-    expect(agents).toEqual([MAIN_AGENT_ID, "build", "sales:agent"]);
+    expect(agents).toEqual([MAIN_AGENT_ID, "build"]);
+  });
+
+  it("falls back to the linked agents while the agent list is missing", () => {
+    const { agents } = buildEnvoys(
+      [connection({ service: "discord", agent: "sales:agent" })],
+      null,
+    );
+    expect(agents).toEqual([MAIN_AGENT_ID, "sales:agent"]);
   });
 
   it("names the account an agent moves off on the same platform", () => {

@@ -90,7 +90,7 @@ function useEnvoys() {
     // Descriptions are optional, so the list renders without the agents.
     data: connections.data
       ? {
-          ...buildEnvoys(connections.data, agents.data?.agents ?? []),
+          ...buildEnvoys(connections.data, agents.data?.agents ?? null),
           agentsFailed: agents.isError,
         }
       : undefined,
