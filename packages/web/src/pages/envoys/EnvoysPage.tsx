@@ -68,6 +68,8 @@ function useEnvoys() {
   const connections = useQuery({
     queryKey: ["envoys", "connections"],
     queryFn: fetchConnections,
+    // Links change on the Connections cards, so a return here reads them fresh.
+    staleTime: 0,
     refetchInterval: CONNECTIONS_REFRESH_INTERVAL_MS,
   });
   const agents = useQuery({
