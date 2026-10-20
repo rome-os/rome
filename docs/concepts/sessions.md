@@ -1,6 +1,6 @@
 # Sessions
 
-A Rome session is the durable product boundary around one continuous body of agent work. It can represent a guardian-authored chat, an external [channel](messaging.md#channels) thread, an automation, a delegated subagent, a handoff, or a fork. Sessions preserve transcript and trace evidence, so an agent does not restart from a blank slate on every message and background work remains inspectable after it finishes.
+A Rome session is the durable product boundary around one continuous body of agent work. It can represent a guardian-authored chat, a conversation on one of [Rome's accounts](messaging.md#romes-accounts), an automation, a delegated subagent, a handoff, or a fork. Sessions preserve transcript and trace evidence, so an agent does not restart from a blank slate on every message and background work remains inspectable after it finishes.
 
 **Contracts:**
 

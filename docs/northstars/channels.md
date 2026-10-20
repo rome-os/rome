@@ -1,6 +1,6 @@
 # Channels
 
-A [channel](../concepts/messaging.md#channels) is one service's conversation with a person. A service can carry more than a conversation. The same connection that carries messages can also let Rome act on the service. A service Rome only reads records from carries no conversation, and is not a channel however much of its data Rome holds.
+A [channel](../architecture/channels.md) is one service's conversation with a person. A service can carry more than a conversation. The same connection that carries messages can also let Rome act on the service. A service Rome only reads records from carries no conversation, and is not a channel however much of its data Rome holds.
 
 Every channel answers the same three things. It carries messages, it says who it can reach, and it says what was said there. How much of each it can do is the channel's own answer, and a caller asks for it. What a channel cannot answer about its directory or its history is a limit of its platform, never a limit of what has been built.
 

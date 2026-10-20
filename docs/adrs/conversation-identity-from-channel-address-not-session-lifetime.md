@@ -6,7 +6,7 @@
 
 ## Context
 
-An external chat carries one address that the platform itself keeps stable: the [channel](../concepts/messaging.md#channels) and the thread id. A guardian sees one scrollback at that address across days, restarts, and quiet weekends. Nothing in the product tells them that a chat ended.
+An external chat carries one address that the platform itself keeps stable: the [channel](../architecture/channels.md) and the thread id. A guardian sees one scrollback at that address across days, restarts, and quiet weekends. Nothing in the product tells them that a chat ended.
 
 Rome runs that conversation on a provider session — a Codex or Claude thread — and that resource has a lifetime of its own. Rome evicts idle in-memory session objects to release resources, the host process restarts, and a per-turn timeout kills a stuck turn. Each of those is a resource event, not a product event.
 

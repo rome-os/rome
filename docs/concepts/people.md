@@ -34,7 +34,7 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 
 ## Person
 
-Rome tracks people the guardian knows. Each person carries a [bond level](#bond-levels) that determines how the system interacts with them. [Links](#link) to multiple [accounts](#account) let the system recognize the same person across [channels](messaging.md#channels).
+Rome tracks people the guardian knows. Each person carries a [bond level](#bond-levels) that determines how the system interacts with them. [Links](#link) to multiple [accounts](#account) let the system recognize the same person across [Rome's accounts](messaging.md#romes-accounts).
 
 **Contracts:**
 
@@ -52,7 +52,7 @@ An account is a party on an external messaging platform — a Telegram user, a W
 
 **Contracts:**
 
-- An account is identified by its [channel](messaging.md#channels) plus its own [address](#address). The same pair always names the same account.
+- An account is identified by its [channel](../architecture/channels.md) plus its own [address](#address). The same pair always names the same account.
 - Rome never creates or deletes an account. Platforms own the account lifecycle, and Rome learns of accounts from inbound messages.
 - An account resolves to a person only through its [link](#link). An account with no link resolves to no one.
 - An account is in exactly one of three states: unlinked, linked, or dismissed. Dismissal records that the account belongs to no one the guardian tracks. A dismissed account stays out of discovery until the guardian restores or links it.
@@ -63,12 +63,12 @@ An account is a party on an external messaging platform — a Telegram user, a W
 
 - **[Person](#person)** — Rome owns persons, and platforms own accounts. A person aggregates the accounts linked to them.
 - **[Address](#address)** — an account is the party. An address is one of the forms it is reachable at.
-- **[Channel](messaging.md#channels)** — a channel is one of Rome's presences on a platform, which messages arrive through. An account is one party Rome sees on that channel.
+- **[Rome's accounts](messaging.md#romes-accounts)** — one of Rome's accounts is an account Rome holds a connection to, which messages arrive through. An account here is one party Rome sees through it.
 - **Connection** — a connection joins the Rome instance to a service. An account belongs to a party on that service.
 
 ## Address
 
-An address is a form an [account](#account) is reachable at on its [channel](messaging.md#channels) — a phone number, a member id, a mailbox. The platform owns the form and Rome carries it whole. Deprecated alias: *channel user id*.
+An address is a form an [account](#account) is reachable at on its [channel](../architecture/channels.md) — a phone number, a member id, a mailbox. The platform owns the form and Rome carries it whole. Deprecated alias: *channel user id*.
 
 **Contracts:**
 
