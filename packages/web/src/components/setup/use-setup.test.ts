@@ -82,18 +82,12 @@ describe("useSetup stale-state handling", () => {
   });
 
   it("cancels a new account's live setup when the card goes away", async () => {
-    const fetchMock = rs
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(
-        async () =>
-          new Response(
-            JSON.stringify({
-              cid: "cid-new",
-              state: { status: "presenting", view: { title: "x" } },
-            }),
-            { status: 200 },
-          ),
-      );
+    const started = JSON.stringify({
+      cid: "cid-new",
+      state: { status: "presenting", view: { title: "x" } },
+    });
+    const fetchMock = rs.spyOn(globalThis, "fetch");
+    fetchMock.mockImplementation(async () => new Response(started, { status: 200 }));
     const { result, unmount } = renderHook(() =>
       useSetup({ idOrService: "feishu", grant: "bot", another: true }),
     );
@@ -122,5 +116,31 @@ describe("useSetup stale-state handling", () => {
     unmount();
 
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/cancel"))).toBe(false);
+  });
+
+  it("cancels a new account's setup that starts after the card went away", async () => {
+    let answerStart: (response: Response) => void = () => {};
+    const fetchMock = rs.spyOn(globalThis, "fetch");
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input).endsWith("/cancel")) return new Response("{}", { status: 200 });
+      return new Promise<Response>((resolve) => {
+        answerStart = resolve;
+      });
+    });
+    const { result, unmount } = renderHook(() =>
+      useSetup({ idOrService: "feishu", grant: "bot", another: true }),
+    );
+    act(() => result.current.start());
+
+    unmount();
+    const state = { status: "presenting", view: { title: "x" } };
+    answerStart(new Response(JSON.stringify({ cid: "cid-late", state }), { status: 200 }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/setups/cid-late/cancel",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
   });
 });

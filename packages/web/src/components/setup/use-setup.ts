@@ -54,6 +54,9 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const doneFiredRef = useRef(false);
+  // Set once the card unmounts, so a start that answers afterwards is not
+  // left running.
+  const unmountedRef = useRef(false);
   // The cid reset() dropped: the adopt effect must not immediately re-adopt it
   // from a stale `activeCid` discovery (the refresh that clears the discovery
   // races the reset). A fresh start() supersedes the dismissal.
@@ -99,6 +102,12 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       setError(null);
       void (async () => {
         const result = await startSetup(idOrService, grant, { force, another });
+        if (unmountedRef.current) {
+          // The card that asked went away first, so nothing could finish this
+          // new account's setup.
+          if (another && result.ok) void cancelSetup(result.start.cid);
+          return;
+        }
         setBusy(false);
         if (!result.ok) {
           setError(result.error);
@@ -181,7 +190,8 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   // A new account's setup has no connection a reopened card could find it
   // through, so it ends with the card that started it. Otherwise a flow left
   // running (a QR code still on a phone) could connect an account after the
-  // guardian closed the card.
+  // guardian closed the card. A start still in flight is cancelled when it
+  // answers.
   const liveCidRef = useRef<string | null>(null);
   liveCidRef.current = cid && !settled ? cid : null;
   useEffect(() => {
@@ -190,6 +200,12 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       if (liveCidRef.current) void cancelSetup(liveCidRef.current);
     };
   }, [another]);
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
 
   return { cid, state, busy, error, start, submit, cancel, reset };
 }
