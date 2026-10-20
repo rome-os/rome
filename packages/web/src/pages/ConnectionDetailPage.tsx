@@ -83,7 +83,8 @@ export default function ConnectionDetailPage() {
     const cards = buildConnectionCards(data ?? [], composioQuery.data ?? null);
     const route = accountRoute(cards, connectionId);
     if (!route) throw new Error();
-    navigate(`${BACK_TO_LIST}/${encodeURIComponent(route)}`);
+    // A reconnect lands on the card already open, which needs no new entry.
+    if (route !== serviceId) navigate(`${BACK_TO_LIST}/${encodeURIComponent(route)}`);
   };
 
   if (loading) {

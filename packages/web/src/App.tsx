@@ -22,6 +22,7 @@ const CallbackPage = lazy(() => import("./pages/CallbackPage"));
 const SharePage = lazy(() => import("./pages/share/SharePage"));
 const ActivityPage = lazy(() => import("./pages/ActivityPage"));
 const PeoplePage = lazy(() => import("./pages/PeoplePage"));
+const EnvoysPage = lazy(() => import("./pages/envoys/EnvoysPage"));
 // The /people redirect lives with the views it forwards to, so the paths are
 // written once; it rides their chunk, which is the one about to render anyway.
 const PeopleIndexRedirect = lazy(() =>
@@ -162,6 +163,7 @@ export default function App() {
             <Route path="/people/latest" element={<PeoplePage view="latest" />} />
             <Route path="/people/directory" element={<PeoplePage view="directory" />} />
             <Route path="/people/person/:personId" element={<PersonDetailPage />} />
+            <Route path="/envoys/*" element={<EnvoysPage />} />
             <Route path="/memory/*" element={<MemoryPage />} />
             <Route path="/projects/*" element={<ProjectsPage />} />
             <Route path="/sessions/*" element={<SessionsPage />} />

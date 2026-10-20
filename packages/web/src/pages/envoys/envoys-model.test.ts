@@ -1,0 +1,127 @@
+import { describe, expect, it } from "@rstest/core";
+import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import type { ApiConnection } from "@/lib/connections-api";
+import { buildEnvoys, displacedAccount } from "./envoys-model";
+
+function connection(overrides: Partial<ApiConnection> & { service: string }): ApiConnection {
+  return {
+    id: `${overrides.service}-id`,
+    label: overrides.service,
+    grants: { bot: "authorized" },
+    display: { bot: null },
+    capabilities: {
+      talk: { state: "unlocked" },
+      act: { state: "unsupported" },
+      watch: { state: "unsupported" },
+    },
+    connect: null,
+    setups: {},
+    channel: overrides.service,
+    agent: null,
+    ...overrides,
+  };
+}
+
+describe("buildEnvoys", () => {
+  it("groups connected accounts by agent, main first", () => {
+    const { envoys, unlinked } = buildEnvoys(
+      [
+        connection({ service: "discord", agent: "sales:agent" }),
+        connection({
+          service: "feishu",
+          agent: MAIN_AGENT_ID,
+          display: {
+            bot: { displayName: "Sales", handle: null, email: null, avatarUrl: null },
+          },
+        }),
+        connection({ service: "telegram", agent: "main" }),
+      ],
+      [{ name: "main", description: "The guardian's agent" }],
+    );
+    expect(envoys.map((envoy) => envoy.agent)).toEqual([MAIN_AGENT_ID, "sales:agent"]);
+    expect(envoys[0]!.description).toBe("The guardian's agent");
+    expect(envoys[0]!.accounts.map((account) => account.name)).toEqual(["Sales", "Telegram"]);
+    expect(unlinked).toEqual([]);
+  });
+
+  it("lists connected accounts with no agent apart", () => {
+    const { envoys, unlinked } = buildEnvoys([connection({ service: "feishu" })], []);
+    expect(envoys).toEqual([]);
+    expect(unlinked.map((account) => account.channel)).toEqual(["feishu"]);
+  });
+
+  it("leaves out accounts that cannot carry an agent", () => {
+    const { envoys, unlinked } = buildEnvoys(
+      [
+        // Not a linkable service.
+        connection({ service: "whatsapp" }),
+        // Never connected.
+        connection({ service: "discord", grants: { bot: "unauthorized" } }),
+        // A placeholder.
+        connection({ service: "telegram", id: null, channel: null }),
+        // A core that predates agent links.
+        connection({ service: "feishu", agent: undefined }),
+      ],
+      [],
+    );
+    expect(envoys).toEqual([]);
+    expect(unlinked).toEqual([]);
+  });
+
+  it("offers main even before the agent list loads", () => {
+    expect(buildEnvoys([], null).agents).toEqual([MAIN_AGENT_ID]);
+  });
+
+  it("offers the loaded agents, main first, and not a linked one core no longer loads", () => {
+    const { agents } = buildEnvoys(
+      [connection({ service: "discord", agent: "sales:agent" })],
+      [{ name: "build" }, { name: "main" }],
+    );
+    expect(agents).toEqual([MAIN_AGENT_ID, "build"]);
+  });
+
+  it("falls back to the linked agents while the agent list is missing", () => {
+    const { agents } = buildEnvoys(
+      [connection({ service: "discord", agent: "sales:agent" })],
+      null,
+    );
+    expect(agents).toEqual([MAIN_AGENT_ID, "sales:agent"]);
+  });
+
+  it("names the account an agent moves off on the same platform", () => {
+    const { envoys, unlinked } = buildEnvoys(
+      [
+        connection({ service: "discord", agent: "sales:agent" }),
+        connection({ service: "discord", channel: "discord-2", id: "discord-2" }),
+        connection({ service: "telegram", agent: MAIN_AGENT_ID }),
+        connection({ service: "telegram", channel: "telegram-2", id: "telegram-2" }),
+      ],
+      [],
+    );
+    const [discord2, telegram2] = unlinked;
+    expect(displacedAccount(envoys, discord2!, "sales:agent")?.channel).toBe("discord");
+    expect(displacedAccount(envoys, telegram2!, "sales:agent")).toBeNull();
+    // Main may speak through several accounts on one platform.
+    expect(displacedAccount(envoys, telegram2!, MAIN_AGENT_ID)).toBeNull();
+  });
+
+  it("marks the guardian's own account as a delegate with no card to open", () => {
+    const own = (agent: string | null) =>
+      connection({
+        service: "telegram_user",
+        channel: "telegram_user",
+        grants: { session: "authorized" },
+        display: { session: null },
+        agent,
+      });
+    const { envoys } = buildEnvoys([own(MAIN_AGENT_ID)], []);
+    expect(envoys[0]!.accounts[0]).toMatchObject({
+      kind: "delegate",
+      platform: "telegram",
+      route: null,
+    });
+    expect(buildEnvoys([own(null)], []).unlinked.map((account) => account.kind)).toEqual([
+      "delegate",
+    ]);
+  });
+});

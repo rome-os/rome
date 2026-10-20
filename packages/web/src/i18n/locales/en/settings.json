@@ -393,6 +393,9 @@
     "restartNeededFallback": "Backend unreachable — restart required to apply changes",
     "disconnectFailedFallback": "Failed to disconnect.",
     "reconnect": "Reconnect",
+    "disconnectConfirmTitle": "Disconnect {{name}}?",
+    "disconnectConfirmTitleUnnamed": "Disconnect this account?",
+    "disconnectConfirmBody": "Rome loses access to the account and stops answering in its chats. If you connect it again, it starts with no chats.",
     "status": {
       "connected": "Connected",
       "disconnected": "Disconnected",

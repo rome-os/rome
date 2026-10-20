@@ -170,6 +170,30 @@ describe("SetupManager", () => {
     expect(imports).toEqual([]);
   });
 
+  it("writes nothing when cancelled while the write waits for its section", async () => {
+    const { registry, imports, connect } = fakeRegistry(discordSetup);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const entered = rs.fn();
+    registry.withGrantSection = async (_s, _g, fn) => {
+      entered();
+      await gate;
+      return fn();
+    };
+    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const started = await mgr.start(PLACEHOLDER, "bot");
+    const input = mgr.provideInput(started.cid, { token: "abc" })!;
+    await rs.waitFor(() => expect(entered).toHaveBeenCalled());
+    const cancelled = mgr.cancel(started.cid);
+    release();
+    await Promise.all([input, cancelled]);
+    expect(connect).not.toHaveBeenCalled();
+    expect(imports).toEqual([]);
+    expect(mgr.state(started.cid)).toEqual({ status: "cancelled" });
+  });
+
   it("begins fresh after an explicit cancel", async () => {
     const { registry } = fakeRegistry(discordSetup);
     const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });

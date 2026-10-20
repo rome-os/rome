@@ -1234,7 +1234,13 @@ async function main() {
     },
     laterChannels: channelRecords
       .all()
-      .filter((record) => record.id !== record.service && talks(record.service))
+      // A released channel waits for `joinLaterChannel` to see a Connection
+      // take it, so boot builds none. One whose account the boot pass removes
+      // below is still built, and lists as unsendable until the next boot.
+      .filter(
+        (record) =>
+          record.id !== record.service && record.connectionId !== null && talks(record.service),
+      )
       .map((record) => ({ name: record.id, service: record.service })),
   });
   builtChannels = channels;
