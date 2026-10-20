@@ -14,14 +14,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { fetchJson } from "@/lib/fetch-json";
-import { type ApiConnection, createConnection, linkAccountAgent } from "@/lib/connections-api";
-import { type ConnectionCard, connectionRoute } from "@/lib/connection-cards";
+import { CHANNEL_CONFIGS, ChannelConnectCard } from "@/components/channels/channel-connect-card";
+import { linkAccountAgent } from "@/lib/connections-api";
+import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 
 /**
  * Account controls on a channel card: "Add another account" for services that
  * offer several, and the "Agent" picker for a linkable service's account
  * whose Talk is connected. Both act on the account (the card's channel), not on
- * a slot, so they sit below the slot cards.
+ * a slot, so they sit below the slot cards. Adding opens the service's connect
+ * flow for a new account, which exists only once that flow connects it.
  */
 
 /** Radix Select reserves the empty string, so "no agent" needs a value of its own. */
@@ -60,15 +62,15 @@ export function AccountControls({
   card: ConnectionCard;
   onRefresh: () => void;
   onFlash: (message: string) => void;
-  /** Open another account's card by its route. Rejects when the account is
-   *  not listed yet. Without it, the add button is hidden. */
-  onOpenAccount?: (route: string) => void | Promise<void>;
+  /** Open another account's card by its connection id. Rejects when the
+   *  account is not listed yet. Without it, the add button is hidden. */
+  onOpenAccount?: (connectionId: string) => void | Promise<void>;
 }) {
   const connected = talkConnected(card);
   const showLink =
     card.linkReported && card.channel !== null && connected && LINKABLE_SERVICES.has(card.service);
   // A second account only makes sense next to a first one that exists.
-  const showAdd = card.severalAccounts && connected;
+  const showAdd = card.severalAccounts && connected && CHANNEL_CONFIGS[card.service] !== undefined;
   if (!showLink && !(showAdd && onOpenAccount)) return null;
 
   return (
@@ -82,57 +84,80 @@ export function AccountControls({
         />
       )}
       {showAdd && onOpenAccount && (
-        <AddAccountButton service={card.service} onFlash={onFlash} onOpenAccount={onOpenAccount} />
+        <AddAccount card={card} onRefresh={onRefresh} onOpenAccount={onOpenAccount} />
       )}
     </div>
   );
 }
 
-function AddAccountButton({
-  service,
-  onFlash,
+/** The slot a new account of `card`'s service connects: the card's own Talk
+ *  slot, with nothing connected and no connection behind it yet. */
+function newAccountSlot(card: ConnectionCard): ConnectionSlot | null {
+  const own = card.slots.find((slot) => slot.key !== "session");
+  if (!own) return null;
+  return {
+    ...own,
+    connectionId: null,
+    state: "unauthorized",
+    display: null,
+    identity: null,
+    activeSetupCid: null,
+  };
+}
+
+function AddAccount({
+  card,
+  onRefresh,
   onOpenAccount,
 }: {
-  service: string;
-  onFlash: (message: string) => void;
-  onOpenAccount: (route: string) => void | Promise<void>;
+  card: ConnectionCard;
+  onRefresh: () => void;
+  onOpenAccount: (connectionId: string) => void | Promise<void>;
 }) {
   const { t } = useTranslation("settings");
   const [adding, setAdding] = useState(false);
+  const config = CHANNEL_CONFIGS[card.service];
+  const slot = newAccountSlot(card);
+  if (!config || !slot) return null;
 
-  const add = async () => {
-    setAdding(true);
+  if (!adding) {
+    return (
+      <Button type="button" variant="outline" onClick={() => setAdding(true)}>
+        <Plus data-icon="inline-start" aria-hidden />
+        {t("connections.accounts.add")}
+      </Button>
+    );
+  }
+
+  const opened = async (connectionId: string | null) => {
+    setAdding(false);
     try {
-      const fallback = t("connections.accounts.addFailed");
-      let connection: ApiConnection;
-      try {
-        connection = await createConnection(service, fallback);
-      } catch (error) {
-        onFlash(errorMessage(error, fallback));
-        return;
-      }
-      // The account exists from here on, so a failure to open it must not read
-      // as a failed add: a retry would create another one.
-      try {
-        // Without a channel the route would be the service, which opens the
-        // first account instead of the new one.
-        if (!connection.channel) throw new Error("The new account has no channel.");
-        await onOpenAccount(connectionRoute(connection));
-      } catch {
-        // Not an error: the account exists. The Settings tab's `onFlash`
-        // shows errors, so this one goes out as a plain toast.
-        toast(t("connections.accounts.addedNotShown"));
-      }
-    } finally {
-      setAdding(false);
+      if (!connectionId) throw new Error("Core did not name the new account.");
+      await onOpenAccount(connectionId);
+    } catch {
+      // Not an error: the account is connected. The Settings tab's `onFlash`
+      // shows errors, so this one goes out as a plain toast.
+      toast(t("connections.accounts.addedNotShown"));
     }
   };
 
   return (
-    <Button type="button" variant="outline" disabled={adding} onClick={() => void add()}>
-      <Plus data-icon="inline-start" aria-hidden />
-      {t("connections.accounts.add")}
-    </Button>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-aux text-muted-foreground">{t("connections.accounts.newAccount")}</p>
+        <Button type="button" variant="ghost" size="sm" onClick={() => setAdding(false)}>
+          {t("common.cancel")}
+        </Button>
+      </div>
+      <ChannelConnectCard
+        config={config}
+        slot={slot}
+        role="secondary"
+        another
+        onRefresh={onRefresh}
+        onConnected={(connectionId) => void opened(connectionId)}
+      />
+    </div>
   );
 }
 

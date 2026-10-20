@@ -472,13 +472,65 @@ describe("teardown serialization (#4)", () => {
     // The in-flight setup was cancelled by teardown...
     const poll = await app.request(`/setups/${second.json.cid}`);
     expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("cancelled");
-    // ...and the grant is revoked.
-    expect((await registry.getLedger().getGrant(conn.id, "bot"))?.state).toBe("unauthorized");
+    // ...and the account, which held no other grant, is gone.
+    expect(registry.find("fake-telegram")).toEqual([]);
+    expect(await registry.getLedger().getGrant(conn.id, "bot")).toBeUndefined();
 
     // Completing the cancelled setup is a no-op (409) and never re-imports.
     const late = await submitInput(app, second.json.cid, "good");
     expect(late.status).toBe(409);
-    expect((await registry.getLedger().getGrant(conn.id, "bot"))?.state).toBe("unauthorized");
+    expect(registry.find("fake-telegram")).toEqual([]);
+  });
+});
+
+describe("another account", () => {
+  function severalAccountsHarness() {
+    const harnessed = harness();
+    const descriptor = harnessed.registry.getDescriptor("fake-telegram");
+    if (descriptor) descriptor.severalAccounts = true;
+    return harnessed;
+  }
+
+  it("connects a new account beside the first, minting it only at the terminal write", async () => {
+    const { app, registry } = severalAccountsHarness();
+    const first = await start(app);
+    await submitInput(app, first.json.cid, "good");
+    const [existing] = registry.find("fake-telegram");
+
+    const added = await start(app, "fake-telegram", { another: true });
+    expect(added.json.reattached).toBe(false);
+    expect(added.json.cid).not.toBe(first.json.cid);
+    expect(registry.find("fake-telegram")).toHaveLength(1);
+    const done = await submitInput(app, added.json.cid, "other");
+
+    const state = ((await done.json()) as { state: { conferral?: { connectionId?: string } } })
+      .state;
+    const accounts = registry.find("fake-telegram");
+    expect(accounts).toHaveLength(2);
+    const minted = accounts.find((account) => account.id !== existing.id);
+    expect(state.conferral?.connectionId).toBe(minted?.id);
+    expect((await registry.getLedger().getGrant(existing.id, "bot"))?.state).toBe("authorized");
+  });
+
+  it("leaves no account behind when the new account's setup is cancelled", async () => {
+    const { app, registry } = severalAccountsHarness();
+    const first = await start(app);
+    await submitInput(app, first.json.cid, "good");
+
+    const added = await start(app, "fake-telegram", { another: true });
+    await app.request(`/setups/${added.json.cid}/cancel`, {
+      method: "POST",
+      headers: SAME_ORIGIN,
+    });
+
+    expect(registry.find("fake-telegram")).toHaveLength(1);
+  });
+
+  it("refuses another account of a service that offers one", async () => {
+    const { app, registry } = harness();
+    const { res } = await start(app, "fake-telegram", { another: true });
+    expect(res.status).toBe(400);
+    expect(registry.find("fake-telegram")).toEqual([]);
   });
 });
 

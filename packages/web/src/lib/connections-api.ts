@@ -79,7 +79,8 @@ export async function fetchConnections(): Promise<ApiConnection[]> {
 export type TeardownResult = { ok: true } | { ok: false; error: string };
 
 /** Revoke one grant — the registry-native disconnect. The transport relocks
- *  and custody artifacts clear off the transition; the connection row persists
+ *  and custody artifacts clear off the transition. A channel account whose
+ *  last grant this was is removed with it; any other connection row persists
  *  so a later reconnect re-confers in place. */
 export async function revokeConnectionGrant(
   connectionId: string,
@@ -94,18 +95,6 @@ export async function revokeConnectionGrant(
     return { ok: false, error: payload?.error || "Failed to disconnect." };
   }
   return { ok: true };
-}
-
-/** Mint a fresh, unauthorized Connection for a service that offers several
- *  accounts. The dashboard then runs the ordinary setup against its id.
- *  `fallback` is the error message when the server gives none. */
-export async function createConnection(service: string, fallback: string): Promise<ApiConnection> {
-  const payload = await fetchJson<{ connection: ApiConnection }>("/api/connections", {
-    method: "POST",
-    json: { service },
-    fallback,
-  });
-  return payload.connection;
 }
 
 /** Link an agent to an account by its channel id, or pass null so the account

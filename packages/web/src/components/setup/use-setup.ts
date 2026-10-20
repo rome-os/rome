@@ -19,12 +19,15 @@ export interface UseSetupOptions {
   /** Connection id, or the bare service name for a never-connected service. */
   idOrService: string;
   grant: string;
+  /** Connect a new account of the service `idOrService` names. */
+  another?: boolean;
   /** A live setup id discovered on the connection response — the hook
    *  re-attaches to it (polls its state) instead of starting fresh. */
   activeCid?: string | null;
-  /** Fired once when the setup reaches `done` — the card refreshes
-   *  connections so the slot flips to connected. */
-  onDone?: () => void;
+  /** Fired once when the setup reaches `done`, with the connection it
+   *  connected when core reports it — the card refreshes connections so the
+   *  slot flips to connected. */
+  onDone?: (connectionId: string | null) => void;
 }
 
 // Poll interval while the setup awaits an external event.
@@ -45,7 +48,7 @@ export interface SetupRunner {
 }
 
 export function useSetup(options: UseSetupOptions): SetupRunner {
-  const { idOrService, grant, activeCid, onDone } = options;
+  const { idOrService, grant, another, activeCid, onDone } = options;
   const [cid, setCid] = useState<string | null>(activeCid ?? null);
   const [state, setState] = useState<SetupState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,7 +64,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       setState(next);
       if (next.status === "done" && !doneFiredRef.current) {
         doneFiredRef.current = true;
-        onDone?.();
+        onDone?.(next.conferral?.connectionId ?? null);
       }
     },
     [onDone],
@@ -95,7 +98,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       setBusy(true);
       setError(null);
       void (async () => {
-        const result = await startSetup(idOrService, grant, { force });
+        const result = await startSetup(idOrService, grant, { force, another });
         setBusy(false);
         if (!result.ok) {
           setError(result.error);
@@ -107,7 +110,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         settle(result.start.state);
       })();
     },
-    [idOrService, grant, settle],
+    [idOrService, grant, another, settle],
   );
 
   const submit = useCallback(

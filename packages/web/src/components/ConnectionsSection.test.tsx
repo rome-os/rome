@@ -309,6 +309,15 @@ describe("ConnectionsSection — Composio row", () => {
 });
 
 describe("ConnectionsSection — several accounts", () => {
+  /** A new account's setup start, answered as connected at once. */
+  function connectedSetup(connectionId: string | null) {
+    return {
+      cid: "cid-new",
+      state: { status: "done", conferral: connectionId ? { connectionId } : {} },
+      reattached: false,
+    };
+  }
+
   function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
     return connection({
       service: "feishu",
@@ -343,8 +352,8 @@ describe("ConnectionsSection — several accounts", () => {
       display: { app: grantDisplay({ displayName: "Sales Bot" }) },
     });
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      if (String(input) === "/api/connections" && init?.method === "POST") {
-        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      if (String(input).endsWith("/setup") && init?.method === "POST") {
+        return new Response(JSON.stringify(connectedSetup(second.id)), { status: 200 });
       }
       if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
       return new Response("{}", { status: 200 });
@@ -353,6 +362,7 @@ describe("ConnectionsSection — several accounts", () => {
     const view = renderSection([feishu()], null, onRefresh);
     fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
     fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
     // The parent re-renders with the refreshed list, as SettingsTabPage does.
@@ -365,8 +375,8 @@ describe("ConnectionsSection — several accounts", () => {
   it("keeps the dialog on the current account when the new one is not listed yet", async () => {
     const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      if (String(input) === "/api/connections" && init?.method === "POST") {
-        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      if (String(input).endsWith("/setup") && init?.method === "POST") {
+        return new Response(JSON.stringify(connectedSetup(second.id)), { status: 200 });
       }
       if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
       return new Response("{}", { status: 200 });
@@ -375,6 +385,7 @@ describe("ConnectionsSection — several accounts", () => {
     renderSection([feishu()], null, onRefresh);
     fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
     fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
     expect(within(screen.getByRole("dialog")).getByText("Feishu")).toBeTruthy();
@@ -383,8 +394,8 @@ describe("ConnectionsSection — several accounts", () => {
   it("leaves the dialog closed when the guardian closed it during the add", async () => {
     const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      if (String(input) === "/api/connections" && init?.method === "POST") {
-        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      if (String(input).endsWith("/setup") && init?.method === "POST") {
+        return new Response(JSON.stringify(connectedSetup(second.id)), { status: 200 });
       }
       if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
       return new Response("{}", { status: 200 });
@@ -399,6 +410,7 @@ describe("ConnectionsSection — several accounts", () => {
     const view = renderSection([feishu()], null, onRefresh);
     fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
     fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
 
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });

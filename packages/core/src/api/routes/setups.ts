@@ -10,9 +10,11 @@
 //
 // `:id` addresses the connection to confer. For a service the guardian has
 // never connected there is no ledger row yet (the terminal conferral mints it),
-// so `:id` may instead be a bare service name — an offerable placeholder. Either
-// way the setup is keyed by (service, grant); the manager enforces one active
-// setup per grant and re-attaches a duplicate start.
+// so `:id` may instead be a bare service name — an offerable placeholder. A
+// start naming the service with `another: true` connects a new account of a
+// service that offers several, minted the same way. Either way the setup is
+// keyed by (service, grant); the manager enforces one active setup per grant
+// and re-attaches a duplicate start.
 
 import { Hono, type Context } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
@@ -25,8 +27,18 @@ import { requireSetupManager, requireConnectionRegistry } from "../helpers.js";
  *  (carry the id AND its service so the terminal write imports into THAT
  *  connection) or, for a never-connected service, the bare service name — valid
  *  only when a descriptor is registered for it (placeholder; the write mints the
- *  row). Null when neither. */
-function resolveTarget(registry: ConnectionRegistry, id: string): SetupTarget | null {
+ *  row). With `another`, `:id` must name a service that offers several
+ *  accounts, and the write mints a new one. Null when none of these. */
+function resolveTarget(
+  registry: ConnectionRegistry,
+  id: string,
+  another: boolean,
+): SetupTarget | null {
+  if (another) {
+    return registry.getDescriptor(id)?.severalAccounts === true
+      ? { service: id, another: true }
+      : null;
+  }
   const conn = registry.all().find((c) => c.id === id);
   if (conn) return { service: conn.service, connectionId: conn.id };
   return registry.isRegistered(id) ? { service: id } : null;
@@ -48,11 +60,19 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     if (blocked) return blocked;
     const registry = requireConnectionRegistry(deps);
     const manager = requireSetupManager(deps);
-    const target = resolveTarget(registry, c.req.param("id"));
-    if (!target) return c.json({ error: "Unknown connection." }, 404);
-    const grant = c.req.param("name");
-    const body = await c.req.json<{ force?: unknown }>().catch(() => ({}) as { force?: unknown });
+    const body = await c.req
+      .json<{ force?: unknown; another?: unknown }>()
+      .catch(() => ({}) as { force?: unknown; another?: unknown });
     const force = body.force === true;
+    const another = body.another === true;
+    const id = c.req.param("id");
+    const target = resolveTarget(registry, id, another);
+    if (!target) {
+      return another
+        ? c.json({ error: `"${id}" does not offer another account.` }, 400)
+        : c.json({ error: "Unknown connection." }, 404);
+    }
+    const grant = c.req.param("name");
     try {
       const started = await manager.start(target, grant, { force });
       c.header("Cache-Control", "no-store");

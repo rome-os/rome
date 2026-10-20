@@ -18,7 +18,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { buildConnectionCards } from "@/lib/connection-cards";
+import { accountRoute, buildConnectionCards } from "@/lib/connection-cards";
 import { StatusIndicator } from "@/lib/connection-status";
 import type { ApiConnection } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
@@ -76,12 +76,11 @@ export function ConnectionsSection({
   // dialog would close, then reopen by itself when a later poll lists it.
   // A dialog the guardian closed, or moved to another card, during the add
   // stays where they left it.
-  const openAccount = async (route: string) => {
+  const openAccount = async (connectionId: string) => {
     const from = selectedRouteRef.current;
     const fresh = await onRefresh(true);
-    if (!fresh || !buildConnectionCards(fresh, composio).some((card) => card.route === route)) {
-      throw new Error(`Account ${route} is not listed yet.`);
-    }
+    const route = fresh && accountRoute(buildConnectionCards(fresh, composio), connectionId);
+    if (!route) throw new Error(`Account ${connectionId} is not listed yet.`);
     if (from !== null && selectedRouteRef.current === from) select(route);
   };
 

@@ -51,8 +51,9 @@ export interface SetupSessionDeps {
   /** The builder's coroutine. */
   fn: SetupFn;
   /** The single durable write, run exactly once when the coroutine returns. A
-   *  throw here fails the setup (nothing partial is left observable). */
-  commit: (conferral: SetupConferral, signal: AbortSignal) => Promise<void>;
+   *  throw here fails the setup (nothing partial is left observable). It
+   *  answers the id of the connection it wrote, which `done` reports. */
+  commit: (conferral: SetupConferral, signal: AbortSignal) => Promise<string | void>;
   /** Optional override of the default working view (progress snapshot). */
   workingView?: SetupView;
 }
@@ -159,8 +160,11 @@ export class SetupSession {
     try {
       const conferral = await this.#deps.fn(interact, ctx);
       // The one durable write; `done` is set only after it resolves.
-      await this.#deps.commit(conferral, this.#abort.signal);
-      this.#terminate({ status: "done", conferral: { summary: conferral.summary } });
+      const connectionId = await this.#deps.commit(conferral, this.#abort.signal);
+      this.#terminate({
+        status: "done",
+        conferral: { summary: conferral.summary, ...(connectionId ? { connectionId } : {}) },
+      });
     } catch (err) {
       if (this.#abort.signal.aborted) {
         this.#terminate({ status: "cancelled" });

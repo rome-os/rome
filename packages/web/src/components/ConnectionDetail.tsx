@@ -38,9 +38,9 @@ export function ConnectionDetailBody({
   /** Re-fetch `/api/connections` (and the Composio status where shown). */
   onRefresh: () => void;
   onFlash: (message: string) => void;
-  /** Open another account's card by its route, after "Add another account"
-   *  minted it. Without it, the add button is hidden. */
-  onOpenAccount?: (route: string) => void | Promise<void>;
+  /** Open another account's card by its connection id, after "Add another
+   *  account" connected it. Without it, the add button is hidden. */
+  onOpenAccount?: (connectionId: string) => void | Promise<void>;
 }) {
   // Always-on (webchat) has its own card — connected, ✓ bullets, no ceremony.
   if (card.alwaysOn) {
@@ -172,7 +172,7 @@ export function ConnectionDetailDialog({
   onClose: () => void;
   onRefresh: () => void;
   onFlash: (message: string) => void;
-  onOpenAccount?: (route: string) => void | Promise<void>;
+  onOpenAccount?: (connectionId: string) => void | Promise<void>;
 }) {
   return (
     <Dialog open={card !== null} onClose={onClose} size="lg">

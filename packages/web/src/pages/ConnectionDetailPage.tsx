@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { StatusIndicator } from "@/lib/connection-status";
 import { ConnectionDetailBody } from "@/components/ConnectionDetail";
-import { buildConnectionCards } from "@/lib/connection-cards";
+import { accountRoute, buildConnectionCards } from "@/lib/connection-cards";
 import { CONNECTIONS_REFRESH_INTERVAL_MS, fetchConnections } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import {
@@ -78,10 +78,11 @@ export default function ConnectionDetailPage() {
   // first would hit the unknown-route redirect. A refetch that still lacks it
   // throws, so the add button reports the failure instead of the page
   // silently falling back to the list.
-  const openAccount = async (route: string) => {
+  const openAccount = async (connectionId: string) => {
     const { data } = await connectionsQuery.refetch();
     const cards = buildConnectionCards(data ?? [], composioQuery.data ?? null);
-    if (!cards.some((entry) => entry.route === route)) throw new Error();
+    const route = accountRoute(cards, connectionId);
+    if (!route) throw new Error();
     navigate(`${BACK_TO_LIST}/${encodeURIComponent(route)}`);
   };
 

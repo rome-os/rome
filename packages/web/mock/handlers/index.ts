@@ -15,7 +15,7 @@ import type {
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import { http, HttpResponse } from "msw";
-import type { ApiConnection, Capability } from "@/lib/connections-api";
+import type { Capability } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import type { SettingsMap } from "@/hooks/use-settings";
 import type { UpgradeStatus } from "@/hooks/use-upgrade-status";
@@ -1230,53 +1230,6 @@ export const handlers = [
     HttpResponse.json({ agents: mockAgentNames.map((name) => ({ name })) }),
   ),
   http.get("/api/connections", () => HttpResponse.json(connections)),
-  // "Add another account": mint an unauthorized Connection under a fresh
-  // opaque channel id, as core does for every account after a service's first.
-  // Its setup ceremony is out of reach here (see "What mock mode cannot do"),
-  // so the new account stays unconnected until reload.
-  http.post("/api/connections", async ({ request }) => {
-    const body = (await request.json()) as { service?: string };
-    const service = body.service ?? "";
-    // Core decides this per service and reports it as `severalAccounts`, so
-    // the mock reads it off the service's first connection.
-    const first = connections.connections.find((candidate) => candidate.service === service);
-    if (!first?.severalAccounts) {
-      return HttpResponse.json(
-        { error: `${service || "This service"} does not offer several accounts.` },
-        { status: 400 },
-      );
-    }
-    // Like core, hand back an account that never received a grant before
-    // minting another.
-    const unfinished = connections.connections.find(
-      (candidate) =>
-        candidate.service === service &&
-        Object.values(candidate.grants).every((state) => state === "unauthorized"),
-    );
-    if (unfinished) return HttpResponse.json({ connection: unfinished }, { status: 200 });
-    const channel = crypto.randomUUID();
-    const grantNames = Object.keys(first.grants);
-    const grants = Object.fromEntries(grantNames.map((grant) => [grant, "unauthorized" as const]));
-    const connection: ApiConnection = {
-      id: `${channel}-mock`,
-      service,
-      label: first.label.split(" · ")[0] ?? service,
-      grants,
-      display: Object.fromEntries(grantNames.map((grant) => [grant, null])),
-      capabilities: {
-        talk: { state: "needs-auth", missingGrants: grantNames },
-        act: { state: "unsupported" },
-        watch: { state: "unsupported" },
-      },
-      connect: null,
-      setups: {},
-      channel,
-      agent: null,
-      severalAccounts: true,
-    };
-    connections.connections.push(connection);
-    return HttpResponse.json({ connection }, { status: 201 });
-  }),
   // Link an agent to an account. On one platform an agent other than main
   // links to at most one account, so linking it here takes the link off the
   // other one.
@@ -1328,11 +1281,12 @@ export const handlers = [
   }),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
   // above without this would make every one of those buttons fail locally.
-  // Teardown is real here, the way the route runs it: the grant
-  // relocks, its identity clears, and the row itself stays so the service is
-  // still offered. Reconnecting needs a setup ceremony mock mode does not have
-  // (see "What mock mode cannot do"), so a disconnect here is one-way until
-  // reload — which is the honest depiction of a fixture with no ceremony
+  // Teardown is real here, the way the route runs it: the grant relocks and
+  // its identity clears. A channel account that holds no grant then is
+  // removed, as core removes it, and a service left with none is offered as a
+  // placeholder again. Reconnecting needs a setup ceremony mock mode does not
+  // have (see "What mock mode cannot do"), so a disconnect here is one-way
+  // until reload — which is the honest depiction of a fixture with no ceremony
   // behind it, not a gap this handler can paper over.
   http.delete("/api/connections/:id/grants/:name", ({ params }) => {
     const connection = connections.connections.find(
@@ -1358,7 +1312,22 @@ export const handlers = [
         missingGrants: [grant],
       };
     }
-    return HttpResponse.json({ ok: true, connection });
+    const unconnectedAccount =
+      connection.capabilities.talk.state !== "unsupported" &&
+      Object.values(connection.grants).every((state) => state === "unauthorized");
+    if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
+    const others = connections.connections.filter(
+      (candidate) => candidate !== connection && candidate.service === connection.service,
+    );
+    if (others.length > 0) {
+      connections.connections.splice(connections.connections.indexOf(connection), 1);
+    } else {
+      connection.id = null;
+      connection.label = connection.service;
+      connection.channel = null;
+      connection.agent = null;
+    }
+    return HttpResponse.json({ ok: true, connection: null });
   }),
   http.get("/api/tailscale/devices", () => HttpResponse.json(tailscale)),
   http.get("/api/integrations/composio/status", () => HttpResponse.json(composioStatus)),

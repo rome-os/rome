@@ -216,6 +216,7 @@ import {
   ConversationSettingsRepository,
   ConversationSettingsService,
 } from "./conversation-settings/index.js";
+import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
 import { ensureZeroGrantConnections } from "./connections/zero-grant.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
 import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
@@ -1352,6 +1353,9 @@ async function main() {
   // Hydrate connection/grant state without starting provider transports, so
   // the zero-grant connections exist before any Talk epoch can admit messages.
   await connectionRegistry.load({ deferCapabilities: true });
+  // An account exists only while connected, so one an earlier version left
+  // unconnected goes before any channel is recorded for it.
+  await removeUnconnectedAccounts(connectionRegistry);
   // Connections minted before channels were recorded get theirs now. Each
   // service held one, so each takes its service's name.
   claimChannels(

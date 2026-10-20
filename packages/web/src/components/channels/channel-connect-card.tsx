@@ -155,6 +155,11 @@ export interface ChannelConnectCardProps {
   slot: ConnectionSlot;
   role: "primary" | "secondary";
   onRefresh: () => void | Promise<void>;
+  /** Connect a new account of the service rather than the slot's own. */
+  another?: boolean;
+  /** Fired after a setup connects, once the refresh has run, with the
+   *  connection it connected when core reports it. */
+  onConnected?: (connectionId: string | null) => void;
 }
 
 /**
@@ -164,7 +169,14 @@ export interface ChannelConnectCardProps {
  * renderer). A channel that reads connected was guardian-linked during the
  * terminal conferral, so there is no separate verify-status polling.
  */
-export function ChannelConnectCard({ config, slot, role, onRefresh }: ChannelConnectCardProps) {
+export function ChannelConnectCard({
+  config,
+  slot,
+  role,
+  onRefresh,
+  another = false,
+  onConnected,
+}: ChannelConnectCardProps) {
   const { t } = useTranslation("settings");
   const connected = slot.state !== "unauthorized";
 
@@ -172,13 +184,18 @@ export function ChannelConnectCard({ config, slot, role, onRefresh }: ChannelCon
   const [error, setError] = useState<string | null>(null);
 
   // The setup addresses the connection by id, or by the bare service name when
-  // the guardian has never connected (the terminal conferral mints the row).
+  // the guardian has never connected or is adding another account (the
+  // terminal conferral mints the row).
   const setup = useSetup({
-    idOrService: slot.connectionId ?? config.service,
+    idOrService: (another ? null : slot.connectionId) ?? config.service,
     grant: slot.grant ?? config.defaultGrant,
+    another,
     activeCid: slot.activeSetupCid,
-    onDone: () => {
-      void onRefresh();
+    onDone: (connectionId) => {
+      void (async () => {
+        await onRefresh();
+        onConnected?.(connectionId);
+      })();
     },
   });
 

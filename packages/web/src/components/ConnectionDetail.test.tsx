@@ -421,12 +421,6 @@ describe("ConnectionDetailBody — accounts", () => {
       if (url.startsWith("/api/channels/accounts/") && method === "PUT") {
         return new Response(JSON.stringify(linkResponse), { status: 200 });
       }
-      if (url === "/api/connections" && method === "POST") {
-        return new Response(
-          JSON.stringify({ connection: feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU }) }),
-          { status: 201 },
-        );
-      }
       if (url === "/api/approvals") return new Response("[]", { status: 200 });
       return new Response("{}", { status: 200 });
     });
@@ -438,7 +432,7 @@ describe("ConnectionDetailBody — accounts", () => {
     handlers: {
       onRefresh?: () => void;
       onFlash?: (message: string) => void;
-      onOpenAccount?: (route: string) => void;
+      onOpenAccount?: (connectionId: string) => void;
     } = {},
   ) {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -673,77 +667,95 @@ describe("ConnectionDetailBody — accounts", () => {
     expect(screen.getByRole("button", { name: "Add another account" })).toBeTruthy();
   });
 
-  it("adds another account and opens it by its route", async () => {
-    const calls = mockAccountsFetch(null);
+  /** Answer the new account's setup start as connected at once, naming
+   *  `connectionId` when given, and record each call. */
+  function mockNewAccountSetup(connectionId?: string) {
+    const calls: FetchCall[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.endsWith("/setup") && method === "POST") {
+        const conferral = connectionId ? { connectionId } : {};
+        return new Response(
+          JSON.stringify({
+            cid: "cid-new",
+            state: { status: "done", conferral },
+            reattached: false,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    return calls;
+  }
+
+  it("opens the connect flow for a new account, and creates nothing until it connects", async () => {
+    const calls = mockNewAccountSetup("conn-feishu-2");
+    const onRefresh = rs.fn();
+    const onOpenAccount = rs.fn();
+    renderAccountBody(cardFor([feishu()], "feishu"), { onRefresh, onOpenAccount });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Add another account" }));
+    expect(screen.getByText("New account")).toBeTruthy();
+    expect(calls.filter((call) => call.method === "POST")).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => expect(onOpenAccount).toHaveBeenCalledWith("conn-feishu-2"));
+    expect(onRefresh).toHaveBeenCalled();
+    expect(calls.filter((call) => call.method === "POST")).toEqual([
+      {
+        url: "/api/connections/feishu/grants/app/setup",
+        method: "POST",
+        body: { force: false, another: true },
+      },
+    ]);
+  });
+
+  it("says the account was connected when it cannot be opened yet", async () => {
+    mockNewAccountSetup("conn-feishu-2");
+    const onOpenAccount = rs.fn(async () => {
+      throw new Error("not listed");
+    });
+    renderAccountBody(cardFor([feishu()], "feishu"), { onOpenAccount });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Add another account" }));
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith("Account connected. Find it in the Connections list."),
+    );
+  });
+
+  it("does not open an account when core does not name the one it connected", async () => {
+    mockNewAccountSetup();
     const onOpenAccount = rs.fn();
     renderAccountBody(cardFor([feishu()], "feishu"), { onOpenAccount });
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Add another account" }));
-
-    await waitFor(() => expect(onOpenAccount).toHaveBeenCalledWith(SECOND_FEISHU));
-    expect(calls.find((call) => call.method === "POST")).toEqual({
-      url: "/api/connections",
-      method: "POST",
-      body: { service: "feishu" },
-    });
-  });
-
-  it("says the account was added when it cannot be opened yet", async () => {
-    mockAccountsFetch();
-    const onFlash = rs.fn();
-    const onOpenAccount = rs.fn(async () => {
-      throw new Error("not listed");
-    });
-    renderAccountBody(cardFor([feishu()], "feishu"), { onFlash, onOpenAccount });
-    const user = userEvent.setup();
-
-    await user.click(screen.getByRole("button", { name: "Add another account" }));
+    await user.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith("Account added. Find it in the Connections list."),
-    );
-    expect(onFlash).not.toHaveBeenCalledWith("Could not add an account");
-  });
-
-  it("does not open the first account when the new one comes back without a channel", async () => {
-    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      if (String(input) === "/api/connections" && init?.method === "POST") {
-        return new Response(JSON.stringify({ connection: feishu({ channel: null }) }), {
-          status: 201,
-        });
-      }
-      return new Response("{}", { status: 200 });
-    });
-    const onFlash = rs.fn();
-    const onOpenAccount = rs.fn();
-    renderAccountBody(cardFor([feishu()], "feishu"), { onFlash, onOpenAccount });
-    const user = userEvent.setup();
-
-    await user.click(screen.getByRole("button", { name: "Add another account" }));
-
-    await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith("Account added. Find it in the Connections list."),
+      expect(toast).toHaveBeenCalledWith("Account connected. Find it in the Connections list."),
     );
     expect(onOpenAccount).not.toHaveBeenCalled();
   });
 
-  it("reports a failed add with the localized fallback", async () => {
-    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      if (String(input) === "/api/connections" && init?.method === "POST") {
-        return new Response("", { status: 500 });
-      }
-      return new Response("{}", { status: 200 });
-    });
-    const onFlash = rs.fn();
-    const onOpenAccount = rs.fn();
-    renderAccountBody(cardFor([feishu()], "feishu"), { onFlash, onOpenAccount });
+  it("closes the new account's connect flow on Cancel", async () => {
+    mockNewAccountSetup();
+    renderAccountBody(cardFor([feishu()], "feishu"), { onOpenAccount: rs.fn() });
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Add another account" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    await waitFor(() => expect(onFlash).toHaveBeenCalledWith("Could not add an account"));
-    expect(onOpenAccount).not.toHaveBeenCalled();
+    expect(screen.queryByText("New account")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add another account" })).toBeTruthy();
   });
 
   it("hides the account controls until the Talk is connected", () => {

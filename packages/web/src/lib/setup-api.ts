@@ -50,6 +50,9 @@ export interface SetupView {
 
 export interface SetupDoneView {
   summary?: SetupView;
+  /** The connection the setup connected, so a setup for a new account can
+   *  open the account it made. Absent from a core that predates it. */
+  connectionId?: string;
 }
 
 export type SetupState =
@@ -77,18 +80,22 @@ export type SetupStartResult = { ok: true; start: SetupStart } | { ok: false; er
 
 /** Start or re-attach a setup for one grant. `idOrService` is the connection
  *  id, or the bare service name for a never-connected service (the terminal
- *  conferral mints the row). */
+ *  conferral mints the row). With `another`, `idOrService` is the service and
+ *  the setup connects a new account of it. */
 export async function startSetup(
   idOrService: string,
   grant: string,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; another?: boolean } = {},
 ): Promise<SetupStartResult> {
   const res = await fetch(
     `/api/connections/${encodeURIComponent(idOrService)}/grants/${encodeURIComponent(grant)}/setup`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ force: opts.force ?? false }),
+      body: JSON.stringify({
+        force: opts.force ?? false,
+        ...(opts.another ? { another: true } : {}),
+      }),
     },
   );
   if (!res.ok) {

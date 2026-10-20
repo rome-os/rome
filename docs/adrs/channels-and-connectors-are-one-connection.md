@@ -101,3 +101,11 @@ Rome stores each channel's platform as a fixed value mapped from its service ([`
 
 - **Let main answer wherever no agent is linked.** Rejected because a guardian who moves an agent to another account would leave the old one answering as main, which is not what moving it means. Linking main makes who answers explicit on every account.
 - **Parse the platform out of a channel id.** Rejected because a later channel's id is opaque, and `telegram_user` would need a parsing rule of its own. A fixed mapping from the service answers the question once.
+
+## Amendment (2026-10-20): an account exists only while it is connected
+
+Adding another account of a service no longer mints a Connection ahead of its setup. The setup starts addressed to a new account of the service, and its terminal conferral mints the Connection and its channel, as it already does for a service's first Connection. `POST /connections` and `connectUnusedOrAnother` from the 2026-10-15 amendment are withdrawn. Revoking the last grant a Connection holds removes the Connection when its service has a Talk, and boot removes any such Connection an earlier version left holding no grant. A Connection whose service has no Talk keeps today's behaviour and stays after its last grant goes.
+
+### Alternatives
+
+- **Keep minting ahead of setup, and hide accounts that hold no grant.** Rejected because the hidden rows still back channels, take names and count against the one-agent-per-platform rule.

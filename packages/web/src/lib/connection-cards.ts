@@ -181,6 +181,15 @@ export function connectionRoute(connection: ApiConnection): string {
   return connection.channel || connection.service;
 }
 
+/** The route of the card whose slots `connectionId` backs, or null when no
+ *  card lists it. */
+export function accountRoute(cards: ConnectionCard[], connectionId: string): string | null {
+  return (
+    cards.find((card) => card.slots.some((slot) => slot.connectionId === connectionId))?.route ??
+    null
+  );
+}
+
 function toCard(connection: ApiConnection): ConnectionCard {
   const alwaysOn = connection.service === "webchat";
   const slots = alwaysOn

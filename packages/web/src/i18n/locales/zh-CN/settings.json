@@ -55,8 +55,8 @@
     "loadFailedFallback": "加载连接失败。",
     "accounts": {
       "add": "添加另一个账号",
-      "addFailed": "无法添加账号",
-      "addedNotShown": "账号已添加，可在连接列表中找到。",
+      "addedNotShown": "账号已连接，可在连接列表中找到。",
+      "newAccount": "新账号",
       "agent": "智能体",
       "agentDescription": "智能体负责回复此账号上的消息。没有智能体时，此账号不回复。同一平台上，main 可以关联多个账号；其他智能体只能关联一个。",
       "noAgent": "无。此账号不回复。",
