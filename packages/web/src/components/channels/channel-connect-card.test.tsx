@@ -134,6 +134,33 @@ it("renews a degraded account in place instead of only offering Disconnect", asy
   ).toBe(true);
 });
 
+it("offers Reconnect again when a renewed account degrades a second time", async () => {
+  stubFetch();
+  const degraded = { ...connected("bot", "@rome_helper"), state: "degraded" as const };
+  const card = (slot: ConnectionSlot) => (
+    <MemoryRouter>
+      <ChannelConnectCard
+        config={CHANNEL_CONFIGS.discord}
+        slot={slot}
+        role="primary"
+        onRefresh={() => {}}
+      />
+    </MemoryRouter>
+  );
+  const { rerender } = render(card(degraded));
+
+  fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+  const token = await screen.findByLabelText("Discord bot token");
+  fireEvent.change(token, { target: { value: "new-token" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(screen.queryByLabelText("Discord bot token")).toBeNull());
+
+  rerender(card(connected("bot", "@rome_helper")));
+  rerender(card(degraded));
+
+  expect(await screen.findByRole("button", { name: "Reconnect" })).toBeTruthy();
+});
+
 // ── Shared frame (via Discord) ──────────────────────────────────────────────
 
 describe("ChannelConnectCard — shared frame", () => {

@@ -35,16 +35,23 @@ beforeEach(() => {
 
 let seededSessions = 0;
 
-function seedMessage(input: { sessionType: string; role: string; hoursAgo: number }): void {
+function seedMessage(input: {
+  sessionType: string;
+  role: string;
+  hoursAgo: number;
+  /** The channel a `channel` session is on. */
+  channel?: string;
+  senderId?: string;
+}): void {
   const sessionId = `session-${++seededSessions}`;
   const createdAt = Math.floor((Date.now() - input.hoursAgo * 60 * 60 * 1000) / 1000);
   testDb.db.run(sql`
-    INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
-    VALUES (${sessionId}, ${sessionId}, ${input.sessionType}, ${createdAt}, ${createdAt})
+    INSERT INTO rome_sessions (id, name, type, source_channel, created_at, activity_at)
+    VALUES (${sessionId}, ${sessionId}, ${input.sessionType}, ${input.channel ?? null}, ${createdAt}, ${createdAt})
   `);
   testDb.db.run(sql`
-    INSERT INTO rome_agent_messages (id, session_id, role, content, created_at)
-    VALUES (${`${sessionId}-message`}, ${sessionId}, ${input.role}, '"hi"', ${createdAt})
+    INSERT INTO rome_agent_messages (id, session_id, role, content, sender_id, created_at)
+    VALUES (${`${sessionId}-message`}, ${sessionId}, ${input.role}, '"hi"', ${input.senderId ?? null}, ${createdAt})
   `);
 }
 
@@ -121,6 +128,21 @@ describe("dream", () => {
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const data = result.data as { windowHours: number };
     expect(data.windowHours).toBe(12);
+  });
+
+  it("asks for the chats of every account, not one account by name", async () => {
+    const run = rs.fn(async function* (_input: { prompt: string }) {
+      yield { type: "result", content: "done" };
+    });
+    const deps = makeDeps([]);
+    (deps.agentRunner as unknown as { run: unknown }).run = run;
+
+    await createAction(actionConfig, deps).execute({ windowHours: 6 });
+
+    const prompt = run.mock.calls[0]?.[0]?.prompt ?? "";
+    expect(prompt).toContain("get_account_chats (windowHours: 6)");
+    expect(prompt).not.toContain("fetch_channel_history");
+    expect(prompt.toLowerCase()).not.toContain("discord");
   });
 
   it("leaves routines to the app-started hook", async () => {
@@ -238,10 +260,17 @@ describe("dream", () => {
       expect(run).not.toHaveBeenCalled();
     });
 
-    it("counts only messages a person sent in a chat or channel", async () => {
+    it("counts only messages a person sent in a chat or on one of Rome's accounts", async () => {
       clearChats();
       seedMessage({ sessionType: "webchat", role: "assistant", hoursAgo: 1 });
-      seedMessage({ sessionType: "channel", role: "notification", hoursAgo: 1 });
+      seedMessage({
+        sessionType: "channel",
+        channel: "telegram",
+        role: "notification",
+        senderId: "rome",
+        hoursAgo: 1,
+      });
+      seedMessage({ sessionType: "channel", channel: "whatsapp", role: "user", hoursAgo: 1 });
       seedMessage({ sessionType: "action", role: "user", hoursAgo: 1 });
       seedMessage({ sessionType: "subagent", role: "user", hoursAgo: 1 });
       const deps = makeDeps([]);
@@ -253,9 +282,27 @@ describe("dream", () => {
       expect(run).not.toHaveBeenCalled();
     });
 
-    it("runs when a person messaged Rome on a channel", async () => {
+    it("runs when a person messaged Rome on one of its accounts", async () => {
       clearChats();
-      seedMessage({ sessionType: "channel", role: "user", hoursAgo: 2 });
+      seedMessage({ sessionType: "channel", channel: "telegram", role: "user", hoursAgo: 2 });
+
+      const result = await createAction(
+        actionConfig,
+        makeDeps([{ type: "result", content: "done" }]),
+      ).execute({});
+
+      expect(result).toMatchObject({ status: "ok", data: { summary: "done" } });
+    });
+
+    it("runs on a line the agent did not answer", async () => {
+      clearChats();
+      seedMessage({
+        sessionType: "channel",
+        channel: "feishu",
+        role: "notification",
+        senderId: "ou_123",
+        hoursAgo: 2,
+      });
 
       const result = await createAction(
         actionConfig,
