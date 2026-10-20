@@ -76,7 +76,7 @@ const envoyPath = (agent: string) => `/envoys/${encodeURIComponent(agent)}`;
 
 const accountPath = (route: string) => `${CONNECTIONS_PATH}/${encodeURIComponent(route)}`;
 
-type EnvoysData = ReturnType<typeof buildEnvoys>;
+type EnvoysData = ReturnType<typeof buildEnvoys> & { agentsFailed: boolean };
 
 function useEnvoys() {
   const { t } = useTranslation("envoys");
@@ -95,7 +95,12 @@ function useEnvoys() {
   });
   return {
     // Descriptions are optional, so the list renders without the agents.
-    data: connections.data ? buildEnvoys(connections.data, agents.data?.agents ?? []) : undefined,
+    data: connections.data
+      ? {
+          ...buildEnvoys(connections.data, agents.data?.agents ?? []),
+          agentsFailed: agents.isError,
+        }
+      : undefined,
     isPending: connections.isPending,
     error: connections.error,
   };
@@ -239,7 +244,7 @@ function AccountSummary({ account }: { account: EnvoyAccount }) {
     <>
       <ConnectionBrandBadge connection={account.platform} />
       <ListRowContent>
-        <div className="font-medium">{account.name}</div>
+        <div className="truncate font-medium">{account.name}</div>
         <div className="truncate text-aux text-muted-foreground">
           {serviceLabel(account.platform)}
           {account.kind === "delegate" && ` · ${t("kinds.yours")}`}
@@ -275,20 +280,20 @@ function AccountAgentRow({
   onChanged,
 }: {
   account: EnvoyAccount;
-  data: { envoys: Envoy[]; agents: string[] };
+  data: EnvoysData;
   onChanged: (agent: string | null) => void;
 }) {
   return (
-    <div className="flex flex-col gap-3 py-3">
-      <div className="flex items-center gap-3">
-        <AccountSummary account={account} />
-      </div>
+    <div className="py-3">
       <AgentChange
         account={account}
         envoys={data.envoys}
         agents={data.agents}
+        agentsFailed={data.agentsFailed}
         onChanged={onChanged}
-      />
+      >
+        <AccountSummary account={account} />
+      </AgentChange>
     </div>
   );
 }

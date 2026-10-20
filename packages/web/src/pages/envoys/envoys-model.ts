@@ -111,9 +111,9 @@ export function buildEnvoys(
     envoy.accounts.push(account);
   }
   const envoys = [...byAgent.values()].sort((a, b) => compareAgents(a.agent, b.agent));
-  // An agent that already speaks through an account stays offered even when
-  // the agent list has not loaded.
-  const names = new Set([...descriptions.keys(), ...byAgent.keys()]);
+  // Main and every agent that already speaks through an account stay offered
+  // even when the agent list has not loaded. Core links main without it.
+  const names = new Set([MAIN_AGENT_ID, ...descriptions.keys(), ...byAgent.keys()]);
   return { envoys, unlinked, agents: [...names].sort(compareAgents) };
 }
 

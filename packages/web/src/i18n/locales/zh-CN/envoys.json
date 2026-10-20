@@ -30,7 +30,6 @@
     "settings": "设置"
   },
   "change": {
-    "agent": "智能体",
     "pick": "关联智能体",
     "noAgent": "无智能体",
     "suggested": "{{agent}}（推荐）",
@@ -42,6 +41,8 @@
     "switch": "切换智能体",
     "unlink": "取消关联",
     "cancel": "取消",
-    "failed": "无法更改智能体"
+    "failed": "无法更改智能体",
+    "agentsFailed": "无法加载智能体",
+    "agentFor": "{{account}} 的智能体"
   }
 }

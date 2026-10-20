@@ -68,6 +68,10 @@ describe("buildEnvoys", () => {
     expect(unlinked).toEqual([]);
   });
 
+  it("offers main even before the agent list loads", () => {
+    expect(buildEnvoys([], []).agents).toEqual([MAIN_AGENT_ID]);
+  });
+
   it("offers every loaded agent and every linked one, main first", () => {
     const { agents } = buildEnvoys(
       [connection({ service: "discord", agent: "sales:agent" })],

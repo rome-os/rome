@@ -30,7 +30,6 @@
     "settings": "Settings"
   },
   "change": {
-    "agent": "Agent",
     "pick": "Link an agent",
     "noAgent": "No agent",
     "suggested": "{{agent}} (suggested)",
@@ -42,6 +41,8 @@
     "switch": "Switch agent",
     "unlink": "Unlink",
     "cancel": "Cancel",
-    "failed": "Failed to change the agent"
+    "failed": "Failed to change the agent",
+    "agentsFailed": "Failed to load agents",
+    "agentFor": "Agent for {{account}}"
   }
 }

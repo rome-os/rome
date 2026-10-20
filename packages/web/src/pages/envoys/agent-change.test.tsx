@@ -51,15 +51,18 @@ function renderChange(props: {
         account={props.account}
         envoys={props.envoys ?? []}
         agents={[MAIN_AGENT_ID, "sales:agent"]}
+        agentsFailed={false}
         onChanged={props.onChanged ?? (() => {})}
-      />
+      >
+        {props.account.name}
+      </AgentChange>
     </QueryClientProvider>,
   );
 }
 
 async function pick(option: string) {
   const user = userEvent.setup();
-  await user.click(screen.getByRole("combobox", { name: "Agent" }));
+  await user.click(screen.getByRole("combobox", { name: "Agent for Sales" }));
   await user.click(await screen.findByRole("option", { name: option }));
   return user;
 }
@@ -69,6 +72,9 @@ describe("AgentChange", () => {
     const puts = mockLink();
     const onChanged = rs.fn();
     renderChange({ account: account(), onChanged });
+    expect(screen.getByRole("combobox", { name: "Agent for Sales" }).textContent).toContain(
+      "Link an agent",
+    );
 
     await pick("sales:agent");
 
@@ -123,7 +129,7 @@ describe("AgentChange", () => {
     mockLink();
     renderChange({ account: account({ kind: "delegate", route: null }) });
     const user = userEvent.setup();
-    await user.click(screen.getByRole("combobox", { name: "Agent" }));
+    await user.click(screen.getByRole("combobox", { name: "Agent for Sales" }));
     expect(await screen.findByRole("option", { name: "main (suggested)" })).toBeTruthy();
   });
 });

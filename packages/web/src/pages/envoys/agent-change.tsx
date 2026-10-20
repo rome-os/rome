@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { MAIN_AGENT_ID, agentLabel } from "@rome/api-types/account-agents";
 import { Button } from "@/components/ui/button";
-import { Field, FieldLabel, FormError } from "@/components/ui/field";
+import { FormError } from "@/components/ui/field";
 import {
   Select,
   SelectContent,
@@ -48,18 +48,23 @@ export function AgentChange({
   account,
   envoys,
   agents,
+  agentsFailed,
   onChanged,
+  children,
 }: {
   account: EnvoyAccount;
   envoys: readonly Envoy[];
   agents: readonly string[];
+  /** The agent list failed to load, so only main and linked agents are offered. */
+  agentsFailed: boolean;
   onChanged: (agent: string | null) => void;
+  /** The account as the row shows it, beside the select. */
+  children: ReactNode;
 }) {
   const { t } = useTranslation("envoys");
   const link = useLinkAgent();
   const [pending, setPending] = useState<string | null>(null);
   const current = account.agent ?? NO_AGENT;
-  const id = `agent-${account.channel}`;
 
   // A delegate is the guardian's pick, with main suggested.
   const suggestMain = account.kind === "delegate" && account.agent === null;
@@ -94,10 +99,18 @@ export function AgentChange({
 
   return (
     <div className="flex flex-col gap-3">
-      <Field className="max-w-xs">
-        <FieldLabel htmlFor={id}>{t("change.agent")}</FieldLabel>
-        <Select value={pending ?? current} disabled={link.isPending} onValueChange={choose}>
-          <SelectTrigger id={id} className="w-full">
+      <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">{children}</div>
+        {/* Radix shows the placeholder only for an empty value. */}
+        <Select
+          value={pending ?? account.agent ?? ""}
+          disabled={link.isPending}
+          onValueChange={choose}
+        >
+          <SelectTrigger
+            className="w-40 shrink-0 sm:w-48"
+            aria-label={t("change.agentFor", { account: account.name })}
+          >
             <SelectValue placeholder={t("change.pick")} />
           </SelectTrigger>
           <SelectContent>
@@ -113,10 +126,11 @@ export function AgentChange({
             )}
           </SelectContent>
         </Select>
-        {link.error && !pending && (
-          <FormError>{errorMessage(link.error, t("change.failed"))}</FormError>
-        )}
-      </Field>
+      </div>
+      {agentsFailed && <FormError>{t("change.agentsFailed")}</FormError>}
+      {link.error && !pending && (
+        <FormError>{errorMessage(link.error, t("change.failed"))}</FormError>
+      )}
       {pending && (
         <div className="flex flex-col gap-3 rounded-8 bg-surface-muted p-3 text-ui">
           <p>
