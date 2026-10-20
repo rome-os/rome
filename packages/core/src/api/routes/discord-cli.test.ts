@@ -300,7 +300,7 @@ describe("Discord CLI loopback broker routes", () => {
       expect(invoked).toEqual([]);
     });
 
-    it("reports a Discord channel whose bot is being re-added as not paired", async () => {
+    it("reports a released Discord channel as not connected, even while another account is being added", async () => {
       const invoked: string[] = [];
       const response = await discordCliRoutes(
         {
@@ -317,8 +317,8 @@ describe("Discord CLI loopback broker routes", () => {
         },
         "127.0.0.1",
       ).request("/_internal/discord/auth", { headers: { "x-rome-channel": "discord-4" } });
-      expect(response.status).toBe(409);
-      expect(await response.json()).toMatchObject({ error: { type: "not_paired" } });
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ error: { type: "not_authenticated" } });
       expect(invoked).toEqual([]);
     });
   });

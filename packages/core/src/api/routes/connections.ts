@@ -370,7 +370,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
         await registry.remove(conn.id);
       } catch (error) {
         // The revoke committed, so the disconnect stands. The boot pass
-        // removes the account this left behind, since its channel names it.
+        // removes the account this left behind.
         log.warn("could not remove a disconnected account", { id: conn.id, error });
         return false;
       }

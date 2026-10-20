@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
-import { and, asc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
 import { channels } from "../schema.js";
@@ -9,9 +9,7 @@ import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
 /**
  * A channel a Connection backs, as stored: its id, the service and platform
  * it is on, the Connection behind it now (null once that Connection is gone),
- * the agent linked to it, and the service's id for the account behind it
- * (null where the service names none). Vocabulary:
- * docs/concepts/messaging.md#romes-accounts.
+ * and the agent linked to it. Vocabulary: docs/concepts/messaging.md#romes-accounts.
  */
 export interface ChannelRecord {
   id: string;
@@ -19,7 +17,6 @@ export interface ChannelRecord {
   platform: string;
   connectionId: string | null;
   agent: string | null;
-  account: string | null;
   createdAt: Date;
 }
 
@@ -71,28 +68,6 @@ function firstAccountAgent(exec: Exec, service: string): string | null {
   return backed === undefined ? MAIN_AGENT_ID : null;
 }
 
-/** Whether `channel`'s released agent can be linked to it again: main always
- *  can, and another agent only while no channel on the platform holds it. */
-function agentFree(
-  exec: Exec,
-  channel: { id: string; platform: string; releasedAgent: string | null },
-): boolean {
-  const agent = channel.releasedAgent;
-  if (agent === null || agent === MAIN_AGENT_ID) return true;
-  const holder = exec
-    .select({ id: channels.id })
-    .from(channels)
-    .where(
-      and(
-        eq(channels.platform, channel.platform),
-        eq(channels.agent, agent),
-        ne(channels.id, channel.id),
-      ),
-    )
-    .get();
-  return holder === undefined;
-}
-
 /** The service a channel belongs to. A service's first channel carries the
  *  service's name, so a name with no record answers for itself. */
 export type ServiceOfChannel = (channel: string) => string;
@@ -104,7 +79,6 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
     platform: row.platform,
     connectionId: row.connectionId,
     agent: row.agent,
-    account: row.account,
     createdAt: row.createdAt,
   };
 }
@@ -116,10 +90,10 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
  * spells it. It is an opaque id, except that a service's first channel carries
  * the service's name, which is what data stored before channels were recorded
  * spells. A row stays when its Connection goes, so its id is never minted
- * again. A linkable service's next Connection takes a row back only when it
- * connects the same account, so a different bot never inherits another's
- * history. Another service's next Connection takes the row back, since apps
- * address that service's one channel by its name.
+ * again. An account of a linkable service starts fresh: the service's next
+ * Connection gets a channel of its own. Another service's next Connection
+ * takes the row back, since apps address that service's one channel by its
+ * name.
  */
 export class ChannelRecordsRepository {
   /** Channel id by Connection id, read on every port use. Every write that
@@ -165,40 +139,21 @@ export class ChannelRecordsRepository {
   /**
    * The channel `connection` backs, recorded in `exec` (the transaction that
    * mints the Connection). A Connection that already has one keeps it. A
-   * Connection of a linkable service takes back only the unbacked channel of
-   * the same `account`, so a reconnected bot keeps its history and a
-   * different one starts with none; one taken back gets its released agent
-   * again while that agent is free. A Connection of any other service takes
-   * back the service's unbacked channel, the one carrying the service's name
-   * first. Failing that, it gets the service's name if no channel holds it,
-   * and a fresh opaque id otherwise. A linkable service's only connected
+   * Connection of a linkable service never takes over another account's
+   * channel, so it starts with no history. A Connection of any other service
+   * takes back the service's unbacked channel, the one carrying the service's
+   * name first. Failing that, it gets the service's name if no channel holds
+   * it, and a fresh opaque id otherwise. A linkable service's only connected
    * account is linked to main, so a guardian's first account answers.
    */
-  claim(
-    exec: Exec,
-    connection: { id: string; service: string; account?: string | null },
-    now: Date,
-  ): ChannelRecord {
+  claim(exec: Exec, connection: { id: string; service: string }, now: Date): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
     this.ids.clear();
 
     const service = connection.service;
-    const account = connection.account ?? null;
     const vacant = LINKABLE_SERVICES.has(service)
-      ? account === null
-        ? undefined
-        : exec
-            .select()
-            .from(channels)
-            .where(
-              and(
-                eq(channels.service, service),
-                isNull(channels.connectionId),
-                eq(channels.account, account),
-              ),
-            )
-            .get()
+      ? undefined
       : exec
           .select()
           .from(channels)
@@ -210,14 +165,13 @@ export class ChannelRecordsRepository {
               a.createdAt.getTime() - b.createdAt.getTime(),
           )[0];
     if (vacant) {
-      const agent =
-        account !== null && vacant.releasedAgent !== null && agentFree(exec, vacant)
-          ? vacant.releasedAgent
-          : firstAccountAgent(exec, service);
-      const kept = account ?? vacant.account;
-      const taken = { connectionId: connection.id, agent, account: kept, releasedAgent: null };
-      exec.update(channels).set(taken).where(eq(channels.id, vacant.id)).run();
-      return toRecord({ ...vacant, ...taken });
+      const agent = firstAccountAgent(exec, service);
+      exec
+        .update(channels)
+        .set({ connectionId: connection.id, agent })
+        .where(eq(channels.id, vacant.id))
+        .run();
+      return toRecord({ ...vacant, connectionId: connection.id, agent });
     }
 
     const serviceIdTaken =
@@ -230,29 +184,19 @@ export class ChannelRecordsRepository {
       platform: platformOf(service),
       connectionId: connection.id,
       agent: firstAccountAgent(exec, service),
-      account,
-      releasedAgent: null,
       createdAt: now,
     };
     exec.insert(channels).values(row).run();
     return toRecord(row);
   }
 
-  /** Record `account` as the account behind the channel `connectionId`
-   *  backs, in `exec`. */
-  setAccount(exec: Exec, connectionId: string, account: string): void {
-    exec.update(channels).set({ account }).where(eq(channels.connectionId, connectionId)).run();
-  }
-
-  /** Release the channel `connectionId` backs. The row, its id and its
-   *  account stay, and its link goes: an agent stays linked only where it can
-   *  still answer. The link is kept aside, for the same account taking the
-   *  channel back. */
+  /** Release the channel `connectionId` backs. The row and its id stay, and
+   *  its link goes: an agent stays linked only where it can still answer. */
   vacate(exec: Exec, connectionId: string): void {
     this.ids.clear();
     exec
       .update(channels)
-      .set({ connectionId: null, agent: null, releasedAgent: sql`${channels.agent}` })
+      .set({ connectionId: null, agent: null })
       .where(eq(channels.connectionId, connectionId))
       .run();
   }

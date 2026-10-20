@@ -880,9 +880,9 @@ export const connections = sqliteTable("connections", {
 // an id minted once and never changed. The first channel of a service takes
 // the service's name as its id, and later ones get an opaque id. A row
 // outlives its Connection, unbacked and unlinked, so its id is never minted
-// again: a linkable service's next Connection takes the row back only for the
-// same `account`, and another service's takes it back regardless. `agent` is
-// the canonical id of the account's agent.
+// again: a linkable service's next Connection gets a channel of its own, and
+// another service's takes the row back. `agent` is the canonical id of the
+// account's agent.
 // `platform` is stored, not derived on read, so the partial unique index can
 // hold that on one platform an agent other than main is linked to at most one
 // channel; a row keeps the platform it was minted on. Main is exempt, since
@@ -896,13 +896,6 @@ export const channels = sqliteTable(
     connectionId: text("connection_id"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     agent: text("agent"),
-    /** The service's own id for the account the channel's Connection held (a
-     *  bot's id), kept after the Connection goes so the same account
-     *  reconnecting takes its channel back. Null where the service names none. */
-    account: text("account"),
-    /** The agent linked when the channel's Connection went, given back when
-     *  the same account takes the channel back. Null while backed. */
-    releasedAgent: text("released_agent"),
   },
   (table) => [
     uniqueIndex("channels_connection_unique").on(table.connectionId),

@@ -79,7 +79,7 @@ import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
-import { claimChannels, recordChannelAccounts } from "./channels/claim-channels.js";
+import { claimChannels } from "./channels/claim-channels.js";
 import { accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
@@ -365,12 +365,9 @@ async function main() {
     connectionRegistry.getDescriptor(service)?.capabilities.talker !== undefined;
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
     ledger: new DrizzleGrantLedger(db),
-    onMint: (tx, record, account) => {
-      if (talks(record.service)) {
-        channelRecords.claim(tx, { ...record, account }, record.createdAt);
-      }
+    onMint: (tx, record) => {
+      if (talks(record.service)) channelRecords.claim(tx, record, record.createdAt);
     },
-    onConfer: (tx, id, account) => channelRecords.setAccount(tx, id, account),
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
   const channelOf = recordedChannelOf(channelRecords, talks);
@@ -1356,18 +1353,16 @@ async function main() {
   // Hydrate connection/grant state without starting provider transports, so
   // the zero-grant connections exist before any Talk epoch can admit messages.
   await connectionRegistry.load({ deferCapabilities: true });
-  // An account exists only while connected, so one left unconnected goes
-  // before any channel is recorded for it.
-  await removeUnconnectedAccounts(
-    connectionRegistry,
-    (id) => (channelRecords.byConnection(id)?.account ?? null) !== null,
-  );
+  // An account exists only while connected, so one an earlier version left
+  // unconnected goes before any channel is recorded for it.
+  await removeUnconnectedAccounts(connectionRegistry);
   // Connections minted before channels were recorded get theirs now. Each
-  // service held one, so each takes its service's name. Then each channel
-  // records the account behind it, so a reconnect can take it back.
-  const talkConnections = connectionRegistry.all().filter((c) => talks(c.service));
-  claimChannels(db, channelRecords, talkConnections);
-  await recordChannelAccounts(db, channelRecords, connectionRegistry, talkConnections);
+  // service held one, so each takes its service's name.
+  claimChannels(
+    db,
+    channelRecords,
+    connectionRegistry.all().filter((c) => talks(c.service)),
+  );
   await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();
 

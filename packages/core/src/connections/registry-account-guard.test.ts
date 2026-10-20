@@ -153,48 +153,4 @@ describe("ConnectionRegistry.confer account guard", () => {
       close();
     }
   });
-
-  it("names the account a minting conferral connected to onMint", async () => {
-    const db = createTestDb();
-    try {
-      const minted: Array<{ id: string; account: string | null }> = [];
-      const registry = new ConnectionRegistry({
-        ledger: new DrizzleGrantLedger(db.db),
-        onMint: (_tx, record, account) => minted.push({ id: record.id, account }),
-      });
-      registry.register(botIdDescriptor());
-
-      const conn = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
-        botId: "100",
-      });
-      const bare = await registry.connectAnother(SERVICE);
-
-      expect(minted).toEqual([
-        { id: conn.id, account: "100" },
-        { id: bare.id, account: null },
-      ]);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("names the account a conferral onto an existing Connection connected to onConfer", async () => {
-    const db = createTestDb();
-    try {
-      const conferred: Array<{ id: string; account: string }> = [];
-      const registry = new ConnectionRegistry({
-        ledger: new DrizzleGrantLedger(db.db),
-        onConfer: (_tx, id, account) => conferred.push({ id, account }),
-      });
-      registry.register(botIdDescriptor());
-      const conn = await registry.connect(SERVICE);
-
-      await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-1"), { botId: "100" });
-      await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-2"), {});
-
-      expect(conferred).toEqual([{ id: conn.id, account: "100" }]);
-    } finally {
-      db.close();
-    }
-  });
 });

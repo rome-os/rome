@@ -21,7 +21,7 @@ function makeLedger(): DrizzleGrantLedger {
 }
 
 describe("removeUnconnectedAccounts", () => {
-  it("removes a never-connected account, and a disconnected one only when its channel names it", async () => {
+  it("removes an account that was never connected, and one that was disconnected", async () => {
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
     const telegram = makePasteTalk();
@@ -29,24 +29,15 @@ describe("removeUnconnectedAccounts", () => {
     const connected = await registry.connect("fake-telegram");
     await registry.importCredential(connected.id, "bot", telegram.validCredential());
     const neverConnected = await registry.connectAnother("fake-telegram");
-    const named = await registry.connectAnother("fake-telegram");
-    const unnamed = await registry.connectAnother("fake-telegram");
-    for (const conn of [named, unnamed]) {
-      await registry.importCredential(conn.id, "bot", telegram.validCredential());
-      await registry.revoke(conn.id, "bot");
-    }
+    const disconnected = await registry.connectAnother("fake-telegram");
+    await registry.importCredential(disconnected.id, "bot", telegram.validCredential());
+    await registry.revoke(disconnected.id, "bot");
 
-    const removed = await removeUnconnectedAccounts(registry, (id) => id === named.id);
+    const removed = await removeUnconnectedAccounts(registry);
 
-    expect(removed.sort()).toEqual([neverConnected.id, named.id].sort());
-    const kept = [connected.id, unnamed.id].sort();
-    expect(
-      registry
-        .find("fake-telegram")
-        .map((conn) => conn.id)
-        .sort(),
-    ).toEqual(kept);
-    expect((await ledger.listConnections()).map((record) => record.id).sort()).toEqual(kept);
+    expect(removed.sort()).toEqual([neverConnected.id, disconnected.id].sort());
+    expect(registry.find("fake-telegram").map((conn) => conn.id)).toEqual([connected.id]);
+    expect((await ledger.listConnections()).map((record) => record.id)).toEqual([connected.id]);
   });
 
   it("keeps a Connection whose service names no account", async () => {
@@ -55,7 +46,7 @@ describe("removeUnconnectedAccounts", () => {
     registry.register(descriptor);
     await registry.connect("fake-telegram");
 
-    expect(await removeUnconnectedAccounts(registry, () => true)).toEqual([]);
+    expect(await removeUnconnectedAccounts(registry)).toEqual([]);
     expect(registry.find("fake-telegram")).toHaveLength(1);
   });
 
@@ -66,7 +57,7 @@ describe("removeUnconnectedAccounts", () => {
     const conn = await registry.connect("fake-discord");
     await registry.importCredential(conn.id, "user", discord.userCredential());
 
-    expect(await removeUnconnectedAccounts(registry, () => true)).toEqual([]);
+    expect(await removeUnconnectedAccounts(registry)).toEqual([]);
     expect(registry.find("fake-discord")).toHaveLength(1);
   });
 
@@ -77,7 +68,7 @@ describe("removeUnconnectedAccounts", () => {
     const zeroGrant = await registry.connect(makeZeroGrantTalk().descriptor.service);
     await registry.connect("fake-github");
 
-    expect(await removeUnconnectedAccounts(registry, () => true)).toEqual([]);
+    expect(await removeUnconnectedAccounts(registry)).toEqual([]);
     expect(registry.all().map((conn) => conn.id)).toContain(zeroGrant.id);
     expect(registry.find("fake-github")).toHaveLength(1);
   });
@@ -98,7 +89,7 @@ describe("removeUnconnectedAccounts", () => {
       },
     };
 
-    expect(await removeUnconnectedAccounts(failing, () => false)).toEqual([other.id]);
+    expect(await removeUnconnectedAccounts(failing)).toEqual([other.id]);
     expect(registry.find("fake-telegram").map((conn) => conn.id)).toEqual([stuck.id]);
   });
 });

@@ -172,9 +172,10 @@ async function execute(
   }
 }
 
-/** The bot backing the caller's Discord channel, resolved per request because
- * a reconnect re-backs a channel with a new Connection. A Discord channel never
- * acts as another bot, so one whose bot is missing or locked is unavailable.
+/** The bot backing the caller's Discord channel, resolved per request. A
+ * Discord channel never acts as another bot, so one whose bot is missing or
+ * locked is unavailable, and a released one stays so, since no later account
+ * takes it back.
  * A caller on no Discord channel gets the first bot that can act, so an
  * unfinished account never hides a live one. The channel is the caller's
  * claim, so this picks a bot rather than enforcing a boundary between them. */
@@ -187,9 +188,7 @@ function discordBotFor(
   if (record?.service === "discord") {
     const own = bots.find((bot) => bot.id === record.connectionId);
     // A failure then describes the channel's own bot, not every Discord bot.
-    // A channel with no Connection waits for the service's next one, which
-    // may be mid-setup.
-    return { bot: own, candidates: own ? [own] : [], includeNewAccount: !record.connectionId };
+    return { bot: own, candidates: own ? [own] : [], includeNewAccount: false };
   }
   return {
     bot: bots.find((bot) => bot.isUnlocked("act")) ?? bots[0],
