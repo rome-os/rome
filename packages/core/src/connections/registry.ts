@@ -285,8 +285,8 @@ export class ConnectionRegistry {
   /** Mint a new Connection from a registered descriptor. Persists the record,
    *  makes sure every declared grant row exists ("unauthorized"), and builds any
    *  zero-grant capabilities immediately (epoch from birth). Refuses a Service
-   *  that already holds a Connection; {@link connectAnother} is the one path
-   *  that adds a second. */
+   *  that already holds a Connection; a conferral asked for another account
+   *  (`confer` with `another`) adds a second. */
   async connect(service: string, label?: string): Promise<Connection> {
     return this.connectionMutex.runExclusive(service, async () => {
       const existing = this.find(service);
@@ -300,8 +300,8 @@ export class ConnectionRegistry {
   }
 
   /** Mint another Connection for a Service, whether or not it already holds
-   *  one. Every other caller assumes one Connection per Service, so only a
-   *  caller that asks for a second account uses this. */
+   *  one, with no grant held yet. Tests use it to stand up several accounts
+   *  without driving a setup. */
   async connectAnother(service: string, label?: string): Promise<Connection> {
     return this.connectionMutex.runExclusive(service, () => this.mint(service, label));
   }

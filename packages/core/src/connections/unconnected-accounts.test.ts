@@ -62,4 +62,24 @@ describe("removeUnconnectedAccounts", () => {
     expect(registry.all().map((conn) => conn.id)).toContain(zeroGrant.id);
     expect(registry.find("fake-github")).toHaveLength(1);
   });
+
+  it("keeps an account it cannot remove, and removes the rest", async () => {
+    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const telegram = makePasteTalk();
+    registry.register({ ...telegram.descriptor, severalAccounts: true });
+    const stuck = await registry.connectAnother("fake-telegram");
+    const other = await registry.connectAnother("fake-telegram");
+    const failing: Parameters<typeof removeUnconnectedAccounts>[0] = {
+      all: () => registry.all(),
+      getDescriptor: (service) => registry.getDescriptor(service),
+      getLedger: () => registry.getLedger(),
+      remove: (id, opts) => {
+        if (id === stuck.id) return Promise.reject(new Error("ledger unavailable"));
+        return registry.remove(id, opts);
+      },
+    };
+
+    expect(await removeUnconnectedAccounts(failing)).toEqual([other.id]);
+    expect(registry.find("fake-telegram").map((conn) => conn.id)).toEqual([stuck.id]);
+  });
 });

@@ -13,6 +13,7 @@ import type { ConnectionAccountFields } from "@rome/api-types/channel-accounts";
 import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
+import { createLogger } from "../../logger.js";
 import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
@@ -34,6 +35,8 @@ import {
 } from "../../db/repositories/channel-records.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
+
+const log = createLogger("api:connections");
 
 /** Per-grant active-setup ids for a connection.
  *  `idOrService` is the connection id for a real connection, or the service name
@@ -363,7 +366,14 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
       if (!registry.all().some((held) => held.id === conn.id)) return true;
       await registry.revoke(conn.id, name, { inTx: guardianMappingTeardown(registry, conn, name) });
       if (!(await isUnconnectedAccount(registry, conn))) return false;
-      await registry.remove(conn.id);
+      try {
+        await registry.remove(conn.id);
+      } catch (error) {
+        // The revoke committed, so the disconnect stands. The boot pass
+        // removes the account this left behind.
+        log.warn("could not remove a disconnected account", { id: conn.id, error });
+        return false;
+      }
       return true;
     });
     c.header("Cache-Control", "no-store");

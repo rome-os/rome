@@ -24,16 +24,21 @@ export async function isUnconnectedAccount(
  * Remove every unconnected account, for the boot pass. Before an account
  * existed only while connected, "Add another account" made one ahead of its
  * setup and Disconnect left the Connection behind, so an upgrade can find
- * either. Answers the ids it removed.
+ * either. Answers the ids it removed; one that fails is logged and kept.
  */
 export async function removeUnconnectedAccounts(
   registry: Pick<ConnectionRegistry, "all" | "getDescriptor" | "getLedger" | "remove">,
 ): Promise<string[]> {
   const removed: string[] = [];
   for (const conn of registry.all()) {
-    if (!(await isUnconnectedAccount(registry, conn))) continue;
-    await registry.remove(conn.id);
-    removed.push(conn.id);
+    try {
+      if (!(await isUnconnectedAccount(registry, conn))) continue;
+      await registry.remove(conn.id);
+      removed.push(conn.id);
+    } catch (error) {
+      // A leftover row must not keep Rome from starting; the next boot retries it.
+      log.warn("could not remove an account no grant connects", { id: conn.id, error });
+    }
   }
   if (removed.length > 0) log.info("removed accounts no grant connects", { removed });
   return removed;
