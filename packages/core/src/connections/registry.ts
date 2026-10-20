@@ -509,7 +509,11 @@ export class ConnectionRegistry {
     const held = await this.ledger.getGrant(connectionId, grant);
     const heldId = held?.profile === undefined ? null : accountIdOf(grant, held.profile);
     if (heldId !== null && heldId !== accountIdOf(grant, profile)) {
-      throw new DifferentAccountError(descriptor.service, connectionId);
+      throw new DifferentAccountError(
+        descriptor.service,
+        connectionId,
+        descriptor.severalAccounts === true,
+      );
     }
   }
 

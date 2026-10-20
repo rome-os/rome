@@ -95,9 +95,11 @@ export class DifferentAccountError extends Error {
   readonly service: string;
   readonly connectionId: ConnectionId;
 
-  constructor(service: string, connectionId: ConnectionId) {
+  constructor(service: string, connectionId: ConnectionId, severalAccounts: boolean) {
     super(
-      "This is a different account. Reconnect with the same account, or add this one as another account.",
+      severalAccounts
+        ? "This is a different account. Reconnect with the same account, or add this one as another account."
+        : "This is a different account. Reconnect with the same account, or disconnect this one first.",
     );
     this.name = "DifferentAccountError";
     this.service = service;
