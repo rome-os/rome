@@ -53,7 +53,8 @@ describe("removeUnconnectedAccounts", () => {
   it("keeps an account while any of its grants is held", async () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     const discord = makeTwoGrant();
-    registry.register(discord.descriptor);
+    // Named accounts, so only the held grant keeps it.
+    registry.register({ ...discord.descriptor, accountIdOf: () => "account-1" });
     const conn = await registry.connect("fake-discord");
     await registry.importCredential(conn.id, "user", discord.userCredential());
 

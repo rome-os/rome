@@ -29,6 +29,28 @@ describe("Feishu credential setup", () => {
     expect(commit.mock.calls[0][0]).not.toHaveProperty("guardianChannelUserId");
   });
 
+  it("renews an account by its own app's credentials, never by registering a new app", async () => {
+    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const session = new SetupSession({
+      fn: makeFeishuSetup({
+        probeCredentials: async () => {},
+        registerAgentApp: async () => {
+          throw new Error("Unexpected QR setup");
+        },
+        fetchBotName: async () => null,
+      }),
+      commit,
+      renewing: true,
+    });
+    await session.started();
+    const form = session.state;
+    expect(JSON.stringify(form)).not.toContain("agent-ready");
+    await session.provideInput({ domain: "lark" });
+    await session.provideInput({ appId: "app", appSecret: "secret" });
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
+    expect(commit.mock.calls[0][0].profile).toMatchObject({ appId: "app" });
+  });
+
   it("records the bot's name, which the account then shows", async () => {
     const commit = rs.fn(async (_value: SetupConferral) => {});
     const session = new SetupSession({

@@ -190,9 +190,10 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   // A new account's setup has no connection a reopened card could find it
   // through, so it ends with the card that started it. Otherwise a flow left
   // running (a QR code still on a phone) could connect an account after the
-  // guardian closed the card. A start still in flight is cancelled when it
-  // answers. That includes a setup this card re-attached to: one a reload left
-  // running has no other card that could end it.
+  // guardian navigated away. A start still in flight is cancelled when it
+  // answers. That includes a setup this card re-attached to. A reload or a
+  // closed tab runs no cleanup, so its setup runs until the next Add re-attaches
+  // to it.
   const liveCidRef = useRef<string | null>(null);
   liveCidRef.current = cid && !settled ? cid : null;
   useEffect(() => {

@@ -8,10 +8,11 @@ import type { Connection } from "./types.js";
 const log = createLogger("connections");
 
 /** Whether `conn` is an account no grant connects. An account here is a
- *  Connection of a service with a Talk that names its accounts (a bot's, an
- *  app's or a user's id), and it is removed, along with its channel, once
- *  every grant is unauthorized. Any other Connection (email, a zero-grant
- *  channel, a service without a Talk) stays after its last grant goes. */
+ *  Connection of a service with a Talk that names its accounts (an app's or a
+ *  user's id), and it is removed, along with its channel, once every grant is
+ *  unauthorized. Any other Connection (email, a zero-grant channel, a service
+ *  without a Talk) stays after its last grant goes. Each such service holds a
+ *  single grant, so a disconnect's grant section covers every grant read here. */
 export async function isUnconnectedAccount(
   registry: Pick<ConnectionRegistry, "getDescriptor" | "getLedger">,
   conn: Pick<Connection, "id" | "service">,

@@ -435,15 +435,45 @@ describe("Feishu setup through the generic routes (#1607)", () => {
 describe("addressed-connection targeting (#3)", () => {
   it("confers into the existing connection named by :id, minting no duplicate", async () => {
     const { app, registry } = harness();
-    // Pre-create the connection so :id addresses a real row.
-    const conn = await registry.connect("fake-telegram");
+    const first = await start(app);
+    await submitInput(app, first.json.cid, "good");
+    const [conn] = registry.find("fake-telegram");
+
     const { json } = await start(app, conn.id);
-    await submitInput(app, json.cid, "good");
+    await submitInput(app, json.cid, "again");
 
     // Same connection got authorized; no second connection was minted.
     expect(registry.find("fake-telegram")).toHaveLength(1);
     const grant = await registry.getLedger().getGrant(conn.id, "bot");
     expect(grant?.state).toBe("authorized");
+  });
+
+  it("connects a fresh account beside one a failed removal left behind", async () => {
+    const { app, registry } = harness();
+    const leftover = await registry.connect("fake-telegram");
+
+    const { json } = await start(app);
+    await submitInput(app, json.cid, "good");
+
+    const connected = registry.find("fake-telegram").filter((conn) => conn.id !== leftover.id);
+    expect(connected).toHaveLength(1);
+    expect((await registry.getLedger().getGrant(leftover.id, "bot"))?.state).toBe("unauthorized");
+  });
+
+  it("refuses a setup into an account a failed removal left behind, and removes it", async () => {
+    const { app, registry } = harness();
+    // A Connection no grant connects, as a disconnect whose removal failed leaves.
+    const leftover = await registry.connect("fake-telegram");
+
+    const refused = await start(app, leftover.id);
+
+    expect(refused.res.status).toBe(409);
+    expect(registry.find("fake-telegram")).toEqual([]);
+    // The service's own Connect then connects a fresh account.
+    const { json } = await start(app);
+    await submitInput(app, json.cid, "good");
+    const [account] = registry.find("fake-telegram");
+    expect(account?.id).not.toBe(leftover.id);
   });
 });
 

@@ -29,7 +29,7 @@ import {
 } from "../../channels/guardian-mapping.js";
 import type { ConferOptions } from "../registry.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
-import { SetupSession, type SetupInputOutcome } from "./session.js";
+import { SetupAbortError, SetupSession, type SetupInputOutcome } from "./session.js";
 import type { SetupConferral, SetupState } from "./types.js";
 
 /** The narrow registry surface the manager drives — every real
@@ -177,6 +177,7 @@ export class SetupManager {
     const session = new SetupSession({
       fn,
       commit: (conferral, signal) => this.#commit(target, grant, conferral, signal),
+      renewing: target.connectionId !== undefined,
     });
     const managed: Managed = { cid, target, grant, session };
     this.#byKey.set(key, managed);
@@ -313,9 +314,12 @@ export class SetupManager {
     target: SetupTarget,
     grant: string,
     conferral: SetupConferral,
-    _signal: AbortSignal,
+    signal: AbortSignal,
   ): Promise<string> {
     return this.#deps.registry.withGrantSection(target.service, grant, async () => {
+      // A cancel that landed while the write waited for the section wins, so
+      // an abandoned setup leaves nothing behind.
+      if (signal.aborted) throw new SetupAbortError();
       const channelUserId = conferral.guardianChannelUserId;
       const plan = channelUserId
         ? await planGuardianMapping(this.#deps.personMappingRepo, target.service, channelUserId)

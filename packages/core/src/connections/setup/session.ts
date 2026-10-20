@@ -56,6 +56,8 @@ export interface SetupSessionDeps {
   commit: (conferral: SetupConferral, signal: AbortSignal) => Promise<string | void>;
   /** Optional override of the default working view (progress snapshot). */
   workingView?: SetupView;
+  /** The setup renews a connection that already names its account. */
+  renewing?: boolean;
 }
 
 type PendingKind = "input" | "redirect";
@@ -156,6 +158,7 @@ export class SetupSession {
     const ctx: SetupContext = {
       signal: this.#abort.signal,
       step: (label, fn) => this.#step(label, fn),
+      renewing: this.#deps.renewing === true,
     };
     try {
       const conferral = await this.#deps.fn(interact, ctx);
