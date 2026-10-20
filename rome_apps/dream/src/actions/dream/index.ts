@@ -88,7 +88,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         "Follow the review process in your instructions:",
         `1. Read memory/MEMORY.md`,
         `2. Call get_webchat_conversations (windowHours: ${windowHours}) to fetch recent conversations`,
-        `3. Call fetch_channel_history (channel: "discord", windowHours: ${windowHours}) to fetch recent Discord messages`,
+        `3. Call get_account_chats (windowHours: ${windowHours}) to fetch recent chats from every one of Rome's accounts`,
         `4. Call get_action_logs (windowHours: ${windowHours}) to fetch recent action executions`,
         `5. Synthesize all sources into insights and updates`,
         `6. Update memory files as needed`,
