@@ -194,7 +194,7 @@ function AccountAgentField({
       const payload = await fetchJson<{ agents: AgentOption[] }>("/api/agents", {
         fallback: t("connections.accounts.agentsFailed"),
       });
-      // Main links like any agent. An account with no agent stays silent.
+      // Main links like any agent. Rome does not listen to an account with no agent.
       return [...new Set(payload.agents.map((agent) => canonicalAgent(agent.name)))];
     },
   });

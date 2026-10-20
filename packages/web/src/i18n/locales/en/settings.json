@@ -58,12 +58,12 @@
       "addedNotShown": "Account connected. Find it in the Connections list.",
       "newAccount": "New account",
       "agent": "Agent",
-      "agentDescription": "The agent answers messages on this account. Without one, the account stays silent. Main can be linked to several accounts on a platform; any other agent to one.",
-      "noAgent": "None. This account stays silent.",
+      "agentDescription": "The agent answers messages on this account. Without one, Rome does not listen to the account, and its messages are neither received nor recorded. Main can be linked to several accounts on a platform; any other agent to one.",
+      "noAgent": "None. Rome does not listen to this account.",
       "agentsFailed": "Could not load agents",
       "linked": "{{agent}} now answers on {{account}}.",
       "linkMoved": "{{agent}} now answers on {{account}}. Its link to another account on this platform was removed, since an agent other than main links to one account per platform.",
-      "linkCleared": "{{account}} now stays silent.",
+      "linkCleared": "Rome does not listen to {{account}} until an agent is linked.",
       "linkFailed": "Could not link the agent"
     },
     "headings": {
@@ -371,7 +371,7 @@
       },
       "mainAgent": "main (default)",
       "accountAgent": "{{agent}} (this account's agent)",
-      "silentAccount": "The agent linked to this account answers here.",
+      "silentAccount": "Messages here do not reach Rome until this account has an agent.",
       "silentAccountLink": "<account>Link one on the account</account>.",
       "silentAccountOverride": "This conversation's choice, {{agent}}, applies once one is linked.",
       "sessionReset": {

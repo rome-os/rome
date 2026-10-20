@@ -136,8 +136,8 @@ export function ChannelsSettingsPage() {
     [connections],
   );
 
-  // A linkable account with no agent answers nothing, whatever agent a
-  // conversation on it picks. A core that predates links omits `agent`.
+  // Rome does not listen to a linkable account with no agent, whatever
+  // agent a conversation on it picks. A core that predates links omits `agent`.
   // Each maps to the page that links its agent.
   const silentAccounts = useMemo(
     () =>
@@ -317,7 +317,7 @@ function ConversationRow({
 }: {
   item: ConversationSettingsListItem;
   agentNames: string[];
-  /** Set when the conversation's account stays silent: the page that links
+  /** Set when Rome does not listen to the conversation's account: the page that links
    *  its agent. */
   silentAccount: string | undefined;
   /** The agent linked to the conversation's account, which answers while the

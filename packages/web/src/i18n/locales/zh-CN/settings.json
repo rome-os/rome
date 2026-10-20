@@ -58,12 +58,12 @@
       "addedNotShown": "账号已连接，可在连接列表中找到。",
       "newAccount": "新账号",
       "agent": "智能体",
-      "agentDescription": "智能体负责回复此账号上的消息。没有智能体时，此账号不回复。同一平台上，main 可以关联多个账号；其他智能体只能关联一个。",
-      "noAgent": "无。此账号不回复。",
+      "agentDescription": "智能体负责回复此账号上的消息。没有智能体时，Rome 不监听此账号，既不接收也不记录它的消息。同一平台上，main 可以关联多个账号；其他智能体只能关联一个。",
+      "noAgent": "无。Rome 不监听此账号。",
       "agentsFailed": "无法加载智能体",
       "linked": "{{agent}} 现在负责回复 {{account}}。",
       "linkMoved": "{{agent}} 现在负责回复 {{account}}。它与此平台上另一个账号的关联已移除，因为同一平台上，除 main 外的智能体只能关联一个账号。",
-      "linkCleared": "{{account}} 现在不回复消息。",
+      "linkCleared": "关联智能体之前，Rome 不监听 {{account}}。",
       "linkFailed": "无法关联智能体"
     },
     "headings": {
@@ -371,7 +371,7 @@
       },
       "mainAgent": "main（默认）",
       "accountAgent": "{{agent}}（此账号的智能体）",
-      "silentAccount": "此账号关联的智能体在这里回复。",
+      "silentAccount": "此账号有智能体之前，这里的消息不会到达 Rome。",
       "silentAccountLink": "<account>在账号页面关联</account>。",
       "silentAccountOverride": "关联后，此对话选择的 {{agent}} 将生效。",
       "sessionReset": {
