@@ -8,7 +8,7 @@ import {
   makeTwoGrant,
   makeZeroGrantTalk,
 } from "./test-fixtures.js";
-import { removeUnconnectedAccounts } from "./unconnected-accounts.js";
+import { removeNeverConnectedAccounts } from "./unconnected-accounts.js";
 
 const openDbs: Array<() => void> = [];
 afterEach(() => {
@@ -20,8 +20,8 @@ function makeLedger(): DrizzleGrantLedger {
   return new DrizzleGrantLedger(db);
 }
 
-describe("removeUnconnectedAccounts", () => {
-  it("removes an account that was never connected, and one that was disconnected", async () => {
+describe("removeNeverConnectedAccounts", () => {
+  it("removes an account that was never connected, and keeps one that was disconnected", async () => {
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
     const telegram = makePasteTalk();
@@ -33,11 +33,17 @@ describe("removeUnconnectedAccounts", () => {
     await registry.importCredential(disconnected.id, "bot", telegram.validCredential());
     await registry.revoke(disconnected.id, "bot");
 
-    const removed = await removeUnconnectedAccounts(registry);
+    const removed = await removeNeverConnectedAccounts(registry);
 
-    expect(removed.sort()).toEqual([neverConnected.id, disconnected.id].sort());
-    expect(registry.find("fake-telegram").map((conn) => conn.id)).toEqual([connected.id]);
-    expect((await ledger.listConnections()).map((record) => record.id)).toEqual([connected.id]);
+    expect(removed).toEqual([neverConnected.id]);
+    const kept = [connected.id, disconnected.id].sort();
+    expect(
+      registry
+        .find("fake-telegram")
+        .map((conn) => conn.id)
+        .sort(),
+    ).toEqual(kept);
+    expect((await ledger.listConnections()).map((record) => record.id).sort()).toEqual(kept);
   });
 
   it("keeps an account while any of its grants is held", async () => {
@@ -47,7 +53,7 @@ describe("removeUnconnectedAccounts", () => {
     const conn = await registry.connect("fake-discord");
     await registry.importCredential(conn.id, "user", discord.userCredential());
 
-    expect(await removeUnconnectedAccounts(registry)).toEqual([]);
+    expect(await removeNeverConnectedAccounts(registry)).toEqual([]);
     expect(registry.find("fake-discord")).toHaveLength(1);
   });
 
@@ -58,7 +64,7 @@ describe("removeUnconnectedAccounts", () => {
     const zeroGrant = await registry.connect(makeZeroGrantTalk().descriptor.service);
     await registry.connect("fake-github");
 
-    expect(await removeUnconnectedAccounts(registry)).toEqual([]);
+    expect(await removeNeverConnectedAccounts(registry)).toEqual([]);
     expect(registry.all().map((conn) => conn.id)).toContain(zeroGrant.id);
     expect(registry.find("fake-github")).toHaveLength(1);
   });
@@ -69,7 +75,7 @@ describe("removeUnconnectedAccounts", () => {
     registry.register({ ...telegram.descriptor, severalAccounts: true });
     const stuck = await registry.connectAnother("fake-telegram");
     const other = await registry.connectAnother("fake-telegram");
-    const failing: Parameters<typeof removeUnconnectedAccounts>[0] = {
+    const failing: Parameters<typeof removeNeverConnectedAccounts>[0] = {
       all: () => registry.all(),
       getDescriptor: (service) => registry.getDescriptor(service),
       getLedger: () => registry.getLedger(),
@@ -79,7 +85,7 @@ describe("removeUnconnectedAccounts", () => {
       },
     };
 
-    expect(await removeUnconnectedAccounts(failing)).toEqual([other.id]);
+    expect(await removeNeverConnectedAccounts(failing)).toEqual([other.id]);
     expect(registry.find("fake-telegram").map((conn) => conn.id)).toEqual([stuck.id]);
   });
 });

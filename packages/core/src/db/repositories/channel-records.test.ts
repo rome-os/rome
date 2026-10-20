@@ -49,20 +49,58 @@ describe("ChannelRecordsRepository", () => {
     expect(records.all()).toHaveLength(1);
   });
 
-  it("gives a re-added bot a fresh channel, linked to main as the only account", () => {
+  it("gives a different bot a fresh channel, linked to main as the only account", () => {
     const records = repository();
     const db = testDb!.db;
-    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    records.claim(db, { id: "c1", service: "feishu", account: "app-a" }, NOW);
     records.link("feishu", "sales:agent");
 
     records.vacate(db, "c1");
-    expect(records.byId("feishu")).toMatchObject({ connectionId: null, agent: null });
+    expect(records.byId("feishu")).toMatchObject({
+      connectionId: null,
+      agent: null,
+      account: "app-a",
+    });
 
-    const readded = records.claim(db, { id: "c2", service: "feishu" }, NOW);
+    const readded = records.claim(db, { id: "c2", service: "feishu", account: "app-b" }, NOW);
     expect(readded.id).toMatch(UUID);
     expect(readded.agent).toBe("core:main");
     // The released channel keeps its id, so no later account is given it.
     expect(records.byId("feishu")).toMatchObject({ connectionId: null, agent: null });
+  });
+
+  it("gives a reconnected bot its own channel back", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "telegram", account: "bot-1" }, NOW);
+    records.vacate(db, "c1");
+
+    const back = records.claim(db, { id: "c2", service: "telegram", account: "bot-1" }, NOW);
+
+    expect(back).toMatchObject({ id: "telegram", connectionId: "c2", agent: "core:main" });
+    expect(records.all()).toHaveLength(1);
+  });
+
+  it("takes back no channel for an account the service does not name", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "telegram" }, NOW);
+    records.vacate(db, "c1");
+
+    expect(records.claim(db, { id: "c2", service: "telegram" }, NOW).id).toMatch(UUID);
+  });
+
+  it("records an account only on a backed channel that has none", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "discord" }, NOW);
+    records.claim(db, { id: "c2", service: "discord", account: "bot-2" }, NOW);
+
+    records.recordAccount("c1", "bot-1");
+    records.recordAccount("c2", "bot-other");
+
+    expect(records.byConnection("c1")?.account).toBe("bot-1");
+    expect(records.byConnection("c2")?.account).toBe("bot-2");
   });
 
   it("links main to a linkable service's first account only", () => {
@@ -79,12 +117,12 @@ describe("ChannelRecordsRepository", () => {
   it("never gives a later account's channel to the next account", () => {
     const records = repository();
     const db = testDb!.db;
-    records.claim(db, { id: "c1", service: "feishu" }, NOW);
-    const later = records.claim(db, { id: "c2", service: "feishu" }, NOW).id;
+    records.claim(db, { id: "c1", service: "feishu", account: "app-a" }, NOW);
+    const later = records.claim(db, { id: "c2", service: "feishu", account: "app-b" }, NOW).id;
     records.link(later, "sales:agent");
     records.vacate(db, "c2");
 
-    const next = records.claim(db, { id: "c3", service: "feishu" }, NOW);
+    const next = records.claim(db, { id: "c3", service: "feishu", account: "app-c" }, NOW);
     expect(next.id).not.toBe(later);
     expect(next.agent).toBeNull();
   });

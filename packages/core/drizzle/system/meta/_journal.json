@@ -568,6 +568,13 @@
       "when": 1792117060937,
       "tag": "0081_channel_linked_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1792507002722,
+      "tag": "0082_channel_accounts",
+      "breakpoints": true
     }
   ]
 }

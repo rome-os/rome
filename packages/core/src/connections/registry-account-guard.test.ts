@@ -153,4 +153,28 @@ describe("ConnectionRegistry.confer account guard", () => {
       close();
     }
   });
+
+  it("names the account a minting conferral connected to onMint", async () => {
+    const db = createTestDb();
+    try {
+      const minted: Array<{ id: string; account: string | null }> = [];
+      const registry = new ConnectionRegistry({
+        ledger: new DrizzleGrantLedger(db.db),
+        onMint: (_tx, record, account) => minted.push({ id: record.id, account }),
+      });
+      registry.register(botIdDescriptor());
+
+      const conn = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
+        botId: "100",
+      });
+      const bare = await registry.connectAnother(SERVICE);
+
+      expect(minted).toEqual([
+        { id: conn.id, account: "100" },
+        { id: bare.id, account: null },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });
