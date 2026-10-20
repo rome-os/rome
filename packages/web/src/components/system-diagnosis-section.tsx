@@ -29,7 +29,7 @@ interface DiagnosisResponse {
    * the rows rather than failing. */
   resources?: {
     memory: { limitBytes: number; availableBytes: number; short: boolean } | null;
-    disk: { path: string; totalBytes: number; freeBytes: number; low: boolean } | null;
+    disk: { totalBytes: number; freeBytes: number; low: boolean } | null;
   };
 }
 
@@ -262,15 +262,15 @@ function ResourceRow({
   hint: string;
 }) {
   return (
-    <>
-      <DiagRow label={label}>
-        <div className="flex items-center justify-end gap-2">
+    <DiagRow label={label}>
+      <div className="flex flex-col items-end gap-1">
+        <div className="flex items-center gap-2">
           <span>{reading}</span>
           <Badge variant={pressed ? "warning" : "success"}>{badge}</Badge>
         </div>
-      </DiagRow>
-      {pressed && <p className="text-right text-aux text-warning-fg">{hint}</p>}
-    </>
+        {pressed && <p className="text-aux text-warning-fg">{hint}</p>}
+      </div>
+    </DiagRow>
   );
 }
 

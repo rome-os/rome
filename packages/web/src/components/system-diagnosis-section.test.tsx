@@ -33,7 +33,7 @@ type Diagnosis = {
   apps: { total: number; failed: string[]; broken: string[] };
   resources: {
     memory: { limitBytes: number; availableBytes: number; short: boolean } | null;
-    disk: { path: string; totalBytes: number; freeBytes: number; low: boolean } | null;
+    disk: { totalBytes: number; freeBytes: number; low: boolean } | null;
   };
 };
 
@@ -54,7 +54,7 @@ function diagnosis(overrides: Partial<Diagnosis> = {}): Diagnosis {
     apps: { total: 5, failed: [], broken: [] },
     resources: {
       memory: { limitBytes: 4 * GIB, availableBytes: 2.6 * GIB, short: false },
-      disk: { path: "/data", totalBytes: 40 * GIB, freeBytes: 21 * GIB, low: false },
+      disk: { totalBytes: 40 * GIB, freeBytes: 21 * GIB, low: false },
     },
     ...overrides,
   };
@@ -107,7 +107,7 @@ describe("SystemDiagnosisSection", () => {
       body: diagnosis({
         resources: {
           memory: { limitBytes: 4 * GIB, availableBytes: 0.5 * GIB, short: true },
-          disk: { path: "/data", totalBytes: 40 * GIB, freeBytes: 3 * GIB, low: true },
+          disk: { totalBytes: 40 * GIB, freeBytes: 3 * GIB, low: true },
         },
       }),
     });

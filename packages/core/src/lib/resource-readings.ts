@@ -1,5 +1,5 @@
 import {
-  MEMORY_HOLD_FRACTION,
+  isMemoryShort,
   type MemoryHeadroomReader,
   readMemoryHeadroom,
 } from "../actions/memory-headroom.js";
@@ -16,13 +16,13 @@ export interface ResourceReadings {
     short: boolean;
   } | null;
   disk: {
-    path: string;
     totalBytes: number;
     freeBytes: number;
     low: boolean;
   } | null;
 }
 
+/** The two readers, injectable so a route test can hand the route numbers. */
 export interface ResourceProbes {
   memory: MemoryHeadroomReader;
   disk: () => DiskUsage | null;
@@ -33,8 +33,8 @@ const defaultProbes: ResourceProbes = {
   disk: () => readDiskUsage(),
 };
 
-/** Reads memory and disk once and marks each against its one line, so every
- * surface paints "short" and "low" the same way the engine judges them. */
+/** Reads memory and disk once and marks each against its one line. Memory uses
+ * the engine's own predicate, so the card and the gate never disagree. */
 export function readResourceReadings(probes: ResourceProbes = defaultProbes): ResourceReadings {
   const memory = probes.memory();
   const disk = probes.disk();
@@ -44,12 +44,11 @@ export function readResourceReadings(probes: ResourceProbes = defaultProbes): Re
         ? {
             limitBytes: memory.limitBytes,
             availableBytes: memory.availableBytes,
-            short: memory.availableBytes / memory.limitBytes < MEMORY_HOLD_FRACTION,
+            short: isMemoryShort(memory),
           }
         : null,
     disk: disk
       ? {
-          path: disk.path,
           totalBytes: disk.totalBytes,
           freeBytes: disk.freeBytes,
           low: disk.freeBytes / disk.totalBytes < DISK_LOW_FRACTION,

@@ -1087,12 +1087,7 @@ export const handlers = [
       apps: { total: 12, failed: [], broken: [] },
       resources: {
         memory: { limitBytes: 4 * 1024 ** 3, availableBytes: 2.6 * 1024 ** 3, short: false },
-        disk: {
-          path: "/rome-home/.rome",
-          totalBytes: 40 * 1024 ** 3,
-          freeBytes: 21 * 1024 ** 3,
-          low: false,
-        },
+        disk: { totalBytes: 40 * 1024 ** 3, freeBytes: 21 * 1024 ** 3, low: false },
       },
     }),
   ),

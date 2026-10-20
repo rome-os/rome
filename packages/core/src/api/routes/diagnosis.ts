@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { proveIdentity, type ProveIdentityResult } from "../../lib/instance-identity.js";
 import { assembleDiagnosticBundle, type DiagnosticsDeps } from "../../lib/diagnostics.js";
-import { readResourceReadings } from "../../lib/resource-readings.js";
+import { readResourceReadings, type ResourceProbes } from "../../lib/resource-readings.js";
 
 // One-shot triage endpoint: a single GET that answers "is this Rome instance
 // healthy, and which exact build/identity am I looking at?" without the
@@ -23,7 +23,7 @@ const FATAL_AUTH_STATES: ReadonlySet<ProveIdentityResult["status"]> = new Set([
   "unknown",
 ]);
 
-export function diagnosisRoutes(deps: DiagnosticsDeps): Hono {
+export function diagnosisRoutes(deps: DiagnosticsDeps, probes?: ResourceProbes): Hono {
   const app = new Hono();
 
   app.get("/diagnosis", async (c) => {
@@ -32,7 +32,7 @@ export function diagnosisRoutes(deps: DiagnosticsDeps): Hono {
     // Memory and disk are pressure, not faults: they inform the guardian but
     // leave the verdict alone, so a probe that alarms on `degraded` stays quiet
     // while a heavy task merely runs.
-    const resources = readResourceReadings();
+    const resources = readResourceReadings(probes);
 
     const auth = await proveIdentity({
       fetch: (input, init) =>

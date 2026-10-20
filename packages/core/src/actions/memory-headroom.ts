@@ -16,10 +16,16 @@ export interface MemoryHeadroom {
 export type MemoryHeadroomReader = () => MemoryHeadroom | null;
 
 /** The instance is short on memory while less than this share of its limit is
- * available. One line, no latch: the action engine judges each queued start
- * against a fresh reading, and the system diagnosis card paints the same line,
- * so what a guardian sees as short is exactly what holds queued work. */
-export const MEMORY_HOLD_FRACTION = 0.15;
+ * available. One line, no latch. */
+const MEMORY_HOLD_FRACTION = 0.15;
+
+/** Whether a reading means the instance is short on memory. The action engine
+ * judges each queued start by this, against a fresh reading, and the system
+ * diagnosis card paints the same verdict, so what a guardian sees as short is
+ * exactly what holds queued work. A reading with no limit is never short. */
+export function isMemoryShort(sample: MemoryHeadroom): boolean {
+  return sample.limitBytes > 0 && sample.availableBytes / sample.limitBytes < MEMORY_HOLD_FRACTION;
+}
 
 /** cgroup v1 reports "no limit" as a value near the address-space maximum. */
 const CGROUP_V1_UNLIMITED = 2 ** 60;

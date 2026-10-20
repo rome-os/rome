@@ -12,7 +12,7 @@ describe("readResourceReadings", () => {
 
     expect(readings).toEqual({
       memory: { limitBytes: 4 * GIB, availableBytes: 2.6 * GIB, short: false },
-      disk: { path: "/data", totalBytes: 40 * GIB, freeBytes: 21 * GIB, low: false },
+      disk: { totalBytes: 40 * GIB, freeBytes: 21 * GIB, low: false },
     });
   });
 
