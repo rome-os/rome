@@ -1,0 +1,30 @@
+{
+  "loading": "加载中…",
+  "loadFailed": "无法加载外派智能体",
+  "accountCount_one": "{{count}} 个账号",
+  "accountCount_other": "{{count}} 个账号",
+  "index": {
+    "title": "外派智能体",
+    "description": "人们能在聊天平台上找到的智能体，每个都通过你连接的账号发言。",
+    "add": "连接账号",
+    "emptyTitle": "还没有连接的账号",
+    "emptyBody": "要在这里列出智能体，请在聊天平台上为它连接一个账号。"
+  },
+  "agent": {
+    "missing": "没有已连接的账号以 <agent>{{agent}}</agent> 为智能体。"
+  },
+  "overview": {
+    "accounts": "账号"
+  },
+  "kinds": {
+    "own": "自有账号",
+    "delegate": "代理",
+    "yours": "你的账号"
+  },
+  "unlinked": {
+    "title": "已连接，无智能体",
+    "description": "Rome 可以访问这些账号，但没有智能体通过它们发言，所以发给它们的消息无人回复。",
+    "link": "关联智能体",
+    "linkTo": "为 {{account}} 关联智能体"
+  }
+}

@@ -39,16 +39,29 @@ Open with the problem — what was missing, broken, or accreted — not with wha
 
 ### Design & Invariants
 
-State the design at the contract level, not the code level: the invariants that must stay true, and what counts as a regression. Name the durable home of each new concept — [`docs/concepts/`](../concepts/index.md) for vocabulary, [`docs/architecture/`](../architecture/index.md) for invariants.
+State the design as business rules: the invariants that must stay true, and what counts as a regression. A reader checks each one against the product, without opening the code, so an invariant names no file, function, type, or field. Name the durable home of each new concept — [`docs/concepts/`](../concepts/index.md) for vocabulary, [`docs/architecture/`](../architecture/index.md) for invariants.
+
+> Prefer: "A guardian stays reachable through a service while at least one of its bots can still talk to them. Removing one bot never cuts off the others."
+> Over: "Teardown deletes `channel_mappings` only when `connectionsHoldingIn(tx, service, needs, exceptId)` is empty."
 
 > Prefer: "The routing layer never learns which channel a message arrived on. The adapter absorbs every channel specific."
 > Over: "Adds a `channel` field to `RouteContext` and reads it in `TelegramAdapter`."
+
+A `refactor:` PR is the exception. Its contract is the code structure, so it names the modules and seams it moves.
 
 When more than one reasonable design existed, name the alternatives and why this one won. The code preserves no rejected design.
 
 ### Test plan
 
-A checklist: `[x]` for what the author verified, `[ ]` for what remains. Name the command or the manual step behind each verified item.
+A checklist of the behaviors the PR proves: `[x]` for what the author verified, `[ ]` for what remains. Each item is a scenario and its observable outcome. Say when a test fails without the change, since that shows the test covers it.
+
+> Prefer: "- [x] Two Telegram bots, remove one: the guardian still reaches Rome through the other. Fails without the fix."
+> Over: "- [x] New cases in `connections.test.ts`."
+
+After the checklist, one line says how the behaviors were exercised: unit tests with fakes, tests against a real database, or a manual run in `pnpm dev:all`. The reader weighs each item by it.
+
+Leave out the checks CI runs on every PR — lint, format, typecheck, the unit suite, the PR title check. Their result is on the PR already. List a CI job only when the PR adds or changes what that job checks, such as a migration the `db-schema` job validates.
+
 
 A PR that changes what the dashboard or an app shows pastes screenshots of the changed view into its description at two sizes. GitHub hosts pasted images outside the repository, so never commit them.
 

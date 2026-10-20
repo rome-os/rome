@@ -1,0 +1,30 @@
+{
+  "loading": "Loading…",
+  "loadFailed": "Failed to load envoys",
+  "accountCount_one": "{{count}} account",
+  "accountCount_other": "{{count}} accounts",
+  "index": {
+    "title": "Envoys",
+    "description": "Agents people can reach on chat platforms, each speaking through an account you connected.",
+    "add": "Connect an account",
+    "emptyTitle": "No connected accounts yet",
+    "emptyBody": "To list an agent here, connect an account for it on a chat platform."
+  },
+  "agent": {
+    "missing": "No connected account has <agent>{{agent}}</agent> as its agent."
+  },
+  "overview": {
+    "accounts": "Accounts"
+  },
+  "kinds": {
+    "own": "Own account",
+    "delegate": "Delegate",
+    "yours": "your account"
+  },
+  "unlinked": {
+    "title": "Connected, no agent",
+    "description": "Rome has access to these accounts, but no agent speaks through them, so they go unanswered.",
+    "link": "Link an agent",
+    "linkTo": "Link an agent to {{account}}"
+  }
+}
