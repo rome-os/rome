@@ -15,13 +15,13 @@ import {
 import { serviceLabel } from "@/lib/connection-cards";
 import { linkAccountAgent } from "@/lib/connections-api";
 import { AgentText } from "./agent-text";
-import { type Envoy, type EnvoyAccount, displacedAccount } from "./envoys-model";
+import { CONNECTIONS_KEY, type Envoy, type EnvoyAccount, displacedAccount } from "./envoys-model";
 
 /** Radix Select reserves the empty string, so "no agent" needs a value of its own. */
 const NO_AGENT = "__none__";
 
 /** Links, switches or unlinks an account's agent. Envoys and the Connections
- *  cards (`connection-detail`, ConnectionDetailPage's key root) are stale once
+ *  cards (ConnectionDetailPage's connections key) are stale once
  *  it lands. */
 function useLinkAgent() {
   const { t } = useTranslation("envoys");
@@ -31,7 +31,7 @@ function useLinkAgent() {
       linkAccountAgent(vars.channel, vars.agent, t("change.failed")),
     onSuccess: () =>
       Promise.all(
-        [["envoys"], ["connection-detail"]].map((queryKey) =>
+        [CONNECTIONS_KEY, ["connection-detail", "connections"]].map((queryKey) =>
           queryClient.invalidateQueries({ queryKey }),
         ),
       ),

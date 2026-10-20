@@ -80,6 +80,9 @@ function compareAgents(a: string, b: string): number {
   return agentLabel(a).localeCompare(agentLabel(b));
 }
 
+/** The query key of the connections Envoys reads. */
+export const CONNECTIONS_KEY = ["envoys", "connections"] as const;
+
 /** Groups the connected accounts by the agent speaking through them. Agents
  *  sort by name with main first, and accounts with no agent are listed apart.
  *  `agents` is every agent an account can be linked to, in the same order.

@@ -49,7 +49,13 @@ import { Avatar } from "../people/avatar";
 import { agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
 import { AgentChange } from "./agent-change";
 import { AgentText } from "./agent-text";
-import { type AgentListing, type Envoy, type EnvoyAccount, buildEnvoys } from "./envoys-model";
+import {
+  type AgentListing,
+  CONNECTIONS_KEY,
+  type Envoy,
+  type EnvoyAccount,
+  buildEnvoys,
+} from "./envoys-model";
 
 /**
  * Envoys: the agents people can reach on chat platforms, each listed with the
@@ -72,8 +78,6 @@ const CONNECTIONS_PATH = "/settings/connections";
 const envoyPath = (agent: string) => `/envoys/${encodeURIComponent(agent)}`;
 
 const accountPath = (route: string) => `${CONNECTIONS_PATH}/${encodeURIComponent(route)}`;
-
-const CONNECTIONS_KEY = ["envoys", "connections"];
 
 type EnvoysData = ReturnType<typeof buildEnvoys> & {
   agentsPending: boolean;
