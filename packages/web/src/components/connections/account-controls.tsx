@@ -66,11 +66,15 @@ export function AccountControls({
    *  account is not listed yet. Without it, the add button is hidden. */
   onOpenAccount?: (connectionId: string) => void | Promise<void>;
 }) {
+  // Held here so a poll that turns `showAdd` off cannot unmount a setup
+  // already under way and cancel it.
+  const [adding, setAdding] = useState(false);
   const connected = talkConnected(card);
   const showLink =
     card.linkReported && card.channel !== null && connected && LINKABLE_SERVICES.has(card.service);
   // A second account only makes sense next to a first one that exists.
-  const showAdd = card.severalAccounts && connected && CHANNEL_CONFIGS[card.service] !== undefined;
+  const showAdd =
+    adding || (card.severalAccounts && connected && CHANNEL_CONFIGS[card.service] !== undefined);
   if (!showLink && !(showAdd && onOpenAccount)) return null;
 
   return (
@@ -84,7 +88,13 @@ export function AccountControls({
         />
       )}
       {showAdd && onOpenAccount && (
-        <AddAccount card={card} onRefresh={onRefresh} onOpenAccount={onOpenAccount} />
+        <AddAccount
+          card={card}
+          adding={adding}
+          setAdding={setAdding}
+          onRefresh={onRefresh}
+          onOpenAccount={onOpenAccount}
+        />
       )}
     </div>
   );
@@ -107,15 +117,18 @@ function newAccountSlot(card: ConnectionCard): ConnectionSlot | null {
 
 function AddAccount({
   card,
+  adding,
+  setAdding,
   onRefresh,
   onOpenAccount,
 }: {
   card: ConnectionCard;
+  adding: boolean;
+  setAdding: (adding: boolean) => void;
   onRefresh: () => void;
   onOpenAccount: (connectionId: string) => void | Promise<void>;
 }) {
   const { t } = useTranslation("settings");
-  const [adding, setAdding] = useState(false);
   const config = CHANNEL_CONFIGS[card.service];
   const slot = newAccountSlot(card);
   if (!config || !slot) return null;
