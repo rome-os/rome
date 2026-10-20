@@ -83,9 +83,10 @@ Alternatives rejected for this amendment:
 - **Lower the worker cap on small plans instead.** Rejected as a replacement because a cap still counts processes, not bytes. A cap sized to the plan remains a complement.
 
 Future diffs must respect: a queued root never starts while the memory gate holds, the gate reads the instance and never the task, and the gate reaches only callers that already queue.
+
 ## Amendment (2026-10-19): the cap's default follows the instance's memory
 
-The cap exists to bound memory, yet its default was one number, 8, for every instance. On a 4 GB instance that admitted more concurrent work than the memory could carry, and on a 16 GB instance it left memory idle while roots queued. Unless an operator pins `ROME_ACTION_MAX_WORKERS`, main now derives the default from the instance's memory at startup, taking a container's cgroup limit over the host total when the limit is smaller: about 1.5 workers per GiB, no fewer than 4 and no more than 16, so 6 on 4 GiB, 12 on 8 GiB and 16 from 11 GiB up. The higher caps on larger instances assume the memory gate on queued roots, so this amendment lands after it. The floor of 4 keeps slots beside the two reserved ones for queued roots. Main logs the chosen cap and its source at startup.
+The cap exists to bound memory, yet its default was one number, 8, for every instance. On a 4 GB instance that admitted more concurrent work than the memory could carry, and on a 16 GB instance it left memory idle while roots queued. Unless an operator pins `ROME_ACTION_MAX_WORKERS`, main now derives the default from the instance's memory at startup, read through the same reader the memory gate uses, so the two never size one instance differently: about 1.5 workers per GiB, no fewer than 4 and no more than 16, so 6 on 4 GiB, 12 on 8 GiB and 16 from 11 GiB up. The higher caps on larger instances assume the memory gate on queued roots, so this amendment lands after it. The floor of 4 keeps slots beside the two reserved ones for queued roots. Main logs the chosen cap and its source at startup.
 
 Alternatives rejected for this amendment:
 
@@ -93,4 +94,3 @@ Alternatives rejected for this amendment:
 - **Lower the cap under memory pressure at run time.** Rejected because the queue waits on a live memory reading (the amendment of 2026-10-18), which answers pressure directly. A moving cap would answer the same signal a second way and make the two disagree.
 
 Future diffs must respect: the cap's default is derived from the instance's memory and never from the work in flight, and an explicit `ROME_ACTION_MAX_WORKERS` always wins.
-

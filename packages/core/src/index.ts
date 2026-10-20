@@ -3,7 +3,6 @@ import { createPairingAdmission, notifyPairingResolution } from "./channels/pair
 import type { Admission } from "./channels/admission.js";
 import { createAgentsGuardianLink } from "./channels/agents-guardian.js";
 import { dirname, join } from "node:path";
-import { totalmem } from "node:os";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { loadConfig } from "./config.js";
@@ -592,16 +591,16 @@ async function main() {
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, serviceOfChannel);
 
   // The worker cap bounds memory, so its default follows the instance's
-  // memory: the fixed 8 was tight on 4 GB and idle on 16 GB. Inside a
-  // container with a memory limit, os.totalmem() is the host's total, so the
-  // cgroup limit wins when it is smaller.
-  const constrained = process.constrainedMemory();
-  const instanceMemory = constrained > 0 && constrained < totalmem() ? constrained : totalmem();
+  // memory: the fixed 8 was tight on 4 GB and idle on 16 GB. The limit comes
+  // from the same reader the memory gate uses, so the cap and the gate size
+  // the instance the same way, and where the gate has no reading the cap
+  // keeps the fixed default.
+  const instanceMemory = readMemoryHeadroom()?.limitBytes ?? null;
   const maxWorkerProcesses = config.actionWorkerMaxProcesses ?? defaultWorkerCap(instanceMemory);
   log.info("action worker cap", {
     maxWorkers: maxWorkerProcesses,
     source: config.actionWorkerMaxProcesses === undefined ? "memory" : "env",
-    instanceMemoryMB: Math.round(instanceMemory / 1_048_576),
+    instanceMemoryMB: instanceMemory === null ? null : Math.round(instanceMemory / 1_048_576),
   });
   const actionEngine = new ActionEngine(
     actionRegistry,
