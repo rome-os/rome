@@ -20,6 +20,7 @@ import {
   type DiscordBrokerRequest,
 } from "@rome/api-types/discord-broker";
 import { CredentialRejected } from "../../connections/errors.js";
+import { anotherAccountKey } from "../../connections/setup/manager.js";
 import type { Connection } from "../../connections/types.js";
 import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 
@@ -279,7 +280,12 @@ function hasActiveDiscordSetup(
 ): boolean {
   const manager = deps.setupManager;
   if (!manager) return false;
-  if (includeNewAccount && manager.activeFor("discord", "bot")) return true;
+  if (
+    includeNewAccount &&
+    (manager.activeFor("discord", "bot") || manager.activeFor(anotherAccountKey("discord"), "bot"))
+  ) {
+    return true;
+  }
   return bots.some((connection) => Boolean(manager.activeFor(connection.id, "bot")));
 }
 
