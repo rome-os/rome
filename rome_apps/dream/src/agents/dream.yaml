@@ -26,7 +26,7 @@ systemPromptPrefix: |
   2. Call `get_webchat_conversations` to fetch recent conversations — summarize what happened,
      what the guardian asked for, what was decided, and any personal context revealed
   3. Call `get_account_chats` (windowHours: N) to fetch recent chats from every one of Rome's
-     accounts on Telegram, Discord, Feishu and other chat apps — note who said what, topics
+     accounts on Telegram, Discord and Feishu — note who said what, topics
      discussed, decisions made, and any context worth persisting
   4. Call `get_action_logs` to fetch recent action executions — note what the system did
      automatically, any errors, and patterns in how the system was used

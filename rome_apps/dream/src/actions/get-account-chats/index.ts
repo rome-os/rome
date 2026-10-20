@@ -12,22 +12,37 @@ import { extractText } from "../../lib/message-text.js";
 
 const log = createAppLogger("get_account_chats");
 
+// The services an agent can be linked to, as `LINKABLE_SERVICES` in
+// @rome/api-types names them. Every other channel carries the guardian's own
+// accounts (a linked WhatsApp, a WeChat login) or Rome's own traffic, and
+// stays out of Dream.
+const ACCOUNT_SERVICES = ["feishu", "telegram", "discord", "telegram_user"];
+
+// The newest lines kept per chat, and the characters kept per line, so one
+// busy group cannot crowd the other sources out of Dream's context.
+const MESSAGES_PER_CHAT = 100;
+const CHARS_PER_MESSAGE = 2000;
+
 interface MessageRow {
   session_id: string;
   session_name: string;
   thread_name: string | null;
   channel: string;
-  service: string | null;
-  platform: string | null;
+  service: string;
+  platform: string;
   role: string;
+  outbound: number;
   sender_name: string | null;
   sender_id: string | null;
   content: string;
   created_at: number;
+  /** Lines the chat holds in the window, kept or not. */
+  chat_total: number;
 }
 
 interface Chat {
   name: string;
+  total: number;
   messages: MessageRow[];
 }
 
@@ -36,19 +51,16 @@ interface Account {
   chats: Map<string, Chat>;
 }
 
-/**
- * The heading an account is listed under. A channel row that is gone leaves
- * only the channel id, which then stands in for the platform too.
- */
+/** The heading an account is listed under. */
 function accountHeading(row: MessageRow): string {
-  const platform = row.platform ?? row.channel;
+  const { platform } = row;
   const name = platform.charAt(0).toUpperCase() + platform.slice(1);
-  const service = row.service && row.service !== platform ? ` (${row.service})` : "";
+  const service = row.service !== platform ? ` (${row.service})` : "";
   return `### ${name} account \`${row.channel}\`${service}`;
 }
 
 function speakerOf(row: MessageRow): string {
-  if (row.role === "assistant") return "Agent";
+  if (row.outbound) return "Agent";
   return row.sender_name || row.sender_id || "Unknown";
 }
 
@@ -66,7 +78,7 @@ function formatChats(rows: MessageRow[]): string {
     }
     let chat = account.chats.get(row.session_id);
     if (!chat) {
-      chat = { name: row.thread_name || row.session_name, messages: [] };
+      chat = { name: row.thread_name || row.session_name, total: row.chat_total, messages: [] };
       account.chats.set(row.session_id, chat);
     }
     chat.messages.push(row);
@@ -78,14 +90,18 @@ function formatChats(rows: MessageRow[]): string {
     for (const chat of account.chats.values()) {
       const lines = chat.messages
         .map((m) => {
-          const text = extractText(m.content);
-          if (!text) return null;
+          const full = extractText(m.content);
+          if (!full) return null;
+          const text =
+            full.length > CHARS_PER_MESSAGE ? `${full.slice(0, CHARS_PER_MESSAGE)}… (cut)` : full;
           const time = new Date(m.created_at * 1000).toISOString();
           return `[${time}] **${speakerOf(m)}**: ${text}`;
         })
         .filter(Boolean)
         .join("\n\n");
-      if (lines) chats.push(`#### Chat: ${chat.name}\n\n${lines}`);
+      const left = chat.total - chat.messages.length;
+      const note = left > 0 ? `(${left} earlier messages left out)\n\n` : "";
+      if (lines) chats.push(`#### Chat: ${chat.name}\n\n${note}${lines}`);
     }
     if (chats.length > 0) parts.push(`${account.heading}\n\n${chats.join("\n\n")}`);
   }
@@ -115,27 +131,42 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
 
       log.info("fetching account chats", { windowHours, cutoffSeconds });
 
-      // Every conversation on a channel other than webchat, as
-      // `isChannelConversation` in packages/core/src/db/session-kind.ts reads
-      // it, less a row that names no channel and so no account. A channel's id
+      // Every conversation on a channel of an account service. A channel's id
       // is the service name only for its service's first account, so the
-      // platform comes from `channels`, never from the id.
+      // service and platform come from `channels`, never from the id.
+      // 'notification' is a line that passed outside a turn: someone the agent
+      // did not answer, or Rome sending untied to one. Rome's own lines are
+      // told apart as `agentMessageOutbound` in
+      // packages/core/src/channels/messages-agent.ts does.
+      const services = sql.join(
+        ACCOUNT_SERVICES.map((service) => sql`${service}`),
+        sql`, `,
+      );
       let rows: MessageRow[];
       try {
         rows = appContext.db.connection.all(
           sql`
-            SELECT m.session_id, s.name AS session_name, s.source_thread_name AS thread_name,
-              s.source_channel AS channel, c.service, c.platform,
-              m.role, m.sender_name, m.sender_id, m.content, m.created_at
-            FROM rome_agent_messages m
-            JOIN rome_sessions s ON s.id = m.session_id
-            LEFT JOIN channels c ON c.id = s.source_channel
-            WHERE m.created_at >= ${cutoffSeconds}
-              AND m.role IN ('user', 'assistant')
-              AND s.type = 'channel'
-              AND s.source_channel IS NOT NULL
-              AND s.source_channel <> 'webchat'
-            ORDER BY s.source_channel, m.session_id, m.created_at ASC
+            SELECT * FROM (
+              SELECT m.session_id, s.name AS session_name, s.source_thread_name AS thread_name,
+                s.source_channel AS channel, c.service, c.platform, m.role,
+                CASE
+                  WHEN m.role = 'assistant' THEN 1
+                  WHEN m.role = 'notification' AND m.sender_id = 'rome' THEN 1
+                  ELSE 0
+                END AS outbound,
+                m.sender_name, m.sender_id, m.content, m.created_at,
+                ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.created_at DESC) AS newest,
+                COUNT(*) OVER (PARTITION BY m.session_id) AS chat_total
+              FROM rome_agent_messages m
+              JOIN rome_sessions s ON s.id = m.session_id
+              JOIN channels c ON c.id = s.source_channel
+              WHERE m.created_at >= ${cutoffSeconds}
+                AND m.role IN ('user', 'assistant', 'notification')
+                AND s.type = 'channel'
+                AND c.service IN (${services})
+            )
+            WHERE newest <= ${MESSAGES_PER_CHAT}
+            ORDER BY channel, session_id, created_at ASC
           `,
         ) as MessageRow[];
       } catch (err) {
