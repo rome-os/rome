@@ -78,9 +78,10 @@ function formatLine(m: MessageRow): string | null {
   return `[${time}] **${speakerOf(m)}**:\n${quoted}`;
 }
 
-function formatChats(rows: MessageRow[]): string {
+/** The chats as Dream reads them, and how many lines that shows. */
+function formatChats(rows: MessageRow[]): { content: string; shown: number } {
   if (rows.length === 0) {
-    return "(No chats on Rome's accounts in the requested window.)";
+    return { content: "(No chats on Rome's accounts in the requested window.)", shown: 0 };
   }
 
   const headings = new Map<string, string>();
@@ -104,26 +105,38 @@ function formatChats(rows: MessageRow[]): string {
   const byRecent = [...chats.values()].sort((a, b) => lastAt(b) - lastAt(a));
   const kept = new Map<string, string[]>();
   let budget = CHARS_IN_ALL;
+  let shown = 0;
   let leftOut = 0;
   for (const chat of byRecent) {
-    const lines = chat.messages.map(formatLine).filter(Boolean).join("\n\n");
-    if (!lines) continue;
-    const left = chat.total - chat.messages.length;
-    const note = left > 0 ? `(${left} earlier messages left out)\n\n` : "";
-    const text = `#### Chat ${named(chat.name)}\n\n${note}${lines}`;
-    if (text.length > budget) {
+    const lines = chat.messages.map(formatLine).filter((line): line is string => line !== null);
+    if (lines.length === 0) continue;
+    const heading = `#### Chat ${named(chat.name)}\n\n`;
+    // The newest lines that fit, so a busy chat is shortened rather than lost.
+    const fitting: string[] = [];
+    let used = heading.length + 64;
+    for (const line of [...lines].reverse()) {
+      if (used + line.length + 2 > budget) break;
+      used += line.length + 2;
+      fitting.unshift(line);
+    }
+    if (fitting.length === 0) {
       leftOut += 1;
       continue;
     }
+    const left = chat.total - fitting.length;
+    const note = left > 0 ? `(${left} earlier messages left out)\n\n` : "";
+    const text = `${heading}${note}${fitting.join("\n\n")}`;
     budget -= text.length;
+    shown += fitting.length;
     kept.set(chat.account, [...(kept.get(chat.account) ?? []), text]);
   }
 
   const parts = [...kept].map(
     ([account, texts]) => `${headings.get(account)}\n\n${texts.join("\n\n")}`,
   );
-  if (leftOut > 0) parts.push(`(${leftOut} less recent chats left out to keep this short.)`);
-  return parts.length > 0 ? parts.join("\n\n---\n\n") : "(No readable messages found.)";
+  if (leftOut > 0) parts.push(`(${leftOut} more chats left out to keep this short.)`);
+  const content = parts.length > 0 ? parts.join("\n\n---\n\n") : "(No readable messages found.)";
+  return { content, shown };
 }
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
@@ -193,7 +206,8 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         return { status: "error", error: `Failed to query account chats: ${message}` };
       }
 
-      log.info("fetched account chats", { count: rows.length, windowHours });
+      const chats = formatChats(rows);
+      log.info("fetched account chats", { count: rows.length, shown: chats.shown, windowHours });
 
       const windowStart = new Date(cutoffSeconds * 1000).toISOString();
       const windowEnd = new Date().toISOString();
@@ -202,9 +216,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       return {
         status: "ok",
         data: {
-          messageCount: rows.length,
+          messageCount: chats.shown,
           windowHours,
-          content: header + formatChats(rows),
+          content: header + chats.content,
         },
       };
     },

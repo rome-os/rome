@@ -44,7 +44,7 @@ export function hasChatSince(db: AppDbContext, since: Date): boolean {
       AND (
         (m.role = 'user' AND (
           s.type IN ('webchat', 'webchat_handoff')
-          OR (s.type = 'channel' AND s.source_channel = 'webchat')
+          OR (s.type = 'channel' AND s.source_channel = 'webchat' AND s.source_thread_id = s.id)
         ))
         OR (${heardOnRomeAccount})
       )

@@ -120,8 +120,41 @@ describe("get_account_chats", () => {
     const content = (result.data as { content: string }).content;
     expect(content).toContain('#### Chat "chat 79"');
     expect(content).not.toContain('#### Chat "chat 0"');
-    expect(content).toMatch(/\(\d+ less recent chats left out to keep this short\.\)/);
+    expect(content).toMatch(/\(\d+ more chats left out to keep this short\.\)/);
     expect(content.length).toBeLessThan(62_000);
+  });
+
+  it("shortens a chat that does not fit to its newest lines", async () => {
+    const long = "z".repeat(1000);
+    const big = Array.from({ length: 50 }, (_, i) =>
+      row({
+        session_id: "big",
+        thread_name: "busy",
+        content: `${i}${long}`,
+        created_at: 1700000100 + i,
+        chat_total: 50,
+      }),
+    );
+    const small = Array.from({ length: 20 }, (_, i) =>
+      row({
+        session_id: "small",
+        thread_name: "quiet",
+        content: `q${i}${long}`,
+        created_at: 1700000000 + i,
+        chat_total: 20,
+      }),
+    );
+
+    const result = await createAction(actionConfig, makeDeps([...small, ...big])).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const data = result.data as { messageCount: number; content: string };
+    expect(data.content).toContain('#### Chat "busy"');
+    expect(data.content).toContain('#### Chat "quiet"');
+    expect(data.content).toContain(`> q19${long}`);
+    expect(data.content).not.toContain(`> q0${long}`);
+    expect(data.content).toMatch(/\(\d+ earlier messages left out\)/);
+    expect(data.messageCount).toBeLessThan(70);
   });
 
   it("quotes what someone wrote, so it cannot pass for a heading", async () => {
