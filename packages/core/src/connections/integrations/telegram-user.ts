@@ -364,6 +364,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
   return {
     service: "telegram_user",
     reviveProfile: (_grant, record) => reviveTelegramUserProfile(record),
+    accountIdOf: (_grant, record) => (typeof record.userId === "string" && record.userId) || null,
     auth: {
       session,
     },

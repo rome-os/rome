@@ -90,17 +90,34 @@ describe("ChannelRecordsRepository", () => {
     expect(records.claim(db, { id: "c2", service: "telegram" }, NOW).id).toMatch(UUID);
   });
 
-  it("records an account only on a backed channel that has none", () => {
+  it("records the account now behind a backed channel", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "discord" }, NOW);
     records.claim(db, { id: "c2", service: "discord", account: "bot-2" }, NOW);
 
-    records.recordAccount("c1", "bot-1");
-    records.recordAccount("c2", "bot-other");
+    records.setAccount(db, "c1", "bot-1");
+    records.setAccount(db, "c2", "bot-3");
 
     expect(records.byConnection("c1")?.account).toBe("bot-1");
-    expect(records.byConnection("c2")?.account).toBe("bot-2");
+    expect(records.byConnection("c2")?.account).toBe("bot-3");
+  });
+
+  it("gives a reconnected account its agent back while no other channel holds it", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "telegram", account: "bot-1" }, NOW);
+    const second = records.claim(db, { id: "c2", service: "telegram", account: "bot-2" }, NOW);
+    records.link(second.id, "sales:agent");
+    records.vacate(db, "c2");
+
+    const back = records.claim(db, { id: "c3", service: "telegram", account: "bot-2" }, NOW);
+    expect(back).toMatchObject({ id: second.id, agent: "sales:agent" });
+
+    records.vacate(db, "c3");
+    records.link("telegram", "sales:agent");
+    const again = records.claim(db, { id: "c4", service: "telegram", account: "bot-2" }, NOW);
+    expect(again).toMatchObject({ id: second.id, agent: null });
   });
 
   it("links main to a linkable service's first account only", () => {

@@ -474,7 +474,7 @@ describe("teardown serialization (#4)", () => {
     expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("cancelled");
     // ...and the account, which held no other grant, is gone.
     expect(registry.find("fake-telegram")).toEqual([]);
-    expect(await registry.getLedger().getGrant(conn.id, "bot")).toBeUndefined();
+    expect(await registry.getLedger().getGrant(conn.id, "bot")).toBeNull();
 
     // Completing the cancelled setup is a no-op (409) and never re-imports.
     const late = await submitInput(app, second.json.cid, "good");

@@ -37,7 +37,8 @@ export function claimChannels(
  * back.
  */
 export async function recordChannelAccounts(
-  records: Pick<ChannelRecordsRepository, "byConnection" | "recordAccount">,
+  db: DrizzleDb,
+  records: Pick<ChannelRecordsRepository, "byConnection" | "setAccount">,
   registry: Pick<ConnectionRegistry, "getDescriptor" | "getLedger">,
   connections: ReadonlyArray<{ id: string; service: string }>,
 ): Promise<void> {
@@ -48,7 +49,7 @@ export async function recordChannelAccounts(
       for (const grant of await registry.getLedger().listGrants(connection.id)) {
         const account = grant.profile ? accountIdOf(grant.name, grant.profile) : null;
         if (account) {
-          records.recordAccount(connection.id, account);
+          records.setAccount(db, connection.id, account);
           break;
         }
       }

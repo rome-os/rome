@@ -51,7 +51,7 @@ describe("claimChannels", () => {
       }),
     } as unknown as Parameters<typeof recordChannelAccounts>[1];
 
-    await recordChannelAccounts(records, registry, connections);
+    await recordChannelAccounts(testDb.db, records, registry, connections);
 
     expect(records.byConnection("c1")?.account).toBe("bot-1");
     expect(records.byConnection("c2")?.account).toBeNull();

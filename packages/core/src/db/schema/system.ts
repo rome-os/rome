@@ -900,6 +900,9 @@ export const channels = sqliteTable(
      *  bot's id), kept after the Connection goes so the same account
      *  reconnecting takes its channel back. Null where the service names none. */
     account: text("account"),
+    /** The agent linked when the channel's Connection went, given back when
+     *  the same account takes the channel back. Null while backed. */
+    releasedAgent: text("released_agent"),
   },
   (table) => [
     uniqueIndex("channels_connection_unique").on(table.connectionId),

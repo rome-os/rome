@@ -67,6 +67,10 @@ export interface ConnectionRegistryDeps {
    *  the row. `account` is the service's id for the account the minting
    *  conferral connected, or null when there is none. */
   onMint?: (tx: DrizzleTx, record: ConnectionRecord, account: string | null) => void;
+  /** Runs inside the transaction of a conferral onto an existing Connection
+   *  that names its account, so what the caller records of the account
+   *  follows the one now connected. */
+  onConfer?: (tx: DrizzleTx, id: ConnectionId, account: string) => void;
   /** Runs inside the transaction that deletes a Connection, before any
    *  caller participant. */
   onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
@@ -177,6 +181,7 @@ export class ConnectionRegistry {
     record: ConnectionRecord,
     account: string | null,
   ) => void;
+  private readonly onConfer?: (tx: DrizzleTx, id: ConnectionId, account: string) => void;
   private readonly onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
 
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
@@ -207,6 +212,7 @@ export class ConnectionRegistry {
     this.backoff = deps.backoff ?? DEFAULT_BACKOFF;
     this.sleep = deps.sleep ?? defaultSleep;
     this.onMint = deps.onMint;
+    this.onConfer = deps.onConfer;
     this.onRemove = deps.onRemove;
   }
 
@@ -457,9 +463,7 @@ export class ConnectionRegistry {
       await this.refuseAccountHeldElsewhere(registered.descriptor, id, grant, profile);
     }
     const account =
-      minting && profile !== undefined
-        ? (registered!.descriptor.accountIdOf?.(grant, profile) ?? null)
-        : null;
+      profile !== undefined ? (registered?.descriptor.accountIdOf?.(grant, profile) ?? null) : null;
     const createdAt = this.clock();
     const patch = conferralPatch(this.now(), credential, profile);
     const ledger = this.ledger;
@@ -474,6 +478,8 @@ export class ConnectionRegistry {
           ledger.writeEnsureGrant(tx, id, name);
         }
         this.onMint?.(tx, record, account);
+      } else if (account !== null) {
+        this.onConfer?.(tx, id, account);
       }
       ledger.writeGrant(tx, id, grant, patch);
       opts.inTx?.(tx);

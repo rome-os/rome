@@ -177,4 +177,24 @@ describe("ConnectionRegistry.confer account guard", () => {
       db.close();
     }
   });
+
+  it("names the account a conferral onto an existing Connection connected to onConfer", async () => {
+    const db = createTestDb();
+    try {
+      const conferred: Array<{ id: string; account: string }> = [];
+      const registry = new ConnectionRegistry({
+        ledger: new DrizzleGrantLedger(db.db),
+        onConfer: (_tx, id, account) => conferred.push({ id, account }),
+      });
+      registry.register(botIdDescriptor());
+      const conn = await registry.connect(SERVICE);
+
+      await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-2"), {});
+
+      expect(conferred).toEqual([{ id: conn.id, account: "100" }]);
+    } finally {
+      db.close();
+    }
+  });
 });

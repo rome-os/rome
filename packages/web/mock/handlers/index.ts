@@ -1312,8 +1312,10 @@ export const handlers = [
         missingGrants: [grant],
       };
     }
+    // Core removes an account of a service that names its accounts, which
+    // the linkable services are.
     const unconnectedAccount =
-      connection.capabilities.talk.state !== "unsupported" &&
+      LINKABLE_SERVICES.has(connection.service) &&
       Object.values(connection.grants).every((state) => state === "unauthorized");
     if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
     const others = connections.connections.filter(

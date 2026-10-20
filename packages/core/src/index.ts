@@ -216,7 +216,7 @@ import {
   ConversationSettingsRepository,
   ConversationSettingsService,
 } from "./conversation-settings/index.js";
-import { removeNeverConnectedAccounts } from "./connections/unconnected-accounts.js";
+import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
 import { ensureZeroGrantConnections } from "./connections/zero-grant.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
 import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
@@ -370,6 +370,7 @@ async function main() {
         channelRecords.claim(tx, { ...record, account }, record.createdAt);
       }
     },
+    onConfer: (tx, id, account) => channelRecords.setAccount(tx, id, account),
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
   const channelOf = recordedChannelOf(channelRecords, talks);
@@ -1355,15 +1356,18 @@ async function main() {
   // Hydrate connection/grant state without starting provider transports, so
   // the zero-grant connections exist before any Talk epoch can admit messages.
   await connectionRegistry.load({ deferCapabilities: true });
-  // An account exists only while connected, so one an earlier version minted
-  // and never connected goes before any channel is recorded for it.
-  await removeNeverConnectedAccounts(connectionRegistry);
+  // An account exists only while connected, so one left unconnected goes
+  // before any channel is recorded for it.
+  await removeUnconnectedAccounts(
+    connectionRegistry,
+    (id) => (channelRecords.byConnection(id)?.account ?? null) !== null,
+  );
   // Connections minted before channels were recorded get theirs now. Each
   // service held one, so each takes its service's name. Then each channel
   // records the account behind it, so a reconnect can take it back.
   const talkConnections = connectionRegistry.all().filter((c) => talks(c.service));
   claimChannels(db, channelRecords, talkConnections);
-  await recordChannelAccounts(channelRecords, connectionRegistry, talkConnections);
+  await recordChannelAccounts(db, channelRecords, connectionRegistry, talkConnections);
   await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();
 

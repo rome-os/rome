@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "640e7c15-da13-4681-b00d-6f303bca5bf3",
+  "id": "845b1ae7-c84f-4ecc-9da6-05aba93e203d",
   "prevId": "3226368c-bcb9-4c29-8cd3-23eaeb792ad6",
   "tables": {
     "action_executions": {
@@ -390,6 +390,13 @@
         },
         "account": {
           "name": "account",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "released_agent": {
+          "name": "released_agent",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
