@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { MAIN_AGENT_ID, agentLabel } from "@rome/api-types/account-agents";
 import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/field";
@@ -11,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { serviceLabel } from "@/lib/connection-cards";
 import { linkAccountAgent } from "@/lib/connections-api";
 import { AgentText } from "./agent-text";
 import { type Envoy, type EnvoyAccount, displacedAccount } from "./envoys-model";
@@ -75,9 +77,20 @@ export function AgentChange({
     const agent = value === NO_AGENT ? null : value;
     // `mutateAsync` settles even once the refetch has moved this row away, so
     // the page still hears about the change. Its error shows through `link.error`.
+    const predicted = agent !== null && displacedAccount(envoys, account, agent) !== null;
     link.mutateAsync({ channel: account.channel, agent }).then(
-      () => {
+      (result) => {
         setPending(null);
+        // The confirm sees only connected accounts, so core can move the agent
+        // off one it never showed.
+        if (agent && result.unlinkedFrom && !predicted) {
+          toast(
+            t("change.moved", {
+              agent: agentLabel(agent),
+              platform: serviceLabel(account.platform),
+            }),
+          );
+        }
         onChanged(agent);
       },
       () => {},
@@ -146,11 +159,13 @@ export function AgentChange({
             ) : (
               <AgentText
                 k={
-                  account.agent !== null
-                    ? "change.switchConfirm"
-                    : account.kind === "delegate"
+                  account.kind === "delegate"
+                    ? account.agent === null
                       ? "change.delegateConfirm"
-                      : "change.linkConfirm"
+                      : "change.delegateSwitchConfirm"
+                    : account.agent === null
+                      ? "change.linkConfirm"
+                      : "change.switchConfirm"
                 }
                 values={{ account: account.name, to: agentLabel(pending) }}
               />

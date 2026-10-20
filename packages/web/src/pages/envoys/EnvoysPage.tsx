@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useMatch, useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
 import {
@@ -38,7 +38,11 @@ import {
   WeChatIcon,
 } from "@/components/brand-icons/connection-badges";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { CONNECTIONS_REFRESH_INTERVAL_MS, fetchConnections } from "@/lib/connections-api";
+import {
+  type ApiConnection,
+  CONNECTIONS_REFRESH_INTERVAL_MS,
+  fetchConnections,
+} from "@/lib/connections-api";
 import { serviceLabel } from "@/lib/connection-cards";
 import { fetchJson } from "@/lib/fetch-json";
 import { Avatar } from "../people/avatar";
@@ -69,6 +73,8 @@ const envoyPath = (agent: string) => `/envoys/${encodeURIComponent(agent)}`;
 
 const accountPath = (route: string) => `${CONNECTIONS_PATH}/${encodeURIComponent(route)}`;
 
+const CONNECTIONS_KEY = ["envoys", "connections"];
+
 type EnvoysData = ReturnType<typeof buildEnvoys> & {
   agentsPending: boolean;
   agentsFailed: boolean;
@@ -77,7 +83,7 @@ type EnvoysData = ReturnType<typeof buildEnvoys> & {
 function useEnvoys() {
   const { t } = useTranslation("envoys");
   const connections = useQuery({
-    queryKey: ["envoys", "connections"],
+    queryKey: CONNECTIONS_KEY,
     queryFn: fetchConnections,
     // Links change on the Connections cards, so a return here reads them fresh.
     staleTime: 0,
@@ -415,6 +421,14 @@ function Overview({ envoy }: { envoy: Envoy }) {
 function Settings({ envoy, data }: { envoy: Envoy; data: EnvoysData }) {
   const { t } = useTranslation("envoys");
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  // Read after the change's refetch, so two changes at once both see the
+  // accounts that are left rather than the count when they started.
+  const keepsAccounts = () => {
+    const connections = queryClient.getQueryData<ApiConnection[]>(CONNECTIONS_KEY);
+    if (!connections) return envoy.accounts.length > 1;
+    return buildEnvoys(connections, null).envoys.some((other) => other.agent === envoy.agent);
+  };
   return (
     <Card className="max-w-3xl">
       <CardHeader>
@@ -430,7 +444,7 @@ function Settings({ envoy, data }: { envoy: Envoy; data: EnvoysData }) {
             onChanged={(agent) => {
               // Stay while this agent keeps other accounts. Otherwise follow the
               // account to its new agent's page, or back to the list.
-              if (envoy.accounts.length > 1) return;
+              if (keepsAccounts()) return;
               navigate(agent ? `${envoyPath(agent)}/settings` : "/envoys");
             }}
           />
