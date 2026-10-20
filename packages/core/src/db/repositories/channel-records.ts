@@ -165,13 +165,13 @@ export class ChannelRecordsRepository {
               a.createdAt.getTime() - b.createdAt.getTime(),
           )[0];
     if (vacant) {
-      const agent = firstAccountAgent(exec, service);
+      // Only a service that takes no agent gets here, so the channel starts with none.
       exec
         .update(channels)
-        .set({ connectionId: connection.id, agent })
+        .set({ connectionId: connection.id, agent: null })
         .where(eq(channels.id, vacant.id))
         .run();
-      return toRecord({ ...vacant, connectionId: connection.id, agent });
+      return toRecord({ ...vacant, connectionId: connection.id, agent: null });
     }
 
     const serviceIdTaken =
