@@ -97,8 +97,8 @@ export async function revokeConnectionGrant(
   return { ok: true };
 }
 
-/** Link an agent to an account by its channel id, or pass null so the account
- *  stays silent. `fallback` is the error message when the server gives none. */
+/** Link an agent to an account by its channel id, or pass null to unlink it,
+ *  so Rome stops listening to the account. `fallback` is the error message when the server gives none. */
 export async function linkAccountAgent(
   id: string,
   agent: string | null,

@@ -481,7 +481,7 @@ describe("ConnectionDetailBody — accounts", () => {
     const user = userEvent.setup();
 
     const picker = screen.getByRole("combobox", { name: "Agent" });
-    expect(picker.textContent).toContain("None. This account stays silent.");
+    expect(picker.textContent).toContain("None. Rome does not listen to this account.");
     await user.click(picker);
     await user.click(await screen.findByRole("option", { name: "sales:agent" }));
 
@@ -556,7 +556,7 @@ describe("ConnectionDetailBody — accounts", () => {
     rerenderCard(cardFor([feishu({ agent: null })], "feishu"));
 
     expect(screen.getByRole("combobox", { name: "Agent" }).textContent).toContain(
-      "None. This account stays silent.",
+      "None. Rome does not listen to this account.",
     );
   });
 
@@ -571,7 +571,7 @@ describe("ConnectionDetailBody — accounts", () => {
     await waitFor(() => expect(onRefresh).toHaveBeenCalled());
     await user.click(screen.getByRole("combobox", { name: "Agent" }));
     await user.click(
-      await screen.findByRole("option", { name: "None. This account stays silent." }),
+      await screen.findByRole("option", { name: "None. Rome does not listen to this account." }),
     );
 
     await waitFor(() =>
@@ -590,7 +590,7 @@ describe("ConnectionDetailBody — accounts", () => {
 
     await user.click(screen.getByRole("combobox", { name: "Agent" }));
     expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
-      "None. This account stays silent.",
+      "None. Rome does not listen to this account.",
       "main",
       "sales:agent",
     ]);
@@ -610,7 +610,7 @@ describe("ConnectionDetailBody — accounts", () => {
     expect(picker.textContent).toContain("main");
     await user.click(picker);
     expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
-      "None. This account stays silent.",
+      "None. Rome does not listen to this account.",
       "main",
       "sales:agent",
     ]);
@@ -645,10 +645,14 @@ describe("ConnectionDetailBody — accounts", () => {
     expect(picker.textContent).toContain("sales:agent");
     await user.click(picker);
     await user.click(
-      await screen.findByRole("option", { name: "None. This account stays silent." }),
+      await screen.findByRole("option", { name: "None. Rome does not listen to this account." }),
     );
 
-    await waitFor(() => expect(toast).toHaveBeenCalledWith("Feishu now stays silent."));
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        "Rome does not listen to Feishu until an agent is linked.",
+      ),
+    );
     expect(calls.find((call) => call.method === "PUT")?.body).toEqual({ agent: null });
   });
 

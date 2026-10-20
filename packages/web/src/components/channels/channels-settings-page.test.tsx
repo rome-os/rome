@@ -295,7 +295,7 @@ describe("ChannelsSettingsPage", () => {
     renderPage();
     const silent = await findCard();
     expect(within(silent).queryByLabelText(/Agent/)).toBeNull();
-    expect(within(silent).getByText("None. This account stays silent.")).toBeTruthy();
+    expect(within(silent).getByText("None. Rome does not listen to this account.")).toBeTruthy();
     expect(
       within(silent).getByRole("link", { name: "Link one on the account" }).getAttribute("href"),
     ).toBe("/settings/connections/discord");
