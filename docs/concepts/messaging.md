@@ -105,6 +105,8 @@ The approval system gates sensitive [actions](actions.md) behind [guardian](peop
 
 - An approval-gated action does not execute before the guardian's decision: execution pauses at the gate, and a rejection means the action never runs.
 - Only the guardian can decide an approval.
+- The guardian can retry an approved action that failed. An approved action that has not finished when Rome stops counts as failed at the next start.
+- An approved action that finished stays executed, even when the agent turn that follows it fails, so a retry never runs it twice.
 
 **Not to be confused with:**
 

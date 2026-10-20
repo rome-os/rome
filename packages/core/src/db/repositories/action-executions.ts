@@ -150,6 +150,75 @@ export class ActionExecutionsRepository {
   }
 
   /**
+   * Records the execution as `pending_approval` while it is still `running`
+   * or parked, and returns whether it changed. A finished execution keeps
+   * its outcome. `actor`, when given, becomes the row's actor.
+   */
+  async markParked(id: string, actor?: SessionActor): Promise<boolean> {
+    const result = await this.db
+      .update(actionExecutions)
+      .set({
+        status: "pending_approval",
+        error: null,
+        finishedAt: null,
+        ...(actor ? { actor } : {}),
+      })
+      .where(
+        and(
+          eq(actionExecutions.id, id),
+          inArray(actionExecutions.status, ["running", "pending_approval"]),
+        ),
+      );
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  /**
+   * Ends the top row of a parked root as `error` with `error`, and returns how
+   * many rows it ended. For an approved replay that threw before it reached
+   * the root, as when the root's action is gone. Call only once no approval
+   * for the root can still resume it.
+   */
+  async markParkedRootErrored(
+    rootExecutionId: string,
+    finishedAt: Date,
+    error: string,
+  ): Promise<number> {
+    const result = await this.db
+      .update(actionExecutions)
+      .set({ status: "error", finishedAt, error })
+      .where(
+        and(
+          eq(actionExecutions.rootExecutionId, rootExecutionId),
+          isNull(actionExecutions.parentId),
+          eq(actionExecutions.status, "pending_approval"),
+        ),
+      );
+    return Number(result.changes ?? 0);
+  }
+
+  /**
+   * Ends every `pending_approval` execution under a parked root as `cancelled`
+   * with `reason`, and returns how many it ended. Call only once no approval
+   * for the root can still resume it: those rows then never run.
+   */
+  async markParkedRootRejected(
+    rootExecutionId: string,
+    finishedAt: Date,
+    reason = "Rejected by guardian",
+  ): Promise<number> {
+    const result = await this.db
+      .update(actionExecutions)
+      .set({ status: "cancelled", finishedAt, error: reason, cancellationReason: reason })
+      .where(
+        and(
+          eq(actionExecutions.rootExecutionId, rootExecutionId),
+          eq(actionExecutions.status, "pending_approval"),
+        ),
+      );
+    return Number(result.changes ?? 0);
+  }
+
+  /**
    * Ends every `running` execution as `error` at `finishedAt`, with the message
    * `errorFor` returns for it, and returns how many it ended. Call only at boot,
    * before anything can start an execution: every row still `running` then was
@@ -222,8 +291,8 @@ export class ActionExecutionsRepository {
    * Top-level executions (no parent) that finished as success, error, or
    * cancelled, in (finishedAt, id) order: strictly after `after` and no later
    * than `until`. Pass the last row's (finishedAt, id) as the next `after` to
-   * page. A routine's top-level execution carries the routine run's root id,
-   * not its own, so `parentId` is the test for top level.
+   * page. A routine run fired before its top-level row took the run's root id
+   * carries that root id, not its own, so `parentId` is the test for top level.
    */
   async findFinishedTopLevelAfter(params: {
     after: { finishedAt: Date; id: string };
@@ -259,6 +328,28 @@ export class ActionExecutionsRepository {
       )
       .orderBy(asc(actionExecutions.finishedAt), asc(actionExecutions.id))
       .limit(params.limit);
+  }
+
+  /** The top row of the tree rooted at `rootExecutionId`, or null when the
+   * tree has none. That is the row with the root id itself, else the newest
+   * row without a parent: a routine run fired before its root row took the
+   * run's execution id has only that one. */
+  async findTreeRoot(rootExecutionId: string) {
+    const rows = await this.db
+      .select()
+      .from(actionExecutions)
+      .where(
+        and(
+          eq(actionExecutions.rootExecutionId, rootExecutionId),
+          isNull(actionExecutions.parentId),
+        ),
+      )
+      .orderBy(
+        desc(sql`${actionExecutions.id} = ${rootExecutionId}`),
+        desc(actionExecutions.createdAt),
+      )
+      .limit(1);
+    return rows[0] ?? null;
   }
 
   async findByRootExecutionIds(rootExecutionIds: string[]) {

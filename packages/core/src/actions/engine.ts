@@ -931,8 +931,12 @@ export class ActionEngine {
               actionEventObserver,
               onRootAccepted,
             );
+      // A root whose tree has a call awaiting approval is parked, even when
+      // its body ignored that call's pending result: handleRootCall reports
+      // it parked, and settling a rejection or a routine run reads this row.
       const status: ActionExecutionStatus =
-        result.status === "pending_approval"
+        result.status === "pending_approval" ||
+        (isRoot && replayContext.getStore()?.pendingApproval)
           ? "pending_approval"
           : result.status === "error"
             ? "error"
@@ -1879,10 +1883,17 @@ export class ActionEngine {
 
     const existing = await repo.findById(data.executionId);
     if (existing) {
+      if (data.status === "pending_approval") {
+        // An approval is visible before the run that requested it finishes
+        // parking, so its replay can finish the row first. Parking never
+        // reopens a finished row.
+        await repo.markParked(data.executionId, data.actor);
+        return;
+      }
       await repo.update(data.executionId, {
         status: data.status,
         error: data.error ?? null,
-        finishedAt: data.status === "pending_approval" ? null : this.clock.now(),
+        finishedAt: this.clock.now(),
         // Same rule as ensureExecutionStarted: the row reflects the actor of
         // the run that most recently drove it.
         ...(data.actor ? { actor: data.actor } : {}),

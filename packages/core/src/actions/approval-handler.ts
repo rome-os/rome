@@ -1,4 +1,5 @@
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
+import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import type { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import type { ActionEngine, ActionRunContext } from "./engine.js";
 import type { ActionResult } from "./types.js";
@@ -44,7 +45,28 @@ function formatResultForAgent(result: ActionResult): string {
   return `The action you requested has been approved and executed successfully.\n\nResult: ${dataStr}`;
 }
 
+/** Hooks that keep records projected from a parked root, such as a routine
+ * run, in step with it. A failure is logged, never rethrown. */
+export interface RootSettlementHooks {
+  /** Called when an approved replay of the root is claimed, a retry included,
+   * before it waits for its session. */
+  onRootResuming?: (rootExecutionId: string, approvalId: string) => Promise<void>;
+  /** Called after a resolution that can settle the root's execution row:
+   * after an approved replay returns or throws, and after every rejection.
+   * `approvalId` names the approval just resolved. The root may still be
+   * parked on another approval. */
+  onRootResolved?: (rootExecutionId: string, approvalId: string) => Promise<void>;
+}
+
+/** How an approval's outcome reaches the records of the root it parked. */
+export interface ApprovalSettlement extends RootSettlementHooks {
+  executions: Pick<ActionExecutionsRepository, "markParkedRootRejected" | "markParkedRootErrored">;
+}
+
 export class ApprovalHandler {
+  /** The latest replay of each root, settled or not. See inRootTurn. */
+  private rootReplays = new Map<string, Promise<void>>();
+
   constructor(
     private approvalsRepo: ApprovalsRepository,
     private journalRepo: ExecutionJournalRepository,
@@ -61,6 +83,8 @@ export class ApprovalHandler {
      * default project and the per-cwd transcript resume fails with "No
      * conversation found". Undefined ⇒ keep the default-dir fallback. */
     private resolveWorkingDir?: (channel: string, threadId: string) => Promise<string | undefined>,
+    /** Undefined ⇒ a resolution leaves the parked root's records as they are. */
+    private settlement?: ApprovalSettlement,
   ) {}
 
   async onApproved(approvalId: string): Promise<void> {
@@ -128,6 +152,10 @@ export class ApprovalHandler {
       return;
     }
 
+    // Before the session task below, which can wait behind another turn: the
+    // root's records read active again from the moment the replay is claimed.
+    await this.notifySettlement("onRootResuming", payload.rootExecutionId, approvalId);
+
     log.info("processing approved action", {
       approvalId,
       actionName: payload.actionName,
@@ -158,6 +186,7 @@ export class ApprovalHandler {
     // the chat. The `approval:` prefix keeps the id distinguishable from
     // SDK-issued `toolu_*` ids and makes it queryable back to the approval row.
     const traceId = `approval:${approvalId}`;
+    let executed = false;
 
     try {
       emit?.({
@@ -180,11 +209,21 @@ export class ApprovalHandler {
         agentName: payload.agentName,
         channelThreadKey: payload.channelThreadKey,
       };
-      const result = await this.actionEngine.run(
-        payload.rootActionName,
-        payload.rootArgs,
-        runContext,
-      );
+      const result = await this.inRootTurn(payload.rootExecutionId, async () => {
+        const replayed = await this.actionEngine.run(
+          payload.rootActionName,
+          payload.rootArgs,
+          runContext,
+        );
+        // The action has run, so record that before the continuation below,
+        // which can run for minutes. A stop during it then leaves nothing to
+        // retry.
+        await this.approvalsRepo.markExecuted(approvalId);
+        executed = true;
+        log.info("approval executed successfully", { approvalId });
+        await this.notifySettlement("onRootResolved", payload.rootExecutionId, approvalId);
+        return replayed;
+      });
 
       emit?.({
         type: "tool_result",
@@ -215,11 +254,17 @@ export class ApprovalHandler {
           if (emit) emit({ ...message, agent: agentName });
         }
       }
-
-      await this.approvalsRepo.markExecuted(approvalId);
-      log.info("approval executed successfully", { approvalId });
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
+      if (executed) {
+        // Only the agent's turn failed. The approval stays executed: a retry
+        // would run the approved action a second time.
+        log.error("agent continuation after approved action failed", {
+          approvalId,
+          error: errorMsg,
+        });
+        return;
+      }
       log.error("approval execution failed", { approvalId, error: errorMsg });
       // Don't leak internal stack traces / DB errors / file paths to the
       // chat surface — keep the detailed error in server logs and emit a
@@ -238,6 +283,29 @@ export class ApprovalHandler {
       } catch {
         // Best-effort — failure already logged above
       }
+      // A replay that reached the root has already recorded it as errored. One
+      // that threw before, as when the root's action is gone, left it parked,
+      // and no other approval may resume it. A retry replays it again.
+      const rootExecutionId: unknown = payload.rootExecutionId;
+      if (this.settlement && typeof rootExecutionId === "string") {
+        try {
+          if (
+            !this.approvalsRepo.hasActiveApprovalForRoot(rootExecutionId, { countFailed: false })
+          ) {
+            await this.settlement.executions.markParkedRootErrored(
+              rootExecutionId,
+              new Date(),
+              errorMsg,
+            );
+          }
+        } catch (settleErr) {
+          log.error("failed to record errored root", {
+            approvalId,
+            error: settleErr instanceof Error ? settleErr.message : String(settleErr),
+          });
+        }
+      }
+      await this.notifySettlement("onRootResolved", payload.rootExecutionId, approvalId);
     }
   }
 
@@ -246,6 +314,24 @@ export class ApprovalHandler {
     if (!approval) return;
 
     const payload = approval.payload as ApprovalPayload | null;
+
+    const rootExecutionId = payload?.rootExecutionId;
+    if (this.settlement && typeof rootExecutionId === "string") {
+      try {
+        // Another approval for the same root can still resume it, so the root
+        // stays parked until the last one resolves.
+        if (!this.approvalsRepo.hasActiveApprovalForRoot(rootExecutionId)) {
+          await this.settlement.executions.markParkedRootRejected(rootExecutionId, new Date());
+        }
+        await this.notifySettlement("onRootResolved", rootExecutionId, approvalId);
+      } catch (err) {
+        log.error("failed to settle rejected root", {
+          approvalId,
+          rootExecutionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     if (payload?.sessionId) {
       try {
@@ -280,5 +366,46 @@ export class ApprovalHandler {
       approvalId,
       rootExecutionId: payload?.rootExecutionId,
     });
+  }
+
+  /** Runs `replay` once every earlier replay of the same root has finished.
+   * Each replay runs the whole root again on the same execution row, so two
+   * at once would record the row over each other: one that finished could
+   * hide one that parked again. */
+  private async inRootTurn<T>(rootExecutionId: unknown, replay: () => Promise<T>): Promise<T> {
+    if (typeof rootExecutionId !== "string") return replay();
+    const previous = this.rootReplays.get(rootExecutionId) ?? Promise.resolve();
+    const turn = previous.then(replay);
+    const done = turn.then(
+      () => {},
+      () => {},
+    );
+    this.rootReplays.set(rootExecutionId, done);
+    try {
+      return await turn;
+    } finally {
+      if (this.rootReplays.get(rootExecutionId) === done) this.rootReplays.delete(rootExecutionId);
+    }
+  }
+
+  /** Runs one settlement hook for the root, and logs a failure instead of
+   * rethrowing it. */
+  private async notifySettlement(
+    hook: "onRootResuming" | "onRootResolved",
+    rootExecutionId: unknown,
+    approvalId: string,
+  ): Promise<void> {
+    const notify = this.settlement?.[hook];
+    if (!notify || typeof rootExecutionId !== "string") return;
+    try {
+      await notify(rootExecutionId, approvalId);
+    } catch (err) {
+      log.error("failed to settle records of approval root", {
+        hook,
+        approvalId,
+        rootExecutionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }

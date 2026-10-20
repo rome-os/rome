@@ -81,6 +81,53 @@ export class RoutineRunsRepository {
     return Number(result.changes ?? 0);
   }
 
+  /**
+   * Copies a settled root execution's outcome onto the run rooted at
+   * `executionId`, and returns whether a run changed. Only a run still
+   * `pending_approval` takes the outcome. A run that ended any other way keeps
+   * its status. `durationMs` keeps the time the run took to park.
+   */
+  async syncFromRoot(
+    executionId: string,
+    outcome: { status: "success" | "error" | "cancelled"; error?: string },
+  ): Promise<boolean> {
+    const result = await this.db
+      .update(routineRuns)
+      .set({ status: outcome.status, error: outcome.error ?? null })
+      .where(
+        and(eq(routineRuns.executionId, executionId), eq(routineRuns.status, "pending_approval")),
+      );
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  /**
+   * Returns the `error` or `cancelled` run rooted at `executionId` to
+   * `pending_approval`, for a retried approval that replays its root again,
+   * as after a replay that threw or was stopped: the run stays active until
+   * that replay settles it. Returns whether a run changed.
+   */
+  async reopenForReplay(executionId: string): Promise<boolean> {
+    const result = await this.db
+      .update(routineRuns)
+      .set({ status: "pending_approval", error: null })
+      .where(
+        and(
+          eq(routineRuns.executionId, executionId),
+          inArray(routineRuns.status, ["error", "cancelled"]),
+        ),
+      );
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  /** The root execution id of every `pending_approval` run. */
+  async findParkedExecutionIds(): Promise<string[]> {
+    const rows = await this.db
+      .select({ executionId: routineRuns.executionId })
+      .from(routineRuns)
+      .where(eq(routineRuns.status, "pending_approval"));
+    return rows.map((row) => row.executionId);
+  }
+
   /** A single run by id — the trace endpoint uses this to resolve a run's
    * `executionId` (the root of its action-execution tree). */
   async findById(id: string): Promise<RoutineRun | null> {
@@ -125,7 +172,8 @@ export class RoutineRunsRepository {
    * runs aren't serialized per routine, so more than one can be live at once and
    * an older run can still be running after a newer one finished — looking only
    * at the newest row would miss it. Excludes `pending_approval` deliberately:
-   * those have no live process to kill and are the approval flow's to resolve. */
+   * those have no live process to kill, and resolving their approval settles
+   * them. */
   async findRunningByRoutineId(routineId: string): Promise<RoutineRun[]> {
     const rows = await this.db
       .select()
