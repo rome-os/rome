@@ -14,7 +14,7 @@ describe("normalizeWelcomeLocale", () => {
   });
 
   it("selects Chinese copy for the landing entry point", () => {
-    expect(getWelcomeCopy("zh-CN").landing.kickoff).toBe("开始设置 👋");
+    expect(getWelcomeCopy("zh-CN").landing.kickoff).toBe("👋 开始设置吧！");
     expect(getWelcomeCopy("zh-CN").landing.start).toBe("开始聊天");
   });
 

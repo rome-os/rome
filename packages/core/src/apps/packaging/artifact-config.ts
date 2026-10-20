@@ -122,6 +122,9 @@ export const AgentConfigSchema = z
     // A code-backed agent. Its turns are always produced by a
     // turn-middleware, never a model, so the session opens no provider query.
     codeBacked: z.boolean().optional(),
+    // The dashboard shows this agent's sessions as the guardian's main agent
+    // (its chosen name and avatar) rather than as the owning app.
+    presentAsMain: z.boolean().optional(),
   })
   .strict()
   .superRefine((raw, ctx) => {

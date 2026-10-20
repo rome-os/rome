@@ -26,6 +26,7 @@ import {
 
 const t = (key: string) => key;
 const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
+const mockInvalidateSettings = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 const mockFindActiveSubmission = rs.hoisted(() => rs.fn(() => null));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
@@ -36,6 +37,10 @@ rs.mock("@/hooks/use-tab-status", () => ({
 
 rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t }),
+}));
+
+rs.mock("@/hooks/use-settings", () => ({
+  useInvalidateSettings: () => mockInvalidateSettings,
 }));
 
 rs.mock("@/components/chat/use-session-identity", () => ({
@@ -130,8 +135,20 @@ rs.mock("@/components/chat/ChatComposer", () => ({
     onStop?: () => void;
     onSend?: (snapshot: unknown, controls: unknown) => Promise<void>;
     streamError?: string | { message: string } | null;
+    pinnedAgentMention?: { label?: string; iconUrl?: string | null } | null;
+    designingInteraction?: { onCancel?: () => void } | null;
   }) => (
     <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
+      {props.pinnedAgentMention ? (
+        <div
+          data-testid="composer-agent"
+          data-label={props.pinnedAgentMention.label ?? ""}
+          data-icon={props.pinnedAgentMention.iconUrl ?? ""}
+        />
+      ) : null}
+      {props.designingInteraction?.onCancel ? (
+        <button type="button" data-testid="cancel-handoff" />
+      ) : null}
       {props.streamError ? (
         <div data-testid="stream-error">
           {typeof props.streamError === "string" ? props.streamError : props.streamError.message}
@@ -167,6 +184,31 @@ rs.mock("@/components/chat/ChatComposer", () => ({
                   reasoningEffort: "medium",
                   projectPath: "",
                   inputId: "11111111-1111-4111-8111-111111111111",
+                },
+                { onUploadProgress: () => {}, signal: new AbortController().signal },
+              )
+              .catch(() => {})
+          }
+        />
+      ) : null}
+      {props.onSend ? (
+        <button
+          type="button"
+          data-testid="send-agent-button"
+          onClick={() =>
+            void props
+              .onSend?.(
+                {
+                  text: "hi",
+                  uploads: [],
+                  reasoningEffort: "medium",
+                  projectPath: "",
+                  agentMention: {
+                    appId: "welcome-to-rome",
+                    appLabel: "Welcome to Rome",
+                    agentName: "welcome-to-rome:welcome-to-rome",
+                    iconUrl: "/api/apps/welcome-to-rome/icon",
+                  },
                 },
                 { onUploadProgress: () => {}, signal: new AbortController().signal },
               )
@@ -535,6 +577,73 @@ describe("Chat session events over the live-events socket", () => {
     expect(MockEventSource.instances).toHaveLength(0);
   });
 
+  it("still delivers a message that lands in a handoff's child after the handoff closed", async () => {
+    rs.mocked(listSessionMessages).mockImplementation(async (sessionId: string) =>
+      sessionId === "session-1"
+        ? [
+            {
+              id: "m-handoff",
+              sessionId: "session-1",
+              turnId: "turn-1",
+              role: "assistant",
+              content: JSON.stringify([
+                {
+                  type: "handoff",
+                  toolUseId: "h1",
+                  appId: "welcome-to-rome",
+                  agentName: "core:main",
+                  childSessionId: "child-1",
+                  payload: { agentLabel: "Nova" },
+                },
+              ]),
+              createdAt: "2026-10-05T00:00:00.000Z",
+            },
+            {
+              id: "m-closed",
+              sessionId: "session-1",
+              turnId: "turn-2",
+              role: "user",
+              content: JSON.stringify([
+                { type: "interaction_result", toolUseId: "h1", output: { dismissed: true } },
+              ]),
+              createdAt: "2026-10-05T00:01:00.000Z",
+            },
+          ]
+        : [],
+    );
+    const onSessionMessage = rs.fn();
+    try {
+      renderChat(
+        <Chat sessionId="session-1" onSessionMessage={onSessionMessage} />,
+        fakeSocketLiveEventsClient(),
+      );
+      const socket = accept();
+      await waitFor(() =>
+        expect(socket.sent).toContainEqual({ type: "subscribe", topic: "chat.session:child-1" }),
+      );
+
+      // An app posts into the closed handoff's chat, as the welcome's closing message does.
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: "chat.session:child-1",
+          event: "message_insert",
+          data: {
+            id: "m-late",
+            sessionId: "child-1",
+            turnId: null,
+            role: "assistant",
+            content: JSON.stringify([{ type: "text", content: "You're all set." }]),
+            createdAt: "2026-10-05T00:02:00.000Z",
+          },
+        }),
+      );
+      expect(onSessionMessage).toHaveBeenCalledWith({ sessionId: "child-1", turnId: null });
+    } finally {
+      rs.mocked(listSessionMessages).mockResolvedValue([]);
+    }
+  });
+
   it("resyncs messages once resubscribed after a drop, and when the server refuses the topic", async () => {
     renderChat(<Chat sessionId="session-1" />, fakeSocketLiveEventsClient());
     const first = accept();
@@ -568,6 +677,49 @@ describe("Chat turn stream lifecycle", () => {
     await user.click(within(dialog).getByRole("button", { name: "navbar.delete" }));
 
     await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("session-1"));
+  });
+
+  it.each([
+    ["refreshes", true],
+    ["leaves", false],
+  ])("%s the cached names when a turn ends, by whether the agent speaks as the main agent", async (_label, presentsAsMain) => {
+    // Onboarding renames the main agent during a turn, and messages are
+    // labelled with the cached name.
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: null,
+      pinnedAgentMention: null,
+      archivedAt: null,
+      presentsAsMain,
+    });
+    rs.mocked(listSessionTurns)
+      .mockResolvedValueOnce([{ turnId: "turn-1", status: "running" }])
+      .mockResolvedValue([]);
+    rs.mocked(openTurnStream).mockImplementationOnce(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode('event: done\ndata: {"success":true}\n\n'),
+              );
+              controller.close();
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    const composer = () => screen.getByTestId("chat-composer").getAttribute("data-streaming");
+
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalled());
+    await waitFor(() => expect(composer()).toBe("false"));
+
+    if (presentsAsMain) {
+      await waitFor(() => expect(mockInvalidateSettings).toHaveBeenCalled());
+    } else {
+      expect(mockInvalidateSettings).not.toHaveBeenCalled();
+    }
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
   });
 
   it("aborts an attached turn stream when the chat unmounts", async () => {
@@ -1190,6 +1342,51 @@ describe("Chat tab status", () => {
   });
 });
 
+describe("Chat handoff composer chip", () => {
+  afterEach(() => {
+    rs.mocked(listSessionMessages).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+  });
+
+  it.each([
+    ["the main agent's name and avatar", "core:main", "Nova", ""],
+    ["the specialist's own icon", "workflow-studio:planner", "", "/api/apps/workflow-studio/icon"],
+  ])("shows %s while a handoff holds the floor", async (_label, agentName, label, icon) => {
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionMessages).mockImplementation(async (sessionId: string) =>
+      sessionId === "session-1"
+        ? [
+            {
+              id: "m-handoff",
+              sessionId: "session-1",
+              turnId: "turn-1",
+              role: "assistant",
+              content: JSON.stringify([
+                {
+                  type: "handoff",
+                  toolUseId: "h1",
+                  appId: agentName === "core:main" ? "welcome-to-rome" : "workflow-studio",
+                  agentName,
+                  childSessionId: "child-1",
+                  payload: { agentLabel: "Planner" },
+                },
+              ]),
+              createdAt: "2026-10-05T00:00:00.000Z",
+            },
+          ]
+        : [],
+    );
+    renderChat(<Chat sessionId="session-1" mainAgentDisplayName="Nova" />);
+
+    await waitFor(() => expect(screen.getByTestId("composer-agent")).toBeTruthy());
+    const chip = screen.getByTestId("composer-agent");
+    expect(chip.getAttribute("data-label")).toBe(label);
+    expect(chip.getAttribute("data-icon")).toBe(icon);
+    // The chip still carries the handoff's cancel.
+    expect(screen.getByTestId("cancel-handoff")).toBeTruthy();
+  });
+});
+
 describe("Chat jump to latest", () => {
   it("hides the control while the viewport is already at the tail", () => {
     renderChat(<Chat sessionId="session-1" />);
@@ -1246,5 +1443,34 @@ describe("Chat draft", () => {
     // The send registered its local follow before the render that adopted the
     // session, so the reattach poll never looks the turn up.
     expect(listSessionTurns).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["drops", true],
+    ["keeps", false],
+  ])("%s the picked agent's name once the new chat's agent loads, by whether it speaks as the main agent", async (_label, presentsAsMain) => {
+    rs.mocked(createSession).mockResolvedValueOnce({ id: "created-1" } as Awaited<
+      ReturnType<typeof createSession>
+    >);
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId: "turn-1" } });
+    // The created session's agent has loaded: speaking as the main agent, it
+    // reports no mention of its own.
+    mockUseSessionIdentity.mockImplementation((sessionId: string | null | undefined) => ({
+      sessionName: null,
+      pinnedAgentMention: null,
+      archivedAt: null,
+      presentsAsMain: !!sessionId && presentsAsMain,
+    }));
+    renderChat(<Chat emptyState={<p>Empty home</p>} />);
+
+    fireEvent.click(screen.getByTestId("send-agent-button"));
+
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
+    if (presentsAsMain) {
+      expect(screen.queryByText("Welcome to Rome")).toBeNull();
+      expect(screen.getByText("sidebar.newChat")).toBeTruthy();
+    } else {
+      expect(screen.getByText("Welcome to Rome")).toBeTruthy();
+    }
   });
 });

@@ -91,6 +91,37 @@ describe("buildChatView", () => {
     expect(v.identityBySession.get(MAIN)).toBe(MAIN_IDENTITY);
   });
 
+  describe("a handoff to the main agent from an app's chat", () => {
+    // The root session runs the welcome app, whose identity is not the main agent's.
+    const WELCOME_IDENTITY: AgentIdentity = { name: "Welcome To Rome", iconUrl: "/welcome.png" };
+    const messages = () => {
+      const map = tree();
+      map.set(MAIN, [
+        mk(MAIN, "assistant", "t2", [
+          {
+            ...handoffBlock,
+            appId: "welcome-to-rome",
+            agentName: "core:main",
+            payload: { summary: "brief", agentLabel: "Atlas" },
+          },
+        ]),
+      ]);
+      return map;
+    };
+
+    it("speaks as the main agent", () => {
+      const view = buildChatView(messages(), MAIN, WELCOME_IDENTITY, MAIN_IDENTITY);
+
+      expect(view.identityBySession.get(CHILD)).toBe(MAIN_IDENTITY);
+    });
+
+    it("falls back to its own label and the main avatar, not the root's identity", () => {
+      const view = buildChatView(messages(), MAIN, WELCOME_IDENTITY);
+
+      expect(view.identityBySession.get(CHILD)).toEqual({ name: "Atlas", iconUrl: null });
+    });
+  });
+
   it("returns the floor to main once the handoff resolves", () => {
     const v = buildChatView(tree(true), MAIN, MAIN_IDENTITY);
     expect(v.handoffList[0].status).toBe("done");

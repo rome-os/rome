@@ -318,6 +318,57 @@ describe("Webchat API", () => {
     ]);
   });
 
+  describe("an agent that presents as the main agent", () => {
+    async function agentsOf(firstParty: boolean) {
+      const record = (name: string, presentAsMain?: boolean) => [
+        `welcome:${name}`,
+        {
+          config: { name, description: name, ...(presentAsMain ? { presentAsMain } : {}) },
+          metadata: {
+            kind: "agent",
+            ownerType: "app",
+            ownerId: "welcome",
+            publicName: name,
+            aliases: [],
+            sourcePath: `/installed/welcome/agents/${name}.yaml`,
+          },
+        },
+      ];
+      deps.agentLoader = {
+        getAllRecords: () => new Map([record("guide", true), record("helper")] as never),
+      } as unknown as typeof deps.agentLoader;
+      deps.appCatalog = {
+        listResolved: () => [
+          {
+            appId: "welcome",
+            displayName: "Welcome",
+            firstParty,
+            manifest: { description: "" },
+            iconAbsolutePath: undefined,
+          },
+        ],
+      } as unknown as typeof deps.appCatalog;
+
+      const res = await createWebchatRuntime(deps).routes.request("/chat/agents");
+      const [group] = (await res.json()) as Array<{ agents: Array<Record<string, unknown>> }>;
+      return group.agents;
+    }
+
+    it("is marked when its app ships with Rome, and only that agent", async () => {
+      expect(await agentsOf(true)).toEqual([
+        { name: "welcome:guide", localName: "guide", description: "guide", presentAsMain: true },
+        { name: "welcome:helper", localName: "helper", description: "helper" },
+      ]);
+    });
+
+    it("is not marked when its app was installed by the guardian", async () => {
+      expect(await agentsOf(false)).toEqual([
+        { name: "welcome:guide", localName: "guide", description: "guide" },
+        { name: "welcome:helper", localName: "helper", description: "helper" },
+      ]);
+    });
+  });
+
   it("aggregates completed child trace summaries without duplicating them in storage", async () => {
     const parentSessionId = "parent-summary-session";
     const parentTurnId = "parent-summary-turn";

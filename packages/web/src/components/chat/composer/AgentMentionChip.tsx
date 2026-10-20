@@ -21,7 +21,7 @@ export function AgentMentionChip({
   removeLabel,
 }: AgentMentionChipProps) {
   const { t } = useTranslation("chat");
-  const agent = prettyAgentName(mention.agentName);
+  const agent = mention.label ?? prettyAgentName(mention.agentName);
   return (
     <TooltipProvider delayDuration={200}>
       <Tooltip>

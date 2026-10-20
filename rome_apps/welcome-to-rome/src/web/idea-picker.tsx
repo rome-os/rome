@@ -4,14 +4,13 @@ import { defineComponent, navigateRome, type AppComponentContext } from "@rome-o
 import { Button } from "@rome-os/ui/button";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
 import { getWelcomeCopy } from "@/lib/copy";
+import { pickIdea } from "./idea-pick";
 
-// The "pick your first app" card. props: `{ ideas: [{title, prompt}] }`. Each
+// The "pick your first app" card. props: `{ ideas: [{title, prompt}], buildInChat }`. Each
 // idea renders as a shadcn Item (title + description, with a "Build this" action
-// on the right). Either button resolves this turn, which ends the welcome, and
-// then hands the guardian to a FRESH chat (not this welcome session): "Build
-// this" opens it with the idea's kickoff prompt in the composer, ready to send,
-// and "I'll explore on my own" submits the `EXPLORE` sentinel and opens it
-// empty.
+// on the right). "Build this" either stays in this chat for the build or opens
+// a drafted chat (see `pickIdea`). "I'll explore on my own" submits
+// the `EXPLORE` sentinel, which ends the welcome, and opens a fresh, empty chat.
 export const EXPLORE = "__explore__";
 
 interface Idea {
@@ -35,12 +34,12 @@ function IdeaPicker({ ctx }: { ctx: AppComponentContext }) {
   const copy = getWelcomeCopy(ctx.bootstrap.shell.locale);
   const ideas = readIdeas(ctx.props.ideas);
   const resolved = ctx.host.resolved;
-
   // The submit posts the resolution first, so the welcome session records the
   // choice before the shell swaps the route to the new chat.
   const build = (idea: Idea) => {
-    ctx.host.submit({ ideaTitle: idea.title }, idea.title);
-    navigateRome({ path: "chat/new", draft: idea.prompt });
+    const pick = pickIdea(ctx.props, idea);
+    ctx.host.submit(pick.result, idea.title);
+    if (pick.draft !== null) navigateRome({ path: "chat/new", draft: pick.draft });
   };
 
   const explore = () => {

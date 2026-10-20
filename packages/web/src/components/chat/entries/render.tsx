@@ -46,6 +46,8 @@ export interface RenderEntryOptions {
   /** Set by the chat transcript: each text block renders as its own bubble,
    * and every entry comes in once while `live` (its turn is running). */
   transcript?: { live: boolean };
+  /** The guardian's name for the main agent, shown on a handoff to it. */
+  mainAgentName?: string;
 }
 
 export function renderSingleEntry(
@@ -238,6 +240,7 @@ export function renderSingleEntry(
           appId={block.appId}
           agentName={block.agentName}
           agentLabel={agentLabel}
+          mainAgentName={options.mainAgentName}
           summary={summary}
           status={status}
         />

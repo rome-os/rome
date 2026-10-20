@@ -69,6 +69,12 @@ export interface AgentConfig {
    * session (no provider query — nothing to resume or bill).
    */
   codeBacked?: boolean;
+  /**
+   * The agent speaks as the guardian's main agent: the dashboard shows its
+   * sessions under the main agent's chosen name and avatar instead of the
+   * owning app's. Presentation only; routing and permissions are unchanged.
+   */
+  presentAsMain?: boolean;
 }
 
 export interface AgentSession {

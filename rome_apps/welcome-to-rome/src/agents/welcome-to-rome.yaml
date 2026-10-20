@@ -8,6 +8,9 @@ description: >-
 # Code-backed: the session opens a null model session, so the
 # model below is never invoked — the turn-middleware drives every turn.
 codeBacked: true
+# Onboarding speaks as the guardian's own agent, so the chat shows the name
+# they just confirmed rather than "Welcome to Rome".
+presentAsMain: true
 model: haiku
 permissionMode: bypassPermissions
 tools: []

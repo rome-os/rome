@@ -11,6 +11,7 @@ An agent is an LLM-backed runtime entity: a named configuration that sets a mode
 - An agent that needs a specific model may declare `provider` with `modelId` instead of a tier. Rome requests that exact ID without tier mapping or automatic substitution. The provider and connected account must support the requested model.
 - Every agent conversation happens within a [session](sessions.md). There is no session-less agent turn. Explicit guardian selections and saved session pins take precedence over the agent's configured model.
 - Each subagent has a restricted capability set appropriate to its role. Delegation never widens capabilities.
+- An agent that declares `presentAsMain: true` appears to the guardian as the main agent, under its chosen name and avatar. Only an app that ships with Rome can use it, and Rome ignores it for any other app. The flag changes presentation only and grants no capability.
 
 ## Model selection
 
