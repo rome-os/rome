@@ -448,6 +448,18 @@ describe("addressed-connection targeting (#3)", () => {
     expect(grant?.state).toBe("authorized");
   });
 
+  it("connects a fresh account beside one a failed removal left behind", async () => {
+    const { app, registry } = harness();
+    const leftover = await registry.connect("fake-telegram");
+
+    const { json } = await start(app);
+    await submitInput(app, json.cid, "good");
+
+    const connected = registry.find("fake-telegram").filter((conn) => conn.id !== leftover.id);
+    expect(connected).toHaveLength(1);
+    expect((await registry.getLedger().getGrant(leftover.id, "bot"))?.state).toBe("unauthorized");
+  });
+
   it("refuses a setup into an account a failed removal left behind, and removes it", async () => {
     const { app, registry } = harness();
     // A Connection no grant connects, as a disconnect whose removal failed leaves.

@@ -4,6 +4,7 @@ import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
+import { isUnconnectedAccount } from "./unconnected-accounts.js";
 import type { ConnectionRecord, GrantLedger, GrantRecord, PersistedCredential } from "./ledger.js";
 import {
   AccountAlreadyConnectedError,
@@ -427,6 +428,14 @@ export class ConnectionRegistry {
     );
   }
 
+  /** The Connection a placeholder conferral fills: the service's own, unless
+   *  that is an account a failed removal left behind, which a connecting
+   *  account must not inherit, so a fresh one is minted beside it. */
+  private async placeholderTarget(service: string): Promise<ConnectionImpl | undefined> {
+    const conn = this.find(service)[0] as ConnectionImpl | undefined;
+    return conn && !(await isUnconnectedAccount(this, conn)) ? conn : undefined;
+  }
+
   private async conferExclusive(
     service: string,
     connectionId: ConnectionId | undefined,
@@ -440,7 +449,7 @@ export class ConnectionRegistry {
       ? this.connections.get(connectionId)
       : opts.another
         ? undefined
-        : (this.find(service)[0] as ConnectionImpl | undefined);
+        : await this.placeholderTarget(service);
     if (connectionId && !conn) {
       throw new Error(`Connection "${connectionId}" no longer exists; setup cannot confer.`);
     }
