@@ -1,6 +1,6 @@
 name: get_account_chats
 type: custom
-description: Fetch recent chats from every one of Rome's accounts on a chat app (Telegram, Discord, Feishu and the signed-in Telegram user), formatted for analysis. Reads what Rome stored, not the platform. Returns a markdown summary grouped by account and chat, with each account's platform named. Keeps the newest 50 lines per chat and the most recently active chats that fit, quoting each line. The dashboard's own chats are left to get_webchat_conversations, and the guardian's own accounts such as a linked WhatsApp stay out.
+description: Fetch recent chats from every one of Rome's accounts on a chat app (Telegram, Discord and Feishu), formatted for analysis. Reads what Rome stored, not the platform. Returns a markdown summary grouped by account and chat, with each account's platform named. Keeps the newest 50 lines per chat and the most recently active chats that fit, quoting each line. The dashboard's own chats are left to get_webchat_conversations, and the guardian's own accounts (a linked WhatsApp, their signed-in Telegram) stay out.
 entry: ./index.ts
 complexity: simple
 speed: fast

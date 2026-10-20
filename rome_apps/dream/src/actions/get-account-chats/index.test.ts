@@ -307,11 +307,9 @@ describe("get_account_chats against the system schema", () => {
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const data = result.data as { messageCount: number; content: string };
-    expect(data.messageCount).toBe(8);
+    expect(data.messageCount).toBe(7);
     expect(data.content).toContain("### Telegram account `telegram`");
     expect(data.content).toContain('**Person "Alice"**:\n> telegram line');
-    expect(data.content).toContain("### Telegram account `telegram_user` (telegram_user)");
-    expect(data.content).toContain('**Person "Friend"**:\n> signed-in line');
     expect(data.content).toContain("### Discord account `discord`");
     expect(data.content).toContain('**Person "Bob"**:\n> first discord line');
     expect(data.content).toContain("### Discord account `d-second`");
@@ -324,6 +322,7 @@ describe("get_account_chats against the system schema", () => {
     expect(data.content).toContain('**Person "Erin"**:\n> unanswered line');
     expect(data.content).toContain("**Agent (Rome)**:\n> proactive line");
     expect(data.content).not.toContain("personal whatsapp line");
+    expect(data.content).not.toContain("signed-in line");
     expect(data.content).not.toContain("dashboard line");
     expect(data.content).not.toContain("dream prompt");
     expect(data.content).not.toContain("too old");
