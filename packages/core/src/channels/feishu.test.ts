@@ -735,7 +735,7 @@ describe("FeishuAdapter", () => {
     expect(card).toContain("gone:agent is not loaded, so sales:agent answers instead.");
   });
 
-  it("says no agent answers a group whose bot has no agent", async () => {
+  it("says no agent answers a group whose account has no agent", async () => {
     const conversationSettings = makeConversationSettings();
     channel = new FakeLarkChannel();
     adapter = new FeishuAdapter(

@@ -248,7 +248,7 @@ describe("Discord configuration command authorization", () => {
     });
   });
 
-  it("says no agent answers when the bot has no agent", async () => {
+  it("says no agent answers when the account has no agent", async () => {
     const settings = makeConversationSettings();
     const adapter = new DiscordAdapter({
       botToken: "test-token",

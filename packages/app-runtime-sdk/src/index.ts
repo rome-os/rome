@@ -1958,8 +1958,9 @@ export interface ChannelMessageHookDeps {
    *   loaded, so nothing answers;
    * - undefined: the channel takes no agent, such as webchat or email, and its
    *   conversations choose their agent, main by default.
-   * A host that predates account agents passes no `accountAgentOf`, which
-   * reads as undefined for every channel.
+   * A host that predates account agents passes neither `accountAgentOf` nor
+   * `linkedAgentOf`, which reads as undefined for every channel. A host that
+   * passes only `linkedAgentOf` answers the same through it.
    */
   accountAgentOf?: (channelName: string) => string | null | undefined;
   /** @deprecated Use `accountAgentOf`, which answers the same. */

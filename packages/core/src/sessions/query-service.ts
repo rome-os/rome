@@ -348,7 +348,7 @@ export class SessionQueryService {
     return isCoreMainAgentId(linked) ? null : linked;
   }
 
-  /** A `accountAgentOf` that reads each channel once, for one request. */
+  /** An `accountAgentOf` that reads each channel once, for one request. */
   private accountAgentLookup(): AccountAgentOf {
     const seen = new Map<string, string | null | undefined>();
     return (channel) => {
