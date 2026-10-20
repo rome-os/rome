@@ -57,6 +57,8 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   // Set once the card unmounts, so a start that answers afterwards is not
   // left running.
   const unmountedRef = useRef(false);
+  // The setup this hook's own start created, as opposed to one it re-attached to.
+  const startedCidRef = useRef<string | null>(null);
   // The cid reset() dropped: the adopt effect must not immediately re-adopt it
   // from a stale `activeCid` discovery (the refresh that clears the discovery
   // races the reset). A fresh start() supersedes the dismissal.
@@ -105,7 +107,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         if (unmountedRef.current) {
           // The card that asked went away first, so nothing could finish this
           // new account's setup.
-          if (another && result.ok) void cancelSetup(result.start.cid);
+          if (another && result.ok && !result.start.reattached) void cancelSetup(result.start.cid);
           return;
         }
         setBusy(false);
@@ -115,6 +117,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         }
         doneFiredRef.current = false;
         dismissedCidRef.current = null;
+        startedCidRef.current = result.start.reattached ? null : result.start.cid;
         setCid(result.start.cid);
         settle(result.start.state);
       })();
@@ -191,9 +194,10 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   // through, so it ends with the card that started it. Otherwise a flow left
   // running (a QR code still on a phone) could connect an account after the
   // guardian closed the card. A start still in flight is cancelled when it
-  // answers.
+  // answers. A setup another card started, and this one re-attached to, is
+  // left to that card.
   const liveCidRef = useRef<string | null>(null);
-  liveCidRef.current = cid && !settled ? cid : null;
+  liveCidRef.current = cid && !settled && cid === startedCidRef.current ? cid : null;
   useEffect(() => {
     if (!another) return;
     return () => {

@@ -143,4 +143,23 @@ describe("useSetup stale-state handling", () => {
       ),
     );
   });
+
+  it("leaves a new account's setup it re-attached to running when the card goes away", async () => {
+    const started = JSON.stringify({
+      cid: "cid-other",
+      reattached: true,
+      state: { status: "presenting", view: { title: "x" } },
+    });
+    const fetchMock = rs.spyOn(globalThis, "fetch");
+    fetchMock.mockImplementation(async () => new Response(started, { status: 200 }));
+    const { result, unmount } = renderHook(() =>
+      useSetup({ idOrService: "feishu", grant: "bot", another: true }),
+    );
+    act(() => result.current.start());
+    await waitFor(() => expect(result.current.cid).toBe("cid-other"));
+
+    unmount();
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/cancel"))).toBe(false);
+  });
 });

@@ -526,7 +526,7 @@ describe("another account", () => {
     expect(registry.find("fake-telegram")).toHaveLength(1);
   });
 
-  it("refuses another account of a service that offers one", async () => {
+  it("refuses another account of a service that does not offer several", async () => {
     const { app, registry } = harness();
     const { res } = await start(app, "fake-telegram", { another: true });
     expect(res.status).toBe(400);
