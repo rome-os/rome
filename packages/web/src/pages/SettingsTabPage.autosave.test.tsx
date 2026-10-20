@@ -74,6 +74,7 @@ function mockSettingsBackend(initialSettings: Record<string, unknown> = {}) {
         relay: { configured: false, depositUrlConfigured: false },
         channels: [],
         apps: { total: 0, failed: [], broken: [] },
+        resources: { memory: null, disk: null },
       });
     }
     return ok({});

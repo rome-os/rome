@@ -807,7 +807,15 @@
       "noChannels": "无活动通道",
       "apps": "应用",
       "appsHealthy": "已加载 {{count}} 个，无失败",
-      "appsUnhealthy": "已加载 {{count}} 个；失败：{{ids}}"
+      "appsUnhealthy": "已加载 {{count}} 个；失败：{{ids}}",
+      "memory": "内存",
+      "disk": "磁盘",
+      "free": "剩余 {{free}}，共 {{total}}",
+      "ok": "正常",
+      "short": "不足",
+      "low": "不足",
+      "memoryShortHint": "内存不足。排队中的任务会等到内存释放后再开始，正在运行的任务可能变慢。",
+      "diskLowHint": "磁盘即将用满。请在写入开始失败前清理空间。"
     },
     "uptimePrefix": "已运行 {{uptime}}",
     "buildPrefix": "版本 {{sha}} · 构建于 {{builtAt}}",

@@ -807,7 +807,15 @@
       "noChannels": "None active",
       "apps": "Apps",
       "appsHealthy": "{{count}} loaded, none failed",
-      "appsUnhealthy": "{{count}} loaded; failed: {{ids}}"
+      "appsUnhealthy": "{{count}} loaded; failed: {{ids}}",
+      "memory": "Memory",
+      "disk": "Disk",
+      "free": "{{free}} of {{total}} free",
+      "ok": "OK",
+      "short": "Short",
+      "low": "Low",
+      "memoryShortHint": "Memory is short. Queued work waits until memory frees up, and running work may slow down.",
+      "diskLowHint": "Disk is nearly full. Free space before saves start failing."
     },
     "uptimePrefix": "running for {{uptime}}",
     "buildPrefix": "build {{sha}} · built {{builtAt}}",

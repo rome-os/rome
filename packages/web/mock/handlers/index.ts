@@ -1066,6 +1066,36 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
 
 export const handlers = [
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
+  // A healthy snapshot for the Advanced tab. Identity is already enrolled, so the
+  // section shows the account row rather than a reconnect prompt.
+  http.get("/api/diagnosis", () =>
+    HttpResponse.json({
+      status: "ok",
+      checkedAt: new Date().toISOString(),
+      uptimeSeconds: 3 * 86_400 + 4 * 3_600 + 12 * 60,
+      build: {
+        version: "1.1.154",
+        sha: "c2f71ed6",
+        builtAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+      },
+      upgradedSinceLastBoot: false,
+      previousVersion: null,
+      instance: { auth: "ok", accountId: "acct_mock", instanceId: "inst_mock" },
+      database: { ok: true },
+      relay: { configured: true, depositUrlConfigured: true },
+      channels: ["telegram", "webchat"],
+      apps: { total: 12, failed: [], broken: [] },
+      resources: {
+        memory: { limitBytes: 4 * 1024 ** 3, availableBytes: 2.6 * 1024 ** 3, short: false },
+        disk: {
+          path: "/rome-home/.rome",
+          totalBytes: 40 * 1024 ** 3,
+          freeBytes: 21 * 1024 ** 3,
+          low: false,
+        },
+      },
+    }),
+  ),
   http.get("/api/bootstrap", () => HttpResponse.json(bootstrap)),
   http.get("/api/auth/me", () => HttpResponse.json(identity)),
   http.get("/api/chat/sessions", () => HttpResponse.json(chatSessions)),

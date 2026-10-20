@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { proveIdentity, type ProveIdentityResult } from "../../lib/instance-identity.js";
 import { assembleDiagnosticBundle, type DiagnosticsDeps } from "../../lib/diagnostics.js";
+import { readResourceReadings } from "../../lib/resource-readings.js";
 
 // One-shot triage endpoint: a single GET that answers "is this Rome instance
 // healthy, and which exact build/identity am I looking at?" without the
@@ -28,6 +29,10 @@ export function diagnosisRoutes(deps: DiagnosticsDeps): Hono {
   app.get("/diagnosis", async (c) => {
     // The local, network-free signals (build, db, apps, channels, uptime).
     const bundle = await assembleDiagnosticBundle(deps);
+    // Memory and disk are pressure, not faults: they inform the guardian but
+    // leave the verdict alone, so a probe that alarms on `degraded` stays quiet
+    // while a heavy task merely runs.
+    const resources = readResourceReadings();
 
     const auth = await proveIdentity({
       fetch: (input, init) =>
@@ -60,6 +65,7 @@ export function diagnosisRoutes(deps: DiagnosticsDeps): Hono {
       relay: bundle.relay,
       channels: bundle.channels,
       apps: bundle.apps,
+      resources,
     });
   });
 
