@@ -135,6 +135,7 @@ function AddAccount({
       if (!connectionId) throw new Error("Core did not name the new account.");
       await onOpenAccount(connectionId);
     } catch {
+      void onRefresh();
       // Not an error: the account is connected. The Settings tab's `onFlash`
       // shows errors, so this one goes out as a plain toast.
       toast(t("connections.accounts.addedNotShown"));

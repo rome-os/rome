@@ -73,6 +73,7 @@ export function ConnectionDetailBody({
               composio={composio}
               onRefresh={onRefresh}
               onFlash={onFlash}
+              onOpenAccount={onOpenAccount}
             />
           </div>
         );
@@ -105,6 +106,7 @@ function SlotEntry({
   composio,
   onRefresh,
   onFlash,
+  onOpenAccount,
 }: {
   card: ConnectionCard;
   slot: ConnectionSlot;
@@ -112,6 +114,7 @@ function SlotEntry({
   composio: ComposioCliStatus | null;
   onRefresh: () => void;
   onFlash: (message: string) => void;
+  onOpenAccount?: (connectionId: string) => void | Promise<void>;
 }) {
   // Talk channels all render through the single generic ChannelConnectCard,
   // driven by a per-service config. Telegram and WeChat each carry two slots —
@@ -122,8 +125,22 @@ function SlotEntry({
       ? CHANNEL_CONFIGS[`${card.service}_user`]
       : CHANNEL_CONFIGS[card.service];
   if (channelConfig) {
+    // Open the account once it connects: an account that starts fresh can get
+    // a channel, and so a route, other than the card it connected from.
+    const opened = onOpenAccount
+      ? (connectionId: string | null) => {
+          if (!connectionId) return onRefresh();
+          void Promise.resolve(onOpenAccount(connectionId)).catch(() => onRefresh());
+        }
+      : undefined;
     return (
-      <ChannelConnectCard config={channelConfig} slot={slot} role={role} onRefresh={onRefresh} />
+      <ChannelConnectCard
+        config={channelConfig}
+        slot={slot}
+        role={role}
+        onRefresh={onRefresh}
+        onConnected={opened}
+      />
     );
   }
 

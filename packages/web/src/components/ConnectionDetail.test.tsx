@@ -705,7 +705,8 @@ describe("ConnectionDetailBody — accounts", () => {
     await user.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() => expect(onOpenAccount).toHaveBeenCalledWith("conn-feishu-2"));
-    expect(onRefresh).toHaveBeenCalled();
+    // Opening the account refetches, so the card does not refresh first.
+    expect(onRefresh).not.toHaveBeenCalled();
     expect(calls.filter((call) => call.method === "POST")).toEqual([
       {
         url: "/api/connections/feishu/grants/app/setup",
@@ -733,8 +734,9 @@ describe("ConnectionDetailBody — accounts", () => {
 
   it("does not open an account when core does not name the one it connected", async () => {
     mockNewAccountSetup();
+    const onRefresh = rs.fn();
     const onOpenAccount = rs.fn();
-    renderAccountBody(cardFor([feishu()], "feishu"), { onOpenAccount });
+    renderAccountBody(cardFor([feishu()], "feishu"), { onRefresh, onOpenAccount });
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Add another account" }));
@@ -744,6 +746,7 @@ describe("ConnectionDetailBody — accounts", () => {
       expect(toast).toHaveBeenCalledWith("Account connected. Find it in the Connections list."),
     );
     expect(onOpenAccount).not.toHaveBeenCalled();
+    expect(onRefresh).toHaveBeenCalled();
   });
 
   it("closes the new account's connect flow on Cancel", async () => {
