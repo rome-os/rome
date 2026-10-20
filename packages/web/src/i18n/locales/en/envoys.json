@@ -23,8 +23,25 @@
   },
   "unlinked": {
     "title": "Connected, no agent",
-    "description": "Rome has access to these accounts, but no agent speaks through them, so they go unanswered.",
-    "link": "Link an agent",
-    "linkTo": "Link an agent to {{account}}"
+    "description": "Rome has access to these accounts, but no agent speaks through them, so they go unanswered."
+  },
+  "tabs": {
+    "overview": "Overview",
+    "settings": "Settings"
+  },
+  "change": {
+    "agent": "Agent",
+    "pick": "Link an agent",
+    "noAgent": "No agent",
+    "suggested": "{{agent}} (suggested)",
+    "linkConfirm": "Link <agent>{{to}}</agent> to {{account}}?",
+    "switchConfirm": "Switch {{account}} to <agent>{{to}}</agent>? <agent>{{to}}</agent> answers in every chat the account is in from now on.",
+    "unlinkConfirm": "Unlink <agent>{{agent}}</agent> from {{account}}? The account stays connected, but its messages go unanswered until an agent is linked again.",
+    "displaces": "<agent>{{to}}</agent> stops answering through {{other}}, since an agent other than main speaks through one account per platform.",
+    "link": "Link",
+    "switch": "Switch agent",
+    "unlink": "Unlink",
+    "cancel": "Cancel",
+    "failed": "Failed to change the agent"
   }
 }

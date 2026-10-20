@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import type { ApiConnection } from "@/lib/connections-api";
-import { buildEnvoys } from "./envoys-model";
+import { buildEnvoys, displacedAccount } from "./envoys-model";
 
 function connection(overrides: Partial<ApiConnection> & { service: string }): ApiConnection {
   return {
@@ -68,6 +68,31 @@ describe("buildEnvoys", () => {
     expect(unlinked).toEqual([]);
   });
 
+  it("offers every loaded agent and every linked one, main first", () => {
+    const { agents } = buildEnvoys(
+      [connection({ service: "discord", agent: "sales:agent" })],
+      [{ name: "build" }, { name: "main" }],
+    );
+    expect(agents).toEqual([MAIN_AGENT_ID, "build", "sales:agent"]);
+  });
+
+  it("names the account an agent moves off on the same platform", () => {
+    const { envoys, unlinked } = buildEnvoys(
+      [
+        connection({ service: "discord", agent: "sales:agent" }),
+        connection({ service: "discord", channel: "discord-2", id: "discord-2" }),
+        connection({ service: "telegram", agent: MAIN_AGENT_ID }),
+        connection({ service: "telegram", channel: "telegram-2", id: "telegram-2" }),
+      ],
+      [],
+    );
+    const [discord2, telegram2] = unlinked;
+    expect(displacedAccount(envoys, discord2!, "sales:agent")?.channel).toBe("discord");
+    expect(displacedAccount(envoys, telegram2!, "sales:agent")).toBeNull();
+    // Main may speak through several accounts on one platform.
+    expect(displacedAccount(envoys, telegram2!, MAIN_AGENT_ID)).toBeNull();
+  });
+
   it("marks the guardian's own account as a delegate with no card to open", () => {
     const own = (agent: string | null) =>
       connection({
@@ -83,7 +108,8 @@ describe("buildEnvoys", () => {
       platform: "telegram",
       route: null,
     });
-    // Nowhere links an agent to it yet, so it is not offered as unlinked.
-    expect(buildEnvoys([own(null)], []).unlinked).toEqual([]);
+    expect(buildEnvoys([own(null)], []).unlinked.map((account) => account.kind)).toEqual([
+      "delegate",
+    ]);
   });
 });
