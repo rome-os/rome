@@ -150,6 +150,35 @@ describe("ConnectionDetailPage — unknown serviceId redirects", () => {
   });
 });
 
+it("redirects the retired telegram-user route to a Telegram card on an opaque channel", async () => {
+  mockApi([
+    connection({ service: "telegram", grants: { bot: "authorized" }, channel: "chan-7" }),
+    connection({ service: "telegram_user", grants: { session: "authorized" } }),
+  ]);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  const locations: string[] = [];
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/settings/connections/telegram-user"]}>
+        <Routes>
+          <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />
+          <Route
+            path="/settings/connections/chan-7"
+            element={<LocationCapture onLocation={(p) => locations.push(p)} />}
+          />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  await waitFor(() => {
+    expect(locations).toContain("/settings/connections/chan-7");
+  });
+});
+
 describe("ConnectionDetailPage — load failure", () => {
   it("stays on the detail route and retries the connections request", async () => {
     let connectionRequests = 0;

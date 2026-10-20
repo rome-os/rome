@@ -86,12 +86,6 @@ export default function ConnectionDetailPage() {
     navigate(`${BACK_TO_LIST}/${encodeURIComponent(route)}`);
   };
 
-  // The Telegram personal account folded onto the Telegram connection as a slot;
-  // its old standalone route redirects to the merged Telegram detail.
-  if (serviceId === "telegram-user") {
-    return <Navigate to={`${BACK_TO_LIST}/telegram`} replace />;
-  }
-
   if (loading) {
     return <DetailSkeleton />;
   }
@@ -125,6 +119,19 @@ export default function ConnectionDetailPage() {
 
   const composio = composioQuery.data ?? null;
   const cards = buildConnectionCards(connectionsQuery.data ?? [], composio);
+  // The Telegram personal account folded onto a Telegram card as a slot; its
+  // old standalone route redirects to whichever card holds it.
+  if (serviceId === "telegram-user") {
+    const telegram = cards.filter((entry) => entry.service === "telegram");
+    const folded =
+      telegram.find((entry) => entry.slots.some((slot) => slot.key === "session")) ?? telegram[0];
+    return (
+      <Navigate
+        to={folded ? `${BACK_TO_LIST}/${encodeURIComponent(folded.route)}` : BACK_TO_LIST}
+        replace
+      />
+    );
+  }
   const card = cards.find((entry) => entry.route === serviceId);
 
   // Unknown / unmatched route — back to the list.
