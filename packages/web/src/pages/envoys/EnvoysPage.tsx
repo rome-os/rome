@@ -120,7 +120,7 @@ function AgentText({ k, values }: { k: string; values: Record<string, unknown> }
       t={t}
       i18nKey={k}
       values={values}
-      components={{ agent: <span className="font-mono text-[0.95em]" /> }}
+      components={{ agent: <span className="font-mono" /> }}
     />
   );
 }
