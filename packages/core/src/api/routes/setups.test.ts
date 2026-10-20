@@ -450,6 +450,8 @@ describe("addressed-connection targeting (#3)", () => {
 
   it("connects a fresh account in place of one a failed removal left behind", async () => {
     const { app, registry } = harness();
+    const descriptor = registry.getDescriptor("fake-telegram");
+    if (descriptor) descriptor.severalAccounts = true;
     // A Connection no grant connects, as a disconnect whose removal failed leaves.
     const leftover = await registry.connect("fake-telegram");
 
