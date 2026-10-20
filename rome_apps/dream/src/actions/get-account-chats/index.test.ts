@@ -35,6 +35,7 @@ function row(overrides: Record<string, unknown>) {
     service: "telegram",
     platform: "telegram",
     role: "user",
+    agent_name: null,
     outbound: 0,
     sender_name: "Alice",
     sender_id: "100",
@@ -249,12 +250,13 @@ describe("get_account_chats against the system schema", () => {
     sourceChannel: string | null,
     threadName: string | null,
     createdAt: number,
+    agentName: string | null = null,
   ): void {
     testDb.db.run(sql`
       INSERT INTO rome_sessions
-        (id, name, type, source_channel, source_thread_id, source_thread_name, created_at, activity_at)
+        (id, name, type, source_channel, source_thread_id, source_thread_name, agent_name, created_at, activity_at)
       VALUES
-        (${id}, ${id}, ${type}, ${sourceChannel}, ${id}, ${threadName}, ${createdAt}, ${createdAt})
+        (${id}, ${id}, ${type}, ${sourceChannel}, ${id}, ${threadName}, ${agentName}, ${createdAt}, ${createdAt})
     `);
   }
 
@@ -284,7 +286,7 @@ describe("get_account_chats against the system schema", () => {
     seedSession("tg", "channel", "telegram", "Telegram DM", now - 60);
     seedSession("tgu", "channel", "telegram_user", "Friend", now - 60);
     seedSession("dc1", "channel", "discord", "general", now - 60);
-    seedSession("dc2", "channel", "d-second", "support", now - 60);
+    seedSession("dc2", "channel", "d-second", "support", now - 60, "helpdesk");
     seedSession("fs", "channel", "feishu", "Team group", now - 60);
     seedSession("web", "channel", "webchat", null, now - 60);
     seedSession("wa", "channel", "whatsapp", "Mum", now - 60);
@@ -315,7 +317,7 @@ describe("get_account_chats against the system schema", () => {
     expect(data.content).toContain("### Discord account `d-second`");
     expect(data.content).toContain('#### Chat "support"');
     expect(data.content).toContain('**Person "Carol"**:\n> second discord line');
-    expect(data.content).toContain("**Agent (Rome)**:\n> second discord answer");
+    expect(data.content).toContain('**Agent "helpdesk" (Rome)**:\n> second discord answer');
     expect(data.content).toContain("### Feishu account `feishu`");
     expect(data.content).toContain('**Person "Dan"**:\n> feishu line');
     expect(data.content).not.toContain("trace text");

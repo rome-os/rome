@@ -30,6 +30,8 @@ interface MessageRow {
   service: string;
   platform: string;
   role: string;
+  /** The agent linked to the chat's account; null for the main agent. */
+  agent_name: string | null;
   outbound: number;
   sender_name: string | null;
   sender_id: string | null;
@@ -61,7 +63,12 @@ function named(name: string): string {
 }
 
 function speakerOf(row: MessageRow): string {
-  if (row.outbound) return "Agent (Rome)";
+  if (row.outbound) {
+    // An account can be linked to an agent other than main, whose lines are
+    // not Rome's own.
+    const agent = row.agent_name && row.agent_name !== "main" ? ` ${named(row.agent_name)}` : "";
+    return `Agent${agent} (Rome)`;
+  }
   return `Person ${named(row.sender_name || row.sender_id || "unknown")}`;
 }
 
@@ -188,7 +195,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               SELECT m.session_id, s.name AS session_name, s.source_thread_name AS thread_name,
                 s.source_channel AS channel,
                 coalesce(c.service, s.source_channel) AS service,
-                coalesce(c.platform, s.source_channel) AS platform, m.role,
+                coalesce(c.platform, s.source_channel) AS platform, m.role, s.agent_name,
                 CASE
                   WHEN m.role = 'assistant' THEN 1
                   WHEN m.role = 'notification' AND m.sender_id = 'rome' THEN 1
