@@ -152,7 +152,7 @@ function AddAccount({
       <ChannelConnectCard
         config={config}
         slot={slot}
-        role="secondary"
+        role="primary"
         another
         onRefresh={onRefresh}
         onConnected={(connectionId) => void opened(connectionId)}
