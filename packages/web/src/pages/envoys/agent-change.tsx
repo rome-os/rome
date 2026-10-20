@@ -1,7 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { MAIN_AGENT_ID, agentLabel } from "@rome/api-types/account-agents";
 import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/field";
@@ -12,10 +11,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { serviceLabel } from "@/lib/connection-cards";
 import { linkAccountAgent } from "@/lib/connections-api";
 import { AgentText } from "./agent-text";
-import { CONNECTIONS_KEY, type Envoy, type EnvoyAccount, displacedAccount } from "./envoys-model";
+import { CONNECTIONS_KEY, type EnvoyAccount } from "./envoys-model";
 
 /** Radix Select reserves the empty string, so "no agent" needs a value of its own. */
 const NO_AGENT = "__none__";
@@ -45,19 +43,17 @@ function errorMessage(error: unknown, fallback: string): string {
 /**
  * The agent select for one account, with the confirmation a change needs.
  * Switching or unlinking always asks first. Linking an account with no agent
- * asks when it moves the agent off another account, or when the account is
- * the guardian's own, since the agent then answers on their behalf.
+ * asks only when the account is the guardian's own, since the agent then
+ * answers on their behalf. Only this account changes.
  */
 export function AgentChange({
   account,
-  envoys,
   agents,
   disabled = false,
   onChanged,
   children,
 }: {
   account: EnvoyAccount;
-  envoys: readonly Envoy[];
   agents: readonly string[];
   /** The agent list is still loading, so the options are not final yet. */
   disabled?: boolean;
@@ -78,20 +74,9 @@ export function AgentChange({
     const agent = value === NO_AGENT ? null : value;
     // `mutateAsync` settles even once the refetch has moved this row away, so
     // the page still hears about the change. Its error shows through `link.error`.
-    const predicted = agent !== null && displacedAccount(envoys, account, agent) !== null;
     link.mutateAsync({ channel: account.channel, agent }).then(
-      (result) => {
+      () => {
         setPending(null);
-        // The confirm sees only connected accounts, so core can move the agent
-        // off one it never showed.
-        if (agent && result.unlinkedFrom && !predicted) {
-          toast(
-            t("change.moved", {
-              agent: agentLabel(agent),
-              platform: serviceLabel(account.platform),
-            }),
-          );
-        }
         onChanged(agent);
       },
       () => {},
@@ -102,19 +87,12 @@ export function AgentChange({
     link.reset();
     if (value === current) {
       setPending(null);
-    } else if (
-      account.agent === null &&
-      account.kind !== "delegate" &&
-      !displacedAccount(envoys, account, value)
-    ) {
+    } else if (account.agent === null && account.kind !== "delegate") {
       apply(value);
     } else {
       setPending(value);
     }
   };
-
-  const displaced =
-    pending && pending !== NO_AGENT ? displacedAccount(envoys, account, pending) : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -173,17 +151,9 @@ export function AgentChange({
                     ? account.agent === null
                       ? "change.delegateConfirm"
                       : "change.delegateSwitchConfirm"
-                    : account.agent === null
-                      ? "change.linkConfirm"
-                      : "change.switchConfirm"
+                    : "change.switchConfirm"
                 }
                 values={{ account: account.name, to: agentLabel(pending) }}
-              />
-            )}{" "}
-            {displaced && (
-              <AgentText
-                k="change.displaces"
-                values={{ to: agentLabel(pending), other: displaced.name }}
               />
             )}
           </p>

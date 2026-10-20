@@ -121,22 +121,3 @@ export function buildEnvoys(
   const names = new Set([MAIN_AGENT_ID, ...(loaded ? descriptions.keys() : byAgent.keys())]);
   return { envoys, unlinked, agents: [...names].sort(compareAgents) };
 }
-
-/** The account `agent` stops speaking through when it is linked to `account`.
- *  On one platform an agent other than main speaks through at most one
- *  account, so linking it moves it off the other one. This sees only the
- *  accounts listed here, so it misses a disconnected account core still
- *  holds the agent on. */
-export function displacedAccount(
-  envoys: readonly Envoy[],
-  account: EnvoyAccount,
-  agent: string,
-): EnvoyAccount | null {
-  if (agent === MAIN_AGENT_ID) return null;
-  const envoy = envoys.find((candidate) => candidate.agent === agent);
-  return (
-    envoy?.accounts.find(
-      (other) => other.platform === account.platform && other.channel !== account.channel,
-    ) ?? null
-  );
-}

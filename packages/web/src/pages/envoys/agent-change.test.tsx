@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import i18n from "@/i18n";
 import { AgentChange } from "./agent-change";
-import type { Envoy, EnvoyAccount } from "./envoys-model";
+import type { EnvoyAccount } from "./envoys-model";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -34,14 +34,13 @@ function mockLink() {
   const puts: { url: string; body: unknown }[] = [];
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     puts.push({ url: String(input), body: JSON.parse(String(init?.body)) });
-    return new Response(JSON.stringify({ account: {}, unlinkedFrom: null }), { status: 200 });
+    return new Response(JSON.stringify({ account: {} }), { status: 200 });
   });
   return puts;
 }
 
 function renderChange(props: {
   account: EnvoyAccount;
-  envoys?: Envoy[];
   onChanged?: (agent: string | null) => void;
 }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -49,7 +48,6 @@ function renderChange(props: {
     <QueryClientProvider client={client}>
       <AgentChange
         account={props.account}
-        envoys={props.envoys ?? []}
         agents={[MAIN_AGENT_ID, "sales:agent"]}
         onChanged={props.onChanged ?? (() => {})}
       >
@@ -115,20 +113,6 @@ describe("AgentChange", () => {
 
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith(null));
     expect(puts[0]?.body).toEqual({ agent: null });
-  });
-
-  it("warns when linking moves the agent off its account on the same platform", async () => {
-    const puts = mockLink();
-    const other = account({ channel: "discord-old", name: "Old sales", agent: "sales:agent" });
-    renderChange({
-      account: account(),
-      envoys: [{ agent: "sales:agent", description: null, accounts: [other] }],
-    });
-
-    await pick("sales:agent");
-
-    expect(screen.getByText(/stops answering through Old sales/)).toBeTruthy();
-    expect(puts).toEqual([]);
   });
 
   it("suggests main for the guardian's own account", async () => {
