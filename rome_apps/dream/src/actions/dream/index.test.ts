@@ -123,6 +123,21 @@ describe("dream", () => {
     expect(data.windowHours).toBe(12);
   });
 
+  it("asks for the chats of every account, not one account by name", async () => {
+    const run = rs.fn(async function* (_input: { prompt: string }) {
+      yield { type: "result", content: "done" };
+    });
+    const deps = makeDeps([]);
+    (deps.agentRunner as unknown as { run: unknown }).run = run;
+
+    await createAction(actionConfig, deps).execute({ windowHours: 6 });
+
+    const prompt = run.mock.calls[0]?.[0]?.prompt ?? "";
+    expect(prompt).toContain("get_account_chats (windowHours: 6)");
+    expect(prompt).not.toContain("fetch_channel_history");
+    expect(prompt.toLowerCase()).not.toContain("discord");
+  });
+
   it("leaves routines to the app-started hook", async () => {
     const runAction = rs.fn().mockResolvedValue({ status: "ok" });
     const listRoutines = rs.fn().mockResolvedValue([]);
