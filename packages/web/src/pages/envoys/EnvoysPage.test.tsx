@@ -55,7 +55,7 @@ function mockServer(
       const { agent } = JSON.parse(String(init.body)) as { agent: string | null };
       const account = connections.find((c) => c.channel === decodeURIComponent(link[1]!))!;
       account.agent = agent;
-      return Response.json({ account: {}, unlinkedFrom: null });
+      return Response.json({ account: {} });
     }
     return new Response("not found", { status: 404 });
   });
