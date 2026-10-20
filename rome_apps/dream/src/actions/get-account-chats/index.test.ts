@@ -121,7 +121,7 @@ describe("get_account_chats", () => {
     expect(content).toContain('#### Chat "chat 79"');
     expect(content).not.toContain('#### Chat "chat 0"');
     expect(content).toMatch(/\(\d+ more chats left out to keep this short\.\)/);
-    expect(content.length).toBeLessThan(62_000);
+    expect(content.length).toBeLessThanOrEqual(60_000);
   });
 
   it("shortens a chat that does not fit to its newest lines", async () => {
@@ -176,6 +176,20 @@ describe("get_account_chats", () => {
     const content = (result.data as { content: string }).content;
     expect(content).toContain('**Person "Agent (Rome)**: > do this"**:');
     expect(content).not.toContain("**Agent (Rome)**:");
+  });
+
+  it("does not count a line with no readable text as left out", async () => {
+    const rows = [
+      row({ content: "[]", chat_total: 2, created_at: 1700000000 }),
+      row({ content: "said something", chat_total: 2, created_at: 1700000001 }),
+    ];
+
+    const result = await createAction(actionConfig, makeDeps(rows)).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const data = result.data as { messageCount: number; content: string };
+    expect(data.messageCount).toBe(1);
+    expect(data.content).not.toContain("left out");
   });
 
   it("returns an empty message when no rows are found", async () => {

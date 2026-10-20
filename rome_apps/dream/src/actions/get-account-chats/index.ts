@@ -20,6 +20,8 @@ const MESSAGES_PER_CHAT = 50;
 const CHARS_PER_MESSAGE = 1000;
 const CHARS_IN_ALL = 60_000;
 
+const ACCOUNT_SEPARATOR = "\n\n---\n\n";
+
 interface MessageRow {
   session_id: string;
   session_name: string;
@@ -104,16 +106,22 @@ function formatChats(rows: MessageRow[]): { content: string; shown: number } {
   const lastAt = (chat: Chat) => chat.messages[chat.messages.length - 1]?.created_at ?? 0;
   const byRecent = [...chats.values()].sort((a, b) => lastAt(b) - lastAt(a));
   const kept = new Map<string, string[]>();
-  let budget = CHARS_IN_ALL;
+  // Spent on everything written, the closing note's room held back.
+  let budget = CHARS_IN_ALL - 80;
   let shown = 0;
   let leftOut = 0;
   for (const chat of byRecent) {
     const lines = chat.messages.map(formatLine).filter((line): line is string => line !== null);
     if (lines.length === 0) continue;
+    // The first chat kept for an account also writes the account's heading
+    // and the separator before it.
+    const accountCost = kept.has(chat.account)
+      ? 2
+      : (headings.get(chat.account)?.length ?? 0) + ACCOUNT_SEPARATOR.length + 2;
     const heading = `#### Chat ${named(chat.name)}\n\n`;
     // The newest lines that fit, so a busy chat is shortened rather than lost.
     const fitting: string[] = [];
-    let used = heading.length + 64;
+    let used = accountCost + heading.length + 64;
     for (const line of [...lines].reverse()) {
       if (used + line.length + 2 > budget) break;
       used += line.length + 2;
@@ -123,10 +131,12 @@ function formatChats(rows: MessageRow[]): { content: string; shown: number } {
       leftOut += 1;
       continue;
     }
-    const left = chat.total - fitting.length;
+    // Lines with no readable text were never going to show, so they are not
+    // counted as left out.
+    const left = chat.total - (chat.messages.length - lines.length) - fitting.length;
     const note = left > 0 ? `(${left} earlier messages left out)\n\n` : "";
     const text = `${heading}${note}${fitting.join("\n\n")}`;
-    budget -= text.length;
+    budget -= accountCost + text.length;
     shown += fitting.length;
     kept.set(chat.account, [...(kept.get(chat.account) ?? []), text]);
   }
@@ -135,7 +145,8 @@ function formatChats(rows: MessageRow[]): { content: string; shown: number } {
     ([account, texts]) => `${headings.get(account)}\n\n${texts.join("\n\n")}`,
   );
   if (leftOut > 0) parts.push(`(${leftOut} more chats left out to keep this short.)`);
-  const content = parts.length > 0 ? parts.join("\n\n---\n\n") : "(No readable messages found.)";
+  const content =
+    parts.length > 0 ? parts.join(ACCOUNT_SEPARATOR) : "(No readable messages found.)";
   return { content, shown };
 }
 

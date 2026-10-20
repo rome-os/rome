@@ -6,3 +6,4 @@ complexity: simple
 speed: fast
 reliability: high
 sideEffects: read-only
+visibility: explicit
