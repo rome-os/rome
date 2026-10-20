@@ -187,6 +187,13 @@ export interface FeishuSetupDeps {
   }) => Promise<FeishuPendingMaterial>;
 }
 
+const FEISHU_RENEW_FORM = {
+  instructions:
+    "Paste this app's App ID and App Secret again on the next step. " +
+    "Domain: feishu = open.feishu.cn (China), lark = open.larksuite.com (International).",
+  fields: [{ name: "domain", label: "Domain", secret: false, options: ["feishu", "lark"] }],
+};
+
 const FEISHU_MODE_FORM = {
   instructions:
     "Choose how to connect: agent-ready scans a QR code to create Rome's app in your " +
@@ -247,7 +254,11 @@ function settledBefore<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
 
 export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
   return async (interact, ctx) => {
-    const { mode, domain: domainChoice } = await interact.prompt(FEISHU_MODE_FORM);
+    // Agent-ready always registers a new app, which a renewal must refuse, so
+    // renewing goes straight to the existing app's credentials.
+    const { mode, domain: domainChoice } = ctx.renewing
+      ? { ...(await interact.prompt(FEISHU_RENEW_FORM)), mode: "manual" }
+      : await interact.prompt(FEISHU_MODE_FORM);
     const domain: "feishu" | "lark" = domainChoice === "lark" ? "lark" : "feishu";
 
     let pending: FeishuPendingMaterial;
