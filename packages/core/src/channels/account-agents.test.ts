@@ -133,6 +133,21 @@ describe("AccountListening", () => {
     expect(listening.listens("feishu-2")).toBe(true);
   });
 
+  it("tells every listener of a change even when one throws", () => {
+    const listening = new AccountListening(repository);
+    const heard = rs.fn();
+    listening.onChange(() => {
+      throw new Error("port failed");
+    });
+    listening.onChange(heard);
+    warn.mockClear();
+
+    listening.changed(["feishu-2", null]);
+
+    expect(heard).toHaveBeenCalledWith("feishu-2");
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   it("does not listen to a linkable channel no record names", () => {
     expect(new AccountListening(repository).listens("telegram")).toBe(false);
   });

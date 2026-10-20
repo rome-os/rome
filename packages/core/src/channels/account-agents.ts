@@ -52,10 +52,18 @@ export class AccountListening implements InboundListening {
     this.listeners.add(listener);
   }
 
+  /** Called after the link is saved, so a port that fails to follow it is
+   *  logged rather than failing the link or skipping the other ports. */
   changed(channels: Iterable<string | null>): void {
     for (const channel of channels) {
       if (channel === null) continue;
-      for (const listener of this.listeners) listener(channel);
+      for (const listener of this.listeners) {
+        try {
+          listener(channel);
+        } catch (error) {
+          log.warn("a channel's inbound did not follow its account's agent", { channel, error });
+        }
+      }
     }
   }
 }
