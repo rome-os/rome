@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import i18n from "@/i18n";
 import type { ApiConnection } from "@/lib/connections-api";
@@ -39,7 +39,10 @@ function connection(service: string, name: string, agent: string | null): ApiCon
 
 /** Serves the connections and agents, and applies each link the way core
  *  does, so the refetch after a change moves the account. */
-function mockServer(connections: ApiConnection[]) {
+function mockServer(
+  connections: ApiConnection[],
+  beforeLink: () => Promise<void> = async () => {},
+) {
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     if (url === "/api/agents") {
@@ -48,6 +51,7 @@ function mockServer(connections: ApiConnection[]) {
     if (url === "/api/connections") return Response.json({ connections });
     const link = url.match(/^\/api\/channels\/accounts\/(.+)\/agent$/);
     if (link && init?.method === "PUT") {
+      await beforeLink();
       const { agent } = JSON.parse(String(init.body)) as { agent: string | null };
       const account = connections.find((c) => c.channel === decodeURIComponent(link[1]!))!;
       account.agent = agent;
@@ -58,7 +62,15 @@ function mockServer(connections: ApiConnection[]) {
 }
 
 function Location() {
-  return <output data-testid="location">{useLocation().pathname}</output>;
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="location">{useLocation().pathname}</output>
+      <button type="button" onClick={() => navigate("/elsewhere")}>
+        Leave
+      </button>
+    </>
+  );
 }
 
 function renderAt(path: string) {
@@ -95,6 +107,27 @@ describe("EnvoysPage", () => {
     await pick("Sales", "sales:agent");
 
     await rs.waitFor(() => expect(location()).toBe(`/envoys/${encodeURIComponent("sales:agent")}`));
+  });
+
+  it("does not pull the guardian back once they have left Envoys", async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const linked = rs.fn();
+    mockServer([connection("discord", "Sales", null)], async () => {
+      linked();
+      await held;
+    });
+    renderAt("/envoys");
+
+    const user = await pick("Sales", "sales:agent");
+    await rs.waitFor(() => expect(linked).toHaveBeenCalled());
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+    release();
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(location()).toBe("/elsewhere");
   });
 
   it("links an account's name to its Connections card", async () => {

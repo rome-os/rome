@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef } from "react";
 import { Link, Navigate, Route, Routes, useMatch, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -65,11 +65,36 @@ import {
  * happens on the Connections cards.
  */
 export default function EnvoysPage() {
+  const open = useRef(true);
+  useEffect(() => {
+    open.current = true;
+    return () => {
+      open.current = false;
+    };
+  }, []);
   return (
-    <Routes>
-      <Route index element={<EnvoysIndex />} />
-      <Route path=":agent/*" element={<EnvoyDetail />} />
-    </Routes>
+    <EnvoysOpen.Provider value={open}>
+      <Routes>
+        <Route index element={<EnvoysIndex />} />
+        <Route path=":agent/*" element={<EnvoyDetail />} />
+      </Routes>
+    </EnvoysOpen.Provider>
+  );
+}
+
+/** Whether the guardian is still on Envoys. A change lands after its refetch,
+ *  by which time they may have gone elsewhere. */
+const EnvoysOpen = createContext<{ readonly current: boolean }>({ current: true });
+
+/** Navigates after a change lands, unless the guardian has left Envoys. */
+function useNavigateAfterChange() {
+  const navigate = useNavigate();
+  const open = useContext(EnvoysOpen);
+  return useCallback(
+    (to: string) => {
+      if (open.current) navigate(to);
+    },
+    [navigate, open],
   );
 }
 
@@ -327,7 +352,7 @@ function AgentsFailed({ data }: { data: EnvoysData }) {
  *  opens that agent's page. */
 function UnlinkedAccounts({ data }: { data: EnvoysData }) {
   const { t } = useTranslation("envoys");
-  const navigate = useNavigate();
+  const navigate = useNavigateAfterChange();
   return (
     <Section>
       <SectionHeader>
@@ -435,7 +460,7 @@ function Overview({ envoy }: { envoy: Envoy }) {
 
 function Settings({ envoy, data }: { envoy: Envoy; data: EnvoysData }) {
   const { t } = useTranslation("envoys");
-  const navigate = useNavigate();
+  const navigate = useNavigateAfterChange();
   const queryClient = useQueryClient();
   // Read after the change's refetch, so two changes at once both see the
   // accounts that are left rather than the count when they started.
