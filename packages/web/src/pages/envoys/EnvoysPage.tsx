@@ -256,7 +256,7 @@ function AccountSummary({ account, linked = false }: { account: EnvoyAccount; li
         {linked && account.route !== null ? (
           <Link
             to={accountPath(account.route)}
-            className="block truncate rounded-4 font-medium underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="block truncate rounded-4 font-medium underline-offset-2 outline-none outline-1 outline-transparent hover:underline focus-visible:outline-solid focus-visible:outline-ring/50"
           >
             {account.name}
           </Link>
