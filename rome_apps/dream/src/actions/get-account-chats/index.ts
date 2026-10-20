@@ -52,9 +52,15 @@ function accountHeading(row: MessageRow): string {
   return `### ${name} account \`${row.channel}\`${service}`;
 }
 
+/** A name someone else chose, on one line and in quotes, so it can be read
+ *  only as a name. */
+function named(name: string): string {
+  return JSON.stringify(name.replace(/\s+/g, " ").trim());
+}
+
 function speakerOf(row: MessageRow): string {
-  if (row.outbound) return "Agent";
-  return row.sender_name || row.sender_id || "Unknown";
+  if (row.outbound) return "Agent (Rome)";
+  return `Person ${named(row.sender_name || row.sender_id || "unknown")}`;
 }
 
 /** A line as Dream reads it. The body is quoted, so what someone wrote can
@@ -104,7 +110,7 @@ function formatChats(rows: MessageRow[]): string {
     if (!lines) continue;
     const left = chat.total - chat.messages.length;
     const note = left > 0 ? `(${left} earlier messages left out)\n\n` : "";
-    const text = `#### Chat: ${chat.name}\n\n${note}${lines}`;
+    const text = `#### Chat ${named(chat.name)}\n\n${note}${lines}`;
     if (text.length > budget) {
       leftOut += 1;
       continue;
@@ -147,8 +153,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       // platform come from `channels`, and from the id only when its record is
       // gone. 'notification' is a line that passed outside a turn: someone the
       // agent did not answer, or Rome sending untied to one. Rome's own lines
-      // are told apart as `agentMessageOutbound` in
-      // packages/core/src/channels/messages-agent.ts does.
+      // are told apart by the rule of `agentMessageOutbound` in
+      // packages/core/src/channels/messages-agent.ts. Lines stored in the same
+      // second keep the order they were stored in.
       let rows: MessageRow[];
       try {
         rows = appContext.db.connection.all(
@@ -164,7 +171,10 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
                   ELSE 0
                 END AS outbound,
                 m.sender_name, m.sender_id, m.content, m.created_at,
-                ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.created_at DESC) AS newest,
+                ROW_NUMBER() OVER (
+                  PARTITION BY m.session_id ORDER BY m.created_at DESC, m.rowid DESC
+                ) AS newest,
+                m.rowid AS stored,
                 COUNT(*) OVER (PARTITION BY m.session_id) AS chat_total
               FROM rome_agent_messages m
               JOIN rome_sessions s ON s.id = m.session_id
@@ -174,7 +184,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
                 AND ${onRomeAccount}
             )
             WHERE newest <= ${MESSAGES_PER_CHAT}
-            ORDER BY channel, session_id, created_at ASC
+            ORDER BY channel, session_id, created_at ASC, stored ASC
           `,
         ) as MessageRow[];
       } catch (err) {

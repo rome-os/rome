@@ -1,8 +1,8 @@
 import { type SQL, sql } from "drizzle-orm";
 import type { AppDbContext } from "@rome-os/app-runtime";
 
-// The services an agent can be linked to, as `LINKABLE_SERVICES` in
-// @rome/api-types names them. Every other channel carries the guardian's own
+// The services an agent can be linked to: `LINKABLE_SERVICES` in
+// @rome/api-types, which an app cannot import. A test keeps the two equal. Every other channel carries the guardian's own
 // accounts (a linked WhatsApp, a WeChat login) or Rome's own traffic, and
 // stays out of Dream.
 export const ACCOUNT_SERVICES = ["feishu", "telegram", "discord", "telegram_user"];
