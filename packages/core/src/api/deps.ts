@@ -50,6 +50,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { FavorService } from "../favors/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
+import type { AccountListening } from "../channels/account-agents.js";
 import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
@@ -121,6 +122,9 @@ export interface ApiDeps {
   appStore: AppStoreReader;
   actionRegistry: ActionRegistryImpl;
   agentLoader: AgentLoader;
+  /** Told of each write to an account's agent, so the account's inbound port
+   *  starts or stops listening. */
+  accountListening: Pick<AccountListening, "changed">;
   /** Live skill catalog — read by `GET /api/skills` for the Skills app and
    * the chat composer's slash-command autocomplete. `getRegistryLoadFailures`
    * surfaces app-owned skills that were declared but failed to load, so the

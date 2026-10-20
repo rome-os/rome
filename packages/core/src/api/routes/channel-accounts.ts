@@ -35,7 +35,9 @@ function accountView(record: ChannelRecord): ChannelAccount {
   };
 }
 
-export function channelAccountsRoutes(deps: Pick<ApiDeps, "db" | "agentLoader">): Hono {
+export function channelAccountsRoutes(
+  deps: Pick<ApiDeps, "db" | "agentLoader" | "accountListening">,
+): Hono {
   const app = new Hono();
   const channels = new ChannelRecordsRepository(deps.db);
 
@@ -47,7 +49,9 @@ export function channelAccountsRoutes(deps: Pick<ApiDeps, "db" | "agentLoader">)
   // Link an agent to an account, or unlink it with `null`. Linking an agent
   // other than main that has an account on the same platform takes it off
   // that account. Only an account of a linkable service takes a link;
-  // unlinking is always open.
+  // unlinking is always open. Rome listens to an account of a linkable
+  // service only while it has an agent, so each account the write touched
+  // starts or stops listening.
   app.put("/channels/accounts/:id/agent", async (c) => {
     if (!isSameOriginMutationRequest(c.req.raw)) {
       return c.json({ error: "Cross-site requests are not allowed." }, 403);
@@ -67,6 +71,7 @@ export function channelAccountsRoutes(deps: Pick<ApiDeps, "db" | "agentLoader">)
     const id = c.req.param("id");
     try {
       const outcome = channels.link(id, agent);
+      deps.accountListening.changed([outcome.channel.id, outcome.unlinkedFrom]);
       const result: LinkAccountAgentResult = {
         account: accountView(outcome.channel),
         unlinkedFrom: outcome.unlinkedFrom,

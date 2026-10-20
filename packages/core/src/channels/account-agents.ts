@@ -7,6 +7,7 @@ import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
+import type { InboundListening } from "./connection-ports.js";
 
 const log = createLogger("account-agents");
 
@@ -25,6 +26,38 @@ export function readAccountAgent(
   if (!LINKABLE_SERVICES.has(record?.service ?? channelName)) return undefined;
   const agent = record?.agent ?? null;
   return agent !== null && (isCoreMainAgentId(agent) || agents.has(agent)) ? agent : null;
+}
+
+/**
+ * Which accounts Rome listens to. An account of a service in
+ * `LINKABLE_SERVICES` is listened to only while its record names an agent,
+ * loaded or not; an account of any other service always is. A channel with
+ * no record answers for its own service, as in {@link readAccountAgent}.
+ *
+ * Call `changed` after each write to an account's agent, naming every account
+ * the write touched, so its inbound port starts or stops listening.
+ */
+export class AccountListening implements InboundListening {
+  private readonly listeners = new Set<(channel: string) => void>();
+
+  constructor(private readonly records: Pick<ChannelRecordsRepository, "byId">) {}
+
+  listens(channel: string): boolean {
+    const record = this.records.byId(channel);
+    if (!LINKABLE_SERVICES.has(record?.service ?? channel)) return true;
+    return (record?.agent ?? null) !== null;
+  }
+
+  onChange(listener: (channel: string) => void): void {
+    this.listeners.add(listener);
+  }
+
+  changed(channels: Iterable<string | null>): void {
+    for (const channel of channels) {
+      if (channel === null) continue;
+      for (const listener of this.listeners) listener(channel);
+    }
+  }
 }
 
 /**
@@ -52,7 +85,7 @@ export function accountAgentResolver(
     if (silent.has(channelName) && silent.get(channelName) === agent) return null;
     silent.set(channelName, agent);
     if (agent === null) {
-      log.info("account has no agent; it stays silent until one is linked", {
+      log.info("account has no agent; Rome does not listen to it until one is linked", {
         channel: channelName,
       });
     } else {
