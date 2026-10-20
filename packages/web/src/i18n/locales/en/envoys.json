@@ -33,6 +33,7 @@
     "pick": "Link an agent",
     "noAgent": "No agent",
     "suggested": "{{agent}} (suggested)",
+    "linkConfirm": "Link <agent>{{to}}</agent> to {{account}}?",
     "delegateConfirm": "Link <agent>{{to}}</agent> to {{account}}, your own account? <agent>{{to}}</agent> answers people in your personal chats on your behalf from now on.",
     "switchConfirm": "Switch {{account}} to <agent>{{to}}</agent>? <agent>{{to}}</agent> answers in every chat the account is in from now on.",
     "delegateSwitchConfirm": "Switch {{account}}, your own account, to <agent>{{to}}</agent>? <agent>{{to}}</agent> answers people in your personal chats on your behalf from now on.",

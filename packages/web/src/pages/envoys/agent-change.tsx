@@ -151,7 +151,9 @@ export function AgentChange({
                     ? account.agent === null
                       ? "change.delegateConfirm"
                       : "change.delegateSwitchConfirm"
-                    : "change.switchConfirm"
+                    : account.agent === null
+                      ? "change.linkConfirm"
+                      : "change.switchConfirm"
                 }
                 values={{ account: account.name, to: agentLabel(pending) }}
               />
