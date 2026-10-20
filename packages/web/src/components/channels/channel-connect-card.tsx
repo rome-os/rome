@@ -2,6 +2,8 @@ import { useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { User } from "lucide-react";
+import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
+import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { ConnectionSlotCard } from "@/components/connection-slot-card";
@@ -184,6 +186,9 @@ export function ChannelConnectCard({
   const degraded = slot.state === "degraded";
 
   const [disconnecting, setDisconnecting] = useState(false);
+  // Disconnecting an account removes it, so the guardian confirms the cost first.
+  const [confirming, setConfirming] = useState(false);
+  const confirmsDisconnect = LINKABLE_SERVICES.has(config.service);
   const [error, setError] = useState<string | null>(null);
 
   // The setup addresses the connection by id, or by the bare service name when
@@ -221,7 +226,12 @@ export function ChannelConnectCard({
   }
 
   const disconnectButton = connected ? (
-    <Button variant="destructive" size="sm" onClick={handleDisconnect} disabled={disconnecting}>
+    <Button
+      variant="destructive"
+      size="sm"
+      onClick={() => (confirmsDisconnect ? setConfirming(true) : void handleDisconnect())}
+      disabled={disconnecting}
+    >
       {disconnecting ? t("common.disconnecting") : t("common.disconnect")}
     </Button>
   ) : undefined;
@@ -270,6 +280,23 @@ export function ChannelConnectCard({
       }
     >
       {error && <p className="text-aux text-destructive-fg">{error}</p>}
+      <RomeConfirmDialog
+        open={confirming}
+        destructive
+        title={
+          identityTitle
+            ? t("channels.disconnectConfirmTitle", { name: identityTitle })
+            : t("channels.disconnectConfirmTitleUnnamed")
+        }
+        description={t("channels.disconnectConfirmBody")}
+        confirmLabel={t("common.disconnect")}
+        confirmDisabled={disconnecting}
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false);
+          void handleDisconnect();
+        }}
+      />
 
       {degraded && setup.error && !setup.state ? (
         <p className="text-aux text-destructive-fg">{setup.error}</p>

@@ -394,6 +394,9 @@
     "restartNeededFallback": "后端不可达 — 需要重启以应用更改",
     "disconnectFailedFallback": "断开失败。",
     "reconnect": "重新连接",
+    "disconnectConfirmTitle": "断开 {{name}}？",
+    "disconnectConfirmTitleUnnamed": "断开此账号？",
+    "disconnectConfirmBody": "Rome 将失去对该账号的访问，并停止在它的聊天中回复。再次连接时，它会从零开始，不带之前的聊天。",
     "status": {
       "connected": "已连接",
       "disconnected": "未连接",
