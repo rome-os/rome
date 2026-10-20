@@ -79,9 +79,14 @@ describe("registerBuiltinConnections", () => {
       wechatUserRuntime: {} as WechatUserRuntime,
     } as unknown as BuiltinConnectionDeps);
 
-    const naming = [...registered.values()]
-      .filter((descriptor) => descriptor.capabilities.talker && descriptor.accountIdOf)
-      .map((descriptor) => descriptor.service);
-    expect(naming.sort()).toEqual([...LINKABLE_SERVICES].sort());
+    const naming = [...registered.values()].filter(
+      (descriptor) => descriptor.capabilities.talker && descriptor.accountIdOf,
+    );
+    expect(naming.map((descriptor) => descriptor.service).sort()).toEqual(
+      [...LINKABLE_SERVICES].sort(),
+    );
+    // A disconnect removes the account once its grant goes, which covers every
+    // grant only while the service holds one.
+    for (const descriptor of naming) expect(Object.keys(descriptor.auth)).toHaveLength(1);
   });
 });

@@ -302,7 +302,8 @@ export class ConnectionRegistry {
 
   /** Mint another Connection for a Service, whether or not it already holds
    *  one, with no grant held yet. Tests use it to stand up several accounts
-   *  without driving a setup. */
+   *  without driving a setup.
+   *  @internal */
   async connectAnother(service: string, label?: string): Promise<Connection> {
     return this.connectionMutex.runExclusive(service, () => this.mint(service, label));
   }
