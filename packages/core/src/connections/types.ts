@@ -322,7 +322,11 @@ export interface ConnectionDescriptor {
    *  still names its account.
    *  `ConnectionRegistry.confer` refuses a conferral whose account another
    *  Connection of the service already holds in the same grant. A service that
-   *  leaves it unset is never refused. */
+   *  leaves it unset is never refused.
+   *  A service with a Talk that declares it holds accounts that exist only while
+   *  connected: the last grant's disconnect removes the Connection
+   *  (`isUnconnectedAccount`). Declare it only for a service in
+   *  `LINKABLE_SERVICES`, whose channels start fresh. */
   accountIdOf?(grant: GrantName, profile: ProfileRecord): string | null;
   capabilities: Partial<{
     talker: {

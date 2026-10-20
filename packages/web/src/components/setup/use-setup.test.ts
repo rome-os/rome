@@ -144,7 +144,7 @@ describe("useSetup stale-state handling", () => {
     );
   });
 
-  it("leaves a new account's setup it re-attached to running when the card goes away", async () => {
+  it("cancels a new account's setup it re-attached to when the card goes away", async () => {
     const started = JSON.stringify({
       cid: "cid-other",
       reattached: true,
@@ -160,6 +160,9 @@ describe("useSetup stale-state handling", () => {
 
     unmount();
 
-    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/cancel"))).toBe(false);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/setups/cid-other/cancel",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });

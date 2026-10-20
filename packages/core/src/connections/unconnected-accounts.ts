@@ -1,5 +1,5 @@
 // An account exists only while it is connected. Model:
-// docs/concepts/messaging.md#channels.
+// docs/concepts/messaging.md#romes-accounts.
 
 import { createLogger } from "../logger.js";
 import type { ConnectionRegistry } from "./registry.js";
