@@ -1,7 +1,7 @@
-import type { ReactNode } from "react";
-import { Link, Route, Routes, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { Trans, useTranslation } from "react-i18next";
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef } from "react";
+import { Link, Navigate, Route, Routes, useMatch, useNavigate, useParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
 import {
   Page,
@@ -9,6 +9,8 @@ import {
   PageDescription,
   PageHeader,
   PageHeading,
+  PageNav,
+  PageNavLink,
   PageTitle,
   Section,
   SectionDescription,
@@ -26,6 +28,7 @@ import {
   EmptyStateDescription,
   EmptyStateTitle,
 } from "@/components/ui/empty-state";
+import { FormError } from "@/components/ui/field";
 import { List, ListRow, ListRowContent } from "@/components/ui/list-row";
 import {
   ConnectionBrandBadge,
@@ -35,25 +38,63 @@ import {
   WeChatIcon,
 } from "@/components/brand-icons/connection-badges";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { CONNECTIONS_REFRESH_INTERVAL_MS, fetchConnections } from "@/lib/connections-api";
+import {
+  type ApiConnection,
+  CONNECTIONS_REFRESH_INTERVAL_MS,
+  fetchConnections,
+} from "@/lib/connections-api";
 import { serviceLabel } from "@/lib/connection-cards";
 import { fetchJson } from "@/lib/fetch-json";
 import { Avatar } from "../people/avatar";
 import { agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
-import { type AgentListing, type Envoy, type EnvoyAccount, buildEnvoys } from "./envoys-model";
+import { AgentChange } from "./agent-change";
+import { AgentText } from "./agent-text";
+import {
+  type AgentListing,
+  CONNECTIONS_KEY,
+  type Envoy,
+  type EnvoyAccount,
+  buildEnvoys,
+} from "./envoys-model";
 
 /**
  * Envoys: the agents people can reach on chat platforms, each listed with the
  * accounts it speaks through. Connected accounts with no agent are listed
- * apart. Connecting an account and picking its agent still happen on the
- * account's Connections card, which every row here opens.
+ * apart, each with a picker that links an agent. An agent's Settings switch or
+ * unlink the agent of each of its accounts. Connecting an account still
+ * happens on the Connections cards.
  */
 export default function EnvoysPage() {
+  const open = useRef(true);
+  useEffect(() => {
+    open.current = true;
+    return () => {
+      open.current = false;
+    };
+  }, []);
   return (
-    <Routes>
-      <Route index element={<EnvoysIndex />} />
-      <Route path=":agent" element={<EnvoyDetail />} />
-    </Routes>
+    <EnvoysOpen.Provider value={open}>
+      <Routes>
+        <Route index element={<EnvoysIndex />} />
+        <Route path=":agent/*" element={<EnvoyDetail />} />
+      </Routes>
+    </EnvoysOpen.Provider>
+  );
+}
+
+/** Whether the guardian is still on Envoys. A change lands after its refetch,
+ *  by which time they may have gone elsewhere. */
+const EnvoysOpen = createContext<{ readonly current: boolean }>({ current: true });
+
+/** Navigates after a change lands, unless the guardian has left Envoys. */
+function useNavigateAfterChange() {
+  const navigate = useNavigate();
+  const open = useContext(EnvoysOpen);
+  return useCallback(
+    (to: string) => {
+      if (open.current) navigate(to);
+    },
+    [navigate, open],
   );
 }
 
@@ -63,10 +104,15 @@ const envoyPath = (agent: string) => `/envoys/${encodeURIComponent(agent)}`;
 
 const accountPath = (route: string) => `${CONNECTIONS_PATH}/${encodeURIComponent(route)}`;
 
+type EnvoysData = ReturnType<typeof buildEnvoys> & {
+  agentsPending: boolean;
+  agentsFailed: boolean;
+};
+
 function useEnvoys() {
   const { t } = useTranslation("envoys");
   const connections = useQuery({
-    queryKey: ["envoys", "connections"],
+    queryKey: CONNECTIONS_KEY,
     queryFn: fetchConnections,
     // Links change on the Connections cards, so a return here reads them fresh.
     staleTime: 0,
@@ -80,7 +126,13 @@ function useEnvoys() {
   });
   return {
     // Descriptions are optional, so the list renders without the agents.
-    data: connections.data ? buildEnvoys(connections.data, agents.data?.agents ?? []) : undefined,
+    data: connections.data
+      ? {
+          ...buildEnvoys(connections.data, agents.data?.agents ?? null),
+          agentsPending: agents.isPending,
+          agentsFailed: agents.isError,
+        }
+      : undefined,
     isPending: connections.isPending,
     error: connections.error,
   };
@@ -105,20 +157,6 @@ function Loading() {
 function LoadError() {
   const { t } = useTranslation("envoys");
   return <p className="text-ui text-destructive">{t("loadFailed")}</p>;
-}
-
-/** A sentence whose `<agent>` tag sets the agent's name in monospace, so a
- *  name such as main does not read as a plain word. */
-function AgentText({ k, values }: { k: string; values: Record<string, unknown> }) {
-  const { t } = useTranslation("envoys");
-  return (
-    <Trans
-      t={t}
-      i18nKey={k}
-      values={values}
-      components={{ agent: <span className="font-mono" /> }}
-    />
-  );
 }
 
 const PLATFORM_ICONS: Partial<Record<string, typeof FeishuIcon>> = {
@@ -194,7 +232,7 @@ function EnvoysIndex() {
               ))}
             </ListGrid>
           )}
-          {unlinked.length > 0 && <UnlinkedAccounts accounts={unlinked} />}
+          {query.data && unlinked.length > 0 && <UnlinkedAccounts data={query.data} />}
         </>
       )}
     </Page>
@@ -232,45 +270,89 @@ function EnvoyCard({ envoy }: { envoy: Envoy }) {
   );
 }
 
-function AccountRow({ account, action }: { account: EnvoyAccount; action?: string }) {
+/** `linked` makes the name open the account's Connections card, for rows
+ *  that are not a link as a whole. */
+function AccountSummary({ account, linked = false }: { account: EnvoyAccount; linked?: boolean }) {
   const { t } = useTranslation("envoys");
-  const content = (
+  return (
     <>
       <ConnectionBrandBadge connection={account.platform} />
       <ListRowContent>
-        <div className="font-medium">{account.name}</div>
+        {linked && account.route !== null ? (
+          <Link
+            to={accountPath(account.route)}
+            className="block truncate rounded-4 font-medium underline-offset-2 outline-none outline-1 outline-transparent hover:underline focus-visible:outline-solid focus-visible:outline-ring/50"
+          >
+            {account.name}
+          </Link>
+        ) : (
+          <div className="truncate font-medium">{account.name}</div>
+        )}
         <div className="truncate text-aux text-muted-foreground">
           {serviceLabel(account.platform)}
           {account.kind === "delegate" && ` · ${t("kinds.yours")}`}
         </div>
       </ListRowContent>
-      {action ? (
-        <span className="text-ui text-muted-foreground">{action}</span>
-      ) : (
-        <Badge variant={account.kind === "delegate" ? "info" : "success"}>
-          {t(`kinds.${account.kind}`)}
-        </Badge>
-      )}
+    </>
+  );
+}
+
+function AccountRow({ account }: { account: EnvoyAccount }) {
+  const { t } = useTranslation("envoys");
+  const content = (
+    <>
+      <AccountSummary account={account} />
+      <Badge variant={account.kind === "delegate" ? "info" : "success"}>
+        {t(`kinds.${account.kind}`)}
+      </Badge>
     </>
   );
   // No Connections card shows a delegate's agent yet, so its row opens nothing.
   if (account.route === null) return <ListRow>{content}</ListRow>;
   return (
     <ListRow asChild interactive>
-      <Link
-        to={accountPath(account.route)}
-        aria-label={action ? t("unlinked.linkTo", { account: account.name }) : undefined}
-      >
-        {content}
-      </Link>
+      <Link to={accountPath(account.route)}>{content}</Link>
     </ListRow>
   );
 }
 
-/** Accounts Rome has access to but no agent speaks through. Each opens its
- *  Connections card, where the agent is picked. */
-function UnlinkedAccounts({ accounts }: { accounts: EnvoyAccount[] }) {
+/** One account with the select that changes its agent. */
+function AccountAgentRow({
+  account,
+  data,
+  onChanged,
+}: {
+  account: EnvoyAccount;
+  data: EnvoysData;
+  onChanged: (agent: string | null) => void;
+}) {
+  return (
+    <div className="py-3">
+      <AgentChange
+        account={account}
+        envoys={data.envoys}
+        agents={data.agents}
+        disabled={data.agentsPending}
+        onChanged={onChanged}
+      >
+        <AccountSummary account={account} linked />
+      </AgentChange>
+    </div>
+  );
+}
+
+/** Shown once above the selects when the agent list failed to load, since each
+ *  select then offers only main and the agents already linked. */
+function AgentsFailed({ data }: { data: EnvoysData }) {
   const { t } = useTranslation("envoys");
+  return data.agentsFailed ? <FormError>{t("change.agentsFailed")}</FormError> : null;
+}
+
+/** Accounts Rome has access to but no agent speaks through. Linking an agent
+ *  opens that agent's page. */
+function UnlinkedAccounts({ data }: { data: EnvoysData }) {
+  const { t } = useTranslation("envoys");
+  const navigate = useNavigateAfterChange();
   return (
     <Section>
       <SectionHeader>
@@ -279,12 +361,18 @@ function UnlinkedAccounts({ accounts }: { accounts: EnvoyAccount[] }) {
           <SectionDescription>{t("unlinked.description")}</SectionDescription>
         </SectionHeading>
       </SectionHeader>
-      <Card className="max-w-3xl py-0">
-        <List>
-          {accounts.map((account) => (
-            <AccountRow key={account.channel} account={account} action={t("unlinked.link")} />
+      <AgentsFailed data={data} />
+      <Card className="max-w-3xl">
+        <CardContent className="divide-y divide-border-subtle">
+          {data.unlinked.map((account) => (
+            <AccountAgentRow
+              key={account.channel}
+              account={account}
+              data={data}
+              onChanged={(agent) => agent && navigate(envoyPath(agent))}
+            />
           ))}
-        </List>
+        </CardContent>
       </Card>
     </Section>
   );
@@ -299,6 +387,7 @@ function EnvoyDetail() {
   const query = useEnvoys();
   const envoy = query.data?.envoys.find((candidate) => candidate.agent === agent);
   const name = agentLabel(agent);
+  const activeTab = useMatch("/envoys/:agent/settings") ? "settings" : "overview";
   useDocumentTitle([name, t("index.title")]);
 
   return (
@@ -325,23 +414,82 @@ function EnvoyDetail() {
               </div>
             </PageHeading>
           </PageHeader>
-          <Card className="max-w-3xl">
-            <CardHeader>
-              <CardTitle>{t("overview.accounts")}</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <List>
-                {envoy.accounts.map((account) => (
-                  <AccountRow key={account.channel} account={account} />
-                ))}
-              </List>
-              <div className="flex flex-wrap gap-2">
-                <ConnectButton primary={false} />
-              </div>
-            </CardContent>
-          </Card>
+          <PageNav aria-label={name}>
+            {TABS.map((tab) => (
+              <PageNavLink asChild key={tab.id} active={tab.id === activeTab}>
+                <Link to={envoyPath(agent) + tab.path}>{t(`tabs.${tab.id}`)}</Link>
+              </PageNavLink>
+            ))}
+          </PageNav>
+          <Routes>
+            <Route index element={<Overview envoy={envoy} />} />
+            <Route path="settings" element={<Settings envoy={envoy} data={query.data!} />} />
+            <Route path="*" element={<Navigate to={envoyPath(agent)} replace />} />
+          </Routes>
         </>
       )}
     </Page>
+  );
+}
+
+const TABS = [
+  { id: "overview", path: "" },
+  { id: "settings", path: "/settings" },
+] as const;
+
+function Overview({ envoy }: { envoy: Envoy }) {
+  const { t } = useTranslation("envoys");
+  return (
+    <Card className="max-w-3xl">
+      <CardHeader>
+        <CardTitle>{t("overview.accounts")}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <List>
+          {envoy.accounts.map((account) => (
+            <AccountRow key={account.channel} account={account} />
+          ))}
+        </List>
+        <div className="flex flex-wrap gap-2">
+          <ConnectButton primary={false} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Settings({ envoy, data }: { envoy: Envoy; data: EnvoysData }) {
+  const { t } = useTranslation("envoys");
+  const navigate = useNavigateAfterChange();
+  const queryClient = useQueryClient();
+  // Read after the change's refetch, so two changes at once both see the
+  // accounts that are left rather than the count when they started.
+  const keepsAccounts = () => {
+    const connections = queryClient.getQueryData<ApiConnection[]>(CONNECTIONS_KEY);
+    if (!connections) return envoy.accounts.length > 1;
+    return buildEnvoys(connections, null).envoys.some((other) => other.agent === envoy.agent);
+  };
+  return (
+    <Card className="max-w-3xl">
+      <CardHeader>
+        <CardTitle>{t("overview.accounts")}</CardTitle>
+      </CardHeader>
+      <CardContent className="divide-y divide-border-subtle">
+        <AgentsFailed data={data} />
+        {envoy.accounts.map((account) => (
+          <AccountAgentRow
+            key={account.channel}
+            account={account}
+            data={data}
+            onChanged={(agent) => {
+              // Stay while this agent keeps other accounts. Otherwise follow the
+              // account to its new agent's page, or back to the list.
+              if (keepsAccounts()) return;
+              navigate(agent ? `${envoyPath(agent)}/settings` : "/envoys");
+            }}
+          />
+        ))}
+      </CardContent>
+    </Card>
   );
 }

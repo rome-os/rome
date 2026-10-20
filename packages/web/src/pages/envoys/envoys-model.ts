@@ -75,16 +75,24 @@ function toAccount(connection: ApiConnection): EnvoyAccount | null {
   };
 }
 
+function compareAgents(a: string, b: string): number {
+  if ((a === MAIN_AGENT_ID) !== (b === MAIN_AGENT_ID)) return a === MAIN_AGENT_ID ? -1 : 1;
+  return agentLabel(a).localeCompare(agentLabel(b));
+}
+
+/** The query key of the connections Envoys reads. */
+export const CONNECTIONS_KEY = ["envoys", "connections"] as const;
+
 /** Groups the connected accounts by the agent speaking through them. Agents
  *  sort by name with main first, and accounts with no agent are listed apart.
- *  A delegate's account with no agent is left out, since no card links one to
- *  it yet. */
+ *  `agents` is every agent an account can be linked to, in the same order.
+ *  Pass null for `loaded` while the agent list is missing. */
 export function buildEnvoys(
   connections: readonly ApiConnection[],
-  agents: readonly AgentListing[],
-): { envoys: Envoy[]; unlinked: EnvoyAccount[] } {
+  loaded: readonly AgentListing[] | null,
+): { envoys: Envoy[]; unlinked: EnvoyAccount[]; agents: string[] } {
   const descriptions = new Map(
-    agents.map((agent) => [canonicalAgent(agent.name), agent.description ?? null]),
+    (loaded ?? []).map((agent) => [canonicalAgent(agent.name), agent.description ?? null]),
   );
   const byAgent = new Map<string, Envoy>();
   const unlinked: EnvoyAccount[] = [];
@@ -92,7 +100,7 @@ export function buildEnvoys(
     const account = toAccount(connection);
     if (!account) continue;
     if (account.agent === null) {
-      if (account.route !== null) unlinked.push(account);
+      unlinked.push(account);
       continue;
     }
     let envoy = byAgent.get(account.agent);
@@ -106,11 +114,29 @@ export function buildEnvoys(
     }
     envoy.accounts.push(account);
   }
-  const envoys = [...byAgent.values()].sort((a, b) => {
-    if ((a.agent === MAIN_AGENT_ID) !== (b.agent === MAIN_AGENT_ID)) {
-      return a.agent === MAIN_AGENT_ID ? -1 : 1;
-    }
-    return agentLabel(a.agent).localeCompare(agentLabel(b.agent));
-  });
-  return { envoys, unlinked };
+  const envoys = [...byAgent.values()].sort((a, b) => compareAgents(a.agent, b.agent));
+  // Core links only loaded agents, and main always. Without the list, the
+  // linked agents are the best guess. An account keeps its own unloaded agent
+  // in its select (`AgentChange`).
+  const names = new Set([MAIN_AGENT_ID, ...(loaded ? descriptions.keys() : byAgent.keys())]);
+  return { envoys, unlinked, agents: [...names].sort(compareAgents) };
+}
+
+/** The account `agent` stops speaking through when it is linked to `account`.
+ *  On one platform an agent other than main speaks through at most one
+ *  account, so linking it moves it off the other one. This sees only the
+ *  accounts listed here, so it misses a disconnected account core still
+ *  holds the agent on. */
+export function displacedAccount(
+  envoys: readonly Envoy[],
+  account: EnvoyAccount,
+  agent: string,
+): EnvoyAccount | null {
+  if (agent === MAIN_AGENT_ID) return null;
+  const envoy = envoys.find((candidate) => candidate.agent === agent);
+  return (
+    envoy?.accounts.find(
+      (other) => other.platform === account.platform && other.channel !== account.channel,
+    ) ?? null
+  );
 }
