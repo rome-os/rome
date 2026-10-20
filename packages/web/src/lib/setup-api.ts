@@ -74,8 +74,6 @@ export interface SetupStart {
   cid: string;
   state: SetupState;
   reattached: boolean;
-  /** The setup connects a new account, so the card that started it ends it. */
-  another?: boolean;
 }
 
 export type SetupStartResult = { ok: true; start: SetupStart } | { ok: false; error: string };

@@ -448,23 +448,20 @@ describe("addressed-connection targeting (#3)", () => {
     expect(grant?.state).toBe("authorized");
   });
 
-  it("connects a fresh account in place of one a failed removal left behind", async () => {
+  it("refuses a setup into an account a failed removal left behind, and removes it", async () => {
     const { app, registry } = harness();
-    const descriptor = registry.getDescriptor("fake-telegram");
-    if (descriptor) descriptor.severalAccounts = true;
     // A Connection no grant connects, as a disconnect whose removal failed leaves.
     const leftover = await registry.connect("fake-telegram");
 
-    const { json } = await start(app, leftover.id);
-    expect((json as { another?: boolean }).another).toBe(true);
-    const done = await submitInput(app, json.cid, "good");
+    const refused = await start(app, leftover.id);
 
-    const state = ((await done.json()) as { state: { conferral?: { connectionId?: string } } })
-      .state;
+    expect(refused.res.status).toBe(409);
+    expect(registry.find("fake-telegram")).toEqual([]);
+    // The service's own Connect then connects a fresh account.
+    const { json } = await start(app);
+    await submitInput(app, json.cid, "good");
     const [account] = registry.find("fake-telegram");
-    expect(registry.find("fake-telegram")).toHaveLength(1);
     expect(account?.id).not.toBe(leftover.id);
-    expect(state.conferral?.connectionId).toBe(account?.id);
   });
 });
 

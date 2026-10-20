@@ -48,28 +48,26 @@ function resolveTarget(
   return registry.isRegistered(id) ? { service: id } : null;
 }
 
-/** The target for a setup addressed to `connectionId`. An account a failed
- *  removal left behind is removed first, so the account that connects starts
- *  fresh rather than taking its old channel. Null when that removal fails. */
-async function freshAccountTarget(
+/** Remove `connectionId` when it is an account a failed removal left behind,
+ *  so no setup connects into its old channel. Answers whether the account is
+ *  gone, removed now or by a disconnect that ran first; a failed removal stays
+ *  for the boot pass. */
+async function removeLeftoverAccount(
   registry: ConnectionRegistry,
   service: string,
   connectionId: string,
   grant: string,
-): Promise<SetupTarget | null> {
-  const kept: SetupTarget = { service, connectionId };
+): Promise<boolean> {
   return registry.withGrantSection(service, grant, async () => {
     const conn = registry.all().find((held) => held.id === connectionId);
-    if (!conn || !(await isUnconnectedAccount(registry, conn))) return kept;
+    if (!conn) return true;
+    if (!(await isUnconnectedAccount(registry, conn))) return false;
     try {
       await registry.remove(connectionId);
     } catch (error) {
       log.warn("could not remove a disconnected account before its setup", { connectionId, error });
-      return null;
     }
-    return registry.getDescriptor(service)?.severalAccounts === true
-      ? { service, another: true }
-      : { service };
+    return true;
   });
 }
 
@@ -95,25 +93,29 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     const force = body.force === true;
     const another = body.another === true;
     const id = c.req.param("id");
-    let target = resolveTarget(registry, id, another);
+    const target = resolveTarget(registry, id, another);
     if (!target) {
       return another
         ? c.json({ error: `"${id}" does not offer another account.` }, 400)
         : c.json({ error: "Unknown connection." }, 404);
     }
     const grant = c.req.param("name");
-    if (target.connectionId) {
-      const fresh = await freshAccountTarget(registry, target.service, target.connectionId, grant);
-      if (!fresh)
-        return c.json({ error: "Could not clear the disconnected account. Try again." }, 409);
-      target = fresh;
+    // An account that connects again starts fresh, so the card of a
+    // disconnected account offers no setup into it. Its card goes on the next
+    // refresh, and the service's own Connect starts the new account.
+    if (
+      target.connectionId &&
+      (await removeLeftoverAccount(registry, target.service, target.connectionId, grant))
+    ) {
+      return c.json(
+        { error: "This account was disconnected. Connect it again from its service." },
+        409,
+      );
     }
     try {
       const started = await manager.start(target, grant, { force });
       c.header("Cache-Control", "no-store");
-      // Says when the setup connects a new account, which a start addressed to
-      // a removed leftover also becomes, so the card that asked owns ending it.
-      return c.json({ ...started, another: target.another === true });
+      return c.json(started);
     } catch (err) {
       if (err instanceof NoSetupError) {
         return c.json({ error: "No conferral setup for this grant." }, 404);
