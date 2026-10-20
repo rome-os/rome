@@ -57,6 +57,9 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   // Set once the card unmounts, so a start that answers afterwards is not
   // left running.
   const unmountedRef = useRef(false);
+  // Whether the live setup connects a new account: asked for with `another`,
+  // or answered so by core for a start addressed to a removed account.
+  const newAccountRef = useRef(another === true);
   // The cid reset() dropped: the adopt effect must not immediately re-adopt it
   // from a stale `activeCid` discovery (the refresh that clears the discovery
   // races the reset). A fresh start() supersedes the dismissal.
@@ -105,7 +108,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         if (unmountedRef.current) {
           // The card that asked went away first, so nothing could finish this
           // new account's setup.
-          if (another && result.ok) void cancelSetup(result.start.cid);
+          if (result.ok && (another || result.start.another)) void cancelSetup(result.start.cid);
           return;
         }
         setBusy(false);
@@ -115,6 +118,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         }
         doneFiredRef.current = false;
         dismissedCidRef.current = null;
+        newAccountRef.current = another === true || result.start.another === true;
         setCid(result.start.cid);
         settle(result.start.state);
       })();
@@ -196,12 +200,12 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   // to it.
   const liveCidRef = useRef<string | null>(null);
   liveCidRef.current = cid && !settled ? cid : null;
-  useEffect(() => {
-    if (!another) return;
-    return () => {
-      if (liveCidRef.current) void cancelSetup(liveCidRef.current);
-    };
-  }, [another]);
+  useEffect(
+    () => () => {
+      if (newAccountRef.current && liveCidRef.current) void cancelSetup(liveCidRef.current);
+    },
+    [],
+  );
   useEffect(() => {
     unmountedRef.current = false;
     return () => {

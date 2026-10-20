@@ -111,7 +111,9 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     try {
       const started = await manager.start(target, grant, { force });
       c.header("Cache-Control", "no-store");
-      return c.json(started);
+      // Says when the setup connects a new account, which a start addressed to
+      // a removed leftover also becomes, so the card that asked owns ending it.
+      return c.json({ ...started, another: target.another === true });
     } catch (err) {
       if (err instanceof NoSetupError) {
         return c.json({ error: "No conferral setup for this grant." }, 404);

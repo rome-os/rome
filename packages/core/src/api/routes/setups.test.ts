@@ -454,6 +454,7 @@ describe("addressed-connection targeting (#3)", () => {
     const leftover = await registry.connect("fake-telegram");
 
     const { json } = await start(app, leftover.id);
+    expect((json as { another?: boolean }).another).toBe(true);
     const done = await submitInput(app, json.cid, "good");
 
     const state = ((await done.json()) as { state: { conferral?: { connectionId?: string } } })

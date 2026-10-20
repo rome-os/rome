@@ -102,6 +102,28 @@ describe("useSetup stale-state handling", () => {
     );
   });
 
+  it("cancels a setup core turned into a new account's when the card goes away", async () => {
+    const started = JSON.stringify({
+      cid: "cid-fresh",
+      another: true,
+      state: { status: "presenting", view: { title: "x" } },
+    });
+    const fetchMock = rs.spyOn(globalThis, "fetch");
+    fetchMock.mockImplementation(async () => new Response(started, { status: 200 }));
+    const { result, unmount } = renderHook(() =>
+      useSetup({ idOrService: "conn-leftover", grant: "bot" }),
+    );
+    act(() => result.current.start());
+    await waitFor(() => expect(result.current.cid).toBe("cid-fresh"));
+
+    unmount();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/setups/cid-fresh/cancel",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("leaves an existing connection's setup running when the card goes away", async () => {
     const fetchMock = rs.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ state: { status: "presenting", view: { title: "x" } } }), {
