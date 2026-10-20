@@ -34,6 +34,7 @@
     "noAgent": "No agent",
     "suggested": "{{agent}} (suggested)",
     "linkConfirm": "Link <agent>{{to}}</agent> to {{account}}?",
+    "delegateConfirm": "Link <agent>{{to}}</agent> to {{account}}, your own account? <agent>{{to}}</agent> answers people in your personal chats on your behalf from now on.",
     "switchConfirm": "Switch {{account}} to <agent>{{to}}</agent>? <agent>{{to}}</agent> answers in every chat the account is in from now on.",
     "unlinkConfirm": "Unlink <agent>{{agent}}</agent> from {{account}}? The account stays connected, but its messages go unanswered until an agent is linked again.",
     "displaces": "<agent>{{to}}</agent> stops answering through {{other}}, since an agent other than main speaks through one account per platform.",

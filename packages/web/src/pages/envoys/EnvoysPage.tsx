@@ -69,7 +69,10 @@ const envoyPath = (agent: string) => `/envoys/${encodeURIComponent(agent)}`;
 
 const accountPath = (route: string) => `${CONNECTIONS_PATH}/${encodeURIComponent(route)}`;
 
-type EnvoysData = ReturnType<typeof buildEnvoys> & { agentsFailed: boolean };
+type EnvoysData = ReturnType<typeof buildEnvoys> & {
+  agentsPending: boolean;
+  agentsFailed: boolean;
+};
 
 function useEnvoys() {
   const { t } = useTranslation("envoys");
@@ -91,6 +94,7 @@ function useEnvoys() {
     data: connections.data
       ? {
           ...buildEnvoys(connections.data, agents.data?.agents ?? null),
+          agentsPending: agents.isPending,
           agentsFailed: agents.isError,
         }
       : undefined,
@@ -282,6 +286,7 @@ function AccountAgentRow({
         account={account}
         envoys={data.envoys}
         agents={data.agents}
+        disabled={data.agentsPending}
         onChanged={onChanged}
       >
         <AccountSummary account={account} />

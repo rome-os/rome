@@ -42,18 +42,22 @@ function errorMessage(error: unknown, fallback: string): string {
 /**
  * The agent select for one account, with the confirmation a change needs.
  * Switching or unlinking always asks first. Linking an account with no agent
- * asks only when it moves the agent off another account.
+ * asks when it moves the agent off another account, or when the account is
+ * the guardian's own, since the agent then answers on their behalf.
  */
 export function AgentChange({
   account,
   envoys,
   agents,
+  disabled = false,
   onChanged,
   children,
 }: {
   account: EnvoyAccount;
   envoys: readonly Envoy[];
   agents: readonly string[];
+  /** The agent list is still loading, so the options are not final yet. */
+  disabled?: boolean;
   onChanged: (agent: string | null) => void;
   /** The account as the row shows it, beside the select. */
   children: ReactNode;
@@ -69,14 +73,14 @@ export function AgentChange({
 
   const apply = (value: string) => {
     const agent = value === NO_AGENT ? null : value;
-    link.mutate(
-      { channel: account.channel, agent },
-      {
-        onSuccess: () => {
-          setPending(null);
-          onChanged(agent);
-        },
+    // `mutateAsync` settles even once the refetch has moved this row away, so
+    // the page still hears about the change. Its error shows through `link.error`.
+    link.mutateAsync({ channel: account.channel, agent }).then(
+      () => {
+        setPending(null);
+        onChanged(agent);
       },
+      () => {},
     );
   };
 
@@ -84,7 +88,11 @@ export function AgentChange({
     link.reset();
     if (value === current) {
       setPending(null);
-    } else if (account.agent === null && !displacedAccount(envoys, account, value)) {
+    } else if (
+      account.agent === null &&
+      account.kind !== "delegate" &&
+      !displacedAccount(envoys, account, value)
+    ) {
       apply(value);
     } else {
       setPending(value);
@@ -101,7 +109,7 @@ export function AgentChange({
         {/* Radix shows the placeholder only for an empty value. */}
         <Select
           value={pending ?? account.agent ?? ""}
-          disabled={link.isPending}
+          disabled={disabled || link.isPending}
           onValueChange={choose}
         >
           <SelectTrigger
@@ -137,7 +145,13 @@ export function AgentChange({
               />
             ) : (
               <AgentText
-                k={account.agent === null ? "change.linkConfirm" : "change.switchConfirm"}
+                k={
+                  account.agent !== null
+                    ? "change.switchConfirm"
+                    : account.kind === "delegate"
+                      ? "change.delegateConfirm"
+                      : "change.linkConfirm"
+                }
                 values={{ account: account.name, to: agentLabel(pending) }}
               />
             )}{" "}

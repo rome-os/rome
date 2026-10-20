@@ -138,4 +138,27 @@ describe("AgentChange", () => {
     await user.click(screen.getByRole("combobox", { name: "Agent for Sales" }));
     expect(await screen.findByRole("option", { name: "main (suggested)" })).toBeTruthy();
   });
+
+  it("asks before linking an agent to the guardian's own account", async () => {
+    const puts = mockLink();
+    renderChange({
+      account: account({
+        service: "telegram_user",
+        platform: "telegram",
+        kind: "delegate",
+        route: null,
+      }),
+    });
+
+    const user = await pick("main (suggested)");
+    expect(puts).toEqual([]);
+    expect(screen.getByText(/your personal chats on your behalf/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Link" }));
+    await waitFor(() =>
+      expect(puts).toEqual([
+        { url: "/api/channels/accounts/discord/agent", body: { agent: MAIN_AGENT_ID } },
+      ]),
+    );
+  });
 });
