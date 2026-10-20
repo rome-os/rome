@@ -5,7 +5,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { createTestDb } from "../test/helpers.js";
-import { AccountAlreadyConnectedError } from "./errors.js";
+import { AccountAlreadyConnectedError, DifferentAccountError } from "./errors.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import { SetupManager } from "./setup/manager.js";
@@ -59,6 +59,25 @@ describe("ConnectionRegistry.confer account guard", () => {
       });
       expect((await ledger.getGrant(second.id, "bot"))?.profile).toBeUndefined();
       expect(second.isUnlocked("talk")).toBe(false);
+    } finally {
+      close();
+    }
+  });
+
+  it("refuses a different bot on a Connection that still names its own", async () => {
+    const { ledger, registry, close } = setupRegistry();
+    try {
+      const first = await registry.connect(SERVICE);
+      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+
+      const refused = registry.confer(SERVICE, first.id, "bot", credentialFor("t-9"), {
+        botId: "900",
+      });
+
+      await expect(refused).rejects.toBeInstanceOf(DifferentAccountError);
+      await expect(ledger.getGrant(first.id, "bot")).resolves.toMatchObject({
+        profile: { botId: "100" },
+      });
     } finally {
       close();
     }

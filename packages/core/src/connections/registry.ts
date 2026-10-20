@@ -7,6 +7,7 @@ import { createLogger, type Logger } from "../logger.js";
 import type { ConnectionRecord, GrantLedger, GrantRecord, PersistedCredential } from "./ledger.js";
 import {
   AccountAlreadyConnectedError,
+  DifferentAccountError,
   CredentialRejected,
   Disconnected,
   DuplicateServiceConnectionsError,
@@ -449,6 +450,7 @@ export class ConnectionRegistry {
 
     const id = conn?.id ?? crypto.randomUUID();
     if (registered && profile !== undefined) {
+      if (conn) await this.refuseDifferentAccount(registered.descriptor, id, grant, profile);
       await this.refuseAccountHeldElsewhere(registered.descriptor, id, grant, profile);
     }
     const createdAt = this.clock();
@@ -491,6 +493,24 @@ export class ConnectionRegistry {
       });
     }
     return conn as Connection;
+  }
+
+  /** Throws DifferentAccountError when `connectionId`'s grant still names an
+   *  account and `profile` names another. A disconnected grant holds no
+   *  profile, so it never refuses there. */
+  private async refuseDifferentAccount(
+    descriptor: ConnectionDescriptor,
+    connectionId: ConnectionId,
+    grant: GrantName,
+    profile: ProfileRecord,
+  ): Promise<void> {
+    const accountIdOf = descriptor.accountIdOf;
+    if (!accountIdOf) return;
+    const held = await this.ledger.getGrant(connectionId, grant);
+    const heldId = held?.profile === undefined ? null : accountIdOf(grant, held.profile);
+    if (heldId !== null && heldId !== accountIdOf(grant, profile)) {
+      throw new DifferentAccountError(descriptor.service, connectionId);
+    }
   }
 
   /** Throws AccountAlreadyConnectedError when another Connection of the

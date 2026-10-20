@@ -84,3 +84,23 @@ export class Disconnected extends Error {
     this.name = "Disconnected";
   }
 }
+
+/**
+ * `ConnectionRegistry.confer` refuses to put a different account onto a
+ * Connection whose grant still names its own, because the new account would
+ * take over that account's channel, history and agent. The message reads to
+ * the guardian on a failed setup, and the conferral writes nothing.
+ */
+export class DifferentAccountError extends Error {
+  readonly service: string;
+  readonly connectionId: ConnectionId;
+
+  constructor(service: string, connectionId: ConnectionId) {
+    super(
+      "This is a different account. Reconnect with the same account, or add this one as another account.",
+    );
+    this.name = "DifferentAccountError";
+    this.service = service;
+    this.connectionId = connectionId;
+  }
+}
