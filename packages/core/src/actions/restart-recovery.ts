@@ -2,6 +2,7 @@
 // docs/concepts/actions.md and docs/concepts/data.md#routines.
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
+import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import { hostJobId } from "../host-execution/service.js";
 import { HOST_ACTION } from "../host-execution/worker-recovery.js";
 
@@ -29,4 +30,31 @@ export async function endInterruptedRuns(
   );
   const routineRuns = await repos.routineRuns.markRunningInterrupted(INTERRUPTED_ROUTINE_RUN_ERROR);
   return { executions, routineRuns };
+}
+
+/**
+ * Settles every `accepted` or `running` webhook invocation with the outcome of
+ * the execution that shares its id, and returns how many it settled. An
+ * invocation whose execution never started, or never finished, records
+ * INTERRUPTED_EXECUTION_ERROR. Call once at boot, after endInterruptedRuns and
+ * before the webhook route serves requests.
+ */
+export async function endInterruptedWebhookInvocations(
+  repos: {
+    webhookInvocations: Pick<WebhookInvocationsRepository, "settleInterrupted">;
+    executions: Pick<ActionExecutionsRepository, "findById">;
+  },
+  now: Date,
+): Promise<number> {
+  return repos.webhookInvocations.settleInterrupted(now, async (executionId) => {
+    const execution = await repos.executions.findById(executionId);
+    if (!execution || execution.status === "running") {
+      return { status: "error", error: INTERRUPTED_EXECUTION_ERROR, finishedAt: now };
+    }
+    return {
+      status: execution.status,
+      error: execution.error ?? null,
+      finishedAt: execution.finishedAt ?? now,
+    };
+  });
 }

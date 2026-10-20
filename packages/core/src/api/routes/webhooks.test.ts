@@ -170,6 +170,43 @@ describe("Webhooks API", () => {
       expect(runImpl).toHaveBeenCalledWith("send_message", { text: "hi" });
     });
 
+    it("posts the finished invocation to the callback URL and records the delivery", async () => {
+      const callbackUrl = "https://hooks.example.test/rome-callback";
+      const fetchSpy = rs
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async () => new Response(null, { status: 500 }));
+      const app = buildApp(baseDeps, async () => ({ status: "ok", data: { echo: "ok" } }));
+
+      const res = await app.request("/webhooks/send_message", {
+        method: "POST",
+        headers: { "x-api-key": API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ args: { text: "hi" }, callbackUrl }),
+      });
+      expect(res.status).toBe(202);
+      const { executionId } = (await res.json()) as { executionId: string };
+
+      const repo = baseDeps.webhookInvocationsRepo!;
+      for (let i = 0; i < 50; i++) {
+        const row = await repo.findByExecutionId(executionId);
+        if (row && row.callbackStatus !== "pending") break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchSpy.mock.calls[0]!;
+      expect(url).toBe(callbackUrl);
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        executionId,
+        status: "success",
+        result: { status: "ok", data: { echo: "ok" } },
+      });
+      expect(await repo.findByExecutionId(executionId)).toMatchObject({
+        callbackStatus: "failed",
+        callbackResponseStatus: 500,
+        callbackError: "Callback failed with status 500",
+      });
+    });
+
     it("runs the action with no session actor even inside an ambient scope", async () => {
       // Webhooks are a machine-credential surface: executions record no actor
       // (NULL) by contract. The router enforces this with withoutSessionActor,

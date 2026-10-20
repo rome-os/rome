@@ -112,7 +112,11 @@ import { ActionEngine } from "./actions/engine.js";
 import { readMemoryHeadroom } from "./actions/memory-headroom.js";
 import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
 import { ActionWorkerCoordinator } from "./actions/action-subprocess.js";
-import { endInterruptedRuns } from "./actions/restart-recovery.js";
+import {
+  endInterruptedRuns,
+  endInterruptedWebhookInvocations,
+} from "./actions/restart-recovery.js";
+import { deliverWebhookCallbacks } from "./api/webhook-callbacks.js";
 import { WorkerRpcServer } from "./actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
 import { AgentRunner } from "./core/agent-runner.js";
@@ -347,9 +351,26 @@ async function main() {
     { executions: actionExecutionsRepo, routineRuns: routineRunsRepo },
     new Date(),
   );
-  if (interrupted.executions > 0 || interrupted.routineRuns > 0) {
-    log.warn("Ended runs a stopped Rome process left running", interrupted);
+  const webhookInvocations = await endInterruptedWebhookInvocations(
+    { webhookInvocations: webhookInvocationsRepo, executions: actionExecutionsRepo },
+    new Date(),
+  );
+  if (interrupted.executions > 0 || interrupted.routineRuns > 0 || webhookInvocations > 0) {
+    log.warn("Ended runs a stopped Rome process left running", {
+      ...interrupted,
+      webhookInvocations,
+    });
   }
+  // Read before the webhook route serves requests, so a live run never shares a callback with
+  // this delivery. Fire-and-forget: a slow callback endpoint must not hold up boot.
+  void deliverWebhookCallbacks(
+    webhookInvocationsRepo,
+    await webhookInvocationsRepo.listUndeliveredCallbacks(),
+  ).catch((err) => {
+    log.error("Failed to deliver webhook callbacks left undelivered by a stopped Rome process", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 
   await ensureSentinelPersons(personMappingRepo);
 

@@ -15,52 +15,18 @@ import type { ActionEngine } from "../../actions/engine.js";
 import type { ActionResult } from "../../actions/types.js";
 import type { WebhookInvocationsRepository } from "../../db/repositories/webhook-invocations.js";
 import type { ApiDeps } from "../deps.js";
+import { deliverWebhookCallback } from "../webhook-callbacks.js";
 
 const log = createLogger("api:webhooks");
-const WEBHOOK_CALLBACK_TIMEOUT_MS = 5_000;
 
 async function processWebhookInvocation(params: {
   executionId: string;
   actionName: string;
   args: Record<string, unknown>;
-  callbackUrl?: string;
   actionEngine: ActionEngine;
   webhookInvocationsRepo: WebhookInvocationsRepository;
 }): Promise<void> {
-  const { executionId, actionName, args, callbackUrl, actionEngine, webhookInvocationsRepo } =
-    params;
-
-  const deliverCallback = async () => {
-    if (!callbackUrl) return;
-    const invocation = await webhookInvocationsRepo.findByExecutionId(executionId);
-    if (!invocation) return;
-    const callbackPayload = toWebhookInvocationResponse(invocation);
-
-    const attemptedAt = new Date();
-    try {
-      const response = await fetch(callbackUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(callbackPayload),
-        signal: AbortSignal.timeout(WEBHOOK_CALLBACK_TIMEOUT_MS),
-      });
-      await webhookInvocationsRepo.update(executionId, {
-        callbackStatus: response.ok ? "succeeded" : "failed",
-        callbackAttemptedAt: attemptedAt,
-        callbackDeliveredAt: response.ok ? new Date() : null,
-        callbackResponseStatus: response.status,
-        callbackError: response.ok ? null : `Callback failed with status ${response.status}`,
-      });
-    } catch (err) {
-      await webhookInvocationsRepo.update(executionId, {
-        callbackStatus: "failed",
-        callbackAttemptedAt: attemptedAt,
-        callbackDeliveredAt: null,
-        callbackResponseStatus: null,
-        callbackError: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
+  const { executionId, actionName, args, actionEngine, webhookInvocationsRepo } = params;
 
   await webhookInvocationsRepo.update(executionId, {
     status: "running",
@@ -81,7 +47,7 @@ async function processWebhookInvocation(params: {
       error: result.status === "error" ? result.error : null,
       finishedAt: new Date(),
     });
-    await deliverCallback();
+    await deliverWebhookCallback(webhookInvocationsRepo, executionId);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const result: ActionResult = { status: "error", error: message };
@@ -91,7 +57,7 @@ async function processWebhookInvocation(params: {
       error: message,
       finishedAt: new Date(),
     });
-    await deliverCallback();
+    await deliverWebhookCallback(webhookInvocationsRepo, executionId);
   }
 }
 
@@ -176,7 +142,6 @@ export function webhookRoutes(deps: ApiDeps, webhookApiKey: string | undefined):
         executionId,
         actionName,
         args: parsedBody.args,
-        callbackUrl: parsedBody.callbackUrl,
         actionEngine,
         webhookInvocationsRepo,
       }),

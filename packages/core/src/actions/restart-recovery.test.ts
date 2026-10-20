@@ -1,11 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { deliverWebhookCallbacks } from "../api/webhook-callbacks.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
+import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import { hostJobId } from "../host-execution/service.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import {
   endInterruptedRuns,
+  endInterruptedWebhookInvocations,
   INTERRUPTED_EXECUTION_ERROR,
   INTERRUPTED_ROUTINE_RUN_ERROR,
 } from "./restart-recovery.js";
@@ -166,5 +169,161 @@ describe("endInterruptedRuns", () => {
       status: "active-runs",
       activeRuns: 1,
     });
+  });
+});
+
+describe("endInterruptedWebhookInvocations", () => {
+  const callbackUrl = "https://hooks.example.test/rome-callback";
+  let testDb: TestDb;
+  let executions: ActionExecutionsRepository;
+  let routineRuns: RoutineRunsRepository;
+  let webhookInvocations: WebhookInvocationsRepository;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    executions = new ActionExecutionsRepository(testDb.db);
+    routineRuns = new RoutineRunsRepository(testDb.db);
+    webhookInvocations = new WebhookInvocationsRepository(testDb.db);
+  });
+
+  afterEach(() => {
+    rs.restoreAllMocks();
+    testDb.close();
+  });
+
+  // The boot order in index.ts: executions end first, so a webhook row reads
+  // its execution's final outcome.
+  async function restart(): Promise<number> {
+    await endInterruptedRuns({ executions, routineRuns }, boot);
+    return endInterruptedWebhookInvocations({ webhookInvocations, executions }, boot);
+  }
+
+  async function seedInvocation(
+    executionId: string,
+    status: "accepted" | "running",
+    options: { callbackUrl?: string } = {},
+  ): Promise<void> {
+    await webhookInvocations.createAccepted({
+      executionId,
+      actionName: "code-review:sync",
+      args: {},
+      callbackUrl: options.callbackUrl,
+      createdAt: lastWeek,
+    });
+    if (status === "running") await webhookInvocations.update(executionId, { status });
+  }
+
+  // Without the sweep, GET /webhooks/executions/:id reads `running` forever
+  // while the execution with the same id reads `error`.
+  it("records an invocation a stopped process left accepted or running as interrupted", async () => {
+    await seedInvocation("mid-run", "running");
+    await executions.create({
+      id: "mid-run",
+      actionName: "code-review:sync",
+      status: "running",
+      startedAt: lastWeek,
+    });
+    // Rome stopped between accepting the request and starting the execution.
+    await seedInvocation("never-started", "accepted");
+
+    expect(await restart()).toBe(2);
+
+    for (const id of ["mid-run", "never-started"]) {
+      expect(await webhookInvocations.findByExecutionId(id)).toMatchObject({
+        status: "error",
+        error: INTERRUPTED_EXECUTION_ERROR,
+        result: null,
+        finishedAt: boot,
+      });
+    }
+    expect((await executions.findById("mid-run"))?.status).toBe("error");
+  });
+
+  // The execution finished before the stop, but its webhook row was never updated.
+  it("copies the outcome of an execution that finished before Rome stopped", async () => {
+    await seedInvocation("finished", "running");
+    await executions.create({
+      id: "finished",
+      actionName: "code-review:sync",
+      status: "success",
+      startedAt: lastWeek,
+      finishedAt: lastWeek,
+    });
+
+    expect(await restart()).toBe(1);
+
+    expect(await webhookInvocations.findByExecutionId("finished")).toMatchObject({
+      status: "success",
+      error: null,
+      finishedAt: lastWeek,
+    });
+  });
+
+  it("keeps an execution awaiting approval visible and leaves settled invocations alone", async () => {
+    await seedInvocation("parked", "running");
+    await executions.create({
+      id: "parked",
+      actionName: "code-review:sync",
+      status: "pending_approval",
+      startedAt: lastWeek,
+    });
+    await seedInvocation("settled", "running");
+    await webhookInvocations.update("settled", {
+      status: "cancelled",
+      error: "cancelled by the guardian",
+      finishedAt: lastWeek,
+    });
+
+    expect(await restart()).toBe(1);
+
+    expect(await webhookInvocations.findByExecutionId("parked")).toMatchObject({
+      status: "pending_approval",
+      error: null,
+      finishedAt: boot,
+    });
+    expect(await webhookInvocations.findByExecutionId("settled")).toMatchObject({
+      status: "cancelled",
+      error: "cancelled by the guardian",
+      finishedAt: lastWeek,
+    });
+  });
+
+  it("delivers each callback a stopped process never sent, once", async () => {
+    await seedInvocation("interrupted", "running", { callbackUrl });
+    await seedInvocation("no-callback", "running");
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response(null, { status: 204 }));
+
+    await restart();
+    await deliverWebhookCallbacks(
+      webhookInvocations,
+      await webhookInvocations.listUndeliveredCallbacks(),
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe(callbackUrl);
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      executionId: "interrupted",
+      status: "error",
+      error: INTERRUPTED_EXECUTION_ERROR,
+      finishedAt: boot.toISOString(),
+    });
+    expect(await webhookInvocations.findByExecutionId("interrupted")).toMatchObject({
+      callbackStatus: "succeeded",
+      callbackResponseStatus: 204,
+    });
+    expect((await webhookInvocations.findByExecutionId("no-callback"))?.callbackStatus).toBe(
+      "not_requested",
+    );
+
+    // The next start finds nothing left to deliver.
+    await restart();
+    await deliverWebhookCallbacks(
+      webhookInvocations,
+      await webhookInvocations.listUndeliveredCallbacks(),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });
