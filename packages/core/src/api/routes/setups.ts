@@ -49,25 +49,27 @@ function resolveTarget(
 }
 
 /** Remove `connectionId` when it is an account a failed removal left behind,
- *  so no setup connects into its old channel. Answers whether the account is
- *  gone, removed now or by a disconnect that ran first; a failed removal stays
- *  for the boot pass. */
+ *  so no setup connects into its old channel. Answers "kept" for an account
+ *  still connected, "gone" once it is removed (now, or by a disconnect that
+ *  ran first), and "stuck" when the removal fails again, which leaves it for
+ *  the boot pass. */
 async function removeLeftoverAccount(
   registry: ConnectionRegistry,
   service: string,
   connectionId: string,
   grant: string,
-): Promise<boolean> {
+): Promise<"kept" | "gone" | "stuck"> {
   return registry.withGrantSection(service, grant, async () => {
     const conn = registry.all().find((held) => held.id === connectionId);
-    if (!conn) return true;
-    if (!(await isUnconnectedAccount(registry, conn))) return false;
+    if (!conn) return "gone";
+    if (!(await isUnconnectedAccount(registry, conn))) return "kept";
     try {
       await registry.remove(connectionId);
     } catch (error) {
       log.warn("could not remove a disconnected account before its setup", { connectionId, error });
+      return "stuck";
     }
-    return true;
+    return "gone";
   });
 }
 
@@ -103,14 +105,28 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     // An account that connects again starts fresh, so the card of a
     // disconnected account offers no setup into it. Its card goes on the next
     // refresh, and the service's own Connect starts the new account.
-    if (
-      target.connectionId &&
-      (await removeLeftoverAccount(registry, target.service, target.connectionId, grant))
-    ) {
-      return c.json(
-        { error: "This account was disconnected. Connect it again from its service." },
-        409,
+    if (target.connectionId) {
+      const leftover = await removeLeftoverAccount(
+        registry,
+        target.service,
+        target.connectionId,
+        grant,
       );
+      if (leftover === "gone") {
+        return c.json(
+          { error: "This account was disconnected. Connect it again from its service." },
+          409,
+        );
+      }
+      if (leftover === "stuck") {
+        return c.json(
+          {
+            error:
+              "Rome could not clear this disconnected account. Restart Rome, then connect it again.",
+          },
+          409,
+        );
+      }
     }
     try {
       const started = await manager.start(target, grant, { force });
