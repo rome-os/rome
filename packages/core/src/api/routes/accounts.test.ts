@@ -176,12 +176,31 @@ describe("Accounts API", () => {
       const gate = new Promise<void>((resolve) => {
         open = resolve;
       });
+      const control = { failing: false };
       store.latest = async (accounts) => {
         asked.push(...accounts.flatMap((account) => account.addresses));
         await gate;
+        if (control.failing) throw new Error("store unavailable");
         return latest(accounts);
       };
-      return { asked, open };
+      return { asked, open, control };
+    }
+
+    /**
+     * Count finished directory reads. Naming is a directory read's last step;
+     * once it has answered, everything up to joining the heads is synchronous,
+     * so by the next timer tick that read has joined.
+     */
+    function countDirectoryReads() {
+      const names = deps.accountNames;
+      const displayNames = names.displayNames.bind(names);
+      const count = { done: 0 };
+      names.displayNames = async (accounts) => {
+        const answer = await displayNames(accounts);
+        count.done += 1;
+        return answer;
+      };
+      return count;
     }
 
     /** Wait until `check` holds, failing after a deadline rather than guessing
@@ -205,19 +224,9 @@ describe("Accounts API", () => {
         channel: "whatsapp",
         channelUserId: TALKING_JID,
       });
-      // Naming is the directory's last read. Once it has answered, everything
-      // up to joining the heads is synchronous, so a timer tick later the
-      // second read has joined.
-      const names = deps.accountNames;
-      const displayNames = names.displayNames.bind(names);
-      let named = 0;
-      names.displayNames = async (accounts) => {
-        const answer = await displayNames(accounts);
-        named += 1;
-        return answer;
-      };
+      const directory = countDirectoryReads();
       const second = fetchStream();
-      await until(() => named === 1);
+      await until(() => directory.done === 1);
       open();
 
       const [before, after] = await Promise.all([first, second]);
@@ -250,12 +259,39 @@ describe("Accounts API", () => {
       ]);
       const second = fetchStream();
       await until(() => asked.includes(NEW_JID));
+      // A third read joins both: the first read's heads and the second's.
+      const directory = countDirectoryReads();
+      const third = fetchStream();
+      await until(() => directory.done === 1);
       open();
 
-      const [before, after] = await Promise.all([first, second]);
+      const [before, after, latest] = await Promise.all([first, second, third]);
       expect(find(before, `whatsapp:${NEW_JID}`)).toBeUndefined();
       expect(find(after, `whatsapp:${NEW_JID}`)?.latest.preview).toBe("just arrived");
+      expect(find(latest, `whatsapp:${NEW_JID}`)?.latest.preview).toBe("just arrived");
       expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(1);
+      expect(asked.filter((address) => address === NEW_JID)).toHaveLength(1);
+    });
+
+    it("fail together on a failed shared read, and do not keep it", async () => {
+      const { asked, open, control } = gateWhatsAppHeads();
+      control.failing = true;
+      const first = app.request("/accounts/stream");
+      await until(() => asked.includes(TALKING_JID));
+      const directory = countDirectoryReads();
+      const second = app.request("/accounts/stream");
+      await until(() => directory.done === 1);
+      open();
+
+      expect((await first).status).toBe(500);
+      expect((await second).status).toBe(500);
+      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(1);
+
+      control.failing = false;
+      expect(find(await fetchStream(), `whatsapp:${TALKING_JID}`)?.latest.preview).toBe(
+        "hello from tina",
+      );
+      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(2);
     });
 
     it("read afresh once the running read has settled", async () => {

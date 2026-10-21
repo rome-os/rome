@@ -83,30 +83,33 @@ export async function readAccountStream(deps: AccountDirectoryDeps): Promise<Str
  * every link and dismissal and is cheap to read, so each read takes it fresh:
  * a refetch right after a write shows that write even while it joins heads a
  * read started before it. Heads depend on nothing but an account's channel and
- * addresses, so a joining read reuses them by that key, reads its own for any
- * account the running read did not cover, and keeps nothing once it settles.
+ * addresses, so each one in flight is shared by that key: a read joins the
+ * heads already being read and starts one read for the rest, which later reads
+ * join in turn. Nothing is kept once a head read settles, failed or not.
  */
 export function accountStreamReader(deps: AccountDirectoryDeps): () => Promise<StreamAccount[]> {
-  let running: { keys: Set<string>; heads: Promise<Map<string, Message>> } | null = null;
+  const inFlight = new Map<string, Promise<Message | undefined>>();
 
   async function heads(accounts: readonly DirectoryAccount[]): Promise<Map<string, Message>> {
-    const joined = running;
-    if (joined) {
-      const rest = accounts.filter((account) => !joined.keys.has(headKey(account)));
-      const [shared, own] = await Promise.all([
-        joined.heads,
-        rest.length > 0 ? readHeads(deps, rest) : new Map<string, Message>(),
-      ]);
-      return new Map([...shared, ...own]);
+    const keys = accounts.map(headKey);
+    const missing = accounts.filter((_, i) => !inFlight.has(keys[i]!));
+    if (missing.length > 0) {
+      const read = readHeads(deps, missing);
+      const started = missing.map((account) => {
+        const key = headKey(account);
+        const head = read.then((found) => found.get(key));
+        inFlight.set(key, head);
+        return [key, head] as const;
+      });
+      const settle = () => {
+        for (const [key, head] of started) if (inFlight.get(key) === head) inFlight.delete(key);
+      };
+      read.then(settle, settle);
     }
-    const read = readHeads(deps, accounts);
-    const entry = { keys: new Set(accounts.map(headKey)), heads: read };
-    running = entry;
-    const settle = () => {
-      if (running === entry) running = null;
-    };
-    read.then(settle, settle);
-    return read;
+    // Taken before any await, so a read that settles meanwhile cannot drop one.
+    const pending = keys.map((key) => inFlight.get(key)!);
+    const found = await Promise.all(pending);
+    return new Map(keys.flatMap((key, i) => (found[i] ? [[key, found[i]] as const] : [])));
   }
 
   return async () => {
