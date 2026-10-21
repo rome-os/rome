@@ -50,8 +50,10 @@ type Call = { url: string; method: string; body: unknown };
 function mockServer(
   connections: ApiConnection[],
   added: { id: string; service: string; agent: string | null } | null,
+  options: { failLinks?: (agent: string | null) => boolean } = {},
 ) {
   const calls: Call[] = [];
+  const server = { calls, holdNextList: null as Promise<void> | null };
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -60,7 +62,14 @@ function mockServer(
     if (url === "/api/agents") {
       return Response.json({ agents: [{ name: "main" }, { name: "sales:agent" }] });
     }
-    if (url === "/api/connections") return Response.json({ connections });
+    if (url === "/api/connections") {
+      // A list answers with the accounts as they were when it was asked for.
+      const snapshot = structuredClone(connections);
+      const hold = server.holdNextList;
+      server.holdNextList = null;
+      if (hold) await hold;
+      return Response.json({ connections: snapshot });
+    }
     if (url.endsWith("/setup") && method === "POST") {
       if (added) {
         connections.push(
@@ -75,14 +84,18 @@ function mockServer(
     }
     const link = url.match(/^\/api\/channels\/accounts\/(.+)\/agent$/);
     if (link && method === "PUT") {
+      const { agent } = body as { agent: string | null };
+      if (options.failLinks?.(agent)) {
+        return Response.json({ error: "Unknown agent" }, { status: 400 });
+      }
       const account = connections.find((c) => c.channel === decodeURIComponent(link[1]!))!;
-      account.agent = (body as { agent: string | null }).agent;
+      account.agent = agent;
       return Response.json({ account: {} });
     }
     if (url === "/api/approvals") return Response.json([]);
     return new Response("not found", { status: 404 });
   });
-  return calls;
+  return server;
 }
 
 function Location() {
@@ -91,6 +104,11 @@ function Location() {
 
 function renderAt(path: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  renderWith(client, path);
+  return client;
+}
+
+function renderWith(client: QueryClient, path: string) {
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
@@ -121,7 +139,7 @@ describe("Connect an account", () => {
   });
 
   it("connects another account and links the picked agent to it", async () => {
-    const calls = mockServer([connection("discord")], {
+    const { calls } = mockServer([connection("discord")], {
       id: "discord-2",
       service: "discord",
       agent: null,
@@ -146,7 +164,7 @@ describe("Connect an account", () => {
   });
 
   it("connects a service's first account in place of its placeholder", async () => {
-    const calls = mockServer([placeholder("telegram")], {
+    const { calls } = mockServer([placeholder("telegram")], {
       id: "telegram-id",
       service: "telegram",
       agent: MAIN_AGENT_ID,
@@ -162,6 +180,71 @@ describe("Connect an account", () => {
     expect(setup?.body).not.toHaveProperty("another");
     // Core already linked main to the service's first account.
     expect(calls.filter((call) => call.method === "PUT")).toEqual([]);
+  });
+
+  it("unlinks main from a first account when the picked agent cannot be linked", async () => {
+    const connections = [placeholder("telegram")];
+    const { calls } = mockServer(
+      connections,
+      { id: "telegram-id", service: "telegram", agent: MAIN_AGENT_ID },
+      { failLinks: (agent) => agent === "sales:agent" },
+    );
+    renderAt("/envoys/connect/sales:agent/telegram");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Connect" }));
+
+    await rs.waitFor(() => expect(location()).toBe("/envoys"));
+    expect(calls.filter((call) => call.method === "PUT").map((call) => call.body)).toEqual([
+      { agent: "sales:agent" },
+      { agent: null },
+    ]);
+    expect(connections.find((c) => c.id === "telegram-id")?.agent).toBeNull();
+  });
+
+  it("returns to the list when neither link nor unlink lands", async () => {
+    const connections = [placeholder("telegram")];
+    mockServer(
+      connections,
+      { id: "telegram-id", service: "telegram", agent: MAIN_AGENT_ID },
+      { failLinks: () => true },
+    );
+    renderAt("/envoys/connect/sales:agent/telegram");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Connect" }));
+
+    await rs.waitFor(() => expect(location()).toBe("/envoys"));
+    expect(connections.find((c) => c.id === "telegram-id")?.agent).toBe(MAIN_AGENT_ID);
+  });
+
+  it("finds the new account even while an older poll is in flight", async () => {
+    const server = mockServer([connection("discord")], {
+      id: "discord-2",
+      service: "discord",
+      agent: null,
+    });
+    const client = renderAt("/envoys/connect/sales:agent/discord");
+    const user = userEvent.setup();
+    const connect = await screen.findByRole("button", { name: "Connect" });
+
+    // A poll that asked before the setup finished, and answers after it.
+    let release = () => {};
+    server.holdNextList = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    void client.refetchQueries({ queryKey: ["envoys", "connections"] });
+    await user.click(connect);
+
+    await rs.waitFor(() => expect(location()).toBe(`/envoys/${encodeURIComponent("sales:agent")}`));
+    release();
+    expect(server.calls.filter((call) => call.method === "PUT")).toEqual([
+      {
+        url: "/api/channels/accounts/discord-2/agent",
+        method: "PUT",
+        body: { agent: "sales:agent" },
+      },
+    ]);
   });
 
   it("returns to the list when the new account cannot be found to link", async () => {

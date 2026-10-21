@@ -239,31 +239,44 @@ function ConnectOn({
       ),
     );
 
+  const leave = async (message: string) => {
+    // Not an error: the account is connected either way.
+    toast(message);
+    await refetch();
+    navigate("/envoys");
+  };
+
   // Core links a service's first account to main and leaves a later one with
   // no agent, so the picked agent is linked once the account exists.
   const connected = async (connectionId: string | null) => {
+    let account: ApiConnection | undefined;
     try {
-      if (!connectionId) throw new Error("Core did not name the new account.");
-      const fresh = await queryClient.fetchQuery({
-        queryKey: CONNECTIONS_KEY,
-        queryFn: fetchConnections,
-        staleTime: 0,
-      });
-      const account = fresh.find((connection) => connection.id === connectionId);
-      if (!account?.channel) throw new Error("The new account is not listed yet.");
-      const linked = account.agent ? canonicalAgent(account.agent) : null;
-      if (linked !== agent) {
-        await linkAccountAgent(account.channel, agent, t("change.failed"));
-      }
-      await refetch();
-      navigate(`/envoys/${encodeURIComponent(agent)}`);
+      // Fetched apart from the polled query, whose request in flight may have
+      // started before the account existed.
+      if (connectionId) account = (await fetchConnections()).find((c) => c.id === connectionId);
     } catch {
-      // The account is connected either way, and lists under Connected, no
-      // agent until one is linked.
-      toast(t("connect.linkFailed", { agent: name }));
-      await refetch();
-      navigate("/envoys");
+      account = undefined;
     }
+    if (!account?.channel) return leave(t("connect.notFound", { agent: name }));
+    const linked = account.agent ? canonicalAgent(account.agent) : null;
+    if (linked !== agent) {
+      try {
+        await linkAccountAgent(account.channel, agent, t("change.failed"));
+      } catch {
+        // Unlink the agent core gave the account, so the account waits under
+        // Connected, no agent rather than answering as an agent nobody picked.
+        if (linked !== null) {
+          try {
+            await linkAccountAgent(account.channel, null, t("change.failed"));
+          } catch {
+            return leave(t("connect.linkFailedKept", { agent: name, kept: agentLabel(linked) }));
+          }
+        }
+        return leave(t("connect.linkFailed", { agent: name }));
+      }
+    }
+    await refetch();
+    navigate(`/envoys/${encodeURIComponent(agent)}`);
   };
 
   return (
