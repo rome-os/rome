@@ -1,4 +1,4 @@
-// Capability-to-grant-state signals. Messaging model: docs/concepts/messaging.md.
+// Capability-to-grant-state signals. Vocabulary: docs/domain/connections.md.
 //
 // `CredentialRejected` is the ONLY bridge from capabilities to grant state: any
 // capability that gets "credential refused" from the service (401, invalid_auth,

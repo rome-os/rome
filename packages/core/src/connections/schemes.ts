@@ -1,4 +1,4 @@
-// Connection authentication schemes. Messaging model: docs/concepts/messaging.md.
+// Connection authentication schemes. Vocabulary: docs/domain/connections.md.
 // `credentialsPaste`
 // (a guardian pastes one or more secret fields) is the general case; `tokenPaste`
 // is its single-field `token` special case. `romeCloudOAuth` is the Rome Cloud-brokered

@@ -1,6 +1,6 @@
 /**
  * The wire shapes of accounts and the agents linked to them. Screens call a
- * channel an account. Vocabulary: docs/concepts/messaging.md#romes-accounts.
+ * channel an account. Vocabulary: docs/domain/chats.md#account.
  */
 
 /**

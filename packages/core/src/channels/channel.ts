@@ -4,7 +4,7 @@
  * reach (`Accounts`, accounts.ts) and what was said to them (`Messages`,
  * messages.ts). So a caller reads one list of channels rather than naming each
  * provider's transport, address book and message store one at a time.
- * Vocabulary: docs/concepts/messaging.md. Invariants:
+ * Vocabulary: docs/domain/chats.md. Invariants:
  * docs/architecture/channels.md#channel-ports.
  *
  * A channel is not a Connection. A Connection may back a channel's `send` and

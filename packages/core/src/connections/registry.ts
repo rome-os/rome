@@ -1,4 +1,4 @@
-// Connection lifecycle registry. Messaging model: docs/concepts/messaging.md.
+// Connection lifecycle registry. Vocabulary: docs/domain/connections.md.
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { DrizzleTx } from "../db/index.js";
