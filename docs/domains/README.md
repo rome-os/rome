@@ -49,7 +49,7 @@ Diffs still owed to the model, each a change of its own:
 - The participants of a chat are the platform's member list.
 - Adapters deliver every message, and the reply rule is applied after delivery.
 - A thread's messages are the parent chat's, marked by thread.
-- A disconnected account's record is deleted, with the messages only it carried.
+- A disconnected account's record is deleted, with the chats it alone was in. A chat another of Rome's accounts is in keeps its whole history.
 - The reply rule takes the value "when it is needed", backed by the lightweight check.
 - A woken agent gets the recent messages of its place as its default view, and a tool to read more of the chat.
 - A message to a chat other than the one the agent was woken in waits on an approval card.
