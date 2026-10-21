@@ -18,8 +18,9 @@ export { MARKDOWN_LINK_CLASS };
 export type { MarkdownLinkProps, MarkdownProps };
 
 // The dashboard currently ships exactly these six theme/mode combinations.
-// Keep Mermaid on explicit sRGB values: Mermaid's color parser cannot consume
-// the OKLCH primitives used by Slate and the dark modes.
+// Keep diagrams on explicit sRGB values: the Markdown theme resolver converts
+// computed colors to hex and cannot read the OKLCH primitives used by Slate and
+// the dark modes.
 const BUILTIN_MERMAID_THEMES: Record<
   "ember" | "ash" | "slate",
   Record<ResolvedTheme, MarkdownTheme>

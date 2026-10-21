@@ -37,8 +37,8 @@ rs.mock("@streamdown/math", () => ({
     return fakes.read("math", fakes.math);
   },
 }));
-rs.mock("@streamdown/mermaid", () => ({
-  get mermaid() {
+rs.mock("./diagram-renderer.js", () => ({
+  get diagram() {
     return fakes.read("mermaid", fakes.mermaid);
   },
 }));

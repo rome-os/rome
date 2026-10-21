@@ -6,7 +6,7 @@
    `src/lib/themes.ts` and the dashboard-specific shell CSS. */
 @import "@rome-os/ui/styles.css";
 @import "@rome-os/node-ui/styles.css";
-/* The kit's Markdown stylesheet (Streamdown + KaTeX + the Shiki/Mermaid
+/* The kit's Markdown stylesheet (Streamdown + KaTeX + the Shiki/diagram
    overrides). Kept out of the canon above so app bundles that render no prose
    don't carry it — the dashboard does, so it opts in here. */
 @import "@rome-os/ui/markdown.css";
