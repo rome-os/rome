@@ -52,7 +52,7 @@ export function directoryPage<T>(
  * implementation instead, opening or looking up the thread; that one is a
  * provider call and should be priced as one.
  */
-export function addressIsConversationFeature(): ChannelDirectMessaging {
+export function addressIsConversationFeature(): Pick<ChannelDirectMessaging, "chatFor"> {
   return {
     async chatFor(channelUserId: string) {
       const trimmed = channelUserId.trim();

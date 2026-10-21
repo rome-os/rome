@@ -1860,8 +1860,8 @@ export interface ChannelDirectMessaging {
    * provider call: callers pricing a listing should treat it as one.
    */
   chatFor(channelUserId: string): Promise<ChatId | null>;
-  /** @deprecated Use `chatFor`. The host no longer calls it. */
-  conversationFor?(channelUserId: string): Promise<ChatId | null>;
+  /** @deprecated Use `chatFor`, which answers the same. */
+  conversationFor(channelUserId: string): Promise<ChatId | null>;
 }
 
 /** Sending on a channel. */

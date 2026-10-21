@@ -43,7 +43,7 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
 function talkService(
   service: string,
   ports: { sends?: boolean; receives?: boolean; history?: boolean } = {},
-  direct: ChannelDirectMessaging | null = null,
+  direct: Pick<ChannelDirectMessaging, "chatFor"> | null = null,
   activity: ChannelActivity | null = null,
   history: TalkHistory | null = null,
   directory: TalkDirectory | null = null,

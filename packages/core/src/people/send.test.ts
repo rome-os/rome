@@ -7,7 +7,8 @@ function channel(name: string, send: ChannelSend | null): Channel {
   return { name, send, inbound: null, accounts: null, messages: null, directory: null };
 }
 
-function sending(direct: ChannelDirectMessaging | null): ChannelSend {
+function sending(talker: Pick<ChannelDirectMessaging, "chatFor"> | null): ChannelSend {
+  const direct = talker && { ...talker, conversationFor: talker.chatFor };
   return { send: async (conversationId) => ({ conversationId }), direct, activity: null };
 }
 
