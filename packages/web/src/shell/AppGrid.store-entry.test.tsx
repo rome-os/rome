@@ -21,6 +21,10 @@ rs.mock("@/lib/auth-state", () => ({
   useAuthStateSnapshot: () => ({ bootstrap: { phase: "ready" } }),
   hasSession: () => true,
 }));
+rs.mock("@/hooks/use-approvals", () => {
+  const pending = { rows: [] };
+  return { usePendingPairings: () => pending };
+});
 rs.mock("@/hooks/use-settings", () => {
   const settings = { data: undefined };
   const invalidate = async () => {};

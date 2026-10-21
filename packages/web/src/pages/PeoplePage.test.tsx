@@ -20,6 +20,8 @@ import {
   type PersonResource,
   type StreamAccount,
 } from "@rome/api-types/people";
+import { pairingFixtures } from "@/pages/dev/pairing-fixtures";
+import type { Approval } from "@/pages/ActivityPage";
 import i18n from "@/i18n";
 import PeoplePage, { PeopleIndexRedirect } from "./PeoplePage";
 
@@ -338,6 +340,8 @@ function mockApi(
     peopleFail?: boolean;
     accountsFail?: boolean;
     writes?: "fail";
+    /** What `GET /api/approvals` returns: the pairing requests above both views. */
+    approvals?: Approval[];
     /** Holds every transfer in flight until this resolves, so a test can act
      *  while one is still running. */
     holdTransfers?: Promise<void>;
@@ -372,6 +376,8 @@ function mockApi(
       if (body?.transferFrom && options.holdTransfers) await options.holdTransfers;
       return applyWrite(state, method, parsed.pathname, body ?? {}, json);
     }
+
+    if (parsed.pathname === "/api/approvals") return json(options.approvals ?? []);
 
     // The two account reads over one world: the contacts list, and the recents
     // surface. Which one the page asked for is the view's own answer, so a test
@@ -1006,6 +1012,42 @@ describe("PeoplePage folds LinkedIn into the general surface", () => {
     // The person page, not a thread dialog: a LinkedIn conversation is read
     // where every other channel's is.
     expect(await screen.findByText("person page")).toBeTruthy();
+  });
+});
+
+describe("PeoplePage pairing requests", () => {
+  const [TELEGRAM_REQUEST] = pairingFixtures();
+
+  it.each([
+    ["latest", "/people/latest"],
+    ["directory", "/people/directory"],
+  ])("shows a waiting request above the %s view", async (_view, entry) => {
+    mockApi({ people: [GUARDIAN, FRIEND] }, { approvals: [TELEGRAM_REQUEST as Approval] });
+    renderPage(entry);
+
+    const section = await screen.findByRole("region", { name: "Pairing requests" });
+    expect(within(section).getByRole("button", { name: "Approve" })).toBeTruthy();
+    expect(within(section).getByText("Alex")).toBeTruthy();
+  });
+
+  it("leaves out a request that is resolved or past its expiry", async () => {
+    const [waiting, lapsed, resolved] = pairingFixtures() as Approval[];
+    mockApi(
+      { people: [GUARDIAN, FRIEND] },
+      {
+        approvals: [
+          waiting as Approval,
+          // Still pending on the server, which expires it only on its next read.
+          { ...lapsed, payload: { ...(lapsed?.payload as object), expiresAt: Date.now() - 1 } },
+          { ...resolved, status: "rejected" } as Approval,
+        ] as Approval[],
+      },
+    );
+    renderPage("/people/latest");
+
+    const section = await screen.findByRole("region", { name: "Pairing requests" });
+    expect(within(section).getAllByRole("button", { name: "Approve" })).toHaveLength(1);
+    expect(within(section).getByText("Telegram")).toBeTruthy();
   });
 });
 

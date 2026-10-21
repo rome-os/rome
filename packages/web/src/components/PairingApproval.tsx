@@ -4,7 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { pairingPayload } from "@rome/api-types/approvals";
 import type { Approval } from "@/pages/ActivityPage";
-import { useApprovals, useResolveApproval, APPROVALS_QUERY_KEY } from "@/hooks/use-approvals";
+import {
+  isPendingPairing,
+  useApprovals,
+  usePendingPairings,
+  useResolveApproval,
+  APPROVALS_QUERY_KEY,
+} from "@/hooks/use-approvals";
 import { fetchJson } from "@/lib/fetch-json";
 import {
   ApprovalHistoryControl,
@@ -24,7 +30,7 @@ export function PairingApproval({ approval }: { approval: Approval }) {
   const [copiedCode, setCopiedCode] = useState("");
   const resolve = useResolveApproval();
   const payload = pairingPayload(approval);
-  const pending = approval.status === "pending" && !!payload && payload.expiresAt > Date.now();
+  const pending = !!payload && isPendingPairing(approval);
   const code = useQuery({
     queryKey: [...APPROVALS_QUERY_KEY, approval.id, "code"],
     queryFn: () =>
@@ -114,12 +120,7 @@ export function ApprovalHistoryButton() {
 }
 
 export function PairingApprovals() {
-  const query = useApprovals();
-  const rows =
-    query.data?.filter((approval) => {
-      const payload = pairingPayload(approval);
-      return payload && approval.status === "pending" && payload.expiresAt > Date.now();
-    }) ?? [];
+  const { query, rows } = usePendingPairings();
   return (
     <PairingRequestsSection
       state={
@@ -131,6 +132,28 @@ export function PairingApprovals() {
               ? "empty"
               : "ready"
       }
+      onRetry={() => void query.refetch()}
+      activityLink={<Link to="/activity" className="text-primary underline underline-offset-4" />}
+    >
+      {rows.map((approval) => (
+        <PairingApproval key={approval.id} approval={approval} />
+      ))}
+    </PairingRequestsSection>
+  );
+}
+
+/**
+ * The pairing requests as People shows them: only while one is waiting. People
+ * is a page about who is who, so an empty or loading request list is not news
+ * there; a failed read is, since a request expires within minutes and this is
+ * where the guardian looks for it.
+ */
+export function PendingPairingApprovals() {
+  const { query, rows } = usePendingPairings();
+  if (!query.isError && rows.length === 0) return null;
+  return (
+    <PairingRequestsSection
+      state={query.isError ? "error" : "ready"}
       onRetry={() => void query.refetch()}
       activityLink={<Link to="/activity" className="text-primary underline underline-offset-4" />}
     >
