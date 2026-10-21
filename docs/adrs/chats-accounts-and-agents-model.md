@@ -22,7 +22,7 @@ The domain is three contexts. **Chats** answers who said what, where, and as who
 ### Chats
 
 - **Chat.** A place where people and agents talk: a group, a direct message, the chat built into the dashboard. The code and the dashboard call it a conversation, a deprecated alias for the same thing. Two chats are the same when the platform's own id for them is the same, so one group is one chat however many of Rome's accounts are in it. A chat starts existing in Rome when its first message reaches Rome through one of Rome's accounts. Its history belongs to the chat and goes when the last of Rome's accounts leaves it, not before.
-- **Thread.** A chat inside a chat, started from one of its messages. A thread is not a chat of its own: its messages are the parent's, marked as said in that thread. It has its own participants, those the platform lists in it. Everyone in the parent sees every thread in it, agents included, and can write in it. The parent's reply rule applies in its threads.
+- **Thread.** A chat inside a chat, started from one of its messages. A thread is not a chat of its own: its messages are the parent's, marked as said in that thread. It has its own participants, those the platform lists in it. Everyone in the parent whom the platform lets see a thread sees it, agents included, and can write in it. A thread the platform hides from some members, such as a private thread, is hidden from them in Rome too. The parent's reply rule applies in its threads.
 - **Participant.** Someone in a chat: a person or an agent. The participants are everyone the platform says is a member.
 - **Agent, as a participant.** When an agent speaks through its own account, the agent is the participant. When an agent answers from the guardian's account, the guardian is the participant and the agent answers on their behalf. An agent sees every message its account receives, mentioned or not. Whether it answers is the chat's reply rule for that account. How an agent remembers what it sees belongs to the Agents context. This context describes participants and messages and says nothing about memory.
 - **Reply rule.** A setting on a chat, for each of Rome's accounts in it, saying when that account's agent answers: everything, or only when mentioned. It decides answering only. What the agent sees is whatever the platform delivers.
@@ -34,7 +34,7 @@ The domain is three contexts. **Chats** answers who said what, where, and as who
 
 ### Connections
 
-- **Connection.** Rome's access to an external account: what the guardian granted so Rome can act or talk as that account. The guardian **connects** an account to give Rome access and **disconnects** it to take the access away. There is no replacing one account with another: disconnect one, connect the other, and the new one starts fresh, with no history. A connection used in chats is how an account's messages reach Rome and how its agent's replies go back, and there is no separate word for that plumbing. A connection used outside chats, such as GitHub, has no agent bonded to it.
+- **Connection.** Rome's access to an external account: what the guardian granted so Rome can act or talk as that account. The guardian **connects** an account to give Rome access and **disconnects** it to take the access away. There is no replacing one account with another: disconnect one, connect the other, and the new one starts fresh, with no history. A chat's history is the chat's, so disconnecting an account removes only the messages no other of Rome's accounts in that chat holds. A connection used in chats is how an account's messages reach Rome and how its agent's replies go back, and there is no separate word for that plumbing. A connection used outside chats, such as GitHub, has no agent bonded to it.
 - **Grant.** One act of giving Rome access, and what it allows. Grants are outside envoy and keep their current contracts ([ADR](channels-and-connectors-are-one-connection.md)).
 
 ### Agents
@@ -48,7 +48,7 @@ The domain is three contexts. **Chats** answers who said what, where, and as who
 - **Channel as a concept the guardian meets, with its own identity and lifetime.** Rejected because a channel is one to one with a connected account, so the two words name one thing and the guardian only ever sees the account. Its jobs went to account, connection and chat.
 - **A per-chat choice of agent that overrides the account's agent.** Rejected because an account named "Sales agent" has to be the sales agent wherever it appears, and a per-chat override breaks that intuition. The override still exists in the code and is removed with a migration ([Consequences](#consequences)).
 - **At most one account per agent per platform.** Rejected because a guardian with two Feishu accounts for one agent is an ordinary case, and the rule forced a "move the link" behaviour nobody asked for.
-- **The next connection of a service takes over the disconnected account's name, chats and history.** Rejected because a new account is a new participant, and inheriting another account's history misattributes what was said. The disconnected account's record and the messages recorded through it are deleted. A retired-but-kept record was considered and rejected, since the guardian has no use for a record nothing reaches.
+- **The next connection of a service takes over the disconnected account's name, chats and history.** Rejected because a new account is a new participant, and inheriting another account's history misattributes what was said. The disconnected account's record is deleted, with the messages that reached Rome only through it: a chat another of Rome's accounts is still in keeps its history, as the chat rule says. A retired-but-kept record was considered and rejected, since the guardian has no use for a record nothing reaches.
 - **Linking a service's first account to main automatically.** Rejected because connecting and linking are two operations and cannot be made one, so an intermediate state with no agent exists anyway, and an agent the guardian did not pick is confusing. Where the product asks the guardian to pick is a design choice, not a model rule.
 - **A thread as a chat of its own.** Rejected because people do not think of a thread as a chat: it is a side chat inside one, seen by everyone in it. Letting the thread model decide the agent's memory boundary was rejected with it. Memory is the agent's own decision.
 - **Keeping "bot", "linked agent" and "unlink" alongside the new words.** "Bot" and "linked agent" as a noun were rejected because a person's identity and an agent's identity on a platform are the same kind of thing, and one name per thing is the writing rule. "Unlink" stays: it is the verb for taking an agent off an account.
@@ -60,8 +60,8 @@ The domain is three contexts. **Chats** answers who said what, where, and as who
 - A change to one of these rules changes this record, and the concepts entry that holds the invariant, in the same PR as the code.
 - Modules and types in the code take the context and word names, so a reader of the code reads the model.
 - Implemented on `main` as of this record's date:
-  - an account exists only while connected and is never reclaimed
-  - Rome listens to an account only while an agent is linked
+  - an account that takes an agent exists only while connected and is never reclaimed. Email and WhatsApp accounts, which take no agent, keep their record across a reconnect
+  - Rome listens to an account that takes an agent only while one is linked. An account that takes no agent is always listened to
   - any number of accounts per agent per platform, and one agent per account in storage
   - Feishu and Lark as two platforms
   - the words account, agent, connect, disconnect, link, switch and unlink in the dashboard and docs
@@ -74,6 +74,6 @@ The domain is three contexts. **Chats** answers who said what, where, and as who
   - participants are the platform's member list
   - adapters deliver every message, and the reply rule is applied after delivery
   - a thread's messages are the parent chat's, marked by thread
-  - a disconnected account's record and messages are deleted
+  - a disconnected account's record is deleted, with the messages only it carried
   - no automatic link to main
 - The envoy check that validates outgoing messages ([agent hierarchy](../concepts/agents.md#agent-hierarchy)) keeps its name. It is unrelated to the feature and the name does no harm.
