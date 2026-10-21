@@ -138,7 +138,9 @@ describe("SettingsPage Advanced autosave", () => {
     const user = userEvent.setup();
     renderAdvancedSettings();
 
-    const toggle = await screen.findByRole("switch", { name: "Stream replies in Telegram" });
+    const toggle = await screen.findByRole("switch", {
+      name: "Stream replies as they are written",
+    });
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     await user.click(toggle);
 
@@ -155,7 +157,9 @@ describe("SettingsPage Advanced autosave", () => {
     mockSettingsBackend();
     renderAdvancedSettings();
 
-    const toggle = await screen.findByRole("switch", { name: "Stream replies in Telegram" });
+    const toggle = await screen.findByRole("switch", {
+      name: "Stream replies as they are written",
+    });
     const section = toggle.closest("section");
     expect(section).not.toBeNull();
     expect(
@@ -168,7 +172,9 @@ describe("SettingsPage Advanced autosave", () => {
     mockSettingsBackend({ enableReplyStreaming: true });
     renderAdvancedSettings();
 
-    const toggle = await screen.findByRole("switch", { name: "Stream replies in Telegram" });
+    const toggle = await screen.findByRole("switch", {
+      name: "Stream replies as they are written",
+    });
     expect(toggle.getAttribute("aria-checked")).toBe("true");
   });
 
