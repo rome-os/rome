@@ -34,7 +34,12 @@ class FakeSocket implements SlackSocketLike {
 
 function fakeApi(overrides: Partial<SlackWebApi> = {}): SlackWebApi {
   return {
-    authTest: rs.fn(async () => ({ teamId: "T1", botUserId: "UBOT", botUsername: "scout" })),
+    authTest: rs.fn(async () => ({
+      teamId: "T1",
+      botUserId: "UBOT",
+      botUsername: "scout",
+      appId: "A1",
+    })),
     openConnection: rs.fn(async () => "wss://example.invalid/socket"),
     postMessage: rs.fn(async () => ({ ts: "100.1" })),
     openDirectMessage: rs.fn(async () => "D9"),
@@ -157,6 +162,63 @@ describe("SlackAdapter inbound", () => {
     expect(received).toHaveLength(0);
   });
 
+  it("keeps a slow name lookup from reordering a conversation", async () => {
+    let releaseFirst: () => void = () => {};
+    const api = fakeApi({
+      userName: rs.fn(async (_token: string, userId: string) => {
+        if (userId === "USLOW") await new Promise<void>((resolve) => (releaseFirst = resolve));
+        return {};
+      }),
+    });
+    const { sockets, received } = await startedAdapter(api);
+    const base = { type: "message", channel_type: "im", channel: "D1" };
+    sockets[0].emit(
+      "message",
+      eventsApi("e1", { ...base, user: "USLOW", text: "first", ts: "1.0" }),
+    );
+    sockets[0].emit(
+      "message",
+      eventsApi("e2", { ...base, user: "UFAST", text: "second", ts: "2.0" }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(received).toHaveLength(0);
+    releaseFirst();
+    await rs.waitFor(() => expect(received).toHaveLength(2));
+    expect(received.map((message) => message.text)).toEqual(["first", "second"]);
+  });
+
+  it("drops events for another workspace or another app", async () => {
+    const { sockets, received } = await startedAdapter();
+    const event = {
+      type: "message",
+      channel_type: "im",
+      channel: "D1",
+      user: "UX",
+      text: "x",
+      ts: "1.0",
+    };
+    sockets[0].emit("message", {
+      type: "events_api",
+      envelope_id: "e1",
+      payload: { type: "event_callback", team_id: "T2", event_id: "Ev1", event },
+    });
+    sockets[0].emit("message", {
+      type: "events_api",
+      envelope_id: "e2",
+      payload: { type: "event_callback", team_id: "T1", api_app_id: "A2", event_id: "Ev2", event },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(received).toHaveLength(0);
+  });
+
+  it("refuses a connection whose hello names another app", async () => {
+    const { sockets, faults } = await startedAdapter();
+    sockets[0].emit("message", { type: "hello", connection_info: { app_id: "A2" } });
+    expect(sockets[0].closed).toBe(true);
+    expect(faults).toHaveLength(1);
+    expect(faults[0].kind).toBe("credential");
+  });
+
   it("reports an uninstalled app as a refused credential", async () => {
     const { sockets, faults } = await startedAdapter();
     sockets[0].emit("message", eventsApi("e1", { type: "app_uninstalled" }));
@@ -198,6 +260,13 @@ describe("SlackAdapter send", () => {
     const { adapter, api } = await startedAdapter();
     await expect(adapter.directConversationFor("T1/UADA")).resolves.toBe("D9");
     expect(api.openDirectMessage).toHaveBeenCalledWith("xoxb-1", "UADA", expect.anything());
+  });
+
+  it("never opens a direct message for a member of another workspace", async () => {
+    const { adapter, api } = await startedAdapter();
+    await expect(adapter.directConversationFor("T2/UADA")).resolves.toBeNull();
+    await expect(adapter.directConversationFor("UADA")).resolves.toBeNull();
+    expect(api.openDirectMessage).not.toHaveBeenCalled();
   });
 });
 

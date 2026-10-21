@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { SlackWebApi } from "../../channels/slack.js";
+import type { CreateSlackSocket, SlackSocketLike, SlackWebApi } from "../../channels/slack.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral, SetupState } from "../setup/types.js";
 import {
@@ -24,6 +24,25 @@ function fakeApi(overrides: Partial<SlackWebApi> = {}): SlackWebApi {
     openDirectMessage: rs.fn(async () => "D1"),
     userName: rs.fn(async () => ({})),
     ...overrides,
+  };
+}
+
+/** A Socket Mode connection that says hello as `appId`. */
+function helloAs(appId: string): CreateSlackSocket {
+  return () => {
+    const listeners: Array<(event: { data: unknown }) => void> = [];
+    const socket = {
+      send: () => {},
+      close: () => {},
+      addEventListener: (type: string, listener: (event: { data: unknown }) => void) => {
+        if (type === "message") listeners.push(listener);
+      },
+    } as unknown as SlackSocketLike;
+    setTimeout(() => {
+      const data = JSON.stringify({ type: "hello", connection_info: { app_id: appId } });
+      for (const listener of listeners) listener({ data });
+    }, 0);
+    return socket;
   };
 }
 
@@ -75,7 +94,10 @@ describe("slack bot setup", () => {
   it("asks for a name, links the prefilled app, and confers both checked tokens", async () => {
     const api = fakeApi();
     const commit = rs.fn(async (_value: SetupConferral) => {});
-    const session = new SetupSession({ fn: makeSlackBotSetup({ api }), commit });
+    const session = new SetupSession({
+      fn: makeSlackBotSetup({ api, createSocket: helloAs("A1") }),
+      commit,
+    });
     await session.started();
     expect(formOf(session.state).form.fields.map((field) => field.name)).toEqual(["name"]);
 
@@ -97,7 +119,10 @@ describe("slack bot setup", () => {
 
   it("re-prompts a name Slack would refuse", async () => {
     const commit = rs.fn(async (_value: SetupConferral) => {});
-    const session = new SetupSession({ fn: makeSlackBotSetup({ api: fakeApi() }), commit });
+    const session = new SetupSession({
+      fn: makeSlackBotSetup({ api: fakeApi(), createSocket: helloAs("A1") }),
+      commit,
+    });
     await session.started();
     await session.provideInput({ name: "x".repeat(36) });
     await rs.waitFor(() => expect(formOf(session.state).error).toMatch(/35 characters/));
@@ -107,13 +132,30 @@ describe("slack bot setup", () => {
   it("re-prompts swapped tokens without calling Slack", async () => {
     const api = fakeApi();
     const commit = rs.fn(async (_value: SetupConferral) => {});
-    const session = new SetupSession({ fn: makeSlackBotSetup({ api }), commit });
+    const session = new SetupSession({
+      fn: makeSlackBotSetup({ api, createSocket: helloAs("A1") }),
+      commit,
+    });
     await session.started();
     await session.provideInput({ name: "Scout" });
     await rs.waitFor(() => expect(formOf(session.state).form.fields).toHaveLength(2));
     await session.provideInput({ botToken: "xapp-1", appToken: "xoxb-1" });
     await rs.waitFor(() => expect(formOf(session.state).error).toMatch(/xoxb-/));
     expect(api.authTest).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it("re-prompts two valid tokens from different apps", async () => {
+    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const session = new SetupSession({
+      fn: makeSlackBotSetup({ api: fakeApi(), createSocket: helloAs("A2") }),
+      commit,
+    });
+    await session.started();
+    await session.provideInput({ name: "Scout" });
+    await rs.waitFor(() => expect(formOf(session.state).form.fields).toHaveLength(2));
+    await session.provideInput({ botToken: "xoxb-1", appToken: "xapp-other" });
+    await rs.waitFor(() => expect(formOf(session.state).error).toMatch(/different Slack apps/));
     expect(commit).not.toHaveBeenCalled();
   });
 
@@ -126,7 +168,10 @@ describe("slack bot setup", () => {
       }),
     });
     const commit = rs.fn(async (_value: SetupConferral) => {});
-    const session = new SetupSession({ fn: makeSlackBotSetup({ api }), commit });
+    const session = new SetupSession({
+      fn: makeSlackBotSetup({ api, createSocket: helloAs("A1") }),
+      commit,
+    });
     await session.started();
     await session.provideInput({ name: "Scout" });
     await rs.waitFor(() => expect(formOf(session.state).form.fields).toHaveLength(2));

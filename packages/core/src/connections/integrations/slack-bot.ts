@@ -25,6 +25,7 @@ import {
   type SlackBotIdentity,
   type SlackWebApi,
   isSlackCredentialError,
+  readSocketAppId,
   slackWebApi,
 } from "../../channels/slack.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -133,8 +134,9 @@ export interface SlackBotDescriptorDeps {
 async function probeSlackBot(
   api: SlackWebApi,
   material: { botToken: string; appToken: string },
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; createSocket?: CreateSlackSocket } = {},
 ): Promise<SlackBotGrantProfile> {
+  const { signal } = options;
   if (!material.botToken.startsWith("xoxb-")) {
     throw new Error("The bot token starts with xoxb-. Copy it from OAuth & Permissions.");
   }
@@ -148,14 +150,27 @@ async function probeSlackBot(
     if (signal?.aborted) throw error;
     throw new Error("Slack did not accept the bot token. Install the app, then copy it again.");
   }
+  if (!identity.appId) {
+    throw new Error("Slack did not say which app the bot token belongs to. Copy it again.");
+  }
+  let socketAppId: string | undefined;
   try {
-    // Opening a connection proves the app-level token has connections:write
-    // and that Socket Mode is on. The URL is single-use, so it is dropped.
-    await api.openConnection(material.appToken, signal);
+    // A connection proves the app-level token has connections:write and that
+    // Socket Mode is on, and its hello names the token's app.
+    socketAppId = await readSocketAppId(api, material.appToken, {
+      signal,
+      createSocket: options.createSocket,
+    });
   } catch (error) {
     if (signal?.aborted) throw error;
     throw new Error(
       "Slack did not accept the app-level token. Generate one with the connections:write scope and check that Socket Mode is on.",
+    );
+  }
+  // Two valid tokens from two apps would hear one app and answer as the other.
+  if (socketAppId !== identity.appId) {
+    throw new Error(
+      "The two tokens belong to different Slack apps. Copy both from the app you just created.",
     );
   }
   return slackBotGrantProfileSchema.parse({
@@ -167,7 +182,10 @@ async function probeSlackBot(
   });
 }
 
-export function makeSlackBotSetup(deps: { api: SlackWebApi }): SetupFn {
+export function makeSlackBotSetup(deps: {
+  api: SlackWebApi;
+  createSocket?: CreateSlackSocket;
+}): SetupFn {
   return async (interact, ctx) => {
     let error: string | undefined;
     let name: string;
@@ -222,7 +240,7 @@ export function makeSlackBotSetup(deps: { api: SlackWebApi }): SetupFn {
       };
       try {
         profile = await ctx.step("slack-bot-identity", (signal) =>
-          probeSlackBot(deps.api, material, signal),
+          probeSlackBot(deps.api, material, { signal, createSocket: deps.createSocket }),
         );
         break;
       } catch (err) {
@@ -263,10 +281,10 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
       { name: "appToken", label: "App-Level Token (xapp-)" },
     ],
     validate: async (material) => {
-      await probeSlackBot(api, botMaterial(material));
+      await probeSlackBot(api, botMaterial(material), { createSocket: deps.createSocket });
     },
   });
-  botScheme.setup = makeSlackBotSetup({ api });
+  botScheme.setup = makeSlackBotSetup({ api, createSocket: deps.createSocket });
 
   return {
     service: SLACK_BOT_SERVICE,

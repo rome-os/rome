@@ -27,6 +27,8 @@ const SLACK_RECONNECT_MAX_MS = 30_000;
  *  the registry rebuild the epoch with its own backoff. */
 const SLACK_RECONNECT_MAX_ATTEMPTS = 5;
 const SLACK_USER_NAME_CACHE_SIZE = 500;
+/** How long setup waits for a probe connection's `hello`. */
+const SLACK_HELLO_TIMEOUT_MS = 10_000;
 
 /** The bot scopes a Rome Slack app asks for. Rome reads direct messages and
  *  mentions only, so it never asks to read channel history. */
@@ -78,6 +80,7 @@ export function isSlackCredentialError(error: unknown): boolean {
       "token_revoked",
       "app_uninstalled",
       "tokens_revoked",
+      "app_mismatch",
     ].includes(error.code)
   );
 }
@@ -157,6 +160,34 @@ async function slackApiCall(
   }
 }
 
+/** A read method Slack takes only as a query string. */
+async function slackApiGet(
+  token: string,
+  method: string,
+  query: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<SlackApiResponse> {
+  const response = await fetch(
+    `https://slack.com/api/${method}?${new URLSearchParams(query).toString()}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(SLACK_API_TIMEOUT_MS)])
+        : AbortSignal.timeout(SLACK_API_TIMEOUT_MS),
+    },
+  );
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new SlackApiError(
+      `http_${response.status}`,
+      `Slack API returned HTTP ${response.status}`,
+    );
+  }
+  const body = (await response.json()) as SlackApiResponse;
+  if (!body.ok) throw new SlackApiError(body.error ?? "unknown_error");
+  return body;
+}
+
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   const abortError = () =>
     signal?.reason instanceof Error ? signal.reason : new Error("Slack wait aborted.");
@@ -186,12 +217,19 @@ export const slackWebApi: SlackWebApi = {
     if (!teamId || !botUserId) {
       throw new SlackApiError("invalid_auth_test", "Slack did not return a workspace and bot id.");
     }
+    let appId = stringField(result.app_id);
+    const botId = stringField(result.bot_id);
+    if (!appId && botId) {
+      // auth.test names the bot, and bots.info names the app it belongs to.
+      const bot = await slackApiGet(botToken, "bots.info", { bot: botId }, signal);
+      appId = stringField((bot.bot as { app_id?: unknown } | undefined)?.app_id);
+    }
     return {
       teamId,
       workspaceName: stringField(result.team),
       botUserId,
       botUsername: stringField(result.user),
-      appId: stringField(result.app_id),
+      appId,
     };
   },
   async openConnection(appToken, signal) {
@@ -223,17 +261,7 @@ export const slackWebApi: SlackWebApi = {
     return id;
   },
   async userName(botToken, userId, signal) {
-    const result = await fetch(
-      `https://slack.com/api/users.info?user=${encodeURIComponent(userId)}`,
-      {
-        headers: { Authorization: `Bearer ${botToken}` },
-        signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(SLACK_API_TIMEOUT_MS)])
-          : AbortSignal.timeout(SLACK_API_TIMEOUT_MS),
-      },
-    );
-    const body = (await result.json()) as SlackApiResponse;
-    if (!body.ok) throw new SlackApiError(body.error ?? "unknown_error");
+    const body = await slackApiGet(botToken, "users.info", { user: userId }, signal);
     const user = body.user as
       | { name?: unknown; real_name?: unknown; profile?: { display_name?: unknown } }
       | undefined;
@@ -291,6 +319,57 @@ interface SocketEnvelope {
   envelope_id?: string;
   payload?: unknown;
   reason?: string;
+  connection_info?: { app_id?: string };
+}
+
+/**
+ * The app an app-level token belongs to, as the `hello` of a Socket Mode
+ * connection names it. Setup reads it to check that the pasted app-level
+ * token and bot token belong to the same app. The connection is closed once
+ * it answers.
+ */
+export async function readSocketAppId(
+  api: SlackWebApi,
+  appToken: string,
+  options: { createSocket?: CreateSlackSocket; signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<string | undefined> {
+  const url = await api.openConnection(appToken, options.signal);
+  const socket = (options.createSocket ?? createWebSocket)(url);
+  try {
+    return await new Promise<string | undefined>((resolve, reject) => {
+      const fail = (error: Error) => reject(error);
+      const timer = setTimeout(
+        () => fail(new SlackApiError("hello_timeout", "Slack did not answer on Socket Mode.")),
+        options.timeoutMs ?? SLACK_HELLO_TIMEOUT_MS,
+      );
+      timer.unref?.();
+      options.signal?.addEventListener(
+        "abort",
+        () =>
+          fail(
+            options.signal?.reason instanceof Error ? options.signal.reason : new Error("aborted"),
+          ),
+        { once: true },
+      );
+      socket.addEventListener("message", (event) => {
+        let envelope: SocketEnvelope;
+        try {
+          envelope = JSON.parse(String(event.data)) as SocketEnvelope;
+        } catch {
+          return;
+        }
+        if (envelope.type !== "hello") return;
+        clearTimeout(timer);
+        resolve(envelope.connection_info?.app_id);
+      });
+      socket.addEventListener("close", () => {
+        clearTimeout(timer);
+        fail(new SlackApiError("socket_closed", "Slack closed the Socket Mode connection."));
+      });
+    });
+  } finally {
+    socket.close();
+  }
 }
 
 /**
@@ -311,6 +390,9 @@ export class SlackSocketMode {
       appToken: string;
       api: SlackWebApi;
       createSocket?: CreateSlackSocket;
+      /** The app the bot token belongs to. A connection whose `hello` names
+       *  another app is refused, since its events are not this bot's. */
+      expectedAppId?: string;
       onEvent: (payload: SlackEventCallback) => void;
       onFault: (cause: unknown) => void;
     },
@@ -353,6 +435,18 @@ export class SlackSocketMode {
       return;
     }
     if (envelope.type === "hello") {
+      const appId = envelope.connection_info?.app_id;
+      if (this.config.expectedAppId && appId !== this.config.expectedAppId) {
+        log.error("slack socket belongs to another app", {
+          expectedAppId: this.config.expectedAppId,
+          appId,
+        });
+        this.stop();
+        this.config.onFault(
+          new SlackApiError("app_mismatch", "The app-level token belongs to another Slack app."),
+        );
+        return;
+      }
       this.reconnectAttempts = 0;
       log.info("slack socket connected");
       return;
@@ -525,6 +619,9 @@ export class SlackAdapter {
   private socket: SlackSocketMode | null = null;
   private readonly dedup = new InboundDedup(1_000);
   private readonly userNames = new Map<string, SlackUserName>();
+  /** The tail of each conversation's deliveries, so a slow name lookup never
+   *  lets a later message overtake an earlier one. */
+  private readonly deliveries = new Map<string, Promise<void>>();
   private sendAbort = new AbortController();
   private readonly api: SlackWebApi;
 
@@ -545,6 +642,7 @@ export class SlackAdapter {
       appToken: this.config.appToken,
       api: this.api,
       createSocket: this.config.createSocket,
+      expectedAppId: this.identity.appId,
       onEvent: (payload) => this.handleEvent(payload),
       onFault: (cause) =>
         this.config.onFault?.({
@@ -589,6 +687,11 @@ export class SlackAdapter {
 
   /** The direct-message conversation with a workspace member. */
   async directConversationFor(senderId: string): Promise<ConversationId | null> {
+    // An address names its workspace. A member of another workspace is not
+    // reachable through this bot, even when the user id resolves here.
+    const separator = senderId.indexOf("/");
+    if (!this.identity || separator === -1) return null;
+    if (senderId.slice(0, separator) !== this.identity.teamId) return null;
     const userId = slackUserIdOf(senderId.trim());
     if (!userId) return null;
     return (await this.api.openDirectMessage(
@@ -601,6 +704,9 @@ export class SlackAdapter {
   private handleEvent(payload: SlackEventCallback): void {
     const identity = this.identity;
     if (!identity) return;
+    // Only this bot's app and workspace speak on its connection.
+    if (payload.team_id !== identity.teamId) return;
+    if (payload.api_app_id && identity.appId && payload.api_app_id !== identity.appId) return;
     if (this.dedup.checkAndRecord(payload.event_id)) return;
     const event = payload.event;
 
@@ -625,7 +731,15 @@ export class SlackAdapter {
 
     const message = this.toChannelMessage(payload, identity);
     if (!message) return;
-    void this.deliver(message, identity.teamId, event.user);
+    const user = event.user;
+    const previous = this.deliveries.get(message.conversationId) ?? Promise.resolve();
+    const next = previous.then(() => this.deliver(message, identity.teamId, user));
+    this.deliveries.set(message.conversationId, next);
+    void next.finally(() => {
+      if (this.deliveries.get(message.conversationId) === next) {
+        this.deliveries.delete(message.conversationId);
+      }
+    });
   }
 
   private toChannelMessage(
