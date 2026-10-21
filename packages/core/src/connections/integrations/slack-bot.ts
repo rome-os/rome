@@ -30,7 +30,7 @@ import {
 } from "../../channels/slack.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
-import type { SetupFn } from "../setup/types.js";
+import type { SetupFn, SetupForm, SetupFormField, SetupInteraction } from "../setup/types.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
 
 export const SLACK_BOT_SERVICE = "slack_bot";
@@ -187,56 +187,89 @@ async function probeSlackBot(
   });
 }
 
+const SLACK_TOKEN_FIELDS: SetupFormField[] = [
+  { name: "botToken", label: "Bot User OAuth Token (xoxb-)", secret: true },
+  { name: "appToken", label: "App-Level Token (xapp-)", secret: true },
+];
+
+async function promptBotName(interact: SetupInteraction): Promise<string> {
+  let error: string | undefined;
+  for (;;) {
+    const answers = await interact.prompt({
+      instructions:
+        "Each Slack bot is its own Slack app. Name the bot the way people in your workspace should see it, usually after the agent that answers as it.",
+      fields: [{ name: "name", label: "Bot name", secret: false }],
+      ...(error ? { error } : {}),
+    });
+    const name = (answers.name ?? "").trim();
+    if (name && name.length <= SLACK_APP_NAME_MAX) return name;
+    error = name
+      ? `Slack app names are at most ${SLACK_APP_NAME_MAX} characters.`
+      : "Enter a name for the bot.";
+  }
+}
+
+function createAppForm(name: string): SetupForm {
+  return {
+    instructions: `Create the ${name} app in Slack from the link below, install it to your workspace, then paste its two tokens.`,
+    steps: [
+      {
+        text: "Open the link, pick the workspace, and click Next, then Create. The name, permissions, events and Socket Mode are already filled in.",
+      },
+      {
+        text: "On the app's Install App page, click Install to Workspace and allow it.",
+      },
+      {
+        text: "On Basic Information, under App-Level Tokens, click Generate Token and Scopes, add the connections:write scope, and copy the token that starts with xapp-.",
+      },
+      {
+        text: "On OAuth & Permissions, copy the Bot User OAuth Token that starts with xoxb-.",
+      },
+      {
+        text: "Optional: upload the agent's picture under Display Information on Basic Information. Slack does not take a picture through the link.",
+      },
+    ],
+    links: [{ label: `Create ${name} in Slack`, url: slackCreateAppUrl(name) }],
+    fields: SLACK_TOKEN_FIELDS,
+    note: "A free Slack workspace allows ten apps in total, so each agent's bot counts toward that limit.",
+  };
+}
+
+const RENEW_APP_FORM: SetupForm = {
+  instructions:
+    "Reconnect the bot's existing Slack app. A new app would be a different bot, so paste fresh tokens from the same one.",
+  steps: [
+    {
+      text: "Open your Slack apps from the link below and pick this bot's app.",
+    },
+    {
+      text: "If the app was removed from the workspace, reinstall it from the Install App page.",
+    },
+    {
+      text: "On Basic Information, under App-Level Tokens, copy a token with the connections:write scope, or generate one.",
+    },
+    {
+      text: "On OAuth & Permissions, copy the Bot User OAuth Token that starts with xoxb-.",
+    },
+  ],
+  links: [{ label: "Your Slack apps", url: "https://api.slack.com/apps" }],
+  fields: SLACK_TOKEN_FIELDS,
+};
+
 export function makeSlackBotSetup(deps: {
   api: SlackWebApi;
   createSocket?: CreateSlackSocket;
 }): SetupFn {
   return async (interact, ctx) => {
+    // A new app is a new bot, which a renewal must refuse, so renewing skips
+    // the name and the create link and asks the existing app for its tokens.
+    const name = ctx.renewing ? undefined : await promptBotName(interact);
     let error: string | undefined;
-    let name: string;
-    for (;;) {
-      ({ name } = await interact.prompt({
-        instructions:
-          "Each Slack bot is its own Slack app. Name the bot the way people in your workspace should see it, usually after the agent that answers as it.",
-        fields: [{ name: "name", label: "Bot name", secret: false }],
-        ...(error ? { error } : {}),
-      }));
-      name = name.trim();
-      if (name && name.length <= SLACK_APP_NAME_MAX) break;
-      error = name
-        ? `Slack app names are at most ${SLACK_APP_NAME_MAX} characters.`
-        : "Enter a name for the bot.";
-    }
-
-    error = undefined;
     let material: { botToken: string; appToken: string };
     let profile: SlackBotGrantProfile;
     for (;;) {
       const answers = await interact.prompt({
-        instructions: `Create the ${name} app in Slack from the link below, install it to your workspace, then paste its two tokens.`,
-        steps: [
-          {
-            text: "Open the link, pick the workspace, and click Next, then Create. The name, permissions, events and Socket Mode are already filled in.",
-          },
-          {
-            text: "On the app's Install App page, click Install to Workspace and allow it.",
-          },
-          {
-            text: "On Basic Information, under App-Level Tokens, click Generate Token and Scopes, add the connections:write scope, and copy the token that starts with xapp-.",
-          },
-          {
-            text: "On OAuth & Permissions, copy the Bot User OAuth Token that starts with xoxb-.",
-          },
-          {
-            text: "Optional: upload the agent's picture under Display Information on Basic Information. Slack does not take a picture through the link.",
-          },
-        ],
-        links: [{ label: `Create ${name} in Slack`, url: slackCreateAppUrl(name) }],
-        fields: [
-          { name: "botToken", label: "Bot User OAuth Token (xoxb-)", secret: true },
-          { name: "appToken", label: "App-Level Token (xapp-)", secret: true },
-        ],
-        note: "A free Slack workspace allows ten apps in total, so each agent's bot counts toward that limit.",
+        ...(name ? createAppForm(name) : RENEW_APP_FORM),
         ...(error ? { error } : {}),
       });
       material = {
@@ -255,7 +288,7 @@ export function makeSlackBotSetup(deps: {
       }
     }
 
-    const handle = profile.botUsername ? `@${profile.botUsername}` : name;
+    const handle = profile.botUsername ? `@${profile.botUsername}` : (name ?? "The bot");
     return {
       credential: { material, expiresAt: "never" },
       profile,

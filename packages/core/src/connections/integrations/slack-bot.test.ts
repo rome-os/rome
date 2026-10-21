@@ -144,6 +144,26 @@ describe("slack bot setup", () => {
     expect(commit.mock.calls[0][0]).not.toHaveProperty("guardianChannelUserId");
   });
 
+  it("renews from the existing app's tokens without offering a new app", async () => {
+    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const session = new SetupSession({
+      fn: makeSlackBotSetup({ api: fakeApi(), createSocket: helloAs("A1") }),
+      commit,
+      renewing: true,
+    });
+    await session.started();
+    const form = formOf(session.state).form;
+    expect(form.fields.map((field) => field.name)).toEqual(["botToken", "appToken"]);
+    expect(form.links?.map((link) => link.url)).toEqual(["https://api.slack.com/apps"]);
+
+    await session.provideInput({ botToken: "xoxb-2", appToken: "xapp-2" });
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
+    expect(commit.mock.calls[0][0]).toMatchObject({
+      credential: { material: { botToken: "xoxb-2", appToken: "xapp-2" } },
+      profile: { teamId: "T1", botUserId: "UBOT" },
+    });
+  });
+
   it("re-prompts a name Slack would refuse", async () => {
     const commit = rs.fn(async (_value: SetupConferral) => {});
     const session = new SetupSession({

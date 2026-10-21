@@ -297,6 +297,7 @@ describe("readSocketAppId", () => {
 describe("SlackSocketMode liveness", () => {
   function socketMode() {
     const sockets: FakeSocket[] = [];
+    const faults: unknown[] = [];
     const mode = new SlackSocketMode({
       appToken: "xapp-1",
       api: fakeApi(),
@@ -306,11 +307,11 @@ describe("SlackSocketMode liveness", () => {
         return socket;
       },
       onEvent: () => {},
-      onFault: () => {},
+      onFault: (cause) => faults.push(cause),
       helloTimeoutMs: 1_000,
       pingIntervalMs: 1_000,
     });
-    return { mode, sockets };
+    return { mode, sockets, faults };
   }
 
   it("drops a connection that never says hello and opens another", async () => {
@@ -322,6 +323,21 @@ describe("SlackSocketMode liveness", () => {
       expect(sockets[0].closed).toBe(true);
       await rs.advanceTimersByTimeAsync(1_000);
       expect(sockets).toHaveLength(2);
+      mode.stop();
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("reports a fault once connections keep ending before hello", async () => {
+    rs.useFakeTimers();
+    try {
+      const { mode, sockets, faults } = socketMode();
+      await mode.start();
+      await rs.advanceTimersByTimeAsync(120_000);
+      expect(sockets).toHaveLength(6);
+      expect(faults).toHaveLength(1);
+      expect(sockets.every((socket) => socket.closed)).toBe(true);
       mode.stop();
     } finally {
       rs.useRealTimers();

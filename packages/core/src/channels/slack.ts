@@ -570,8 +570,18 @@ export class SlackSocketMode {
     this.scheduleReconnect(0);
   }
 
-  private scheduleReconnect(delayMs?: number): void {
+  /** Every connection that ends before its `hello`, or after it stops
+   *  answering, spends one attempt. A `hello` refills the budget, and an
+   *  exhausted one reaches `onFault` so the registry can report it. */
+  private scheduleReconnect(delayMs?: number, cause?: unknown): void {
     if (this.stopped || this.reconnectTimer) return;
+    if (this.reconnectAttempts >= SLACK_RECONNECT_MAX_ATTEMPTS) {
+      this.stop();
+      this.config.onFault(
+        cause ?? new SlackApiError("socket_unavailable", "Slack Socket Mode kept dropping."),
+      );
+      return;
+    }
     const attempt = this.reconnectAttempts++;
     const wait =
       delayMs ?? Math.min(SLACK_RECONNECT_BASE_MS * 2 ** attempt, SLACK_RECONNECT_MAX_MS);
@@ -579,15 +589,13 @@ export class SlackSocketMode {
       this.reconnectTimer = null;
       this.connect().catch((error) => {
         if (this.stopped) return;
-        if (
-          isSlackCredentialError(error) ||
-          this.reconnectAttempts >= SLACK_RECONNECT_MAX_ATTEMPTS
-        ) {
+        if (isSlackCredentialError(error)) {
+          this.stop();
           this.config.onFault(error);
           return;
         }
         log.warn("slack socket reconnect failed", { error: describe(error) });
-        this.scheduleReconnect();
+        this.scheduleReconnect(undefined, error);
       });
     }, wait);
     this.reconnectTimer.unref?.();
