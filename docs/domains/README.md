@@ -33,6 +33,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 
 - An account that takes an agent exists only while connected and is never reclaimed by the next connection. Email and WhatsApp accounts, which take no agent, keep their record across a reconnect.
 - Rome listens to an account that takes an agent only while one is linked. An account that takes no agent is always listened to.
+- A newly connected account starts with no agent. Rome never links one on its own, and the guardian links it afterwards.
 - An agent can be linked to any number of accounts, several on one platform included, and an account has one agent in storage.
 - Feishu and Lark are two platforms.
 - The dashboard and docs say account, agent, connect, disconnect, link, switch and unlink.
@@ -48,7 +49,6 @@ Diffs still owed to the model, each a change of its own:
 - Adapters deliver every message, and the reply rule is applied after delivery.
 - A thread's messages are the parent chat's, marked by thread.
 - A disconnected account's record is deleted, with the messages only it carried.
-- No automatic link of a service's first account to main.
 - The reply rule takes the value "when it is needed", backed by the lightweight check.
 - A woken agent gets the recent messages of its place as its default view, and a tool to read more of the chat.
 - A message to a chat other than the one the agent was woken in waits on an approval card.
