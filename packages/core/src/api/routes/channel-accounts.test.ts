@@ -55,6 +55,7 @@ describe("channel account routes", () => {
       accounts: [
         {
           id: "feishu",
+          connectionKind: "feishu",
           service: "feishu",
           platform: "feishu",
           connectionId: "c1",
@@ -76,6 +77,7 @@ describe("channel account routes", () => {
     expect(await res.json()).toEqual({
       account: {
         id: "telegram_user",
+        connectionKind: "telegram_user",
         service: "telegram_user",
         platform: "telegram",
         connectionId: "c2",

@@ -199,14 +199,21 @@ describe("romeManagedGrantsUsable", () => {
 describe("connectedRomeManagedSlugs", () => {
   it("marks a Rome-managed card connected from the registry, not Composio", () => {
     const slugs = connectedRomeManagedSlugs([
-      { service: "shopify", grants: { store: "authorized" } },
-      { service: "github", grants: { user: "degraded" } },
-      { service: "slack", grants: { workspace: "unauthorized" } },
-      // A registry service outside the Rome-managed catalog never counts.
-      { service: "telegram", grants: { bot: "authorized" } },
+      { connectionKind: "shopify", grants: { store: "authorized" } },
+      { connectionKind: "github", grants: { user: "degraded" } },
+      { connectionKind: "slack", grants: { workspace: "unauthorized" } },
+      // A kind of connection outside the Rome-managed catalog never counts.
+      { connectionKind: "telegram", grants: { bot: "authorized" } },
     ]);
     expect([...slugs]).toEqual(["shopify"]);
     expect(connectedRomeManagedSlugs(undefined).size).toBe(0);
+  });
+
+  it("reads the kind of connection from a host that names it service", () => {
+    const slugs = connectedRomeManagedSlugs([
+      { service: "shopify", grants: { store: "authorized" } },
+    ]);
+    expect([...slugs]).toEqual(["shopify"]);
   });
 });
 

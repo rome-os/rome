@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
@@ -145,7 +145,7 @@ export class ChannelRecordsRepository {
     this.ids.clear();
 
     const service = connection.service;
-    const vacant = LINKABLE_SERVICES.has(service)
+    const vacant = LINKABLE_KINDS.has(service)
       ? undefined
       : exec
           .select()
@@ -176,7 +176,7 @@ export class ChannelRecordsRepository {
       service,
       platform: platformOf(service, connection.domain),
       connectionId: connection.id,
-      agent: LINKABLE_SERVICES.has(service) ? agent : null,
+      agent: LINKABLE_KINDS.has(service) ? agent : null,
       createdAt: now,
     };
     exec.insert(channels).values(row).run();
@@ -206,7 +206,7 @@ export class ChannelRecordsRepository {
     return this.db.transaction((tx) => {
       const row = tx.select().from(channels).where(eq(channels.id, id)).get();
       if (!row) throw new ChannelRecordNotFound(id);
-      if (agent !== null && !LINKABLE_SERVICES.has(row.service)) {
+      if (agent !== null && !LINKABLE_KINDS.has(row.service)) {
         throw new ChannelNotLinkable(id, row.service);
       }
       if (agent !== null && row.connectionId === null) throw new ChannelUnbacked(id);

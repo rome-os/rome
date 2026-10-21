@@ -352,7 +352,7 @@
       },
       "loading": "Loading chats…",
       "emptyTitle": "No configurable chats found",
-      "emptyDescription": "Connect a supported chat service, or send a message so Rome can discover the chat.",
+      "emptyDescription": "Connect an account on a supported platform, or send a message so Rome can discover the chat.",
       "loadMore": "Load more",
       "overrideCount_one": "{{count}} override",
       "overrideCount_other": "{{count}} overrides",

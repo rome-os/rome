@@ -28,6 +28,7 @@ const linkBodySchema: z.ZodType<LinkAccountAgentRequest> = z.object({
 function accountView(record: ChannelRecord): ChannelAccount {
   return {
     id: record.id,
+    connectionKind: record.service,
     service: record.service,
     platform: record.platform,
     connectionId: record.connectionId,

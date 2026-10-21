@@ -156,7 +156,9 @@ export function romeManagedGrantsUsable(grants: Record<string, string> | undefin
 
 /** A connection as core's registry reports it (`/api/connections`). */
 export interface RegistryConnectionStatus {
-  service: string;
+  connectionKind?: string;
+  /** The kind of connection, as a host from before the rename names it. */
+  service?: string;
   grants: Record<string, string>;
 }
 
@@ -172,8 +174,9 @@ export function connectedRomeManagedSlugs(
   const managed = new Set(ROME_MANAGED_CATALOG.map((e) => e.slug.toLowerCase()));
   return new Set(
     (connections ?? [])
-      .filter((c) => managed.has(c.service.toLowerCase()) && romeManagedGrantsUsable(c.grants))
-      .map((c) => c.service.toLowerCase()),
+      .map((c) => ({ kind: (c.connectionKind ?? c.service ?? "").toLowerCase(), grants: c.grants }))
+      .filter((c) => managed.has(c.kind) && romeManagedGrantsUsable(c.grants))
+      .map((c) => c.kind),
   );
 }
 

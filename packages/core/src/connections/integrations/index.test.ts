@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import type { WechatUserRuntime } from "../../channels/wechat-user.js";
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConnectionDescriptor, RuntimeKit } from "../types.js";
@@ -88,7 +88,7 @@ describe("registerBuiltinConnections", () => {
   });
 
   // Removal on disconnect follows `accountIdOf` on a Talk, and a fresh channel
-  // follows `LINKABLE_SERVICES`; the two must name the same services.
+  // follows `LINKABLE_KINDS`; the two must name the same kinds.
   it("names its accounts exactly for the services an agent can be linked to", () => {
     const registered = new Map<string, ConnectionDescriptor>();
     const registry = {
@@ -106,7 +106,7 @@ describe("registerBuiltinConnections", () => {
       (descriptor) => descriptor.capabilities.talker && descriptor.accountIdOf,
     );
     expect(naming.map((descriptor) => descriptor.service).sort()).toEqual(
-      [...LINKABLE_SERVICES].sort(),
+      [...LINKABLE_KINDS].sort(),
     );
     // A disconnect removes the account once its grant goes, which covers every
     // grant only while the service holds one.

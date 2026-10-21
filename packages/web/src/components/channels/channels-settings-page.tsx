@@ -46,7 +46,7 @@ import { Switch } from "@/components/ui/switch";
 import { artifactLocalName, artifactOwnerId } from "@/lib/artifact-name";
 import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
 import { fetchConnections, type ApiConnection } from "@/lib/connections-api";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 
 interface PageResponse {
   items: ChatSettingsListItem[];
@@ -144,7 +144,7 @@ export function ChannelsSettingsPage() {
       new Map(
         connections.flatMap((connection) =>
           connection.id !== null &&
-          LINKABLE_SERVICES.has(connection.service) &&
+          LINKABLE_KINDS.has(connection.connectionKind) &&
           connection.agent === null
             ? [
                 [
@@ -165,7 +165,7 @@ export function ChannelsSettingsPage() {
       new Map(
         connections.flatMap((connection) =>
           connection.id !== null &&
-          LINKABLE_SERVICES.has(connection.service) &&
+          LINKABLE_KINDS.has(connection.connectionKind) &&
           typeof connection.agent === "string"
             ? [[connection.id, connection.agent]]
             : [],

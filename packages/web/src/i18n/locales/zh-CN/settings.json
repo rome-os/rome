@@ -352,7 +352,7 @@
       },
       "loading": "正在加载聊天…",
       "emptyTitle": "未找到可配置的聊天",
-      "emptyDescription": "连接受支持的聊天服务，或发送一条消息让 Rome 发现该聊天。",
+      "emptyDescription": "在受支持的平台上连接一个账号，或发送一条消息让 Rome 发现该聊天。",
       "loadMore": "加载更多",
       "overrideCount_one": "{{count}} 项覆盖",
       "overrideCount_other": "{{count}} 项覆盖",

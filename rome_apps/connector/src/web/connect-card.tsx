@@ -73,7 +73,9 @@ interface CredentialStatusAdapter {
 }
 
 interface ConnectionStatus {
-  service: string;
+  connectionKind?: string;
+  /** The kind of connection, as a host from before the rename names it. */
+  service?: string;
   grants: Record<string, string>;
   connect: { url: string | null; available: boolean; unavailableReason: string | null } | null;
 }
@@ -92,7 +94,7 @@ function createRomeManagedAdapter(slug: string, name: string): CredentialStatusA
       const res = await fetch("/api/connections", { credentials: "include", cache: "no-store" });
       if (!res.ok) return null;
       const body = (await res.json()) as { connections?: ConnectionStatus[] };
-      return body.connections?.find((c) => c.service === slug) ?? null;
+      return body.connections?.find((c) => (c.connectionKind ?? c.service) === slug) ?? null;
     } catch {
       return null;
     }

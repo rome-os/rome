@@ -132,7 +132,7 @@ function apiConnection(
   }
   return {
     id: options.placeholder ? null : `fixture-${service}-${fixtureId++}`,
-    service,
+    connectionKind: service,
     label: service,
     grants: grantStates,
     display,

@@ -3,10 +3,10 @@ import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import type { ApiConnection } from "@/lib/connections-api";
 import { buildEnvoys, connectChoices } from "./envoys-model";
 
-function connection(overrides: Partial<ApiConnection> & { service: string }): ApiConnection {
+function connection(overrides: Partial<ApiConnection> & { connectionKind: string }): ApiConnection {
   return {
-    id: `${overrides.service}-id`,
-    label: overrides.service,
+    id: `${overrides.connectionKind}-id`,
+    label: overrides.connectionKind,
     grants: { bot: "authorized" },
     display: { bot: null },
     capabilities: {
@@ -16,7 +16,7 @@ function connection(overrides: Partial<ApiConnection> & { service: string }): Ap
     },
     connect: null,
     setups: {},
-    channel: overrides.service,
+    channel: overrides.connectionKind,
     agent: null,
     ...overrides,
   };
@@ -26,15 +26,15 @@ describe("buildEnvoys", () => {
   it("groups connected accounts by agent, main first", () => {
     const { envoys, unlinked } = buildEnvoys(
       [
-        connection({ service: "discord", agent: "sales:agent" }),
+        connection({ connectionKind: "discord", agent: "sales:agent" }),
         connection({
-          service: "feishu",
+          connectionKind: "feishu",
           agent: MAIN_AGENT_ID,
           display: {
             bot: { displayName: "Sales", handle: null, email: null, avatarUrl: null },
           },
         }),
-        connection({ service: "telegram", agent: "main" }),
+        connection({ connectionKind: "telegram", agent: "main" }),
       ],
       [{ name: "main", description: "The guardian's agent" }],
     );
@@ -47,10 +47,15 @@ describe("buildEnvoys", () => {
   it("names an account with no name after its platform, Lark apart from Feishu", () => {
     const { unlinked } = buildEnvoys(
       [
-        connection({ service: "feishu", platform: "feishu" }),
-        connection({ service: "feishu", id: "lark-id", channel: "lark-app", platform: "lark" }),
+        connection({ connectionKind: "feishu", platform: "feishu" }),
+        connection({
+          connectionKind: "feishu",
+          id: "lark-id",
+          channel: "lark-app",
+          platform: "lark",
+        }),
         // A core that predates `platform`.
-        connection({ service: "telegram_user", channel: "telegram_user" }),
+        connection({ connectionKind: "telegram_user", channel: "telegram_user" }),
       ],
       [],
     );
@@ -62,7 +67,7 @@ describe("buildEnvoys", () => {
   });
 
   it("lists connected accounts with no agent apart", () => {
-    const { envoys, unlinked } = buildEnvoys([connection({ service: "feishu" })], []);
+    const { envoys, unlinked } = buildEnvoys([connection({ connectionKind: "feishu" })], []);
     expect(envoys).toEqual([]);
     expect(unlinked.map((account) => account.channel)).toEqual(["feishu"]);
   });
@@ -71,13 +76,13 @@ describe("buildEnvoys", () => {
     const { envoys, unlinked } = buildEnvoys(
       [
         // Not a linkable service.
-        connection({ service: "whatsapp" }),
+        connection({ connectionKind: "whatsapp" }),
         // Never connected.
-        connection({ service: "discord", grants: { bot: "unauthorized" } }),
+        connection({ connectionKind: "discord", grants: { bot: "unauthorized" } }),
         // A placeholder.
-        connection({ service: "telegram", id: null, channel: null }),
+        connection({ connectionKind: "telegram", id: null, channel: null }),
         // A core that predates agent links.
-        connection({ service: "feishu", agent: undefined }),
+        connection({ connectionKind: "feishu", agent: undefined }),
       ],
       [],
     );
@@ -91,7 +96,7 @@ describe("buildEnvoys", () => {
 
   it("offers the loaded agents, main first, and not a linked one core no longer loads", () => {
     const { agents } = buildEnvoys(
-      [connection({ service: "discord", agent: "sales:agent" })],
+      [connection({ connectionKind: "discord", agent: "sales:agent" })],
       [{ name: "build" }, { name: "main" }],
     );
     expect(agents).toEqual([MAIN_AGENT_ID, "build"]);
@@ -99,7 +104,7 @@ describe("buildEnvoys", () => {
 
   it("falls back to the linked agents while the agent list is missing", () => {
     const { agents } = buildEnvoys(
-      [connection({ service: "discord", agent: "sales:agent" })],
+      [connection({ connectionKind: "discord", agent: "sales:agent" })],
       null,
     );
     expect(agents).toEqual([MAIN_AGENT_ID, "sales:agent"]);
@@ -108,7 +113,7 @@ describe("buildEnvoys", () => {
   it("marks the guardian's own account as a delegate with no card to open", () => {
     const own = (agent: string | null) =>
       connection({
-        service: "telegram_user",
+        connectionKind: "telegram_user",
         channel: "telegram_user",
         grants: { session: "authorized" },
         display: { session: null },
@@ -130,12 +135,17 @@ describe("buildEnvoys", () => {
 
 describe("connectChoices", () => {
   const placeholder = (service: string) =>
-    connection({ service, id: null, channel: null, grants: { bot: "unauthorized" } });
+    connection({
+      connectionKind: service,
+      id: null,
+      channel: null,
+      grants: { bot: "unauthorized" },
+    });
 
   it("starts even a first account as a new one where the service offers several", () => {
     const [choice] = connectChoices([
       connection({
-        service: "telegram",
+        connectionKind: "telegram",
         grants: { bot: "unauthorized" },
         severalAccounts: true,
         setups: { bot: "cid-old" },
@@ -147,7 +157,7 @@ describe("connectChoices", () => {
   it("re-attaches the setup of a service that holds one account", () => {
     const [choice] = connectChoices([
       connection({
-        service: "telegram_user",
+        connectionKind: "telegram_user",
         id: "left",
         grants: { session: "unauthorized" },
         setups: { session: "cid-live" },
@@ -158,7 +168,7 @@ describe("connectChoices", () => {
 
   it("marks a service whose one account is connected as taken", () => {
     const [choice] = connectChoices([
-      connection({ service: "telegram_user", grants: { session: "authorized" } }),
+      connection({ connectionKind: "telegram_user", grants: { session: "authorized" } }),
     ]);
     expect(choice).toMatchObject({ kind: "delegate", platform: "telegram", taken: true });
   });
@@ -166,7 +176,7 @@ describe("connectChoices", () => {
   it("offers a Slack account on the Slack platform", () => {
     const [choice] = connectChoices([
       connection({
-        service: "slack_bot",
+        connectionKind: "slack_bot",
         id: null,
         channel: null,
         grants: { bot: "unauthorized" },

@@ -157,7 +157,7 @@ describe("ChannelsSettingsPage", () => {
           connections: [
             {
               id: "discord-1",
-              service: "discord",
+              connectionKind: "discord",
               label: "Discord · Rome",
               grants: {},
               display: {},
@@ -252,7 +252,7 @@ describe("ChannelsSettingsPage", () => {
   it("shows a silent account instead of the agent picker", async () => {
     const connection = (service: string, linked: { agent?: string | null }) => ({
       id: `${service}-1`,
-      service,
+      connectionKind: service,
       label: service,
       grants: {},
       display: {},
@@ -322,7 +322,7 @@ describe("ChannelsSettingsPage", () => {
           connections: [
             {
               id: "discord-1",
-              service: "discord",
+              connectionKind: "discord",
               label: "Discord · Rome",
               grants: {},
               display: {},
@@ -379,7 +379,7 @@ describe("ChannelsSettingsPage", () => {
           connections: [
             {
               id: "discord-1",
-              service: "discord",
+              connectionKind: "discord",
               label: "Discord · Rome",
               grants: {},
               display: {},

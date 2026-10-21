@@ -43,7 +43,7 @@ import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
@@ -1267,9 +1267,9 @@ export const handlers = [
     if (agent !== null && !mockAgentNames.includes(agent)) {
       return HttpResponse.json({ error: `Agent ${agent} is not loaded.` }, { status: 400 });
     }
-    if (!LINKABLE_SERVICES.has(target.service)) {
+    if (!LINKABLE_KINDS.has(target.connectionKind)) {
       return HttpResponse.json(
-        { error: `${target.service} accounts do not take an agent.` },
+        { error: `${target.connectionKind} accounts do not take an agent.` },
         { status: 400 },
       );
     }
@@ -1284,8 +1284,8 @@ export const handlers = [
     return HttpResponse.json({
       account: {
         id,
-        service: target.service,
-        platform: target.platform ?? platformOf(target.service),
+        service: target.connectionKind,
+        platform: target.platform ?? platformOf(target.connectionKind),
         connectionId: target.id,
         agent,
       },
@@ -1327,17 +1327,18 @@ export const handlers = [
     // Core removes an account of a service that names its accounts, which
     // the linkable services are.
     const unconnectedAccount =
-      LINKABLE_SERVICES.has(connection.service) &&
+      LINKABLE_KINDS.has(connection.connectionKind) &&
       Object.values(connection.grants).every((state) => state === "unauthorized");
     if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
     const others = connections.connections.filter(
-      (candidate) => candidate !== connection && candidate.service === connection.service,
+      (candidate) =>
+        candidate !== connection && candidate.connectionKind === connection.connectionKind,
     );
     if (others.length > 0) {
       connections.connections.splice(connections.connections.indexOf(connection), 1);
     } else {
       connection.id = null;
-      connection.label = connection.service;
+      connection.label = connection.connectionKind;
       connection.channel = null;
       connection.agent = null;
     }

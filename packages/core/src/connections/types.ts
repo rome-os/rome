@@ -324,7 +324,7 @@ export interface ConnectionDescriptor {
    *  A service with a Talk that declares it holds accounts that exist only while
    *  connected: the last grant's disconnect removes the Connection
    *  (`isUnconnectedAccount`). Declare it only for a service in
-   *  `LINKABLE_SERVICES`, whose channels start fresh. */
+   *  `LINKABLE_KINDS`, whose channels start fresh. */
   accountIdOf?(grant: GrantName, profile: ProfileRecord): string | null;
   capabilities: Partial<{
     talker: {

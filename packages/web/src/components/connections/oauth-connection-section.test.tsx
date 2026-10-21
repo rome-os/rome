@@ -56,7 +56,7 @@ function githubCard(
 ): ConnectionCard {
   const connection: ApiConnection = {
     id: "conn-github",
-    service: "github",
+    connectionKind: "github",
     label: "GitHub",
     grants: { user: state },
     display: { user: display },
