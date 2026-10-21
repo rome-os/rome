@@ -30,7 +30,9 @@ Terms used on multiple surfaces with no entry yet. Each needs a full pass throug
 - **Notification** — notification transcript rows, [`architecture/notification-delivery.md`](../architecture/notification-delivery.md) — an out-of-band delivery to the guardian that is also a durable transcript row — not a channel message, not an approval.
 - **Relay (instance mailbox)** — relay runtime, dashboard — Rome Cloud-side durable mailbox buffering inbound events for an offline instance, drained in order with acknowledgements.
 - **Favor** — favors runtime, settings UI, [`apps.md#caller-identity`](apps.md#caller-identity) — Rome Cloud-minted currency gating a visitor-invoked action on another guardian's instance.
-- **Envoy** — envoy agent config, agent runner, one line in [`agents.md`](agents.md#agent-hierarchy) — the outbound-validation gate for agent-authored external messages — arguably a gap in `agents.md` rather than a new entry.
+- **Envoy** — envoy agent config, agent runner, one line in [`agents.md`](agents.md#agent-hierarchy) — the outbound-validation gate for agent-authored external messages — arguably a gap in `agents.md` rather than a new entry. The dashboard's envoy, the feature that links agents to accounts, is a product name and not a concept ([ADR](../adrs/chats-accounts-and-agents-model.md)).
+- **Thread** — Discord adapter, [`messaging.md`](messaging.md#conversation), [ADR](../adrs/chats-accounts-and-agents-model.md#chats) — a chat inside a chat, started from one of its messages. Its messages are the parent's, marked by thread, and the parent's reply rule applies.
+- **Reply rule** — conversation settings, dashboard conversation picker, [ADR](../adrs/chats-accounts-and-agents-model.md#chats) — per chat, per one of Rome's accounts: when that account's agent answers. It decides answering only, never what the agent sees.
 
 ## Related docs
 
