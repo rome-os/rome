@@ -10,7 +10,13 @@ import {
   loadLocalDashboard,
   shouldNavigateToLocalDashboard,
 } from "./window";
-import { readRuntimeTarget, registerIpcHandlers, writeRuntimeTarget } from "./ipc";
+import {
+  readDeviceEnabled,
+  readRuntimeTarget,
+  registerIpcHandlers,
+  writeDeviceEnabled,
+  writeRuntimeTarget,
+} from "./ipc";
 import { isQuitting, requestStopAndQuit, setupLifecycle } from "./lifecycle";
 import { setupUpdater, updateManager } from "./updater";
 import { RESTART_BUTTON, updateDialogFor } from "./update-dialog";
@@ -26,7 +32,9 @@ import { RuntimeController } from "./runtime/controller";
 import { RemoteRuntime } from "./runtime/remote";
 import type { Runtime } from "./runtime/runtime";
 import type { CloudAccount } from "./cloud/account";
-import { createCloudAccount } from "./cloud/electron";
+import { createCloudAccount, deviceName } from "./cloud/electron";
+import { DeviceHost, type DeviceStatus } from "./cloud/device-host";
+import { adoptLoginShellPath } from "./cloud/login-path";
 import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler } from "./protocol";
 
 const log = createLogger("main");
@@ -99,6 +107,46 @@ async function bootstrap() {
       },
     });
     runtimeManager = controller.runtime;
+    const deviceHost = cloudAccount
+      ? new DeviceHost({
+          cloudOrigin: cloudAccount.cloudOrigin,
+          deviceName: deviceName(),
+          credential: () => cloudAccount.credential(),
+          enabled: readDeviceEnabled,
+          onRevoked: async () => {
+            await controller.signOut();
+          },
+          prepare: process.platform === "darwin" ? adoptLoginShellPath : undefined,
+          onStatus: (status) => {
+            // Only the app's own pages and the open Rome hear it, as with device:get.
+            const target = controller.activeTarget();
+            const origin = target.kind === "remote" ? target.instance?.origin : null;
+            for (const window of BrowserWindow.getAllWindows()) {
+              if (window.isDestroyed()) continue;
+              const url = window.webContents.getURL();
+              if (url.startsWith("file:") || (origin && url.startsWith(`${origin}/`))) {
+                window.webContents.send("device:status", status);
+              }
+            }
+          },
+        })
+      : null;
+    // Only a Rome Cloud launch connects this computer. Switching to the VM
+    // restarts the app, so a VM launch never connects it or changes its PATH.
+    const device = {
+      status: (): DeviceStatus => deviceHost?.status() ?? { state: "off" },
+      start: async () => {
+        if (controller.activeTarget().kind === "remote") await deviceHost?.start();
+      },
+      stop: async () => {
+        await deviceHost?.stop();
+      },
+      setEnabled: async (enabled: boolean) => {
+        writeDeviceEnabled(enabled);
+        await deviceHost?.stop();
+        await device.start();
+      },
+    };
     const active = controller.activeTarget();
     log.info(
       active.kind === "remote"
@@ -110,6 +158,7 @@ async function bootstrap() {
       openSettingsWindow: () => createSettingsWindow(),
       cloudAccount,
       hasLocalRuntime,
+      device,
     });
 
     mainWindow = await createMainWindow(runtimeManager);
@@ -230,6 +279,7 @@ async function bootstrap() {
     setupLifecycle({
       runtimeManager,
       onShutdownStart: () => {
+        void device.stop();
         if (quittingWindow && !quittingWindow.isDestroyed()) return;
         for (const win of BrowserWindow.getAllWindows()) {
           if (!win.isDestroyed() && win.isVisible()) win.hide();
@@ -241,6 +291,7 @@ async function bootstrap() {
     // Enrollment is owned by the dashboard, so desktop startup never waits for
     // an instance token.
     void runtimeManager.ensureReady();
+    void device.start();
 
     log.info("Bootstrap complete");
   } catch (err) {

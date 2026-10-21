@@ -1,10 +1,11 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeAll, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
+import type { DesktopDeviceStatus } from "@/lib/electron-shell";
 import DeviceActivityPage from "./DeviceActivityPage";
 import SettingsPage from "./SettingsTabPage";
 
@@ -257,4 +258,74 @@ it("opens a device's page with the selected command from the URL", async () => {
   expect(screen.getByRole("link", { name: "Devices" }).getAttribute("href")).toBe(
     "/settings/devices",
   );
+});
+
+describe("this device in the Mac app", () => {
+  const online = () => ({
+    connection: "online",
+    checkedAt: new Date().toISOString(),
+    devices: [{ id: "this-mac", name: "RayBook", platform: "macos", status: "connected" }],
+  });
+
+  function installBridge() {
+    let listener: ((status: DesktopDeviceStatus) => void) | null = null;
+    const bridge = {
+      get: rs.fn(
+        async (): Promise<DesktopDeviceStatus> => ({
+          state: "connected",
+          deviceId: "this-mac",
+          name: "RayBook.local",
+        }),
+      ),
+      setEnabled: rs.fn(
+        async (enabled: boolean): Promise<DesktopDeviceStatus> => ({
+          state: enabled ? "connecting" : "disabled",
+          deviceId: "this-mac",
+          name: "RayBook.local",
+        }),
+      ),
+      onStatus: rs.fn((callback: (status: DesktopDeviceStatus) => void) => {
+        listener = callback;
+        return () => {
+          listener = null;
+        };
+      }),
+    };
+    window.rome = { device: bridge };
+    return { bridge, push: (status: DesktopDeviceStatus) => listener?.(status) };
+  }
+
+  afterEach(() => {
+    delete window.rome;
+  });
+
+  it("shows this computer under its Rome Cloud name and turns it off", async () => {
+    const { bridge } = installBridge();
+    renderDevices(online);
+    const toggle = await screen.findByRole("switch", { name: "Let Rome use this device" });
+    expect(screen.getByText("This device")).toBeTruthy();
+    expect(screen.getByText("macOS · Online")).toBeTruthy();
+    await userEvent.click(toggle);
+    expect(bridge.setEnabled).toHaveBeenCalledWith(false);
+    expect(await screen.findByText("macOS · Turned off")).toBeTruthy();
+  });
+
+  it("follows the status the app pushes", async () => {
+    const { push } = installBridge();
+    renderDevices(online);
+    await screen.findByText("macOS · Online");
+    act(() => push({ state: "offline", deviceId: "this-mac", name: "RayBook.local" }));
+    expect(await screen.findByText("macOS · Not connected")).toBeTruthy();
+  });
+
+  it("shows nothing in a browser or in an app without device controls", async () => {
+    renderDevices(online);
+    await screen.findByText("RayBook");
+    expect(screen.queryByText("This device")).toBeNull();
+    cleanup();
+    window.rome = {};
+    renderDevices(online);
+    await screen.findByText("RayBook");
+    expect(screen.queryByText("This device")).toBeNull();
+  });
 });

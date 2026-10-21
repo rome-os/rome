@@ -103,6 +103,11 @@ export type RuntimeTarget =
   | { kind: "local" }
   | { kind: "remote"; instance: { id: string; name: string; origin: string } | null };
 
+/** Whether this computer is reachable as a device of the signed-in account. */
+export type DeviceStatus =
+  | { state: "off" }
+  | { state: "disabled" | "connecting" | "connected" | "offline"; deviceId: string; name: string };
+
 export interface CloudState {
   /** False when this build's Rome Cloud origin cannot back a sign-in. */
   available: boolean;
@@ -114,6 +119,7 @@ export interface CloudState {
   savedTarget: RuntimeTarget;
   /** Whether this computer can run the private VM, and why not. */
   localVm: { supported: boolean; reason: string | null };
+  device: DeviceStatus;
 }
 
 export interface CloudInstance {
@@ -180,6 +186,7 @@ export interface RomeApi {
   on(channel: "updater:status", callback: (status: UpdateStatus) => void): () => void;
   on(channel: "rome-image:status", callback: (status: ImageUpdateStatus) => void): () => void;
   on(channel: "pill:name", callback: (name: string) => void): () => void;
+  on(channel: "device:status", callback: (status: DeviceStatus) => void): () => void;
   on(channel: string, callback: (...args: unknown[]) => void): () => void;
 }
 
@@ -245,6 +252,7 @@ function createMockRomeApi(): RomeApi {
     activeTarget: { kind: "local" },
     savedTarget: { kind: "local" },
     localVm: { supported: true, reason: null },
+    device: { state: "off" },
   };
 
   const log = (name: string, ...args: unknown[]) =>

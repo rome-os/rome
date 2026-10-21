@@ -59,6 +59,13 @@ describe("executor credential lifecycle", () => {
     expect(mocks.remove).not.toHaveBeenCalled();
     expect(mocks.connect.mock.calls[0][0].deviceToken).toBe(saved.token);
   });
+  it("reuses a stored Rome desktop session as the device identity", async () => {
+    const desktop = { ...saved, token: `romemob_${"b".repeat(43)}` };
+    mocks.read.mockResolvedValue(desktop);
+    await expect(runHost(new AbortController().signal)).rejects.toThrow("replaced");
+    expect(mocks.login).not.toHaveBeenCalled();
+    expect(mocks.connect.mock.calls[0][0].deviceToken).toBe(desktop.token);
+  });
   it.each([
     null,
     { token: "malformed" },

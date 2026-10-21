@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   type CloudInstance,
   type CloudState,
+  type DeviceStatus,
   errorMessage,
   romeApi,
   type RuntimeTarget,
@@ -19,6 +20,21 @@ type Busy = "sign-in" | "sign-out" | "list" | "save" | null;
 function sameTarget(a: RuntimeTarget, b: RuntimeTarget): boolean {
   if (a.kind === "local" || b.kind === "local") return a.kind === b.kind;
   return (a.instance?.id ?? null) === (b.instance?.id ?? null);
+}
+
+function deviceLine(device: DeviceStatus): string | null {
+  switch (device.state) {
+    case "connected":
+      return `This Mac is connected as ${device.name}. Your Rome can run programs on it.`;
+    case "connecting":
+      return "Connecting this Mac…";
+    case "offline":
+      return "This Mac is not connected.";
+    case "disabled":
+      return "Rome can't use this Mac. Turn it on in your Rome under Settings → Devices.";
+    case "off":
+      return null;
+  }
 }
 
 function OptionRow({
@@ -94,6 +110,14 @@ export function RuntimeTargetCard() {
     }
   }, []);
 
+  useEffect(
+    () =>
+      romeApi.on("device:status", (device) => {
+        setCloud((state) => (state ? { ...state, device } : state));
+      }),
+    [],
+  );
+
   useEffect(() => {
     romeApi.cloud
       .getState()
@@ -167,6 +191,9 @@ export function RuntimeTargetCard() {
       setBusy(null);
     }
   }, [target]);
+
+  // Only a Rome Cloud launch connects this computer.
+  const deviceText = cloud?.activeTarget.kind === "remote" ? deviceLine(cloud.device) : null;
 
   return (
     <Card>
@@ -262,6 +289,7 @@ export function RuntimeTargetCard() {
                 Sign out
               </button>
             </p>
+            {deviceText && <p className="text-xs text-muted-foreground">{deviceText}</p>}
           </div>
         )}
 

@@ -35,7 +35,7 @@ export async function connectHost(options: HostOptions): Promise<void> {
     isRecord(stored) &&
     stored.cloudUrl === cloudUrl &&
     typeof stored.token === "string" &&
-    /^romedev_[A-Za-z0-9_-]{43}$/.test(stored.token) &&
+    /^(?:romedev|romemob)_[A-Za-z0-9_-]{43}$/.test(stored.token) &&
     validId(stored.deviceId) &&
     typeof stored.name === "string"
       ? { cloudUrl, token: stored.token, deviceId: stored.deviceId, name: stored.name }

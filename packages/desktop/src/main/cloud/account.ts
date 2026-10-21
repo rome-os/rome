@@ -1,5 +1,6 @@
 import {
   CloudApi,
+  type CloudCredential,
   type CloudInstance,
   CredentialVault,
   type InstanceSession,
@@ -59,6 +60,11 @@ export class CloudAccount {
 
   async isSignedIn(): Promise<boolean> {
     return (await this.vault.getCloudCredential()) !== null;
+  }
+
+  /** The sign-in this computer also connects to the device Gateway with. */
+  credential(): Promise<CloudCredential | null> {
+    return this.vault.getCloudCredential();
   }
 
   /** One sign-in at a time: starting another cancels the browser wait. */

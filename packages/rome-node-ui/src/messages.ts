@@ -50,6 +50,13 @@ export interface NodeUiMessages {
     running: string;
   };
   back: string;
+  thisDevice: {
+    label: string;
+    toggle: string;
+    state: Record<"connected" | "connecting" | "offline" | "disabled", string>;
+    on: string;
+    off: string;
+  };
   detail: {
     commandsInDay: Plural;
     average: string;
@@ -157,6 +164,18 @@ const en: NodeUiMessages = {
     running: "{count} running",
   },
   back: "Devices",
+  thisDevice: {
+    label: "This device",
+    toggle: "Let Rome use this device",
+    state: {
+      connected: "Online",
+      connecting: "Connecting",
+      offline: "Not connected",
+      disabled: "Turned off",
+    },
+    on: "Your Rome can run programs on this computer as you. Turned off, it stays off after the app restarts.",
+    off: "Your Rome can't reach this computer until you turn it back on.",
+  },
   detail: {
     commandsInDay: {
       one: "command in the last 24 h",
@@ -273,6 +292,18 @@ const zhCN: NodeUiMessages = {
     running: "{count} 运行中",
   },
   back: "设备",
+  thisDevice: {
+    label: "本机",
+    toggle: "允许 Rome 使用本机",
+    state: {
+      connected: "在线",
+      connecting: "连接中",
+      offline: "未连接",
+      disabled: "已关闭",
+    },
+    on: "你的 Rome 可以以你的身份在这台电脑上运行程序。关闭后，重启 app 也保持关闭。",
+    off: "重新打开之前，你的 Rome 无法访问这台电脑。",
+  },
   detail: {
     commandsInDay: { one: "条命令（最近 24 小时）", other: "条命令（最近 24 小时）" },
     average: "平均 {rate}/分钟",

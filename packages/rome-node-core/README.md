@@ -190,7 +190,9 @@ await running;
 ```
 
 `showAuthorizationUrl` and `updateApplicationState` are application callbacks.
-A custom credential store implements `load`, `save`, and `clear`. The built-in
+A custom credential store implements `load`, `save`, and `clear`. A stored token
+is either a computer credential from `loginDevice` or `loginDeviceCode`, or the
+Rome desktop app's own Rome Cloud sign-in. The built-in
 login adapter uses a temporary loopback callback listener. Applications can
 supply their own authorization function returning a device session.
 

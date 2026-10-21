@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@rome-os/ui/button";
 import { Card } from "@rome-os/ui/card";
 import { cn } from "@rome-os/ui/cn";
@@ -44,6 +44,8 @@ export interface NodeDevicesProps {
   checkedAt?: number;
   refreshing?: boolean;
   onRefresh?: () => void;
+  /** Shown under the header, such as `NodeThisDevice` for the computer the host runs on. */
+  thisDevice?: ReactNode;
 }
 
 interface Context {
@@ -299,6 +301,7 @@ export function NodeDevices({
   checkedAt,
   refreshing = false,
   onRefresh,
+  thisDevice,
 }: NodeDevicesProps) {
   const m = messagesFor(locale);
   const socket = useNodeSocket(url);
@@ -395,6 +398,8 @@ export function NodeDevices({
           </Button>
         </SectionActions>
       </SectionHeader>
+
+      {thisDevice}
 
       {!supported && <p className="text-aux text-muted-foreground">{m.statsUnavailable}</p>}
 

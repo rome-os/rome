@@ -1,10 +1,27 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 /**
+ * This computer as a device of the signed-in account. The open Rome's
+ * dashboard gets this too; main answers only that origin and the app's pages.
+ */
+const device = {
+  get: (): Promise<DeviceStatus> => ipcRenderer.invoke("device:get"),
+  setEnabled: (enabled: boolean): Promise<DeviceStatus> =>
+    ipcRenderer.invoke("device:setEnabled", enabled),
+  onStatus: (callback: (status: DeviceStatus) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: DeviceStatus) => callback(status);
+    ipcRenderer.on("device:status", listener);
+    return () => ipcRenderer.removeListener("device:status", listener);
+  },
+};
+
+/**
  * Exposed API for renderer processes.
  * Accessed via `window.rome` in the renderer.
  */
 const api = {
+  device,
+
   settings: {
     get: (key: string): Promise<string | null> => ipcRenderer.invoke("settings:get", key),
     set: (key: string, value: string): Promise<void> =>
@@ -64,7 +81,13 @@ const api = {
   },
 
   on: (channel: string, callback: (...args: unknown[]) => void) => {
-    const validChannels = ["updater:status", "runtime:status", "rome-image:status", "pill:name"];
+    const validChannels = [
+      "updater:status",
+      "runtime:status",
+      "rome-image:status",
+      "pill:name",
+      "device:status",
+    ];
     if (validChannels.includes(channel)) {
       const listener = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args);
       ipcRenderer.on(channel, listener);
@@ -76,9 +99,10 @@ const api = {
 
 // The app's own pages load from file: and get the whole bridge. Anything else
 // in the main window is the dashboard, possibly a Rome on the internet, or a
-// sign-in page; it gets only the marker that says "inside the Mac app" (see
-// `isElectronShell` in the dashboard), and main refuses its IPC regardless.
-contextBridge.exposeInMainWorld("rome", location.protocol === "file:" ? api : {});
+// sign-in page. It gets the marker that says "inside the Mac app" (see
+// `isElectronShell` in the dashboard) and the device bridge, which main answers
+// only for the Rome this launch opened. Main refuses everything else.
+contextBridge.exposeInMainWorld("rome", location.protocol === "file:" ? api : { device });
 
 // Tag the document so the web app can conditionally apply
 // Electron-shell-only styles (drag regions, traffic-light insets) without
@@ -159,6 +183,10 @@ type RuntimeTarget =
   | { kind: "local" }
   | { kind: "remote"; instance: { id: string; name: string; origin: string } | null };
 
+type DeviceStatus =
+  | { state: "off" }
+  | { state: "disabled" | "connecting" | "connected" | "offline"; deviceId: string; name: string };
+
 interface CloudState {
   available: boolean;
   signedIn: boolean;
@@ -166,6 +194,7 @@ interface CloudState {
   activeTarget: RuntimeTarget;
   savedTarget: RuntimeTarget;
   localVm: { supported: boolean; reason: string | null };
+  device: DeviceStatus;
 }
 
 interface CloudInstance {

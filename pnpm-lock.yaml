@@ -471,6 +471,9 @@ importers:
       '@rome-os/libs':
         specifier: workspace:*
         version: link:../lib
+      '@rome-os/node-core':
+        specifier: workspace:*
+        version: link:../rome-node-core
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
