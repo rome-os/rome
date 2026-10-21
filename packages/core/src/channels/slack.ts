@@ -12,6 +12,7 @@ import type {
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
+import { WebSocket } from "ws";
 import { createLogger } from "../logger.js";
 import { InboundDedup } from "./inbound-dedup.js";
 
@@ -27,8 +28,12 @@ const SLACK_RECONNECT_MAX_MS = 30_000;
  *  the registry rebuild the epoch with its own backoff. */
 const SLACK_RECONNECT_MAX_ATTEMPTS = 5;
 const SLACK_USER_NAME_CACHE_SIZE = 500;
-/** How long setup waits for a probe connection's `hello`. */
+/** How long a new connection, setup's probe included, waits for `hello`. */
 const SLACK_HELLO_TIMEOUT_MS = 10_000;
+/** How often a live connection pings Slack. A ping still unanswered at the
+ *  next one marks the connection dead, since a half-open socket never closes
+ *  on its own. */
+const SLACK_PING_INTERVAL_MS = 30_000;
 
 /** The bot scopes a Rome Slack app asks for. Rome reads direct messages and
  *  mentions only, so it never asks to read channel history. */
@@ -274,20 +279,37 @@ export const slackWebApi: SlackWebApi = {
 
 // ── Socket Mode ──────────────────────────────────────────────────────────────
 
-/** The slice of a WebSocket the Socket Mode client uses. */
+/** The slice of a WebSocket the Socket Mode client uses. `close` drops the
+ *  connection at once and fires `close`, even when the peer is gone. */
 export interface SlackSocketLike {
   send(data: string): void;
   close(): void;
-  addEventListener(type: "open", listener: () => void): void;
+  /** Sends a protocol ping, answered by a `pong` event. */
+  ping(): void;
   addEventListener(type: "message", listener: (event: { data: unknown }) => void): void;
-  addEventListener(type: "close", listener: () => void): void;
+  addEventListener(type: "close" | "pong", listener: () => void): void;
   addEventListener(type: "error", listener: (event: unknown) => void): void;
 }
 
 export type CreateSlackSocket = (url: string) => SlackSocketLike;
 
-const createWebSocket: CreateSlackSocket = (url) =>
-  new WebSocket(url) as unknown as SlackSocketLike;
+const createWebSocket: CreateSlackSocket = (url) => {
+  const ws = new WebSocket(url);
+  return {
+    send: (data) => ws.send(data),
+    close: () => ws.terminate(),
+    ping: () => ws.ping(),
+    addEventListener: (type: string, listener: (event: never) => void) => {
+      if (type === "message") {
+        ws.on("message", (data) => (listener as (event: { data: unknown }) => void)({ data }));
+      } else if (type === "close" || type === "pong") {
+        ws.on(type, () => (listener as () => void)());
+      } else if (type === "error") {
+        ws.on("error", (error) => (listener as (event: unknown) => void)(error));
+      }
+    },
+  };
+};
 
 /** One Events API payload, as a Socket Mode `events_api` envelope carries it. */
 export interface SlackEventCallback {
@@ -383,6 +405,9 @@ export class SlackSocketMode {
   private stopped = false;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Watches the current socket: first for its `hello`, then for pongs. */
+  private watchdog: ReturnType<typeof setTimeout> | null = null;
+  private awaitingPong = false;
   private readonly abort = new AbortController();
 
   constructor(
@@ -395,6 +420,8 @@ export class SlackSocketMode {
       expectedAppId?: string;
       onEvent: (payload: SlackEventCallback) => void;
       onFault: (cause: unknown) => void;
+      helloTimeoutMs?: number;
+      pingIntervalMs?: number;
     },
   ) {}
 
@@ -408,9 +435,46 @@ export class SlackSocketMode {
     this.abort.abort(new Error("Slack Socket Mode stopped."));
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    this.clearWatchdog();
     const socket = this.socket;
     this.socket = null;
     socket?.close();
+  }
+
+  private clearWatchdog(): void {
+    if (this.watchdog) clearTimeout(this.watchdog);
+    this.watchdog = null;
+  }
+
+  private watch(socket: SlackSocketLike, delayMs: number, onExpire: () => void): void {
+    this.clearWatchdog();
+    this.watchdog = setTimeout(() => {
+      this.watchdog = null;
+      if (socket === this.socket) onExpire();
+    }, delayMs);
+    this.watchdog.unref?.();
+  }
+
+  /** Drops a connection that stopped answering and opens another. */
+  private abandon(socket: SlackSocketLike, reason: string): void {
+    log.warn("slack socket stopped answering", { reason });
+    this.clearWatchdog();
+    this.socket = null;
+    socket.close();
+    this.scheduleReconnect();
+  }
+
+  private ping(socket: SlackSocketLike): void {
+    const interval = this.config.pingIntervalMs ?? SLACK_PING_INTERVAL_MS;
+    this.watch(socket, interval, () => {
+      if (this.awaitingPong) {
+        this.abandon(socket, "no pong");
+        return;
+      }
+      this.awaitingPong = true;
+      socket.ping();
+      this.ping(socket);
+    });
   }
 
   private async connect(): Promise<void> {
@@ -418,7 +482,14 @@ export class SlackSocketMode {
     if (this.stopped) return;
     const socket = (this.config.createSocket ?? createWebSocket)(url);
     this.socket = socket;
+    this.awaitingPong = false;
+    this.watch(socket, this.config.helloTimeoutMs ?? SLACK_HELLO_TIMEOUT_MS, () =>
+      this.abandon(socket, "no hello"),
+    );
     socket.addEventListener("message", (event) => this.onMessage(socket, event.data));
+    socket.addEventListener("pong", () => {
+      if (socket === this.socket) this.awaitingPong = false;
+    });
     socket.addEventListener("close", () => this.onClose(socket));
     socket.addEventListener("error", (event) => {
       log.warn("slack socket error", { error: describe(event) });
@@ -448,6 +519,7 @@ export class SlackSocketMode {
         return;
       }
       this.reconnectAttempts = 0;
+      this.ping(socket);
       log.info("slack socket connected");
       return;
     }
@@ -471,12 +543,14 @@ export class SlackSocketMode {
 
   private onClose(socket: SlackSocketLike): void {
     if (socket !== this.socket || this.stopped) return;
+    this.clearWatchdog();
     this.socket = null;
     this.scheduleReconnect();
   }
 
   /** Opens the next connection, then closes the one Slack is retiring. */
   private replace(old: SlackSocketLike): void {
+    this.clearWatchdog();
     this.socket = null;
     old.close();
     this.scheduleReconnect(0);

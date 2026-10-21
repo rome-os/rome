@@ -1,8 +1,15 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { CreateSlackSocket, SlackSocketLike, SlackWebApi } from "../../channels/slack.js";
+import {
+  type CreateSlackSocket,
+  SlackApiError,
+  type SlackSocketLike,
+  type SlackWebApi,
+} from "../../channels/slack.js";
+import { CredentialRejected } from "../errors.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral, SetupState } from "../setup/types.js";
 import {
+  makeSlackBotDescriptor,
   makeSlackBotSetup,
   slackBotAccountId,
   slackBotDisplayName,
@@ -35,6 +42,7 @@ function helloAs(appId: string): CreateSlackSocket {
     const socket = {
       send: () => {},
       close: () => {},
+      ping: () => {},
       addEventListener: (type: string, listener: (event: { data: unknown }) => void) => {
         if (type === "message") listeners.push(listener);
       },
@@ -202,5 +210,29 @@ describe("slack bot setup", () => {
     await session.provideInput({ botToken: "xoxb-1", appToken: "xapp-good" });
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(commit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("slack bot talker", () => {
+  it("reports a bot token Slack refuses while opening a DM as a refused credential", async () => {
+    const api = fakeApi({
+      openDirectMessage: rs.fn(async () => {
+        throw new SlackApiError("invalid_auth");
+      }),
+    });
+    const descriptor = makeSlackBotDescriptor({ api, createSocket: helloAs("A1") });
+    const talker = descriptor.capabilities.talker!.build(
+      { bot: { material: { botToken: "xoxb-1", appToken: "xapp-1" }, expiresAt: "never" } },
+      { connectionId: "conn-1", persist: async () => {}, registerIngress: () => () => {} },
+    );
+    talker.start(
+      () => {},
+      () => {},
+    );
+    await rs.waitFor(() => expect(api.openConnection).toHaveBeenCalled());
+    await expect(talker.directMessaging!.conversationFor("T1/UADA")).rejects.toBeInstanceOf(
+      CredentialRejected,
+    );
+    await talker.stop();
   });
 });

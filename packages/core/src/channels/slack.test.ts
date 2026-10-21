@@ -3,6 +3,7 @@ import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import {
   SlackAdapter,
   SlackApiError,
+  SlackSocketMode,
   type SlackEventCallback,
   type SlackSocketLike,
   type SlackWebApi,
@@ -16,8 +17,12 @@ class FakeSocket implements SlackSocketLike {
   closed = false;
   private readonly listeners = new Map<string, Array<(event: never) => void>>();
 
+  pings = 0;
   send(data: string): void {
     this.sent.push(data);
+  }
+  ping(): void {
+    this.pings++;
   }
   close(): void {
     this.closed = true;
@@ -25,7 +30,7 @@ class FakeSocket implements SlackSocketLike {
   addEventListener(type: string, listener: (event: never) => void): void {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
-  emit(type: "message" | "close", data?: unknown): void {
+  emit(type: "message" | "close" | "pong", data?: unknown): void {
     for (const listener of this.listeners.get(type) ?? []) {
       (listener as (event: { data: unknown }) => void)({ data: JSON.stringify(data) });
     }
@@ -241,6 +246,78 @@ describe("SlackAdapter inbound", () => {
       }),
     });
     await expect(startedAdapter(api)).rejects.toThrow(SlackApiError);
+  });
+});
+
+describe("SlackSocketMode liveness", () => {
+  function socketMode() {
+    const sockets: FakeSocket[] = [];
+    const mode = new SlackSocketMode({
+      appToken: "xapp-1",
+      api: fakeApi(),
+      createSocket: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      onEvent: () => {},
+      onFault: () => {},
+      helloTimeoutMs: 1_000,
+      pingIntervalMs: 1_000,
+    });
+    return { mode, sockets };
+  }
+
+  it("drops a connection that never says hello and opens another", async () => {
+    rs.useFakeTimers();
+    try {
+      const { mode, sockets } = socketMode();
+      await mode.start();
+      await rs.advanceTimersByTimeAsync(1_000);
+      expect(sockets[0].closed).toBe(true);
+      await rs.advanceTimersByTimeAsync(1_000);
+      expect(sockets).toHaveLength(2);
+      mode.stop();
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("drops a connection whose ping goes unanswered and opens another", async () => {
+    rs.useFakeTimers();
+    try {
+      const { mode, sockets } = socketMode();
+      await mode.start();
+      sockets[0].emit("message", { type: "hello" });
+      await rs.advanceTimersByTimeAsync(1_000);
+      expect(sockets[0].pings).toBe(1);
+      await rs.advanceTimersByTimeAsync(1_000);
+      expect(sockets[0].closed).toBe(true);
+      await rs.advanceTimersByTimeAsync(1_000);
+      expect(sockets).toHaveLength(2);
+      mode.stop();
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("keeps a connection that answers its pings", async () => {
+    rs.useFakeTimers();
+    try {
+      const { mode, sockets } = socketMode();
+      await mode.start();
+      sockets[0].emit("message", { type: "hello" });
+      for (let round = 1; round <= 3; round++) {
+        await rs.advanceTimersByTimeAsync(1_000);
+        expect(sockets[0].pings).toBe(round);
+        sockets[0].emit("pong");
+      }
+      expect(sockets).toHaveLength(1);
+      expect(sockets[0].closed).toBe(false);
+      mode.stop();
+    } finally {
+      rs.useRealTimers();
+    }
   });
 });
 
