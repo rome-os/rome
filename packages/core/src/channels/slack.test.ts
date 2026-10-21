@@ -464,7 +464,7 @@ describe("SlackAdapter send", () => {
       { channel: "C1", markdown: "**done**", threadTs: "150.0" },
       expect.anything(),
     );
-    expect(receipt).toEqual({ conversationId: "C1:150.0", messageId: "100.1" });
+    expect(receipt).toEqual({ conversationId: "C1:150.0", messageId: "150.0:100.1" });
   });
 
   it("opens the direct message for a member's address", async () => {
