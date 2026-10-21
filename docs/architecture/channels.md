@@ -52,7 +52,8 @@ A reply can reach a chat as the agent writes it, rather than whole after the run
 - A Connection's streamed replies and ordinary sends share one write budget, and only a Connection that can stream has one. A write that hangs cannot stall the Connection's other writes, and it is not cut off.
 - A stop reaches the reply before the provider, so nothing new is written after it. When the worker that asked for the reply goes away, the reply stops the same way, even after the run has ended. A reply whose worker went away before it opened writes nothing.
 - A streamed reply is its turn's one answer in the chat's history, and holds the text the user was shown or may have been shown.
-- A message the platform refuses to edit again keeps what it shows, and the rest of the reply goes out as new messages. Feishu allows a message 20 edits, so a long Feishu reply can end in whole messages.
+- A message is edited no more often than its platform allows. Its last edit ends it at a readable break, and the reply goes on streaming in a new message. Feishu allows a message 20 edits. A message the platform refuses to edit again anyway keeps what it shows, and the rest of the reply goes out as new messages.
+- On Feishu, code that runs past the end of a message is closed there and opened again in the next, so each message shows it as code.
 - A streamed reply lands where a whole one would. Where a chat puts replies in a thread, every message of the reply goes into that thread.
 - A fault in the reply stream never ends the run. The result still reaches its caller. A reply that certainly wrote nothing is reported as failed, so the caller sends it. A reply that cannot settle is reported as unknown.
 
