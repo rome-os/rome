@@ -4,10 +4,10 @@ A Rome session is the durable product boundary around one continuous body of age
 
 **Contracts:**
 
-- For webchat and external IM, one session is the stable conversation. External chats are addressed by their channel and thread: a platform-native thread is a separate conversation, while an ordinary reply remains in its chat.
-- The transcript is durable and belongs to Rome, including participant and out-of-band messages the model provider has not seen yet. Provider-side execution state is a separate, re-derivable resource — losing it never loses the conversation.
-- A conversation does not expire because it is idle. Rome may evict in-memory session objects to release resources, but the next message resumes the same conversation and the same provider thread.
-- Only an explicit product boundary — New Chat, or entering another platform-native thread — creates another conversation. An ordinary reply never does.
+- For webchat and external IM, one session is the stable chat. External chats are addressed by their channel and thread: a platform-native thread is a separate session, while an ordinary reply remains in its chat.
+- The transcript is durable and belongs to Rome, including participant and out-of-band messages the model provider has not seen yet. Provider-side execution state is a separate, re-derivable resource — losing it never loses the chat.
+- A chat does not expire because it is idle. Rome may evict in-memory session objects to release resources, but the next message resumes the same chat and the same provider thread.
+- Only an explicit product boundary — New Chat, or entering another platform-native thread — creates another session. An ordinary reply never does.
 - Provider compaction manages the live context window without deleting Rome's durable transcript.
 - Usage belongs to the session that executed it: a first-class child subagent session owns its own [turns](#turn) and accounting, and the parent session does not duplicate that usage. Parent/child sessions are linked and appear as session lineage.
 - Project attribution matches the session's project directory (exact path or child path). A project's display name is metadata, not an attribution fallback. Forks and subagents inherit the parent's project. Sessions created without project context stay unattributed.
@@ -50,7 +50,7 @@ A turn is one request to an agent plus the agent work that follows until the age
 - Stop targets one turn and requests provider cancellation. Until that turn ends, Stop can be retried. Accepting the request does not mean execution has ended.
 - Stopping preserves received text and tool evidence, including partial replies. It does not roll back changes. A tool call without a received result has an unknown outcome, not a guarantee that nothing ran.
 - A turn that a backend restart cuts off fails when Rome starts again, with an error that names the restart. Each subagent call the turn was still waiting on fails with the same error. The turn is not resumed. A turn that started more than a day before the most recent turn stays open.
-- Cancelling provider execution does not close the conversation. The next message opens usable execution state and resumes available history without replaying the cancelled message.
+- Cancelling provider execution does not close the chat. The next message opens usable execution state and resumes available history without replaying the cancelled message.
 - A turn's outcome and wall-clock duration come from the [event](#event) that closes it, and its model attribution and token cost come from the accounting on its terminal event. Neither is read from fields mirrored onto individual messages.
 
 **Not to be confused with:**
@@ -162,7 +162,7 @@ The caller creating the fork chooses one of two modes:
 The caller also chooses how long the fork's provider branch lives:
 
 - **One-shot** (the default) — the provider branch is disposable. It closes when the single turn completes, and nothing can resume it. Recap and turn-feedback forks run this way.
-- **Continuable** — the caller asks for a provider thread of its own and Rome pins an agent session to it when the turn completes. Later turns resume that thread, so the fork becomes a conversation the guardian can keep talking to.
+- **Continuable** — the caller asks for a provider thread of its own and Rome pins an agent session to it when the turn completes. Later turns resume that thread, so the fork becomes a chat the guardian can keep talking to.
 
 **Contracts:**
 
@@ -171,7 +171,7 @@ The caller also chooses how long the fork's provider branch lives:
 - A turn can be forked only after it completes successfully and Rome persists that exact turn's provider checkpoint. Running, stopped, failed, and checkpoint-less turns are not forkable. Rome never substitutes another turn's transcript head or reconstructs provider history from visible output.
 - Every forked turn is recorded as its own fork session, linked back to the parent session and the turn the fork branched from, so its trajectory can be inspected like any other turn.
 - A fork is continuable only when it completed on a provider thread of its own. A branch whose turn errored, and one whose provider ran it inside the source thread, stay one-shot and read-only.
-- A fork holds no scheduled wake-ups and hosts no approval continuation, continuable or not. Both resume through the top-level session host, which answers into the conversation that scheduled them.
+- A fork holds no scheduled wake-ups and hosts no approval continuation, continuable or not. Both resume through the top-level session host, which answers into the chat that scheduled them.
 
 **Not to be confused with:**
 
