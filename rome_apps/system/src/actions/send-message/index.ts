@@ -323,46 +323,29 @@ async function resolveChatThreadId(
 }
 
 /**
- * The channel a send goes out on, and the service it is an account on.
- * `channel` names an account's channel, or a service, which stands for the
- * service's one connected account, so a send by service name still reaches an
- * account whose channel has an opaque id. A service with several connected
- * accounts is refused with each one's channel rather than guessed between.
+ * The service `channel` is an account on. `channel` is the account's id: its
+ * channel's name, as the channel a message arrived on spells it, and never a
+ * service standing for one of its accounts. A service named after itself, such
+ * as `webchat`, `email` or `agents`, is addressed by that name.
  *
  * A channel no Connection can send on is refused before anything else is
  * checked, so an unconfigured channel is not reported as a bad attachment or a
  * missing guardian mapping. The text is the one the channels service rejects
  * with.
  */
-async function resolveSendChannel(
-  channels: ChannelsService,
-  channel: string,
-): Promise<{ channel: string; service: string }> {
-  const listed = await channels.list();
-  const named = listed.find((candidate) => candidate.name === channel);
-  if (named?.sendable) return { channel, service: named.service ?? channel };
-  const accounts = listed.filter(
-    (candidate) => candidate.sendable && candidate.service === channel,
-  );
-  if (accounts.length > 1) {
-    const names = accounts.map((account) => `"${account.name}"`).join(", ");
-    throw new Error(
-      `"${channel}" has ${accounts.length} connected accounts: ${names}. Send again with one of them as \`channel\`.`,
-    );
-  }
-  const [account] = accounts;
-  if (account) return { channel: account.name, service: channel };
-  throw new Error(`No Talk connection registered for "${channel}"`);
+async function serviceOfSendable(channels: ChannelsService, channel: string): Promise<string> {
+  const target = (await channels.list()).find((candidate) => candidate.name === channel);
+  if (!target?.sendable) throw new Error(`No Talk connection registered for "${channel}"`);
+  return target.service ?? channel;
 }
 
 export async function executeSendMessage(
   channels: ChannelsService,
-  requested: SendMessageInput,
+  input: SendMessageInput,
   deps: SendMessageRuntimeDeps = {},
 ): Promise<ActionResult> {
-  const { channel, service } = await resolveSendChannel(channels, requested.channel);
-  const input = { ...requested, channel } as SendMessageInput;
-  const { text, attachments, turnId, parts } = input;
+  const { channel, text, attachments, turnId, parts } = input;
+  const service = await serviceOfSendable(channels, channel);
   const hasAttachments = !!attachments && attachments.length > 0;
   const hasParts = !!parts && parts.length > 0;
 
@@ -475,7 +458,7 @@ export function createSendMessageAction(
         channel: {
           type: "string",
           description:
-            'The account to send as: a service name, e.g. "telegram", "telegram_user", "whatsapp", "discord", "feishu", "webchat", "email", or "agents", which picks the service\'s one connected account, or an account\'s channel id, such as the channel a message arrived on, when the service has several. "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its id (a UUID, the threadId its messages arrive on) as `threadId`, or, from the main agent, its name as `to`.',
+            'The id of the account to send as: the channel a message arrived on, such as "webchat", "email", "agents", or a Telegram, Discord or Feishu account\'s id. A service name such as "telegram" reaches only an account whose id it is. "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its id (a UUID, the threadId its messages arrive on) as `threadId`, or, from the main agent, its name as `to`.',
         },
         threadId: {
           type: "string",

@@ -320,15 +320,7 @@ describe("send_message to an account with an opaque id", () => {
     };
   }
 
-  it("sends by service name through the service's one connected account", async () => {
-    const adapter = accounts(FIRST);
-
-    await executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" });
-
-    expect(adapter.send).toHaveBeenCalledWith(FIRST, "42", expect.objectContaining({ text: "hi" }));
-  });
-
-  it("sends by the account's channel id", async () => {
+  it("sends as the account its id names", async () => {
     const adapter = accounts(FIRST, SECOND);
 
     await executeSendMessage(adapter, { channel: SECOND, threadId: "42", text: "hi" });
@@ -340,12 +332,12 @@ describe("send_message to an account with an opaque id", () => {
     );
   });
 
-  it("refuses a service name that several accounts share, naming each", async () => {
-    const adapter = accounts(FIRST, SECOND);
+  it("refuses a service name that is not an account's id", async () => {
+    const adapter = accounts(FIRST);
 
     await expect(
       executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" }),
-    ).rejects.toThrow(`"telegram" has 2 connected accounts: "${FIRST}", "${SECOND}"`);
+    ).rejects.toThrow('No Talk connection registered for "telegram"');
     expect(adapter.send).not.toHaveBeenCalled();
   });
 
