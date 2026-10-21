@@ -316,7 +316,7 @@ describe("send_message to an account with an opaque id", () => {
         { name: "telegram", platform: "telegram", sendable: false },
         ...names.map((name) => ({ name, platform: "telegram", sendable: true })),
       ]),
-      send: rs.fn(async (_channel, conversationId) => ({ conversationId })),
+      send: rs.fn(async (_channel, chatId) => ({ chatId })),
       query: async () => [],
     };
   }
@@ -359,6 +359,36 @@ describe("send_message to an account with an opaque id", () => {
     expect(adapter.send).toHaveBeenCalledWith(
       FIRST,
       "1001",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  // People files a signed-in Telegram's links under its own key, not under
+  // the platform, until links are keyed by platform.
+  it("resolves to: guardian under the key People files the account's links by", async () => {
+    const adapter = accounts(FIRST);
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [
+        {
+          channelMappings: [
+            { channel: "telegram", channelUserId: "1001" },
+            { channel: "telegram_user", channelUserId: "2002" },
+          ],
+        },
+      ]),
+      linkKeyOf: rs.fn(async () => "telegram_user"),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: FIRST, to: "guardian", text: "hi" },
+      { personMappingRepo },
+    );
+
+    expect(personMappingRepo.linkKeyOf).toHaveBeenCalledWith(FIRST);
+    expect(adapter.send).toHaveBeenCalledWith(
+      FIRST,
+      "2002",
       expect.objectContaining({ text: "hi" }),
     );
   });

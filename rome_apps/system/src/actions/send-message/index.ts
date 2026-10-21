@@ -39,6 +39,9 @@ type GuardianPerson = {
 
 interface PersonMappingResolver {
   findByBondLevel(bondLevel: "guardian"): Promise<GuardianPerson[]>;
+  /** The key People files a link on `channel` under. Awaited, since a worker
+   *  reaches the repository through a proxy. */
+  linkKeyOf?(channel: string): string | Promise<string>;
 }
 
 /** Core's agent-name lookup, handed to the system app alone. Declared here
@@ -231,7 +234,8 @@ async function validateAttachmentSources(input: SendMessageInput): Promise<SendM
 }
 
 /** The guardian's address on `channel`: a link to the channel itself, or
- *  else the link People keys by the account's platform. */
+ *  else the link under the key People files that account's links by. Absent
+ *  that key, the account's platform stands in for it. */
 async function resolveGuardianThreadId(
   channel: string,
   platform: string,
@@ -245,9 +249,10 @@ async function resolveGuardianThreadId(
 
   const guardians = await deps.personMappingRepo.findByBondLevel("guardian");
   const mappings = guardians.flatMap((guardian) => guardian.channelMappings);
+  const key = (await deps.personMappingRepo.linkKeyOf?.(channel)) ?? platform;
   const mapping =
     mappings.find((candidate) => candidate.channel === channel) ??
-    mappings.find((candidate) => candidate.channel === platform);
+    mappings.find((candidate) => candidate.channel === key);
 
   if (!mapping) {
     throw new Error(`No guardian mapping found for channel "${channel}"`);
