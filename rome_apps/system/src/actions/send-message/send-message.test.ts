@@ -305,6 +305,72 @@ describe("send_message connection choice", () => {
   });
 });
 
+describe("send_message to an account with an opaque id", () => {
+  const FIRST = "6f1d2c3b-0000-4000-8000-000000000001";
+  const SECOND = "6f1d2c3b-0000-4000-8000-000000000002";
+
+  function accounts(...names: string[]): ChannelsService {
+    return {
+      list: rs.fn(async () => [
+        { name: "telegram", service: "telegram", sendable: false },
+        ...names.map((name) => ({ name, service: "telegram", sendable: true })),
+      ]),
+      send: rs.fn(async (_channel, conversationId) => ({ conversationId })),
+      query: async () => [],
+    };
+  }
+
+  it("sends by service name through the service's one connected account", async () => {
+    const adapter = accounts(FIRST);
+
+    await executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" });
+
+    expect(adapter.send).toHaveBeenCalledWith(FIRST, "42", expect.objectContaining({ text: "hi" }));
+  });
+
+  it("sends by the account's channel id", async () => {
+    const adapter = accounts(FIRST, SECOND);
+
+    await executeSendMessage(adapter, { channel: SECOND, threadId: "42", text: "hi" });
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      SECOND,
+      "42",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  it("refuses a service name that several accounts share, naming each", async () => {
+    const adapter = accounts(FIRST, SECOND);
+
+    await expect(
+      executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" }),
+    ).rejects.toThrow(`"telegram" has 2 connected accounts: "${FIRST}", "${SECOND}"`);
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("resolves to: guardian through the link People keys by service", async () => {
+    const adapter = accounts(FIRST);
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [
+        { channelMappings: [{ channel: "telegram", channelUserId: "1001" }] },
+      ]),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: FIRST, to: "guardian", text: "hi" },
+      { personMappingRepo },
+    );
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      FIRST,
+      "1001",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+});
+
 describe("send_message conversation recording", () => {
   it("stores a confirmed out-of-band delivery as a pending notification", async () => {
     const adapter = makeAdapter();

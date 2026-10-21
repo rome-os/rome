@@ -59,21 +59,37 @@ function service(channels: unknown[] = []) {
     channels: () => channels as Channels,
     registry: registryOf(CONNECTIONS, send),
     channelOf: serviceChannelOf,
+    serviceOf: (channel) => (channel === "whatsapp" ? "whatsapp" : null),
   });
   return { channelsService, send };
 }
 
 describe("createChannelsService", () => {
-  it("lists each channel and whether a Connection backs it", async () => {
+  it("lists each channel, its service, and whether a Connection backs it", async () => {
     const { channelsService } = service([
       { name: "discord", messages: null },
       { name: "whatsapp", messages: null },
+      { name: "unrecorded", messages: null },
     ]);
 
     expect(await channelsService.list()).toEqual([
-      { name: "discord", sendable: true },
-      { name: "telegram_user", sendable: true },
-      { name: "whatsapp", sendable: false },
+      { name: "discord", service: "discord", sendable: true },
+      { name: "telegram_user", service: "telegram_user", sendable: true },
+      { name: "whatsapp", service: "whatsapp", sendable: false },
+      { name: "unrecorded", sendable: false },
+    ]);
+  });
+
+  it("names the service of an account whose channel has an opaque id", async () => {
+    const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
+    const channelsService = createChannelsService({
+      channels: () => undefined,
+      registry: registryOf([{ connectionId: "tg-b", service: "telegram" }], send),
+      channelOf: () => "b1f0c3d2-0000-4000-8000-000000000001",
+    });
+
+    expect(await channelsService.list()).toEqual([
+      { name: "b1f0c3d2-0000-4000-8000-000000000001", service: "telegram", sendable: true },
     ]);
   });
 
@@ -167,6 +183,10 @@ describe("createChannelsService", () => {
     expect(() => (summary as unknown as { connectionIds: unknown }).connectionIds).toThrow(
       "ChannelSummary.connectionIds was removed in @rome-os/app-runtime 0.7",
     );
-    expect(JSON.parse(JSON.stringify(summary))).toEqual({ name: "discord", sendable: true });
+    expect(JSON.parse(JSON.stringify(summary))).toEqual({
+      name: "discord",
+      service: "discord",
+      sendable: true,
+    });
   });
 });

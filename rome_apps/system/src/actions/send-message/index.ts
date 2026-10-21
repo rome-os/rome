@@ -217,8 +217,11 @@ async function validateAttachmentSources(input: SendMessageInput): Promise<SendM
   return { ...input, attachments };
 }
 
+/** The guardian's address on `channel`: a link to the channel itself, or
+ *  else the link People keys by the account's service. */
 async function resolveGuardianThreadId(
-  channel: SendMessageChatInput["channel"],
+  channel: string,
+  service: string,
   deps: SendMessageRuntimeDeps,
 ): Promise<string> {
   if (!deps.personMappingRepo) {
@@ -228,9 +231,10 @@ async function resolveGuardianThreadId(
   }
 
   const guardians = await deps.personMappingRepo.findByBondLevel("guardian");
-  const mapping = guardians
-    .flatMap((guardian) => guardian.channelMappings)
-    .find((candidate) => candidate.channel === channel);
+  const mappings = guardians.flatMap((guardian) => guardian.channelMappings);
+  const mapping =
+    mappings.find((candidate) => candidate.channel === channel) ??
+    mappings.find((candidate) => candidate.channel === service);
 
   if (!mapping) {
     throw new Error(`No guardian mapping found for channel "${channel}"`);
@@ -299,6 +303,7 @@ function agentRecipient(channel: unknown, to: unknown): string | undefined {
 
 async function resolveChatThreadId(
   chat: SendMessageChatInput,
+  service: string,
   deps: SendMessageRuntimeDeps,
 ): Promise<string> {
   const agent = agentRecipient(chat.channel, chat.to);
@@ -312,35 +317,58 @@ async function resolveChatThreadId(
         : `Channel "${chat.channel}" only supports to: "guardian"; use threadId for explicit recipients`,
     );
   }
-  if (to === "guardian") return resolveGuardianThreadId(chat.channel, deps);
+  if (to === "guardian") return resolveGuardianThreadId(chat.channel, service, deps);
   if (chat.threadId) return chat.threadId;
   throw new Error(`Channel "${chat.channel}" requires a threadId or to: "guardian"`);
 }
 
 /**
- * Refuse a channel no Connection can send on before anything else is checked,
- * so an unconfigured channel is not reported as a bad attachment or a missing
- * guardian mapping. The text is the one the channels service rejects with.
+ * The channel a send goes out on, and the service it is an account on.
+ * `channel` names an account's channel, or a service, which stands for the
+ * service's one connected account, so a send by service name still reaches an
+ * account whose channel has an opaque id. A service with several connected
+ * accounts is refused with each one's channel rather than guessed between.
+ *
+ * A channel no Connection can send on is refused before anything else is
+ * checked, so an unconfigured channel is not reported as a bad attachment or a
+ * missing guardian mapping. The text is the one the channels service rejects
+ * with.
  */
-async function requireSendableChannel(channels: ChannelsService, channel: string): Promise<void> {
-  const target = (await channels.list()).find((candidate) => candidate.name === channel);
-  if (!target?.sendable) throw new Error(`No Talk connection registered for "${channel}"`);
+async function resolveSendChannel(
+  channels: ChannelsService,
+  channel: string,
+): Promise<{ channel: string; service: string }> {
+  const listed = await channels.list();
+  const named = listed.find((candidate) => candidate.name === channel);
+  if (named?.sendable) return { channel, service: named.service ?? channel };
+  const accounts = listed.filter(
+    (candidate) => candidate.sendable && candidate.service === channel,
+  );
+  if (accounts.length > 1) {
+    const names = accounts.map((account) => `"${account.name}"`).join(", ");
+    throw new Error(
+      `"${channel}" has ${accounts.length} connected accounts: ${names}. Send again with one of them as \`channel\`.`,
+    );
+  }
+  const [account] = accounts;
+  if (account) return { channel: account.name, service: channel };
+  throw new Error(`No Talk connection registered for "${channel}"`);
 }
 
 export async function executeSendMessage(
   channels: ChannelsService,
-  input: SendMessageInput,
+  requested: SendMessageInput,
   deps: SendMessageRuntimeDeps = {},
 ): Promise<ActionResult> {
-  const { channel, text, attachments, turnId, parts } = input;
+  const { channel, service } = await resolveSendChannel(channels, requested.channel);
+  const input = { ...requested, channel } as SendMessageInput;
+  const { text, attachments, turnId, parts } = input;
   const hasAttachments = !!attachments && attachments.length > 0;
   const hasParts = !!parts && parts.length > 0;
 
-  await requireSendableChannel(channels, channel);
-
   // The mail transport carries no attachments. Fail before validating sources
   // that email could never deliver. The adapter rejects them too.
-  if (channel === "email" && hasAttachments) {
+  if (service === "email" && hasAttachments) {
     throw new Error(
       "Email attachments are not supported by the mail transport. No email was sent.",
     );
@@ -348,7 +376,7 @@ export async function executeSendMessage(
 
   const safeInput = await validateAttachmentSources(input);
 
-  if (channel === "email") {
+  if (service === "email") {
     const email = input as SendMessageEmailInput;
     const hasHtml = !!email.html?.trim();
     const hasText =
@@ -405,7 +433,7 @@ export async function executeSendMessage(
   if (!text && !hasAttachments && !hasParts) {
     throw new Error("At least one of `text`, `attachments`, or `parts` must be provided");
   }
-  const threadId = await resolveChatThreadId(chat, deps);
+  const threadId = await resolveChatThreadId(chat, service, deps);
   const channelUserId = chat.channelUserId ?? threadId;
 
   log.info("sending message", {
@@ -446,19 +474,8 @@ export function createSendMessageAction(
       properties: {
         channel: {
           type: "string",
-          enum: [
-            "telegram",
-            "telegram_user",
-            "whatsapp",
-            "wechat",
-            "discord",
-            "webchat",
-            "email",
-            "feishu",
-            "agents",
-          ],
           description:
-            'Registered channel adapter name, e.g. "telegram", "whatsapp", "discord", "feishu", or "email". "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its id (a UUID, the threadId its messages arrive on) as `threadId`, or, from the main agent, its name as `to`.',
+            'The account to send as: a service name, e.g. "telegram", "telegram_user", "whatsapp", "discord", "feishu", "webchat", "email", or "agents", which picks the service\'s one connected account, or an account\'s channel id, such as the channel a message arrived on, when the service has several. "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its id (a UUID, the threadId its messages arrive on) as `threadId`, or, from the main agent, its name as `to`.',
         },
         threadId: {
           type: "string",

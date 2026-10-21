@@ -1742,6 +1742,11 @@ export interface ChannelMessageQuery {
 export interface ChannelSummary {
   /** The channel's name, as every stored row and link spells it. */
   name: string;
+  /** The service the channel is an account on, such as `telegram`. A service
+   *  can hold several accounts, each its own channel, and a channel named
+   *  after its service is only one of them. Absent where Rome does not know
+   *  the service. */
+  service?: string;
   /** Whether a Connection backs the channel, so `send` has something to send
    *  through. A send can still fail while that Connection is locked or
    *  offline. */

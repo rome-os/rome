@@ -45,6 +45,9 @@ export interface ChannelsServiceDeps {
   /** Names the channel each Connection backs. A Connection it answers null
    *  for backs no channel and is skipped. */
   channelOf: ChannelOf;
+  /** The service a channel no Connection backs belongs to, or null where no
+   *  record names one. A backed channel's service is its Connection's. */
+  serviceOf?: (channel: string) => string | null;
   /** Paces a send while reply streaming is on. */
   pacing?: ConnectionPacing;
 }
@@ -80,11 +83,16 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
         for (const connection of talking(deps.registry)) {
           const name = deps.channelOf(connection);
           if (name === null) continue;
-          summaries.set(name, { name, sendable: true });
+          summaries.set(name, { name, service: connection.service, sendable: true });
         }
         for (const channel of deps.channels() ?? []) {
           if (!summaries.has(channel.name)) {
-            summaries.set(channel.name, { name: channel.name, sendable: false });
+            const service = deps.serviceOf?.(channel.name) ?? undefined;
+            summaries.set(channel.name, {
+              name: channel.name,
+              ...(service ? { service } : {}),
+              sendable: false,
+            });
           }
         }
         return [...summaries.values()].map((summary) =>
