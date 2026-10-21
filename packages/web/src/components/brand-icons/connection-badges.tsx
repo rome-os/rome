@@ -130,7 +130,7 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
   slack: { Icon: SlackIcon, badge: "border border-border bg-white" },
   google: { Icon: GoogleIcon, badge: "border border-border bg-white" },
   github: { Icon: GithubIcon, badge: "bg-foreground text-background" },
-  shopify: { Icon: ShopifyIcon, badge: "bg-[#7AB55C] text-white" },
+  shopify: { Icon: ShopifyIcon, badge: "bg-foreground text-background" },
   webchat: {
     Icon: RomeLogo,
     badge: "bg-foreground text-background",

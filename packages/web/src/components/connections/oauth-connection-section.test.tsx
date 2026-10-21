@@ -259,6 +259,34 @@ describe("OAuthConnectionSection", () => {
     expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ force: true });
   });
 
+  it("shows the store form when Reconnect starts with a question (Shopify)", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            cid: "setup-shop",
+            reattached: false,
+            state: {
+              status: "awaiting-input",
+              form: {
+                instructions: "Enter your store's myshopify.com address.",
+                fields: [{ name: "shop", label: "Store address", secret: false }],
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    renderSection(
+      githubCard("degraded", {
+        display: { displayName: "Acme Goods", handle: null, email: null, avatarUrl: null },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    expect(await screen.findByLabelText("Store address")).toBeTruthy();
+    expect(screen.getByText("Enter your store's myshopify.com address.")).toBeTruthy();
+  });
+
   it("hands Connect to the system browser in the desktop shell", async () => {
     const assign = rs.fn();
     const open = rs.fn();

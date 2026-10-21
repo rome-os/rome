@@ -250,6 +250,20 @@ describe("Rome Cloud OAuth brokering", () => {
       );
     });
 
+    it("reports a body that fails mid-read as RenewalUnavailable", async () => {
+      stubFetch(async () => {
+        const body = new ReadableStream({
+          start(controller) {
+            controller.error(new Error("socket hang up"));
+          },
+        });
+        return new Response(body, { status: 200 });
+      });
+      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+        RenewalUnavailable,
+      );
+    });
+
     it("reports a refusal as a plain error, so the grant needs a reconnect", async () => {
       stubFetch(async () =>
         json({ error: "invalid_grant", error_description: "Reconnect it in Rome." }, 400),

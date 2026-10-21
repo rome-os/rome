@@ -264,12 +264,25 @@ export async function refreshRomeCloudOAuthGrant(
     throw new RenewalUnavailable("Rome Cloud OAuth refresh did not complete.", error);
   }
 
-  const data = (await response.json().catch(() => null)) as {
+  // fetch resolves at the headers, so the body can still time out or drop.
+  // That is Rome Cloud not answering, not a refusal.
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    throw new RenewalUnavailable("Rome Cloud OAuth refresh response did not complete.", error);
+  }
+  let data: {
     provider?: unknown;
     tokens?: OAuthTokenBundle;
     error?: string;
     error_description?: string;
   } | null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = null;
+  }
 
   if (!response.ok) {
     const message =

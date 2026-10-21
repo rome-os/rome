@@ -262,23 +262,37 @@ export function OAuthConnectionSection({
         {expired && (
           <p className="text-ui text-warning-fg">{t("connections.oauth.accessExpired")}</p>
         )}
-        {pendingRedirectControls ?? (
-          <Button
-            variant={expired ? "default" : "outline"}
-            size="sm"
-            disabled={setup.busy}
-            aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
-            onClick={() => beginConnect(true)}
-          >
-            {setup.busy && (
-              <Spinner
-                data-icon="inline-start"
-                size="sm"
-                label={t("connections.oauth.reconnecting")}
-              />
-            )}
-            {t("connections.oauth.reconnect")}
-          </Button>
+        {setup.state?.status === "awaiting-input" ? (
+          // A reconnect whose setup asks something before the hand-off (Shopify
+          // asks which store) renders that form here, as the unconnected card does.
+          <SetupRenderer
+            state={setup.state}
+            busy={setup.busy}
+            error={setup.error}
+            onSubmit={setup.submit}
+            onCancel={setup.cancel}
+            onRetry={() => beginConnect(true)}
+            labels={{ continue: t("connections.oauth.reconnect") }}
+          />
+        ) : (
+          (pendingRedirectControls ?? (
+            <Button
+              variant={expired ? "default" : "outline"}
+              size="sm"
+              disabled={setup.busy}
+              aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
+              onClick={() => beginConnect(true)}
+            >
+              {setup.busy && (
+                <Spinner
+                  data-icon="inline-start"
+                  size="sm"
+                  label={t("connections.oauth.reconnecting")}
+                />
+              )}
+              {t("connections.oauth.reconnect")}
+            </Button>
+          ))
         )}
       </div>
     </ConnectionSlotCard>
