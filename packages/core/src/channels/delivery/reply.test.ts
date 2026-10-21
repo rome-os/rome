@@ -4,6 +4,7 @@ import { FakeClock } from "../../test/kit/clock.js";
 import { Outlasted, Pacer } from "./pacer.js";
 import { type DeliveryEvent, ReplyDelivery } from "./reply.js";
 import {
+  type DeliveryCapabilities,
   DeliveryFailure,
   type DeliveryPolicy,
   type DeliveryTransport,
@@ -33,7 +34,11 @@ class MemoryPlatform implements DeliveryTransport {
   readonly edit?: (receipt: PartReceipt, text: string) => Promise<void>;
 
   constructor(
-    readonly capabilities = { maxPartLength: 20, edit: true, budget: OPEN_BUDGET },
+    readonly capabilities: DeliveryCapabilities = {
+      maxPartLength: 20,
+      edit: true,
+      budget: OPEN_BUDGET,
+    },
     private readonly conversation = "c1",
   ) {
     if (capabilities.edit)
@@ -299,6 +304,225 @@ describe("ReplyDelivery", () => {
 
       expect(platform.shown).toEqual(["first", " second"]);
       expect(outcome.status).toBe("delivered");
+    });
+  });
+
+  describe("per-message edit cap", () => {
+    const capped = (maxEditsPerMessage: number, maxPartLength = 100) => {
+      platform = new MemoryPlatform({
+        maxPartLength,
+        maxEditsPerMessage,
+        edit: true,
+        budget: OPEN_BUDGET,
+      });
+      return reply();
+    };
+
+    it("settles at the last edit and keeps editing subsequent messages", async () => {
+      const delivery = capped(2);
+      await stream(delivery, "one two three four five six seven eight nine ", 1000);
+      const finished = delivery.finish();
+      await advance(1000);
+      const outcome = await finished;
+
+      expect(platform.messages.map((message) => message.history)).toEqual([
+        ["one ", "one two ", "one two three "],
+        ["four ", "four five ", "four five six "],
+        ["seven ", "seven eight ", "seven eight nine "],
+      ]);
+      expect(outcome.status).toBe("delivered");
+      expect(outcome.parts.every((part) => part.state === "settled")).toBe(true);
+    });
+
+    it("holds the last edit until a forward break without retracting shown text", async () => {
+      const delivery = capped(1);
+      delivery.accept(delta("one tw"));
+      await advance(1000);
+      delivery.accept(delta("o"));
+      await advance(1000);
+      expect(platform.messages[0]!.history).toEqual(["one tw"]);
+      delivery.accept(delta(" three"));
+      await advance(1000);
+      expect(platform.messages.map((message) => message.history)).toEqual([
+        ["one tw", "one two "],
+        ["three"],
+      ]);
+      await delivery.finish();
+      expect(platform.shown.join("")).toBe("one two three");
+    });
+
+    it("releases the last edit when the block completes without a forward break", async () => {
+      const delivery = capped(1, 10);
+      delivery.accept(delta("abc"));
+      await advance(1000);
+      delivery.accept(delta("def"));
+      await advance(1000);
+      expect(platform.messages[0]!.history).toEqual(["abc"]);
+      const finished = delivery.finish();
+      await advance(1000);
+      expect((await finished).status).toBe("delivered");
+      expect(platform.messages[0]!.history).toEqual(["abc", "abcdef"]);
+    });
+
+    it("releases the last edit when the message fills without a forward break", async () => {
+      const delivery = capped(1, 10);
+      delivery.accept(delta("abc"));
+      await advance(1000);
+      delivery.accept(delta("defghij"));
+      await advance(1000);
+      expect(platform.messages[0]!.history).toEqual(["abc"]);
+      delivery.accept(delta("k"));
+      await advance(1000);
+      expect(platform.messages.map((message) => message.history)).toEqual([
+        ["abc", "abcdefghij"],
+        ["k"],
+      ]);
+      await delivery.finish();
+    });
+
+    it("never edits when the cap is zero", async () => {
+      const delivery = capped(0);
+      await stream(delivery, "one two three ", 1000);
+      const outcome = await delivery.finish();
+      expect(events.filter((event) => event.write === "edit")).toEqual([]);
+      expect(platform.shown.join("")).toBe("one two three ");
+      expect(outcome.status).toBe("delivered");
+    });
+
+    it.each([
+      "rate-limited",
+      "unavailable",
+    ] as const)("does not charge a definite %s refusal", async (kind) => {
+      const delivery = capped(1);
+      delivery.accept(delta("one "));
+      await advance(1000);
+      platform.failures.push({ write: "edit", failure: new DeliveryFailure(kind, "try later") });
+      delivery.accept(delta("two "));
+      await advance(2000);
+      delivery.accept(delta("three "));
+      await advance(1000);
+      const outcome = await delivery.finish();
+      expect(events.filter((event) => event.write === "edit").map((event) => event.result)).toEqual(
+        [kind, "accepted"],
+      );
+      expect(platform.shown).toEqual(["one two ", "three "]);
+      expect(outcome.status).toBe("delivered");
+    });
+
+    it("charges an unknown edit and fails unknown when the cap leaves no reconciliation", async () => {
+      const delivery = capped(1);
+      delivery.accept(delta("one "));
+      await advance(1000);
+      platform.lostEditAnswers = 1;
+      delivery.accept(delta("two three"));
+      await advance(1000);
+      const outcome = await delivery.finish();
+      expect(outcome).toMatchObject({ status: "unknown", failure: { kind: "unknown" } });
+      expect(events.filter((event) => event.write === "edit")).toHaveLength(1);
+      expect(platform.shown).toEqual(["one two "]);
+    });
+
+    it("uses the remaining allowance to reconcile an unknown edit", async () => {
+      const delivery = capped(2);
+      delivery.accept(delta("one "));
+      await advance(1000);
+      platform.lostEditAnswers = 1;
+      delivery.accept(delta("two "));
+      await advance(2000);
+      delivery.accept(delta("three "));
+      await advance(1000);
+      const outcome = await delivery.finish();
+      expect(events.filter((event) => event.write === "edit").map((event) => event.result)).toEqual(
+        ["unknown", "accepted"],
+      );
+      expect(platform.shown).toEqual(["one two ", "three "]);
+      expect(outcome.status).toBe("delivered");
+    });
+
+    it("marks a rewritten capped part diverged without another edit", async () => {
+      const delivery = capped(1);
+      delivery.accept(delta("one ", "a"));
+      await advance(1000);
+      delivery.accept(delta("two ", "a"));
+      await advance(1000);
+      delivery.accept(text("ONE two three", "a"));
+      const outcome = await delivery.finish();
+      expect(platform.shown).toEqual(["one two ", "three"]);
+      expect(events.filter((event) => event.write === "edit")).toHaveLength(1);
+      expect(outcome).toMatchObject({ status: "delivered", diverged: true });
+      expect(outcome.parts[0]).toMatchObject({ state: "settled", diverged: true });
+    });
+
+    it("retains reply-wide blocks fallback for unsupported edits", async () => {
+      const delivery = capped(2);
+      delivery.accept(delta("one "));
+      await advance(1000);
+      platform.failures.push({
+        write: "edit",
+        failure: new DeliveryFailure("unsupported", "cannot edit"),
+      });
+      delivery.accept(delta("two "));
+      await advance(1000);
+      delivery.accept(delta("three "));
+      const finished = delivery.finish();
+      await advance(2000);
+      expect((await finished).status).toBe("delivered");
+      expect(platform.shown).toEqual(["one ", "two three "]);
+      expect(events.filter((event) => event.write === "edit").map((event) => event.result)).toEqual(
+        ["unsupported"],
+      );
+    });
+  });
+
+  describe("codec context", () => {
+    /** Reopens a code span that the source before the message left open.
+     *  It requires context, so a render without it fails the reply. */
+    const spans: DeliveryTransport["codec"] = {
+      render: (source, _settled, context) => {
+        if (!context) throw new Error("render without context");
+        return (context.before.split("`").length - 1) % 2 ? `\`${source}` : source;
+      },
+      measure: (rendered) => rendered.length,
+    };
+    const withSpans = (capabilities: Partial<DeliveryCapabilities> = {}) => {
+      platform = new MemoryPlatform({
+        maxPartLength: 10,
+        edit: true,
+        budget: OPEN_BUDGET,
+        ...capabilities,
+      });
+      Object.assign(platform, { codec: spans });
+      return reply({ editIntervalMs: 0 });
+    };
+
+    it("fits a part that reopens a span in the limit", async () => {
+      const delivery = withSpans();
+      delivery.accept(text("ab `cdef ghijklmnop"));
+      const outcome = await delivery.finish();
+      expect(outcome.status).toBe("delivered");
+      expect(platform.shown).toEqual(["ab `cdef ", "`ghijklmno", "`p"]);
+    });
+
+    it("edits a settled part whose source is unchanged when the text before it changes", async () => {
+      const delivery = withSpans();
+      delivery.accept(text("abcd efgh ijkl", "a"));
+      await advance(0);
+      await advance(0);
+      expect(platform.shown).toEqual(["abcd efgh ", "ijkl"]);
+      delivery.accept(text("abc` efgh ijkl", "a"));
+      const outcome = await delivery.finish();
+      expect(platform.shown).toEqual(["abc` efgh ", "`ijkl"]);
+      expect(outcome.status).toBe("delivered");
+    });
+
+    it("gives the part after a capped one its context", async () => {
+      const delivery = withSpans({ maxPartLength: 100, maxEditsPerMessage: 1 });
+      delivery.accept(delta("`one "));
+      await advance(0);
+      delivery.accept(delta("two three"));
+      await advance(0);
+      await delivery.finish();
+      expect(platform.shown).toEqual(["`one two ", "`three"]);
     });
   });
 

@@ -23,6 +23,10 @@ export interface DeliveryCapabilities {
   maxPartLength: number;
   /** The platform can replace a message's text after sending it. */
   edit: boolean;
+  /** The most edits one message accepts, when the platform limits them. An
+   *  edit counts once it is accepted or its result is unknown. Zero delivers
+   *  `edit` as `blocks`. */
+  maxEditsPerMessage?: number;
   /** How fast one account may write. Every write the account makes, ordinary
    *  sends included, shares it. This is the one authority: whoever wires the
    *  engine builds the account's Pacer from it, and routes the account's
@@ -35,8 +39,8 @@ export interface DeliveryCapabilities {
 
 /**
  * How replies stream, narrowed by capabilities: `edit` on a platform that
- * cannot edit delivers as `blocks`. Callers build a policy from constants, and
- * nothing parses one from configuration.
+ * cannot edit, or allows no edits per message, delivers as `blocks`. Callers
+ * build a policy from constants, and nothing parses one from configuration.
  */
 export interface DeliveryPolicy {
   /**
@@ -76,14 +80,24 @@ export function effectiveMode(
   policy: DeliveryPolicy,
   capabilities: DeliveryCapabilities,
 ): DeliveryMode {
-  return policy.mode === "edit" && !capabilities.edit ? "blocks" : policy.mode;
+  return policy.mode === "edit" && (!capabilities.edit || capabilities.maxEditsPerMessage === 0)
+    ? "blocks"
+    : policy.mode;
+}
+
+/** Where rendered source sits in its block. */
+export interface TextContext {
+  /** The block's source before the message's own source. */
+  before: string;
 }
 
 /** Turns source text into what the platform displays, and measures it. */
 export interface TextCodec {
   /** `settled` is false for a preview, so a codec may close what the source
-   *  leaves open (a fenced block, an emphasis). */
-  render(source: string, settled: boolean): string;
+   *  leaves open (a fenced block, an emphasis). The engine passes `context`
+   *  on every call. The result depends only on the arguments, so a codec
+   *  keeps no state between calls. */
+  render(source: string, settled: boolean, context?: TextContext): string;
   /** The platform's measure of `rendered`. Must not shrink as `rendered`
    *  grows from a longer source. */
   measure(rendered: string): number;
