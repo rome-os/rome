@@ -581,6 +581,7 @@ export class FeishuAdapter {
     const observed = this.observedConversations.get(chatId);
     const descriptor: ChatDescriptor = {
       ref: { connectionId: this.connectionId, chatId: chatId as ChatId },
+      connectionKind: "feishu",
       service: "feishu",
       kind: observed?.kind ?? "group",
       displayName: observed?.displayName ?? chatId,

@@ -1684,6 +1684,9 @@ export interface ChatRef {
 
 export interface ChatDescriptor {
   ref: ChatRef;
+  /** The kind of connection the chat is reached through, such as `telegram_user`. */
+  connectionKind: string;
+  /** @deprecated Read `connectionKind`, which carries the same value. */
   service: string;
   kind: "dm" | "group" | "channel" | "topic";
   displayName: string;

@@ -22,7 +22,7 @@ import { toWechatUserChannelMessage } from "../../channels/wechat-user-messages.
 import {
   createWechatUserDescriptor,
   makeWechatUserSetup,
-  WECHAT_USER_SERVICE,
+  WECHAT_USER_KIND,
   wechatUserGrantProfileSchema,
 } from "./wechat-user.js";
 
@@ -595,13 +595,15 @@ describe("the WeChat personal Talker", () => {
     expect(page.conversations).toEqual([
       {
         ref: { connectionId: "conn-wechat-user", chatId: "45357963768@chatroom" },
-        service: WECHAT_USER_SERVICE,
+        connectionKind: WECHAT_USER_KIND,
+        service: WECHAT_USER_KIND,
         kind: "group",
         displayName: "Karball",
       },
       {
         ref: { connectionId: "conn-wechat-user", chatId: "wxid_friend" },
-        service: WECHAT_USER_SERVICE,
+        connectionKind: WECHAT_USER_KIND,
+        service: WECHAT_USER_KIND,
         kind: "dm",
         displayName: "A Friend",
       },

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
-import { createTestDb, serviceChannelOf, type TestDb } from "../test/helpers.js";
+import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
@@ -22,7 +22,7 @@ describe("a channel's Connection across epochs", () => {
       epoch: number;
     }> = [];
     const descriptor: ConnectionDescriptor = {
-      service: "discord",
+      connectionKind: "discord",
       auth: {
         bot: tokenPaste({ label: "token", validate: async () => {} }),
       },
@@ -71,7 +71,7 @@ describe("a channel's Connection across epochs", () => {
         message.senderId === "guardian",
     );
     const ports = connectionPorts(
-      { registry, channelOf: serviceChannelOf, ...(gated ? { admit } : {}) },
+      { registry, channelOf: kindChannelOf, ...(gated ? { admit } : {}) },
       "discord",
     )!;
     const sibling: string[] = [];
@@ -156,7 +156,7 @@ describe("a channel's Connection across epochs", () => {
     let deliver: ((message: ChannelMessage) => void) | undefined;
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     registry.register({
-      service: "telegram",
+      connectionKind: "telegram",
       auth: { bot: tokenPaste({ label: "token", validate: async () => {} }) },
       capabilities: {
         talker: {
@@ -172,7 +172,7 @@ describe("a channel's Connection across epochs", () => {
       },
     });
     const admit = rs.fn(async () => false);
-    connectionPorts({ registry, admit, channelOf: serviceChannelOf }, "telegram");
+    connectionPorts({ registry, admit, channelOf: kindChannelOf }, "telegram");
     const connection = await registry.connect("telegram");
     await registry.importCredential(connection.id, "bot", {
       material: { token: "t" },

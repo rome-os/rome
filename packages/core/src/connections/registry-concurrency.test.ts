@@ -170,7 +170,7 @@ describe("per-grant lock: independent grants do not serialize", () => {
     );
     const registry = new ConnectionRegistry({ ledger });
     registry.register(fx.descriptor);
-    registry.register({ ...fx.descriptor, service: "fake-signal" });
+    registry.register({ ...fx.descriptor, connectionKind: "fake-signal" });
     const connA = await registry.connect("fake-telegram");
     const connB = await registry.connect("fake-signal");
     connAId = connA.id;

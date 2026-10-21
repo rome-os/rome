@@ -266,7 +266,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
   });
 
   return {
-    service: "linkedin",
+    connectionKind: "linkedin",
     reviveProfile: (_grant, record) => reviveLinkedInProfile(record),
     auth: {
       session: sessionScheme,

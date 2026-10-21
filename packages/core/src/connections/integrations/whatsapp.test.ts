@@ -114,7 +114,7 @@ describe("whatsapp descriptor shape", () => {
   it("declares one `session` grant and a talker needing it", () => {
     const { deps } = makeDeps(new FakeWhatsAppAdapter());
     const desc = createWhatsAppDescriptor(deps);
-    expect(desc.service).toBe("whatsapp");
+    expect(desc.connectionKind).toBe("whatsapp");
     expect(Object.keys(desc.auth)).toEqual(["session"]);
     expect(desc.capabilities.talker?.needs).toEqual(["session"]);
     expect(desc.capabilities.actor).toBeUndefined();

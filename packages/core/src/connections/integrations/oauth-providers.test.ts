@@ -153,7 +153,7 @@ describe("OAuth profile revival", () => {
     expect(() => revive?.("store", { avatarUrl: "https://example.com/a.png" })).toThrow();
   });
 
-  it("rejects reviving a stored record carrying keys outside the service's schema", () => {
+  it("rejects reviving a stored record carrying keys outside the connectionKind's schema", () => {
     const github = makeOAuthProviderDescriptor("github").reviveProfile;
     expect(() => github?.("user", { login: "octocat", teamId: "T123" })).toThrow();
     // `login` is a GitHub/Slack key; Google's schema deliberately has no handle.
@@ -175,7 +175,7 @@ describe.each(
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
 
-    expect(conn.service).toBe(provider);
+    expect(conn.connectionKind).toBe(provider);
     expect(conn.auth.grants()).toEqual({ [grant]: "unauthorized" });
     // No Actor in this phase — connector_proxy keeps its legacy token path.
     expect(conn.act).toBeNull();

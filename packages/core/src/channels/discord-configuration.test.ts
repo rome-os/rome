@@ -28,6 +28,7 @@ function makeChatSettings() {
   };
   const descriptor: ChatDescriptor = {
     ref: { connectionId: CONNECTION_ID, chatId: CHANNEL_ID },
+    connectionKind: "discord",
     service: "discord",
     kind: "channel",
     displayName: "general",

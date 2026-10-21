@@ -281,7 +281,7 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
   sessionScheme.setup = makeWhatsAppSetup({ openPairing });
 
   return {
-    service: "whatsapp",
+    connectionKind: "whatsapp",
     reviveProfile: (_grant, record) => reviveWhatsAppProfile(record),
     auth: {
       session: sessionScheme,

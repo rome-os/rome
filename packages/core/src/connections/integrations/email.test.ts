@@ -164,7 +164,7 @@ const validCred = (material: Partial<EmailInboxMaterial> = {}) => ({
 describe("email descriptor shape", () => {
   it("declares one `inbox` grant and a talker needing it", () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
-    expect(desc.service).toBe("email");
+    expect(desc.connectionKind).toBe("email");
     expect(Object.keys(desc.auth)).toEqual(["inbox"]);
     expect(desc.capabilities.talker?.needs).toEqual(["inbox"]);
     expect(desc.capabilities.actor).toBeUndefined();

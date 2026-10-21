@@ -211,10 +211,10 @@ export function makeEmailSetup(deps: {
 /** The narrow registry surface `autoConnectEmail` drives. Every
  *  `ConnectionRegistry` satisfies it structurally. */
 export interface EmailAutoConnectRegistry {
-  find(service: string): readonly unknown[];
-  withGrantSection<T>(service: string, grant: string, fn: () => Promise<T>): Promise<T>;
+  find(connectionKind: string): readonly unknown[];
+  withGrantSection<T>(connectionKind: string, grant: string, fn: () => Promise<T>): Promise<T>;
   confer(
-    service: string,
+    connectionKind: string,
     connectionId: string | undefined,
     grant: string,
     credential: Credential,
@@ -264,7 +264,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
   });
 
   return {
-    service: "email",
+    connectionKind: "email",
     reviveProfile: (_grant, record) => reviveEmailProfile(record),
     auth: {
       inbox: inboxScheme,

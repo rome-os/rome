@@ -91,7 +91,7 @@ export class ChannelNotConnected extends Error {
  *
  * - **C1 The name is the identity.** One channel per name, one name per
  *   channel, stable for the life of the deployment. A channel's name is its
- *   service's, and it is the `channel` written on every link, every stored
+ *   connection kind's, and it is the `channel` written on every link, every stored
  *   message and every sentinel row. The name is not a label a channel can
  *   restyle — changing it reassigns history.
  * - **C2 What a channel carries is the channel's.** No port reaches past this

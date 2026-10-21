@@ -17,7 +17,7 @@ import { ChannelNotConnected } from "./channel.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { makePasteTalk } from "../connections/test-fixtures.js";
-import { createTestDb, serviceChannelOf } from "../test/helpers.js";
+import { createTestDb, kindChannelOf } from "../test/helpers.js";
 import { systemClock } from "../lib/clock.js";
 import { ConnectionPacing } from "./delivery/connection-pacing.js";
 import { plainText } from "./delivery/types.js";
@@ -82,7 +82,7 @@ testMessagesQueryContract("connection-backed messages", () => {
         },
       ],
       onUnlocked: () => {},
-      registeredServices: () => ["telegram_user"],
+      registeredKinds: () => ["telegram_user"],
     },
     channelOf: () => "telegram_user",
   } as unknown as ConnectionPortsDeps;
@@ -117,7 +117,7 @@ describe("connection-backed messages", () => {
           },
         ],
         onUnlocked: () => {},
-        registeredServices: () => ["telegram_user"],
+        registeredKinds: () => ["telegram_user"],
       },
       channelOf: () => "telegram_user",
     } as unknown as ConnectionPortsDeps;
@@ -150,7 +150,7 @@ describe("connection-backed messages, across conversations", () => {
           },
         ],
         onUnlocked: () => {},
-        registeredServices: () => ["telegram_user"],
+        registeredKinds: () => ["telegram_user"],
       },
       channelOf: () => "telegram_user",
     } as unknown as ConnectionPortsDeps;
@@ -198,7 +198,7 @@ describe("connection-backed messages, shared reads", () => {
           },
         ],
         onUnlocked: () => {},
-        registeredServices: () => ["telegram_user"],
+        registeredKinds: () => ["telegram_user"],
       },
       channelOf: () => "telegram_user",
     } as unknown as ConnectionPortsDeps;
@@ -322,7 +322,7 @@ describe("connection-backed send, across epochs", () => {
     };
     await registry.importCredential(connection.id, "bot", fx.validCredential());
     offerDirect("first");
-    const direct = connectionPorts({ registry, channelOf: serviceChannelOf }, "fake-telegram")?.send
+    const direct = connectionPorts({ registry, channelOf: kindChannelOf }, "fake-telegram")?.send
       ?.direct;
     if (!direct) throw new Error("the talker offers direct messaging");
     await expect(direct.chatFor("7")).resolves.toBe("first");
@@ -351,7 +351,7 @@ describe("connection ports for a service's later channels", () => {
     ]);
     const deps: ConnectionPortsDeps = {
       registry,
-      channelOf: (connection) => names.get(connection.id) ?? connection.service,
+      channelOf: (connection) => names.get(connection.id) ?? connection.connectionKind,
     };
     const ports = {
       first: connectionPorts(deps, "fake-telegram"),
@@ -389,7 +389,7 @@ describe("a channel Rome does not listen to", () => {
     const admitted: string[] = [];
     const deps: ConnectionPortsDeps = {
       registry,
-      channelOf: serviceChannelOf,
+      channelOf: kindChannelOf,
       admit: async (_connectionId, _service, message) => {
         admitted.push(message.messageId);
         return true;
@@ -556,7 +556,7 @@ describe("reply streaming ports", () => {
         getDescriptor: () => ({ capabilities: { talker: {} } }),
         find: () => [connection],
         onUnlocked: () => {},
-        registeredServices: () => ["telegram"],
+        registeredKinds: () => ["telegram"],
       },
       channelOf: (each: { service: string }) => each.service,
       ...(pacing ? { pacing } : {}),

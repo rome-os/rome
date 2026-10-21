@@ -17,10 +17,10 @@ const SETTINGS_CONNECTIONS_PATH = "/settings/connections";
  *  delivered: the connection's own detail page, the only surface that renders
  *  `OAuthConnectionSection` and so the only one that re-attaches to the (possibly
  *  still-redeeming) setup and settles it to connected. Falls back to the list
- *  when the service is unknown. */
-function connectionPath(service: string | undefined): string {
-  return service
-    ? `${SETTINGS_CONNECTIONS_PATH}/${encodeURIComponent(service)}`
+ *  when the connection kind is unknown. */
+function connectionPath(connectionKind: string | undefined): string {
+  return connectionKind
+    ? `${SETTINGS_CONNECTIONS_PATH}/${encodeURIComponent(connectionKind)}`
     : SETTINGS_CONNECTIONS_PATH;
 }
 
@@ -136,7 +136,7 @@ function handleOAuthReturnOnce(
       if (!(await hasDashboardSession())) return { delivered: true };
       // The setup consumed the leg and is finishing the redeem; the connection's
       // detail page re-attaches and settles it.
-      return { redirect: connectionPath(returned.service) };
+      return { redirect: connectionPath(returned.connectionKind) };
     }
 
     // A broker error (denied consent) means no connection could have succeeded —
@@ -148,7 +148,7 @@ function handleOAuthReturnOnce(
     // the redeem would dead-end on an already-consumed attempt. Send the guardian
     // to the connections list to see the real state instead — an ambiguous
     // delivery carries no service to address.
-    if (returned.ambiguous) return { redirect: connectionPath(returned.service) };
+    if (returned.ambiguous) return { redirect: connectionPath(returned.connectionKind) };
 
     // Definitive no-match — the sign-in / lost-session fallback.
     if (!handoff) return { error: fallbackError };

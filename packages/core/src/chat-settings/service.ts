@@ -27,7 +27,7 @@ import type { Connection } from "../connections/types.js";
 import type { StoredChatRow } from "./repository.js";
 import { ChatSettingsRepository } from "./repository.js";
 import {
-  CONVERSATION_SETTING_FIELDS_BY_SERVICE,
+  CONVERSATION_SETTING_FIELDS_BY_KIND,
   CORE_CONVERSATION_SETTING_FIELDS,
   defaultConversationSettings,
 } from "./support.js";
@@ -231,7 +231,8 @@ export class ChatSettingsService implements ChatSettingsControl {
       if (!existing) {
         this.remember({
           ref: descriptor.parent,
-          service: descriptor.service,
+          connectionKind: descriptor.connectionKind,
+          service: descriptor.connectionKind,
           kind: "channel",
           displayName: descriptor.containerName ?? descriptor.parent.chatId,
           containerName: descriptor.containerName,
@@ -258,7 +259,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       input.connectionId && !selectedChannel
         ? []
         : this.deps.repository.listKnown({
-            service: selectedChannel ?? undefined,
+            channel: selectedChannel ?? undefined,
             query: input.query,
           });
     const byRef = new Map<
@@ -286,11 +287,11 @@ export class ChatSettingsService implements ChatSettingsControl {
       )
         continue;
       // Removing a Connection hides its persisted conversations from settings.
-      // Keep the rows intact so reconnecting the same service can recover them,
+      // Keep the rows intact so reconnecting the same account can recover them,
       // but do not let one orphaned row abort the cross-provider list.
       if (row.sourceChannel && this.connectionsOf(row.sourceChannel).length === 0) {
         log.debug("conversation_settings.removed_connection_hidden", {
-          service: row.sourceChannel,
+          channel: row.sourceChannel,
           chatId: row.sourceThreadId,
         });
         continue;
@@ -317,7 +318,11 @@ export class ChatSettingsService implements ChatSettingsControl {
       // Their effective settings are resolved through the parent conversation.
       if (this.isThread(descriptor)) continue;
       if (query) {
-        const haystack = [descriptor.service, descriptor.containerName, descriptor.displayName]
+        const haystack = [
+          descriptor.connectionKind,
+          descriptor.containerName,
+          descriptor.displayName,
+        ]
           .filter(Boolean)
           .join(" ")
           .toLocaleLowerCase();
@@ -328,8 +333,8 @@ export class ChatSettingsService implements ChatSettingsControl {
       candidates.push({ descriptor, availability, source });
     }
     candidates.sort((a, b) => {
-      const left = `${a.descriptor.service}\0${a.descriptor.containerName ?? ""}\0${a.descriptor.displayName}\0${a.descriptor.ref.connectionId}\0${a.descriptor.ref.chatId}`;
-      const right = `${b.descriptor.service}\0${b.descriptor.containerName ?? ""}\0${b.descriptor.displayName}\0${b.descriptor.ref.connectionId}\0${b.descriptor.ref.chatId}`;
+      const left = `${a.descriptor.connectionKind}\0${a.descriptor.containerName ?? ""}\0${a.descriptor.displayName}\0${a.descriptor.ref.connectionId}\0${a.descriptor.ref.chatId}`;
+      const right = `${b.descriptor.connectionKind}\0${b.descriptor.containerName ?? ""}\0${b.descriptor.displayName}\0${b.descriptor.ref.connectionId}\0${b.descriptor.ref.chatId}`;
       return left.localeCompare(right);
     });
     const page = candidates.slice(offset, offset + limit);
@@ -568,7 +573,8 @@ export class ChatSettingsService implements ChatSettingsControl {
     const descriptor: ChatDescriptor = {
       ...remembered,
       ref,
-      service: connections[0]!.service,
+      connectionKind: connections[0]!.connectionKind,
+      service: connections[0]!.connectionKind,
       kind:
         row.sourceThreadType === "private"
           ? "dm"
@@ -581,7 +587,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     };
     if (row.parentSessionId) {
       const parent = this.deps.repository
-        .listKnown({ service: row.sourceChannel })
+        .listKnown({ channel: row.sourceChannel })
         .find((candidate) => candidate.id === row.parentSessionId);
       if (parent?.sourceThreadId) {
         descriptor.parent = {
@@ -614,7 +620,8 @@ export class ChatSettingsService implements ChatSettingsControl {
     if (row) return { descriptor: this.descriptorFromRow(row), row };
     const descriptor: ChatDescriptor = {
       ref,
-      service: connection.service,
+      connectionKind: connection.connectionKind,
+      service: connection.connectionKind,
       kind: "channel",
       displayName: ref.chatId,
     };
@@ -639,7 +646,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       return CORE_CONVERSATION_SETTING_FIELDS;
     }
     return (
-      CONVERSATION_SETTING_FIELDS_BY_SERVICE.get(descriptor.service) ??
+      CONVERSATION_SETTING_FIELDS_BY_KIND.get(descriptor.connectionKind) ??
       CORE_CONVERSATION_SETTING_FIELDS
     );
   }

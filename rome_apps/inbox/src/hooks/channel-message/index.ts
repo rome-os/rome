@@ -13,7 +13,7 @@ import type {
 
 const log = createAppLogger("channel-message-hook");
 
-/** Core's `AGENTS_SERVICE`, which an app cannot import. */
+/** Core's `AGENTS_KIND`, which an app cannot import. */
 const AGENTS_CHANNEL = "agents";
 
 /**

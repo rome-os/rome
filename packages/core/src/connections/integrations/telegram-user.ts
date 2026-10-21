@@ -362,7 +362,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
   // is the single ledger write (credential material + identity profile).
   session.setup = makeTelegramUserSetup({ openLogin: deps.openLogin ?? openTelegramUserLogin });
   return {
-    service: "telegram_user",
+    connectionKind: "telegram_user",
     reviveProfile: (_grant, record) => reviveTelegramUserProfile(record),
     accountIdOf: (_grant, record) => (typeof record.userId === "string" && record.userId) || null,
     auth: {
@@ -431,6 +431,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
                     connectionId: kit.connectionId,
                     chatId: dialog.id as import("@rome-os/app-runtime").ChatId,
                   },
+                  connectionKind: "telegram_user",
                   service: "telegram_user",
                   kind:
                     dialog.type === "private"

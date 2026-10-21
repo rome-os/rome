@@ -38,7 +38,7 @@ export interface WebchatDescriptorDeps {
  */
 export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDescriptor {
   return {
-    service: "webchat",
+    connectionKind: "webchat",
     auth: {},
     capabilities: {
       talker: {

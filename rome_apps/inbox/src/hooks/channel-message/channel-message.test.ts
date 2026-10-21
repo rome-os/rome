@@ -53,6 +53,7 @@ function snapshot(
   return {
     conversation: {
       ref: { connectionId, chatId },
+      connectionKind: SERVICES[connectionId] ?? "unknown",
       service: SERVICES[connectionId] ?? "unknown",
       kind: "group" as const,
       displayName: chatId,

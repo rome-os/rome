@@ -118,7 +118,7 @@ describe("isWechatAuthError", () => {
 describe("wechat descriptor shape", () => {
   it("declares one `account` grant and a talker needing it", () => {
     const desc = createWechatDescriptor();
-    expect(desc.service).toBe("wechat");
+    expect(desc.connectionKind).toBe("wechat");
     expect(Object.keys(desc.auth)).toEqual(["account"]);
     expect(desc.capabilities.talker?.needs).toEqual(["account"]);
     expect(desc.capabilities.actor).toBeUndefined();

@@ -8,14 +8,14 @@ import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
 export type StoredChatRow = typeof romeSessions.$inferSelect;
 
-function rowByAddress(exec: DrizzleDb | DrizzleTx, service: string, chatId: ChatId) {
+function rowByAddress(exec: DrizzleDb | DrizzleTx, channel: string, chatId: ChatId) {
   return exec
     .select()
     .from(romeSessions)
     .where(
       and(
         isChannelConversation,
-        eq(romeSessions.sourceChannel, service),
+        eq(romeSessions.sourceChannel, channel),
         eq(romeSessions.sourceThreadId, chatId),
       ),
     )
@@ -26,14 +26,14 @@ function rowByAddress(exec: DrizzleDb | DrizzleTx, service: string, chatId: Chat
 export class ChatSettingsRepository {
   constructor(private readonly db: DrizzleDb) {}
 
-  find(service: string, chatId: ChatId): StoredChatRow | null {
-    return rowByAddress(this.db, service, chatId) ?? null;
+  find(channel: string, chatId: ChatId): StoredChatRow | null {
+    return rowByAddress(this.db, channel, chatId) ?? null;
   }
 
-  listKnown(input: { service?: string; query?: string }): StoredChatRow[] {
+  listKnown(input: { channel?: string; query?: string }): StoredChatRow[] {
     const predicates = [isChannelConversation];
-    if (input.service) {
-      predicates.push(eq(romeSessions.sourceChannel, input.service));
+    if (input.channel) {
+      predicates.push(eq(romeSessions.sourceChannel, input.channel));
     }
     if (input.query?.trim()) {
       predicates.push(like(romeSessions.sourceThreadName, `%${input.query.trim()}%`));
@@ -59,7 +59,7 @@ export class ChatSettingsRepository {
 
   /** Create if missing, then mutate one aggregate in one SQLite transaction. Callers
    * serialize by address before entering this method. `channel` is the name of
-   * the channel the conversation belongs to, which a service's later channels
+   * the channel the conversation belongs to, which a connection kind's later channels
    * do not share with it. */
   mutate(
     descriptor: ChatDescriptor,
@@ -70,7 +70,7 @@ export class ChatSettingsRepository {
     },
   ): void {
     // A webchat address is a guardian chat, which has no conversation settings.
-    if (descriptor.service === "webchat") {
+    if (descriptor.connectionKind === "webchat") {
       throw new Error("Webchat chats have no conversation settings");
     }
     this.db.transaction((tx) => {

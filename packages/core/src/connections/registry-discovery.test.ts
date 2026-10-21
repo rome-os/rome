@@ -398,7 +398,7 @@ describe("scenario 16: late onUnlocked registration", () => {
     const reg = makeRegistry(ledger);
     const { descriptor } = makeZeroGrantTalk();
     reg.register(descriptor);
-    reg.register({ ...descriptor, service: "fake-browser-chat" });
+    reg.register({ ...descriptor, connectionKind: "fake-browser-chat" });
 
     const connA = await reg.connect("fake-webchat");
     const connB = await reg.connect("fake-browser-chat");
@@ -447,7 +447,7 @@ describe("scenario 17: register() validation", () => {
 
     expect(() =>
       reg.register({
-        service: "bad-service",
+        connectionKind: "bad-service",
         auth: {},
         capabilities: {
           actor: {
@@ -470,7 +470,7 @@ describe("scenario 17: register() validation", () => {
 
     expect(() =>
       reg.register({
-        service: "bad-talk",
+        connectionKind: "bad-talk",
         auth: {},
         capabilities: {
           talker: {
@@ -494,7 +494,7 @@ describe("scenario 17: register() validation", () => {
 
     expect(() =>
       reg.register({
-        service: "valid-service",
+        connectionKind: "valid-service",
         auth: {},
         capabilities: {
           actor: {
@@ -521,7 +521,7 @@ describe("scenario 18: load() with unregistered service rows", () => {
     // Manually insert a connection for a service that won't be registered.
     await ledger.createConnection({
       id: "orphan-conn-1",
-      service: "ghost-service",
+      connectionKind: "ghost-service",
       label: "ghost",
       createdAt: new Date(),
     });
@@ -541,7 +541,7 @@ describe("scenario 18: load() with unregistered service rows", () => {
     // Insert an orphan.
     await ledger.createConnection({
       id: "orphan-conn-2",
-      service: "ghost-service-2",
+      connectionKind: "ghost-service-2",
       label: "ghost2",
       createdAt: new Date(),
     });
@@ -571,7 +571,7 @@ describe("scenario 18: load() with unregistered service rows", () => {
 
     await ledger.createConnection({
       id: "orphan-conn-3",
-      service: "totally-unknown",
+      connectionKind: "totally-unknown",
       label: "unknown",
       createdAt: new Date(),
     });
@@ -590,7 +590,7 @@ describe("startup capability activation barrier", () => {
     const ledger = makeLedger();
     await ledger.createConnection({
       id: "boot-webchat",
-      service: "fake-webchat",
+      connectionKind: "fake-webchat",
       label: "Webchat",
       createdAt: new Date(),
     });

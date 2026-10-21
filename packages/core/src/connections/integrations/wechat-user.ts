@@ -49,9 +49,9 @@ import { directoryPage } from "./talk-features.js";
 
 const log = createLogger("wechat-user");
 
-// The channel's name is the service's: one constant, so the channel its reads
+// The channel's name is the connection kind's: one constant, so the channel its reads
 // back and the channel its Connection backs cannot drift into two.
-export const WECHAT_USER_SERVICE = WECHAT_USER_CHANNEL;
+export const WECHAT_USER_KIND = WECHAT_USER_CHANNEL;
 
 /** How long a setup step waits for the guardian's phone actions. Scanning and
  *  confirming on a phone that may be in another room: generous on purpose. */
@@ -370,7 +370,8 @@ function toConversationDescriptor(
 ): ChatDescriptor {
   return {
     ref: { connectionId, chatId: conversation.id as ChatId },
-    service: WECHAT_USER_SERVICE,
+    connectionKind: WECHAT_USER_KIND,
+    service: WECHAT_USER_KIND,
     kind: conversation.isGroup ? "group" : "dm",
     displayName: conversation.name || conversation.id,
   };
@@ -404,7 +405,7 @@ export function createWechatUserDescriptor(
   });
 
   return {
-    service: WECHAT_USER_SERVICE,
+    connectionKind: WECHAT_USER_KIND,
     reviveProfile: (_grant, record) => reviveWechatUserProfile(record),
     auth: {
       session: sessionScheme,

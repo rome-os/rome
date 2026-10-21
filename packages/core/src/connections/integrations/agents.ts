@@ -40,7 +40,7 @@ import type {
 
 const log = createLogger("agents-channel");
 
-export const AGENTS_SERVICE = "agents";
+export const AGENTS_KIND = "agents";
 const POLL_INTERVAL_MS = 10_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
 /** Cloud returns at most this many messages per poll; a full page polls again at once. */
@@ -81,7 +81,7 @@ export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMes
       ? `\n\nData:\n\`\`\`json\n${JSON.stringify(message.data, null, 2)}\n\`\`\``
       : "";
   return {
-    channel: AGENTS_SERVICE,
+    channel: AGENTS_KIND,
     direction: "inbound",
     messageId: message.messageId,
     chatId: sender as ChatId,
@@ -292,7 +292,7 @@ export function makeAgentsDescriptor(
   client: AgentMessagingClient = createRomeCloudAgentsClient(),
 ): ConnectionDescriptor {
   return {
-    service: AGENTS_SERVICE,
+    connectionKind: AGENTS_KIND,
     reviveProfile: (_grant, record) => reviveAgentsProfile(record),
     auth: { cloud: agentsScheme(client) },
     capabilities: {

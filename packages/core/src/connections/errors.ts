@@ -9,51 +9,51 @@
 
 import type { ConnectionId, GrantName } from "./types.js";
 
-/** A Service that has more than one connection, with the offending connection
+/** A connection kind that has more than one connection, with the offending connection
  *  IDs so an operator can resolve the duplicate explicitly. */
-export interface DuplicateServiceConnectionGroup {
-  service: string;
+export interface DuplicateKindConnectionGroup {
+  connectionKind: string;
   connectionIds: ConnectionId[];
 }
 
 /**
- * `ConnectionRegistry.connect` mints a Service's first Connection only. IDs are
+ * `ConnectionRegistry.connect` mints a connection kind's first Connection only. IDs are
  * included so an operator can resolve the duplicate explicitly; the registry
  * never selects, merges, or deletes one on its own.
  */
-export class DuplicateServiceConnectionsError extends Error {
-  readonly duplicates: readonly DuplicateServiceConnectionGroup[];
+export class DuplicateKindConnectionsError extends Error {
+  readonly duplicates: readonly DuplicateKindConnectionGroup[];
 
-  constructor(duplicates: readonly DuplicateServiceConnectionGroup[]) {
+  constructor(duplicates: readonly DuplicateKindConnectionGroup[]) {
     const detail = duplicates
-      .map(({ service, connectionIds }) => `${service}: ${connectionIds.join(", ")}`)
+      .map(({ connectionKind, connectionIds }) => `${connectionKind}: ${connectionIds.join(", ")}`)
       .join("; ");
     super(
-      `Duplicate Service connections found (${detail}). connect mints only a Service's first connection; remove the existing one first, or add another account of a Service that offers several.`,
+      `Duplicate connections of one connection kind found (${detail}). connect mints only a connection kind's first connection; remove the existing one first, or add another account of a connection kind that offers several.`,
     );
-    this.name = "DuplicateServiceConnectionsError";
+    this.name = "DuplicateKindConnectionsError";
     this.duplicates = duplicates;
   }
 }
 
 /**
  * `ConnectionRegistry.confer` refuses a conferral whose account another
- * Connection of the service already holds, because two Connections of one bot
+ * Connection of the connection kind already holds, because two Connections of one bot
  * run two transports that conflict. The message reads to the guardian on a
  * failed setup, and the conferral writes nothing.
  */
 export class AccountAlreadyConnectedError extends Error {
-  readonly service: string;
+  readonly connectionKind: string;
   readonly accountId: string;
   /** The Connection that already holds the account. */
   readonly connectionId: ConnectionId;
 
-  constructor(service: string, accountId: string, connectionId: ConnectionId) {
+  constructor(connectionKind: string, accountId: string, connectionId: ConnectionId) {
     super(
       "This account is already connected. Connect a different account, or disconnect that one first.",
     );
     this.name = "AccountAlreadyConnectedError";
-    this.service = service;
+    this.connectionKind = connectionKind;
     this.accountId = accountId;
     this.connectionId = connectionId;
   }
@@ -105,17 +105,17 @@ export class Disconnected extends Error {
  * the guardian on a failed setup, and the conferral writes nothing.
  */
 export class DifferentAccountError extends Error {
-  readonly service: string;
+  readonly connectionKind: string;
   readonly connectionId: ConnectionId;
 
-  constructor(service: string, connectionId: ConnectionId, severalAccounts: boolean) {
+  constructor(connectionKind: string, connectionId: ConnectionId, severalAccounts: boolean) {
     super(
       severalAccounts
         ? "This is a different account. Reconnect with the same account, or add this one as another account."
         : "This is a different account. Reconnect with the same account, or disconnect this one first.",
     );
     this.name = "DifferentAccountError";
-    this.service = service;
+    this.connectionKind = connectionKind;
     this.connectionId = connectionId;
   }
 }

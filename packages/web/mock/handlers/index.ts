@@ -998,6 +998,7 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
       snapshot: {
         conversation: {
           ref: { connectionId: "discord-1", chatId: "engineering" as ChatId },
+          connectionKind: "discord",
           service: "discord",
           kind: "group",
           displayName: "can you see active chats?",
@@ -1024,6 +1025,7 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
       snapshot: {
         conversation: {
           ref: { connectionId: "telegram-1", chatId: "dm-42" as ChatId },
+          connectionKind: "telegram",
           service: "telegram",
           kind: "dm",
           displayName: "Ray",

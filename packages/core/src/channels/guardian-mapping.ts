@@ -101,7 +101,7 @@ export type GuardianMappingPlan =
  * so the transactional conferral path (`ConnectionRegistry.confer`) reaches the
  * same decision, then applies it inside the credential-write transaction. Safe to
  * run before the transaction: the terminal conferral already holds the registry's
- * per-(service, grant) section, so no competing conferral can change the guardian
+ * per-(connection kind, grant) section, so no competing conferral can change the guardian
  * between plan and apply.
  *
  * An account another writer claimed in that window does not abort the conferral,

@@ -6,7 +6,7 @@ import type { ConnectionDescriptor, RuntimeKit } from "../types.js";
 import {
   type BuiltinConnectionDeps,
   registerBuiltinConnections,
-  WECHAT_USER_SERVICE,
+  WECHAT_USER_KIND,
 } from "./index.js";
 
 describe("registerBuiltinConnections", () => {
@@ -16,7 +16,7 @@ describe("registerBuiltinConnections", () => {
     const registered = new Map<string, ConnectionDescriptor>();
     const registry = {
       register: (descriptor: ConnectionDescriptor) =>
-        registered.set(descriptor.service, descriptor),
+        registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
     registerBuiltinConnections(registry, {
       linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
@@ -47,7 +47,7 @@ describe("registerBuiltinConnections", () => {
     const registered = new Map<string, ConnectionDescriptor>();
     const registry = {
       register: (descriptor: ConnectionDescriptor) =>
-        registered.set(descriptor.service, descriptor),
+        registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
 
     registerBuiltinConnections(registry, {
@@ -62,7 +62,7 @@ describe("registerBuiltinConnections", () => {
       registerIngress: () => () => {},
     } satisfies RuntimeKit;
     const talker = registered
-      .get(WECHAT_USER_SERVICE)!
+      .get(WECHAT_USER_KIND)!
       .capabilities.talker!.build(
         { session: { material: { wxid: "wxid_guardian" }, expiresAt: "never" } },
         kit,
@@ -76,7 +76,7 @@ describe("registerBuiltinConnections", () => {
     const registered = new Map<string, ConnectionDescriptor>();
     const registry = {
       register: (descriptor: ConnectionDescriptor) =>
-        registered.set(descriptor.service, descriptor),
+        registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
 
     registerBuiltinConnections(registry, {
@@ -84,7 +84,7 @@ describe("registerBuiltinConnections", () => {
       listAgents: () => [],
     } as unknown as BuiltinConnectionDeps);
 
-    expect(registered.has(WECHAT_USER_SERVICE)).toBe(false);
+    expect(registered.has(WECHAT_USER_KIND)).toBe(false);
   });
 
   // Removal on disconnect follows `accountIdOf` on a Talk, and a fresh channel
@@ -93,7 +93,7 @@ describe("registerBuiltinConnections", () => {
     const registered = new Map<string, ConnectionDescriptor>();
     const registry = {
       register: (descriptor: ConnectionDescriptor) =>
-        registered.set(descriptor.service, descriptor),
+        registered.set(descriptor.connectionKind, descriptor),
     } as unknown as ConnectionRegistry;
 
     registerBuiltinConnections(registry, {
@@ -105,7 +105,7 @@ describe("registerBuiltinConnections", () => {
     const naming = [...registered.values()].filter(
       (descriptor) => descriptor.capabilities.talker && descriptor.accountIdOf,
     );
-    expect(naming.map((descriptor) => descriptor.service).sort()).toEqual(
+    expect(naming.map((descriptor) => descriptor.connectionKind).sort()).toEqual(
       [...LINKABLE_KINDS].sort(),
     );
     // A disconnect removes the account once its grant goes, which covers every

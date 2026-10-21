@@ -63,9 +63,9 @@ export function credentialFromBundle(
 }
 
 /**
- * Pick a service's keys out of Rome Cloud's raw profile JSON. Mechanical only:
+ * Pick a connection kind's keys out of Rome Cloud's raw profile JSON. Mechanical only:
  * null / undefined / "" become ABSENT (the sparse case), while every other
- * value is passed through untouched so the service schema — not this picker —
+ * value is passed through untouched so the connection kind's schema — not this picker —
  * decides validity. A wrong-typed value must FAIL the parse, never silently
  * drop.
  */
@@ -83,14 +83,14 @@ function pickRawKeys(raw: unknown, keys: readonly string[]): Record<string, unkn
 const IDENTITY_KEYS = ["subject", "displayName", "email", "avatarUrl"] as const;
 
 /**
- * The profile half of the per-service parser: Rome Cloud's redeem hands over a
- * RAW JSON object (`account`), and each service parses it against its OWN
+ * The profile half of the per-kind parser: Rome Cloud's redeem hands over a
+ * RAW JSON object (`account`), and each connection kind parses it against its OWN
  * schema — the parse output is exactly what lands on the grant row. Scopes come
  * from `bundle`, Slack's `teamId` from `bundle.raw.team.id`. This is the
  * non-secret conferral outcome — deliberately NOT the opaque
  * handoff `metadata` bag, which is dropped here and never reaches the ledger.
  *
- * Fail-closed: a raw value the service schema rejects throws (ZodError) and
+ * Fail-closed: a raw value the connection kind's schema rejects throws (ZodError) and
  * fails the conferral BEFORE anything is persisted — a partial or unparsed
  * profile is never stored.
  *
@@ -146,10 +146,10 @@ export function grantProfileFromBundle(
  *
  * A no-op (returns `false`) when the bundle has no usable token, or when the
  * registry doesn't declare the provider's descriptor (a test wiring a subset of
- * services). Returns `true` when a credential was imported.
+ * connection kinds). Returns `true` when a credential was imported.
  *
  * `account` is the redeem side's non-secret identity as a RAW JSON object.
- * When supplied (live conferral), the service parses it against its own schema
+ * When supplied (live conferral), the connection kind parses it against its own schema
  * and the grant records the parsed profile (identity + scopes + Slack `teamId`)
  * in the SAME write as the credential — a parse rejection throws before
  * anything is persisted. When omitted, no profile is written.

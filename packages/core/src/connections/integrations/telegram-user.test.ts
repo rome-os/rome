@@ -190,7 +190,7 @@ describe("telegram_user material round-trip", () => {
 describe("telegram_user descriptor shape", () => {
   it("declares one setup-driven `session` grant and a talker needing it", () => {
     const desc = makeTelegramUserDescriptor();
-    expect(desc.service).toBe("telegram_user");
+    expect(desc.connectionKind).toBe("telegram_user");
     expect(Object.keys(desc.auth)).toEqual(["session"]);
     expect(desc.capabilities.talker?.needs).toEqual(["session"]);
     expect(desc.capabilities.actor).toBeUndefined();

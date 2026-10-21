@@ -23,8 +23,8 @@ function appWith(
     {
       setupManager: opts.activeSetup
         ? ({
-            activeFor: (idOrService: string, grant: string) =>
-              idOrService === SETUP_KEYS[opts.activeSetup!] && grant === "bot" ? "setup-1" : null,
+            activeFor: (idOrKind: string, grant: string) =>
+              idOrKind === SETUP_KEYS[opts.activeSetup!] && grant === "bot" ? "setup-1" : null,
           } as NonNullable<ApiDeps["setupManager"]>)
         : undefined,
       connectionRegistry:
@@ -266,9 +266,9 @@ describe("Discord CLI loopback broker routes", () => {
           channelRecords: {
             byId: (id: string) =>
               ({
-                "discord-2": { service: "discord", connectionId: "conn-2" },
-                "telegram-1": { service: "telegram", connectionId: "conn-2" },
-                "discord-3": { service: "discord", connectionId: "conn-gone" },
+                "discord-2": { connectionKind: "discord", connectionId: "conn-2" },
+                "telegram-1": { connectionKind: "telegram", connectionId: "conn-2" },
+                "discord-3": { connectionKind: "discord", connectionId: "conn-gone" },
               })[id] as never,
           },
         },
@@ -305,14 +305,14 @@ describe("Discord CLI loopback broker routes", () => {
       const response = await discordCliRoutes(
         {
           setupManager: {
-            activeFor: (idOrService: string, grant: string) =>
-              idOrService === "discord" && grant === "bot" ? "setup-1" : null,
+            activeFor: (idOrKind: string, grant: string) =>
+              idOrKind === "discord" && grant === "bot" ? "setup-1" : null,
           } as NonNullable<ApiDeps["setupManager"]>,
           connectionRegistry: {
             find: () => [bot("conn-1", invoked)],
           } as unknown as NonNullable<ApiDeps["connectionRegistry"]>,
           channelRecords: {
-            byId: () => ({ service: "discord", connectionId: null }) as never,
+            byId: () => ({ connectionKind: "discord", connectionId: null }) as never,
           },
         },
         "127.0.0.1",

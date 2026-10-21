@@ -206,7 +206,7 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
   botScheme.setup = makeTelegramSetup({ probeBotIdentity });
 
   return {
-    service: "telegram",
+    connectionKind: "telegram",
     severalAccounts: true,
     reviveProfile: (_grant, record) => reviveTelegramProfile(record),
     accountIdOf: (_grant, record) => (typeof record.botId === "string" && record.botId) || null,

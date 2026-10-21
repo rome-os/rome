@@ -33,7 +33,7 @@ import {
 } from "./wechat-user.js";
 
 /** The channel name every stored WeChat-account row spells, matching the
- *  connection service and the person mappings that link to it. */
+ *  connection kind and the person mappings that link to it. */
 export const WECHAT_USER_CHANNEL = "wechat_user";
 
 /** A bounded window for one live read. The reader ranks newest-first and has no

@@ -690,7 +690,7 @@ function isExternalAuthor(payload: SlackEventCallback): boolean {
 export interface SlackAdapterConfig {
   botToken: string;
   appToken: string;
-  /** The service name the channel records carry. */
+  /** The connection kind the channel records carry. */
   channel: string;
   api?: SlackWebApi;
   createSocket?: CreateSlackSocket;

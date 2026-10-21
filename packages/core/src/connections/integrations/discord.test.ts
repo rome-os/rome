@@ -177,7 +177,7 @@ describe("isDiscordAuthError", () => {
 describe("discord descriptor shape", () => {
   it("declares one `bot` grant and a talker needing it", () => {
     const desc = makeDiscordDescriptor(deps);
-    expect(desc.service).toBe("discord");
+    expect(desc.connectionKind).toBe("discord");
     expect(Object.keys(desc.auth)).toEqual(["bot"]);
     expect(desc.capabilities.talker?.needs).toEqual(["bot"]);
     expect(desc.capabilities.actor?.needs).toEqual(["bot"]);

@@ -8,7 +8,7 @@ import {
 } from "./channels-service.js";
 import { recordedChannelOf } from "./connection-ports.js";
 import type { Connection } from "../connections/types.js";
-import { serviceChannelOf } from "../test/helpers.js";
+import { kindChannelOf } from "../test/helpers.js";
 
 // The name-keyed service app actions send and read through, in the main
 // process and, over RPC, in a worker. It finds the Connection itself.
@@ -45,7 +45,7 @@ function registryOf(
     };
     return {
       id: connectionId,
-      service,
+      connectionKind: service,
       withTalker: (call: (live: typeof talker) => unknown) => call(talker),
       status: () => ({ talk: { state: "unlocked" } }),
     } as unknown as Connection;
@@ -58,7 +58,7 @@ function service(channels: unknown[] = []) {
   const channelsService = createChannelsService({
     channels: () => channels as Channels,
     registry: registryOf(CONNECTIONS, send),
-    channelOf: serviceChannelOf,
+    channelOf: kindChannelOf,
     platformOf: (channel) => (channel === "whatsapp" ? "whatsapp" : null),
   });
   return { channelsService, send };
@@ -117,7 +117,7 @@ describe("createChannelsService", () => {
     const early = createChannelsService({
       channels: () => undefined,
       registry: registryOf(CONNECTIONS, send),
-      channelOf: serviceChannelOf,
+      channelOf: kindChannelOf,
     });
 
     expect((await early.list()).map((channel) => channel.name)).toEqual([

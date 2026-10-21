@@ -106,8 +106,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   await skillCatalog.loadFromCatalog(appCatalog);
 
   const channelRecords = new ChannelRecordsRepository(db);
-  const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
-  const personMappingRepo = new PersonMappingRepository(db, serviceOfChannel);
+  const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
+  const personMappingRepo = new PersonMappingRepository(db, connectionKindOfChannel);
   const sentinelLogRepo = new SentinelLogRepository(db);
   const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
   const webchatRepo = new WebChatRepository(db);
@@ -120,7 +120,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const channelsService = new ChannelsServiceProxy();
   const chatSettings = new ChatSettingsControlProxy();
   const appChatSettings = legacyChatIdSettings(chatSettings);
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, serviceOfChannel);
+  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
 
   const actionEngine = new ActionEngine(
     actionRegistry,

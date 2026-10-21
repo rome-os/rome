@@ -202,7 +202,7 @@ export function ChannelConnectCard({
   // the guardian has never connected or is adding another account (the
   // terminal conferral mints the row).
   const setup = useSetup({
-    idOrService: (another ? null : slot.connectionId) ?? config.service,
+    idOrKind: (another ? null : slot.connectionId) ?? config.service,
     grant: slot.grant ?? config.defaultGrant,
     another,
     cancelOnLeave,

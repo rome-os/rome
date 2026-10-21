@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatDescriptor, ChatId, ChatRef } from "@rome-os/app-runtime";
 import type { TalkDirectory } from "../connections/types.js";
-import { createTestDb, serviceChannelOf, type TestDb } from "../test/helpers.js";
+import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import type { Channels } from "../channels/channel.js";
@@ -16,7 +16,7 @@ function directoryDescriptor(
   conversations: (connectionId: string) => ChatDescriptor[],
 ): ConnectionDescriptor {
   return {
-    service,
+    connectionKind: service,
     auth: {},
     capabilities: {
       talker: {
@@ -52,9 +52,9 @@ function directoryDescriptor(
 function channelsOver(registry: ConnectionRegistry): () => Channels {
   const built = new Map<string, ReturnType<typeof connectionPorts>>();
   return () =>
-    registry.registeredServices().flatMap((name) => {
+    registry.registeredKinds().flatMap((name) => {
       if (!built.has(name))
-        built.set(name, connectionPorts({ registry, channelOf: serviceChannelOf }, name));
+        built.set(name, connectionPorts({ registry, channelOf: kindChannelOf }, name));
       const ports = built.get(name);
       return ports ? [{ name, accounts: null, ...ports }] : [];
     });
@@ -72,6 +72,7 @@ describe("ChatSettingsService", () => {
       directoryDescriptor("discord", (connectionId) => [
         {
           ref: { connectionId, chatId: "parent" as ChatId },
+          connectionKind: "discord",
           service: "discord",
           kind: "channel",
           displayName: "general",
@@ -79,6 +80,7 @@ describe("ChatSettingsService", () => {
         },
         {
           ref: { connectionId, chatId: "child" as ChatId },
+          connectionKind: "discord",
           service: "discord",
           kind: "topic",
           displayName: "launch thread",
@@ -96,7 +98,7 @@ describe("ChatSettingsService", () => {
     const service = new ChatSettingsService({
       repository,
       connections: registry,
-      channelOf: serviceChannelOf,
+      channelOf: kindChannelOf,
       channels: channelsOver(registry),
       listAgents: () => ["pm-assistant"],
       onChanged,
@@ -106,6 +108,7 @@ describe("ChatSettingsService", () => {
       .snapshot.conversation.ref;
     const childDescriptor: ChatDescriptor = {
       ref: { connectionId: discord.id, chatId: "child" as ChatId },
+      connectionKind: "discord",
       service: "discord",
       kind: "topic",
       displayName: "launch thread",
@@ -157,7 +160,7 @@ describe("ChatSettingsService", () => {
 
     // Simulate a stale child override written by the previous model. Thread
     // reads must ignore it and resolve the parent as the sole settings owner.
-    repository.mutate(childDescriptor, childDescriptor.service, {
+    repository.mutate(childDescriptor, childDescriptor.connectionKind, {
       settings: {
         schemaVersion: 1,
         overrides: { enabled: true },
@@ -217,7 +220,14 @@ describe("ChatSettingsService", () => {
       connectionId: discord.id,
       chatId: "new-thread" as ChatId,
     };
-    service.observe({ ref: thread, service: "discord", kind: "topic", displayName: "new", parent });
+    service.observe({
+      ref: thread,
+      connectionKind: "discord",
+      service: "discord",
+      kind: "topic",
+      displayName: "new",
+      parent,
+    });
 
     await expect(service.get(thread)).resolves.toMatchObject({
       inheritedFrom: parent,
@@ -403,6 +413,7 @@ describe("ChatSettingsService", () => {
     };
     service.observe({
       ref: feishuRef,
+      connectionKind: "feishu",
       service: "feishu",
       kind: "group",
       displayName: "Feishu group",
@@ -422,6 +433,7 @@ describe("ChatSettingsService", () => {
     };
     service.observe({
       ref: wechatRef,
+      connectionKind: "wechat",
       service: "wechat",
       kind: "group",
       displayName: "WeChat conversation",
@@ -500,6 +512,7 @@ describe("ChatSettingsService", () => {
     };
     service.observe({
       ref: wechatRef,
+      connectionKind: "wechat",
       service: "wechat",
       kind: "group",
       displayName: "WeChat group",
@@ -530,7 +543,7 @@ describe("ChatSettingsService", () => {
     const unrecorded = new ChatSettingsService({
       repository: new ChatSettingsRepository(testDb!.db),
       connections: registry,
-      channelOf: (connection) => (connection.id === discord.id ? null : connection.service),
+      channelOf: (connection) => (connection.id === discord.id ? null : connection.connectionKind),
       channels: () => [],
       listAgents: () => [],
       onChanged: () => {},
@@ -554,7 +567,13 @@ describe("ChatSettingsService", () => {
       connectionId: wechat.id,
       chatId: "wechat-group" as ChatId,
     };
-    service.observe({ ref, service: "wechat", kind: "group", displayName: "WeChat group" });
+    service.observe({
+      ref,
+      connectionKind: "wechat",
+      service: "wechat",
+      kind: "group",
+      displayName: "WeChat group",
+    });
     await service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } });
 
     await registry.remove(wechat.id);
@@ -609,6 +628,7 @@ describe("ChatSettingsService", () => {
             connectionId,
             chatId: `channel-${index}` as ChatId,
           },
+          connectionKind: "discord",
           service: "discord",
           kind: "channel" as const,
           displayName: `channel-${index}`,
@@ -619,7 +639,7 @@ describe("ChatSettingsService", () => {
     const service = new ChatSettingsService({
       repository: new ChatSettingsRepository(testDb.db),
       connections: registry,
-      channelOf: serviceChannelOf,
+      channelOf: kindChannelOf,
       channels: channelsOver(registry),
       listAgents: () => [],
       onChanged: () => {},
@@ -651,16 +671,18 @@ describe("ChatSettingsService", () => {
         connectionId: discord.id,
         chatId: `channel-${index}` as ChatId,
       },
+      connectionKind: "discord",
       service: "discord",
       kind: "channel" as const,
       displayName: `channel-${index}`,
     }));
     for (const descriptor of descriptors) {
-      repository.mutate(descriptor, descriptor.service, { settings: null, agentName: null });
+      repository.mutate(descriptor, descriptor.connectionKind, { settings: null, agentName: null });
     }
     repository.mutate(
       {
         ref: { connectionId: discord.id, chatId: "topic-1" as ChatId },
+        connectionKind: "discord",
         service: "discord",
         kind: "topic",
         displayName: "topic-1",
@@ -674,7 +696,7 @@ describe("ChatSettingsService", () => {
     const service = new ChatSettingsService({
       repository,
       connections: registry,
-      channelOf: serviceChannelOf,
+      channelOf: kindChannelOf,
       channels: channelsOver(registry),
       listAgents: () => [],
       onChanged: () => {},
@@ -701,6 +723,7 @@ describe("ChatSettingsService", () => {
       repository.mutate(
         {
           ref: { connectionId: "webchat", chatId: "chat-2" as ChatId },
+          connectionKind: "webchat",
           service: "webchat",
           kind: "channel",
           displayName: "chat-2",

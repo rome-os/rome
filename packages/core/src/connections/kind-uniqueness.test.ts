@@ -6,8 +6,8 @@ import { ConnectionRegistry } from "./registry.js";
 import { makePasteTalk, makeZeroGrantTalk } from "./test-fixtures.js";
 import type { ConnectionId } from "./types.js";
 
-describe("ConnectionRegistry Service uniqueness", () => {
-  it("rejects a second connection for a Service with an actionable error", async () => {
+describe("ConnectionRegistry connection kind uniqueness", () => {
+  it("rejects a second connection for a connection kind with an actionable error", async () => {
     const { db, close } = createTestDb();
     try {
       const ledger = new DrizzleGrantLedger(db);
@@ -24,7 +24,7 @@ describe("ConnectionRegistry Service uniqueness", () => {
     }
   });
 
-  it("mints only one connection when two connects for a Service race", async () => {
+  it("mints only one connection when two connects for a connection kind race", async () => {
     const { db, close } = createTestDb();
     try {
       const ledger = new DrizzleGrantLedger(db);
@@ -40,7 +40,7 @@ describe("ConnectionRegistry Service uniqueness", () => {
       const rejected = results.find((result) => result.status === "rejected");
       expect(rejected).toMatchObject({ status: "rejected" });
       expect(rejected?.status === "rejected" ? rejected.reason.message : "").toMatch(
-        /mints only a Service's first connection/i,
+        /mints only a connection kind's first connection/i,
       );
       await expect(ledger.listConnections()).resolves.toHaveLength(1);
     } finally {
@@ -81,7 +81,7 @@ describe("ConnectionRegistry Service uniqueness", () => {
             fail = false;
             throw new Error("injected participant failure");
           }
-          minted.push(record.service);
+          minted.push(record.connectionKind);
         },
       });
       registry.register(makePasteTalk().descriptor);
@@ -192,20 +192,20 @@ describe("ConnectionRegistry Service uniqueness", () => {
   });
 });
 
-describe("connections.service in a migrated store", () => {
-  it("accepts several connections of one Service", async () => {
+describe("connections.service column in a migrated store", () => {
+  it("accepts several connections of one connection kind", async () => {
     const { db, close } = createTestDb();
     try {
       const ledger = new DrizzleGrantLedger(db);
       ledger.writeConnection(db, {
         id: "discord-a",
-        service: "discord",
+        connectionKind: "discord",
         label: "A",
         createdAt: new Date(1),
       });
       ledger.writeConnection(db, {
         id: "discord-b",
-        service: "discord",
+        connectionKind: "discord",
         label: "B",
         createdAt: new Date(2),
       });
@@ -216,19 +216,19 @@ describe("connections.service in a migrated store", () => {
     }
   });
 
-  it("lists a Service's connections oldest first, whatever order they were written", async () => {
+  it("lists a connection kind's connections oldest first, whatever order they were written", async () => {
     const { db, close } = createTestDb();
     try {
       const ledger = new DrizzleGrantLedger(db);
       ledger.writeConnection(db, {
         id: "later",
-        service: "discord",
+        connectionKind: "discord",
         label: "B",
         createdAt: new Date(2_000),
       });
       ledger.writeConnection(db, {
         id: "first",
-        service: "discord",
+        connectionKind: "discord",
         label: "A",
         createdAt: new Date(1_000),
       });
@@ -246,13 +246,13 @@ describe("connections.service in a migrated store", () => {
       const ledger = new DrizzleGrantLedger(db);
       ledger.writeConnection(db, {
         id: "zzz-first",
-        service: "discord",
+        connectionKind: "discord",
         label: "A",
         createdAt: new Date(1_000),
       });
       ledger.writeConnection(db, {
         id: "aaa-later",
-        service: "discord",
+        connectionKind: "discord",
         label: "B",
         createdAt: new Date(1_500),
       });

@@ -39,10 +39,10 @@ import type {
   ProfileRecord,
 } from "../types.js";
 
-// Per-service grant-profile schemas. Rome Cloud's redeem hands over a RAW JSON
-// object; each service parses that raw object against its own schema, and the
+// Per-kind grant-profile schemas. Rome Cloud's redeem hands over a RAW JSON
+// object; each connection kind parses that raw object against its own schema, and the
 // parse OUTPUT is exactly what lands on the grant row as the opaque
-// ProfileRecord. There is no shared normalization DTO in the service path.
+// ProfileRecord. There is no shared normalization DTO on this path.
 // The same schema re-runs on revive, so a stored record that no longer matches
 // fails loudly instead of yielding a silently sparse display.
 
@@ -123,7 +123,7 @@ export const OAUTH_PROVIDER_PROFILE_SCHEMAS = {
   shopify: shopifyGrantProfileSchema,
 } as const;
 
-/** Any service-owned OAuth grant profile, for OAuth-layer code that fans out
+/** Any kind-specific OAuth grant profile, for OAuth-layer code that fans out
  *  per provider (e.g. the token-file serializer). */
 export type OAuthProviderGrantProfile =
   | GithubGrantProfile
@@ -148,9 +148,9 @@ export const OAUTH_PROVIDER_GRANTS: Record<OAuthProvider, GrantName> = {
   shopify: "store",
 };
 
-// Pure display mappings: parsed service profile (plain data) in, frozen display
+// Pure display mappings: parsed profile (plain data) in, frozen display
 // object out. The returned object is what satisfies the readonly
-// `ProfileDisplay` interface — there are no profile classes. Service-specific
+// `ProfileDisplay` interface — there are no profile classes. Kind-specific
 // values a generic reader can't render (subject, scopes, Slack's teamId) stay
 // on the parsed profile for owner-side readers and never reach the display.
 
@@ -194,7 +194,7 @@ export function toShopifyDisplay(profile: ShopifyGrantProfile): ProfileDisplay {
   });
 }
 
-/** Each service revives a stored record by re-running its OWN parse, then
+/** Each connection kind revives a stored record by re-running its OWN parse, then
  *  mapping the parsed plain data through its pure display function. A record
  *  that no longer matches the schema throws instead of displaying sparsely. */
 const OAUTH_PROVIDER_REVIVERS: Record<OAuthProvider, (record: ProfileRecord) => ProfileDisplay> = {
@@ -360,7 +360,7 @@ export function makeOAuthProviderDescriptor(
   const scheme = romeCloudOAuth({ provider, refresh: setupDeps?.refresh });
   if (setupDeps) scheme.setup = makeOAuthProviderSetup(provider, setupDeps);
   return {
-    service: provider,
+    connectionKind: provider,
     auth: {
       [OAUTH_PROVIDER_GRANTS[provider]]: scheme,
     },

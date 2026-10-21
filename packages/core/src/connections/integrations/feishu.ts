@@ -527,7 +527,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
   });
 
   return {
-    service: "feishu",
+    connectionKind: "feishu",
     severalAccounts: true,
     reviveProfile: (_grant, record) => reviveFeishuProfile(record),
     accountIdOf: (_grant, record) => (typeof record.appId === "string" && record.appId) || null,
@@ -599,6 +599,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
                     connectionId: kit.connectionId,
                     chatId: conversation.id as import("@rome-os/app-runtime").ChatId,
                   },
+                  connectionKind: "feishu",
                   service: "feishu",
                   kind: conversation.kind,
                   displayName: conversation.displayName,

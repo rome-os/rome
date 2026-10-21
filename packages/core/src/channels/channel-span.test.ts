@@ -14,7 +14,7 @@ import {
   FakeTransport,
   installTestSpanHarness,
   noAccounts,
-  serviceChannelOf,
+  kindChannelOf,
   type SpanHarness,
   type TestDb,
 } from "../test/helpers.js";
@@ -42,7 +42,7 @@ function hear(
       linkedInAccounts: noAccounts,
       connections: {
         registry: createTestConnections(new Map([[channel, transport]])),
-        channelOf: serviceChannelOf,
+        channelOf: kindChannelOf,
       },
     }),
     "channel-message",
@@ -170,7 +170,7 @@ describe("channel:{name}.handle span", () => {
         linkedInAccounts: noAccounts,
         connections: {
           registry: createTestConnections(new Map([["telegram", transport]])),
-          channelOf: serviceChannelOf,
+          channelOf: kindChannelOf,
         },
       }),
       "channel-message",

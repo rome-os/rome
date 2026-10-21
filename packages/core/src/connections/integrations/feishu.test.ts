@@ -164,7 +164,7 @@ describe("isFeishuAuthError", () => {
 describe("feishu descriptor shape", () => {
   it("declares one `app` grant and a talker needing it", () => {
     const desc = makeDescriptor(new FakeLarkChannel());
-    expect(desc.service).toBe("feishu");
+    expect(desc.connectionKind).toBe("feishu");
     expect(Object.keys(desc.auth)).toEqual(["app"]);
     expect(desc.capabilities.talker?.needs).toEqual(["app"]);
     expect(desc.capabilities.actor).toBeUndefined();

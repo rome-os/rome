@@ -56,6 +56,7 @@ function item(input: {
     snapshot: {
       conversation: {
         ref: { connectionId: `${service}-1`, chatId: input.id },
+        connectionKind: service,
         service,
         kind: "channel",
         displayName: input.name,

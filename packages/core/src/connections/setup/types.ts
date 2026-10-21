@@ -1,7 +1,7 @@
 // Connection conferral setup contracts. Vocabulary: docs/domains/connections.md.
 //
 // A setup is a server-owned coroutine that walks a guardian through
-// connecting one grant of one service. Builders write linear async code
+// connecting one grant of one connection kind. Builders write linear async code
 // (`setup(interact, ctx)`) suspended at interaction points; the runtime pumps
 // the coroutine and clients poll the resulting state. The verb set is
 // deliberately closed — `prompt` (blocking input), `show` (non-blocking
@@ -13,7 +13,7 @@
 // Content payloads are the HARD RULE: they are semantically complete
 // (copy authored server-side, next to the setup), so any surface — the
 // dashboard, a chat-driven conferral — can narrate any setup from the payload
-// alone. Custom per-`(service, state)` components override RENDERING only.
+// alone. Custom per-`(connectionKind, state)` components override RENDERING only.
 
 import type { Credential, ProfileRecord } from "../types.js";
 
@@ -77,7 +77,7 @@ export interface SetupView {
   links?: SetupViewLink[];
   steps?: SetupViewStep[];
   /** A QR code for the guardian to scan, as a `data:` image URL. First-class
-   *  because QR conferral recurs across services (WeChat, WhatsApp): the server
+   *  because QR conferral recurs across connection kinds (WeChat, WhatsApp): the server
    *  renders the image once and every surface — dashboard `<img>`, a chat
    *  message — presents it without its own QR encoder. The raw content string
    *  rides along in `links` so a surface that prefers a tappable link has it. */
@@ -99,8 +99,8 @@ export interface SetupConferral {
   /** The non-secret conferral outcome written in the same update as the
    *  credential. Omit when there is no identity to record. */
   profile?: ProfileRecord;
-  /** The guardian's own identity on this service's channel to auto-map in the
-   *  same terminal write (e.g. Discord's verified author id). Omit for services
+  /** The guardian's own identity on this connection kind's channel to auto-map in the
+   *  same terminal write (e.g. Discord's verified author id). Omit for connection kinds
    *  with no guardian-link step. */
   guardianChannelUserId?: string;
   /** The success view the standard "done" renderer presents. */

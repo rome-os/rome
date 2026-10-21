@@ -119,7 +119,12 @@ export class ApprovalsRepository {
       const connection = tx
         .select()
         .from(connections)
-        .where(and(eq(connections.id, input.connectionId), eq(connections.service, input.channel)))
+        .where(
+          and(
+            eq(connections.id, input.connectionId),
+            eq(connections.connectionKind, input.channel),
+          ),
+        )
         .get();
       if (!connection || requiredGrants.length === 0) return null;
       const grants = tx

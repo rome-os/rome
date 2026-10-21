@@ -24,7 +24,7 @@ import { createWechatDescriptor } from "./wechat.js";
 const stub = {} as never;
 
 interface ChannelCase {
-  service: string;
+  connectionKind: string;
   descriptor: ConnectionDescriptor;
   grant: string;
   full: ProfileRecord;
@@ -40,7 +40,7 @@ interface ChannelCase {
 
 const CASES: ChannelCase[] = [
   {
-    service: "telegram",
+    connectionKind: "telegram",
     descriptor: makeTelegramDescriptor(),
     grant: "bot",
     full: { botId: "42", botUsername: "@rome_bot" },
@@ -53,7 +53,7 @@ const CASES: ChannelCase[] = [
     sparse: { record: { botId: "42" }, expect: { handle: undefined } },
   },
   {
-    service: "discord",
+    connectionKind: "discord",
     descriptor: makeDiscordDescriptor({
       chatSettings: stub,
       personMappingRepo: stub,
@@ -70,7 +70,7 @@ const CASES: ChannelCase[] = [
     sparse: { record: { botId: "999" }, expect: { handle: undefined } },
   },
   {
-    service: "feishu",
+    connectionKind: "feishu",
     descriptor: createFeishuDescriptor({
       chatSettings: stub,
       personMappingRepo: stub,
@@ -87,7 +87,7 @@ const CASES: ChannelCase[] = [
     sparse: { record: { domain: "feishu" }, expect: { handle: undefined } },
   },
   {
-    service: "wechat",
+    connectionKind: "wechat",
     descriptor: createWechatDescriptor(),
     grant: "account",
     full: { accountId: "acct-1", userId: "guardian-7" },
@@ -100,7 +100,7 @@ const CASES: ChannelCase[] = [
     sparse: { record: { userId: "guardian-7" }, expect: { handle: undefined } },
   },
   {
-    service: "email",
+    connectionKind: "email",
     descriptor: makeEmailDescriptor({
       provider: stub,
       settingsRepo: stub,
@@ -117,7 +117,7 @@ const CASES: ChannelCase[] = [
     sparse: { record: {}, expect: { email: undefined, handle: undefined } },
   },
   {
-    service: "telegram_user",
+    connectionKind: "telegram_user",
     descriptor: makeTelegramUserDescriptor(),
     grant: "session",
     full: {
@@ -137,7 +137,7 @@ const CASES: ChannelCase[] = [
   },
 ];
 
-describe.each(CASES)("$service descriptor reviveProfile", (c) => {
+describe.each(CASES)("$connectionKind descriptor reviveProfile", (c) => {
   it("wires reviveProfile and projects the stored record onto the display slots", () => {
     expect(c.descriptor.reviveProfile).toBeDefined();
     const display = c.descriptor.reviveProfile?.(c.grant, c.full);

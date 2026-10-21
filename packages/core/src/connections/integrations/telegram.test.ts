@@ -177,7 +177,7 @@ describe("isTelegramAuthError", () => {
 describe("telegram descriptor shape", () => {
   it("declares one `bot` grant and a talker needing it", () => {
     const desc = makeTelegramDescriptor();
-    expect(desc.service).toBe("telegram");
+    expect(desc.connectionKind).toBe("telegram");
     expect(Object.keys(desc.auth)).toEqual(["bot"]);
     expect(desc.capabilities.talker?.needs).toEqual(["bot"]);
     expect(desc.capabilities.actor).toBeUndefined();

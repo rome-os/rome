@@ -151,9 +151,9 @@ export interface Credential {
 /**
  * The framework's only universal identity surface. The ledger stores the opaque
  * `ProfileRecord`; the descriptor's `reviveProfile` re-parses a stored record
- * with the service's own schema and maps the parsed plain data through the
- * service's pure display function — the returned display object is what
- * satisfies this readonly interface. Service-specific values that generic
+ * with the connection kind's own schema and maps the parsed plain data through the
+ * connection kind's pure display function — the returned display object is what
+ * satisfies this readonly interface. Kind-specific values that generic
  * readers can't render (scopes, workspace ids) stay on the parsed profile for
  * owner-side readers; they never widen this surface.
  */
@@ -205,10 +205,10 @@ export type CapabilityStatus =
   | { state: "needs-subscription" }
   | { state: "unsupported" };
 
-/** One service, named grants, up to three capabilities. */
+/** One connection kind, named grants, up to three capabilities. */
 export interface Connection {
   readonly id: ConnectionId;
-  readonly service: string;
+  readonly connectionKind: string;
   readonly label: string;
   readonly auth: AuthState;
   /** Discovery with reasons — drives the dashboard and connect hints. */
@@ -233,7 +233,7 @@ export interface Connection {
   get watch(): Watch | null;
 }
 
-/** What every push from the service looks like. Raw bytes + headers stay intact
+/** What every push from the remote service looks like. Raw bytes + headers stay intact
  *  so origin verification can HMAC them. */
 export type RawDelivery = { body: Uint8Array; headers: Record<string, string>; json: unknown };
 
@@ -295,21 +295,21 @@ export interface GrantCustody {
   clear(grant: GrantName): Promise<void>;
 }
 
-/** A service integration declaration. */
+/** A connection kind declaration. */
 export interface ConnectionDescriptor {
-  service: string;
+  connectionKind: string;
   auth: Record<GrantName, AuthScheme>;
   /** Revive a grant's stored opaque profile record: re-parse it with this
-   *  service's own schema, then map it through the service's pure display
+   *  connection kind's own schema, then map it through the connection kind's pure display
    *  function. Fail-closed — a record that no longer matches the schema throws
    *  rather than displaying sparsely. Generic readers consume only the returned
    *  display object; raw records never cross to generic surfaces. */
   reviveProfile?(grant: GrantName, record: ProfileRecord): ProfileDisplay;
   /** Grant-state-driven custody of out-of-process artifacts (token files, shell
-   *  auth). Omitted by services with no such artifact — most descriptors. */
+   *  auth). Omitted by connection kinds with no such artifact — most descriptors. */
   custody?: GrantCustody;
-  /** True when the guardian can add another account of this service, each
-   *  with its own Connection and channel. A service that keeps its stores or
+  /** True when the guardian can add another account of this connection kind, each
+   *  with its own Connection and channel. A connection kind that keeps its stores or
    *  adapter state under one channel, or is a single presence by nature
    *  (webchat, email), leaves it unset. Vocabulary:
    *  docs/domains/chats.md#account. */
@@ -319,11 +319,11 @@ export interface ConnectionDescriptor {
    *  parsing the strict profile schema, so a stored profile with an extra key
    *  still names its account.
    *  `ConnectionRegistry.confer` refuses a conferral whose account another
-   *  Connection of the service already holds in the same grant. A service that
+   *  Connection of the connection kind already holds in the same grant. A connection kind that
    *  leaves it unset is never refused.
-   *  A service with a Talk that declares it holds accounts that exist only while
+   *  A connection kind with a Talk that declares it holds accounts that exist only while
    *  connected: the last grant's disconnect removes the Connection
-   *  (`isUnconnectedAccount`). Declare it only for a service in
+   *  (`isUnconnectedAccount`). Declare it only for a connection kind in
    *  `LINKABLE_KINDS`, whose channels start fresh. */
   accountIdOf?(grant: GrantName, profile: ProfileRecord): string | null;
   capabilities: Partial<{

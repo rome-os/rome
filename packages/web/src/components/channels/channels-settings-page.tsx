@@ -537,7 +537,7 @@ function ConversationRow({
       className="overflow-hidden rounded-12 border border-border bg-surface px-4"
     >
       <header className="-mx-4 flex items-start gap-3 border-b border-border px-4 py-4">
-        <ConnectionBrandBadge connection={conversation.service} />
+        <ConnectionBrandBadge connection={conversation.connectionKind} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             {/* The container reads as the place the conversation lives, so it
@@ -568,7 +568,7 @@ function ConversationRow({
               list the service would otherwise be absent from the a11y tree. */}
           <p className="mt-1 truncate text-aux text-muted-foreground">
             {t(`channels.conversationSettings.kinds.${conversation.kind}`)}
-            <span className="sr-only">{` · ${serviceLabel(conversation.service)}`}</span>
+            <span className="sr-only">{` · ${serviceLabel(conversation.connectionKind)}`}</span>
           </p>
         </div>
         {saving && (

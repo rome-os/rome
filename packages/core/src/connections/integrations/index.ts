@@ -37,7 +37,7 @@ export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
 export { makeTelegramUserDescriptor } from "./telegram-user.js";
 export { createWechatDescriptor } from "./wechat.js";
-export { createWechatUserDescriptor, WECHAT_USER_SERVICE } from "./wechat-user.js";
+export { createWechatUserDescriptor, WECHAT_USER_KIND } from "./wechat-user.js";
 export { createFeishuDescriptor } from "./feishu.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeAgentsDescriptor } from "./agents.js";
@@ -45,7 +45,7 @@ export { makeWebchatDescriptor } from "./webchat.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
 export { createLinkedInDescriptor } from "./linkedin.js";
 export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-providers.js";
-export { makeSlackBotDescriptor, SLACK_BOT_SERVICE } from "./slack-bot.js";
+export { makeSlackBotDescriptor, SLACK_BOT_KIND } from "./slack-bot.js";
 
 /**
  * The runtime dependencies the descriptor factories need, threaded from index.ts

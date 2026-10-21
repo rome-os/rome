@@ -12,7 +12,7 @@ import { v4 as uuidv4 } from "uuid";
 import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
-import type { ServiceOfChannel } from "../db/repositories/channel-records.js";
+import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { SessionsRepository } from "../db/repositories/sessions.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
@@ -402,9 +402,9 @@ interface ManagerDeps {
   /** What the named channel's surface supports, or null for a name no channel
    *  has. A null result reads as a messaging channel. */
   channelSurface: (channel: string) => ChannelSurface | null;
-  /** The service behind a channel id. When absent, every channel id reads as
-   *  its own service, which holds only where no service has a second channel. */
-  serviceOfChannel?: ServiceOfChannel;
+  /** The connection kind behind a channel id. When absent, every channel id reads as
+   *  its own connection kind, which holds only where no connection kind has a second channel. */
+  connectionKindOfChannel?: ConnectionKindOfChannel;
 }
 
 /** The parts of a channel's surface that change how its sessions prompt. */
@@ -1313,7 +1313,7 @@ async function openSession(
   // would resume through a path that cannot honor the detached surface, and
   // the first branch turn still carries its parent's delivery address.
   const deferEnabled =
-    isGuardianFacingChannel(key.channelThreadKey, deps.serviceOfChannel) &&
+    isGuardianFacingChannel(key.channelThreadKey, deps.connectionKindOfChannel) &&
     !opts.isSubagent &&
     !init.interactiveSurfaceDetached;
   const makeExecuteDefer =

@@ -33,7 +33,7 @@ export interface SendDeps {
 
 /** A resolved target: the channel's send port, and the conversation on it
  *  that reaches this account. It names the channel, not the Connection: the
- *  port finds the channel's Connection again when it sends. A service holds at
+ *  port finds the channel's Connection again when it sends. A connection kind holds at
  *  most one Connection, so that is the one the conversation was resolved on,
  *  unless the Connection was replaced in between. This is deliberate. */
 export interface SendTarget {

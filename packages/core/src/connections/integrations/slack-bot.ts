@@ -13,7 +13,7 @@
 //   - a Socket Mode connection that keeps failing to reopen → Disconnected →
 //     runtime backs off and rebuilds.
 //
-// This service is separate from `slack`, the Rome Cloud-brokered OAuth
+// This connection kind is separate from `slack`, the Rome Cloud-brokered OAuth
 // connection that acts in a workspace for the guardian.
 
 import { z } from "zod";
@@ -33,7 +33,7 @@ import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupForm, SetupFormField, SetupInteraction } from "../setup/types.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
 
-export const SLACK_BOT_SERVICE = "slack_bot";
+export const SLACK_BOT_KIND = "slack_bot";
 
 /** Slack caps an app's name at 35 characters. */
 const SLACK_APP_NAME_MAX = 35;
@@ -325,7 +325,7 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
   botScheme.setup = makeSlackBotSetup({ api, createSocket: deps.createSocket });
 
   return {
-    service: SLACK_BOT_SERVICE,
+    connectionKind: SLACK_BOT_KIND,
     severalAccounts: true,
     reviveProfile: (_grant, record) => reviveSlackBotProfile(record),
     accountIdOf: (_grant, record) => slackBotAccountId(record),
@@ -346,7 +346,7 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
           const adapter = new SlackAdapter({
             botToken: material.botToken,
             appToken: material.appToken,
-            channel: SLACK_BOT_SERVICE,
+            channel: SLACK_BOT_KIND,
             api,
             createSocket: deps.createSocket,
             onFault: ({ kind, cause }) =>

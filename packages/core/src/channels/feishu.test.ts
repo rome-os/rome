@@ -163,6 +163,7 @@ function makeChatSettings(initial: ChatSettingsOverrides = {}) {
       descriptors.get(chatId) ??
       ({
         ref: { connectionId: FEISHU_CONNECTION_ID, chatId },
+        connectionKind: "feishu",
         service: "feishu",
         kind: "group",
         displayName: chatId,

@@ -31,7 +31,7 @@ describe("webchat descriptor shape", () => {
     const testDb = createTestDb();
     const repo = new WebChatRepository(testDb.db);
     const desc = makeWebchatDescriptor({ webchatRepo: repo });
-    expect(desc.service).toBe("webchat");
+    expect(desc.connectionKind).toBe("webchat");
     expect(Object.keys(desc.auth)).toEqual([]);
     expect(desc.capabilities.talker?.needs).toEqual([]);
     expect(desc.capabilities.actor).toBeUndefined();

@@ -651,6 +651,7 @@ export class DiscordAdapter {
     const ref = { connectionId: this.connectionId, chatId: channelId as ChatId };
     return {
       ref,
+      connectionKind: "discord",
       service: "discord",
       kind: parentId ? "topic" : "channel",
       displayName: displayName ?? channelId,

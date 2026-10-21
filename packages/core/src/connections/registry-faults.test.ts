@@ -771,7 +771,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     });
     let renewStarted = false;
     const descriptor: ConnectionDescriptor = {
-      service: "fake-session-svc",
+      connectionKind: "fake-session-svc",
       auth: {
         session: {
           async confer(): Promise<Credential> {
@@ -862,7 +862,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     renew: () => Promise<Credential | "re-confer">,
   ): ConnectionDescriptor {
     return {
-      service: "fake-session-svc",
+      connectionKind: "fake-session-svc",
       auth: {
         session: {
           async confer(): Promise<Credential> {

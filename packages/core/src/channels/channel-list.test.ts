@@ -11,7 +11,7 @@ import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { tokenPaste } from "../connections/schemes.js";
 import type { Connection, ConnectionDescriptor, Talker } from "../connections/types.js";
-import { createTestDb, serviceChannelOf, type TestDb } from "../test/helpers.js";
+import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
 import type { Accounts } from "./accounts.js";
 import { ChannelNotConnected } from "./channel.js";
 import { channelList, joinLaterChannel } from "./channel-list.js";
@@ -40,7 +40,7 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
 }
 
 /** A pasted-token service whose every talker epoch is recorded. */
-function talkService(
+function talkKind(
   service: string,
   ports: { sends?: boolean; receives?: boolean; history?: boolean } = {},
   direct: Pick<ChannelDirectMessaging, "chatFor"> | null = null,
@@ -53,7 +53,7 @@ function talkService(
   return {
     epochs,
     descriptor: {
-      service,
+      connectionKind: service,
       auth: { bot: tokenPaste({ label: "token", validate: async () => {} }) },
       capabilities: {
         talker: {
@@ -122,7 +122,7 @@ describe("channelList", () => {
       getDescriptor: (service) => registry.getDescriptor(service),
       onUnlocked: (capability, handler) =>
         registry.onUnlocked(capability, (connection) => handler(tracked(connection))),
-      registeredServices: () => registry.registeredServices(),
+      registeredKinds: () => registry.registeredKinds(),
     };
     const channels = channelList({
       db: testDb.db,
@@ -131,7 +131,7 @@ describe("channelList", () => {
       connections: {
         registry: watched,
         admit,
-        channelOf: serviceChannelOf,
+        channelOf: kindChannelOf,
         ...(admission ? { admission } : {}),
       },
       ...(connectionAccounts ? { connectionAccounts } : {}),
@@ -141,17 +141,17 @@ describe("channelList", () => {
 
   it("gives every service with a Talk a channel, beside the read-backed ones", () => {
     const actOnly: ConnectionDescriptor = {
-      service: "github",
+      connectionKind: "github",
       auth: {},
       capabilities: {
         actor: { needs: [], build: () => ({ operations: () => [], invoke: async () => null }) },
       },
     };
     const { channels } = setup([
-      talkService("whatsapp").descriptor,
-      talkService("linkedin", { receives: false }).descriptor,
-      talkService("telegram").descriptor,
-      talkService("silent", { sends: false, receives: false }).descriptor,
+      talkKind("whatsapp").descriptor,
+      talkKind("linkedin", { receives: false }).descriptor,
+      talkKind("telegram").descriptor,
+      talkKind("silent", { sends: false, receives: false }).descriptor,
       actOnly,
     ]);
 
@@ -168,7 +168,7 @@ describe("channelList", () => {
   it("gives a Connection-backed channel the address book named for its service", () => {
     const book: Accounts = { ...noAccounts };
     const { channels } = setup(
-      [talkService("agents").descriptor, talkService("telegram").descriptor],
+      [talkKind("agents").descriptor, talkKind("telegram").descriptor],
       undefined,
       undefined,
       { agents: book },
@@ -179,7 +179,7 @@ describe("channelList", () => {
   });
 
   it("rejects a send nothing backs, and sends through the Connection once one does", async () => {
-    const { registry, channels } = setup([talkService("telegram").descriptor]);
+    const { registry, channels } = setup([talkKind("telegram").descriptor]);
     const telegram = channels.find((channel) => channel.name === "telegram")!;
 
     await expect(telegram.send!.send("c-1" as ChatId, { text: "hi" })).rejects.toThrow(
@@ -208,7 +208,7 @@ describe("channelList", () => {
       query: async () => [said("older", now - 2_000), said("newer", now - 1_000)],
     };
     const { registry, channels } = setup([
-      talkService("telegram", { history: true }, null, null, history).descriptor,
+      talkKind("telegram", { history: true }, null, null, history).descriptor,
     ]);
     const telegram = channels.find((channel) => channel.name === "telegram")!;
     // Rome keeps no copy of a live channel, so People reads it elsewhere.
@@ -243,7 +243,7 @@ describe("channelList", () => {
     // Offers a history read but does not declare one, so its channel would
     // never get a `messages` port.
     const history: TalkHistory = { query: async () => [] };
-    registry.register(talkService("telegram", {}, null, null, history).descriptor);
+    registry.register(talkKind("telegram", {}, null, null, history).descriptor);
     const connection = await registry.connect("telegram");
     await registry.importCredential(connection.id, "bot", {
       material: { token: "t" },
@@ -252,7 +252,7 @@ describe("channelList", () => {
 
     expect(error).toHaveBeenCalledWith("talker history flag disagrees with its history feature", {
       connectionId: connection.id,
-      service: "telegram",
+      connectionKind: "telegram",
       declared: false,
       offered: true,
     });
@@ -266,7 +266,7 @@ describe("channelList", () => {
       ledger: new DrizzleGrantLedger(testDb.db),
       logger: logger as never,
     });
-    const service = talkService("telegram");
+    const service = talkKind("telegram");
     const build = service.descriptor.capabilities.talker!.build;
     service.descriptor.capabilities.talker!.build = (creds, kit) => ({
       ...build(creds, kit),
@@ -284,7 +284,7 @@ describe("channelList", () => {
     expect(service.epochs).toHaveLength(1);
     expect(warn).toHaveBeenCalledWith("could not check the talker's history flag", {
       connectionId: connection.id,
-      service: "telegram",
+      connectionKind: "telegram",
       error: "not started",
     });
   });
@@ -292,8 +292,8 @@ describe("channelList", () => {
   it("reaches an account directly only through a Connection that offers it", async () => {
     const chatFor = rs.fn(async (id: string) => id as ChatId);
     const { registry, channels } = setup([
-      talkService("telegram", {}, { chatFor }).descriptor,
-      talkService("discord").descriptor,
+      talkKind("telegram", {}, { chatFor }).descriptor,
+      talkKind("discord").descriptor,
     ]);
     const telegram = channels.find((channel) => channel.name === "telegram")!;
     const discord = channels.find((channel) => channel.name === "discord")!;
@@ -318,6 +318,7 @@ describe("channelList", () => {
       conversations: [
         {
           ref: { connectionId: "unused", chatId: "general" as ChatId },
+          connectionKind: "discord",
           service: "discord",
           kind: "channel" as const,
           displayName: "general",
@@ -325,8 +326,8 @@ describe("channelList", () => {
       ],
     }));
     const { registry, channels } = setup([
-      talkService("discord", {}, null, null, null, { listConversations }).descriptor,
-      talkService("feishu", {}, null, null, null, {
+      talkKind("discord", {}, null, null, null, { listConversations }).descriptor,
+      talkKind("feishu", {}, null, null, null, {
         listConversations: async () => {
           throw new Error("provider down");
         },
@@ -367,7 +368,7 @@ describe("channelList", () => {
 
   it("shows typing through the send port once a Connection offers it", async () => {
     const begin = rs.fn(async () => null);
-    const { registry, channels } = setup([talkService("telegram", {}, null, { begin }).descriptor]);
+    const { registry, channels } = setup([talkKind("telegram", {}, null, { begin }).descriptor]);
     const send = channels.find((channel) => channel.name === "telegram")!.send!;
 
     expect(send.activity).toBeNull();
@@ -381,7 +382,7 @@ describe("channelList", () => {
   });
 
   it("delivers admitted, answerable messages to a subscription that outlives reconnects", async () => {
-    const service = talkService("telegram");
+    const service = talkKind("telegram");
     const { registry, channels } = setup([service.descriptor]);
     const telegram = channels.find((channel) => channel.name === "telegram")!;
 
@@ -415,7 +416,7 @@ describe("channelList", () => {
   });
 
   it("keeps two subscriptions of one handler independent", async () => {
-    const service = talkService("telegram");
+    const service = talkKind("telegram");
     const { registry, channels } = setup([service.descriptor]);
     const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
     const heard: string[] = [];
@@ -439,7 +440,7 @@ describe("channelList", () => {
   });
 
   it("follows a Connection removed and connected again, holding only the live one", async () => {
-    const service = talkService("telegram");
+    const service = talkKind("telegram");
     const { registry, channels, subscribed } = setup([service.descriptor]);
     const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
     const heard: string[] = [];
@@ -460,7 +461,7 @@ describe("channelList", () => {
   });
 
   it("hears one conversation's events in order, without waiting on another conversation", async () => {
-    const service = talkService("telegram");
+    const service = talkKind("telegram");
     const { registry, channels } = setup([service.descriptor]);
     const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
     const started: string[] = [];
@@ -495,7 +496,7 @@ describe("channelList", () => {
   });
 
   it("keeps a conversation's order when admission finishes out of order", async () => {
-    const service = talkService("telegram");
+    const service = talkKind("telegram");
     // Admission for the first message finishes after admission for the second,
     // as two pooled database queries can.
     const { registry, channels } = setup([service.descriptor], async (_id, _service, inbound) => {
@@ -520,7 +521,7 @@ describe("channelList", () => {
   });
 
   it("fails a stuck admission closed and admits the conversation's next message", async () => {
-    const service = talkService("telegram");
+    const service = talkKind("telegram");
     const { registry, channels } = setup(
       [service.descriptor],
       (_id, _service, inbound) =>
@@ -545,7 +546,7 @@ describe("channelList", () => {
   });
 
   it("drops events still queued for a handler once it unsubscribes", async () => {
-    const service = talkService("telegram");
+    const service = talkKind("telegram");
     const { registry, channels } = setup([service.descriptor]);
     const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
     const started: string[] = [];
@@ -575,7 +576,7 @@ describe("channelList", () => {
   });
 
   it("lets no slow or synchronously throwing handler hold up another subscriber", async () => {
-    const service = talkService("telegram");
+    const service = talkKind("telegram");
     const { registry, channels } = setup([service.descriptor]);
     const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
 
@@ -607,11 +608,11 @@ describe("joinLaterChannel", () => {
 
   it("joins a second Connection's channel once, and its first message reaches a subscriber once", async () => {
     testDb = createTestDb();
-    const service = talkService("telegram");
+    const service = talkKind("telegram");
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     registry.register(service.descriptor);
     const first = await registry.connect("telegram");
-    const channelOf = (connection: Pick<Connection, "id" | "service">) =>
+    const channelOf = (connection: Pick<Connection, "id" | "connectionKind">) =>
       connection.id === first.id ? "telegram" : `later-${connection.id}`;
     const admit = async () => true;
     const channels = channelList({
@@ -654,7 +655,7 @@ describe("joinLaterChannel", () => {
 
   it("paces a later channel's writes with its Connection's pacer, so its replies can stream", async () => {
     testDb = createTestDb();
-    const service = talkService("telegram", {}, null, null, null, null, {
+    const service = talkKind("telegram", {}, null, null, null, null, {
       capabilities: {
         maxPartLength: 10,
         edit: false,

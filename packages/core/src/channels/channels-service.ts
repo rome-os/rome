@@ -84,7 +84,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
         for (const connection of talking(deps.registry)) {
           const name = deps.channelOf(connection);
           if (name === null) continue;
-          const platform = deps.platformOf?.(name) ?? platformOf(connection.service);
+          const platform = deps.platformOf?.(name) ?? platformOf(connection.connectionKind);
           summaries.set(name, { name, platform, sendable: true });
         }
         for (const channel of deps.channels() ?? []) {

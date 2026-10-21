@@ -185,7 +185,7 @@ function discordBotFor(
 ): { bot: Connection | undefined; candidates: Connection[] | null; includeNewAccount: boolean } {
   const bots = deps.connectionRegistry?.find("discord") ?? [];
   const record = channel ? deps.channelRecords?.byId(channel) : null;
-  if (record?.service === "discord") {
+  if (record?.connectionKind === "discord") {
     const own = bots.find((bot) => bot.id === record.connectionId);
     // A failure then describes the channel's own bot, not every Discord bot.
     return { bot: own, candidates: own ? [own] : [], includeNewAccount: false };

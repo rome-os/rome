@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { ChannelSend } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
-import { createTestDb, type TestDb, identityServiceOf } from "../test/helpers.js";
+import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/helpers.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import {
@@ -58,7 +58,7 @@ describe("channel pairing approvals", () => {
       .insert(connections)
       .values({
         id: "connection",
-        service,
+        connectionKind: service,
         label: service,
         createdAt: new Date(),
       })
@@ -76,7 +76,7 @@ describe("channel pairing approvals", () => {
     testDb = createTestDb();
     repo = new ApprovalsRepository(
       testDb.db,
-      new PersonMappingRepository(testDb.db, identityServiceOf),
+      new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       () => key,
     );
     testDb.db
@@ -109,7 +109,7 @@ describe("channel pairing approvals", () => {
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityServiceOf),
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       registry,
     });
     await admit("connection", channel, {
@@ -151,7 +151,7 @@ describe("channel pairing approvals", () => {
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityServiceOf),
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       registry,
     });
 
@@ -190,7 +190,7 @@ describe("channel pairing approvals", () => {
     await createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityServiceOf),
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       registry: registryOf(send),
     })("connection", channel, {
       channel,
@@ -219,7 +219,7 @@ describe("channel pairing approvals", () => {
     expect(
       await new ApprovalsRepository(
         testDb.db,
-        new PersonMappingRepository(testDb.db, identityServiceOf),
+        new PersonMappingRepository(testDb.db, identityConnectionKindOf),
         () => key,
       ).pairingCode(first.approval.id),
     ).toBe(code);
@@ -283,7 +283,7 @@ describe("channel pairing approvals", () => {
   ] as const)("%s requires dismissed accounts to pair before admission", async (channel) => {
     seedConnection(channel);
     const accountId = channel === "feishu" ? "ou_123" : "123";
-    const people = new PersonMappingRepository(testDb.db, identityServiceOf);
+    const people = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
     testDb.db
       .insert(persons)
       .values({
@@ -357,7 +357,7 @@ describe("channel pairing approvals", () => {
     const input = { ...identity, connectionId: "connection", channelUserId: "123" };
     const previous = repo.requestAuthorizedPairing(input, ["bot"])!;
     const code = (await repo.pairingCode(previous.approval.id))!;
-    const people = new PersonMappingRepository(testDb.db, identityServiceOf);
+    const people = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
     let resume!: () => void;
     let entered!: () => void;
     const paused = new Promise<void>((resolve) => {
@@ -506,7 +506,7 @@ describe("channel pairing approvals", () => {
     const load = rs.fn(() => key);
     const cached = new ApprovalsRepository(
       testDb.db,
-      new PersonMappingRepository(testDb.db, identityServiceOf),
+      new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       load,
     );
     const id = cached.requestPairing(identity)!.approval.id;
@@ -603,7 +603,7 @@ describe("channel pairing approvals", () => {
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityServiceOf),
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       registry,
     });
     const id = service === "feishu" ? "ou_123" : "123";

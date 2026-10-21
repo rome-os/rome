@@ -76,7 +76,7 @@ export function OAuthConnectionSection({
   // The setup addresses the connection by id, or by the bare service name when
   // the guardian has never connected (the terminal conferral mints the row).
   const setup = useSetup({
-    idOrService: slot.connectionId ?? card.service,
+    idOrKind: slot.connectionId ?? card.service,
     grant: slot.grant ?? "",
     activeCid: slot.activeSetupCid,
     onDone: () => {

@@ -1,7 +1,7 @@
 // Shared test fixtures. No Rstest imports here so all three
 // test agents (registry, ledger, rehydration) can import from this one file.
 //
-// Six fake descriptors mirror the six canonical services:
+// Six fake descriptors mirror the six canonical connection kinds:
 //   zeroGrantTalk   — webchat-like: Talker with no grants, unlocked from birth
 //   pasteTalk       — telegram-like: one tokenPaste grant → Talker
 //   twoGrant        — discord-like: bot(paste)+user(renewable) → talker+watcher+actor
@@ -375,7 +375,7 @@ export interface ZeroGrantTalkFixture {
 export function makeZeroGrantTalk(): ZeroGrantTalkFixture {
   const talkerFactory = makeFakeTalkerFactory();
   const descriptor: ConnectionDescriptor = {
-    service: "fake-webchat",
+    connectionKind: "fake-webchat",
     auth: {},
     capabilities: {
       talker: {
@@ -404,7 +404,7 @@ export function makePasteTalk(opts?: FakeTalkerOptions): PasteTalkFixture {
   const talkerFactory = makeFakeTalkerFactory(opts);
 
   const descriptor: ConnectionDescriptor = {
-    service: "fake-telegram",
+    connectionKind: "fake-telegram",
     // Names its account by the profile's `botId`, as Telegram does.
     accountIdOf: (_grant, profile) => (typeof profile.botId === "string" ? profile.botId : null),
     auth: {
@@ -468,7 +468,7 @@ export function makeTwoGrant(): TwoGrantFixture {
   });
 
   const descriptor: ConnectionDescriptor = {
-    service: "fake-discord",
+    connectionKind: "fake-discord",
     auth: {
       bot: botScheme,
       user: userScheme,
@@ -538,7 +538,7 @@ export function makeRenewableAct(opts?: { successCount?: number }): RenewableAct
   });
 
   const descriptor: ConnectionDescriptor = {
-    service: "fake-github",
+    connectionKind: "fake-github",
     auth: {
       user: userScheme,
     },
@@ -574,7 +574,7 @@ export function makeGatedWatch(): GatedWatchFixture {
   const watcherFactory = makeFakeWatcherFactory();
 
   const descriptor: ConnectionDescriptor = {
-    service: "fake-github-watch",
+    connectionKind: "fake-github-watch",
     auth: {},
     capabilities: {
       watcher: {
@@ -640,7 +640,7 @@ export function makeExternalCustody(): ExternalCustodyFixture {
   };
 
   const descriptor: ConnectionDescriptor = {
-    service: "fake-composio",
+    connectionKind: "fake-composio",
     auth: {
       account: scheme,
     },
@@ -721,7 +721,7 @@ export function makeCustodyGrant(opts?: { successCount?: number }): CustodyGrant
   });
 
   const descriptor: ConnectionDescriptor = {
-    service: "fake-oauth-provider",
+    connectionKind: "fake-oauth-provider",
     auth: { user: userScheme },
     custody,
     capabilities: {},
