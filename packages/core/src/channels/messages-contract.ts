@@ -11,7 +11,7 @@ import {
   messageCursor,
   type Message,
 } from "@rome/api-types/message";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import type { AccountMessages, MessageAccount, Messages } from "./messages.js";
 
 /** A limit large enough to hold any history a store can answer — what
@@ -156,9 +156,9 @@ export interface MessagesQuerySubject {
    * conversation. A group wherever the store can hold one, since a group is
    * what the account reads never reach.
    */
-  conversation: ConversationId;
+  conversation: ChatId;
   /** A conversation on the store's channel that it holds nothing of. */
-  silentConversation: ConversationId;
+  silentConversation: ChatId;
 }
 
 export function testMessagesQueryContract(

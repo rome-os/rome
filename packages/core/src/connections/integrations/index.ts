@@ -16,7 +16,7 @@ import {
 } from "../../lib/rome-cloud-oauth.js";
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
-import type { ConversationSettingsService } from "../../conversation-settings/service.js";
+import type { ChatSettingsService } from "../../conversation-settings/service.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
@@ -51,7 +51,7 @@ export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-prov
  */
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
-  conversationSettings: ConversationSettingsService;
+  conversationSettings: ChatSettingsService;
   chatStop: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   webchatRepo: WebChatRepository;

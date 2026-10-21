@@ -15,7 +15,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - Inbound delivers only what a subscriber may answer. Rome's own sends, the guardian's messages from another device, reactions, edits and frames with no text or attachments stay out of it. The complete record is `messages`.
 - The `send` port reaches one account directly through `direct`, where the channel offers it. While no Connection exists for the channel, that lookup rejects as a send does, which is how People tells an unconnected channel from one that cannot be written to. A Connection that exists but has no live talker reads as a channel that cannot be written to, as it did before.
 - The `send` port shows a typing indicator through `activity`, where the channel offers it. It is cosmetic, and nothing waits on it.
-- An inbound event carries its chat's `ConversationRef`, the address that chat settings and stop take, so a subscriber does not track what backs the channel.
+- An inbound event carries its chat's `ChatRef`, the address that chat settings and stop take, so a subscriber does not track what backs the channel.
 - An inbound event's message is a `ChannelMessage`, the record `messages` answers: it names the channel and says it came inbound.
 - Inbound is live and at most once. Nothing is acknowledged or replayed, and a subscriber catches up by reading `messages`.
 - `messages` answers one `query` for what was said on the channel: every chat or one, since a moment or not, newest first. It answers the record `inbound` delivers, plus the channel and the direction, whether a copy Rome keeps or the platform holds the data, and a caller cannot tell which. Neither kind is complete: a copy holds what was synced, and a live read what the platform returns.
@@ -26,7 +26,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - Every subscriber hears every event. A subscriber hears one chat's events one at a time, in arrival order. Different chats and different subscribers never wait on each other, so one slow or failing handler holds up only its own chat for its own subscriber. A handler that never settles stops that chat for that subscriber for good, so a subscriber settles every event it takes. A handler still running after ten minutes is logged, and so is a chat with twenty events waiting. A chat holds at most a hundred waiting events per subscriber. Past that, the oldest is dropped and logged. Events still waiting when a subscription ends are dropped, and a handler already running keeps running.
 - An inbound subscription outlives a reconnect of whatever backs it.
 - Inbound hears a channel only while Rome listens to its account ([An account's agent](#an-accounts-agent)). While Rome does not, the channel keeps its subscribers, but nothing it receives reaches them, and admission does not run.
-- `directory` lists the chats a channel can see, each with its `ConversationRef`, so chat settings reach a channel's chats without reaching a Connection. A listing that fails is logged and answers no chats.
+- `directory` lists the chats a channel can see, each with its `ChatRef`, so chat settings reach a channel's chats without reaching a Connection. A listing that fails is logged and answers no chats.
 
 ### Channels for app actions
 

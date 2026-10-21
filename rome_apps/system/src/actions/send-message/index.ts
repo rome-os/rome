@@ -6,8 +6,8 @@ import type {
   Action,
   ActionConfig,
   ActionResult,
-  ConversationId,
-  ConversationRepository,
+  ChatId,
+  ChatRepository,
   MessageReceipt,
   ChannelsService,
   PreviewPayload,
@@ -54,7 +54,7 @@ export interface AgentNamesService {
 
 interface SendMessageRuntimeDeps {
   personMappingRepo?: PersonMappingResolver;
-  conversations?: ConversationRepository;
+  conversations?: ChatRepository;
   agentNames?: AgentNamesService;
 }
 
@@ -370,7 +370,7 @@ export async function executeSendMessage(
       reply: !!(email.threadId || replyTarget),
       attachmentCount: attachments?.length ?? 0,
     });
-    const delivery = await channels.send(channel, threadId as ConversationId, {
+    const delivery = await channels.send(channel, threadId as ChatId, {
       kind: "email",
       text,
       parts,
@@ -414,7 +414,7 @@ export async function executeSendMessage(
     channelUserId,
     attachmentCount: attachments?.length ?? 0,
   });
-  const delivery = await channels.send(channel, threadId as ConversationId, {
+  const delivery = await channels.send(channel, threadId as ChatId, {
     text,
     parts,
     attachments: safeInput.attachments,
@@ -562,7 +562,7 @@ export function createSendMessageAction(
 export function createAction(
   config: ActionConfig,
   deps: { channelsService: ChannelsService } & SendMessageRuntimeDeps & {
-      appContext?: { repositories?: { conversations?: ConversationRepository } };
+      appContext?: { repositories?: { conversations?: ChatRepository } };
     },
 ): Action {
   return createSendMessageAction(config, deps.channelsService, {

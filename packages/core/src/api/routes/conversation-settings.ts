@@ -1,14 +1,10 @@
 import { Hono } from "hono";
-import type {
-  ConversationRef,
-  ConversationSettingField,
-  PartialConversationSettings,
-} from "@rome-os/app-runtime";
+import type { ChatRef, ChatSettingField, PartialChatSettings } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 
 const dashboardActor = { kind: "guardian" as const, id: "dashboard" };
 
-function parseRef(value: unknown): ConversationRef {
+function parseRef(value: unknown): ChatRef {
   if (!value || typeof value !== "object") throw new Error("ref is required");
   const ref = value as { connectionId?: unknown; conversationId?: unknown };
   if (typeof ref.connectionId !== "string" || !ref.connectionId) {
@@ -17,7 +13,7 @@ function parseRef(value: unknown): ConversationRef {
   if (typeof ref.conversationId !== "string") {
     throw new Error("ref.conversationId is required");
   }
-  return ref as ConversationRef;
+  return ref as ChatRef;
 }
 
 export function conversationSettingsRoutes(deps: ApiDeps): Hono {
@@ -43,8 +39,8 @@ export function conversationSettingsRoutes(deps: ApiDeps): Hono {
     try {
       const body = await c.req.json<{
         ref?: unknown;
-        set?: PartialConversationSettings;
-        clear?: ConversationSettingField[];
+        set?: PartialChatSettings;
+        clear?: ChatSettingField[];
       }>();
       return c.json(
         await deps.conversationSettings.update({

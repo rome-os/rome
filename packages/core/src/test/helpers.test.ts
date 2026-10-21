@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "@rstest/core";
 import { sql } from "drizzle-orm";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   createTestDb,
   createMockAgentRunner,
@@ -144,7 +144,7 @@ describe("Test Helpers", () => {
       const transport = new FakeTransport("telegram");
       expect(transport.channel).toBe("telegram");
 
-      const receipt = await transport.send("thread-1" as ConversationId, { text: "Hi" });
+      const receipt = await transport.send("thread-1" as ChatId, { text: "Hi" });
       expect(receipt.conversationId).toBe("thread-1");
       expect(receipt.messageId).toEqual(expect.any(String));
       expect(transport.sentMessages).toEqual([

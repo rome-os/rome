@@ -1,7 +1,7 @@
 import type {
   AppRuntimeRepositories,
   AppSettingsRepository,
-  ConversationRepository,
+  ChatRepository,
   GuardianProfileRepository,
   WebChatRecapRepository,
 } from "@rome-os/app-runtime";
@@ -53,7 +53,7 @@ function createGuardianProfileRepository(deps: {
   };
 }
 
-function createConversationRepository(repo: WebChatRepository): ConversationRepository {
+function createConversationRepository(repo: WebChatRepository): ChatRepository {
   return {
     ensureChannelConversation: (input) => repo.ensureChannelConversation(input),
     addMessage: (input) => repo.addConversationMessage(input),

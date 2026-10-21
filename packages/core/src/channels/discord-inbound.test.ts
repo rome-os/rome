@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ChannelType, MessageReferenceType, MessageType, type Message } from "discord.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId, MessageAddressing } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageAddressing } from "@rome-os/app-runtime";
 import { DiscordAdapter } from "./discord.js";
 
 // The gateway filters run before dispatchMessage. These tests call it directly
@@ -186,7 +186,7 @@ describe("DiscordAdapter.saveIncomingAttachments", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "msg-7",
-      conversationId: "thread-1" as ConversationId,
+      conversationId: "thread-1" as ChatId,
       senderId: "user-1",
       text: "",
       attachments: [{ type: "image", url: "https://cdn.discordapp.com/attachments/1/2/photo.png" }],
@@ -211,7 +211,7 @@ describe("DiscordAdapter.saveIncomingAttachments", () => {
         channel: "discord",
         direction: "inbound",
         messageId: "msg-8",
-        conversationId: "channel-1" as ConversationId,
+        conversationId: "channel-1" as ChatId,
         senderId: "user-1",
         text: "",
         attachments,

@@ -6,7 +6,7 @@ import type {
   Attachment,
   ChannelMessage,
   ChannelsService,
-  ConversationId,
+  ChatId,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("fetch_channel_history");
@@ -176,7 +176,7 @@ export function createAction(
         // `query` answers newest first; the transcript reads oldest first.
         messages = (
           await channels.query(channel, {
-            ...(threadId ? { conversationId: threadId as ConversationId } : {}),
+            ...(threadId ? { conversationId: threadId as ChatId } : {}),
             since: new Date(Date.now() - windowHours * 60 * 60 * 1000),
           })
         ).reverse();

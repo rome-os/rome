@@ -1,9 +1,9 @@
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
 import type {
-  ConversationId,
-  ConversationSettings,
-  ConversationSettingsListItem,
-  PartialConversationSettings,
+  ChatId,
+  ChatSettings,
+  ChatSettingsListItem,
+  PartialChatSettings,
 } from "@rome/api-types/conversation-settings";
 import type {
   AppRefDto,
@@ -982,7 +982,7 @@ const composioStatus: { composio: ComposioCliStatus } = {
   },
 };
 
-const conversationDefaults: ConversationSettings = {
+const conversationDefaults: ChatSettings = {
   enabled: true,
   activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
   replies: { placement: "thread" },
@@ -990,14 +990,14 @@ const conversationDefaults: ConversationSettings = {
   session: { reset: { mode: "idle", idleMinutes: 10_080 } },
 };
 
-const conversationSettings: { items: ConversationSettingsListItem[] } = {
+const conversationSettings: { items: ChatSettingsListItem[] } = {
   items: [
     {
       availability: "online",
       source: "configured",
       snapshot: {
         conversation: {
-          ref: { connectionId: "discord-1", conversationId: "engineering" as ConversationId },
+          ref: { connectionId: "discord-1", conversationId: "engineering" as ChatId },
           service: "discord",
           kind: "group",
           displayName: "can you see active chats?",
@@ -1023,7 +1023,7 @@ const conversationSettings: { items: ConversationSettingsListItem[] } = {
       source: "known",
       snapshot: {
         conversation: {
-          ref: { connectionId: "telegram-1", conversationId: "dm-42" as ConversationId },
+          ref: { connectionId: "telegram-1", conversationId: "dm-42" as ChatId },
           service: "telegram",
           kind: "dm",
           displayName: "Ray",
@@ -1044,7 +1044,7 @@ const conversationSettings: { items: ConversationSettingsListItem[] } = {
  * One level of nesting is all the settings shape has (`activation.mode`,
  * `session.reset`, …), so a targeted merge beats pulling in a deep-merge dep.
  */
-function mergeSettings<T extends object>(base: T, patch: PartialConversationSettings): T {
+function mergeSettings<T extends object>(base: T, patch: PartialChatSettings): T {
   const merged: Record<string, unknown> = { ...(base as Record<string, unknown>) };
   for (const [key, value] of Object.entries(patch)) {
     merged[key] =
@@ -1351,7 +1351,7 @@ export const handlers = [
   http.patch("/api/conversation-settings", async ({ request }) => {
     const body = (await request.json()) as {
       ref: { connectionId: string; conversationId: string };
-      set: PartialConversationSettings;
+      set: PartialChatSettings;
       clear?: string[];
     };
     const found = conversationSettings.items.find(

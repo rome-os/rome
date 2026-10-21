@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { sendThrough } from "../../channels/connection-ports.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
@@ -72,7 +72,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
   it("round-trips send() through the wrapped WebChatAdapter into the repo", async () => {
     await repo.createSession("sess-1", "Test Session");
     const conn = await registry.connect("webchat");
-    const receipt = await sendThrough(conn, "sess-1" as ConversationId, {
+    const receipt = await sendThrough(conn, "sess-1" as ChatId, {
       text: "hello from talk",
     });
 
@@ -107,7 +107,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     const conn = await registry.connect("webchat");
     const history = await conn.withTalker((talker) =>
       talker.history?.query({
-        conversationId: "sess-2" as ConversationId,
+        conversationId: "sess-2" as ChatId,
         limit: 20,
       }),
     );
@@ -143,7 +143,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     );
     const conn = await registry.connect("webchat");
     const history = await conn.withTalker((talker) =>
-      talker.history?.query({ conversationId: "sess-3" as ConversationId }),
+      talker.history?.query({ conversationId: "sess-3" as ChatId }),
     );
 
     const rows = await repo.getHistoryMessages("sess-3", new Date(0));
@@ -185,7 +185,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     const conn = await registry.connect("webchat");
 
     const history = await conn.withTalker((talker) =>
-      talker.history?.query({ conversationId: "sess-4" as ConversationId, limit: 2 }),
+      talker.history?.query({ conversationId: "sess-4" as ChatId, limit: 2 }),
     );
     expect(history).toHaveLength(2);
   });

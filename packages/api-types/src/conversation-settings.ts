@@ -1,20 +1,20 @@
 export type {
-  ConversationSettingField,
-  ConversationSettings,
-  ConversationSettingsOverrides,
-  ConversationSettingsSnapshot,
-  ConversationSettingsListItem,
-  ConversationSettingsPage,
-  ListConversationSettingsInput,
-  PartialConversationSettings,
+  ChatSettingField,
+  ChatSettings,
+  ChatSettingsOverrides,
+  ChatSettingsSnapshot,
+  ChatSettingsListItem,
+  ChatSettingsPage,
+  ListChatSettingsInput,
+  PartialChatSettings,
   ProviderSessionResetPolicy,
-  ResetConversationSettingsInput,
+  ResetChatSettingsInput,
   SettingsActor,
-  UpdateConversationSettingsInput,
+  UpdateChatSettingsInput,
 } from "@rome-os/app-runtime";
 
 export type {
-  ConversationDescriptor,
-  ConversationId,
-  ConversationRef,
+  ChatDescriptor,
+  ChatId,
+  ChatRef,
 } from "@rome-os/app-runtime";

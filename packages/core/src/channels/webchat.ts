@@ -1,4 +1,4 @@
-import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { OutgoingMessage } from "./types.js";
 import type { StoredWebchatHistoryMessage, WebChatRepository } from "../db/repositories/webchat.js";
 import type { MessagePart } from "../types.js";
@@ -71,7 +71,7 @@ export class WebChatAdapter {
 
   /** Persist an assistant reply into the session. A message with no text,
    *  parts or attachments writes nothing, and its receipt has no `messageId`. */
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const threadId: string = conversationId;
     // Only the host authors routine cards (see host-only-parts.ts).
     const given = withoutHostOnlyParts(message.parts ?? []);
@@ -121,7 +121,7 @@ export class WebChatAdapter {
       channel: "webchat",
       direction: senderId === WEBCHAT_GUARDIAN_USER_ID ? "inbound" : "outbound",
       messageId: row.id,
-      conversationId: row.sessionId as ConversationId,
+      conversationId: row.sessionId as ChatId,
       senderId,
       senderDisplayName: isUser ? "Guardian" : prettyAgentName(row.sessionAgentName),
       text: contentToText(row.content),

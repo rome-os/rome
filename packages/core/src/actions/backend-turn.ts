@@ -24,8 +24,8 @@
 import type {
   BackendTurnParams,
   BackendTurnRunner,
-  ConversationId,
-  ConversationRepository,
+  ChatId,
+  ChatRepository,
 } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
 import type { AgentRunnerInterface, RunParams } from "../core/types.js";
@@ -84,7 +84,7 @@ export interface BackendTurnRunnerDeps {
    * falls back to the default working dir. */
   resolveWorkingDir?: (channel: string, threadId: string) => Promise<string | undefined>;
   /** Durable conversation projection used to attach provider delivery ids. */
-  conversations?: ConversationRepository;
+  conversations?: ChatRepository;
 }
 
 export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBackendTurnRunner {
@@ -166,7 +166,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             await emit({ ...msg, agent: params.agentName }, { recorded: true });
           }
           if (!reply.trim()) return;
-          await send.send(params.threadId as ConversationId, {
+          await send.send(params.threadId as ChatId, {
             text: reply,
             ...(turnId ? { turnId } : {}),
           });
@@ -191,7 +191,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       }
       const send = deps.channel(params.channel)?.send;
       if (!send) throw new Error(`Channel "${params.channel}" cannot send`);
-      const delivery = await send.send(params.threadId as ConversationId, {
+      const delivery = await send.send(params.threadId as ChatId, {
         text: reply,
         ...(turnId ? { turnId } : {}),
       });

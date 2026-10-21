@@ -1,21 +1,21 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
-  ConversationDescriptor,
-  ConversationId,
-  ConversationSettings,
-  ConversationSettingsControl,
-  ConversationSettingsSnapshot,
+  ChatDescriptor,
+  ChatId,
+  ChatSettings,
+  ChatSettingsControl,
+  ChatSettingsSnapshot,
 } from "@rome-os/app-runtime";
 import type { AutocompleteInteraction, ChatInputCommandInteraction } from "discord.js";
 import { buildDiscordSlashCommands, DiscordAdapter } from "./discord.js";
 
 const CONNECTION_ID = "connection:discord";
-const CHANNEL_ID = "channel-1" as ConversationId;
+const CHANNEL_ID = "channel-1" as ChatId;
 const GUARDIAN_ID = "discord-guardian-777";
 const UNLINKED_ID = "discord-user-888";
 
 function makeConversationSettings() {
-  const effective: ConversationSettings = {
+  const effective: ChatSettings = {
     enabled: true,
     activation: {
       mode: "mention",
@@ -26,14 +26,14 @@ function makeConversationSettings() {
     routing: { agentName: null },
     session: { reset: { mode: "idle", idleMinutes: 10_080 } },
   };
-  const descriptor: ConversationDescriptor = {
+  const descriptor: ChatDescriptor = {
     ref: { connectionId: CONNECTION_ID, conversationId: CHANNEL_ID },
     service: "discord",
     kind: "channel",
     displayName: "general",
     containerName: "Rome",
   };
-  const snapshot: ConversationSettingsSnapshot = {
+  const snapshot: ChatSettingsSnapshot = {
     conversation: descriptor,
     supportedFields: [
       "enabled",
@@ -55,8 +55,8 @@ function makeConversationSettings() {
     update,
     reset,
     list: rs.fn(async () => ({ items: [] })),
-  } as unknown as ConversationSettingsControl & {
-    observe(descriptor: ConversationDescriptor): void;
+  } as unknown as ChatSettingsControl & {
+    observe(descriptor: ChatDescriptor): void;
   };
   return { control, get, update, reset };
 }

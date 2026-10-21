@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type { ConversationId, ChannelDirectMessaging } from "@rome-os/app-runtime";
+import type { ChatId, ChannelDirectMessaging } from "@rome-os/app-runtime";
 import { type Channel, ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
 import { readSendStates } from "./send.js";
 
@@ -29,7 +29,7 @@ describe("readSendStates", () => {
           conversationFor: () => Promise.reject(new Error("provider is down")),
         }),
       ),
-      channel("open", sending({ conversationFor: async (id) => id as ConversationId })),
+      channel("open", sending({ conversationFor: async (id) => id as ChatId })),
     ];
 
     const states = await readSendStates({ channels }, [

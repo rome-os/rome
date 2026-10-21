@@ -14,7 +14,7 @@
 
 import { compareMessages, isAfterMessageCursor, type Message } from "@rome/api-types/message";
 import type { Account, AccountId, Accounts } from "./accounts.js";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   channelMessageDetail,
   queryLimit,
@@ -27,7 +27,7 @@ import {
 import {
   isWechatUserSessionRejected,
   WechatUserStorePending,
-  type WechatUserConversation,
+  type WechatUserChat,
   type WechatUserMessage,
   type WechatUserReader,
 } from "./wechat-user.js";
@@ -70,7 +70,7 @@ export function toWechatUserChannelMessage(message: WechatUserMessage): ChannelM
     channel: WECHAT_USER_CHANNEL,
     direction: message.isSelf ? "outbound" : "inbound",
     messageId: message.id,
-    conversationId: message.conversationId as ConversationId,
+    conversationId: message.conversationId as ChatId,
     senderId: message.senderId || message.conversationId,
     ...(message.senderName ? { senderDisplayName: message.senderName } : {}),
     text: message.text,
@@ -178,7 +178,7 @@ function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
 /** One WeChat contact as an account: its wxid is the id and its only address,
  *  its display name is the platform's, and the wxid is also a searchable
  *  identifier. Groups are not accounts and are filtered out by the caller. */
-function toAccount(conversation: WechatUserConversation): Account {
+function toAccount(conversation: WechatUserChat): Account {
   return {
     id: conversation.id as AccountId,
     addresses: [conversation.id],

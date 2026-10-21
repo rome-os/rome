@@ -1,7 +1,7 @@
-import type { ConversationSettingField, ConversationSettings } from "@rome-os/app-runtime";
+import type { ChatSettingField, ChatSettings } from "@rome-os/app-runtime";
 import { DEFAULT_PROVIDER_SESSION_RESET_POLICY } from "./reset-policy.js";
 
-export const defaultConversationSettings = (): ConversationSettings => ({
+export const defaultConversationSettings = (): ChatSettings => ({
   enabled: true,
   activation: {
     mode: "mention",
@@ -14,15 +14,13 @@ export const defaultConversationSettings = (): ConversationSettings => ({
 });
 
 /** Fields every provider supports. Direct messages own only these. */
-export const CORE_CONVERSATION_SETTING_FIELDS: readonly ConversationSettingField[] = [
-  "session.reset",
-];
+export const CORE_CONVERSATION_SETTING_FIELDS: readonly ChatSettingField[] = ["session.reset"];
 
 /** The fields each provider enforces. Unlisted providers get the core fields. */
 export const CONVERSATION_SETTING_FIELDS_BY_SERVICE: ReadonlyMap<
   string,
-  readonly ConversationSettingField[]
-> = new Map<string, readonly ConversationSettingField[]>([
+  readonly ChatSettingField[]
+> = new Map<string, readonly ChatSettingField[]>([
   [
     "discord",
     [

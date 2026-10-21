@@ -19,7 +19,7 @@ import type {
   Channel as AppChannel,
   ChannelInbound,
   ChannelSend as AppChannelSend,
-  ConversationDescriptor,
+  ChatDescriptor,
   ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
 import type { AddressBooks } from "./account-fold.js";
@@ -57,7 +57,7 @@ export interface ChannelSend extends AppChannelSend {
 
 /**
  * The conversations a channel can see, for conversation settings. Each
- * descriptor carries its `ConversationRef`, so a caller addresses a
+ * descriptor carries its `ChatRef`, so a caller addresses a
  * conversation it found here the way it addresses one an inbound event named.
  */
 export interface ChannelDirectory {
@@ -71,7 +71,7 @@ export interface ChannelDirectory {
     limit: number;
     includeTopics?: boolean;
     connectionId?: string;
-  }): Promise<ConversationDescriptor[]>;
+  }): Promise<ChatDescriptor[]>;
 }
 
 /** A send, or a direct-conversation lookup, on a channel nothing backs now. */

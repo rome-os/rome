@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { TalkHistory } from "../connections/types.js";
 import {
   historyQueryLimit,
@@ -33,7 +33,7 @@ function said(id: string, conversationId: string, hoursAgo: number): ChannelMess
     channel: "telegram_user",
     direction: "inbound",
     messageId: id,
-    conversationId: conversationId as ConversationId,
+    conversationId: conversationId as ChatId,
     senderId: "7",
     senderDisplayName: "Chat",
     text: id,
@@ -96,8 +96,8 @@ testMessagesQueryContract("connection-backed messages", () => {
   return {
     messages,
     channel: "telegram_user",
-    conversation: "group-1" as ConversationId,
-    silentConversation: "quiet-1" as ConversationId,
+    conversation: "group-1" as ChatId,
+    silentConversation: "quiet-1" as ChatId,
   };
 });
 
@@ -180,7 +180,7 @@ describe("connection-backed messages, shared reads", () => {
       channel: "telegram_user",
       direction: "inbound",
       messageId: id,
-      conversationId: "dm-1" as ConversationId,
+      conversationId: "dm-1" as ChatId,
       senderId: "7",
       text: id,
       attachments: [],
@@ -250,7 +250,7 @@ describe("connection-backed messages, shared reads", () => {
     const { messages, query } = port(() => [line("only", 5)]);
 
     await messages.query({});
-    await messages.query({ conversationId: "dm-1" as ConversationId });
+    await messages.query({ conversationId: "dm-1" as ChatId });
 
     expect(query).toHaveBeenCalledTimes(2);
   });
@@ -323,7 +323,7 @@ describe("connection-backed send, across epochs", () => {
     const offerDirect = (answer: string) => {
       const talker = fx.talkerFactory.instances.at(-1);
       if (!talker) throw new Error("talker not built");
-      talker.directMessaging = { conversationFor: async () => answer as ConversationId };
+      talker.directMessaging = { conversationFor: async () => answer as ChatId };
     };
     await registry.importCredential(connection.id, "bot", fx.validCredential());
     offerDirect("first");
@@ -376,7 +376,7 @@ describe("connection ports for a service's later channels", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(heard).toEqual([{ channel: "fake-telegram-2", connectionId: second.id }]);
 
-    await ports.second?.send?.send("dm-1" as ConversationId, { text: "hi" });
+    await ports.second?.send?.send("dm-1" as ChatId, { text: "hi" });
     expect(secondTalker.state.sends).toHaveLength(1);
     expect(firstTalker.state.sends).toHaveLength(0);
   });
@@ -469,7 +469,7 @@ describe("a channel Rome does not listen to", () => {
     const connection = await registry.connect("fake-telegram");
     await registry.importCredential(connection.id, "bot", fx.validCredential());
 
-    await ports.send!.send("dm-1" as ConversationId, { text: "hi" });
+    await ports.send!.send("dm-1" as ChatId, { text: "hi" });
 
     expect(fx.talkerFactory.instances.at(-1)!.state.sends).toHaveLength(1);
   });
@@ -509,7 +509,7 @@ describe("a Connection with no channel record", () => {
     talker.state.deliver!({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(heard).toEqual([]);
-    await expect(ports.send!.send("dm-1" as ConversationId, { text: "hi" })).rejects.toBeInstanceOf(
+    await expect(ports.send!.send("dm-1" as ChatId, { text: "hi" })).rejects.toBeInstanceOf(
       ChannelNotConnected,
     );
     expect(talker.state.sends).toHaveLength(0);
@@ -566,7 +566,7 @@ describe("reply streaming ports", () => {
   }
 
   const pacingWith = (on: boolean) => new ConnectionPacing(systemClock, async () => on);
-  const chat = "chat-1" as ConversationId;
+  const chat = "chat-1" as ChatId;
   const tick = () => new Promise((resolve) => setImmediate(resolve));
 
   it("offers no replies port without pacing, or from a talker that cannot stream", () => {

@@ -23,7 +23,7 @@ import {
   ActionRegistryProxy,
   AppManagerProxy,
   AppStoreProxy,
-  ConversationSettingsControlProxy,
+  ChatSettingsControlProxy,
   EmailInboundControlProxy,
   BackendTurnRunnerProxy,
   EventBusProxy,
@@ -117,7 +117,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const executionJournalRepo = new ExecutionJournalRepository(db);
 
   const channelsService = new ChannelsServiceProxy();
-  const conversationSettings = new ConversationSettingsControlProxy();
+  const conversationSettings = new ChatSettingsControlProxy();
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, serviceOfChannel);
 
   const actionEngine = new ActionEngine(

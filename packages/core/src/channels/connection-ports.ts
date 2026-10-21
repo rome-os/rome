@@ -13,7 +13,7 @@ import type {
   ChannelInbound,
   ChannelInboundMedia,
   ChannelMessage,
-  ConversationId,
+  ChatId,
   InboundEvent,
   ChannelDirectMessaging,
   MessageReceipt,
@@ -31,7 +31,7 @@ import {
   type ChannelReplies,
   type ChannelSend,
 } from "./channel.js";
-import { ConversationBuffers } from "./conversation-buffer.js";
+import { ChatBuffers } from "./conversation-buffer.js";
 import type { ConnectionPacing } from "./delivery/connection-pacing.js";
 import { DeliveryFailure, type DeliveryTransport } from "./delivery/types.js";
 import { MAX_QUERY_LIMIT, queryLimit, type Messages } from "./messages.js";
@@ -308,7 +308,7 @@ function connectionFor(backing: Backing): Connection | null {
  */
 export async function sendThrough(
   connection: Connection,
-  conversationId: ConversationId,
+  conversationId: ChatId,
   message: OutgoingMessage,
   pacing?: ConnectionPacing,
 ): Promise<MessageReceipt> {
@@ -422,7 +422,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
   const { deps, channel } = backing;
   // One buffer set per subscription, so two subscriptions of one handler stay
   // two, and each subscription's conversations wait only on themselves (R4).
-  const subscriptions = new Set<ConversationBuffers<InboundEvent>>();
+  const subscriptions = new Set<ChatBuffers<InboundEvent>>();
   // One talker subscription per Connection, fanned out to every handler. A new
   // epoch starts with no handlers, so each unlock subscribes again (R5).
   const attached = new Map<string, () => void>();
@@ -509,7 +509,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
 
   return {
     subscribe(handler) {
-      const subscription = new ConversationBuffers<InboundEvent>(handler, {
+      const subscription = new ChatBuffers<InboundEvent>(handler, {
         log,
         describe: (event) => ({ channel, messageId: event.message.messageId }),
       });

@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { InputFile } from "grammy";
 import { TelegramAdapter } from "./telegram.js";
 import { FakeTelegramApi } from "../test/kit/fake-telegram.js";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { OutgoingMessage } from "./types.js";
 
 // The Telegram Bot API server is the process edge here, played by
@@ -37,7 +37,7 @@ describe("TelegramAdapter", () => {
     await rm(sandboxHome, { recursive: true, force: true });
   });
 
-  const CHAT = "chat-99" as ConversationId;
+  const CHAT = "chat-99" as ChatId;
 
   /** A Telegram `message` update, in real Bot API wire shape. */
   function makeUpdate(overrides: Record<string, unknown> = {}) {
@@ -408,7 +408,7 @@ describe("TelegramAdapter", () => {
         channel: "telegram",
         direction: "inbound",
         messageId: "42",
-        conversationId: "999" as ConversationId,
+        conversationId: "999" as ChatId,
         senderId: "111",
         timestamp: new Date("2026-05-10T00:00:00Z"),
         text: "",

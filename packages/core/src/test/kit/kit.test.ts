@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import {
   createTestRome,
   recordingAction,
@@ -168,7 +168,7 @@ describe("testkit", () => {
 
       await tg.receive({
         text: "hello",
-        conversationId: "t-1" as ConversationId,
+        conversationId: "t-1" as ChatId,
         senderId: "u-1",
       });
 

@@ -9,7 +9,7 @@
 //   4. the address book lists direct contacts (never groups) and resolves a wxid.
 
 import { describe, expect, it } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import { messageCursor, parseMessageCursor, type Message } from "@rome/api-types/message";
 import {
   WechatUserSessionRejected,
@@ -17,7 +17,7 @@ import {
   WechatUserRuntimeError,
   WechatUserRuntime,
   WechatUserReader,
-  type WechatUserConversation,
+  type WechatUserChat,
   type WechatUserMessage,
 } from "./wechat-user.js";
 import type { AccountMessages } from "./messages.js";
@@ -36,7 +36,7 @@ const msg = (over: Partial<WechatUserMessage>): WechatUserMessage => ({
   ...over,
 });
 
-const convo = (over: Partial<WechatUserConversation>): WechatUserConversation => ({
+const convo = (over: Partial<WechatUserChat>): WechatUserChat => ({
   id: "wxid_a",
   name: "Alice",
   isGroup: false,
@@ -46,7 +46,7 @@ const convo = (over: Partial<WechatUserConversation>): WechatUserConversation =>
 
 function fakeReader(opts: {
   byConversation?: Record<string, WechatUserMessage[]>;
-  conversations?: WechatUserConversation[];
+  conversations?: WechatUserChat[];
 }): WechatUserReader {
   return {
     async messages(input: {
@@ -142,7 +142,7 @@ describe("wechatUserMessages", () => {
     const since = new Date(500_000);
 
     const page = await wechatUserMessages(reader).query({
-      conversationId: "room@chatroom" as ConversationId,
+      conversationId: "room@chatroom" as ChatId,
       since,
       limit: 5,
     });
@@ -324,7 +324,7 @@ describe("wechatUserMessages query order", () => {
         msg({ id: "wxid_a:2", timestamp: 1000, text: "second" }),
       ]),
     );
-    const page = await store.query({ conversationId: "wxid_a" as ConversationId });
+    const page = await store.query({ conversationId: "wxid_a" as ChatId });
     expect(page.map((entry) => entry.messageId)).toEqual(["wxid_a:2", "wxid_a:1"]);
   });
 });
@@ -355,6 +355,6 @@ testMessagesQueryContract("wechatUserMessages", () => ({
     ]),
   ),
   channel: "wechat_user",
-  conversation: "room@chatroom" as ConversationId,
-  silentConversation: "quiet@chatroom" as ConversationId,
+  conversation: "room@chatroom" as ChatId,
+  silentConversation: "quiet@chatroom" as ChatId,
 }));

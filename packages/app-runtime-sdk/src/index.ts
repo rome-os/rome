@@ -1,7 +1,7 @@
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
-import type { ConversationSettingsControl } from "./conversation-settings.js";
+import type { ChatSettingsControl } from "./conversation-settings.js";
 
 export { z };
 export type { JSONSchema };
@@ -1675,19 +1675,19 @@ export interface MessageReplyReference {
 
 /** Opaque provider-owned conversation address. Callers may persist and
  * round-trip this value, but must never parse or construct one. */
-export type ConversationId = string & { readonly __brand: "ConversationId" };
+export type ChatId = string & { readonly __brand: "ChatId" };
 
-export interface ConversationRef {
+export interface ChatRef {
   connectionId: string;
-  conversationId: ConversationId;
+  conversationId: ChatId;
 }
 
-export interface ConversationDescriptor {
-  ref: ConversationRef;
+export interface ChatDescriptor {
+  ref: ChatRef;
   service: string;
   kind: "dm" | "group" | "channel" | "topic";
   displayName: string;
-  parent?: ConversationRef;
+  parent?: ChatRef;
   containerName?: string;
 }
 
@@ -1707,9 +1707,9 @@ export interface ChannelMessage {
   channel: string;
   direction: "inbound" | "outbound";
   messageId: string;
-  conversationId: ConversationId;
+  conversationId: ChatId;
   /** Parent conversation when this message belongs to a native thread. */
-  parentConversationId?: ConversationId;
+  parentConversationId?: ChatId;
   /** Who said it, as the channel addresses them. Empty when the channel
    *  recorded no sender for the line. */
   senderId: string;
@@ -1731,7 +1731,7 @@ export interface ChannelMessage {
 export interface ChannelMessageQuery {
   /** One conversation, by the platform's own id for it. Absent for every
    *  conversation the channel can read. */
-  conversationId?: ConversationId;
+  conversationId?: ChatId;
   /** Only messages said at or after this instant. */
   since?: Date;
   /** At most this many, newest first. Defaults to 100, capped at 1,000. */
@@ -1762,11 +1762,7 @@ export interface ChannelsService {
   list(): Promise<ChannelSummary[]>;
   /** Send on a channel, through the Connection backing it. Rejects when no
    *  Connection backs the channel. */
-  send(
-    channel: string,
-    conversationId: ConversationId,
-    message: OutgoingMessage,
-  ): Promise<MessageReceipt>;
+  send(channel: string, conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   /**
    * The channel's `messages.query`: its newest messages, newest first.
    *
@@ -1801,7 +1797,7 @@ export function chatStopReceipt(status: ChatStopStatus): string {
 }
 
 export interface ChatStopInput {
-  ref: ConversationRef;
+  ref: ChatRef;
   service: string;
   senderId: string;
 }
@@ -1811,7 +1807,7 @@ export type ChatStopHandler = (input: ChatStopInput) => Promise<ChatStopResult>;
 
 export interface MessageReceipt {
   messageId?: string;
-  conversationId: ConversationId;
+  conversationId: ChatId;
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
@@ -1826,7 +1822,7 @@ export interface ChannelActivitySession {
 
 export interface ChannelActivity {
   begin(input: {
-    conversationId: ConversationId;
+    conversationId: ChatId;
     messageId?: string;
   }): Promise<ChannelActivitySession | null>;
 }
@@ -1863,12 +1859,12 @@ export interface ChannelDirectMessaging {
    * key a thread separately, it opens or looks up that thread, which is a
    * provider call: callers pricing a listing should treat it as one.
    */
-  conversationFor(channelUserId: string): Promise<ConversationId | null>;
+  conversationFor(channelUserId: string): Promise<ChatId | null>;
 }
 
 /** Sending on a channel. */
 export interface ChannelSend {
-  send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
+  send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   /** Showing the account that a reply is on its way (a typing indicator), or
    *  null or absent where the channel cannot. Cosmetic: a caller never waits
    *  on it to answer. */
@@ -1881,10 +1877,10 @@ export interface ChannelSend {
  * message, and a handler switching on `kind` keeps compiling.
  *
  * `ref` addresses the event's conversation for the APIs that take a
- * {@link ConversationRef} (conversation settings, stop), resolved by the
+ * {@link ChatRef} (conversation settings, stop), resolved by the
  * channel so a subscriber does not track what backs it.
  */
-export type InboundEvent = { kind: "message"; message: ChannelMessage; ref: ConversationRef };
+export type InboundEvent = { kind: "message"; message: ChannelMessage; ref: ChatRef };
 
 /**
  * Hearing what arrives on a channel. Every implementation owes all five:
@@ -1945,7 +1941,7 @@ export interface Channel {
  */
 export interface ChannelMessageHookDeps {
   actionEngine: ActionEngineLike;
-  conversationSettings: ConversationSettingsControl;
+  conversationSettings: ChatSettingsControl;
   chatStop: ChatStopHandler;
   /** A live array: the host appends a channel added later, such as a second
    *  bot, in place. Read it at each `register()` rather than keep a copy. */
@@ -2173,7 +2169,7 @@ export interface AppFavorCapability {
 export interface AppRuntimeRepositories {
   settings: AppSettingsRepository;
   webchatRecaps?: WebChatRecapRepository;
-  conversations?: ConversationRepository;
+  conversations?: ChatRepository;
   guardianProfile?: GuardianProfileRepository;
 }
 
@@ -2198,12 +2194,12 @@ export interface AppSettingsRepository {
   set(key: string, value: unknown): Promise<void>;
 }
 
-export interface ConversationRecord {
+export interface ChatRecord {
   id: string;
   agentName: string | null;
 }
 
-export interface ConversationRepository {
+export interface ChatRepository {
   ensureChannelConversation(input: {
     channel: string;
     threadId: string;
@@ -2213,7 +2209,7 @@ export interface ConversationRepository {
     agentName: string;
     projectName?: string;
     projectPath?: string;
-  }): Promise<ConversationRecord>;
+  }): Promise<ChatRecord>;
   addMessage(input: {
     sessionId: string;
     role: "user" | "notification";
@@ -2885,3 +2881,14 @@ export function createAppLogger(component: string): Logger {
     error: (message, data) => log("error", message, data),
   };
 }
+
+/** @deprecated Use `ChatId`. */
+export type ConversationId = ChatId;
+/** @deprecated Use `ChatRef`. */
+export type ConversationRef = ChatRef;
+/** @deprecated Use `ChatDescriptor`. */
+export type ConversationDescriptor = ChatDescriptor;
+/** @deprecated Use `ChatRecord`. */
+export type ConversationRecord = ChatRecord;
+/** @deprecated Use `ChatRepository`. */
+export type ConversationRepository = ChatRepository;

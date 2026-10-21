@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, rs } from "@rstest/core";
 import type {
   ChannelMessage,
-  ConversationDescriptor,
-  ConversationId,
-  ConversationSettings,
-  ConversationSettingsControl,
-  ConversationSettingsOverrides,
-  ConversationSettingsSnapshot,
+  ChatDescriptor,
+  ChatId,
+  ChatSettings,
+  ChatSettingsControl,
+  ChatSettingsOverrides,
+  ChatSettingsSnapshot,
 } from "@rome-os/app-runtime";
 import type {
   CardActionEvent,
@@ -134,8 +134,8 @@ function makeCardAction(over: Partial<CardActionEvent> = {}): CardActionEvent {
 
 const FEISHU_CONNECTION_ID = "connection:feishu";
 
-function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
-  const defaults: ConversationSettings = {
+function makeConversationSettings(initial: ChatSettingsOverrides = {}) {
+  const defaults: ChatSettings = {
     enabled: true,
     activation: {
       mode: "mention",
@@ -146,7 +146,7 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
     routing: { agentName: null },
     session: { reset: { mode: "idle", idleMinutes: 10_080 } },
   };
-  let effective: ConversationSettings = {
+  let effective: ChatSettings = {
     ...defaults,
     ...initial,
     activation: { ...defaults.activation, ...initial.activation },
@@ -154,11 +154,11 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
     routing: { ...defaults.routing, ...initial.routing },
     session: { ...defaults.session, ...initial.session },
   };
-  const descriptors = new Map<string, ConversationDescriptor>();
-  const observe = rs.fn((descriptor: ConversationDescriptor) => {
+  const descriptors = new Map<string, ChatDescriptor>();
+  const observe = rs.fn((descriptor: ChatDescriptor) => {
     descriptors.set(descriptor.ref.conversationId, descriptor);
   });
-  const makeSnapshot = (conversationId: ConversationId): ConversationSettingsSnapshot => ({
+  const makeSnapshot = (conversationId: ChatId): ChatSettingsSnapshot => ({
     conversation:
       descriptors.get(conversationId) ??
       ({
@@ -166,7 +166,7 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
         service: "feishu",
         kind: "group",
         displayName: conversationId,
-      } satisfies ConversationDescriptor),
+      } satisfies ChatDescriptor),
     supportedFields: ["enabled", "activation.mode", "replies.placement", "routing.agentName"],
     effective: structuredClone(effective),
     // A pin to main is a null override, until an update stores an agent.
@@ -175,10 +175,8 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
         ? { routing: { agentName: null } }
         : {},
   });
-  const get = rs.fn(async (ref: { conversationId: ConversationId }) =>
-    makeSnapshot(ref.conversationId),
-  );
-  const update = rs.fn(async (input: Parameters<ConversationSettingsControl["update"]>[0]) => {
+  const get = rs.fn(async (ref: { conversationId: ChatId }) => makeSnapshot(ref.conversationId));
+  const update = rs.fn(async (input: Parameters<ChatSettingsControl["update"]>[0]) => {
     for (const field of input.clear) {
       if (field === "enabled") effective.enabled = defaults.enabled;
       if (field === "activation.mode") effective.activation.mode = defaults.activation.mode;
@@ -197,7 +195,7 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
     }
     return makeSnapshot(input.ref.conversationId);
   });
-  const reset = rs.fn(async (input: Parameters<ConversationSettingsControl["reset"]>[0]) => {
+  const reset = rs.fn(async (input: Parameters<ChatSettingsControl["reset"]>[0]) => {
     effective = structuredClone(defaults);
     return makeSnapshot(input.ref.conversationId);
   });
@@ -207,8 +205,8 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
     update,
     reset,
     list: rs.fn(),
-  } as unknown as ConversationSettingsControl & {
-    observe(descriptor: ConversationDescriptor): void;
+  } as unknown as ChatSettingsControl & {
+    observe(descriptor: ChatDescriptor): void;
   };
   return { control, get, update, reset, current: () => structuredClone(effective) };
 }
@@ -794,7 +792,7 @@ describe("FeishuAdapter", () => {
   });
 
   it("sends the agent's text as markdown for the SDK to render", async () => {
-    const receipt = await adapter.send("oc_chat" as ConversationId, {
+    const receipt = await adapter.send("oc_chat" as ChatId, {
       text: "## Title\n**bold**\n- [x] done",
     });
     expect(receipt).toStrictEqual({ conversationId: "oc_chat", messageId: "om_sent" });
@@ -807,7 +805,7 @@ describe("FeishuAdapter", () => {
   });
 
   it("threads a reply via replyTo", async () => {
-    await adapter.send("oc_chat" as ConversationId, { text: "ok", replyToMessageId: "om_42" });
+    await adapter.send("oc_chat" as ChatId, { text: "ok", replyToMessageId: "om_42" });
     expect(channel.sent[0].opts).toEqual({ replyTo: "om_42", replyInThread: true });
   });
 
@@ -827,7 +825,7 @@ describe("FeishuAdapter", () => {
     );
     await adapter.start();
 
-    await adapter.send("oc_chat" as ConversationId, { text: "ok", replyToMessageId: "om_42" });
+    await adapter.send("oc_chat" as ChatId, { text: "ok", replyToMessageId: "om_42" });
 
     expect(channel.sent[0].opts).toEqual({ replyTo: "om_42", replyInThread: false });
   });
@@ -1084,7 +1082,7 @@ describe("FeishuAdapter", () => {
   });
 
   it("skips sending when there is no text body", async () => {
-    const receipt = await adapter.send("oc_chat" as ConversationId, {});
+    const receipt = await adapter.send("oc_chat" as ChatId, {});
     expect(receipt).toStrictEqual({ conversationId: "oc_chat" });
     expect(channel.sent).toHaveLength(0);
   });

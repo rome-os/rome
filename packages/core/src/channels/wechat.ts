@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { v4 as uuidv4 } from "uuid";
 import { getProfileDir } from "../paths.js";
 import { createLogger } from "../logger.js";
-import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, MessageReplyReference, OutgoingMessage } from "./types.js";
 import {
   isAllowedAttachmentUrl,
@@ -993,7 +993,7 @@ export function normalizeWechatMessage(msg: WechatMessage): ChannelMessage | nul
       normalizeWechatMessageId(msg.message_id) ??
       msg.client_id ??
       `${conversationId}:${msg.create_time_ms ?? Date.now()}`,
-    conversationId: conversationId as ConversationId,
+    conversationId: conversationId as ChatId,
     senderId,
     senderDisplayName: senderShort,
     text: extracted.text,
@@ -1211,7 +1211,7 @@ export class WechatAdapter {
     this.connectionStatus = "disconnected";
   }
 
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     this.assertSessionActive();
     const target = this.resolveSendTarget(conversationId);
 

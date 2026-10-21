@@ -12,7 +12,7 @@
 
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
-import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { ChannelApiRequest, ChannelApiResult } from "../../channels/api-request.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { StreamFault, Talker } from "../types.js";
@@ -33,7 +33,7 @@ const fakeState: {
   startError: unknown;
   typedThread?: string;
   inbound?: (msg: ChannelMessage) => Promise<void>;
-  sent: Array<{ conversationId: ConversationId; message: unknown }>;
+  sent: Array<{ conversationId: ChatId; message: unknown }>;
   historyCalls: Array<{ threadId: string | null; windowHours: number }>;
   historyMessages: ChannelMessage[];
   apiRequests: ChannelApiRequest[];
@@ -75,7 +75,7 @@ rs.mock("../../channels/discord.js", () => ({
     async stop(): Promise<void> {
       fakeState.stopCalls++;
     }
-    async send(conversationId: ConversationId, message: unknown): Promise<MessageReceipt> {
+    async send(conversationId: ChatId, message: unknown): Promise<MessageReceipt> {
       fakeState.sent.push({ conversationId, message });
       return { conversationId, messageId: "sent-1" };
     }
@@ -202,7 +202,7 @@ describe("discord descriptor shape", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "message-1",
-      conversationId: "chan-1" as ConversationId,
+      conversationId: "chan-1" as ChatId,
       senderId: "user-1",
       text: "hi",
       attachments: [],
@@ -239,7 +239,7 @@ describe("discord descriptor shape", () => {
   it("passes the opaque conversation id to the adapter and returns its receipt", async () => {
     const h = buildTalker();
     h.start();
-    await expect(h.talker.send("chan-1" as ConversationId, { text: "hi" })).resolves.toStrictEqual({
+    await expect(h.talker.send("chan-1" as ChatId, { text: "hi" })).resolves.toStrictEqual({
       conversationId: "chan-1",
       messageId: "sent-1",
     });
@@ -258,7 +258,7 @@ describe("discord descriptor shape", () => {
         channel: "discord",
         direction: "inbound",
         messageId: "message-1",
-        conversationId: "chan-1" as ConversationId,
+        conversationId: "chan-1" as ChatId,
         senderId: "user-1",
         senderDisplayName: "User",
         text: "hello",
@@ -271,7 +271,7 @@ describe("discord descriptor shape", () => {
     h.start();
     await expect(
       h.talker.history?.query({
-        conversationId: "chan-1" as ConversationId,
+        conversationId: "chan-1" as ChatId,
       }),
     ).resolves.toMatchObject([{ messageId: "message-1", text: "hello" }]);
     expect(fakeState.historyCalls).toEqual([{ threadId: "chan-1", windowHours: 24 }]);
@@ -280,7 +280,7 @@ describe("discord descriptor shape", () => {
   it("exposes provider-neutral activity", async () => {
     const h = buildTalker();
     h.start();
-    const session = await h.talker.activity?.begin({ conversationId: "chan-2" as ConversationId });
+    const session = await h.talker.activity?.begin({ conversationId: "chan-2" as ChatId });
     await session?.update("working");
     expect(fakeState.typedThread).toBe("chan-2");
   });
@@ -457,8 +457,8 @@ describe("discord inbound delivery", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "msg-7",
-      conversationId: "thread-1" as ConversationId,
-      parentConversationId: "channel-1" as ConversationId,
+      conversationId: "thread-1" as ChatId,
+      parentConversationId: "channel-1" as ChatId,
       senderId: "user-1",
       senderDisplayName: "Alice Smith",
       senderUsername: "alice",

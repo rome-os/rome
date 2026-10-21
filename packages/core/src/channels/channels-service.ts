@@ -13,7 +13,7 @@ import type {
   ChannelMessageQuery,
   ChannelSummary,
   ChannelsService,
-  ConversationId,
+  ChatId,
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
@@ -94,7 +94,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
 
       async send(
         channel: string,
-        conversationId: ConversationId,
+        conversationId: ChatId,
         message: OutgoingMessage,
       ): Promise<MessageReceipt> {
         const backing = backingConnection(deps.registry, channel, deps.channelOf);

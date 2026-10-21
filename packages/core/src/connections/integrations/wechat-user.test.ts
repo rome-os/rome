@@ -11,7 +11,7 @@
 //   3. The read surfaces map reader rows onto Talk's provider-neutral shapes.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-user.js";
 import { WechatUserStorePending } from "../../channels/wechat-user.js";
 import { CredentialRejected } from "../errors.js";
@@ -560,9 +560,7 @@ describe("the WeChat personal Talker", () => {
   it("is read-only: send throws, direct messaging is absent, nothing delivered", async () => {
     const { talker, deliver } = buildTalker(fakeRuntime({ statuses: [READY] }));
 
-    await expect(talker.send("wxid_friend" as ConversationId, { text: "hi" })).rejects.toThrow(
-      /read-only/,
-    );
+    await expect(talker.send("wxid_friend" as ChatId, { text: "hi" })).rejects.toThrow(/read-only/);
     expect(talker.directMessaging).toBeUndefined();
     expect(deliver).not.toHaveBeenCalled();
 

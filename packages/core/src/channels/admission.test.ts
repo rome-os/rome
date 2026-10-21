@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { createTestDb, serviceChannelOf, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
@@ -50,7 +50,7 @@ describe("a channel's Connection across epochs", () => {
                     channel: "discord",
                     direction: "inbound",
                     messageId: `history-${state.epoch}`,
-                    conversationId: "general" as ConversationId,
+                    conversationId: "general" as ChatId,
                     senderId: "guardian",
                     text: `epoch ${state.epoch}`,
                     attachments: [],
@@ -91,7 +91,7 @@ describe("a channel's Connection across epochs", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "inbound-1",
-      conversationId: "general" as ConversationId,
+      conversationId: "general" as ChatId,
       senderId: "guardian",
       text: "hello",
       attachments: [],
@@ -105,7 +105,7 @@ describe("a channel's Connection across epochs", () => {
     const history = await connection.withTalker((talker) => talker.history?.query({ limit: 10 }));
     expect(history?.[0]?.messageId).toBe("history-1");
     await expect(
-      ports.send!.send("general" as ConversationId, { text: "first reply" }),
+      ports.send!.send("general" as ChatId, { text: "first reply" }),
     ).resolves.toMatchObject({ messageId: "sent-1" });
 
     // Past its epoch nothing reaches the stopped talker.
@@ -120,7 +120,7 @@ describe("a channel's Connection across epochs", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "inbound-2",
-      conversationId: "general" as ConversationId,
+      conversationId: "general" as ChatId,
       senderId: "guardian",
       text: "hello again",
       attachments: [],
@@ -134,7 +134,7 @@ describe("a channel's Connection across epochs", () => {
         channel: "discord",
         direction: "inbound",
         messageId: "blocked",
-        conversationId: "general" as ConversationId,
+        conversationId: "general" as ChatId,
         senderId: "unknown",
         text: "not authorized",
         attachments: [],
@@ -147,7 +147,7 @@ describe("a channel's Connection across epochs", () => {
     const current = await connection.withTalker((talker) => talker.history?.query({ limit: 10 }));
     expect(current?.[0]?.messageId).toBe("history-2");
     await expect(
-      ports.send!.send("general" as ConversationId, { text: "second reply" }),
+      ports.send!.send("general" as ChatId, { text: "second reply" }),
     ).resolves.toMatchObject({ messageId: "sent-2" });
   });
 
@@ -184,7 +184,7 @@ describe("a channel's Connection across epochs", () => {
       channel: "telegram",
       direction: "inbound",
       messageId: "code",
-      conversationId: "dm" as ConversationId,
+      conversationId: "dm" as ChatId,
       senderId: "stranger",
       text: "PAIR-123",
       attachments: [],

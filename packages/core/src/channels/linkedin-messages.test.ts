@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { countingDb, createTestDb, type TestDb } from "../test/helpers.js";
 import { linkedinMessages, linkedinThreadParticipants, linkedinThreads } from "../db/schema.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 import {
   testAccountMessagesContract,
@@ -27,8 +27,8 @@ const TWIN_B = "ACoAATWINB";
 const account = { channel: "linkedin", addresses: [MEMBER] };
 const accounts = [account];
 const silent = [{ channel: "linkedin", addresses: ["ACoAASILENT"] }];
-const room = "t-room" as ConversationId;
-const emptyThread = "t-nothing" as ConversationId;
+const room = "t-room" as ChatId;
+const emptyThread = "t-nothing" as ChatId;
 
 /** The store's per-account reads, which every LinkedIn store answers. */
 function accountReads(db: DrizzleDb): AccountMessages {
@@ -204,7 +204,7 @@ describe("linkedInMessages", () => {
 
   it("queries a thread LinkedIn calls a group, as a group", async () => {
     const page = await linkedInMessages(testDb.db).query({
-      conversationId: "t-flagged" as ConversationId,
+      conversationId: "t-flagged" as ChatId,
     });
     expect(page.map((entry) => entry.messageId)).toEqual(["g"]);
     expect(page[0]?.thread?.kind).toBe("group");
@@ -231,7 +231,7 @@ describe("linkedInMessages", () => {
 
   it("queries a direct thread, reading an undated message at when it was stored", async () => {
     const page = await linkedInMessages(testDb.db).query({
-      conversationId: "t-direct" as ConversationId,
+      conversationId: "t-direct" as ChatId,
     });
     expect(page.map((entry) => entry.messageId)).toEqual(["e", "d", "c", "b", "a"]);
     expect(page[0]).toMatchObject({

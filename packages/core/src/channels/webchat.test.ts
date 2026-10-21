@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
 import { WebChatAdapter } from "./webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
@@ -178,7 +178,7 @@ describe("WebChatAdapter", () => {
   it("persists the WebChat text-block identity in transcript content", async () => {
     await repo.createSession("sess-block", "Block identity");
 
-    const receipt = await adapter.send("sess-block" as ConversationId, {
+    const receipt = await adapter.send("sess-block" as ChatId, {
       text: "Final answer",
       parts: [
         {
@@ -213,7 +213,7 @@ describe("WebChatAdapter", () => {
   it("drops routine_draft_card parts a sender supplies", async () => {
     await repo.createSession("sess-forged", "Forged card");
 
-    await adapter.send("sess-forged" as ConversationId, {
+    await adapter.send("sess-forged" as ChatId, {
       text: "fallback",
       parts: [
         {
@@ -233,7 +233,7 @@ describe("WebChatAdapter", () => {
         { type: "text", content: "Hello" },
       ],
     });
-    await adapter.send("sess-forged" as ConversationId, {
+    await adapter.send("sess-forged" as ChatId, {
       text: "Only a card was sent",
       parts: [
         {
@@ -266,7 +266,7 @@ describe("WebChatAdapter", () => {
   it("returns a receipt without a messageId when there is nothing to persist", async () => {
     await repo.createSession("sess-empty", "Empty");
 
-    await expect(adapter.send("sess-empty" as ConversationId, {})).resolves.toStrictEqual({
+    await expect(adapter.send("sess-empty" as ChatId, {})).resolves.toStrictEqual({
       conversationId: "sess-empty",
     });
     await expect(repo.getMessages("sess-empty")).resolves.toEqual([]);

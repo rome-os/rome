@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   type AgentMessageEnvelope,
   type AgentMessagingClient,
@@ -241,7 +241,7 @@ describe("agents channel", () => {
     const client = fakeClient([]);
     const talker = createAgentsTalker(client);
     await expect(
-      talker.send(ATLAS as ConversationId, {
+      talker.send(ATLAS as ChatId, {
         text: "Here is the invoice",
         attachments: [{ type: "document", source: "/tmp/invoice.pdf" }],
       }),
@@ -252,13 +252,13 @@ describe("agents channel", () => {
   it("sends to the agent id named by the conversation and threads replies", async () => {
     const client = fakeClient([]);
     const talker = createAgentsTalker(client);
-    const receipt = await talker.send(ATLAS as ConversationId, {
+    const receipt = await talker.send(ATLAS as ChatId, {
       text: "On it",
       replyToMessageId: "msg_1",
     });
     expect(client.sent).toEqual([{ to: ATLAS, text: "On it", inReplyTo: "msg_1" }]);
     expect(receipt).toEqual({ conversationId: ATLAS, messageId: "msg_sent" });
-    await expect(talker.send(ATLAS as ConversationId, { text: " " })).rejects.toThrow(/text/);
+    await expect(talker.send(ATLAS as ChatId, { text: " " })).rejects.toThrow(/text/);
   });
 
   it("says plainly when Cloud will not deliver to an agent", async () => {
@@ -266,9 +266,7 @@ describe("agents channel", () => {
     client.send = async () => {
       throw new AgentMessagingError("Not reachable", 404, "not_reachable");
     };
-    await expect(
-      createAgentsTalker(client).send(ATLAS as ConversationId, { text: "Hi" }),
-    ).rejects.toThrow(
+    await expect(createAgentsTalker(client).send(ATLAS as ChatId, { text: "Hi" })).rejects.toThrow(
       "Rome Cloud can't deliver to this agent. It may no longer exist, or no link between your accounts lets this Rome reach it.",
     );
   });
@@ -276,7 +274,7 @@ describe("agents channel", () => {
   it("refuses a name in place of an agent id without asking Cloud", async () => {
     const client = fakeClient([]);
     await expect(
-      createAgentsTalker(client).send("atlas" as ConversationId, { text: "Hi" }),
+      createAgentsTalker(client).send("atlas" as ChatId, { text: "Hi" }),
     ).rejects.toThrow("Address an agent by its agent id (a UUID), not its name.");
     expect(client.sent).toEqual([]);
   });

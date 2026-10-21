@@ -12,7 +12,7 @@ import makeWASocket, {
   type Chat,
 } from "@whiskeysockets/baileys";
 
-import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage } from "./types.js";
 import type {
   WhatsAppSyncSink,
@@ -471,7 +471,7 @@ export class WhatsAppAdapter {
     return normalized;
   }
 
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     if (!this.sock) throw new Error("WhatsApp not connected");
     const threadId: string = conversationId;
     const jid = this.canonicalJid(threadId);
@@ -600,7 +600,7 @@ export class WhatsAppAdapter {
       channel: "whatsapp",
       direction: "inbound",
       messageId: waMsg.key.id!,
-      conversationId: conversationId as ConversationId,
+      conversationId: conversationId as ChatId,
       senderId: isGroup ? this.canonicalJid(waMsg.key.participant ?? remoteJid) : conversationId,
       senderDisplayName: waMsg.pushName ?? "Unknown",
       text: content.text ?? "",

@@ -36,10 +36,10 @@ import {
 } from "./api-request.js";
 import type {
   ChannelMessage,
-  ConversationDescriptor,
-  ConversationId,
-  ConversationSettingsControl,
-  ConversationSettingsSnapshot,
+  ChatDescriptor,
+  ChatId,
+  ChatSettingsControl,
+  ChatSettingsSnapshot,
   ChatStopHandler,
   MessageAddressing,
   MessageReceipt,
@@ -119,7 +119,7 @@ function restMessageToChannelMessage(
     channel: "discord",
     direction: "inbound",
     messageId: msg.id,
-    conversationId: channelId as ConversationId,
+    conversationId: channelId as ChatId,
     senderId: msg.author.id,
     senderDisplayName: msg.author.global_name ?? msg.author.username,
     senderUsername: msg.author.username,
@@ -375,8 +375,8 @@ function projectDiscordBody(
 export class DiscordAdapter {
   private client: Client;
   private handler?: (msg: ChannelMessage) => Promise<void>;
-  private conversationSettings?: ConversationSettingsControl & {
-    observe?(descriptor: ConversationDescriptor): void;
+  private conversationSettings?: ChatSettingsControl & {
+    observe?(descriptor: ChatDescriptor): void;
   };
   private connectionId?: string;
   private slashCommandsRegistered = false;
@@ -413,8 +413,8 @@ export class DiscordAdapter {
   constructor(config: {
     botToken: string;
     connectionId?: string;
-    conversationSettings?: ConversationSettingsControl & {
-      observe?(descriptor: ConversationDescriptor): void;
+    conversationSettings?: ChatSettingsControl & {
+      observe?(descriptor: ChatDescriptor): void;
     };
     maxMessagesPerChannel?: number;
     listAgents?: () => string[];
@@ -646,9 +646,9 @@ export class DiscordAdapter {
     displayName?: string,
     parentId?: string | null,
     containerName?: string,
-  ): ConversationDescriptor {
+  ): ChatDescriptor {
     if (!this.connectionId) throw new Error("Discord connection id is unavailable");
-    const ref = { connectionId: this.connectionId, conversationId: channelId as ConversationId };
+    const ref = { connectionId: this.connectionId, conversationId: channelId as ChatId };
     return {
       ref,
       service: "discord",
@@ -659,14 +659,14 @@ export class DiscordAdapter {
         ? {
             parent: {
               connectionId: this.connectionId,
-              conversationId: parentId as ConversationId,
+              conversationId: parentId as ChatId,
             },
           }
         : {}),
     };
   }
 
-  private async settingsForMessage(message: Message): Promise<ConversationSettingsSnapshot | null> {
+  private async settingsForMessage(message: Message): Promise<ChatSettingsSnapshot | null> {
     if (!this.conversationSettings) return null;
     const parentId =
       message.channel && "isThread" in message.channel && message.channel.isThread()
@@ -679,7 +679,7 @@ export class DiscordAdapter {
     return this.conversationSettings.get(descriptor.ref);
   }
 
-  private legacyConfig(snapshot: ConversationSettingsSnapshot | null): DiscordChannelConfig {
+  private legacyConfig(snapshot: ChatSettingsSnapshot | null): DiscordChannelConfig {
     if (!snapshot) return {};
     return {
       mode: snapshot.effective.enabled ? "allow" : "ignore",
@@ -898,8 +898,8 @@ export class DiscordAdapter {
       channel: "discord",
       direction: "inbound",
       messageId: message.id,
-      conversationId: message.channelId as ConversationId,
-      ...(parentId ? { parentConversationId: parentId as ConversationId } : {}),
+      conversationId: message.channelId as ChatId,
+      ...(parentId ? { parentConversationId: parentId as ChatId } : {}),
       senderId: message.author.id,
       senderDisplayName:
         message.member?.displayName ?? message.author.displayName ?? message.author.username,
@@ -948,7 +948,7 @@ export class DiscordAdapter {
         const result = await this.chatStop({
           ref: {
             connectionId: this.connectionId,
-            conversationId: interaction.channelId as ConversationId,
+            conversationId: interaction.channelId as ChatId,
           },
           service: "discord",
           senderId: interaction.user.id,
@@ -1341,8 +1341,8 @@ Use \`/channel agent clear\` to undo.`,
       return;
     }
 
-    const set: import("@rome-os/app-runtime").PartialConversationSettings = {};
-    const clear: import("@rome-os/app-runtime").ConversationSettingField[] = [];
+    const set: import("@rome-os/app-runtime").PartialChatSettings = {};
+    const clear: import("@rome-os/app-runtime").ChatSettingField[] = [];
     const owns = (key: keyof DiscordChannelConfig) => Object.hasOwn(patch, key);
     if (owns("mode")) {
       if (patch.mode === "ignore") set.enabled = false;
@@ -1383,7 +1383,7 @@ Use \`/channel agent clear\` to undo.`,
     channelName?: string,
     parentId?: string | null,
     containerName?: string,
-  ): Promise<ConversationSettingsSnapshot | null> {
+  ): Promise<ChatSettingsSnapshot | null> {
     if (!this.conversationSettings) return null;
     if (!channelName || parentId === undefined || !containerName) {
       const channel = await this.client.channels.fetch(channelId).catch(() => null);
@@ -1414,7 +1414,7 @@ Use \`/channel agent clear\` to undo.`,
     return (await this.client.users.createDM(channelUserId)).id;
   }
 
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const threadId: string = conversationId;
     const channel = await this.client.channels.fetch(threadId);
     if (!channel || !channel.isTextBased()) {
@@ -1459,7 +1459,7 @@ Use \`/channel agent clear\` to undo.`,
       // A reply posted into an auto-thread lands in that thread, so the
       // receipt names the thread, not the channel it was asked for.
       return {
-        conversationId: targetChannel.id as ConversationId,
+        conversationId: targetChannel.id as ChatId,
         ...(messageId ? { messageId } : {}),
       };
     } catch (err) {

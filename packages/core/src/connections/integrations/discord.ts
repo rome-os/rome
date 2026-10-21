@@ -20,7 +20,7 @@ import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rom
 import type { TalkDirectory, TalkFeatures, TalkHistory } from "../types.js";
 import { DiscordAdapter } from "../../channels/discord.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import type { ConversationSettingsService } from "../../conversation-settings/service.js";
+import type { ChatSettingsService } from "../../conversation-settings/service.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
@@ -103,7 +103,7 @@ export function isDiscordAuthError(err: unknown): boolean {
  * validation + autocomplete).
  */
 export interface DiscordDeps {
-  conversationSettings: ConversationSettingsService;
+  conversationSettings: ChatSettingsService;
   chatStop?: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   listAgents: () => string[];
@@ -324,7 +324,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                 conversations: page.items.map((channel) => ({
                   ref: {
                     connectionId: kit.connectionId,
-                    conversationId: channel.id as import("@rome-os/app-runtime").ConversationId,
+                    conversationId: channel.id as import("@rome-os/app-runtime").ChatId,
                   },
                   service: "discord",
                   kind: channel.type === "thread" ? ("topic" as const) : ("channel" as const),
@@ -336,8 +336,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                     ? {
                         parent: {
                           connectionId: kit.connectionId,
-                          conversationId:
-                            channel.parentId as import("@rome-os/app-runtime").ConversationId,
+                          conversationId: channel.parentId as import("@rome-os/app-runtime").ChatId,
                         },
                       }
                     : {}),
@@ -351,7 +350,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
               conversationFor: async (userId) =>
                 (await adapter.directConversationFor(
                   userId,
-                )) as import("@rome-os/app-runtime").ConversationId,
+                )) as import("@rome-os/app-runtime").ChatId,
             },
             history,
             inboundMedia,

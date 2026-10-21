@@ -1,7 +1,7 @@
 import { Api, TelegramClient } from "telegram";
 import { NewMessage, type NewMessageEvent } from "telegram/events/NewMessage.js";
 import { StringSession } from "telegram/sessions/StringSession.js";
-import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
 import { readFile } from "node:fs/promises";
@@ -186,7 +186,7 @@ export class TelegramUserAdapter {
     }
   }
 
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const threadId: string = conversationId;
     const entity = entityFromThreadId(threadId);
     const replyTo = message.replyToMessageId
@@ -358,7 +358,7 @@ export class TelegramUserAdapter {
       channel: "telegram_user",
       direction: "inbound",
       messageId: String(message.id),
-      conversationId: threadId as ConversationId,
+      conversationId: threadId as ChatId,
       senderId: isOutgoing ? this.settings.userId : fromId,
       senderDisplayName: isOutgoing ? this.settings.displayName : (context.threadName ?? fromId),
       text: message.message ?? "",

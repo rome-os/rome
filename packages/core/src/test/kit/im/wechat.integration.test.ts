@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +10,7 @@ import { deferred } from "./peer.js";
 import { WECHAT_ORIGIN, WECHAT_TOKEN, WECHAT_USER, WechatPeer } from "./wechat.js";
 
 const capture = loadCapture(textCapture);
-const user = WECHAT_USER as ConversationId;
+const user = WECHAT_USER as ChatId;
 const SEND_PATH = "/ilink/bot/sendmessage";
 
 describe("WechatPeer", () => {

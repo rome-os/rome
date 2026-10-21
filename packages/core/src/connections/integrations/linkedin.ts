@@ -19,7 +19,7 @@
 // Replies use the same browser session and the shared People outbox.
 
 import { z } from "zod";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import type { TalkFeatures } from "../types.js";
 import {
   OpencliAuthError,
@@ -292,7 +292,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
               async conversationFor(address: string) {
                 const participantId = linkedInMemberIdFromProfileUrl(address) ?? address.trim();
                 const target = await sink.findReplyTarget?.({ participantId });
-                return target ? (target.threadId as ConversationId) : null;
+                return target ? (target.threadId as ChatId) : null;
               },
             };
           }
@@ -309,7 +309,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
             stop(): void {
               poller.stop();
             },
-            async send(conversationId: ConversationId, msg) {
+            async send(conversationId: ChatId, msg) {
               if (
                 !msg.text?.trim() ||
                 msg.attachments?.length ||

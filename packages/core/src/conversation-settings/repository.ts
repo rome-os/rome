@@ -1,22 +1,14 @@
 import { and, asc, eq, like } from "drizzle-orm";
-import type {
-  ConversationDescriptor,
-  ConversationId,
-  StoredConversationSettings,
-} from "@rome-os/app-runtime";
+import type { ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { channelConversationId } from "../db/repositories/webchat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
-export type StoredConversationRow = typeof romeSessions.$inferSelect;
+export type StoredChatRow = typeof romeSessions.$inferSelect;
 
-function rowByAddress(
-  exec: DrizzleDb | DrizzleTx,
-  service: string,
-  conversationId: ConversationId,
-) {
+function rowByAddress(exec: DrizzleDb | DrizzleTx, service: string, conversationId: ChatId) {
   return exec
     .select()
     .from(romeSessions)
@@ -31,14 +23,14 @@ function rowByAddress(
     .get();
 }
 
-export class ConversationSettingsRepository {
+export class ChatSettingsRepository {
   constructor(private readonly db: DrizzleDb) {}
 
-  find(service: string, conversationId: ConversationId): StoredConversationRow | null {
+  find(service: string, conversationId: ChatId): StoredChatRow | null {
     return rowByAddress(this.db, service, conversationId) ?? null;
   }
 
-  listKnown(input: { service?: string; query?: string }): StoredConversationRow[] {
+  listKnown(input: { service?: string; query?: string }): StoredChatRow[] {
     const predicates = [isChannelConversation];
     if (input.service) {
       predicates.push(eq(romeSessions.sourceChannel, input.service));
@@ -70,10 +62,10 @@ export class ConversationSettingsRepository {
    * the channel the conversation belongs to, which a service's later channels
    * do not share with it. */
   mutate(
-    descriptor: ConversationDescriptor,
+    descriptor: ChatDescriptor,
     channel: string,
     input: {
-      settings: StoredConversationSettings | null;
+      settings: StoredChatSettings | null;
       agentName: string | null | undefined;
     },
   ): void {

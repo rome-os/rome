@@ -16,7 +16,7 @@
 // pin the descriptor's own mapping arithmetic here.
 
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, OutgoingMessage, ChannelMessage } from "@rome-os/app-runtime";
+import type { ChatId, OutgoingMessage, ChannelMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
 import { installTestClock } from "../../test/kit/index.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
@@ -31,7 +31,7 @@ const fakeState: {
   startError: unknown;
   sendError: unknown;
   stopped: boolean;
-  sent: Array<{ conversationId: ConversationId; message: OutgoingMessage }>;
+  sent: Array<{ conversationId: ChatId; message: OutgoingMessage }>;
   /** Error the fake probe() throws on its next tick (null → session healthy). */
   probeError: unknown;
   /** Count of probe() ticks, so a test can assert the timer stopped. */
@@ -80,9 +80,9 @@ rs.mock("../../channels/telegram-user.js", () => {
         if (fakeState.probeError) throw fakeState.probeError;
       }
       async send(
-        conversationId: ConversationId,
+        conversationId: ChatId,
         message: OutgoingMessage,
-      ): Promise<{ conversationId: ConversationId; messageId: string }> {
+      ): Promise<{ conversationId: ChatId; messageId: string }> {
         if (fakeState.sendError) throw fakeState.sendError;
         fakeState.sent.push({ conversationId, message });
         return { conversationId, messageId: "sent-1" };
@@ -215,7 +215,7 @@ describe("telegram_user descriptor shape", () => {
       channel: "telegram_user",
       direction: "inbound",
       messageId: "message-1",
-      conversationId: "dialog-1" as ConversationId,
+      conversationId: "dialog-1" as ChatId,
       senderId: "999",
       text: "hi",
       attachments: [],
@@ -241,7 +241,7 @@ describe("telegram_user descriptor shape", () => {
     h.start();
     await expect(
       h.talker.history?.query({
-        conversationId: "dialog-1" as ConversationId,
+        conversationId: "dialog-1" as ChatId,
         limit: 20,
       }),
     ).resolves.toEqual([]);
@@ -253,7 +253,7 @@ describe("telegram_user descriptor shape", () => {
       channel: "telegram_user",
       direction: "inbound",
       messageId,
-      conversationId: "dialog-1" as ConversationId,
+      conversationId: "dialog-1" as ChatId,
       senderId: out ? "u-1" : "999",
       senderDisplayName: out ? "Me" : "999",
       text: `line ${messageId}`,
@@ -292,7 +292,7 @@ describe("telegram_user inbound delivery", () => {
       channel: "telegram_user",
       direction: "inbound",
       messageId: "7",
-      conversationId: "-100555" as ConversationId,
+      conversationId: "-100555" as ChatId,
       senderId: "111",
       senderDisplayName: "111",
       text: "see this",
@@ -365,7 +365,7 @@ describe("telegram_user Talker fault mapping", () => {
     const h = buildTalker();
     h.start();
     fakeState.sendError = rpcError(undefined, "SESSION_REVOKED");
-    const address = "999" as ConversationId;
+    const address = "999" as ChatId;
     await expect(h.talker.send(address, { text: "hi" })).rejects.toBeInstanceOf(CredentialRejected);
     await expect(h.talker.send(address, { text: "hi" })).rejects.toMatchObject({
       grant: "session",
@@ -376,13 +376,13 @@ describe("telegram_user Talker fault mapping", () => {
     const h = buildTalker();
     h.start();
     fakeState.sendError = new Error("timeout");
-    await expect(h.talker.send("999" as ConversationId, { text: "hi" })).rejects.toThrow("timeout");
+    await expect(h.talker.send("999" as ChatId, { text: "hi" })).rejects.toThrow("timeout");
   });
 
   it("forwards the opaque conversation id to the adapter's send and returns its receipt", async () => {
     const h = buildTalker();
     h.start();
-    await expect(h.talker.send("chat-42" as ConversationId, { text: "hi" })).resolves.toEqual({
+    await expect(h.talker.send("chat-42" as ChatId, { text: "hi" })).resolves.toEqual({
       conversationId: "chat-42",
       messageId: "sent-1",
     });

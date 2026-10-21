@@ -45,7 +45,7 @@ import type { BootVersionReport } from "../lib/boot-version-report.js";
 import type { SystemUpgradeService } from "../system-upgrade/service.js";
 import type {
   AppRuntimeRepositories,
-  ConversationSettingsControl,
+  ChatSettingsControl,
   ChannelsService,
 } from "@rome-os/app-runtime";
 import type { FavorService } from "../favors/types.js";
@@ -80,7 +80,7 @@ export interface ApiDeps {
   notifyPairingResolution: PairingNotifier;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
-  conversationSettings: ConversationSettingsControl;
+  conversationSettings: ChatSettingsControl;
   actionEngine: ActionEngine;
   actionLoader: Pick<ActionLoader, "get">;
   db: DrizzleDb;

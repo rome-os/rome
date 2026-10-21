@@ -7,7 +7,7 @@
 
 import type { Logger } from "../logger.js";
 
-export interface ConversationBufferLimits {
+export interface ChatBufferLimits {
   /** Most events a conversation may hold waiting. Pushing past it drops the
    *  oldest waiting event, which R3 (at most once) allows. */
   capacity: number;
@@ -24,20 +24,20 @@ export interface ConversationBufferLimits {
  * so twenty waiting means the handler is stuck. A hundred bounds what one stuck
  * conversation holds in memory, attachments included.
  */
-export const CONVERSATION_BUFFER_DEFAULTS: ConversationBufferLimits = {
+export const CONVERSATION_BUFFER_DEFAULTS: ChatBufferLimits = {
   capacity: 100,
   depthWarning: 20,
   slowHandlerMs: 10 * 60_000,
 };
 
-interface Conversation<T> {
+interface ChatQueue<T> {
   waiting: T[];
   /** Whether the depth warning has fired since the conversation last drained. */
   warned: boolean;
 }
 
-export class ConversationBuffers<T> {
-  private readonly conversations = new Map<string, Conversation<T>>();
+export class ChatBuffers<T> {
+  private readonly conversations = new Map<string, ChatQueue<T>>();
   private closed = false;
 
   constructor(
@@ -46,7 +46,7 @@ export class ConversationBuffers<T> {
       log: Pick<Logger, "warn" | "error">;
       /** Fields that name an item in a log line, e.g. its message id. */
       describe: (item: T) => Record<string, unknown>;
-      limits?: Partial<ConversationBufferLimits>;
+      limits?: Partial<ChatBufferLimits>;
     },
   ) {}
 
@@ -99,7 +99,7 @@ export class ConversationBuffers<T> {
     for (const entry of this.conversations.values()) entry.waiting.length = 0;
   }
 
-  private async drain(conversation: string, entry: Conversation<T>): Promise<void> {
+  private async drain(conversation: string, entry: ChatQueue<T>): Promise<void> {
     // Start one microtask after the push, so no handler starts inside the
     // caller's push loop, ahead of the other subscribers' pushes.
     await Promise.resolve();
@@ -134,7 +134,7 @@ export class ConversationBuffers<T> {
     }
   }
 
-  private limits(): ConversationBufferLimits {
+  private limits(): ChatBufferLimits {
     return { ...CONVERSATION_BUFFER_DEFAULTS, ...this.options.limits };
   }
 }

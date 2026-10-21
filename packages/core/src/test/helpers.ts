@@ -44,8 +44,8 @@ import { SystemUpgradeService } from "../system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type {
   ChannelMessage,
-  ConversationId,
-  ConversationSettingsControl,
+  ChatId,
+  ChatSettingsControl,
   MessageReceipt,
 } from "@rome-os/app-runtime";
 import type { Talker } from "../connections/types.js";
@@ -234,7 +234,7 @@ let sentCount = 0;
 
 /** One message Rome sent on a fake transport. */
 export interface SentMessage {
-  conversationId: ConversationId;
+  conversationId: ChatId;
   message: OutgoingMessage;
 }
 
@@ -253,7 +253,7 @@ export class FakeTransport {
 
   constructor(readonly channel = "test") {}
 
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     this.sentMessages.push({ conversationId, message });
     // A message id, the way every real talker answers with one. The outbox
     // recognizes a delivered message by it, so a Talk that named nothing
@@ -347,7 +347,7 @@ function talkerOver(transport: FakeTransport): TestTalker {
     send: (conversationId, message) => transport.send(conversationId, message),
     directMessaging: {
       async conversationFor(channelUserId: string) {
-        return channelUserId as ConversationId;
+        return channelUserId as ChatId;
       },
     },
   };
@@ -378,7 +378,7 @@ export function channelNamed(channels: Channels): (name: string) => Channel | nu
   return (name) => channels.find((channel) => channel.name === name) ?? null;
 }
 
-const emptyConversationSettings: ConversationSettingsControl = {
+const emptyConversationSettings: ChatSettingsControl = {
   async list() {
     return { items: [] };
   },
@@ -420,7 +420,7 @@ export function buildMessage(overrides: Partial<ChannelMessage> = {}): ChannelMe
     channel: "telegram",
     direction: "inbound",
     messageId: "msg-001",
-    conversationId: "thread-001" as ConversationId,
+    conversationId: "thread-001" as ChatId,
     senderId: "user-123",
     senderDisplayName: "Test User",
     text: "Hello, world!",

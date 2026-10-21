@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import {
   isWechatAuthError,
   normalizeWechatBaseUrl,
@@ -510,14 +510,14 @@ describe("WechatAdapter send", () => {
       accountId: "account",
       connectedAt: "2026-05-09T00:00:00.000Z",
     }) as unknown as {
-      send(conversationId: ConversationId, message: { text: string }): Promise<unknown>;
+      send(conversationId: ChatId, message: { text: string }): Promise<unknown>;
       rememberContextToken(key: string, contextToken: string, typingTarget: string): void;
     };
 
     adapter.rememberContextToken("room-1@chatroom", "ctx-room", "alice@im.wechat");
     adapter.rememberContextToken("alice@im.wechat", "ctx-alice", "alice@im.wechat");
 
-    const receipt = await adapter.send("alice@im.wechat" as ConversationId, { text: "hello" });
+    const receipt = await adapter.send("alice@im.wechat" as ChatId, { text: "hello" });
 
     expect(receipt).toStrictEqual({ conversationId: "alice@im.wechat", messageId: "123" });
 
@@ -572,14 +572,14 @@ describe("WechatAdapter send", () => {
       accountId: "account",
       connectedAt: "2026-05-09T00:00:00.000Z",
     }) as unknown as {
-      send(conversationId: ConversationId, message: { text: string }): Promise<unknown>;
+      send(conversationId: ChatId, message: { text: string }): Promise<unknown>;
       rememberContextToken(key: string, contextToken: string, typingTarget: string): void;
     };
     adapter.rememberContextToken("alice@im.wechat", "ctx-alice", "alice@im.wechat");
 
-    await expect(
-      adapter.send("alice@im.wechat" as ConversationId, { text: "hello" }),
-    ).rejects.toThrow(error);
+    await expect(adapter.send("alice@im.wechat" as ChatId, { text: "hello" })).rejects.toThrow(
+      error,
+    );
   });
 });
 
@@ -667,9 +667,9 @@ describe("WechatAdapter fault surfacing", () => {
         retryAt: expect.any(String),
       }),
     );
-    await expect(
-      adapter.send("alice@im.wechat" as ConversationId, { text: "hello" }),
-    ).rejects.toThrow("WeChat session paused after errcode -14; retry in 60 min");
+    await expect(adapter.send("alice@im.wechat" as ChatId, { text: "hello" })).rejects.toThrow(
+      "WeChat session paused after errcode -14; retry in 60 min",
+    );
 
     const pauseData = loggerMocks.warn.mock.calls[0]?.[1] as { retryAt: string };
     expect(adapter.getRuntimeDegradation()).toEqual({

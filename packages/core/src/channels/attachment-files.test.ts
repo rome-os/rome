@@ -12,7 +12,7 @@ import {
   saveIncomingAttachmentPayloads,
   saveUrlAttachments,
 } from "./attachment-files.js";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { Attachment } from "./types.js";
 
 const profileMemoryDir = rs.hoisted(() => ({ value: "" }));
@@ -26,7 +26,7 @@ function messageWithAttachments(attachments: Attachment[]): ChannelMessage {
     channel: "discord",
     direction: "inbound",
     messageId: "msg-1",
-    conversationId: "thread-1" as ConversationId,
+    conversationId: "thread-1" as ChatId,
     senderId: "user-1",
     senderDisplayName: "User",
     text: "",
@@ -220,7 +220,7 @@ describe("attachment file sanitization", () => {
       fileName: `${"a".repeat(300)}.png`,
     };
     const message = messageWithAttachments([duplicateA, duplicateB, generated, unicode, longName]);
-    message.conversationId = "thread/../../secret" as ConversationId;
+    message.conversationId = "thread/../../secret" as ChatId;
     message.messageId = "..";
 
     const attachments = await saveIncomingAttachmentPayloads(message, [

@@ -1,6 +1,6 @@
 import { ChannelType } from "discord.js";
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import { DiscordAdapter } from "./discord.js";
 
 describe("DiscordAdapter.send", () => {
@@ -33,7 +33,7 @@ describe("DiscordAdapter.send", () => {
     });
 
     await expect(
-      adapter.send(channel.id as ConversationId, {
+      adapter.send(channel.id as ChatId, {
         attachments: [
           {
             type: "document",
@@ -62,7 +62,7 @@ describe("DiscordAdapter.send", () => {
       client: { channels: { fetch: rs.fn().mockResolvedValue(channel) } },
     });
 
-    await expect(adapter.send(channel.id as ConversationId, {})).resolves.toStrictEqual({
+    await expect(adapter.send(channel.id as ChatId, {})).resolves.toStrictEqual({
       conversationId: channel.id,
     });
   });

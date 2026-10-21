@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { trace } from "@opentelemetry/api";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import { installTestSpanHarness, type SpanHarness } from "./helpers.js";
 import {
   buildGoldenTraceRig,
@@ -90,7 +90,7 @@ describe("golden-trace integration", () => {
 
   it("emits the expected span hierarchy for one inbound message", async () => {
     await rig.simulateInbound("telegram", {
-      conversationId: "thread-golden" as ConversationId,
+      conversationId: "thread-golden" as ChatId,
       text: "hi",
     });
 

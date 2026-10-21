@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { Api } from "telegram";
 import { returnBigInt } from "telegram/Helpers.js";
 import { openTelegramUserLogin, TelegramUserAdapter } from "./telegram-user.js";
@@ -145,7 +145,7 @@ describe("TelegramUserAdapter", () => {
     const sendMessage = rs.fn().mockResolvedValue({ id: 99 });
     internals.client = { sendMessage };
 
-    await expect(adapter.send("123" as ConversationId, { text: "hi" })).resolves.toStrictEqual({
+    await expect(adapter.send("123" as ChatId, { text: "hi" })).resolves.toStrictEqual({
       conversationId: "123",
       messageId: "99",
     });
@@ -156,7 +156,7 @@ describe("TelegramUserAdapter", () => {
     internals.client = { sendMessage: rs.fn().mockResolvedValue({ id: 1 }) };
 
     await expect(
-      adapter.send("123" as ConversationId, {
+      adapter.send("123" as ChatId, {
         attachments: [{ type: "document", source: "/tmp/a.pdf" }],
       }),
     ).resolves.toStrictEqual({ conversationId: "123" });
@@ -196,7 +196,7 @@ describe("TelegramUserAdapter", () => {
         channel: "telegram_user",
         direction: "inbound",
         messageId: "7",
-        conversationId: "-100555" as ConversationId,
+        conversationId: "-100555" as ChatId,
         senderId: "111",
         text: "",
         attachments: [{ type: "document" }],

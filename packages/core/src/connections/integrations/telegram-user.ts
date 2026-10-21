@@ -429,7 +429,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
                 conversations: page.items.map((dialog) => ({
                   ref: {
                     connectionId: kit.connectionId,
-                    conversationId: dialog.id as import("@rome-os/app-runtime").ConversationId,
+                    conversationId: dialog.id as import("@rome-os/app-runtime").ChatId,
                   },
                   service: "telegram_user",
                   kind:

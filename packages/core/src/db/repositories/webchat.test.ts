@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { createTestDb, type TestDb, identityServiceOf } from "../../test/helpers.js";
 import { ApprovalsRepository } from "./approvals.js";
 import { PersonMappingRepository } from "./person-mapping.js";
-import { ConversationSettingsRepository } from "../../conversation-settings/repository.js";
+import { ChatSettingsRepository } from "../../conversation-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema.js";
 import {
@@ -271,7 +271,7 @@ describe("WebChatRepository", () => {
     expect(archived?.pinnedAt).not.toBeNull();
     expect(ids(await repo.listSessions("archived"))).toEqual(["chat-1"]);
 
-    const settings = new ConversationSettingsRepository(testDb.db);
+    const settings = new ChatSettingsRepository(testDb.db);
     expect(settings.listKnown({})).toEqual([]);
   });
 

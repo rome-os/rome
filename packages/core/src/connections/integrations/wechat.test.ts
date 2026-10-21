@@ -13,7 +13,7 @@ import { sendThrough } from "../../channels/connection-ports.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, ChannelMessage } from "@rome-os/app-runtime";
+import type { ChatId, ChannelMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
 import { WechatAdapter, type WechatAdapterConfig } from "../../channels/wechat.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -47,7 +47,7 @@ class FakeWechatAdapter {
   handler?: (msg: ChannelMessage) => Promise<void>;
   started = false;
   stopped = false;
-  readonly sent: Array<{ conversationId: ConversationId; text?: string }> = [];
+  readonly sent: Array<{ conversationId: ChatId; text?: string }> = [];
   readonly typed: string[] = [];
   degradation: { reason: string; retryAt: string } | null = null;
   private readonly onFault?: (err: unknown) => void;
@@ -65,7 +65,7 @@ class FakeWechatAdapter {
   async stop(): Promise<void> {
     this.stopped = true;
   }
-  async send(conversationId: ConversationId, message: { text?: string }) {
+  async send(conversationId: ChatId, message: { text?: string }) {
     this.sent.push({ conversationId, text: message.text });
     return { conversationId };
   }
@@ -152,7 +152,7 @@ describe("wechat descriptor shape", () => {
     expect(adapters).toHaveLength(1);
     expect(adapters[0].started).toBe(true);
 
-    await expect(sendThrough(conn, "addr-1" as ConversationId, { text: "hi" })).resolves.toEqual({
+    await expect(sendThrough(conn, "addr-1" as ChatId, { text: "hi" })).resolves.toEqual({
       conversationId: "addr-1",
     });
     expect(adapters[0].sent).toEqual([{ conversationId: "addr-1", text: "hi" }]);
@@ -160,7 +160,7 @@ describe("wechat descriptor shape", () => {
       channel: "wechat",
       direction: "inbound",
       messageId: "message-1",
-      conversationId: "addr-1" as ConversationId,
+      conversationId: "addr-1" as ChatId,
       senderId: "user-1",
       text: "hi",
       attachments: [],

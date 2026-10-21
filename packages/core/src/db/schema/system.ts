@@ -9,7 +9,7 @@ import {
   type SQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-import type { AgentInputState, StoredConversationSettings } from "@rome-os/app-runtime";
+import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
 import type { OutboxMessage } from "@rome/api-types/people";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
@@ -501,7 +501,7 @@ export const romeSessions = sqliteTable(
     sourceThreadType: text("source_thread_type"),
     // Versioned policy overrides for channel conversations. Agent routing is
     // intentionally not duplicated here; agentName is its canonical column.
-    channelSettings: text("channel_settings", { mode: "json" }).$type<StoredConversationSettings>(),
+    channelSettings: text("channel_settings", { mode: "json" }).$type<StoredChatSettings>(),
     triggerKind: text("trigger_kind"),
     triggerName: text("trigger_name"),
     triggerActionName: text("trigger_action_name"),

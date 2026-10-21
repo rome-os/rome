@@ -30,7 +30,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { ConversationId, StreamFault, Talker } from "../types.js";
+import type { ChatId, StreamFault, Talker } from "../types.js";
 import { makeEmailDescriptor, type EmailDescriptorDeps, type EmailInboxMaterial } from "./email.js";
 
 const INBOUND_SECRET = "test-inbound-secret";
@@ -323,7 +323,7 @@ describe("email Talker fault mapping", () => {
     const h = buildTalker(provider);
     h.start();
 
-    const receipt = await h.talker.send("" as ConversationId, {
+    const receipt = await h.talker.send("" as ChatId, {
       kind: "email",
       to: "someone@example.com",
       text: "hi there",
@@ -485,7 +485,7 @@ describe("email inbound delivery", () => {
       channel: "email",
       direction: "inbound",
       messageId: "msg_unknown",
-      conversationId: "t1" as ConversationId,
+      conversationId: "t1" as ChatId,
       senderId: GUARDIAN,
       text: "",
       attachments,

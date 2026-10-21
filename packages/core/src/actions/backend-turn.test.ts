@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ConversationRepository } from "@rome-os/app-runtime";
+import type { ChatRepository } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
 import { createMockAgentRunner } from "../test/helpers.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
@@ -37,7 +37,7 @@ describe("backend turn delivery", () => {
     const conversations = {
       ensureChannelConversation,
       recordOutboundMessage,
-    } as unknown as ConversationRepository;
+    } as unknown as ChatRepository;
     const runner = createBackendTurnRunner({
       agentRunner,
       channel: (name) => (name === "wechat" ? wechat : null),

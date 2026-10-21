@@ -1,4 +1,4 @@
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -171,7 +171,7 @@ export async function notifyPairingResolution(
   if (!payload || approval.status !== "approved") return;
   try {
     const conversationId =
-      (payload.conversationId as ConversationId | undefined) ??
+      (payload.conversationId as ChatId | undefined) ??
       (await registry
         .get(payload.connectionId)
         .withTalker((talker) => talker.directMessaging?.conversationFor(payload.channelUserId)));
@@ -194,7 +194,7 @@ export async function notifyPairingResolution(
 async function sendOn(
   registry: Pick<ConnectionRegistry, "get">,
   connectionId: string,
-  conversationId: ConversationId,
+  conversationId: ChatId,
   text: string,
 ): Promise<void> {
   await sendThrough(registry.get(connectionId), conversationId, { text });

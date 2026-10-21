@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { ChannelSend } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { createTestDb, type TestDb, identityServiceOf } from "../test/helpers.js";
@@ -103,7 +103,7 @@ describe("channel pairing approvals", () => {
       messageId: "sent",
       conversationId,
     }));
-    const conversationFor = rs.fn(async () => "private-chat" as ConversationId);
+    const conversationFor = rs.fn(async () => "private-chat" as ChatId);
     const feature = rs.fn(() => ({ conversationFor }));
     const registry = registryOf(send, feature);
     const admit = createPairingAdmission({
@@ -117,7 +117,7 @@ describe("channel pairing approvals", () => {
       direction: "inbound",
       senderId: id,
       senderUsername: channel === "telegram" ? "actualuser" : undefined,
-      conversationId: "group" as ConversationId,
+      conversationId: "group" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -159,7 +159,7 @@ describe("channel pairing approvals", () => {
       channel: "telegram",
       direction: "inbound",
       senderId: "123",
-      conversationId: "group" as ConversationId,
+      conversationId: "group" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -185,7 +185,7 @@ describe("channel pairing approvals", () => {
     seedConnection(channel);
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ConversationId,
+      conversationId: "dm" as ChatId,
     }));
     await createPairingAdmission({
       talkGrants,
@@ -197,7 +197,7 @@ describe("channel pairing approvals", () => {
       direction: "inbound",
       senderId: id,
       senderDisplayName: name,
-      conversationId: "dm" as ConversationId,
+      conversationId: "dm" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -245,10 +245,10 @@ describe("channel pairing approvals", () => {
     if (result.outcome !== "resolved") throw new Error("Approval failed");
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ConversationId,
+      conversationId: "dm" as ChatId,
     }));
     const registry = registryOf(send, () => ({
-      conversationFor: async () => "dm" as ConversationId,
+      conversationFor: async () => "dm" as ChatId,
     }));
     await notifyPairingResolution(registry, result.approval);
     expect(send).toHaveBeenCalledWith(input.connectionId, "dm", {
@@ -297,7 +297,7 @@ describe("channel pairing approvals", () => {
     await people.addChannelMapping(STRANGER_PERSON_ID, channel, accountId, "Alice");
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ConversationId,
+      conversationId: "dm" as ChatId,
     }));
     const registry = registryOf(send);
     const admit = createPairingAdmission({
@@ -311,7 +311,7 @@ describe("channel pairing approvals", () => {
       direction: "inbound",
       senderId: accountId,
       senderDisplayName: "Alice",
-      conversationId: "dm" as ConversationId,
+      conversationId: "dm" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -381,7 +381,7 @@ describe("channel pairing approvals", () => {
       direction: "inbound",
       senderId: "123",
       senderDisplayName: "Alice",
-      conversationId: "dm" as ConversationId,
+      conversationId: "dm" as ChatId,
       messageId: "racing",
       text: "hello",
       attachments: [],
@@ -597,7 +597,7 @@ describe("channel pairing approvals", () => {
     seedConnection(service);
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ConversationId,
+      conversationId: "dm" as ChatId,
     }));
     const registry = registryOf(send);
     const admit = createPairingAdmission({
@@ -619,7 +619,7 @@ describe("channel pairing approvals", () => {
       senderId: id,
       senderDisplayName: "Owner",
       senderUsername: service === "telegram" ? "realowner" : undefined,
-      conversationId: "dm" as ConversationId,
+      conversationId: "dm" as ChatId,
       messageId: "one",
       text: "hello",
       attachments: [],

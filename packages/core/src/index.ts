@@ -213,10 +213,7 @@ import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_SERVICE } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
-import {
-  ConversationSettingsRepository,
-  ConversationSettingsService,
-} from "./conversation-settings/index.js";
+import { ChatSettingsRepository, ChatSettingsService } from "./conversation-settings/index.js";
 import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
 import { ensureZeroGrantConnections } from "./connections/zero-grant.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
@@ -736,8 +733,8 @@ async function main() {
   // (injected into appActionDeps) and the WorkerRPC handlers, so a worker's
   // proxy and a main-process call resolve to identical behavior.
   const eventService = new EventService(eventBus, eventCatalog);
-  const conversationSettings = new ConversationSettingsService({
-    repository: new ConversationSettingsRepository(db),
+  const conversationSettings = new ChatSettingsService({
+    repository: new ChatSettingsRepository(db),
     connections: connectionRegistry,
     channelOf,
     channels: () => builtChannels,

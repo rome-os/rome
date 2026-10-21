@@ -15,10 +15,10 @@ import { createLogger } from "../logger.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type {
   ChannelMessage,
-  ConversationDescriptor,
-  ConversationId,
-  ConversationSettingsControl,
-  ConversationSettingsSnapshot,
+  ChatDescriptor,
+  ChatId,
+  ChatSettingsControl,
+  ChatSettingsSnapshot,
   MessageAddressing,
   MessageReceipt,
 } from "@rome-os/app-runtime";
@@ -39,8 +39,8 @@ export interface FeishuConfig {
    *  (International). Defaults to "feishu". */
   domain?: "feishu" | "lark";
   connectionId?: string;
-  conversationSettings?: ConversationSettingsControl & {
-    observe?(descriptor: ConversationDescriptor): void;
+  conversationSettings?: ChatSettingsControl & {
+    observe?(descriptor: ChatDescriptor): void;
   };
   personMappingRepo?: PersonMappingRepository;
   listAgents?: () => string[];
@@ -133,8 +133,8 @@ export class FeishuAdapter {
   private channel: LarkChannel;
   private handler?: (msg: ChannelMessage) => Promise<void>;
   private readonly connectionId?: string;
-  private readonly conversationSettings?: ConversationSettingsControl & {
-    observe?(descriptor: ConversationDescriptor): void;
+  private readonly conversationSettings?: ChatSettingsControl & {
+    observe?(descriptor: ChatDescriptor): void;
   };
   private readonly personMappingRepo?: PersonMappingRepository;
   private readonly listAgents?: () => string[];
@@ -208,7 +208,7 @@ export class FeishuAdapter {
     log.info("feishu adapter stopped");
   }
 
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     if (!message.text) return { conversationId };
     const threadId: string = conversationId;
 
@@ -313,7 +313,7 @@ export class FeishuAdapter {
       channel: "feishu",
       direction: "inbound",
       messageId: m.messageId,
-      conversationId: m.chatId as ConversationId,
+      conversationId: m.chatId as ChatId,
       senderId: m.senderId,
       senderDisplayName: m.senderName ?? "Feishu User",
       text,
@@ -561,7 +561,7 @@ export class FeishuAdapter {
   }
 
   private agentsOf(
-    snapshot: Pick<ConversationSettingsSnapshot, "effective" | "overrides">,
+    snapshot: Pick<ChatSettingsSnapshot, "effective" | "overrides">,
   ): Pick<FeishuChannelConfig, "storedAgent" | "answeringAgent"> {
     const storedAgent = storedAgentChoice(snapshot);
     return {
@@ -579,8 +579,8 @@ export class FeishuAdapter {
         : {};
     }
     const observed = this.observedConversations.get(chatId);
-    const descriptor: ConversationDescriptor = {
-      ref: { connectionId: this.connectionId, conversationId: chatId as ConversationId },
+    const descriptor: ChatDescriptor = {
+      ref: { connectionId: this.connectionId, conversationId: chatId as ChatId },
       service: "feishu",
       kind: observed?.kind ?? "group",
       displayName: observed?.displayName ?? chatId,
@@ -605,7 +605,7 @@ export class FeishuAdapter {
   ): Promise<FeishuChannelConfig> {
     if (!this.conversationSettings || !this.connectionId) return {};
     const current = await this.getChannelConfig(chatId);
-    const ref = { connectionId: this.connectionId, conversationId: chatId as ConversationId };
+    const ref = { connectionId: this.connectionId, conversationId: chatId as ChatId };
     if (patch === null) {
       const saved = await this.conversationSettings.reset({
         ref,
@@ -618,8 +618,8 @@ export class FeishuAdapter {
         ...this.agentsOf(saved),
       };
     }
-    const set: import("@rome-os/app-runtime").PartialConversationSettings = {};
-    const clear: import("@rome-os/app-runtime").ConversationSettingField[] = [];
+    const set: import("@rome-os/app-runtime").PartialChatSettings = {};
+    const clear: import("@rome-os/app-runtime").ChatSettingField[] = [];
     const owns = (key: keyof FeishuChannelConfig) => Object.hasOwn(patch, key);
     if (owns("mode")) {
       if (patch.mode === "ignore") set.enabled = false;

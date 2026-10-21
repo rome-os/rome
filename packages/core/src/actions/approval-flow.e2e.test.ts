@@ -29,7 +29,7 @@ import {
 import { buildApp } from "../api/index.js";
 import { COOKIE_NAME, createSession } from "../lib/auth.js";
 import type { Action, ActionConfig, ActionResult } from "./types.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import type { OutgoingMessage } from "../types.js";
 import type { ThreadContext } from "../core/types.js";
 
@@ -105,7 +105,7 @@ function buildHarness() {
             },
           ],
         };
-        await channel.send(event.channelContext.threadId as ConversationId, msg);
+        await channel.send(event.channelContext.threadId as ChatId, msg);
       },
     },
   );

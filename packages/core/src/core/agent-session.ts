@@ -39,8 +39,8 @@ import type {
   RomeSessionType,
   StreamAgentEvent,
   TurnMiddlewareContext,
-  ConversationId,
-  ConversationRef,
+  ChatId,
+  ChatRef,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
@@ -396,7 +396,7 @@ interface ManagerDeps {
    *  model terminal directly (behavior identical to a chain of size 0). */
   turnMiddleware?: TurnMiddlewareChain;
   /** Resolve the effective reset policy from the existing external thread identity. */
-  resolveProviderSessionReset?: (ref: ConversationRef) => Promise<ProviderSessionResetPolicy>;
+  resolveProviderSessionReset?: (ref: ChatRef) => Promise<ProviderSessionResetPolicy>;
   /** Receives every turn this manager's sessions finish, forked turns included. */
   usageRecorder?: TurnUsageSink;
   /** What the named channel's surface supports, or null for a name no channel
@@ -521,7 +521,7 @@ export function createAgentSessionManager(
       deps.resolveProviderSessionReset
         ? {
             connectionId: init.threadContext.connectionId,
-            conversationId: init.threadContext.threadId as ConversationId,
+            conversationId: init.threadContext.threadId as ChatId,
           }
         : undefined;
     if (init && resetRef && !init.resumeSessionId && !resetChecked) {

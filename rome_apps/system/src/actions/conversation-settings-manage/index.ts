@@ -3,10 +3,10 @@ import type {
   ActionConfig,
   ActionResult,
   AppActionRuntimeDeps,
-  ConversationId,
-  ConversationSettingField,
-  ConversationSettingsControl,
-  PartialConversationSettings,
+  ChatId,
+  ChatSettingField,
+  ChatSettingsControl,
+  PartialChatSettings,
 } from "@rome-os/app-runtime";
 
 interface Input {
@@ -14,12 +14,12 @@ interface Input {
   connectionId?: string;
   conversationId?: string;
   query?: string;
-  settings?: PartialConversationSettings;
-  clear?: ConversationSettingField[];
+  settings?: PartialChatSettings;
+  clear?: ChatSettingField[];
 }
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
-  const settings = deps.conversationSettings as ConversationSettingsControl | undefined;
+  const settings = deps.conversationSettings as ChatSettingsControl | undefined;
   if (!settings) throw new Error("conversation_settings_manage requires conversationSettings");
 
   return {
@@ -76,7 +76,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       }
       const ref = {
         connectionId: input.connectionId,
-        conversationId: input.conversationId as ConversationId,
+        conversationId: input.conversationId as ChatId,
       };
       if (input.op === "get") return { status: "ok", data: await settings.get(ref) };
       if (input.op === "reset") {

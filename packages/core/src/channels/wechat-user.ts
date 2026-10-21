@@ -207,7 +207,7 @@ export const wechatUserConversationSchema = z.object({
   lastMessageAt: z.number().int().nonnegative().nullish(),
   lastMessagePreview: z.string().nullish(),
 });
-export type WechatUserConversation = z.infer<typeof wechatUserConversationSchema>;
+export type WechatUserChat = z.infer<typeof wechatUserConversationSchema>;
 
 export const wechatUserMessageSchema = z.object({
   id: z.string().min(1),
@@ -1157,7 +1157,7 @@ function isChat(session: BridgeSession): boolean {
   return session.type !== "folded";
 }
 
-function toConversation(session: BridgeSession): WechatUserConversation {
+function toConversation(session: BridgeSession): WechatUserChat {
   // A group's preview is prefixed by its sender's id.
   const preview = session.lastMessage?.content ?? "";
   const createdAt = session.lastMessage?.createdAt;
@@ -1227,7 +1227,7 @@ export class WechatUserReader {
   async conversations(
     input: { query?: string; limit: number },
     signal?: AbortSignal,
-  ): Promise<WechatUserConversation[]> {
+  ): Promise<WechatUserChat[]> {
     const needle = input.query?.toLowerCase();
     return (await this.sessions(signal))
       .filter((session) => session.lastMessage?.createdAt)

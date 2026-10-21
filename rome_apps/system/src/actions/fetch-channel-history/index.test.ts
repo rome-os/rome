@@ -1,10 +1,5 @@
 import { describe, it, expect, rs } from "@rstest/core";
-import type {
-  Attachment,
-  ChannelMessage,
-  ChannelsService,
-  ConversationId,
-} from "@rome-os/app-runtime";
+import type { Attachment, ChannelMessage, ChannelsService, ChatId } from "@rome-os/app-runtime";
 import { createAction } from "./index.js";
 
 const actionConfig = {
@@ -22,7 +17,7 @@ function makeMessage(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
     channel: "discord",
     direction: "inbound",
     messageId: "msg1",
-    conversationId: "general" as ConversationId,
+    conversationId: "general" as ChatId,
     senderId: "user1",
     senderDisplayName: "Alice",
     thread: { kind: "group", name: "general" },

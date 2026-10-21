@@ -13,7 +13,7 @@
 // agent id, so a rename or a reused name never moves a conversation or a
 // link. Cloud refuses a send to an agent no link allows as `not_reachable`.
 
-import type { ChannelMessage, ConversationId, OutgoingMessage } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, OutgoingMessage } from "@rome-os/app-runtime";
 import { z } from "zod";
 import {
   type AgentMessageEnvelope,
@@ -84,7 +84,7 @@ export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMes
     channel: AGENTS_SERVICE,
     direction: "inbound",
     messageId: message.messageId,
-    conversationId: sender as ConversationId,
+    conversationId: sender as ChatId,
     senderId: sender,
     senderDisplayName: agentLabel(message.from),
     text: `${message.text}${data}`,
@@ -245,7 +245,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
     directMessaging: {
       async conversationFor(channelUserId) {
         const address = channelUserId.trim();
-        return isAgentId(address) ? (address as ConversationId) : null;
+        return isAgentId(address) ? (address as ChatId) : null;
       },
     },
   };

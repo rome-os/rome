@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { sendThrough } from "../../channels/connection-ports.js";
-import type { ConversationId, ChannelMessage, MessageReceipt } from "@rome-os/app-runtime";
+import type { ChatId, ChannelMessage, MessageReceipt } from "@rome-os/app-runtime";
 import {
   WhatsAppAdapter,
   type WhatsAppAuthProvider,
@@ -49,7 +49,7 @@ class FakeWhatsAppAdapter {
   started = false;
   stopped = false;
   startError: unknown = null;
-  readonly sent: Array<{ conversationId: ConversationId; msg: unknown }> = [];
+  readonly sent: Array<{ conversationId: ChatId; msg: unknown }> = [];
 
   onSync(sink: WhatsAppSyncSink): void {
     this.sync = sink;
@@ -70,7 +70,7 @@ class FakeWhatsAppAdapter {
   async stop(): Promise<void> {
     this.stopped = true;
   }
-  async send(conversationId: ConversationId, msg: unknown): Promise<MessageReceipt> {
+  async send(conversationId: ChatId, msg: unknown): Promise<MessageReceipt> {
     this.sent.push({ conversationId, msg });
     return { conversationId, messageId: "sent-1" };
   }
@@ -156,7 +156,7 @@ describe("whatsapp descriptor shape", () => {
       channel: "whatsapp",
       direction: "inbound",
       messageId: "message-1",
-      conversationId: "chat-1@s.whatsapp.net" as ConversationId,
+      conversationId: "chat-1@s.whatsapp.net" as ChatId,
       senderId: "user-1",
       text: "hi",
       attachments: [],
@@ -298,7 +298,7 @@ describe("whatsapp descriptor over a real registry", () => {
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     // WhatsAppAdapter.send addresses by the conversation (the chat JID), and
     // its receipt is the Talk's as it is.
-    const receipt = await sendThrough(conn, "120@g.us" as ConversationId, { text: "hi" });
+    const receipt = await sendThrough(conn, "120@g.us" as ChatId, { text: "hi" });
     expect(fake.sent).toEqual([{ conversationId: "120@g.us", msg: { text: "hi" } }]);
     expect(receipt).toStrictEqual({ conversationId: "120@g.us", messageId: "sent-1" });
   });
@@ -392,7 +392,7 @@ describe("whatsapp inbound delivery", () => {
       channel: "whatsapp",
       direction: "inbound",
       messageId: "wa-8",
-      conversationId: "15550001111@s.whatsapp.net" as ConversationId,
+      conversationId: "15550001111@s.whatsapp.net" as ChatId,
       senderId: "15550001111@s.whatsapp.net",
       text: "",
       attachments: [{ type: "image", mimeType: "image/jpeg" }],

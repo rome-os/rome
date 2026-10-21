@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { REST, type RequestMethod, Routes } from "discord.js";
 import type { DiscordAdapter } from "../../../channels/discord.js";
 import { comparable, loadCapture } from "./capture.js";
@@ -8,7 +8,7 @@ import { DISCORD_DM, DISCORD_TOKEN, DiscordPeer } from "./discord.js";
 import { deferred } from "./peer.js";
 
 const capture = loadCapture(textCapture);
-const dm = DISCORD_DM as ConversationId;
+const dm = DISCORD_DM as ChatId;
 
 describe("DiscordPeer", () => {
   let peer: DiscordPeer;

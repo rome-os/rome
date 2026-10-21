@@ -5,8 +5,8 @@
 
 import type {
   ChannelMessage,
-  ConversationDescriptor,
-  ConversationId,
+  ChatDescriptor,
+  ChatId,
   MessageReceipt,
   OutgoingMessage,
   ChannelActivity,
@@ -32,7 +32,7 @@ import type { CredentialRejected, Disconnected } from "./errors.js";
  */
 export interface TalkHistory {
   query(input: {
-    conversationId?: ConversationId;
+    conversationId?: ChatId;
     since?: Date;
     limit?: number;
   }): Promise<ChannelMessage[]>;
@@ -45,7 +45,7 @@ export interface TalkDirectory {
     cursor?: string;
     limit: number;
     includeTopics?: boolean;
-  }): Promise<{ conversations: ConversationDescriptor[]; nextCursor?: string }>;
+  }): Promise<{ conversations: ChatDescriptor[]; nextCursor?: string }>;
 }
 
 export interface TalkFeatureMap {
@@ -82,7 +82,7 @@ export type ProfileRecord = Record<string, unknown>;
 
 // OutgoingMessage is the existing @rome-os/app-runtime shape (phase 2 collapses
 // the message contract; do not invent a new shape now).
-export type { ConversationId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
+export type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 
 export interface OperationCall {
   operation: string;
@@ -256,7 +256,7 @@ export interface Talker extends TalkFeatures {
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
   stop(): void | Promise<void>;
-  send(conversationId: ConversationId, msg: OutgoingMessage): Promise<MessageReceipt>;
+  send(conversationId: ChatId, msg: OutgoingMessage): Promise<MessageReceipt>;
 }
 
 /** Builder-side Act implementation. */

@@ -1,4 +1,4 @@
-import type { ConversationRepository, StreamAgentEvent } from "@rome-os/app-runtime";
+import type { ChatRepository, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { Clock } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
 import type { ChannelReplies } from "../channel.js";
@@ -43,7 +43,7 @@ export interface ReplyStreamsDeps {
   /** The channel's reply port, read when a reply opens. */
   replies(channel: string): ChannelReplies | null | undefined;
   clock: Clock;
-  conversations?: Pick<ConversationRepository, "recordOutboundMessage">;
+  conversations?: Pick<ChatRepository, "recordOutboundMessage">;
   policy?: DeliveryPolicy;
 }
 

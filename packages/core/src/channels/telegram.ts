@@ -2,7 +2,7 @@ import { Bot, type Context, InputFile } from "grammy";
 import { telegramTransport } from "./delivery/transports/telegram.js";
 import type { DeliveryTransport } from "./delivery/types.js";
 import { Marked, Renderer, type Token } from "marked";
-import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage, OutgoingAttachment } from "./types.js";
 import {
   isAttachmentTooLargeError,
@@ -134,7 +134,7 @@ export class TelegramAdapter {
         channel: "telegram",
         direction: "inbound",
         messageId: String(rawMsg.message_id),
-        conversationId: String(chat.id) as ConversationId,
+        conversationId: String(chat.id) as ChatId,
         senderId: ctx.channelPost
           ? String(chat.id)
           : rawMsg.sender_chat
@@ -223,7 +223,7 @@ export class TelegramAdapter {
     return telegramTransport(this.bot.api);
   }
 
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const threadId: string = conversationId;
     const replyParams = message.replyToMessageId
       ? { reply_parameters: { message_id: Number(message.replyToMessageId) } }

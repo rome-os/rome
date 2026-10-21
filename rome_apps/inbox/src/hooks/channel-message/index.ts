@@ -5,8 +5,8 @@ import type {
   ChatStopHandler,
   ChannelMessageHook as ChannelMessageHookInterface,
   ChannelMessageHookDeps,
-  ConversationId,
-  ConversationSettingsControl,
+  ChatId,
+  ChatSettingsControl,
   InboundEvent,
   ChannelActivitySession,
 } from "@rome-os/app-runtime";
@@ -30,7 +30,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
 
   constructor(
     private readonly actionEngine: ActionEngineLike,
-    private readonly conversationSettings: ConversationSettingsControl,
+    private readonly conversationSettings: ChatSettingsControl,
     private readonly chatStop: ChatStopHandler,
     private readonly channels: readonly Channel[],
     private readonly options: {
@@ -267,11 +267,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
 
   /** Answer in a conversation on the channel it arrived on, where it can send.
    *  The channel sends through the Connection backing it, which is `ref`'s. */
-  private async reply(
-    channel: Channel,
-    conversationId: ConversationId,
-    text: string,
-  ): Promise<void> {
+  private async reply(channel: Channel, conversationId: ChatId, text: string): Promise<void> {
     if (!channel.send) {
       log.warn("cannot answer on a channel that does not send", { service: channel.name });
       return;

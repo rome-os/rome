@@ -18,7 +18,7 @@
 // directly cannot be written to from here, without a read-only flag threaded
 // through anything.
 
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
 import { ChannelNotConnected, type ChannelSend, type Channels } from "../channels/channel.js";
 
@@ -38,7 +38,7 @@ export interface SendDeps {
  *  unless the Connection was replaced in between. This is deliberate. */
 export interface SendTarget {
   send: ChannelSend;
-  conversationId: ConversationId;
+  conversationId: ChatId;
 }
 
 export type Resolution = { ok: true; target: SendTarget } | { ok: false; send: RefusedState };
@@ -70,7 +70,7 @@ async function sendStateOf(
   // person read already gives for this account. Letting it escape would make
   // the send path report a 500 where the read reported `no-conversation`, so
   // the two would disagree about one condition.
-  let conversationId: ConversationId | null;
+  let conversationId: ChatId | null;
   try {
     conversationId = await direct.conversationFor(account.channelUserId);
   } catch (err) {

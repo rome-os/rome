@@ -9,7 +9,7 @@
 
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { sendThrough } from "../../channels/connection-ports.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import {
   type CardActionEvent,
   LarkChannelError,
@@ -222,9 +222,7 @@ describe("feishu talk lifecycle", () => {
     await channel.emitMessage({ content: "hello there" });
     expect(received).toEqual(["ou_alice/oc_chat:hello there"]);
 
-    await expect(
-      sendThrough(conn, "oc_chat" as ConversationId, { text: "reply" }),
-    ).resolves.toEqual({
+    await expect(sendThrough(conn, "oc_chat" as ChatId, { text: "reply" })).resolves.toEqual({
       messageId: "om_sent",
       conversationId: "oc_chat",
     });
@@ -237,7 +235,7 @@ describe("feishu talk lifecycle", () => {
     expect(channel.sent.at(-1)).toMatchObject({ to: "ou_alice", input: { markdown: "paired" } });
     const session = await conn.withTalker((talker) =>
       talker.activity?.begin({
-        conversationId: "oc_chat" as ConversationId,
+        conversationId: "oc_chat" as ChatId,
         messageId: "om_1",
       }),
     );

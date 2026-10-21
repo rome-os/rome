@@ -51,7 +51,7 @@ const log = createLogger("people-outbox");
 /** The slice of the conversation repository this needs: a channel thread's
  *  session, and Rome's own record of what it said there. Named as `ApiDeps`
  *  names it so no adapter sits between the two. */
-export interface Conversations {
+export interface ChatStore {
   ensureChannelConversation(input: {
     channel: string;
     threadId: string;
@@ -69,7 +69,7 @@ export interface Conversations {
 
 export interface OutboxDeps extends SendDeps {
   outboxRepo: OutboxRepository;
-  webchatRepo: Conversations;
+  webchatRepo: ChatStore;
 }
 
 export type SendResult =

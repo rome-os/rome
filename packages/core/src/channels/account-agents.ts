@@ -2,7 +2,7 @@
 // Vocabulary: docs/concepts/messaging.md#romes-accounts. Invariants:
 // docs/architecture/channels.md#an-accounts-agent.
 
-import type { ChannelMessageHookDeps, ConversationSettingsSnapshot } from "@rome-os/app-runtime";
+import type { ChannelMessageHookDeps, ChatSettingsSnapshot } from "@rome-os/app-runtime";
 import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
@@ -133,7 +133,7 @@ export function answeringAgentOf(
 /** The conversation's stored agent as {@link answeringAgentOf} takes it. A pin
  *  to main can be stored as a null override, apart from no choice at all. */
 export function storedAgentChoice(
-  snapshot: Pick<ConversationSettingsSnapshot, "effective" | "overrides">,
+  snapshot: Pick<ChatSettingsSnapshot, "effective" | "overrides">,
 ): string | undefined {
   return snapshot.overrides.routing?.agentName === null
     ? "main"

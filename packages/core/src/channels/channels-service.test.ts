@@ -1,10 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type {
-  ChannelMessage,
-  ChannelsService,
-  ConversationId,
-  MessageReceipt,
-} from "@rome-os/app-runtime";
+import type { ChannelMessage, ChannelsService, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Channels } from "./channel.js";
 import {
   backingConnection,
@@ -28,7 +23,7 @@ function line(id: string, at: number): ChannelMessage {
     channel: "whatsapp",
     direction: "inbound",
     messageId: id,
-    conversationId: "c1" as ConversationId,
+    conversationId: "c1" as ChatId,
     senderId: "s1",
     text: id,
     attachments: [],
@@ -36,7 +31,7 @@ function line(id: string, at: number): ChannelMessage {
   };
 }
 
-const RECEIPT: MessageReceipt = { messageId: "m1", conversationId: "c1" as ConversationId };
+const RECEIPT: MessageReceipt = { messageId: "m1", conversationId: "c1" as ChatId };
 
 /** A registry holding `connections`, each with a talker that sends through
  *  `send`, told which Connection is sending. */
@@ -96,7 +91,7 @@ describe("createChannelsService", () => {
       "discord",
       "telegram_user",
     ]);
-    await early.send("discord", "c1" as ConversationId, { text: "hi" });
+    await early.send("discord", "c1" as ChatId, { text: "hi" });
     expect(send).toHaveBeenCalledWith("discord-1", "c1", { text: "hi" });
     await expect(early.query("discord")).rejects.toThrow('Channel "discord" reads no messages');
   });
@@ -104,7 +99,7 @@ describe("createChannelsService", () => {
   it("sends through the Connection backing the channel", async () => {
     const { channelsService, send } = service();
 
-    const receipt = await channelsService.send("telegram_user", "c1" as ConversationId, {
+    const receipt = await channelsService.send("telegram_user", "c1" as ChatId, {
       text: "hi",
     });
 
@@ -115,9 +110,9 @@ describe("createChannelsService", () => {
   it("refuses a channel no Connection backs", async () => {
     const { channelsService, send } = service();
 
-    await expect(
-      channelsService.send("whatsapp", "c1" as ConversationId, { text: "hi" }),
-    ).rejects.toThrow('No Talk connection registered for "whatsapp"');
+    await expect(channelsService.send("whatsapp", "c1" as ChatId, { text: "hi" })).rejects.toThrow(
+      'No Talk connection registered for "whatsapp"',
+    );
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -139,9 +134,9 @@ describe("createChannelsService", () => {
     expect((await channelsService.list()).map((channel) => channel.name)).toEqual([
       "telegram_user",
     ]);
-    await expect(
-      channelsService.send("discord", "c1" as ConversationId, { text: "hi" }),
-    ).rejects.toThrow('No Talk connection registered for "discord"');
+    await expect(channelsService.send("discord", "c1" as ChatId, { text: "hi" })).rejects.toThrow(
+      'No Talk connection registered for "discord"',
+    );
     expect(send).not.toHaveBeenCalled();
   });
 

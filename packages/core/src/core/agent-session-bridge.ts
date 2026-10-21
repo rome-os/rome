@@ -6,7 +6,7 @@
 import type { ChildProcess } from "node:child_process";
 import type { IpcRpc } from "../actions/ipc.js";
 import type {
-  ConversationId,
+  ChatId,
   CurrentActionContext,
   MessageReplyReference,
   ReplyDeliveryReport,
@@ -291,7 +291,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                       ? {
                           conversation: {
                             connectionId: thread.connectionId,
-                            conversationId: thread.threadId as ConversationId,
+                            conversationId: thread.threadId as ChatId,
                           },
                         }
                       : {}),

@@ -10,7 +10,7 @@
 
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { sendThrough } from "../../channels/connection-ports.js";
-import type { ConversationId, ChannelMessage } from "@rome-os/app-runtime";
+import type { ChatId, ChannelMessage } from "@rome-os/app-runtime";
 import { Bot, GrammyError, type Transformer } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";
 import { createTestDb } from "../../test/helpers.js";
@@ -207,7 +207,7 @@ describe("telegram descriptor shape", () => {
       channel: "telegram",
       direction: "inbound",
       messageId: "message-1",
-      conversationId: "999" as ConversationId,
+      conversationId: "999" as ChatId,
       senderId: "111",
       text: "hi",
       attachments: [],
@@ -284,7 +284,7 @@ describe("telegram descriptor shape", () => {
     });
     expect(received).toEqual(["999:hi"]);
 
-    await sendThrough(conn, "999" as ConversationId, { text: "yo" });
+    await sendThrough(conn, "999" as ChatId, { text: "yo" });
     expect(factory.sent).toEqual([
       { method: "sendMessage", payload: { chat_id: "999", text: "yo", parse_mode: "HTML" } },
     ]);
@@ -440,7 +440,7 @@ describe("telegram Talker fault mapping", () => {
     const h = buildTalker(factory);
     h.start();
 
-    const addr = "999" as ConversationId;
+    const addr = "999" as ChatId;
     await expect(h.talker.send(addr, { text: "hi" })).rejects.toBeInstanceOf(CredentialRejected);
     await expect(h.talker.send(addr, { text: "hi" })).rejects.toMatchObject({ grant: "bot" });
   });
@@ -457,7 +457,7 @@ describe("telegram send-401 drives renew-once-then-degrade", () => {
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     // The send() 401 surfaces to the caller as CredentialRejected AND triggers
     // the async grant flow: tokenPaste.renew() → "re-confer" → degrade "bot".
-    await expect(sendThrough(conn, "999" as ConversationId, { text: "hi" })).rejects.toBeInstanceOf(
+    await expect(sendThrough(conn, "999" as ChatId, { text: "hi" })).rejects.toBeInstanceOf(
       CredentialRejected,
     );
     await flush();

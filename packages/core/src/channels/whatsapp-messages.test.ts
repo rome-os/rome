@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { countingDb, createTestDb, type TestDb } from "../test/helpers.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 import { waChats, waContacts, waMessages } from "../db/schema.js";
 import {
@@ -27,8 +27,8 @@ const GROUP = "1200000@g.us";
 const account = { channel: "whatsapp", addresses: [PHONE, LID] };
 const accounts = [account];
 const silent = [{ channel: "whatsapp", addresses: ["15554444@s.whatsapp.net"] }];
-const groupChat = GROUP as ConversationId;
-const emptyChat = "1299999@g.us" as ConversationId;
+const groupChat = GROUP as ChatId;
+const emptyChat = "1299999@g.us" as ChatId;
 
 /** The store's per-account reads, which every whatsApp store answers. */
 function accountReads(db: DrizzleDb): AccountMessages {
@@ -139,7 +139,7 @@ describe("whatsAppMessages", () => {
 
   it("queries a direct chat by the contact's address", async () => {
     const page = await whatsAppMessages(testDb.db).query({
-      conversationId: PHONE as ConversationId,
+      conversationId: PHONE as ChatId,
     });
     expect(page.map((entry) => entry.messageId)).toEqual(["r", "e", "c", "a"]);
   });
@@ -195,7 +195,7 @@ describe("whatsAppMessages", () => {
 
   it("reads `since` as an instant, not as the second it falls in", async () => {
     const page = await whatsAppMessages(testDb.db).query({
-      conversationId: PHONE as ConversationId,
+      conversationId: PHONE as ChatId,
       since: new Date(300_500),
     });
     expect(page.map((entry) => entry.messageId)).toEqual(["r", "e"]);
@@ -210,7 +210,7 @@ describe("whatsAppMessages", () => {
     testDb.db.insert(waChats).values({ jid: GROUP, name: "Book club", updatedAt: now }).run();
     const store = whatsAppMessages(testDb.db);
 
-    const [latest] = await store.query({ conversationId: PHONE as ConversationId, limit: 2 });
+    const [latest] = await store.query({ conversationId: PHONE as ChatId, limit: 2 });
     expect(latest).toMatchObject({
       channel: "whatsapp",
       direction: "inbound",
@@ -220,7 +220,7 @@ describe("whatsAppMessages", () => {
     });
     const [answered] = await store
       .query({
-        conversationId: PHONE as ConversationId,
+        conversationId: PHONE as ChatId,
         since: new Date(300_000),
       })
       .then((page) => page.filter((entry) => entry.messageId === "c"));

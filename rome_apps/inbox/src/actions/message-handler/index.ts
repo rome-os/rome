@@ -7,7 +7,7 @@ import type {
   AppActionRuntimeDeps,
   ApprovalsRepository,
   Attachment,
-  ConversationRepository,
+  ChatRepository,
   MessageReplyReference,
   PersonMappingRepository,
   PersonRecord,
@@ -303,7 +303,7 @@ async function collectAgentResult(
   return { success: true, content: response, turnId, ...(replyDelivery ? { replyDelivery } : {}) };
 }
 
-function requireConversationRepository(deps: MessageHandlerRuntimeDeps): ConversationRepository {
+function requireConversationRepository(deps: MessageHandlerRuntimeDeps): ChatRepository {
   const repository = deps.appContext.repositories.conversations;
   if (!repository) throw new Error("Conversation repository is unavailable");
   return repository;
