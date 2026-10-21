@@ -7,7 +7,9 @@ import type {
   ActionConfig,
   ActionResult,
   ChatId,
+  ChatRecord,
   ChatRepository,
+  EnsureChannelChatInput,
   MessageReceipt,
   ChannelsService,
   PreviewPayload,
@@ -96,7 +98,7 @@ async function recordDeliveredConversationMessage(
   const boundRomeSessionId = explicitRomeSessionId ?? ambientRomeSessionId;
   const conversation = boundRomeSessionId
     ? { id: boundRomeSessionId, agentName: null }
-    : await deps.chats.ensureChannelChat({
+    : await ensureChannelChat(deps.chats, {
         channel: input.channel,
         threadId,
         parentThreadId: deliveryCreatedThread ? requestedThreadId : undefined,
@@ -119,6 +121,17 @@ async function recordDeliveredConversationMessage(
     turnId: input.turnId ?? current?.turnId,
     knownToProvider,
   });
+}
+
+/** Opens the chat for a channel thread, or finds the one already open. A host
+ *  that predates the chat names offers only `ensureChannelConversation`. */
+function ensureChannelChat(
+  repository: ChatRepository,
+  input: EnsureChannelChatInput,
+): Promise<ChatRecord> {
+  return typeof repository.ensureChannelChat === "function"
+    ? repository.ensureChannelChat(input)
+    : repository.ensureChannelConversation(input);
 }
 
 async function recordDeliveredConversationMessageBestEffort(

@@ -7,7 +7,9 @@ import type {
   AppActionRuntimeDeps,
   ApprovalsRepository,
   Attachment,
+  ChatRecord,
   ChatRepository,
+  EnsureChannelChatInput,
   MessageReplyReference,
   PersonMappingRepository,
   PersonRecord,
@@ -308,6 +310,17 @@ function requireChatRepository(deps: MessageHandlerRuntimeDeps): ChatRepository 
     deps.appContext.repositories.chats ?? deps.appContext.repositories.conversations;
   if (!repository) throw new Error("Chat repository is unavailable");
   return repository;
+}
+
+/** Opens the chat for a channel thread, or finds the one already open. A host
+ *  that predates the chat names offers only `ensureChannelConversation`. */
+function ensureChannelChat(
+  repository: ChatRepository,
+  input: EnsureChannelChatInput,
+): Promise<ChatRecord> {
+  return typeof repository.ensureChannelChat === "function"
+    ? repository.ensureChannelChat(input)
+    : repository.ensureChannelConversation(input);
 }
 
 /**
@@ -681,7 +694,7 @@ export function createMessageHandlerAction(
           typeof args.parentThreadId === "string" && args.parentThreadId
             ? args.parentThreadId
             : undefined;
-        const conversation = await conversations.ensureChannelChat({
+        const conversation = await ensureChannelChat(conversations, {
           channel,
           threadId,
           parentThreadId,

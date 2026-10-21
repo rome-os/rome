@@ -853,6 +853,42 @@ describe("per-channel agent routing (trusted path)", () => {
     );
   });
 
+  it("opens the chat through a host that predates the chat names", async () => {
+    const { deps, conversations } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
+      agentResponses: [[{ type: "result", content: "Hi." }]],
+    });
+    // An older host offers the repository only as `conversations`, with only
+    // the old method, which reads its own receiver.
+    const { ensureChannelChat, ...rest } = conversations;
+    const legacy = {
+      ...rest,
+      open: ensureChannelChat,
+      ensureChannelConversation(input: Record<string, unknown>) {
+        return this.open(input);
+      },
+    };
+    const repositories = deps.appContext.repositories as unknown as Record<string, unknown>;
+    delete repositories.chats;
+    repositories.conversations = legacy;
+    const action = createAction(actionConfig, deps);
+
+    await action.execute({
+      channel: "discord",
+      channelUserId: "g-discord",
+      threadId: "channel-legacy",
+      threadType: "group",
+      displayName: "Guardian",
+      text: "hello",
+      messageId: "msg-legacy",
+    });
+
+    expect(ensureChannelChat).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "discord", threadId: "channel-legacy" }),
+    );
+    expect(conversations.addMessage).toHaveBeenCalled();
+  });
+
   it("falls back to main when the routed agent is not in the catalog (e.g. app uninstalled)", async () => {
     const { deps, agentRunner, approvals } = createMessageHandlerDeps({
       personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },

@@ -7,6 +7,7 @@ import {
   setCurrentActionContextResolver,
   type ActionConfig,
   type ChannelsService,
+  type ChatRepository,
 } from "@rome-os/app-runtime";
 import { createSendMessageAction, executeSendMessage } from "./index.js";
 import type { AgentNamesService, SendMessageInput } from "./index.js";
@@ -348,6 +349,35 @@ describe("send_message conversation recording", () => {
       turnId: undefined,
       knownToProvider: false,
     });
+  });
+
+  it("records a delivery through a host that predates the chat names", async () => {
+    const adapter = makeAdapter();
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
+      messageId: "platform-out-1",
+      conversationId: "thread-1",
+    });
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    // Only the old method, reading its own receiver as a host repository can.
+    const legacy = {
+      sessionId: "channel:discord:thread-1",
+      async ensureChannelConversation() {
+        return { id: this.sessionId, agentName: null };
+      },
+      recordOutboundMessage,
+      addMessage: rs.fn(),
+      promoteMessageToUser: rs.fn(),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: "discord", threadId: "thread-1", text: "Background update" },
+      { chats: legacy as unknown as ChatRepository },
+    );
+
+    expect(recordOutboundMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "channel:discord:thread-1" }),
+    );
   });
 
   it("leaves a webchat send to the channel, which writes it into the chat", async () => {
