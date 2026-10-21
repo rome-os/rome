@@ -145,7 +145,7 @@
     },
     "refusal": {
       "notConnected": "{{channel}} isn't connected, so Rome can't send there. Connect it in Settings.",
-      "noConversation": "Rome could not identify a direct {{channel}} conversation for this account. Open {{channel}} to reply.",
+      "noConversation": "Rome could not identify a direct {{channel}} chat for this account. Open {{channel}} to reply.",
       "unsupported": {
         "default": "Rome cannot send on {{channel}} yet."
       }

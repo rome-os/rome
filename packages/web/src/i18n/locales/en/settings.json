@@ -137,7 +137,7 @@
           "title": "Your LinkedIn",
           "bullets": {
             "read": "Keep a synced copy of your LinkedIn inbox",
-            "recap": "Read and recap your LinkedIn conversations"
+            "recap": "Read and recap your LinkedIn chats"
           }
         }
       },
@@ -311,8 +311,8 @@
   },
   "channels": {
     "conversationSettings": {
-      "configure": "Configure conversations",
-      "searchPlaceholder": "Search provider, workspace, or conversation",
+      "configure": "Configure chats",
+      "searchPlaceholder": "Search provider, workspace, or chat",
       "allConnections": "All connections",
       "anyStatus": "Any status",
       "connectionFilterAria": "Filter by connection",
@@ -328,9 +328,9 @@
         "dm": "Direct message",
         "topic": "Topic"
       },
-      "loading": "Loading conversations…",
-      "emptyTitle": "No configurable conversations found",
-      "emptyDescription": "Connect a supported chat service, or send a message so Rome can discover the conversation.",
+      "loading": "Loading chats…",
+      "emptyTitle": "No configurable chats found",
+      "emptyDescription": "Connect a supported chat service, or send a message so Rome can discover the chat.",
       "loadMore": "Load more",
       "overrideCount_one": "{{count}} override",
       "overrideCount_other": "{{count}} overrides",
@@ -342,7 +342,7 @@
         "routing": "Routing"
       },
       "fields": {
-        "enabled": "Rome in this conversation",
+        "enabled": "Rome in this chat",
         "respond": "Respond",
         "botMessages": "Messages from automated accounts",
         "whenOthersMentioned": "When others are mentioned",
@@ -351,7 +351,7 @@
         "sessionReset": "Provider session reset"
       },
       "descriptions": {
-        "sessionReset": "Clears the provider-side conversation memory"
+        "sessionReset": "Clears the agent's memory kept by the model provider"
       },
       "source": {
         "overridden": "Overridden"
@@ -369,7 +369,7 @@
       "accountAgent": "{{agent}} (this account's agent)",
       "silentAccount": "Messages here do not reach Rome until this account has an agent.",
       "silentAccountLink": "<account>Link one on the account</account>.",
-      "silentAccountOverride": "This conversation's choice, {{agent}}, applies once one is linked.",
+      "silentAccountOverride": "This chat's choice, {{agent}}, applies once one is linked.",
       "sessionReset": {
         "never": "Never",
         "afterInactivity": "After inactivity",

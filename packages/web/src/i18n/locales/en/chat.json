@@ -79,7 +79,7 @@
     "branch": {
       "open": "Start a side chat from this turn",
       "title": "Branch into a side chat",
-      "description": "Ask a follow-up without changing this conversation.",
+      "description": "Ask a follow-up without changing this chat.",
       "suggestionsLabel": "Suggested prompts",
       "suggestions": {
         "mermaid": "Visualize this in a Mermaid chart",

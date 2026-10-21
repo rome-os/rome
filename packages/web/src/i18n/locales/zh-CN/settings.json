@@ -137,7 +137,7 @@
           "title": "你的领英",
           "bullets": {
             "read": "保持同步你的领英收件箱副本",
-            "recap": "阅读并总结你的领英对话"
+            "recap": "阅读并总结你的领英聊天"
           }
         }
       },
@@ -311,8 +311,8 @@
   },
   "channels": {
     "conversationSettings": {
-      "configure": "配置会话",
-      "searchPlaceholder": "搜索提供商、工作区或会话",
+      "configure": "配置聊天",
+      "searchPlaceholder": "搜索提供商、工作区或聊天",
       "allConnections": "所有连接",
       "anyStatus": "所有状态",
       "connectionFilterAria": "按连接筛选",
@@ -328,9 +328,9 @@
         "dm": "私聊",
         "topic": "话题"
       },
-      "loading": "正在加载会话…",
-      "emptyTitle": "未找到可配置的会话",
-      "emptyDescription": "连接受支持的对话服务，或发送一条消息让 Rome 发现该会话。",
+      "loading": "正在加载聊天…",
+      "emptyTitle": "未找到可配置的聊天",
+      "emptyDescription": "连接受支持的聊天服务，或发送一条消息让 Rome 发现该聊天。",
       "loadMore": "加载更多",
       "overrideCount_one": "{{count}} 项覆盖",
       "overrideCount_other": "{{count}} 项覆盖",
@@ -342,7 +342,7 @@
         "routing": "路由"
       },
       "fields": {
-        "enabled": "Rome 在此会话中",
+        "enabled": "Rome 在此聊天中",
         "respond": "响应条件",
         "botMessages": "自动账号的消息",
         "whenOthersMentioned": "提及其他人时",
@@ -351,7 +351,7 @@
         "sessionReset": "提供商会话重置"
       },
       "descriptions": {
-        "sessionReset": "清除提供商侧的会话记忆"
+        "sessionReset": "清除模型提供商侧保存的智能体记忆"
       },
       "source": {
         "overridden": "已覆盖"
@@ -369,7 +369,7 @@
       "accountAgent": "{{agent}}（此账号的智能体）",
       "silentAccount": "此账号有智能体之前，这里的消息不会到达 Rome。",
       "silentAccountLink": "<account>在账号页面关联</account>。",
-      "silentAccountOverride": "关联后，此对话选择的 {{agent}} 将生效。",
+      "silentAccountOverride": "关联后，此聊天选择的 {{agent}} 将生效。",
       "sessionReset": {
         "never": "永不",
         "afterInactivity": "无活动后",

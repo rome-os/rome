@@ -335,7 +335,7 @@ describe("ChannelConnectCard — custom components", () => {
         onRefresh={() => {}}
       />,
     );
-    expect(screen.getByRole("link", { name: "Configure conversations" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Configure chats" }).getAttribute("href")).toBe(
       "/settings/channels?connectionId=conn-1",
     );
     expect(fetchMock).not.toHaveBeenCalledWith("/api/channels/discord/channels");
@@ -351,7 +351,7 @@ describe("ChannelConnectCard — custom components", () => {
         onRefresh={() => {}}
       />,
     );
-    expect(screen.getByRole("link", { name: "Configure conversations" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Configure chats" }).getAttribute("href")).toBe(
       "/settings/channels?connectionId=conn-1",
     );
   });
