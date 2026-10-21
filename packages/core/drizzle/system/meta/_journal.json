@@ -589,6 +589,13 @@
       "when": 1792568813319,
       "tag": "0084_chat_id_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "6",
+      "when": 1792578730451,
+      "tag": "0085_connection_kind_columns",
+      "breakpoints": true
     }
   ]
 }

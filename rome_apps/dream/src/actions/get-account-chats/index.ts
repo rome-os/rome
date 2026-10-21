@@ -41,7 +41,7 @@ interface MessageRow {
   session_name: string;
   thread_name: string | null;
   channel: string;
-  service: string;
+  connection_kind: string;
   platform: string;
   role: string;
   /** The agent that answers the chat, by core's rule; null for main. */
@@ -66,8 +66,8 @@ interface Chat {
 function accountHeading(row: MessageRow): string {
   const { platform } = row;
   const name = platform.charAt(0).toUpperCase() + platform.slice(1);
-  const service = row.service !== platform ? ` (${row.service})` : "";
-  return `### ${name} account \`${row.channel}\`${service}`;
+  const kind = row.connection_kind !== platform ? ` (${row.connection_kind})` : "";
+  return `### ${name} account \`${row.channel}\`${kind}`;
 }
 
 /** A name someone else chose, on one line and in quotes, so it can be read
@@ -195,7 +195,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       log.info("fetching account chats", { windowHours, cutoffSeconds });
 
       // Every conversation on one of Rome's accounts. A channel's id is the
-      // service name only for its service's first account, so the service and
+      // connection kind only for that kind's first account, so the kind and
       // platform come from `channels`, and from the id only when its record is
       // gone. 'notification' is a line that passed outside a turn: someone the
       // agent did not answer, or Rome sending untied to one. Rome's own lines
@@ -209,7 +209,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             SELECT * FROM (
               SELECT m.session_id, s.name AS session_name, s.source_thread_name AS thread_name,
                 s.source_channel AS channel,
-                coalesce(c.service, s.source_channel) AS service,
+                coalesce(c.connection_kind, s.source_channel) AS connection_kind,
                 coalesce(c.platform, s.source_channel) AS platform, m.role,
                 ${ANSWERING_AGENT} AS agent_name,
                 CASE

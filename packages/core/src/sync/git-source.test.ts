@@ -450,7 +450,7 @@ describe("githubCommitterIdentity", () => {
     sqlite.exec(`
       CREATE TABLE connections (
         id text PRIMARY KEY NOT NULL,
-        service text NOT NULL,
+        connection_kind text NOT NULL,
         label text NOT NULL,
         created_at integer NOT NULL
       );

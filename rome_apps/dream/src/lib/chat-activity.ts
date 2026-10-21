@@ -26,7 +26,7 @@ export function inDashboardChat(session: string): SQL {
  * channel record is gone is judged by its channel id, which names the
  * connection kind for a connection kind's first account.
  */
-export const onRomeAccount: SQL = sql`s.type = 'channel' AND coalesce(c.service, s.source_channel) IN (${sql.join(
+export const onRomeAccount: SQL = sql`s.type = 'channel' AND coalesce(c.connection_kind, s.source_channel) IN (${sql.join(
   ACCOUNT_KINDS.map((kind) => sql`${kind}`),
   sql`, `,
 )})`;

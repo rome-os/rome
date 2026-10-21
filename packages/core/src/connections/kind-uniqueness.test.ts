@@ -192,7 +192,7 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
   });
 });
 
-describe("connections.service column in a migrated store", () => {
+describe("connections.connection_kind column in a migrated store", () => {
   it("accepts several connections of one connection kind", async () => {
     const { db, close } = createTestDb();
     try {
