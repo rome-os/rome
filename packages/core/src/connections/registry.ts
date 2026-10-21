@@ -48,8 +48,9 @@ const KIND_OF: Record<Capability, CapabilityKind> = {
 
 /** How {@link ConnectionRegistry.confer} writes. */
 export interface ConferOptions {
-  /** A participant run in the conferral's transaction (the guardian mapping). */
-  inTx?: (tx: DrizzleTx) => void;
+  /** A participant run in the conferral's transaction (the guardian mapping,
+   *  the account's agent), given the Connection it confers. */
+  inTx?: (tx: DrizzleTx, connectionId: ConnectionId) => void;
   /** Mint another account of the service rather than fill its first one. Only
    *  read when no connection id is addressed. */
   another?: boolean;
@@ -479,7 +480,7 @@ export class ConnectionRegistry {
         this.onMint?.(tx, record);
       }
       ledger.writeGrant(tx, id, grant, patch);
-      opts.inTx?.(tx);
+      opts.inTx?.(tx, id);
     });
 
     // Committed — ledger + mapping are consistent. Bring the adapter live;

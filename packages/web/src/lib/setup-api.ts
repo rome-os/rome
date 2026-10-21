@@ -81,11 +81,12 @@ export type SetupStartResult = { ok: true; start: SetupStart } | { ok: false; er
 /** Start or re-attach a setup for one grant. `idOrService` is the connection
  *  id, or the bare service name for a never-connected service (the terminal
  *  conferral mints the row). With `another`, `idOrService` is the service and
- *  the setup connects a new account of it. */
+ *  the setup connects a new account of it. `agent` is linked to the account
+ *  as it connects, in place of the agent it would start with. */
 export async function startSetup(
   idOrService: string,
   grant: string,
-  opts: { force?: boolean; another?: boolean } = {},
+  opts: { force?: boolean; another?: boolean; agent?: string } = {},
 ): Promise<SetupStartResult> {
   const res = await fetch(
     `/api/connections/${encodeURIComponent(idOrService)}/grants/${encodeURIComponent(grant)}/setup`,
@@ -95,6 +96,7 @@ export async function startSetup(
       body: JSON.stringify({
         force: opts.force ?? false,
         ...(opts.another ? { another: true } : {}),
+        ...(opts.agent ? { agent: opts.agent } : {}),
       }),
     },
   );

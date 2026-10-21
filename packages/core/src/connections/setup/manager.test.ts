@@ -74,7 +74,7 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
       // The atomic write: record the credential, then run the guardian-mapping
       // participant exactly as the real `confer` does inside its transaction.
       imports.push({ id: conn.id, grant, credential, profile });
-      opts?.inTx?.(FAKE_TX);
+      opts?.inTx?.(FAKE_TX, conn.id);
       return conn;
     },
   };
@@ -144,6 +144,36 @@ describe("SetupManager", () => {
       },
     ]);
     expect(writeChannelMapping).toHaveBeenCalledWith(FAKE_TX, "guardian", "discord", "guardian-1");
+  });
+
+  it("links the requested agent inside the conferral, then tells the channel", async () => {
+    const { registry } = fakeRegistry(discordSetup);
+    const order: string[] = [];
+    const agentLink = {
+      inTx: rs.fn((_tx: DrizzleTx, connectionId: string, agent: string) => {
+        order.push(`link ${connectionId} ${agent}`);
+        return "channel-1";
+      }),
+      changed: rs.fn((channel: string) => {
+        order.push(`changed ${channel}`);
+      }),
+    };
+    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo(), agentLink });
+    const started = await mgr.start({ ...PLACEHOLDER, agent: "sales:agent" }, "bot");
+    const outcome = await mgr.provideInput(started.cid, { token: "abc" })!;
+    expect(outcome.state.status).toBe("done");
+    expect(agentLink.inTx).toHaveBeenCalledWith(FAKE_TX, "conn-discord", "sales:agent");
+    expect(order).toEqual(["link conn-discord sales:agent", "changed channel-1"]);
+  });
+
+  it("links no agent when the start names none", async () => {
+    const { registry } = fakeRegistry(discordSetup);
+    const agentLink = { inTx: rs.fn(() => "channel-1"), changed: rs.fn() };
+    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo(), agentLink });
+    const started = await mgr.start(PLACEHOLDER, "bot");
+    await mgr.provideInput(started.cid, { token: "abc" });
+    expect(agentLink.inTx).not.toHaveBeenCalled();
+    expect(agentLink.changed).not.toHaveBeenCalled();
   });
 
   it("imports into the ADDRESSED connection, never find()[0]", async () => {

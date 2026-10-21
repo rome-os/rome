@@ -21,6 +21,8 @@ export interface UseSetupOptions {
   grant: string;
   /** Connect a new account of the service `idOrService` names. */
   another?: boolean;
+  /** The agent linked to the account as it connects. */
+  agent?: string;
   /** A live setup id discovered on the connection response — the hook
    *  re-attaches to it (polls its state) instead of starting fresh. */
   activeCid?: string | null;
@@ -48,7 +50,7 @@ export interface SetupRunner {
 }
 
 export function useSetup(options: UseSetupOptions): SetupRunner {
-  const { idOrService, grant, another, activeCid, onDone } = options;
+  const { idOrService, grant, another, agent, activeCid, onDone } = options;
   const [cid, setCid] = useState<string | null>(activeCid ?? null);
   const [state, setState] = useState<SetupState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -101,7 +103,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       setBusy(true);
       setError(null);
       void (async () => {
-        const result = await startSetup(idOrService, grant, { force, another });
+        const result = await startSetup(idOrService, grant, { force, another, agent });
         if (unmountedRef.current) {
           // The card that asked went away first, so nothing could finish this
           // new account's setup.
@@ -119,7 +121,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         settle(result.start.state);
       })();
     },
-    [idOrService, grant, another, settle],
+    [idOrService, grant, another, agent, settle],
   );
 
   const submit = useCallback(

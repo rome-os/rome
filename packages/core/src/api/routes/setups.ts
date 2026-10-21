@@ -17,6 +17,8 @@
 // and re-attaches a duplicate start.
 
 import { Hono, type Context } from "hono";
+import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { NoSetupError, type SetupTarget } from "../../connections/setup/manager.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
@@ -73,6 +75,29 @@ async function removeLeftoverAccount(
   });
 }
 
+/** The canonical id of the agent a start asks for, or an error to answer
+ *  with. A start may name the agent its account is linked to as it connects,
+ *  so the account never answers as another one first. Only an account that
+ *  takes an agent can be given one, and only a loaded agent, as a link
+ *  requires (docs/architecture/channels.md#an-accounts-agent). */
+function requestedAgent(
+  deps: Pick<ApiDeps, "agentLoader">,
+  service: string,
+  requested: unknown,
+): { agent?: string } | { error: string } {
+  if (requested === undefined) return {};
+  if (typeof requested !== "string" || requested.trim() === "") {
+    return { error: "Name the agent as a string." };
+  }
+  if (!LINKABLE_SERVICES.has(service)) {
+    return { error: `A ${service} account cannot be linked to an agent.` };
+  }
+  const agent = requested.trim();
+  if (isCoreMainAgentId(agent)) return { agent: MAIN_AGENT_ID };
+  if (!deps.agentLoader.has(agent)) return { error: `Agent "${agent}" is not loaded.` };
+  return { agent: deps.agentLoader.getCanonicalName(agent) };
+}
+
 function crossOriginBlocked(c: Context): Response | null {
   if (!isSameOriginMutationRequest(c.req.raw)) {
     return c.json({ error: "Cross-site requests are not allowed." }, 403);
@@ -90,8 +115,8 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     const registry = requireConnectionRegistry(deps);
     const manager = requireSetupManager(deps);
     const body = await c.req
-      .json<{ force?: unknown; another?: unknown }>()
-      .catch(() => ({}) as { force?: unknown; another?: unknown });
+      .json<{ force?: unknown; another?: unknown; agent?: unknown }>()
+      .catch(() => ({}) as { force?: unknown; another?: unknown; agent?: unknown });
     const force = body.force === true;
     const another = body.another === true;
     const id = c.req.param("id");
@@ -107,6 +132,9 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     if (!registry.getDescriptor(target.service)?.auth[grant]?.setup) {
       return c.json({ error: "No conferral setup for this grant." }, 404);
     }
+    const requested = requestedAgent(deps, target.service, body.agent);
+    if ("error" in requested) return c.json({ error: requested.error }, 400);
+    if (requested.agent) target.agent = requested.agent;
     // An account that connects again starts fresh, so the card of a
     // disconnected account offers no setup into it. Its card goes on the next
     // refresh, and the service's own Connect starts the new account.

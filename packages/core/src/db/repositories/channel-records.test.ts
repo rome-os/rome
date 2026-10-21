@@ -239,6 +239,27 @@ describe("ChannelRecordsRepository", () => {
     expect(records.all().map((record) => record.agent)).toEqual(["sales:agent", "sales:agent"]);
   });
 
+  it("links a requested agent to the channel a Connection backs, in place of main", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "telegram" }, NOW);
+
+    expect(records.linkBacked(db, "c1", "sales:agent")).toBe("telegram");
+    expect(records.byId("telegram")?.agent).toBe("sales:agent");
+    expect(records.linkBacked(db, "c1", "main")).toBe("telegram");
+    expect(records.byId("telegram")?.agent).toBe("core:main");
+  });
+
+  it("links nothing for a Connection with no channel, or one that takes no agent", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "whatsapp" }, NOW);
+
+    expect(records.linkBacked(db, "missing", "sales:agent")).toBeNull();
+    expect(records.linkBacked(db, "c1", "sales:agent")).toBeNull();
+    expect(records.byId("whatsapp")?.agent).toBeNull();
+  });
+
   it("lists the Connections no channel records yet", () => {
     const records = repository();
     records.claim(testDb!.db, { id: "c1", service: "feishu" }, NOW);

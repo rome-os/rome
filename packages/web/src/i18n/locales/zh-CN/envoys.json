@@ -72,9 +72,6 @@
     "onDescription": "<agent>{{agent}}</agent> 会在该账号所在的每个聊天中回复。",
     "delegateOnTitle": "连接你的 {{app}} 账号",
     "delegateOnDescription": "<agent>{{agent}}</agent> 会用你自己的账号代你回复。聊天中的人看到的是你的名字，而不是智能体的。",
-    "unavailable": "无法在此平台上连接新账号。",
-    "linkFailed": "账号已连接，但关联 {{agent}} 失败。请在“已连接，无智能体”中关联智能体。",
-    "notFound": "账号已连接，但外派智能体找不到它来关联 {{agent}}。请在外派智能体中查看它的智能体。",
-    "linkFailedKept": "账号已连接，但关联 {{agent}} 失败，{{kept}} 仍在该账号上回复。请在 {{kept}} 的设置中更改它的智能体。"
+    "unavailable": "无法在此平台上连接新账号。"
   }
 }
