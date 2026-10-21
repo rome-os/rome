@@ -9,13 +9,16 @@ const httpFailure = (status: number, data: unknown, headers: Record<string, stri
   });
 
 /** The three message calls the transport makes, answering as `message` says. */
-function transportOver(message: {
-  create?: (payload: unknown) => Promise<unknown>;
-  reply?: (payload: unknown) => Promise<unknown>;
-  update?: (payload: unknown) => Promise<unknown>;
-}) {
+function transportOver(
+  message: {
+    create?: (payload: unknown) => Promise<unknown>;
+    reply?: (payload: unknown) => Promise<unknown>;
+    update?: (payload: unknown) => Promise<unknown>;
+  },
+  replyInThread: FeishuTransportOptions["replyInThread"] = async () => true,
+) {
   const client = { im: { v1: { message } } } as unknown as FeishuTransportOptions["client"];
-  const transport = feishuTransport({ client, replyInThread: async () => true });
+  const transport = feishuTransport({ client, replyInThread });
   if (!transport.edit) throw new Error("The Feishu transport declares edit");
   return { create: transport.create, edit: transport.edit };
 }
@@ -81,10 +84,85 @@ describe("feishuTransport", () => {
     });
   });
 
+  it("names a failed settings lookup as unavailable before sending a reply", async () => {
+    const writes: string[] = [];
+    const { create } = transportOver(
+      {
+        create: async () => {
+          writes.push("create");
+          return sent;
+        },
+        reply: async () => {
+          writes.push("reply");
+          return sent;
+        },
+      },
+      async () => {
+        throw new Error("Settings store unavailable");
+      },
+    );
+
+    await expect(create("oc_1", "hi", "om_user")).rejects.toMatchObject({
+      kind: "unavailable",
+      message: "Settings store unavailable",
+    });
+    expect(writes).toEqual([]);
+  });
+
   it("names a token Feishu would not mint as unauthorized", async () => {
     const { create } = transportOver({
       create: async () => {
         throw new Error("failed to get tenant_access_token, code: 10014, msg: app secret invalid");
+      },
+    });
+
+    await expect(create("oc_1", "hi")).rejects.toMatchObject({ kind: "unauthorized" });
+  });
+
+  it.each([
+    { failure: httpFailure(503, "Service Unavailable"), name: "HTTP 503" },
+    {
+      failure: Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }),
+      name: "a reset",
+    },
+    { failure: Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }), name: "a timeout" },
+  ])("names $name during the token request as unavailable", async ({ failure }) => {
+    const fail = async () => {
+      throw Object.assign(failure, {
+        config: { url: "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal" },
+      });
+    };
+    const { create, edit } = transportOver({ create: fail, update: fail });
+
+    await expect(create("oc_1", "hi")).rejects.toMatchObject({ kind: "unavailable" });
+    await expect(edit({ messageId: "om_9", chatId: "oc_1" }, "hi")).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+  });
+
+  it.each([
+    "https://open.feishu.cn/open-apis/im/v1/messages",
+    "https://open.feishu.cn/open-apis/im/v1/messages/om_auth/reply",
+    "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal/extra",
+    "https://open.feishu.cn/open-apis/im/v1/messages?next=/open-apis/auth/v3/tenant_access_token/internal",
+    "not a URL",
+    undefined,
+  ])("keeps a server error outside the token endpoint unknown (%s)", async (url) => {
+    const { create } = transportOver({
+      create: async () => {
+        throw Object.assign(httpFailure(503, "Service Unavailable"), { config: { url } });
+      },
+    });
+
+    await expect(create("oc_1", "hi")).rejects.toMatchObject({ kind: "unknown" });
+  });
+
+  it("keeps a token credential refusal unauthorized", async () => {
+    const { create } = transportOver({
+      create: async () => {
+        throw Object.assign(httpFailure(400, { code: 99991663, msg: "invalid token" }), {
+          config: { url: "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal" },
+        });
       },
     });
 
@@ -100,7 +178,7 @@ describe("feishuTransport", () => {
         return { code: 0 };
       },
     });
-    const receipt = { messageId: "om_9", conversationId: "oc_1" };
+    const receipt = { messageId: "om_9", chatId: "oc_1" };
 
     await expect(edit(receipt, "0")).rejects.toMatchObject({ kind: "unknown" });
     for (let i = 1; i < FEISHU_MAX_EDITS; i += 1) await edit(receipt, String(i));

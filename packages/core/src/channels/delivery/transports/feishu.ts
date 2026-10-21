@@ -46,9 +46,9 @@ export interface FeishuTransportOptions {
  * directly: the SDK's `send` repeats a failed create on its own and falls back
  * to plain text, which would hide what happened from the reply.
  *
- * Feishu lets a message be edited 20 times. The transport counts them and
- * refuses the next as `unsupported`, so the reply keeps what the message shows
- * and sends the rest as new messages.
+ * Feishu lets a message be edited 20 times. The capabilities say so, and the
+ * transport also counts the edits and refuses the next as `unsupported`
+ * without asking Feishu.
  */
 export function feishuTransport({
   client,
@@ -74,6 +74,7 @@ export function feishuTransport({
       // The SDK sends a whole reply in posts of up to 3500 characters.
       maxPartLength: 3500,
       edit: true,
+      maxEditsPerMessage: FEISHU_MAX_EDITS,
       // Feishu allows an app 50 writes a second and 1000 a minute, and 5 a
       // second to one user or one group, which the group's bots share.
       budget: { burst: 50, refillMs: 60, conversationSpacingMs: 200 },
@@ -87,7 +88,14 @@ export function feishuTransport({
         // replies. Later messages of the reply follow the first into its thread.
         const target = replyTo ?? root;
         if (target) {
-          const inThread = root !== undefined || (await replyInThread(chat));
+          let inThread = root !== undefined;
+          if (!inThread) {
+            try {
+              inThread = await replyInThread(chat);
+            } catch (error) {
+              throw new DeliveryFailure("unavailable", messageOf(error));
+            }
+          }
           try {
             return receiptOf(chat, await reply(target, content, inThread));
           } catch (error) {
@@ -137,25 +145,87 @@ export function feishuTransport({
  * a large one, since Feishu shows H1 to H3 very large, and runs of blank lines
  * shrink to one. Fenced code is left alone. A preview is rendered the same way.
  * The measure counts UTF-16 code units, as the SDK's split does.
+ *
+ * Code that runs past the end of a message is closed there and opened again
+ * at the start of the next, as the SDK's split does, so each message shows it
+ * as code.
  */
 export const feishuMarkdown: TextCodec = {
-  render: (source) => {
-    const fences: string[] = [];
-    let text = source.replace(
-      /(^|\n)(`{3,})([^\n]*)\n[\s\S]*?\n\2(?=\n|$)/g,
-      (match, lead = "") => {
-        fences.push(match.slice(String(lead).length));
-        return `${lead}\u0000${fences.length - 1}\u0000`;
-      },
-    );
+  render: (source, _settled, context) => {
+    const open = fenceAfter(context?.before ?? "");
+    const lines = `${open ? `${open.line}\n` : ""}${source}`.split("\n");
+    const code: string[] = [];
+    const prose: string[] = [];
+    let fence: Fence | undefined;
+    let block: string[] = [];
+    for (const line of lines) {
+      if (fence) {
+        block.push(line);
+        if (closes(line, fence)) {
+          prose.push(placeholder(code, block.join("\n")));
+          fence = undefined;
+        }
+        continue;
+      }
+      fence = opener(line);
+      if (fence) block = [line];
+      else prose.push(line);
+    }
+    if (fence) {
+      // A trailing newline in the code would show as a blank last line, and a
+      // closing fence that has begun to arrive is finished rather than shown
+      // as code, so the rendering never shrinks as the source grows.
+      const last = block.at(-1)!;
+      if (block.length > 1 && (last === "" || new RegExp(`^ {0,3}\\${fence.char}+$`).test(last)))
+        block.pop();
+      block.push(fence.char.repeat(fence.length));
+      prose.push(placeholder(code, block.join("\n")));
+    }
+
+    let text = prose.join("\n");
     // The SDK looks for a large heading in the text as given, fences included.
     if (/^#{1,3} /m.test(source))
       text = text.replace(/^#{2,6} (.+)$/gm, "##### $1").replace(/^# (.+)$/gm, "#### $1");
-    text = text.replace(/\u0000(\d+)\u0000/g, (_, index: string) => fences[Number(index)]!);
-    return text.replace(/\n{3,}/g, "\n\n");
+    return text
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/\u0000(\d+)\u0000/g, (_, index: string) => code[Number(index)]!);
   },
   measure: (rendered) => rendered.length,
 };
+
+/** An open code fence: its opening line, and what a closing line must repeat. */
+interface Fence {
+  line: string;
+  char: string;
+  length: number;
+}
+
+function opener(line: string): Fence | undefined {
+  const match = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+  if (!match) return undefined;
+  return { line, char: match[1]![0]!, length: match[1]!.length };
+}
+
+function closes(line: string, fence: Fence): boolean {
+  const match = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
+  return match !== null && match[1]![0] === fence.char && match[1]!.length >= fence.length;
+}
+
+/** The fence still open at the end of `text`, if any. */
+function fenceAfter(text: string): Fence | undefined {
+  let fence: Fence | undefined;
+  for (const line of text.split("\n")) {
+    if (!fence) fence = opener(line);
+    else if (closes(line, fence)) fence = undefined;
+  }
+  return fence;
+}
+
+/** Stores `block` in `code` and answers the token that stands for it. */
+function placeholder(code: string[], block: string): string {
+  code.push(block);
+  return `\u0000${code.length - 1}\u0000`;
+}
 
 /** A post that shows `text` as Markdown. */
 function postOf(text: string): string {
@@ -177,7 +247,7 @@ function receiptOf(chat: string, answer: Answer): PartReceipt {
   const at = chat_id ?? chat;
   return {
     messageId: message_id,
-    conversationId: thread_id && root_id ? `${at}${THREAD}${root_id}` : at,
+    chatId: thread_id && root_id ? `${at}${THREAD}${root_id}` : at,
   };
 }
 
@@ -217,6 +287,7 @@ const WONT_EDIT = new Set([230054, 230072, 230073, 230074, 230075]);
 const REPLY_TARGET_GONE = new Set([230011, 230110]);
 
 interface HttpFailure {
+  config?: { url?: unknown };
   response?: { status?: number; data?: { code?: unknown; msg?: unknown }; headers?: unknown };
 }
 
@@ -249,6 +320,15 @@ function classify(error: unknown): DeliveryFailure {
   // the app's credential. The write was never sent.
   if (/^failed to get tenant_access_token\b/.test(message))
     return new DeliveryFailure("unauthorized", message);
+  const url = (error as HttpFailure | null)?.config?.url;
+  // A failed token request precedes the message write, so the message is safe to retry.
+  if (
+    (status === undefined || status >= 500) &&
+    typeof url === "string" &&
+    URL.canParse(url) &&
+    new URL(url).pathname === "/open-apis/auth/v3/tenant_access_token/internal"
+  )
+    return new DeliveryFailure("unavailable", message);
   // A server error is a hiccup, and the write may have gone through before it.
   if (status !== undefined && status >= 500) return new DeliveryFailure("unknown", message);
   // Feishu answered and refused. It will refuse the same write again.

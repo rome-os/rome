@@ -106,7 +106,8 @@ export class FeishuPeer implements Peer {
   private redirected(): HttpInstance {
     const http = defaultHttpInstance as unknown as HttpInstance;
     const here = (url = "") => {
-      if (!url.startsWith(FEISHU_ORIGIN)) throw new Error(`Peer blocked a request to ${url}`);
+      if (!URL.canParse(url) || new URL(url).origin !== FEISHU_ORIGIN)
+        throw new Error(`Peer blocked a request to ${url}`);
       return this.server.url + url.slice(FEISHU_ORIGIN.length);
     };
     return {

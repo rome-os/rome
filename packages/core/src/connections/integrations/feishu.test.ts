@@ -332,7 +332,7 @@ describe("feishu reply delivery", () => {
     // The chat's settings put replies in a thread, so later messages join it.
     await expect(talker.replyDelivery?.create("oc_chat", "hello", "om_7")).resolves.toEqual({
       messageId: "om_8",
-      conversationId: "oc_chat#thread:om_7",
+      chatId: "oc_chat#thread:om_7",
     });
     expect(channel.replies).toEqual([
       {

@@ -24,6 +24,23 @@ function lastMessageExchange(peer: FeishuPeer): PeerExchange | undefined {
 }
 
 describe("FeishuPeer", () => {
+  it.each([
+    "open.feishu.cn.evil.invalid",
+    "open.feishu.cnevil.invalid",
+  ])("blocks a similar host before sending a request (%s)", async (host) => {
+    const peer = await FeishuPeer.start();
+    const url = `https://${host}${MESSAGES}`;
+    try {
+      await expect(
+        Promise.resolve().then(() => peer.createClient().httpInstance.get(url)),
+      ).rejects.toThrow(`Peer blocked a request to ${url}`);
+      expect(peer.server.exchanges).toEqual([]);
+      peer.server.assertClean();
+    } finally {
+      await peer.close();
+    }
+  });
+
   it("answers the recorded requests the way Feishu did", async () => {
     const peer = await FeishuPeer.start();
     const message = peer.createClient().im.v1.message;
@@ -118,10 +135,10 @@ describe("feishuTransport against the peer", () => {
     const user = peer.userMessage("hello");
 
     const first = await transport.create(FEISHU_CHAT, "one", user.id);
-    const second = await transport.create(first.conversationId, "two");
+    const second = await transport.create(first.chatId, "two");
 
-    expect(first.conversationId).toBe(`${FEISHU_CHAT}#thread:${user.id}`);
-    expect(second.conversationId).toBe(first.conversationId);
+    expect(first.chatId).toBe(`${FEISHU_CHAT}#thread:${user.id}`);
+    expect(second.chatId).toBe(first.chatId);
     const thread = peer.threadOf(user.id);
     expect(thread).toBeDefined();
     expect([peer.threadOf(first.messageId), peer.threadOf(second.messageId)]).toEqual([
@@ -140,9 +157,9 @@ describe("feishuTransport against the peer", () => {
     const user = peer.userMessage("hello");
 
     const first = await transport.create(FEISHU_CHAT, "one", user.id);
-    const second = await transport.create(first.conversationId, "two");
+    const second = await transport.create(first.chatId, "two");
 
-    expect([first.conversationId, second.conversationId]).toEqual([FEISHU_CHAT, FEISHU_CHAT]);
+    expect([first.chatId, second.chatId]).toEqual([FEISHU_CHAT, FEISHU_CHAT]);
     expect(peer.threadOf(first.messageId)).toBeUndefined();
     expect(peer.visible().map((m) => m.replyTo)).toEqual([undefined, user.id, undefined]);
   });
@@ -153,7 +170,7 @@ describe("feishuTransport against the peer", () => {
 
     const receipt = await transport.create(FEISHU_CHAT, "one", user.id);
 
-    expect(receipt.conversationId).toBe(FEISHU_CHAT);
+    expect(receipt.chatId).toBe(FEISHU_CHAT);
     expect(peer.visible().at(-1)).toMatchObject({ id: receipt.messageId, text: "one" });
     expect(peer.visible().at(-1)?.replyTo).toBeUndefined();
   });
@@ -236,6 +253,19 @@ describe("feishuTransport against the peer", () => {
 
     expect(failure).toBeInstanceOf(DeliveryFailure);
     expect(failure).toMatchObject({ kind: "unauthorized" });
+    expect(peer.visible()).toEqual([]);
+  });
+
+  it("names a write as unavailable when the token request gets a server error", async () => {
+    peer.server.once({
+      method: "POST",
+      path: "/open-apis/auth/v3/tenant_access_token/internal",
+      respond: { status: 503, body: "Service Unavailable" },
+    });
+
+    await expect(transport.create(FEISHU_CHAT, "one")).rejects.toMatchObject({
+      kind: "unavailable",
+    });
     expect(peer.visible()).toEqual([]);
   });
 
@@ -373,6 +403,40 @@ describe("a reply streamed to Feishu", () => {
       maxPartLength: transport.capabilities.maxPartLength,
     }).filter((check) => !check.ok);
     expect(failed).toEqual([]);
+  });
+
+  it("shows code that runs across messages as code in each of them", async () => {
+    const transport = feishuTransport({
+      client: peer.createClient(),
+      replyInThread: async () => true,
+    });
+    const delivery = deliver(transport, {
+      mode: "edit",
+      editIntervalMs: 20,
+      blockWaitMs: 30,
+      maxPendingChars: 100_000,
+    });
+    const code = Array.from({ length: 250 }, (_, i) => `# step ${i + 1}\nprint(${i + 1})\n`);
+    const text = `Here is the script:\n\n\`\`\`python\n${code.join("")}\`\`\`\n\nThat is all.`;
+    for (const chunk of chunks(text, 400)) {
+      delivery.accept({ type: "text_delta", content: chunk, blockId: "a" });
+      await sleep(2);
+    }
+    delivery.accept({ type: "text", content: text, blockId: "a", turnPhase: "final" });
+    const outcome = await delivery.finish();
+
+    expect(outcome.status).toBe("delivered");
+    const messages = romeMessages().map((message) => message.text);
+    expect(messages.length).toBeGreaterThanOrEqual(2);
+    for (const message of messages) {
+      expect(message.length).toBeLessThanOrEqual(transport.capabilities.maxPartLength);
+      // Every fence a message opens, it closes.
+      expect(message.match(/^```/gm)!.length % 2).toBe(0);
+    }
+    expect(messages.slice(1).every((message) => message.startsWith("```python\n"))).toBe(true);
+    // The comments stay comments, not headings brought down to H4.
+    expect(messages.join("\n")).not.toContain("#### step");
+    expect(messages.at(-1)).toMatch(/\n```\n\nThat is all\.$/);
   });
 });
 
