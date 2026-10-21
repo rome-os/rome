@@ -88,24 +88,31 @@ export function tokenPaste(opts: {
  * (guardian-interaction machinery is absent this phase), so `confer()`
  * throws — the route is the conferral driver.
  *
- * `renew()`: Rome has no Rome Cloud refresh exchange yet (the provider-token-sharing
- * norm: refreshing providers is not implemented), so a rehydrated bundle can only
- * be re-authorized by the guardian — `renew()` always answers "re-confer". GitHub
- * access tokens are non-expiring unless the bundle carries an explicit expiry, so
- * a token whose `expiresAt` is `"never"` never reaches `renew()` at all.
+ * `renew()`: when the provider is wired with `refresh` and the credential carries
+ * a refresh token, Rome Cloud runs the provider's refresh (it holds the client
+ * secret) and the renewed credential replaces this one. Otherwise the bundle can
+ * only be re-authorized by the guardian, and `renew()` answers "re-confer".
+ * GitHub and Slack tokens don't expire, so a token whose `expiresAt` is `"never"`
+ * never reaches `renew()` at all.
  */
-export function romeCloudOAuth(opts: { provider: string }): AuthScheme {
+export function romeCloudOAuth(opts: {
+  provider: string;
+  /** Exchange a refresh token for a renewed credential through Rome Cloud. */
+  refresh?: (refreshToken: string) => Promise<Credential>;
+}): AuthScheme {
   return {
     async confer(_interact: GuardianInteraction): Promise<Credential> {
       throw new Error(
         `conferral for "${opts.provider}" is driven by the oauth redeem route, not a headless confer()`,
       );
     },
-    async renew(_cred: Credential): Promise<Credential | "re-confer"> {
-      // No Rome Cloud refresh exchange exists yet (see lib/rome-cloud-oauth.ts —
-      // only the token-exchange redeem grant is implemented). A stale/refused
-      // bundle can only be replaced by re-running the redeem route.
-      return "re-confer";
+    async renew(cred: Credential): Promise<Credential | "re-confer"> {
+      const refreshToken =
+        typeof cred.material === "function" ? undefined : cred.material.refreshToken;
+      // Without a refresh path, a stale or refused bundle can only be replaced by
+      // the guardian reconnecting.
+      if (!opts.refresh || !refreshToken) return "re-confer";
+      return opts.refresh(refreshToken);
     },
   };
 }

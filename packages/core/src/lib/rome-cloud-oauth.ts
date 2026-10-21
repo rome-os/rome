@@ -60,10 +60,12 @@ export function createRomeCloudOAuthStartUrl(provider: OAuthProvider): RomeCloud
   // Available whenever Rome Cloud is reachable. The connect link is the instance's
   // own start route as a same-origin relative path — the browser resolves it
   // against the dashboard origin, which is exactly where that route lives. No
-  // request needed.
+  // request needed. Shopify authorizes per store, and a bare link can't ask which
+  // store, so its link opens the Settings card, whose setup asks first.
   return {
     provider,
-    connectUrl: `/api/oauth/${provider}/start`,
+    connectUrl:
+      provider === "shopify" ? `/settings/connections/${provider}` : `/api/oauth/${provider}/start`,
     available: true,
     unavailableReason: null,
   };
@@ -72,7 +74,7 @@ export function createRomeCloudOAuthStartUrl(provider: OAuthProvider): RomeCloud
 export async function createRomeCloudOAuthStartRedirect(
   db: DrizzleDb,
   provider: OAuthProvider,
-  opts?: { reconnect?: boolean },
+  opts?: { reconnect?: boolean; shop?: string },
 ): Promise<string> {
   const romeCloudOrigin = getRomeCloudOrigin();
   if (!romeCloudOrigin) {
@@ -112,6 +114,11 @@ export async function createRomeCloudOAuthStartRedirect(
   // on the existing connection.
   if (opts?.reconnect) {
     authorizeUrl.searchParams.set("reconnect", "1");
+  }
+  // Shopify authorizes per store; Rome Cloud validates the domain and builds the
+  // store's own authorize URL from it.
+  if (opts?.shop) {
+    authorizeUrl.searchParams.set("shop", opts.shop);
   }
 
   return authorizeUrl.toString();
@@ -210,4 +217,55 @@ export async function redeemRomeCloudOAuthHandoff(
         ? (data.metadata as Record<string, unknown>)
         : null,
   };
+}
+
+/**
+ * Renew an expiring provider grant through Rome Cloud. Rome Cloud holds the
+ * provider client secret, so it runs the refresh and answers with the
+ * replacement bundle; it only refreshes a refresh token it stores for this
+ * instance's account. The instance authenticates with its enrolled token, as
+ * for the handoff redeem.
+ */
+export async function refreshRomeCloudOAuthGrant(
+  provider: OAuthProvider,
+  refreshToken: string,
+): Promise<OAuthTokenBundle> {
+  const romeCloudOrigin = getRomeCloudOrigin();
+  if (!romeCloudOrigin) {
+    throw new Error("Rome Cloud origin is not configured for OAuth refresh.");
+  }
+  const instanceToken = getInstanceToken();
+  if (!instanceToken) {
+    throw new Error("This instance is not enrolled with Rome Cloud.");
+  }
+
+  const response = await fetch(new URL("/connections/token", romeCloudOrigin), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      Authorization: `Bearer ${instanceToken}`,
+    },
+    cache: "no-store",
+    body: JSON.stringify({ grant_type: "refresh_token", provider, refresh_token: refreshToken }),
+  });
+
+  const data = (await response.json().catch(() => null)) as {
+    provider?: unknown;
+    tokens?: OAuthTokenBundle;
+    error?: string;
+    error_description?: string;
+  } | null;
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error_description ||
+        data?.error ||
+        `Rome Cloud OAuth refresh failed with status ${response.status}.`,
+    );
+  }
+  if (data?.provider !== provider || !data.tokens?.accessToken) {
+    throw new Error("Rome Cloud returned an invalid OAuth refresh payload.");
+  }
+  return data.tokens;
 }

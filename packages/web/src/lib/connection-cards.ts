@@ -98,6 +98,7 @@ const SERVICE_ORDER = [
   "github",
   "google",
   "slack",
+  "shopify",
 ];
 
 const LABELS: Record<string, string> = {
@@ -115,10 +116,11 @@ const LABELS: Record<string, string> = {
   google: "Google",
   slack: "Slack",
   slack_bot: "Slack bot",
+  shopify: "Shopify",
   composio: "Composio",
 };
 
-const OAUTH_SERVICES = new Set(["github", "google", "slack"]);
+const OAUTH_SERVICES = new Set(["github", "google", "slack", "shopify"]);
 
 /** The copy slot key each registry grant renders under. A channel's single
  *  Talk grant is the generic `bot` slot whatever the grant is named; an OAuth
@@ -136,6 +138,7 @@ const SLOT_KEY_BY_GRANT: Record<string, Record<string, SlotKey>> = {
   github: { user: "user" },
   google: { user: "user" },
   slack: { workspace: "user" },
+  shopify: { store: "user" },
 };
 
 function slotKeyFor(service: string, grant: string): SlotKey {

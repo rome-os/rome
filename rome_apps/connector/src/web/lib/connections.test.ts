@@ -154,18 +154,19 @@ describe("buildConnectionViews", () => {
 });
 
 describe("Rome-managed providers", () => {
-  it("marks GitHub and Slack as Rome-managed (brokered by Rome's integration, not Composio)", () => {
+  it("marks GitHub, Slack, and Shopify as Rome-managed (brokered by Rome's integration, not Composio)", () => {
     expect(CATALOG_BY_SLUG.get("github")).toMatchObject({ name: "GitHub", romeManaged: true });
     expect(CATALOG_BY_SLUG.get("slack")).toMatchObject({ name: "Slack", romeManaged: true });
+    expect(CATALOG_BY_SLUG.get("shopify")).toMatchObject({ name: "Shopify", romeManaged: true });
   });
 
   it("treats every other catalog provider as a normal Composio connect", () => {
     const managed = CATALOG.filter((e) => e.romeManaged).map((e) => e.slug);
-    expect(managed).toEqual(["github", "slack"]);
+    expect(managed).toEqual(["github", "slack", "shopify"]);
   });
 
   it("exposes Rome-managed entries via ROME_MANAGED_CATALOG", () => {
-    expect(ROME_MANAGED_CATALOG.map((e) => e.slug)).toEqual(["github", "slack"]);
+    expect(ROME_MANAGED_CATALOG.map((e) => e.slug)).toEqual(["github", "slack", "shopify"]);
   });
 
   it("carries the romeManaged flag onto connected GitHub and Slack views so they render as managed", () => {

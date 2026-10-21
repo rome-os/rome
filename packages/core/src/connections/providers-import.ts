@@ -10,6 +10,7 @@ import {
   OAUTH_PROVIDER_GRANTS,
   githubGrantProfileSchema,
   googleGrantProfileSchema,
+  shopifyGrantProfileSchema,
   slackGrantProfileSchema,
   type OAuthProviderGrantProfile,
 } from "./integrations/oauth-providers.js";
@@ -22,7 +23,7 @@ import type { Credential, SecretRecord } from "./types.js";
  * caller treats it as a no-op).
  *
  * Material shape per provider (flat `SecretRecord`, mirroring the grant table):
- * - `github` / `google`: `{ accessToken, refreshToken?, expiresAt? }`.
+ * - `github` / `google` / `shopify`: `{ accessToken, refreshToken?, expiresAt? }`.
  * - `slack`: `{ botToken, userToken? }` — Slack v2 issues a bot token (`xoxb-`,
  *   the bundle's `accessToken`) plus a user token (`xoxp-`) that rides in `raw`
  *   (the verbatim oauth.v2.access response), same extraction the token-file
@@ -30,11 +31,10 @@ import type { Credential, SecretRecord } from "./types.js";
  *
  * Expiry: the credential's `expiresAt` mirrors the bundle's. GitHub and Slack
  * tokens are non-expiring, so an absent expiry becomes `"never"` and the
- * credential never reaches `renew()`. Google tokens DO expire — the expiry
- * flows through, and since no Rome Cloud refresh exchange exists yet
- * (`romeCloudOAuth.renew()` answers "re-confer"; a refresh-capable scheme is
- * territory), an expired google grant honestly degrades at load until
- * the guardian reconnects. That is intended.
+ * credential never reaches `renew()`. Shopify and Google tokens DO expire — the
+ * expiry flows through, and `romeCloudOAuth.renew()` refreshes them through Rome
+ * Cloud with the material's refresh token. A grant Rome Cloud can't refresh
+ * (Google today) degrades once it expires, until the guardian reconnects.
  */
 export function credentialFromBundle(
   provider: OAuthProvider,
@@ -122,6 +122,11 @@ export function grantProfileFromBundle(
       if (raw.team?.id != null && raw.team.id !== "") candidate.teamId = raw.team.id;
       return slackGrantProfileSchema.parse(candidate);
     }
+    case "shopify":
+      // Shopify has no store avatar, so a raw avatar never lands.
+      return shopifyGrantProfileSchema.parse(
+        withScopes(pickRawKeys(account, ["subject", "displayName", "email", "login"])),
+      );
   }
 }
 

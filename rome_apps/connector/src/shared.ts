@@ -26,7 +26,7 @@ export const ROME_USER_ID = "rome-guardian";
  * `gh`/`git` in the shell, and its events arrive via Rome's own GitHub webhook,
  * never a Composio trigger.
  */
-export const ROME_MANAGED_TOOLKITS = new Set(["github", "slack"]);
+export const ROME_MANAGED_TOOLKITS = new Set(["github", "slack", "shopify"]);
 
 export function isRomeManagedToolkit(toolkit: string): boolean {
   return ROME_MANAGED_TOOLKITS.has(toolkit.toLowerCase());

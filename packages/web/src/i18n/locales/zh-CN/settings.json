@@ -231,6 +231,15 @@
           "privacyNote": "你在 Slack 上授权访问，随时可以在这里断开。"
         }
       },
+      "shopify": {
+        "user": {
+          "title": "你的 Shopify 店铺",
+          "bullets": {
+            "work": "更新你店铺的商品和库存，并读取订单"
+          },
+          "privacyNote": "你在 Shopify 上授权访问，随时可以在这里断开。"
+        }
+      },
       "composio": {
         "user": {
           "title": "你的 Composio 账号",

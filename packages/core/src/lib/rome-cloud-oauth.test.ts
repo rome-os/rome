@@ -34,6 +34,12 @@ describe("Rome Cloud OAuth brokering", () => {
       expect(link.connectUrl).toBe("/api/oauth/github/start");
     });
 
+    it("sends Shopify to its Settings card, which asks for the store first", () => {
+      const link = createRomeCloudOAuthStartUrl("shopify");
+      expect(link.available).toBe(true);
+      expect(link.connectUrl).toBe("/settings/connections/shopify");
+    });
+
     it("is unavailable when Rome Cloud is not configured", () => {
       delete process.env.PANTHEON_BASE_ORIGIN;
       delete process.env.PANTHEON_DOMAIN;
@@ -72,6 +78,20 @@ describe("Rome Cloud OAuth brokering", () => {
     it("carries reconnect=1 through to the authorize URL when reconnecting", async () => {
       const url = await createRomeCloudOAuthStartRedirect(db, "github", { reconnect: true });
       expect(new URL(url).searchParams.get("reconnect")).toBe("1");
+    });
+
+    it("names the store on the authorize URL for Shopify", async () => {
+      const url = await createRomeCloudOAuthStartRedirect(db, "shopify", {
+        shop: "acme.myshopify.com",
+      });
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe("/connections/shopify/authorize");
+      expect(parsed.searchParams.get("shop")).toBe("acme.myshopify.com");
+    });
+
+    it("omits the store for providers that don't authorize per store", async () => {
+      const url = await createRomeCloudOAuthStartRedirect(db, "github");
+      expect(new URL(url).searchParams.has("shop")).toBe(false);
     });
 
     it("persists an empty tenant sentinel on the pending attempt", async () => {

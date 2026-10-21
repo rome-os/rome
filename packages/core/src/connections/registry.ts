@@ -586,6 +586,24 @@ export class ConnectionRegistry {
     await conn.setWatchSubscribed(subscribed);
   }
 
+  /** Renew every authorized credential that expires within `withinMs`, before it
+   *  lapses. A credential nothing reports as rejected (an OAuth token a separate
+   *  process reads from its custody file) never reaches the fault-driven renew, so
+   *  without this it would expire in place. Connections renew independently: one
+   *  failure never stops the others. */
+  async renewExpiring(withinMs: number): Promise<void> {
+    await Promise.all(
+      [...this.connections.values()].map((conn) =>
+        conn.renewExpiring(withinMs).catch((err) => {
+          this.log.error("expiring-credential renewal failed", {
+            connectionId: conn.id,
+            error: errMsg(err),
+          });
+        }),
+      ),
+    );
+  }
+
   /** Run a composite lifecycle ceremony inside the registry-owned critical
    *  section for `(service, grant)`: it starts only once every previously
    *  enqueued section on the SAME (service, grant) has settled, so overlapping
@@ -815,6 +833,60 @@ class ConnectionImpl implements Connection {
     for (const slot of this.slots.values()) {
       if (this.unlocked(slot) && !slot.epoch) this.buildEpoch(slot, /* fire */ true);
     }
+  }
+
+  /** Renew each authorized grant whose credential expires within `withinMs`.
+   *  Runs under the grant's lock, so it serializes with conferral and revoke.
+   *  Unlike the fault-driven renew, a failure here does not degrade a credential
+   *  that still works: it keeps the current one and the next pass retries. Only a
+   *  credential that has already expired degrades, matching the at-load rule. */
+  async renewExpiring(withinMs: number): Promise<void> {
+    const deadline = this.registry.now().getTime() + withinMs;
+    for (const [grant, scheme] of Object.entries(this.descriptor.auth)) {
+      const cred = this.liveCreds.get(grant);
+      if (!cred || cred.expiresAt === "never" || cred.expiresAt.getTime() > deadline) continue;
+      await this.withGrantLock(grant, () => this.renewExpiringLocked(grant, scheme, withinMs));
+    }
+  }
+
+  private async renewExpiringLocked(
+    grant: GrantName,
+    scheme: AuthScheme,
+    withinMs: number,
+  ): Promise<void> {
+    // Re-read under the lock: a conferral or revoke that ran while this pass
+    // queued has already replaced or dropped the credential.
+    const cred = this.liveCreds.get(grant);
+    if (this.grantState.get(grant) !== "authorized" || !cred || cred.expiresAt === "never") return;
+    if (cred.expiresAt.getTime() > this.registry.now().getTime() + withinMs) return;
+    const stillCurrent = () => this.liveCreds.get(grant) === cred;
+
+    let renewed: Credential | "re-confer";
+    try {
+      renewed = await scheme.renew(cred);
+    } catch (err) {
+      renewed = "re-confer";
+      this.log.warn("expiring-credential renew threw", {
+        connectionId: this.id,
+        grant,
+        error: errMsg(err),
+      });
+    }
+    if (!stillCurrent()) return;
+    if (renewed === "re-confer") {
+      if (this.isExpired(cred)) {
+        await this.degradeGrant(grant, "credential expired and renew failed", stillCurrent);
+      }
+      return;
+    }
+    await this.ledger.updateGrant(this.id, grant, {
+      state: "authorized",
+      credential: toPersisted(renewed),
+      lastRenewedAt: this.registry.now(),
+    });
+    this.liveCreds.set(grant, renewed);
+    this.reconcile(grant);
+    await this.syncCustody(grant, renewed);
   }
 
   /** At-load expired-credential handling: renew once, else degrade. */

@@ -1,4 +1,4 @@
-export const OAUTH_PROVIDERS = ["google", "github", "slack"] as const;
+export const OAUTH_PROVIDERS = ["google", "github", "slack", "shopify"] as const;
 
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
 
@@ -24,7 +24,31 @@ export const OAUTH_PROVIDER_DESCRIPTORS: Record<OAuthProvider, OAuthProviderDesc
     label: "Slack",
     description: "Read and post messages, channels, reactions, and search.",
   },
+  shopify: {
+    id: "shopify",
+    label: "Shopify",
+    description: "Products, inventory, and orders in your Shopify store.",
+  },
 };
+
+// A store's permanent `.myshopify.com` domain, per Shopify's own validation.
+const SHOPIFY_SHOP_DOMAIN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
+
+/**
+ * Normalize what a guardian typed for their Shopify store to its
+ * `<store>.myshopify.com` domain, or `null` when it isn't one. Accepts the bare
+ * store handle (`acme`) or the domain with an optional scheme and trailing slash.
+ */
+export function normalizeShopifyShopDomain(value: string | null | undefined): string | null {
+  const trimmed = value
+    ?.trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "");
+  if (!trimmed) return null;
+  const domain = trimmed.includes(".") ? trimmed : `${trimmed}.myshopify.com`;
+  return SHOPIFY_SHOP_DOMAIN.test(domain) ? domain : null;
+}
 
 export function isOAuthProvider(value: string): value is OAuthProvider {
   return OAUTH_PROVIDERS.includes(value as OAuthProvider);
