@@ -310,7 +310,6 @@
     }
   },
   "channels": {
-    "title": "Channel Connections",
     "conversationSettings": {
       "configure": "Configure conversations",
       "searchPlaceholder": "Search provider, workspace, or conversation",
@@ -345,7 +344,7 @@
       "fields": {
         "enabled": "Rome in this conversation",
         "respond": "Respond",
-        "botMessages": "Bot messages",
+        "botMessages": "Messages from automated accounts",
         "whenOthersMentioned": "When others are mentioned",
         "replies": "Reply placement",
         "agent": "Agent",
@@ -408,7 +407,7 @@
       "linkAccount": "Link your Telegram account",
       "sendCodeTo": "Send this code to <link>{{target}}</link> on Telegram:",
       "sendCodeToPlain": "Send this code to {{target}} on Telegram:",
-      "yourBot": "your bot",
+      "yourBot": "your agent's account",
       "waitingVerification": "Waiting for verification...",
       "codeShownEarlier": "Verification code was shown when you first connected. Disconnect and reconnect to generate a new code.",
       "botTokenLabel": "Bot Token",
@@ -454,7 +453,7 @@
         "addCancel": "Cancel",
         "addPickBoth": "Pick both a channel and an agent first.",
         "addAllBound": "Every discoverable channel already has a binding — edit one above to rebind.",
-        "addDiscordOffline": "Discord isn't connected. Connect the bot above to populate this list.",
+        "addDiscordOffline": "Discord isn't connected. Connect the account above to populate this list.",
         "suggestionsTitle": "App suggestions",
         "suggestionFromApp": "{{app}} suggests routing a Discord channel to"
       }

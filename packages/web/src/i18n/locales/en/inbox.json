@@ -16,7 +16,7 @@
   },
   "sources": {
     "title": "Message sources",
-    "description": "Channels that feed your inbox. Connections are managed in <a>channel settings</a>.",
+    "description": "Accounts that feed your inbox. Connections are managed in <a>Connections settings</a>.",
     "status": {
       "connected": "Connected",
       "configured": "Configured",

@@ -310,7 +310,6 @@
     }
   },
   "channels": {
-    "title": "渠道连接",
     "conversationSettings": {
       "configure": "配置会话",
       "searchPlaceholder": "搜索提供商、工作区或会话",
@@ -345,7 +344,7 @@
       "fields": {
         "enabled": "Rome 在此会话中",
         "respond": "响应条件",
-        "botMessages": "机器人消息",
+        "botMessages": "自动账号的消息",
         "whenOthersMentioned": "提及其他人时",
         "replies": "回复位置",
         "agent": "智能体",
@@ -408,7 +407,7 @@
       "linkAccount": "绑定你的 Telegram 账号",
       "sendCodeTo": "在 Telegram 中向 <link>{{target}}</link> 发送以下验证码：",
       "sendCodeToPlain": "在 Telegram 中向 {{target}} 发送以下验证码：",
-      "yourBot": "你的机器人",
+      "yourBot": "智能体的账号",
       "waitingVerification": "等待验证中…",
       "codeShownEarlier": "首次连接时已显示验证码。请断开后重新连接以生成新验证码。",
       "botTokenLabel": "机器人 Token",
@@ -454,7 +453,7 @@
         "addCancel": "取消",
         "addPickBoth": "请同时选择频道和 agent。",
         "addAllBound": "所有可见频道都已绑定 — 请在上方编辑现有行进行修改。",
-        "addDiscordOffline": "Discord 未连接。请先在上方连接 bot 以填充列表。",
+        "addDiscordOffline": "Discord 未连接。请先在上方连接账号以填充列表。",
         "suggestionsTitle": "应用建议",
         "suggestionFromApp": "{{app}} 建议把某个 Discord 频道路由到"
       }
