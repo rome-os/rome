@@ -19,7 +19,7 @@
 // Replies use the same browser session and the shared People outbox.
 
 import { z } from "zod";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import type { TalkFeatures } from "../types.js";
 import {
   OpencliAuthError,
@@ -289,10 +289,10 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
           const features: TalkFeatures = {};
           if (sink.findReplyTarget) {
             features.directMessaging = {
-              async conversationFor(address: string) {
+              async chatFor(address: string) {
                 const participantId = linkedInMemberIdFromProfileUrl(address) ?? address.trim();
                 const target = await sink.findReplyTarget?.({ participantId });
-                return target ? (target.threadId as ConversationId) : null;
+                return target ? (target.threadId as ChatId) : null;
               },
             };
           }
@@ -309,7 +309,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
             stop(): void {
               poller.stop();
             },
-            async send(conversationId: ConversationId, msg) {
+            async send(chatId: ChatId, msg) {
               if (
                 !msg.text?.trim() ||
                 msg.attachments?.length ||
@@ -319,12 +319,12 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
               ) {
                 throw new Error("LinkedIn replies support plain text only");
               }
-              const target = await deps.syncSink.findReplyTarget?.({ threadId: conversationId });
+              const target = await deps.syncSink.findReplyTarget?.({ threadId: chatId });
               if (!target)
                 throw new Error("No verified LinkedIn direct conversation for this reply");
               if (
-                target.threadId !== conversationId ||
-                target.threadUrl !== `https://www.linkedin.com/messaging/thread/${conversationId}/`
+                target.threadId !== chatId ||
+                target.threadUrl !== `https://www.linkedin.com/messaging/thread/${chatId}/`
               ) {
                 throw new Error("LinkedIn reply target does not match the selected conversation");
               }
@@ -347,7 +347,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
                     ],
                     { timeoutMs: 180_000 },
                   ),
-                  conversationId,
+                  chatId,
                 );
               } catch (error) {
                 if (error instanceof OpencliAuthError) {
@@ -360,12 +360,12 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
               } catch (error) {
                 // Provider acceptance survives a local mirror failure. The next poll repairs it.
                 log.warn("LinkedIn reply accepted but mirror write failed", {
-                  threadId: conversationId,
+                  threadId: chatId,
                   messageId: message.messageId,
                   error: error instanceof Error ? error.message : String(error),
                 });
               }
-              return { conversationId, messageId: message.messageId };
+              return { chatId, messageId: message.messageId };
             },
             ...features,
             getRuntimeDegradation(): CapabilityDegradation | null {

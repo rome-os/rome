@@ -1,6 +1,6 @@
 // Accounts and their agents. An account is a channel, as the dashboard
 // shows it; one whose Connection was deleted is listed with no Connection.
-// Vocabulary: docs/concepts/messaging.md#romes-accounts.
+// Vocabulary: docs/domains/chats.md#account.
 // Invariants: docs/architecture/channels.md#an-accounts-agent.
 
 import type {
@@ -28,6 +28,7 @@ const linkBodySchema: z.ZodType<LinkAccountAgentRequest> = z.object({
 function accountView(record: ChannelRecord): ChannelAccount {
   return {
     id: record.id,
+    connectionKind: record.service,
     service: record.service,
     platform: record.platform,
     connectionId: record.connectionId,

@@ -1,6 +1,6 @@
 /**
  * The boot pass that records a channel for each Connection from before
- * channels were recorded. Vocabulary: docs/concepts/messaging.md#romes-accounts.
+ * channels were recorded. Vocabulary: docs/domains/chats.md#account.
  */
 
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";

@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { sendThrough } from "../../channels/connection-ports.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
@@ -72,14 +72,14 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
   it("round-trips send() through the wrapped WebChatAdapter into the repo", async () => {
     await repo.createSession("sess-1", "Test Session");
     const conn = await registry.connect("webchat");
-    const receipt = await sendThrough(conn, "sess-1" as ConversationId, {
+    const receipt = await sendThrough(conn, "sess-1" as ChatId, {
       text: "hello from talk",
     });
 
     const rows = await repo.getHistoryMessages("sess-1", new Date(0));
     expect(rows).toHaveLength(1);
     expect(rows[0].content).toContain("hello from talk");
-    expect(receipt).toStrictEqual({ conversationId: "sess-1", messageId: rows[0].id });
+    expect(receipt).toStrictEqual({ chatId: "sess-1", messageId: rows[0].id });
   });
 
   // The flag is what gives the channel a \`messages\` port; the feature is what
@@ -107,13 +107,13 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     const conn = await registry.connect("webchat");
     const history = await conn.withTalker((talker) =>
       talker.history?.query({
-        conversationId: "sess-2" as ConversationId,
+        chatId: "sess-2" as ChatId,
         limit: 20,
       }),
     );
     expect(history).toHaveLength(1);
     expect(history?.[0]).toMatchObject({
-      conversationId: "sess-2",
+      chatId: "sess-2",
       senderId: "guardian",
       text: "Hi there",
     });
@@ -143,7 +143,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     );
     const conn = await registry.connect("webchat");
     const history = await conn.withTalker((talker) =>
-      talker.history?.query({ conversationId: "sess-3" as ConversationId }),
+      talker.history?.query({ chatId: "sess-3" as ChatId }),
     );
 
     const rows = await repo.getHistoryMessages("sess-3", new Date(0));
@@ -152,7 +152,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
         channel: "webchat",
         direction: "inbound",
         messageId: "msg-guardian",
-        conversationId: "sess-3",
+        chatId: "sess-3",
         senderId: "guardian",
         senderDisplayName: "Guardian",
         text: "Draft the plan",
@@ -165,7 +165,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
         channel: "webchat",
         direction: "outbound",
         messageId: "msg-agent",
-        conversationId: "sess-3",
+        chatId: "sess-3",
         senderId: "workflow-planner",
         senderDisplayName: "Workflow Planner",
         text: "Plan drafted",
@@ -185,7 +185,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     const conn = await registry.connect("webchat");
 
     const history = await conn.withTalker((talker) =>
-      talker.history?.query({ conversationId: "sess-4" as ConversationId, limit: 2 }),
+      talker.history?.query({ chatId: "sess-4" as ChatId, limit: 2 }),
     );
     expect(history).toHaveLength(2);
   });

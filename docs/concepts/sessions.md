@@ -1,6 +1,6 @@
 # Sessions
 
-A Rome session is the durable product boundary around one continuous body of agent work. It can represent a guardian-authored chat, a chat on one of [Rome's accounts](messaging.md#romes-accounts), an automation, a delegated subagent, a handoff, or a fork. Sessions preserve transcript and trace evidence, so an agent does not restart from a blank slate on every message and background work remains inspectable after it finishes.
+A Rome session is the durable product boundary around one continuous body of agent work. It can represent a guardian-authored chat, a [chat](../domains/chats.md#chat) on one of Rome's accounts, an automation, a delegated subagent, a handoff, or a fork. Sessions preserve transcript and trace evidence, so an agent does not restart from a blank slate on every message and background work remains inspectable after it finishes.
 
 **Contracts:**
 
@@ -79,7 +79,7 @@ An event is one item of a turn's stream, as Rome publishes it to its consumers. 
 
 **Not to be confused with:**
 
-- **[Message](messaging.md#message)** — a message is a chat entry that a person or an agent sends. An event is an item of one turn's stream.
+- **[Message](../domains/chats.md#message)** — a message is a chat entry that a person or an agent sends. An event is an item of one turn's stream.
 - **[Block](#block)** — a block reaches consumers as a block event, except a subagent call's tool use and tool result, which normally reach them as subagent start and result events. A subagent call with no linked execution reaches them as a plain tool use and tool result. Results, errors, plan updates, and subagent reports are events that are not blocks.
 - **Event-bus event** — something that happens in Rome that a [routine](data.md#routines) or a hook can react to. It is not part of a turn's stream.
 - **[Routine](data.md#routines)** — surfaces that say "events" for scheduled automation mean routines, not turn events.
@@ -99,7 +99,7 @@ A block is one completed piece of model content inside a turn: text, thinking, a
 **Not to be confused with:**
 
 - **[Event](#event)** — a result, an error, a plan update, or a subagent report is an event, not a block.
-- **Message part** — a piece of a stored chat [message](messaging.md#message). A text part can hold the text of a text block, but parts belong to the chat and blocks belong to a turn.
+- **Message part** — a piece of a stored chat [message](../domains/chats.md#message). A text part can hold the text of a text block, but parts belong to the chat and blocks belong to a turn.
 - **Content block** (Anthropic) and **item** (Codex) — the providers' own units, which Rome translates into blocks and events.
 
 ## Delta

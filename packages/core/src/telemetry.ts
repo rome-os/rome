@@ -259,13 +259,13 @@ export function withInboundSpans<
             `channel:${name}.handle`,
             {
               "channel.name": name,
-              "channel.thread_id": message.conversationId,
+              "channel.thread_id": message.chatId,
               "channel.user_id": message.senderId,
             },
             () => {
               logInboundChannelMessage({
                 channel: name,
-                threadId: message.conversationId,
+                threadId: message.chatId,
                 channelUserId: message.senderId,
                 messageId: message.messageId,
                 text: message.text,

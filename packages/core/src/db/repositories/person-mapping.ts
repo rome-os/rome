@@ -105,6 +105,11 @@ export class PersonMappingRepository {
     private readonly serviceOf: ServiceOfChannel,
   ) {}
 
+  /** The key People files a link to an account on `channel` under. */
+  linkKeyOf(channel: string): string {
+    return this.serviceOf(channel);
+  }
+
   private async generatePersonId(displayName: string): Promise<string> {
     const base = generatePersonSlug(displayName);
     if (!base) return uuid();

@@ -2,7 +2,7 @@
 // main process and an action worker both send it through the channels
 // service, so each answers `onApprovalCreated` the same way.
 
-import type { ChannelsService, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelsService, ChatId } from "@rome-os/app-runtime";
 import type { ApprovalCreatedEvent } from "./engine.js";
 
 /**
@@ -22,7 +22,7 @@ export async function sendApprovalCard(
     title: actionName,
     summary: `The agent wants to run "${actionName}" and needs your approval.`,
   };
-  await channels.send(channelContext.channel, channelContext.threadId as ConversationId, {
+  await channels.send(channelContext.channel, channelContext.threadId as ChatId, {
     parts: [
       {
         type: "approval_card",

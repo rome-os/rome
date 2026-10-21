@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { countingDb, createTestDb, type TestDb } from "../test/helpers.js";
 import { linkedinMessages, linkedinThreadParticipants, linkedinThreads } from "../db/schema.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 import {
   testAccountMessagesContract,
@@ -27,8 +27,8 @@ const TWIN_B = "ACoAATWINB";
 const account = { channel: "linkedin", addresses: [MEMBER] };
 const accounts = [account];
 const silent = [{ channel: "linkedin", addresses: ["ACoAASILENT"] }];
-const room = "t-room" as ConversationId;
-const emptyThread = "t-nothing" as ConversationId;
+const room = "t-room" as ChatId;
+const emptyThread = "t-nothing" as ChatId;
 
 /** The store's per-account reads, which every LinkedIn store answers. */
 function accountReads(db: DrizzleDb): AccountMessages {
@@ -178,7 +178,7 @@ describe("linkedInMessages", () => {
   // A thread is the conversation, named by LinkedIn's own id: what the account
   // scope reaches through membership, a query names outright.
   it("queries a group thread", async () => {
-    const page = await linkedInMessages(testDb.db).query({ conversationId: room });
+    const page = await linkedInMessages(testDb.db).query({ chatId: room });
     // Newest first, and the tie at 700 in the mirror's own order.
     expect(page.map((entry) => entry.messageId)).toEqual(["f4", "f3", "f2", "f"]);
     expect(page.find((entry) => entry.messageId === "f2")?.direction).toBe("outbound");
@@ -204,7 +204,7 @@ describe("linkedInMessages", () => {
 
   it("queries a thread LinkedIn calls a group, as a group", async () => {
     const page = await linkedInMessages(testDb.db).query({
-      conversationId: "t-flagged" as ConversationId,
+      chatId: "t-flagged" as ChatId,
     });
     expect(page.map((entry) => entry.messageId)).toEqual(["g"]);
     expect(page[0]?.thread?.kind).toBe("group");
@@ -218,7 +218,7 @@ describe("linkedInMessages", () => {
     expect(read.length).toBeGreaterThan(0);
     for (const entry of read) {
       const same = queried.find(
-        (message) => `${message.conversationId}:${message.messageId}` === entry.ref,
+        (message) => `${message.chatId}:${message.messageId}` === entry.ref,
       );
       expect(same).toBeDefined();
       expect({ sender: entry.sender, conversation: entry.conversation }).toEqual(
@@ -231,13 +231,13 @@ describe("linkedInMessages", () => {
 
   it("queries a direct thread, reading an undated message at when it was stored", async () => {
     const page = await linkedInMessages(testDb.db).query({
-      conversationId: "t-direct" as ConversationId,
+      chatId: "t-direct" as ChatId,
     });
     expect(page.map((entry) => entry.messageId)).toEqual(["e", "d", "c", "b", "a"]);
     expect(page[0]).toMatchObject({
       channel: "linkedin",
       direction: "inbound",
-      conversationId: "t-direct",
+      chatId: "t-direct",
       text: "latest",
       attachments: [],
       thread: { kind: "dm" },

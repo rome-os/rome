@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { WhatsAppAdapter } from "./whatsapp.js";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type {
   WhatsAppSyncSink,
   WaContactInput,
@@ -134,7 +134,7 @@ describe("WhatsAppAdapter", () => {
         channel: "whatsapp",
         direction: "inbound",
         messageId: "wa-msg-001",
-        conversationId: "1234567890@s.whatsapp.net",
+        chatId: "1234567890@s.whatsapp.net",
         senderId: "1234567890@s.whatsapp.net",
         senderDisplayName: "Bob",
         text: "hello from whatsapp",
@@ -166,7 +166,7 @@ describe("WhatsAppAdapter", () => {
       });
 
       expect(captured!.thread).toEqual({ kind: "group" });
-      expect(captured!.conversationId).toBe("group123@g.us");
+      expect(captured!.chatId).toBe("group123@g.us");
       expect(captured!.senderId).toBe("sender@s.whatsapp.net");
     });
 
@@ -629,7 +629,7 @@ describe("WhatsAppAdapter", () => {
   });
 
   describe("send()", () => {
-    const CHAT = "jid@s.whatsapp.net" as ConversationId;
+    const CHAT = "jid@s.whatsapp.net" as ChatId;
 
     it("sends a text message via the socket and returns its receipt", async () => {
       mockSendMessage.mockResolvedValueOnce({ key: { id: "sent-1" } });
@@ -641,14 +641,14 @@ describe("WhatsAppAdapter", () => {
       expect(mockSendMessage).toHaveBeenCalledWith("jid@s.whatsapp.net", {
         text: "hi from bot",
       });
-      expect(receipt).toStrictEqual({ conversationId: CHAT, messageId: "sent-1" });
+      expect(receipt).toStrictEqual({ chatId: CHAT, messageId: "sent-1" });
     });
 
     it("leaves messageId out of the receipt when the socket returns none", async () => {
       await adapter.start();
       const receipt = await adapter.send(CHAT, { text: "hi" });
 
-      expect(receipt).toStrictEqual({ conversationId: CHAT });
+      expect(receipt).toStrictEqual({ chatId: CHAT });
     });
 
     it("throws if socket is not connected", async () => {
@@ -703,7 +703,7 @@ describe("WhatsAppAdapter", () => {
 
     it("strips the device suffix from a non-self send target", async () => {
       await adapter.start();
-      await adapter.send("5551234:9@s.whatsapp.net" as ConversationId, { text: "hi" });
+      await adapter.send("5551234:9@s.whatsapp.net" as ChatId, { text: "hi" });
       expect(mockSendMessage).toHaveBeenCalledWith("5551234@s.whatsapp.net", { text: "hi" });
     });
 
@@ -715,7 +715,7 @@ describe("WhatsAppAdapter", () => {
         "267645534388423@lid", // LID
       ]) {
         mockSendMessage.mockClear();
-        await adapter.send(form as ConversationId, { text: "note" });
+        await adapter.send(form as ChatId, { text: "note" });
         expect(mockSendMessage).toHaveBeenCalledWith(SELF_PN, { text: "note" });
       }
     });
@@ -802,7 +802,7 @@ describe("WhatsAppAdapter", () => {
         channel: "whatsapp",
         direction: "inbound",
         messageId: "wa-msg-001",
-        conversationId: "1234567890@s.whatsapp.net" as ConversationId,
+        chatId: "1234567890@s.whatsapp.net" as ChatId,
         senderId: "1234567890@s.whatsapp.net",
         senderDisplayName: "Bob",
         timestamp: new Date("2026-05-10T00:00:00Z"),

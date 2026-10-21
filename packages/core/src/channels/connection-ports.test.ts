@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { TalkHistory } from "../connections/types.js";
 import {
   historyQueryLimit,
@@ -28,31 +28,28 @@ import { plainText } from "./delivery/types.js";
 
 const HOUR = 3_600_000;
 
-function said(id: string, conversationId: string, hoursAgo: number): ChannelMessage {
+function said(id: string, chatId: string, hoursAgo: number): ChannelMessage {
   return {
     channel: "telegram_user",
     direction: "inbound",
     messageId: id,
-    conversationId: conversationId as ConversationId,
+    chatId: chatId as ChatId,
     senderId: "7",
     senderDisplayName: "Chat",
     text: id,
     attachments: [],
     timestamp: new Date(Date.now() - hoursAgo * HOUR),
-    thread: { kind: conversationId === "group-1" ? "group" : "dm" },
+    thread: { kind: chatId === "group-1" ? "group" : "dm" },
   };
 }
 
 /** A Connection's history over an adapter's read, as the integrations build it. */
 function historyOver(
-  fetchHistory: (conversationId: string | null, windowHours: number) => Promise<ChannelMessage[]>,
+  fetchHistory: (chatId: string | null, windowHours: number) => Promise<ChannelMessage[]>,
 ): TalkHistory {
   return {
     async query(input) {
-      const messages = await fetchHistory(
-        input.conversationId ?? null,
-        historyWindowHours(input.since),
-      );
+      const messages = await fetchHistory(input.chatId ?? null, historyWindowHours(input.since));
       return messages.slice(0, historyQueryLimit(input.limit));
     },
   };
@@ -68,12 +65,10 @@ testMessagesQueryContract("connection-backed messages", () => {
     said("d1", "dm-1", 1),
   ];
   // An adapter's read: everything in the whole-hour window, oldest first.
-  const history = historyOver(async (conversationId, windowHours) => {
+  const history = historyOver(async (chatId, windowHours) => {
     const cutoff = Date.now() - windowHours * HOUR;
     return held.filter(
-      (m) =>
-        (conversationId === null || m.conversationId === conversationId) &&
-        m.timestamp.getTime() >= cutoff,
+      (m) => (chatId === null || m.chatId === chatId) && m.timestamp.getTime() >= cutoff,
     );
   });
   const deps = {
@@ -96,8 +91,8 @@ testMessagesQueryContract("connection-backed messages", () => {
   return {
     messages,
     channel: "telegram_user",
-    conversation: "group-1" as ConversationId,
-    silentConversation: "quiet-1" as ConversationId,
+    conversation: "group-1" as ChatId,
+    silentConversation: "quiet-1" as ChatId,
   };
 });
 
@@ -107,7 +102,7 @@ describe("connection-backed messages", () => {
   it("reaches back the default window unless a since is named", async () => {
     const old = said("old", "dm-1", 30);
     const recent = said("recent", "dm-1", 1);
-    const history = historyOver(async (_conversationId, windowHours) => {
+    const history = historyOver(async (_chatId, windowHours) => {
       const cutoff = Date.now() - windowHours * HOUR;
       return [old, recent].filter((m) => m.timestamp.getTime() >= cutoff);
     });
@@ -180,7 +175,7 @@ describe("connection-backed messages, shared reads", () => {
       channel: "telegram_user",
       direction: "inbound",
       messageId: id,
-      conversationId: "dm-1" as ConversationId,
+      chatId: "dm-1" as ChatId,
       senderId: "7",
       text: id,
       attachments: [],
@@ -250,7 +245,7 @@ describe("connection-backed messages, shared reads", () => {
     const { messages, query } = port(() => [line("only", 5)]);
 
     await messages.query({});
-    await messages.query({ conversationId: "dm-1" as ConversationId });
+    await messages.query({ chatId: "dm-1" as ChatId });
 
     expect(query).toHaveBeenCalledTimes(2);
   });
@@ -323,21 +318,22 @@ describe("connection-backed send, across epochs", () => {
     const offerDirect = (answer: string) => {
       const talker = fx.talkerFactory.instances.at(-1);
       if (!talker) throw new Error("talker not built");
-      talker.directMessaging = { conversationFor: async () => answer as ConversationId };
+      talker.directMessaging = { chatFor: async () => answer as ChatId };
     };
     await registry.importCredential(connection.id, "bot", fx.validCredential());
     offerDirect("first");
     const direct = connectionPorts({ registry, channelOf: serviceChannelOf }, "fake-telegram")?.send
       ?.direct;
     if (!direct) throw new Error("the talker offers direct messaging");
+    await expect(direct.chatFor("7")).resolves.toBe("first");
     await expect(direct.conversationFor("7")).resolves.toBe("first");
 
     await connection.auth.revoke("bot");
-    await expect(direct.conversationFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+    await expect(direct.chatFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
 
     await registry.importCredential(connection.id, "bot", fx.validCredential());
     offerDirect("second");
-    await expect(direct.conversationFor("7")).resolves.toBe("second");
+    await expect(direct.chatFor("7")).resolves.toBe("second");
   });
 });
 
@@ -376,7 +372,7 @@ describe("connection ports for a service's later channels", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(heard).toEqual([{ channel: "fake-telegram-2", connectionId: second.id }]);
 
-    await ports.second?.send?.send("dm-1" as ConversationId, { text: "hi" });
+    await ports.second?.send?.send("dm-1" as ChatId, { text: "hi" });
     expect(secondTalker.state.sends).toHaveLength(1);
     expect(firstTalker.state.sends).toHaveLength(0);
   });
@@ -469,7 +465,7 @@ describe("a channel Rome does not listen to", () => {
     const connection = await registry.connect("fake-telegram");
     await registry.importCredential(connection.id, "bot", fx.validCredential());
 
-    await ports.send!.send("dm-1" as ConversationId, { text: "hi" });
+    await ports.send!.send("dm-1" as ChatId, { text: "hi" });
 
     expect(fx.talkerFactory.instances.at(-1)!.state.sends).toHaveLength(1);
   });
@@ -509,10 +505,13 @@ describe("a Connection with no channel record", () => {
     talker.state.deliver!({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(heard).toEqual([]);
-    await expect(ports.send!.send("dm-1" as ConversationId, { text: "hi" })).rejects.toBeInstanceOf(
+    await expect(ports.send!.send("dm-1" as ChatId, { text: "hi" })).rejects.toBeInstanceOf(
       ChannelNotConnected,
     );
     expect(talker.state.sends).toHaveLength(0);
+    for (const lookup of [ports.send!.direct!.chatFor, ports.send!.direct!.conversationFor]) {
+      await expect(lookup("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+    }
   });
 });
 
@@ -534,14 +533,14 @@ describe("reply streaming ports", () => {
         sent.push(`start ${message.text}`);
         if (message.text === "first") await gate;
         sent.push(`end ${message.text}`);
-        return { conversationId: "chat-1" };
+        return { chatId: "chat-1" };
       },
       ...(streams
         ? {
             replyDelivery: {
               capabilities: { maxPartLength: 10, edit: false, budget },
               codec: plainText,
-              create: async () => ({ messageId: "m1", conversationId: "chat-1" }),
+              create: async () => ({ messageId: "m1", chatId: "chat-1" }),
             },
           }
         : {}),
@@ -566,7 +565,7 @@ describe("reply streaming ports", () => {
   }
 
   const pacingWith = (on: boolean) => new ConnectionPacing(systemClock, async () => on);
-  const chat = "chat-1" as ConversationId;
+  const chat = "chat-1" as ChatId;
   const tick = () => new Promise((resolve) => setImmediate(resolve));
 
   it("offers no replies port without pacing, or from a talker that cannot stream", () => {
@@ -604,7 +603,7 @@ describe("reply streaming ports", () => {
     const replies = send.replies!;
     await expect(replies.transport.create("chat-1", "hi")).resolves.toEqual({
       messageId: "m1",
-      conversationId: "chat-1",
+      chatId: "chat-1",
     });
     live.talker = false;
     await expect(replies.transport.create("chat-1", "hi")).rejects.toMatchObject({

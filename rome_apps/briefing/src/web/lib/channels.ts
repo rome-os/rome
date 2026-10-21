@@ -10,6 +10,8 @@ export interface ChannelConnectivity {
 }
 
 interface HostConnection {
+  connectionKind?: string;
+  /** The kind of connection, as a host from before the rename names it. */
   service?: string;
   grants?: Record<string, string>;
 }
@@ -19,7 +21,7 @@ export async function fetchChannelConnectivity(): Promise<ChannelConnectivity | 
     const res = await fetch("/api/connections", { credentials: "include" });
     if (!res.ok) return null;
     const data = (await res.json()) as { connections?: HostConnection[] };
-    const whatsapp = data.connections?.find((c) => c.service === "whatsapp");
+    const whatsapp = data.connections?.find((c) => (c.connectionKind ?? c.service) === "whatsapp");
     // Conferred (authorized or degraded) counts as set up — mirrors the
     // dashboard's registry-native "configured" reading.
     const conferred = Object.values(whatsapp?.grants ?? {}).some(

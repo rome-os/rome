@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
@@ -9,7 +9,7 @@ import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
 /**
  * A channel a Connection backs, as stored: its id, the service and platform
  * it is on, the Connection behind it now (null once that Connection is gone),
- * and the agent linked to it. Vocabulary: docs/concepts/messaging.md#romes-accounts.
+ * and the agent linked to it. Vocabulary: docs/domains/chats.md#account.
  */
 export interface ChannelRecord {
   id: string;
@@ -98,6 +98,12 @@ export class ChannelRecordsRepository {
     return this.byId(id)?.service ?? id;
   }
 
+  /** The platform channel `id` is an account on, or null when no channel
+   *  records it. */
+  platformOf(id: string): string | null {
+    return this.byId(id)?.platform ?? null;
+  }
+
   /** The id of the channel `connectionId` backs, or null for none. */
   idOf(connectionId: string): string | null {
     const cached = this.ids.get(connectionId);
@@ -139,7 +145,7 @@ export class ChannelRecordsRepository {
     this.ids.clear();
 
     const service = connection.service;
-    const vacant = LINKABLE_SERVICES.has(service)
+    const vacant = LINKABLE_KINDS.has(service)
       ? undefined
       : exec
           .select()
@@ -170,7 +176,7 @@ export class ChannelRecordsRepository {
       service,
       platform: platformOf(service, connection.domain),
       connectionId: connection.id,
-      agent: LINKABLE_SERVICES.has(service) ? agent : null,
+      agent: LINKABLE_KINDS.has(service) ? agent : null,
       createdAt: now,
     };
     exec.insert(channels).values(row).run();
@@ -200,7 +206,7 @@ export class ChannelRecordsRepository {
     return this.db.transaction((tx) => {
       const row = tx.select().from(channels).where(eq(channels.id, id)).get();
       if (!row) throw new ChannelRecordNotFound(id);
-      if (agent !== null && !LINKABLE_SERVICES.has(row.service)) {
+      if (agent !== null && !LINKABLE_KINDS.has(row.service)) {
         throw new ChannelNotLinkable(id, row.service);
       }
       if (agent !== null && row.connectionId === null) throw new ChannelUnbacked(id);

@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
+import { connections as mockConnections } from "../../mock/handlers/connections-store";
 import InboxPage from "./InboxPage";
 
 beforeAll(async () => {
@@ -29,9 +30,9 @@ function mockBackend(connections: unknown[] = []) {
 
 // A lean /api/connections row for the source overview: grant states + whether
 // the Talk capability is unlocked.
-function connectionRow(service: string, grants: Record<string, string>, talkUnlocked: boolean) {
+function connectionRow(kind: string, grants: Record<string, string>, talkUnlocked: boolean) {
   return {
-    service,
+    connectionKind: kind,
     grants,
     capabilities: { talk: { state: talkUnlocked ? "unlocked" : "needs-auth" } },
   };
@@ -80,6 +81,16 @@ describe("InboxPage message sources", () => {
     expect((await badgeOf("Discord")).getByText("Connected")).toBeTruthy();
     expect((await badgeOf("Telegram User")).getByText("Not connected")).toBeTruthy();
     expect((await badgeOf("Webchat")).getByText("Always on")).toBeTruthy();
+  });
+
+  it("shows the mock dashboard's connected accounts as connected", async () => {
+    mockBackend(mockConnections.connections);
+    renderPage();
+
+    for (const label of ["Telegram", "WhatsApp", "WeChat", "Discord"]) {
+      const row = (await screen.findByText(label)).parentElement as HTMLElement;
+      expect(within(row).queryByText("Not connected")).toBeNull();
+    }
   });
 });
 

@@ -28,7 +28,7 @@ function reply({
     parts: sent.map((text, index) => ({
       block: 0,
       text,
-      receipt: { messageId: String(index + 1), conversationId: CONVERSATION },
+      receipt: { messageId: String(index + 1), chatId: CONVERSATION },
       state: "settled",
     })),
   };

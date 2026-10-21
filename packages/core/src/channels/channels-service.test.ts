@@ -1,10 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type {
-  ChannelMessage,
-  ChannelsService,
-  ConversationId,
-  MessageReceipt,
-} from "@rome-os/app-runtime";
+import type { ChannelMessage, ChannelsService, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Channels } from "./channel.js";
 import {
   backingConnection,
@@ -28,7 +23,7 @@ function line(id: string, at: number): ChannelMessage {
     channel: "whatsapp",
     direction: "inbound",
     messageId: id,
-    conversationId: "c1" as ConversationId,
+    chatId: "c1" as ChatId,
     senderId: "s1",
     text: id,
     attachments: [],
@@ -36,7 +31,7 @@ function line(id: string, at: number): ChannelMessage {
   };
 }
 
-const RECEIPT: MessageReceipt = { messageId: "m1", conversationId: "c1" as ConversationId };
+const RECEIPT: MessageReceipt = { messageId: "m1", chatId: "c1" as ChatId };
 
 /** A registry holding `connections`, each with a talker that sends through
  *  `send`, told which Connection is sending. */
@@ -64,21 +59,54 @@ function service(channels: unknown[] = []) {
     channels: () => channels as Channels,
     registry: registryOf(CONNECTIONS, send),
     channelOf: serviceChannelOf,
+    platformOf: (channel) => (channel === "whatsapp" ? "whatsapp" : null),
   });
   return { channelsService, send };
 }
 
 describe("createChannelsService", () => {
-  it("lists each channel and whether a Connection backs it", async () => {
+  it("lists each channel, its platform, and whether a Connection backs it", async () => {
     const { channelsService } = service([
       { name: "discord", messages: null },
       { name: "whatsapp", messages: null },
+      { name: "unrecorded", messages: null },
     ]);
 
     expect(await channelsService.list()).toEqual([
-      { name: "discord", sendable: true },
-      { name: "telegram_user", sendable: true },
-      { name: "whatsapp", sendable: false },
+      { name: "discord", platform: "discord", sendable: true },
+      // A signed-in Telegram is an account on the Telegram platform.
+      { name: "telegram_user", platform: "telegram", sendable: true },
+      { name: "whatsapp", platform: "whatsapp", sendable: false },
+      { name: "unrecorded", sendable: false },
+    ]);
+  });
+
+  it("names the platform of an account whose channel has an opaque id", async () => {
+    const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
+    const channelsService = createChannelsService({
+      channels: () => undefined,
+      registry: registryOf([{ connectionId: "tg-b", service: "telegram" }], send),
+      channelOf: () => "b1f0c3d2-0000-4000-8000-000000000001",
+    });
+
+    expect(await channelsService.list()).toEqual([
+      { name: "b1f0c3d2-0000-4000-8000-000000000001", platform: "telegram", sendable: true },
+    ]);
+  });
+
+  // Feishu and Lark are one kind of connection but two platforms, told apart
+  // by the app's domain, which the channel's record carries.
+  it("reads a recorded channel's platform from its record", async () => {
+    const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
+    const channelsService = createChannelsService({
+      channels: () => undefined,
+      registry: registryOf([{ connectionId: "fs-a", service: "feishu" }], send),
+      channelOf: () => "feishu",
+      platformOf: () => "lark",
+    });
+
+    expect(await channelsService.list()).toEqual([
+      { name: "feishu", platform: "lark", sendable: true },
     ]);
   });
 
@@ -96,7 +124,7 @@ describe("createChannelsService", () => {
       "discord",
       "telegram_user",
     ]);
-    await early.send("discord", "c1" as ConversationId, { text: "hi" });
+    await early.send("discord", "c1" as ChatId, { text: "hi" });
     expect(send).toHaveBeenCalledWith("discord-1", "c1", { text: "hi" });
     await expect(early.query("discord")).rejects.toThrow('Channel "discord" reads no messages');
   });
@@ -104,7 +132,7 @@ describe("createChannelsService", () => {
   it("sends through the Connection backing the channel", async () => {
     const { channelsService, send } = service();
 
-    const receipt = await channelsService.send("telegram_user", "c1" as ConversationId, {
+    const receipt = await channelsService.send("telegram_user", "c1" as ChatId, {
       text: "hi",
     });
 
@@ -115,9 +143,9 @@ describe("createChannelsService", () => {
   it("refuses a channel no Connection backs", async () => {
     const { channelsService, send } = service();
 
-    await expect(
-      channelsService.send("whatsapp", "c1" as ConversationId, { text: "hi" }),
-    ).rejects.toThrow('No Talk connection registered for "whatsapp"');
+    await expect(channelsService.send("whatsapp", "c1" as ChatId, { text: "hi" })).rejects.toThrow(
+      'No Talk connection registered for "whatsapp"',
+    );
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -139,9 +167,9 @@ describe("createChannelsService", () => {
     expect((await channelsService.list()).map((channel) => channel.name)).toEqual([
       "telegram_user",
     ]);
-    await expect(
-      channelsService.send("discord", "c1" as ConversationId, { text: "hi" }),
-    ).rejects.toThrow('No Talk connection registered for "discord"');
+    await expect(channelsService.send("discord", "c1" as ChatId, { text: "hi" })).rejects.toThrow(
+      'No Talk connection registered for "discord"',
+    );
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -172,6 +200,10 @@ describe("createChannelsService", () => {
     expect(() => (summary as unknown as { connectionIds: unknown }).connectionIds).toThrow(
       "ChannelSummary.connectionIds was removed in @rome-os/app-runtime 0.7",
     );
-    expect(JSON.parse(JSON.stringify(summary))).toEqual({ name: "discord", sendable: true });
+    expect(JSON.parse(JSON.stringify(summary))).toEqual({
+      name: "discord",
+      platform: "discord",
+      sendable: true,
+    });
   });
 });

@@ -111,6 +111,7 @@ describe("GET /connections", () => {
     const [d, t] = connections;
     expect(t).toEqual({
       id: tg.id,
+      connectionKind: "fake-telegram",
       service: "fake-telegram",
       label: "Telegram",
       grants: { bot: "authorized" },
@@ -208,6 +209,7 @@ describe("GET /connections", () => {
     const [placeholder] = connections;
     expect(placeholder).toEqual({
       id: null,
+      connectionKind: "fake-discord",
       service: "fake-discord",
       label: "fake-discord",
       grants: { bot: "unauthorized", user: "unauthorized" },

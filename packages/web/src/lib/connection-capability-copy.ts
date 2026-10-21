@@ -63,12 +63,14 @@ const BULLET_KEYS: Record<string, string[]> = {
   "linkedin.bot": ["read", "recap"],
   "discord.bot": ["reply", "start"],
   "feishu.bot": ["reply", "start"],
+  "slack_bot.bot": ["reply", "start"],
   "email.bot": ["reply", "start"],
   "agents.bot": ["reply", "start"],
   "webchat.bot": ["chat"],
   "github.user": ["work", "watch"],
   "google.user": ["work"],
   "slack.user": ["work"],
+  "shopify.user": ["work"],
   "composio.user": ["act"],
 };
 
@@ -77,7 +79,7 @@ const BULLET_KEYS: Record<string, string[]> = {
  * known these read from `bulletsFallback` (and the title from `titleFallback`)
  * instead, so an unconnected bot never shows a dangling `{{identity}}`.
  */
-const IDENTITY_SLOTS = new Set(["telegram.bot", "discord.bot"]);
+const IDENTITY_SLOTS = new Set(["telegram.bot", "discord.bot", "slack_bot.bot"]);
 
 /**
  * Resolve the full copy for one slot card. `identityKnown` selects the
@@ -135,4 +137,5 @@ const PRIVACY_SLOTS = new Set([
   "github.user",
   "google.user",
   "slack.user",
+  "shopify.user",
 ]);

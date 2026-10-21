@@ -12,7 +12,7 @@ import { sendThrough } from "../channels/connection-ports.js";
 import { ConnectionRegistry } from "./registry.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { createTestDb } from "../test/helpers.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import {
   makeZeroGrantTalk,
   makePasteTalk,
@@ -108,7 +108,7 @@ describe("scenario 1: zero-grant talk", () => {
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-webchat");
-    await sendThrough(conn, "thread-1" as ConversationId, { text: "reply" });
+    await sendThrough(conn, "thread-1" as ChatId, { text: "reply" });
 
     expect(talkerFactory.instances[0].state.sends).toHaveLength(1);
     expect(talkerFactory.instances[0].state.sends[0].address).toBe("thread-1");
@@ -478,8 +478,8 @@ describe("scenario 17: register() validation", () => {
             build: () => ({
               start() {},
               stop() {},
-              async send(conversationId) {
-                return { conversationId };
+              async send(chatId) {
+                return { chatId };
               },
             }),
           },

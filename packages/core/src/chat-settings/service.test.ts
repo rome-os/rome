@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationDescriptor, ConversationId, ConversationRef } from "@rome-os/app-runtime";
+import type { ChatDescriptor, ChatId, ChatRef } from "@rome-os/app-runtime";
 import type { TalkDirectory } from "../connections/types.js";
 import { createTestDb, serviceChannelOf, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
@@ -8,12 +8,12 @@ import type { Channels } from "../channels/channel.js";
 import { connectionPorts } from "../channels/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { ConversationSettingsRepository } from "./repository.js";
-import { ConversationSettingsService } from "./service.js";
+import { ChatSettingsRepository } from "./repository.js";
+import { ChatSettingsService } from "./service.js";
 
 function directoryDescriptor(
   service: "discord" | "feishu" | "wechat",
-  conversations: (connectionId: string) => ConversationDescriptor[],
+  conversations: (connectionId: string) => ChatDescriptor[],
 ): ConnectionDescriptor {
   return {
     service,
@@ -36,8 +36,8 @@ function directoryDescriptor(
           return {
             start() {},
             stop() {},
-            async send(conversationId) {
-              return { conversationId };
+            async send(chatId) {
+              return { chatId };
             },
             directory,
           };
@@ -60,7 +60,7 @@ function channelsOver(registry: ConnectionRegistry): () => Channels {
     });
 }
 
-describe("ConversationSettingsService", () => {
+describe("ChatSettingsService", () => {
   let testDb: TestDb | undefined;
 
   afterEach(() => testDb?.close());
@@ -71,19 +71,19 @@ describe("ConversationSettingsService", () => {
     registry.register(
       directoryDescriptor("discord", (connectionId) => [
         {
-          ref: { connectionId, conversationId: "parent" as ConversationId },
+          ref: { connectionId, chatId: "parent" as ChatId },
           service: "discord",
           kind: "channel",
           displayName: "general",
           containerName: "Rome",
         },
         {
-          ref: { connectionId, conversationId: "child" as ConversationId },
+          ref: { connectionId, chatId: "child" as ChatId },
           service: "discord",
           kind: "topic",
           displayName: "launch thread",
           containerName: "Rome",
-          parent: { connectionId, conversationId: "parent" as ConversationId },
+          parent: { connectionId, chatId: "parent" as ChatId },
         },
       ]),
     );
@@ -92,8 +92,8 @@ describe("ConversationSettingsService", () => {
     const discord = await registry.connect("discord");
     const feishu = await registry.connect("feishu");
     const wechat = await registry.connect("wechat");
-    const repository = new ConversationSettingsRepository(testDb.db);
-    const service = new ConversationSettingsService({
+    const repository = new ChatSettingsRepository(testDb.db);
+    const service = new ChatSettingsService({
       repository,
       connections: registry,
       channelOf: serviceChannelOf,
@@ -102,11 +102,10 @@ describe("ConversationSettingsService", () => {
       onChanged,
     });
     const listed = await service.list();
-    const parent = listed.items.find(
-      (item) => item.snapshot.conversation.ref.conversationId === "parent",
-    )!.snapshot.conversation.ref;
-    const childDescriptor: ConversationDescriptor = {
-      ref: { connectionId: discord.id, conversationId: "child" as ConversationId },
+    const parent = listed.items.find((item) => item.snapshot.conversation.ref.chatId === "parent")!
+      .snapshot.conversation.ref;
+    const childDescriptor: ChatDescriptor = {
+      ref: { connectionId: discord.id, chatId: "child" as ChatId },
       service: "discord",
       kind: "topic",
       displayName: "launch thread",
@@ -132,9 +131,7 @@ describe("ConversationSettingsService", () => {
   it("keeps settings on the parent while threads inherit without overrides", async () => {
     const { repository, service, changed, parent, child, childDescriptor, listed } = await setup();
 
-    expect(listed.items.map((item) => item.snapshot.conversation.ref.conversationId)).toEqual([
-      "parent",
-    ]);
+    expect(listed.items.map((item) => item.snapshot.conversation.ref.chatId)).toEqual(["parent"]);
 
     await expect(service.get(parent)).resolves.toMatchObject({
       effective: {
@@ -216,9 +213,9 @@ describe("ConversationSettingsService", () => {
       clear: [],
       actor: { kind: "guardian" },
     });
-    const thread: ConversationRef = {
+    const thread: ChatRef = {
       connectionId: discord.id,
-      conversationId: "new-thread" as ConversationId,
+      chatId: "new-thread" as ChatId,
     };
     service.observe({ ref: thread, service: "discord", kind: "topic", displayName: "new", parent });
 
@@ -230,9 +227,9 @@ describe("ConversationSettingsService", () => {
 
   it("reconciles a first-seen topic placeholder with its persisted parent", async () => {
     const { service, discord, parent } = await setup();
-    const child: ConversationRef = {
+    const child: ChatRef = {
       connectionId: discord.id,
-      conversationId: "first-seen-topic" as ConversationId,
+      chatId: "first-seen-topic" as ChatId,
     };
 
     const placeholder = await service.get(child);
@@ -246,7 +243,7 @@ describe("ConversationSettingsService", () => {
       clear: [],
       actor: { kind: "guardian", id: "guardian-1" },
     });
-    await new WebChatRepository(testDb!.db).ensureChannelConversation({
+    await new WebChatRepository(testDb!.db).ensureChannelChat({
       channel: "discord",
       threadId: "first-seen-topic",
       parentThreadId: "parent",
@@ -319,21 +316,19 @@ describe("ConversationSettingsService", () => {
   it("lists only established direct messages and lets them own only session.reset", async () => {
     const { service, repository, changed, discord } = await setup();
     const webchat = new WebChatRepository(testDb!.db);
-    await webchat.ensureChannelConversation({
+    await webchat.ensureChannelChat({
       channel: "discord",
       threadId: "dm-1",
       threadName: "Ray",
       threadType: "private",
       agentName: "main",
     });
-    const ref: ConversationRef = {
+    const ref: ChatRef = {
       connectionId: discord.id,
-      conversationId: "dm-1" as ConversationId,
+      chatId: "dm-1" as ChatId,
     };
     const listed = await service.list();
-    expect(listed.items.map((item) => item.snapshot.conversation.ref.conversationId)).not.toContain(
-      "dm-1",
-    );
+    expect(listed.items.map((item) => item.snapshot.conversation.ref.chatId)).not.toContain("dm-1");
     await expect(service.get(ref)).resolves.toMatchObject({
       supportedFields: ["session.reset"],
       effective: {
@@ -372,7 +367,7 @@ describe("ConversationSettingsService", () => {
     expect(reset.effective.session.reset).toEqual({ mode: "idle", idleMinutes: 10_080 });
     expect(reset.overrides).toEqual({});
 
-    const row = repository.find("discord", "dm-1" as ConversationId)!;
+    const row = repository.find("discord", "dm-1" as ChatId)!;
     await webchat.addConversationMessage({
       sessionId: row.id,
       role: "user",
@@ -380,10 +375,10 @@ describe("ConversationSettingsService", () => {
       platformMessageId: "dm-message-1",
     });
     expect(
-      (await service.list()).items.map((item) => item.snapshot.conversation.ref.conversationId),
+      (await service.list()).items.map((item) => item.snapshot.conversation.ref.chatId),
     ).toContain("dm-1");
 
-    expect(repository.find("discord", "dm-1" as ConversationId)).toMatchObject({
+    expect(repository.find("discord", "dm-1" as ChatId)).toMatchObject({
       sourceThreadType: "private",
       channelSettings: null,
     });
@@ -402,9 +397,9 @@ describe("ConversationSettingsService", () => {
       }),
     ).rejects.toThrow('Agent "missing-agent" is not loaded');
 
-    const feishuRef: ConversationRef = {
+    const feishuRef: ChatRef = {
       connectionId: feishu.id,
-      conversationId: "oc_group" as ConversationId,
+      chatId: "oc_group" as ChatId,
     };
     service.observe({
       ref: feishuRef,
@@ -421,9 +416,9 @@ describe("ConversationSettingsService", () => {
       }),
     ).rejects.toThrow('Unsupported conversation setting "activation.botMessages"');
 
-    const wechatRef: ConversationRef = {
+    const wechatRef: ChatRef = {
       connectionId: wechat.id,
-      conversationId: "wechat-contact" as ConversationId,
+      chatId: "wechat-contact" as ChatId,
     };
     service.observe({
       ref: wechatRef,
@@ -471,7 +466,7 @@ describe("ConversationSettingsService", () => {
 
     expect(
       (await service.list()).items.find(
-        (item) => item.snapshot.conversation.ref.conversationId === "parent",
+        (item) => item.snapshot.conversation.ref.chatId === "parent",
       )?.source,
     ).toBe("configured");
 
@@ -499,9 +494,9 @@ describe("ConversationSettingsService", () => {
       actor: { kind: "guardian" },
     });
 
-    const wechatRef: ConversationRef = {
+    const wechatRef: ChatRef = {
       connectionId: wechat.id,
-      conversationId: "wechat-group" as ConversationId,
+      chatId: "wechat-group" as ChatId,
     };
     service.observe({
       ref: wechatRef,
@@ -520,7 +515,7 @@ describe("ConversationSettingsService", () => {
 
     const page = await service.list();
     expect(page.items.map((item) => item.snapshot.conversation.service)).toEqual(["wechat"]);
-    expect(repository.find("discord", "parent" as ConversationId)?.channelSettings).not.toBeNull();
+    expect(repository.find("discord", "parent" as ChatId)?.channelSettings).not.toBeNull();
   });
 
   it("reads no row for, and refuses updates on, a Connection that backs no channel", async () => {
@@ -532,8 +527,8 @@ describe("ConversationSettingsService", () => {
       actor: { kind: "guardian" },
     });
     // discord has lost its channel record, as while `registry.remove` evicts it.
-    const unrecorded = new ConversationSettingsService({
-      repository: new ConversationSettingsRepository(testDb!.db),
+    const unrecorded = new ChatSettingsService({
+      repository: new ChatSettingsRepository(testDb!.db),
       connections: registry,
       channelOf: (connection) => (connection.id === discord.id ? null : connection.service),
       channels: () => [],
@@ -555,9 +550,9 @@ describe("ConversationSettingsService", () => {
 
   it("still reads a seen conversation and its settings once its connection is removed", async () => {
     const { registry, service, wechat } = await setup();
-    const ref: ConversationRef = {
+    const ref: ChatRef = {
       connectionId: wechat.id,
-      conversationId: "wechat-group" as ConversationId,
+      chatId: "wechat-group" as ChatId,
     };
     service.observe({ ref, service: "wechat", kind: "group", displayName: "WeChat group" });
     await service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } });
@@ -612,7 +607,7 @@ describe("ConversationSettingsService", () => {
         Array.from({ length: 5 }, (_, index) => ({
           ref: {
             connectionId,
-            conversationId: `channel-${index}` as ConversationId,
+            chatId: `channel-${index}` as ChatId,
           },
           service: "discord",
           kind: "channel" as const,
@@ -621,8 +616,8 @@ describe("ConversationSettingsService", () => {
       ),
     );
     await registry.connect("discord");
-    const service = new ConversationSettingsService({
-      repository: new ConversationSettingsRepository(testDb.db),
+    const service = new ChatSettingsService({
+      repository: new ChatSettingsRepository(testDb.db),
       connections: registry,
       channelOf: serviceChannelOf,
       channels: channelsOver(registry),
@@ -650,11 +645,11 @@ describe("ConversationSettingsService", () => {
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     registry.register(directoryDescriptor("discord", () => []));
     const discord = await registry.connect("discord");
-    const repository = new ConversationSettingsRepository(testDb.db);
+    const repository = new ChatSettingsRepository(testDb.db);
     const descriptors = Array.from({ length: 5 }, (_, index) => ({
       ref: {
         connectionId: discord.id,
-        conversationId: `channel-${index}` as ConversationId,
+        chatId: `channel-${index}` as ChatId,
       },
       service: "discord",
       kind: "channel" as const,
@@ -665,7 +660,7 @@ describe("ConversationSettingsService", () => {
     }
     repository.mutate(
       {
-        ref: { connectionId: discord.id, conversationId: "topic-1" as ConversationId },
+        ref: { connectionId: discord.id, chatId: "topic-1" as ChatId },
         service: "discord",
         kind: "topic",
         displayName: "topic-1",
@@ -676,7 +671,7 @@ describe("ConversationSettingsService", () => {
     );
     const find = rs.spyOn(repository, "find");
     const listKnown = rs.spyOn(repository, "listKnown");
-    const service = new ConversationSettingsService({
+    const service = new ChatSettingsService({
       repository,
       connections: registry,
       channelOf: serviceChannelOf,
@@ -699,13 +694,13 @@ describe("ConversationSettingsService", () => {
   it("keeps guardian chats out of conversation settings", async () => {
     testDb = createTestDb();
     await new WebChatRepository(testDb.db).createSession("chat-1", "Chat");
-    const repository = new ConversationSettingsRepository(testDb.db);
+    const repository = new ChatSettingsRepository(testDb.db);
 
-    expect(repository.find("webchat", "chat-1" as ConversationId)).toBeNull();
+    expect(repository.find("webchat", "chat-1" as ChatId)).toBeNull();
     expect(() =>
       repository.mutate(
         {
-          ref: { connectionId: "webchat", conversationId: "chat-2" as ConversationId },
+          ref: { connectionId: "webchat", chatId: "chat-2" as ChatId },
           service: "webchat",
           kind: "channel",
           displayName: "chat-2",

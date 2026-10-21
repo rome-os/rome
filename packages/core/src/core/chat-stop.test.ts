@@ -1,11 +1,11 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { stopActiveConversationTurn } from "./chat-stop.js";
 
 const ref = {
   connectionId: "connection:discord",
-  conversationId: "channel-1" as ConversationId,
+  chatId: "channel-1" as ChatId,
 };
 
 function activeTurn(initiatorId = "user-1") {

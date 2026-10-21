@@ -102,6 +102,19 @@ describe("connector actions when not logged in to Composio", () => {
     expect(result.interaction.promptText).not.toMatch(/connector_login/);
   });
 
+  it("connector_connect renders the unified card for Shopify too, never a Composio connect", async () => {
+    const action = createConnectorConnect(config("connector_connect"), deps);
+    const result = await action.execute({ toolkit: "shopify" });
+    expect(result).toMatchObject({
+      status: "pending_interaction",
+      interaction: {
+        appId: "connector",
+        promptText: expect.stringMatching(/settings/i),
+        render: { kind: "inline", componentId: "connect-card", props: { toolkit: "shopify" } },
+      },
+    });
+  });
+
   it("connector_connect refuses an unsupported toolkit and never renders a connect card", async () => {
     // connector_search exposes Composio's full catalog, so the agent can hand a
     // slug Rome can't broker (no managed auth config, e.g. twitter). The action

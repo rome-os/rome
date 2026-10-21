@@ -2,7 +2,7 @@
  * The channels Rome uses, built once for every caller that uses all of them.
  * `Channel` (channel.ts) is what one entry is, and a provider joins the
  * address-book fold, the display-name read and a person's history at once by
- * taking an entry here. Vocabulary: docs/concepts/messaging.md.
+ * taking an entry here. Vocabulary: docs/domains/chats.md.
  */
 
 import type { Connection } from "../connections/types.js";

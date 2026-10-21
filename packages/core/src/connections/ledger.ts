@@ -1,4 +1,4 @@
-// Connection grant ledger. Messaging model: docs/concepts/messaging.md.
+// Connection grant ledger. Vocabulary: docs/domains/connections.md.
 //
 // Invariants the implementations and tests hold:
 //  1. Runtime never reads inside `material` — only the envelope (`expiresAt`, kind).

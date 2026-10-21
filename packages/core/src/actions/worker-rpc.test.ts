@@ -245,7 +245,7 @@ describe("WorkerRpcServer param validation", () => {
       const listed = await rpc(fake, "channels.list", {});
       const sent = await rpc(fake, "channels.send", {
         channel: "discord",
-        conversationId: "c1",
+        chatId: "c1",
         message: { text: "hi" },
       });
       await rpc(fake, "channels.query", {

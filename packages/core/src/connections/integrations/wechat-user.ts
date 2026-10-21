@@ -22,13 +22,13 @@
 // degradation, not a revoked login.
 
 import { z } from "zod";
-import type { ConversationDescriptor, ConversationId } from "@rome-os/app-runtime";
+import type { ChatDescriptor, ChatId } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
 import {
   isWechatUserSessionRejected,
   WechatUserReader,
   WechatUserRuntime,
-  type WechatUserConversation,
+  type WechatUserChat,
   type WechatUserStatus,
 } from "../../channels/wechat-user.js";
 import { WECHAT_USER_CHANNEL } from "../../channels/wechat-user-messages.js";
@@ -366,10 +366,10 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
 
 function toConversationDescriptor(
   connectionId: string,
-  conversation: WechatUserConversation,
-): ConversationDescriptor {
+  conversation: WechatUserChat,
+): ChatDescriptor {
   return {
-    ref: { connectionId, conversationId: conversation.id as ConversationId },
+    ref: { connectionId, chatId: conversation.id as ChatId },
     service: WECHAT_USER_SERVICE,
     kind: conversation.isGroup ? "group" : "dm",
     displayName: conversation.name || conversation.id,

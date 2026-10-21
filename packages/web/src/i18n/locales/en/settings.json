@@ -154,6 +154,19 @@
           }
         }
       },
+      "slack_bot": {
+        "bot": {
+          "titleFallback": "Your agent's Slack account",
+          "bullets": {
+            "reply": "Reply when people message {{identity}} or mention it in a channel",
+            "start": "Start a task when a new message arrives"
+          },
+          "bulletsFallback": {
+            "reply": "Reply when people message this account or mention it in a channel",
+            "start": "Start a task when a new message arrives"
+          }
+        }
+      },
       "feishu": {
         "bot": {
           "title": "Your agent's Feishu account",
@@ -216,6 +229,15 @@
             "work": "Send and read messages in your Slack workspace as you"
           },
           "privacyNote": "You approve access on Slack; you can disconnect here anytime."
+        }
+      },
+      "shopify": {
+        "user": {
+          "title": "Your Shopify store",
+          "bullets": {
+            "work": "Update products and inventory, and read orders, in your store"
+          },
+          "privacyNote": "You approve access on Shopify; you can disconnect here anytime."
         }
       },
       "composio": {
@@ -330,7 +352,7 @@
       },
       "loading": "Loading chats…",
       "emptyTitle": "No configurable chats found",
-      "emptyDescription": "Connect a supported chat service, or send a message so Rome can discover the chat.",
+      "emptyDescription": "Connect an account on a supported platform, or send a message so Rome can discover the chat.",
       "loadMore": "Load more",
       "overrideCount_one": "{{count}} override",
       "overrideCount_other": "{{count}} overrides",

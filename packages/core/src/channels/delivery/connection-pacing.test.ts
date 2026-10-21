@@ -14,7 +14,7 @@ function connection(id: string, streams: boolean, live = true): Connection {
           replyDelivery: {
             capabilities: { maxPartLength: 10, edit: false, budget },
             codec: plainText,
-            create: async () => ({ messageId: "m", conversationId: "c" }),
+            create: async () => ({ messageId: "m", chatId: "c" }),
           },
         }
       : {}),

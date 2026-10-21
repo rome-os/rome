@@ -37,11 +37,11 @@ import type {
   AppLifecycleCreateParams,
   BackendTurnParams,
   BackendTurnRunner,
-  ConversationId,
-  ConversationRef,
-  ConversationSettingsControl,
-  ConversationSettingsPage,
-  ConversationSettingsSnapshot,
+  ChatId,
+  ChatRef,
+  ChatSettingsControl,
+  ChatSettingsPage,
+  ChatSettingsSnapshot,
   EventCatalogEntry,
   EventCatalogReader,
   EventPublisher,
@@ -53,9 +53,9 @@ import type {
   ChannelsService,
   MessageReceipt,
   OutgoingMessage,
-  ListConversationSettingsInput,
-  ResetConversationSettingsInput,
-  UpdateConversationSettingsInput,
+  ListChatSettingsInput,
+  ResetChatSettingsInput,
+  UpdateChatSettingsInput,
 } from "@rome-os/app-runtime";
 
 /** apps.* operations install/pack on the main process — minutes, not seconds. */
@@ -228,14 +228,10 @@ export class ChannelsServiceProxy implements ChannelsService {
     return summaries.map((summary) => withRemovedMembers(summary, REMOVED_SUMMARY_MEMBERS));
   }
 
-  send(
-    channel: string,
-    conversationId: ConversationId,
-    message: OutgoingMessage,
-  ): Promise<MessageReceipt> {
+  send(channel: string, chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     return callMain<MessageReceipt>("channels.send", {
       channel,
-      conversationId,
+      chatId,
       message,
     });
   }
@@ -251,21 +247,21 @@ export class ChannelsServiceProxy implements ChannelsService {
   }
 }
 
-export class ConversationSettingsControlProxy implements ConversationSettingsControl {
-  list(input: ListConversationSettingsInput): Promise<ConversationSettingsPage> {
-    return callMain("conversationSettings.list", input);
+export class ChatSettingsControlProxy implements ChatSettingsControl {
+  list(input: ListChatSettingsInput): Promise<ChatSettingsPage> {
+    return callMain("chatSettings.list", input);
   }
 
-  get(ref: ConversationRef): Promise<ConversationSettingsSnapshot> {
-    return callMain("conversationSettings.get", { ref });
+  get(ref: ChatRef): Promise<ChatSettingsSnapshot> {
+    return callMain("chatSettings.get", { ref });
   }
 
-  update(input: UpdateConversationSettingsInput): Promise<ConversationSettingsSnapshot> {
-    return callMain("conversationSettings.update", input);
+  update(input: UpdateChatSettingsInput): Promise<ChatSettingsSnapshot> {
+    return callMain("chatSettings.update", input);
   }
 
-  reset(input: ResetConversationSettingsInput): Promise<ConversationSettingsSnapshot> {
-    return callMain("conversationSettings.reset", input);
+  reset(input: ResetChatSettingsInput): Promise<ChatSettingsSnapshot> {
+    return callMain("chatSettings.reset", input);
   }
 }
 

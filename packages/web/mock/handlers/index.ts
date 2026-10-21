@@ -1,10 +1,10 @@
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
 import type {
-  ConversationId,
-  ConversationSettings,
-  ConversationSettingsListItem,
-  PartialConversationSettings,
-} from "@rome/api-types/conversation-settings";
+  ChatId,
+  ChatSettings,
+  ChatSettingsListItem,
+  PartialChatSettings,
+} from "@rome/api-types/chat-settings";
 import type {
   AppRefDto,
   TraceEventDto,
@@ -43,7 +43,7 @@ import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
@@ -982,7 +982,7 @@ const composioStatus: { composio: ComposioCliStatus } = {
   },
 };
 
-const conversationDefaults: ConversationSettings = {
+const conversationDefaults: ChatSettings = {
   enabled: true,
   activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
   replies: { placement: "thread" },
@@ -990,14 +990,14 @@ const conversationDefaults: ConversationSettings = {
   session: { reset: { mode: "idle", idleMinutes: 10_080 } },
 };
 
-const conversationSettings: { items: ConversationSettingsListItem[] } = {
+const conversationSettings: { items: ChatSettingsListItem[] } = {
   items: [
     {
       availability: "online",
       source: "configured",
       snapshot: {
         conversation: {
-          ref: { connectionId: "discord-1", conversationId: "engineering" as ConversationId },
+          ref: { connectionId: "discord-1", chatId: "engineering" as ChatId },
           service: "discord",
           kind: "group",
           displayName: "can you see active chats?",
@@ -1023,7 +1023,7 @@ const conversationSettings: { items: ConversationSettingsListItem[] } = {
       source: "known",
       snapshot: {
         conversation: {
-          ref: { connectionId: "telegram-1", conversationId: "dm-42" as ConversationId },
+          ref: { connectionId: "telegram-1", chatId: "dm-42" as ChatId },
           service: "telegram",
           kind: "dm",
           displayName: "Ray",
@@ -1044,7 +1044,7 @@ const conversationSettings: { items: ConversationSettingsListItem[] } = {
  * One level of nesting is all the settings shape has (`activation.mode`,
  * `session.reset`, …), so a targeted merge beats pulling in a deep-merge dep.
  */
-function mergeSettings<T extends object>(base: T, patch: PartialConversationSettings): T {
+function mergeSettings<T extends object>(base: T, patch: PartialChatSettings): T {
   const merged: Record<string, unknown> = { ...(base as Record<string, unknown>) };
   for (const [key, value] of Object.entries(patch)) {
     merged[key] =
@@ -1267,9 +1267,9 @@ export const handlers = [
     if (agent !== null && !mockAgentNames.includes(agent)) {
       return HttpResponse.json({ error: `Agent ${agent} is not loaded.` }, { status: 400 });
     }
-    if (!LINKABLE_SERVICES.has(target.service)) {
+    if (!LINKABLE_KINDS.has(target.connectionKind)) {
       return HttpResponse.json(
-        { error: `${target.service} accounts do not take an agent.` },
+        { error: `${target.connectionKind} accounts do not take an agent.` },
         { status: 400 },
       );
     }
@@ -1284,8 +1284,8 @@ export const handlers = [
     return HttpResponse.json({
       account: {
         id,
-        service: target.service,
-        platform: target.platform ?? platformOf(target.service),
+        service: target.connectionKind,
+        platform: target.platform ?? platformOf(target.connectionKind),
         connectionId: target.id,
         agent,
       },
@@ -1327,17 +1327,18 @@ export const handlers = [
     // Core removes an account of a service that names its accounts, which
     // the linkable services are.
     const unconnectedAccount =
-      LINKABLE_SERVICES.has(connection.service) &&
+      LINKABLE_KINDS.has(connection.connectionKind) &&
       Object.values(connection.grants).every((state) => state === "unauthorized");
     if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
     const others = connections.connections.filter(
-      (candidate) => candidate !== connection && candidate.service === connection.service,
+      (candidate) =>
+        candidate !== connection && candidate.connectionKind === connection.connectionKind,
     );
     if (others.length > 0) {
       connections.connections.splice(connections.connections.indexOf(connection), 1);
     } else {
       connection.id = null;
-      connection.label = connection.service;
+      connection.label = connection.connectionKind;
       connection.channel = null;
       connection.agent = null;
     }
@@ -1345,19 +1346,19 @@ export const handlers = [
   }),
   http.get("/api/tailscale/devices", () => HttpResponse.json(tailscale)),
   http.get("/api/integrations/composio/status", () => HttpResponse.json(composioStatus)),
-  http.get("/api/conversation-settings", () => HttpResponse.json(conversationSettings)),
+  http.get("/api/chat-settings", () => HttpResponse.json(conversationSettings)),
   // Auto-save writes through on every edit, so mock mode needs a real write
   // path or the dashboard would toast an error on each change.
-  http.patch("/api/conversation-settings", async ({ request }) => {
+  http.patch("/api/chat-settings", async ({ request }) => {
     const body = (await request.json()) as {
-      ref: { connectionId: string; conversationId: string };
-      set: PartialConversationSettings;
+      ref: { connectionId: string; chatId: string };
+      set: PartialChatSettings;
       clear?: string[];
     };
     const found = conversationSettings.items.find(
       (candidate) =>
         candidate.snapshot.conversation.ref.connectionId === body.ref.connectionId &&
-        candidate.snapshot.conversation.ref.conversationId === body.ref.conversationId,
+        candidate.snapshot.conversation.ref.chatId === body.ref.chatId,
     );
     if (!found) return HttpResponse.json({ error: "Unknown conversation" }, { status: 404 });
     found.snapshot.effective = mergeSettings(found.snapshot.effective, body.set);

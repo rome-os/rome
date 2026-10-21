@@ -157,6 +157,48 @@ describe("grantProfileFromBundle", () => {
     });
   });
 
+  it("shopify: the store's identity lands on the profile; the refresh token stays material", () => {
+    const bundle: OAuthTokenBundle = {
+      accessToken: "shpat_live",
+      refreshToken: "shprt_live",
+      expiresAt: "2026-10-21T04:00:00.000Z",
+      scope: ["read_products"],
+      raw: { shop: "acme.myshopify.com" },
+    };
+    const profile = grantProfileFromBundle("shopify", bundle, {
+      subject: "acme.myshopify.com",
+      login: "acme.myshopify.com",
+      displayName: "Acme Goods",
+      email: "owner@example.com",
+      avatarUrl: null,
+    });
+    expect(profile).toEqual({
+      subject: "acme.myshopify.com",
+      login: "acme.myshopify.com",
+      displayName: "Acme Goods",
+      email: "owner@example.com",
+      scopes: ["read_products"],
+    });
+    expect(credentialFromBundle("shopify", bundle)).toEqual({
+      material: {
+        accessToken: "shpat_live",
+        refreshToken: "shprt_live",
+        expiresAt: "2026-10-21T04:00:00.000Z",
+      },
+      expiresAt: new Date("2026-10-21T04:00:00.000Z"),
+    });
+  });
+
+  it("shopify: fails the conferral when Rome Cloud doesn't name the store's domain", () => {
+    const bundle: OAuthTokenBundle = { accessToken: "shpat_live", raw: {} };
+    expect(() => grantProfileFromBundle("shopify", bundle, { displayName: "Acme" })).toThrow(
+      /myshopify\.com/,
+    );
+    expect(() => grantProfileFromBundle("shopify", bundle, { login: "acme.example.com" })).toThrow(
+      /myshopify\.com/,
+    );
+  });
+
   it("omits empty identity fields and empty scopes — sparse but typed", () => {
     expect(grantProfileFromBundle("github", { accessToken: "gho" }, {})).toEqual({});
     expect(

@@ -160,13 +160,39 @@ describe("Markdown", () => {
 
   it("routes ```mermaid fences to the mermaid plugin, not the shiki code highlighter", () => {
     const { container } = renderMd("```mermaid\ngraph TD; A-->B;\n```");
-    // The mermaid plugin renders asynchronously (mermaid.js, behind Suspense),
+    // The mermaid plugin renders asynchronously (Pele, loaded on demand),
     // so synchronously we only see its loading skeleton. The meaningful guard
     // is that the fence is NOT handed to the shiki code block — and isn't
     // rendered as a plain paragraph of source text either.
     expect(container.querySelector("[data-streamdown='code-block']")).toBeNull();
     expect(container.querySelector("[data-streamdown='inline-code']")).toBeNull();
     expect(container.textContent ?? "").not.toContain("graph TD");
+  });
+
+  it("renders a ```mermaid fence to a Pele SVG once the block scrolls into view", async () => {
+    rs.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    rs.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(private readonly callback: IntersectionObserverCallback) {}
+        observe(target: Element) {
+          this.callback(
+            [{ isIntersecting: true, target } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver,
+          );
+        }
+        unobserve() {}
+        disconnect() {}
+        takeRecords() {
+          return [];
+        }
+      },
+    );
+    const { container } = renderMd("```mermaid\ngraph TD; A-->B;\n```");
+
+    await waitFor(() => expect(container.querySelector("svg.pele-flowchart")).not.toBeNull());
+    const style = container.querySelector("svg.pele-flowchart")?.getAttribute("style") ?? "";
+    expect(style).toContain("--pele-line:");
   });
 
   it("renders inline and block math with KaTeX once the math plugin loads", async () => {

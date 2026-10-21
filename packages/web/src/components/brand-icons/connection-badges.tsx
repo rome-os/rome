@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { RomeLogo } from "@/components/logo";
 import { GithubIcon } from "@/components/brand-icons/github-icon";
 import { GoogleIcon } from "@/components/brand-icons/google-icon";
+import { ShopifyIcon } from "@/components/brand-icons/shopify-icon";
 import { SlackIcon } from "@/components/brand-icons/slack-icon";
 
 /**
@@ -129,6 +130,7 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
   slack: { Icon: SlackIcon, badge: "border border-border bg-white" },
   google: { Icon: GoogleIcon, badge: "border border-border bg-white" },
   github: { Icon: GithubIcon, badge: "bg-foreground text-background" },
+  shopify: { Icon: ShopifyIcon, badge: "bg-foreground text-background" },
   webchat: {
     Icon: RomeLogo,
     badge: "bg-foreground text-background",
@@ -141,6 +143,9 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
   composio: { Icon: Blocks, badge: "bg-primary/15 text-primary" },
 };
 
+/** Services drawn with another service's mark: a Slack bot is still Slack. */
+const BADGE_OF_SERVICE: Readonly<Record<string, string>> = { slack_bot: "slack" };
+
 /** Square brand badge for a unified Connection card header. An unknown service
  *  gets an empty bordered square. */
 export function ConnectionBrandBadge({
@@ -150,7 +155,7 @@ export function ConnectionBrandBadge({
   connection: string;
   className?: string;
 }) {
-  const entry = CONNECTION_BADGES[connection];
+  const entry = CONNECTION_BADGES[BADGE_OF_SERVICE[connection] ?? connection];
   return (
     <div
       className={cn(

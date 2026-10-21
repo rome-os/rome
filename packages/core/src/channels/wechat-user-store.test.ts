@@ -152,7 +152,7 @@ describe("WechatUserReader over a real store", () => {
   });
 
   it("keeps an unreadable message between readable ones", async () => {
-    const messages = await (await reader()).messages({ conversationId: "wxid_friend", limit: 10 });
+    const messages = await (await reader()).messages({ chatId: "wxid_friend", limit: 10 });
     expect(messages.map((m) => m.text)).toEqual(["before", "[Unreadable message]", "after"]);
   }, 60_000);
 

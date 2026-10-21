@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   ChannelMessage,
-  ConversationId,
+  ChatId,
   InboundEvent,
   ChannelActivity,
   ChannelDirectMessaging,
@@ -30,7 +30,7 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
     channel: "telegram",
     direction: "inbound",
     messageId: "m-1",
-    conversationId: "c-1" as ConversationId,
+    chatId: "c-1" as ChatId,
     senderId: "guardian",
     text: "hello",
     attachments: [],
@@ -43,7 +43,7 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
 function talkService(
   service: string,
   ports: { sends?: boolean; receives?: boolean; history?: boolean } = {},
-  direct: ChannelDirectMessaging | null = null,
+  direct: Pick<ChannelDirectMessaging, "chatFor"> | null = null,
   activity: ChannelActivity | null = null,
   history: TalkHistory | null = null,
   directory: TalkDirectory | null = null,
@@ -67,8 +67,8 @@ function talkService(
                 epoch.deliver = deliver;
               },
               stop() {},
-              async send(conversationId) {
-                return { conversationId, messageId: `sent-${epochs.length}` };
+              async send(chatId) {
+                return { chatId, messageId: `sent-${epochs.length}` };
               },
               ...(direct && { directMessaging: direct }),
               ...(activity && { activity }),
@@ -182,7 +182,7 @@ describe("channelList", () => {
     const { registry, channels } = setup([talkService("telegram").descriptor]);
     const telegram = channels.find((channel) => channel.name === "telegram")!;
 
-    await expect(telegram.send!.send("c-1" as ConversationId, { text: "hi" })).rejects.toThrow(
+    await expect(telegram.send!.send("c-1" as ChatId, { text: "hi" })).rejects.toThrow(
       'No connection backs channel "telegram"',
     );
 
@@ -191,9 +191,9 @@ describe("channelList", () => {
       material: { token: "t" },
       expiresAt: "never",
     });
-    await expect(
-      telegram.send!.send("c-1" as ConversationId, { text: "hi" }),
-    ).resolves.toMatchObject({ messageId: "sent-1" });
+    await expect(telegram.send!.send("c-1" as ChatId, { text: "hi" })).resolves.toMatchObject({
+      messageId: "sent-1",
+    });
   });
 
   it("reads a live channel's history through its Connection, newest first", async () => {
@@ -290,18 +290,16 @@ describe("channelList", () => {
   });
 
   it("reaches an account directly only through a Connection that offers it", async () => {
-    const conversationFor = rs.fn(async (id: string) => id as ConversationId);
+    const chatFor = rs.fn(async (id: string) => id as ChatId);
     const { registry, channels } = setup([
-      talkService("telegram", {}, { conversationFor }).descriptor,
+      talkService("telegram", {}, { chatFor }).descriptor,
       talkService("discord").descriptor,
     ]);
     const telegram = channels.find((channel) => channel.name === "telegram")!;
     const discord = channels.find((channel) => channel.name === "discord")!;
 
     // Nothing backs either channel yet: the lookup says so, as a send would.
-    await expect(telegram.send!.direct!.conversationFor("u-1")).rejects.toBeInstanceOf(
-      ChannelNotConnected,
-    );
+    await expect(telegram.send!.direct!.chatFor("u-1")).rejects.toBeInstanceOf(ChannelNotConnected);
 
     for (const service of ["telegram", "discord"]) {
       const connection = await registry.connect(service);
@@ -310,7 +308,7 @@ describe("channelList", () => {
         expiresAt: "never",
       });
     }
-    await expect(telegram.send!.direct!.conversationFor("u-1")).resolves.toBe("u-1");
+    await expect(telegram.send!.direct!.chatFor("u-1")).resolves.toBe("u-1");
     // A Connection whose talker offers no direct messaging.
     expect(discord.send!.direct).toBeNull();
   });
@@ -319,7 +317,7 @@ describe("channelList", () => {
     const listConversations = rs.fn(async (_input: { limit: number }) => ({
       conversations: [
         {
-          ref: { connectionId: "unused", conversationId: "general" as ConversationId },
+          ref: { connectionId: "unused", chatId: "general" as ChatId },
           service: "discord",
           kind: "channel" as const,
           displayName: "general",
@@ -378,8 +376,8 @@ describe("channelList", () => {
       material: { token: "t" },
       expiresAt: "never",
     });
-    await send.activity!.begin({ conversationId: "c-1" as ConversationId });
-    expect(begin).toHaveBeenCalledWith({ conversationId: "c-1" });
+    await send.activity!.begin({ chatId: "c-1" as ChatId });
+    expect(begin).toHaveBeenCalledWith({ chatId: "c-1" });
   });
 
   it("delivers admitted, answerable messages to a subscription that outlives reconnects", async () => {
@@ -405,7 +403,7 @@ describe("channelList", () => {
     service.epochs[0]!.deliver?.(message({ messageId: "first" }));
     await rs.waitFor(() => expect(heard.map((e) => e.message.messageId)).toEqual(["first"]));
     expect(heard[0]?.kind).toBe("message");
-    expect(heard[0]?.ref).toEqual({ connectionId: connection.id, conversationId: "c-1" });
+    expect(heard[0]?.ref).toEqual({ connectionId: connection.id, chatId: "c-1" });
     expect(failing).toHaveBeenCalledTimes(1);
 
     await connection.auth.revoke("bot");
@@ -484,9 +482,9 @@ describe("channelList", () => {
       expiresAt: "never",
     });
     const deliver = service.epochs[0]!.deliver!;
-    deliver(message({ messageId: "c1-first", conversationId: "c-1" as ConversationId }));
-    deliver(message({ messageId: "c1-second", conversationId: "c-1" as ConversationId }));
-    deliver(message({ messageId: "c2-first", conversationId: "c-2" as ConversationId }));
+    deliver(message({ messageId: "c1-first", chatId: "c-1" as ChatId }));
+    deliver(message({ messageId: "c1-second", chatId: "c-1" as ChatId }));
+    deliver(message({ messageId: "c2-first", chatId: "c-2" as ChatId }));
 
     // c-2 is heard while c-1's first event is still in its handler.
     await rs.waitFor(() => expect(started).toEqual(["c1-first", "c2-first"]));
@@ -663,7 +661,7 @@ describe("joinLaterChannel", () => {
         budget: { burst: 1, refillMs: 1, conversationSpacingMs: 0 },
       },
       codec: plainText,
-      create: async () => ({ messageId: "m", conversationId: "c" }),
+      create: async () => ({ messageId: "m", chatId: "c" }),
     });
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     registry.register(service.descriptor);

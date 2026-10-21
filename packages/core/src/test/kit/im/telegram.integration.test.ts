@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { TelegramAdapter } from "../../../channels/telegram.js";
 import { comparable, loadCapture } from "./capture.js";
 import textCapture from "./captures/telegram-text.capture.json" with { type: "json" };
@@ -7,7 +7,7 @@ import { deferred } from "./peer.js";
 import { TELEGRAM_CHAT, TELEGRAM_TOKEN, TelegramPeer } from "./telegram.js";
 
 const capture = loadCapture(textCapture);
-const chat = String(TELEGRAM_CHAT) as ConversationId;
+const chat = String(TELEGRAM_CHAT) as ChatId;
 
 describe("TelegramPeer", () => {
   it("answers the recorded requests the way Telegram did", async () => {

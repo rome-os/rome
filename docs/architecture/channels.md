@@ -1,6 +1,6 @@
 # Channels
 
-A channel is the layer in core that carries the messages of one of [Rome's accounts](../concepts/messaging.md#romes-accounts). The word belongs to the code: the guardian meets accounts, not channels. This page covers the channel ports, the server-owned setup protocol every adapter goes through, and the rules that keep the connect flow generic across services.
+A channel is the layer in core that carries the messages of one of Rome's [accounts](../domains/chats.md#account). The word belongs to the code: the guardian meets accounts, not channels. This page covers the channel ports, the server-owned setup protocol every adapter goes through, and the rules that keep the connect flow generic across services.
 
 ## Channel ports
 
@@ -15,7 +15,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - Inbound delivers only what a subscriber may answer. Rome's own sends, the guardian's messages from another device, reactions, edits and frames with no text or attachments stay out of it. The complete record is `messages`.
 - The `send` port reaches one account directly through `direct`, where the channel offers it. While no Connection exists for the channel, that lookup rejects as a send does, which is how People tells an unconnected channel from one that cannot be written to. A Connection that exists but has no live talker reads as a channel that cannot be written to, as it did before.
 - The `send` port shows a typing indicator through `activity`, where the channel offers it. It is cosmetic, and nothing waits on it.
-- An inbound event carries its chat's `ConversationRef`, the address that chat settings and stop take, so a subscriber does not track what backs the channel.
+- An inbound event carries its chat's `ChatRef`, the address that chat settings and stop take, so a subscriber does not track what backs the channel.
 - An inbound event's message is a `ChannelMessage`, the record `messages` answers: it names the channel and says it came inbound.
 - Inbound is live and at most once. Nothing is acknowledged or replayed, and a subscriber catches up by reading `messages`.
 - `messages` answers one `query` for what was said on the channel: every chat or one, since a moment or not, newest first. It answers the record `inbound` delivers, plus the channel and the direction, whether a copy Rome keeps or the platform holds the data, and a caller cannot tell which. Neither kind is complete: a copy holds what was synced, and a live read what the platform returns.
@@ -26,7 +26,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - Every subscriber hears every event. A subscriber hears one chat's events one at a time, in arrival order. Different chats and different subscribers never wait on each other, so one slow or failing handler holds up only its own chat for its own subscriber. A handler that never settles stops that chat for that subscriber for good, so a subscriber settles every event it takes. A handler still running after ten minutes is logged, and so is a chat with twenty events waiting. A chat holds at most a hundred waiting events per subscriber. Past that, the oldest is dropped and logged. Events still waiting when a subscription ends are dropped, and a handler already running keeps running.
 - An inbound subscription outlives a reconnect of whatever backs it.
 - Inbound hears a channel only while Rome listens to its account ([An account's agent](#an-accounts-agent)). While Rome does not, the channel keeps its subscribers, but nothing it receives reaches them, and admission does not run.
-- `directory` lists the chats a channel can see, each with its `ConversationRef`, so chat settings reach a channel's chats without reaching a Connection. A listing that fails is logged and answers no chats.
+- `directory` lists the chats a channel can see, each with its `ChatRef`, so chat settings reach a channel's chats without reaching a Connection. A listing that fails is logged and answers no chats.
 
 ### Channels for app actions
 
@@ -63,7 +63,7 @@ An [agent](../concepts/agents.md) can be linked to one of Rome's accounts, which
 ### Invariants
 
 - An account has at most one agent, stored on its channel by its canonical id. Main is linked like any other agent, as `core:main`.
-- Only a Feishu, Telegram, or Discord account made for an agent, or the signed-in Telegram user, takes an agent ([`account-agents.ts`](../../packages/api-types/src/account-agents.ts)). A channel that carries Rome's own traffic, such as the Cloud `agents` channel, takes no link.
+- Only a Feishu, Telegram, Discord, or Slack account made for an agent, or the signed-in Telegram user, takes an agent ([`account-agents.ts`](../../packages/api-types/src/account-agents.ts)). A channel that carries Rome's own traffic, such as the Cloud `agents` channel, takes no link.
 - An agent can be linked to any number of channels, several on one platform included ([ADR](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-10-20-an-agent-linked-to-any-number-of-channels)). A link changes only the channel it names. Linking an agent to a second Telegram account leaves it linked to the first. Main follows the same rule.
 - Rome never picks an account's agent. A linkable service's newly connected account has no agent, so it is silent until the guardian links one ([ADR](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-10-21-rome-never-picks-an-accounts-agent)). On upgrade, every backed channel of a linkable service is linked to main, since those accounts answered as main before.
 - A linkable service's account that connects starts fresh. It never takes over a released channel, its own earlier one included, so it inherits no history. Any other service's next account takes back the service's released channel, since apps address that service's one channel by its name.
@@ -76,7 +76,7 @@ An [agent](../concepts/agents.md) can be linked to one of Rome's accounts, which
 - The Feishu group settings card starts on the group's own agent choice, or on the agent that answers when the group has none. A Save that keeps the agent the card showed leaves the group's choice as it is. So the card cannot pin a group to the account's current agent, and the group keeps following the link.
 - A channel of a service that takes no link, such as webchat, email or the Cloud `agents` channel, keeps its chats' agent choice, and main answers by default.
 - An agent's shell commands act as the Discord account of the channel the agent's chat came in on. A chat on another service's channel, such as webchat, acts as the first Discord account that can act. The channel is the agent's own claim, so any agent can act as any of Rome's Discord accounts. Agents are trusted with every one of them, and a second account is not a boundary between the agents linked to each.
-- People and [account pairing](#account-pairing) key an account by its service, not by its channel. An address on a service's second channel resolves to the same person as on its first when the platform gives that person one address across Rome's accounts. Telegram and Discord do. Feishu does not: its sender id is issued per app, so a guardian is paired again on a second Feishu account.
+- People and [account pairing](#account-pairing) key an account by its service, not by its channel. An address on a service's second channel resolves to the same person as on its first when the platform gives that person one address across Rome's accounts. Telegram and Discord do. Slack does within one workspace: its member ids are issued per workspace, so a Slack address carries its workspace, and the same person in two workspaces is two accounts. Feishu does not: its sender id is issued per app, so a guardian is paired again on a second Feishu account.
 
 ## Connection setup
 
@@ -86,8 +86,21 @@ Every channel is connected through **one server-owned setup protocol** ([decisio
 
 - **Setup is uniform.** Enabling any channel drives the same generic surface (a conferral setup addressed by connection + grant). Setup proves provider credentials, while account pairing grants human authority. A connected account can receive pairing requests before any account is linked to the guardian.
 - **The dashboard renders setups generically.** The connect UI is a single standard renderer plus a small set of registered custom components for the few steps that need bespoke presentation (e.g. rendering a QR image). Adding a channel adds neither a connect route nor a per-service connect card.
-- **An account exists only while it is connected.** Adding another account of a service runs that service's setup for a new account, and the account and its channel come into being only when the setup connects it, so an abandoned add leaves nothing behind. Disconnecting the last grant of an account whose service names its accounts (Telegram, Discord, Feishu, the signed-in Telegram user) removes the account and releases its channel. Any other Connection stays after its last grant goes.
+- **An account exists only while it is connected.** Adding another account of a service runs that service's setup for a new account, and the account and its channel come into being only when the setup connects it, so an abandoned add leaves nothing behind. Disconnecting the last grant of an account whose service names its accounts (Telegram, Discord, Feishu, Slack bots, the signed-in Telegram user) removes the account and releases its channel. Any other Connection stays after its last grant goes.
 - **Post-connection configuration is not setup.** Config and feature surfaces that operate *after* a channel is linked — Discord per-channel agent routing, the Telegram personal-account dialog list — live under their own named routes, separate from the setup protocol and never part of connecting.
+
+## Slack bots
+
+A Slack bot is one of Rome's accounts with one agent ([`slack-bot.ts`](../../packages/core/src/connections/integrations/slack-bot.ts)). Slack gives an app exactly one bot in a workspace, so each bot is its own Slack app, and two agents in one workspace are two apps. It is a separate service from `slack`, the Rome Cloud connection that acts in a workspace for the guardian.
+
+### Invariants
+
+- The guardian creates each app from a link that carries its manifest, installs it, and pastes its bot token and app-level token back. Rome never creates or configures a Slack app, and holds no configuration token. A manifest carries no picture, so the guardian uploads one on the app's settings page.
+- Rome opens its own Socket Mode connection to Slack, so an instance needs no public address and no Cloud relay for Slack's events.
+- Rome hears direct messages to the bot and mentions of it in a channel. It never asks for permission to read a channel's history, so other lines in a channel never reach it.
+- A direct message is one chat. A mention in a channel starts a chat for that thread, and the reply goes into the thread.
+- Reconnecting an account asks for fresh tokens from its own app. A new app is a different bot, so it is a different account and cannot renew this one.
+- Members of the workspace reach the agent through [account pairing](#account-pairing), the guardian included.
 
 ## LinkedIn replies
 

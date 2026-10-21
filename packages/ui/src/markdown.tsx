@@ -1,6 +1,5 @@
 "use client";
 
-import type { MermaidConfig } from "@streamdown/mermaid";
 import {
   memo,
   useCallback,
@@ -25,7 +24,9 @@ import {
 } from "./markdown-plugins.js";
 import { MermaidDownloadMenuLayer } from "./mermaid-download-menu.js";
 
-export type { Components, MermaidConfig, MermaidOptions, StreamdownProps };
+/** Mermaid config as Streamdown passes it to the diagram renderer. */
+export type MermaidConfig = NonNullable<MermaidOptions["config"]>;
+export type { Components, MermaidOptions, StreamdownProps };
 export { defaultUrlTransform } from "streamdown";
 
 export const MARKDOWN_LINK_CLASS = "wrap-anywhere text-primary underline";

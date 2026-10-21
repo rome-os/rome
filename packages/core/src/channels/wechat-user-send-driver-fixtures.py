@@ -186,14 +186,14 @@ class FakeStore:
                 return
             chat, text = self.client.sent[self.seen]
             conv = self.where.get(chat, chat)
-            self.lines.append({"id": f"{conv}:{len(self.lines) + 1}", "conversationId": conv,
+            self.lines.append({"id": f"{conv}:{len(self.lines) + 1}", "chatId": conv,
                                "conversationName": chat, "isSelf": True, "type": "text", "text": text,
                                "timestamp": int(self.clock.now) - self.skew})
             self.seen += 1
 
     def chat(self, chat_id, timeout):
         self._sync()
-        return [m for m in self.lines if m["conversationId"] == chat_id]
+        return [m for m in self.lines if m["chatId"] == chat_id]
 
     def recent(self, since, timeout):
         self._sync()
@@ -245,7 +245,7 @@ class SendTests(unittest.TestCase):
 
     def test_an_earlier_identical_line_is_not_the_confirmation(self):
         client, desk, store, clock = rig()
-        store.lines.append({"id": "filehelper:1", "conversationId": "filehelper", "isSelf": True,
+        store.lines.append({"id": "filehelper:1", "chatId": "filehelper", "isSelf": True,
                             "type": "text", "text": "rome test", "timestamp": 1})
         self.assertEqual(send(client, desk, store, clock), "filehelper:2")
 
@@ -431,12 +431,12 @@ class SendTests(unittest.TestCase):
         def return_and_same_text_elsewhere(name):
             key(name)
             if name == "Return" and client.sent:  # "ok" sent to another chat from the phone
-                store.lines.append({"id": "wxid_other:1", "conversationId": "wxid_other",
+                store.lines.append({"id": "wxid_other:1", "chatId": "wxid_other",
                                     "conversationName": "Li Wei", "isSelf": True, "type": "text",
                                     "text": "rome test", "createTime": int(clock.now)})
         client.key = return_and_same_text_elsewhere
         answer = send(client, desk, store, clock)
-        self.assertEqual(answer, [m["id"] for m in store.lines if m["conversationId"] == "filehelper"][-1])
+        self.assertEqual(answer, [m["id"] for m in store.lines if m["chatId"] == "filehelper"][-1])
 
     def test_a_copy_elsewhere_with_no_echo_is_a_misdelivery(self):
         client, desk, store, clock = rig()
@@ -635,14 +635,14 @@ class SendTests(unittest.TestCase):
 
     def test_a_chat_the_store_names_otherwise_is_refused_before_anything(self):
         client, desk, store, clock = rig()
-        store.lines.append({"id": "filehelper:1", "conversationId": "filehelper", "conversationName": "Li Wei",
+        store.lines.append({"id": "filehelper:1", "chatId": "filehelper", "conversationName": "Li Wei",
                             "isSelf": False, "type": "text", "text": "hi", "timestamp": 1})
         self.assertFails("not-found", False, lambda: send(client, desk, store, clock))
         self.assertEqual(desk.events, [])
 
     def test_a_chat_the_store_names_the_same_is_sent(self):
         client, desk, store, clock = rig()
-        store.lines.append({"id": "filehelper:1", "conversationId": "filehelper", "conversationName": "File Transfer",
+        store.lines.append({"id": "filehelper:1", "chatId": "filehelper", "conversationName": "File Transfer",
                             "isSelf": False, "type": "text", "text": "hi", "timestamp": 1})
         self.assertEqual(send(client, desk, store, clock), "filehelper:2")
 

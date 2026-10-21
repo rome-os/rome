@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ChatStopHandler, ConversationId } from "@rome-os/app-runtime";
+import type { ChatStopHandler, ChatId } from "@rome-os/app-runtime";
 import type { ChatInputCommandInteraction } from "discord.js";
 import {
   buildDiscordSlashCommands,
@@ -51,7 +51,7 @@ describe("Discord stop command", () => {
     const editReply = rs.fn(async () => undefined);
     const interaction = {
       commandName: "stop",
-      channelId: "channel-1" as ConversationId,
+      channelId: "channel-1" as ChatId,
       user: { id: "user-1" },
       deferReply,
       editReply,
@@ -65,7 +65,7 @@ describe("Discord stop command", () => {
 
     expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
     expect(stop).toHaveBeenCalledWith({
-      ref: { connectionId: "connection:discord", conversationId: "channel-1" },
+      ref: { connectionId: "connection:discord", chatId: "channel-1" },
       service: "discord",
       senderId: "user-1",
     });

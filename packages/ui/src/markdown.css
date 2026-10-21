@@ -26,11 +26,9 @@
 @source "../node_modules/streamdown/dist/*.js";
 @source "../node_modules/@streamdown/code/dist/*.js";
 @source "../node_modules/@streamdown/math/dist/*.js";
-@source "../node_modules/@streamdown/mermaid/dist/*.js";
 @source "../../../streamdown/dist/*.js";
 @source "../../../@streamdown/code/dist/*.js";
 @source "../../../@streamdown/math/dist/*.js";
-@source "../../../@streamdown/mermaid/dist/*.js";
 
 /* Dependency sources and authored docs still expose off-roster candidates.
    Keep them out of host bundles. Restate inline code on Rome's spacing scale. */
@@ -438,7 +436,7 @@
 }
 
 /* A diagram keeps its canvas instead, and the card goes flush around it:
-   Mermaid fills its nodes with the same `--surface` the card is tinted with,
+   Pele fills its nodes with the same `--surface` the card is tinted with,
    so a diagram drawn straight onto that tint loses every node interior. */
 .rome-markdown [data-streamdown="mermaid-block"] {
   border: 0;

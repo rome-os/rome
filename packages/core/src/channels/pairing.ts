@@ -1,4 +1,4 @@
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -35,6 +35,13 @@ function pairingAccount(
     : code;
 }
 
+/** The docs page that explains pairing for a service. */
+function pairingGuidePage(service: string): string {
+  if (service === "feishu") return "lark";
+  if (service === "slack_bot") return "slack";
+  return service;
+}
+
 function pairingSuccess(
   channel: string,
   id: string,
@@ -64,12 +71,12 @@ export function createPairingAdmission(deps: {
     // agent's first answer. Approval is recorded before the send, so only the
     // order of the two bot messages is at stake.
     const reply = (text: string): void => {
-      sendOn(deps.registry, connectionId, message.conversationId, text).catch(() => {
+      sendOn(deps.registry, connectionId, message.chatId, text).catch(() => {
         // Provider errors may include the rejected request body. Do not log them.
         log.error("pairing reply failed", { connectionId, senderId: message.senderId });
       });
     };
-    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
+    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${pairingGuidePage(service)}).`;
     try {
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {
@@ -128,7 +135,7 @@ export function createPairingAdmission(deps: {
           channelUserId: message.senderId,
           displayName: message.senderDisplayName ?? message.senderId,
           username: message.senderUsername,
-          ...(message.thread?.kind === "dm" ? { conversationId: message.conversationId } : {}),
+          ...(message.thread?.kind === "dm" ? { chatId: message.chatId } : {}),
         },
         deps.talkGrants(service),
       );
@@ -170,16 +177,16 @@ export async function notifyPairingResolution(
   const payload = pairingPayload(approval);
   if (!payload || approval.status !== "approved") return;
   try {
-    const conversationId =
-      (payload.conversationId as ConversationId | undefined) ??
+    const chatId =
+      (payload.chatId as ChatId | undefined) ??
       (await registry
         .get(payload.connectionId)
-        .withTalker((talker) => talker.directMessaging?.conversationFor(payload.channelUserId)));
-    if (!conversationId) throw new Error("Direct conversation unavailable");
+        .withTalker((talker) => talker.directMessaging?.chatFor(payload.channelUserId)));
+    if (!chatId) throw new Error("Direct conversation unavailable");
     await sendOn(
       registry,
       payload.connectionId,
-      conversationId,
+      chatId,
       pairingSuccess(payload.channel, payload.channelUserId, payload.displayName, payload.username),
     );
   } catch {
@@ -194,8 +201,8 @@ export async function notifyPairingResolution(
 async function sendOn(
   registry: Pick<ConnectionRegistry, "get">,
   connectionId: string,
-  conversationId: ConversationId,
+  chatId: ChatId,
   text: string,
 ): Promise<void> {
-  await sendThrough(registry.get(connectionId), conversationId, { text });
+  await sendThrough(registry.get(connectionId), chatId, { text });
 }

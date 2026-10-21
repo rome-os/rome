@@ -9,7 +9,7 @@
     "./bootstrap": "./src/bootstrap.ts",
     "./chat": "./src/chat.ts",
     "./computer-use": "./src/computer-use.ts",
-    "./conversation-settings": "./src/conversation-settings.ts",
+    "./chat-settings": "./src/chat-settings.ts",
     "./trace-segments": "./src/trace-segments.ts",
     "./app-manager-errors": "./src/app-manager-errors.ts",
     "./approvals": "./src/approvals.ts",

@@ -1,4 +1,4 @@
-// Connection management HTTP surface. Messaging model: docs/concepts/messaging.md.
+// Connection management HTTP surface. Vocabulary: docs/domains/connections.md.
 //
 // One list for everything the ConnectionRegistry holds — channels and OAuth
 // integrations alike — the sole feed for the dashboard's Connections surface.
@@ -10,7 +10,7 @@
 // the connect setup, a later account of a service included.
 
 import type { ConnectionAccountFields } from "@rome/api-types/channel-accounts";
-import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { createLogger } from "../../logger.js";
@@ -81,6 +81,10 @@ interface ConnectionView
    *  service the guardian has never connected (nothing to address or tear down
    *  yet; the connect setup mints the row). */
   id: string | null;
+  /** The kind of connection, such as `telegram_user`. */
+  connectionKind: string;
+  /** @deprecated The kind of connection under its old name, which apps built
+   *  before the rename read. */
   service: string;
   label: string;
   grants: Record<GrantName, GrantState>;
@@ -149,6 +153,7 @@ function buildConnectionView(
 
   return {
     id: conn.id,
+    connectionKind: conn.service,
     service: conn.service,
     label: conn.label,
     grants,
@@ -159,7 +164,7 @@ function buildConnectionView(
     channel: channel?.id ?? null,
     platform: channel?.platform ?? null,
     // Null means silent, so a service that takes no link reports none.
-    agent: LINKABLE_SERVICES.has(conn.service) ? (channel?.agent ?? null) : undefined,
+    agent: LINKABLE_KINDS.has(conn.service) ? (channel?.agent ?? null) : undefined,
     severalAccounts: registry.getDescriptor(conn.service)?.severalAccounts === true,
   };
 }
@@ -229,6 +234,7 @@ function placeholderView(
 
   return {
     id: null,
+    connectionKind: service,
     service,
     label: service,
     grants,

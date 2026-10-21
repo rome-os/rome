@@ -114,7 +114,7 @@ describe("People timeline API", () => {
 
     // Telegram: no mirror, so her direct conversation is the channel session's
     // own transcript.
-    const conversation = await deps.webchatRepo.ensureChannelConversation({
+    const conversation = await deps.webchatRepo.ensureChannelChat({
       channel: "telegram",
       threadId: TG_THREAD,
       threadType: "private",
@@ -279,7 +279,7 @@ describe("People timeline API", () => {
     // own transcript of the channel session, and by the sentinel that triaged
     // it. Production stores the same words in all three; the wording differs
     // here only so the assertion can say which store answered.
-    const conversation = await deps.webchatRepo.ensureChannelConversation({
+    const conversation = await deps.webchatRepo.ensureChannelChat({
       channel: "whatsapp",
       threadId: WA_JID,
       threadType: "private",
@@ -319,7 +319,7 @@ describe("People timeline API", () => {
       approved: true,
       channelMappings: [{ channel: "telegram", channelUserId: "tg-both" }],
     });
-    const conversation = await deps.webchatRepo.ensureChannelConversation({
+    const conversation = await deps.webchatRepo.ensureChannelChat({
       channel: "telegram",
       threadId: "tg-both",
       threadType: "private",
@@ -354,7 +354,7 @@ describe("People timeline API", () => {
       approved: true,
       channelMappings: [{ channel: "telegram", channelUserId: "tg-in-group" }],
     });
-    await deps.webchatRepo.ensureChannelConversation({
+    await deps.webchatRepo.ensureChannelChat({
       channel: "telegram",
       threadId: GROUP_THREAD,
       threadType: "group",
@@ -708,7 +708,7 @@ describe("People API", () => {
     // The mirror, Rome's own transcript of the channel session, and the
     // sentinel that triaged it all hold the same WhatsApp message. Adding them
     // would treble the number beside her name.
-    const conversation = await deps.webchatRepo.ensureChannelConversation({
+    const conversation = await deps.webchatRepo.ensureChannelChat({
       channel: "whatsapp",
       threadId: NADIA_JID,
       threadType: "private",

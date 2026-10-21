@@ -29,7 +29,7 @@ import {
 import { buildApp } from "../api/index.js";
 import { COOKIE_NAME, createSession } from "../lib/auth.js";
 import type { Action, ActionConfig, ActionResult } from "./types.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import type { OutgoingMessage } from "../types.js";
 import type { ThreadContext } from "../core/types.js";
 
@@ -105,7 +105,7 @@ function buildHarness() {
             },
           ],
         };
-        await channel.send(event.channelContext.threadId as ConversationId, msg);
+        await channel.send(event.channelContext.threadId as ChatId, msg);
       },
     },
   );
@@ -271,7 +271,7 @@ describe("Approval flow E2E — triggering an approval", () => {
     expect(r1.approval.approvalId).not.toBe(r2.approval.approvalId);
     const pending = await h.approvalsRepo.findPending();
     expect(pending.length).toBeGreaterThanOrEqual(2);
-    expect(h.channel.sentMessages.map((m) => m.conversationId)).toEqual(["thread-A", "thread-B"]);
+    expect(h.channel.sentMessages.map((m) => m.chatId)).toEqual(["thread-A", "thread-B"]);
 
     h.testDb.close();
   });

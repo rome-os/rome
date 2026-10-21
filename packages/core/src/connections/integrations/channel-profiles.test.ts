@@ -55,7 +55,7 @@ const CASES: ChannelCase[] = [
   {
     service: "discord",
     descriptor: makeDiscordDescriptor({
-      conversationSettings: stub,
+      chatSettings: stub,
       personMappingRepo: stub,
       listAgents: () => [],
     }),
@@ -72,7 +72,7 @@ const CASES: ChannelCase[] = [
   {
     service: "feishu",
     descriptor: createFeishuDescriptor({
-      conversationSettings: stub,
+      chatSettings: stub,
       personMappingRepo: stub,
       listAgents: () => [],
     }),

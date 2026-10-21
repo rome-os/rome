@@ -24,8 +24,8 @@
 import type {
   BackendTurnParams,
   BackendTurnRunner,
-  ConversationId,
-  ConversationRepository,
+  ChatId,
+  ChatRepository,
 } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
 import type { AgentRunnerInterface, RunParams } from "../core/types.js";
@@ -84,7 +84,7 @@ export interface BackendTurnRunnerDeps {
    * falls back to the default working dir. */
   resolveWorkingDir?: (channel: string, threadId: string) => Promise<string | undefined>;
   /** Durable conversation projection used to attach provider delivery ids. */
-  conversations?: ConversationRepository;
+  chats?: ChatRepository;
 }
 
 export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBackendTurnRunner {
@@ -166,7 +166,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             await emit({ ...msg, agent: params.agentName }, { recorded: true });
           }
           if (!reply.trim()) return;
-          await send.send(params.threadId as ConversationId, {
+          await send.send(params.threadId as ChatId, {
             text: reply,
             ...(turnId ? { turnId } : {}),
           });
@@ -191,18 +191,18 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       }
       const send = deps.channel(params.channel)?.send;
       if (!send) throw new Error(`Channel "${params.channel}" cannot send`);
-      const delivery = await send.send(params.threadId as ConversationId, {
+      const delivery = await send.send(params.threadId as ChatId, {
         text: reply,
         ...(turnId ? { turnId } : {}),
       });
-      if (deps.conversations) {
+      if (deps.chats) {
         try {
-          const conversation = await deps.conversations.ensureChannelConversation({
+          const conversation = await deps.chats.ensureChannelChat({
             channel: params.channel,
             threadId: params.threadId,
             agentName: params.agentName,
           });
-          await deps.conversations.recordOutboundMessage({
+          await deps.chats.recordOutboundMessage({
             sessionId: conversation.id,
             content: JSON.stringify([{ type: "text", content: reply }]),
             platformMessageId: delivery?.messageId,

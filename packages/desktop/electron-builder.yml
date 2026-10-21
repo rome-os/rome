@@ -12,6 +12,10 @@ files:
 extraMetadata:
   main: dist/main/index.js
 asar: true
+# The only native module, better-sqlite3, ships as native/better_sqlite3.node
+# (scripts/rebuild-native.mjs). Rebuilding node_modules would only recompile
+# the workspace copy that Rome Core uses, which the app never loads.
+npmRebuild: false
 asarUnpack:
   - "native/**/*.node"
 extraResources:

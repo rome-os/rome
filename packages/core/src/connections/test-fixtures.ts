@@ -11,12 +11,7 @@
 //
 // All factories produce plain objects — no singletons, safe to call per test.
 
-import type {
-  ChannelMessage,
-  Attachment,
-  ConversationId,
-  MessageReceipt,
-} from "@rome-os/app-runtime";
+import type { ChannelMessage, Attachment, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import { CredentialRejected, Disconnected } from "./errors.js";
 import type {
   Actor,
@@ -66,7 +61,7 @@ export interface FakeTalkerState {
   /** Every start() call is recorded here as the creds snapshot at the time. */
   starts: Array<{ creds: Record<string, Credential> }>;
   stopCount: number;
-  sends: Array<{ address: ConversationId; msg: OutgoingMessage }>;
+  sends: Array<{ address: ChatId; msg: OutgoingMessage }>;
   /** If set, the next send() call will throw this error (then clear). */
   nextSendError: Error | null;
   /** If set, start() synchronously delivers these messages via the deliver
@@ -136,7 +131,7 @@ export function makeFakeTalker(
       }
       state.sends.push({ address, msg });
       return {
-        conversationId: address,
+        chatId: address,
       } satisfies MessageReceipt;
     },
   };
@@ -347,7 +342,7 @@ export function makeInboundMessage(overrides?: Partial<ChannelMessage>): Channel
     channel: "test",
     direction: "inbound",
     messageId: "msg-1",
-    conversationId: "thread-1" as ConversationId,
+    chatId: "thread-1" as ChatId,
     senderId: "sender-1",
     senderDisplayName: "Sender",
     thread: { kind: "dm" },

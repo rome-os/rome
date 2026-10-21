@@ -61,7 +61,7 @@ class MemoryPlatform implements DeliveryTransport {
     this.fail("create");
     const id = `m${this.messages.length + 1}`;
     this.messages.push({ id, ...(replyTo ? { replyTo } : {}), history: [text] });
-    return { messageId: id, conversationId: this.conversation };
+    return { messageId: id, chatId: this.conversation };
   }
 
   /** What each message shows now. */
@@ -434,7 +434,7 @@ describe("ReplyDelivery", () => {
     expect(outcome.parts).toEqual([
       expect.objectContaining({
         state: "settled",
-        receipt: { messageId: "m1", conversationId: "c1" },
+        receipt: { messageId: "m1", chatId: "c1" },
       }),
     ]);
     expect(outcome.failure).toEqual({ kind: "rejected", message: "no" });

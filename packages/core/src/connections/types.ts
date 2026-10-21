@@ -1,12 +1,12 @@
-// Connection caller and builder contracts. Messaging model: docs/concepts/messaging.md.
+// Connection caller and builder contracts. Vocabulary: docs/domains/connections.md.
 //
 // The runtime never inspects the contents of a credential's `material` (only
 // the `expiresAt` envelope).
 
 import type {
   ChannelMessage,
-  ConversationDescriptor,
-  ConversationId,
+  ChatDescriptor,
+  ChatId,
   MessageReceipt,
   OutgoingMessage,
   ChannelActivity,
@@ -31,11 +31,7 @@ import type { CredentialRejected, Disconnected } from "./errors.js";
  * store of its own (channels/connection-ports.ts).
  */
 export interface TalkHistory {
-  query(input: {
-    conversationId?: ConversationId;
-    since?: Date;
-    limit?: number;
-  }): Promise<ChannelMessage[]>;
+  query(input: { chatId?: ChatId; since?: Date; limit?: number }): Promise<ChannelMessage[]>;
 }
 
 /** The conversations a Connection can see, for conversation settings. */
@@ -45,7 +41,7 @@ export interface TalkDirectory {
     cursor?: string;
     limit: number;
     includeTopics?: boolean;
-  }): Promise<{ conversations: ConversationDescriptor[]; nextCursor?: string }>;
+  }): Promise<{ conversations: ChatDescriptor[]; nextCursor?: string }>;
 }
 
 export interface TalkFeatureMap {
@@ -53,7 +49,9 @@ export interface TalkFeatureMap {
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
   directory: TalkDirectory;
-  directMessaging: ChannelDirectMessaging;
+  /** A talker answers only `chatFor`. The channel port adds the deprecated
+   *  `conversationFor` for callers. */
+  directMessaging: Pick<ChannelDirectMessaging, "chatFor">;
   /** Writing a reply as it is generated: creating and editing messages. */
   replyDelivery: DeliveryTransport;
 }
@@ -82,7 +80,7 @@ export type ProfileRecord = Record<string, unknown>;
 
 // OutgoingMessage is the existing @rome-os/app-runtime shape (phase 2 collapses
 // the message contract; do not invent a new shape now).
-export type { ConversationId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
+export type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 
 export interface OperationCall {
   operation: string;
@@ -256,7 +254,7 @@ export interface Talker extends TalkFeatures {
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
   stop(): void | Promise<void>;
-  send(conversationId: ConversationId, msg: OutgoingMessage): Promise<MessageReceipt>;
+  send(chatId: ChatId, msg: OutgoingMessage): Promise<MessageReceipt>;
 }
 
 /** Builder-side Act implementation. */
@@ -314,7 +312,7 @@ export interface ConnectionDescriptor {
    *  with its own Connection and channel. A service that keeps its stores or
    *  adapter state under one channel, or is a single presence by nature
    *  (webchat, email), leaves it unset. Vocabulary:
-   *  docs/concepts/messaging.md#romes-accounts. */
+   *  docs/domains/chats.md#account. */
   severalAccounts?: boolean;
   /** The platform account a grant's profile names (a bot id, an app id), or
    *  null when the profile names none. It reads the one field rather than
@@ -326,7 +324,7 @@ export interface ConnectionDescriptor {
    *  A service with a Talk that declares it holds accounts that exist only while
    *  connected: the last grant's disconnect removes the Connection
    *  (`isUnconnectedAccount`). Declare it only for a service in
-   *  `LINKABLE_SERVICES`, whose channels start fresh. */
+   *  `LINKABLE_KINDS`, whose channels start fresh. */
   accountIdOf?(grant: GrantName, profile: ProfileRecord): string | null;
   capabilities: Partial<{
     talker: {

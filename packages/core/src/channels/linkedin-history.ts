@@ -1,7 +1,7 @@
 // A row of the LinkedIn mirror as the message it records, for the channel's
 // `query` and its account reads (linkedin-messages.ts).
 
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { linkedInMemberIdFromProfileUrl, type LinkedInHistoryMessage } from "./linkedin-sync.js";
 
 /**
@@ -42,7 +42,7 @@ export function linkedInHistoryMessage(row: LinkedInHistoryMessage): ChannelMess
     channel: "linkedin",
     direction: row.senderIsSelf ? "outbound" : "inbound",
     messageId: row.messageId,
-    conversationId: row.threadId as ConversationId,
+    chatId: row.threadId as ChatId,
     senderId: linkedInChannelUserId(row),
     ...(row.senderName ? { senderDisplayName: row.senderName } : {}),
     text: linkedInHistoryText(row),

@@ -1,14 +1,14 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { MessageStore, type Peer, PeerServer } from "./peer.js";
 import { runScenario } from "./scenario.js";
 import type { TestChannel } from "./test-channel.js";
 import { TRACE_META_KEY, traceSchema } from "./trace.js";
 
-const CONVERSATION = "chat-1" as ConversationId;
+const CONVERSATION = "chat-1" as ChatId;
 
 describe("runScenario", () => {
   let directory: string;

@@ -36,6 +36,7 @@ import {
   TelegramIcon,
   WeChatIcon,
 } from "@/components/brand-icons/connection-badges";
+import { SlackIcon } from "@/components/brand-icons/slack-icon";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import {
   type ApiConnection,
@@ -157,6 +158,7 @@ const PLATFORM_ICONS: Partial<Record<string, typeof FeishuIcon>> = {
   telegram: TelegramIcon,
   discord: DiscordIcon,
   wechat: WeChatIcon,
+  slack: SlackIcon,
 };
 
 function AccountPills({ accounts }: { accounts: EnvoyAccount[] }) {

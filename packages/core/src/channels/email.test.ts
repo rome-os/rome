@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { EmailAdapter, type EmailInboxCoordinates } from "./email.js";
 import type {
   MailProvider,
@@ -120,7 +120,7 @@ describe("EmailAdapter.ingestInbound", () => {
         channel: "email",
         direction: "inbound",
         messageId: "msg_1",
-        conversationId: "t1",
+        chatId: "t1",
         senderId: GUARDIAN,
         senderDisplayName: "Guardian",
         text: "hello from the full body",
@@ -239,7 +239,7 @@ describe("EmailAdapter.send", () => {
     const raw = JSON.stringify(buildEvent());
     await adapter.ingestInbound(raw, sign(raw));
 
-    const receipt = await adapter.send("t1" as ConversationId, { text: "my reply" });
+    const receipt = await adapter.send("t1" as ChatId, { text: "my reply" });
 
     expect(provider.sent).toHaveLength(1);
     // Multipart: markdown text + rendered HTML.
@@ -248,14 +248,14 @@ describe("EmailAdapter.send", () => {
     expect(provider.sent[0].html).toContain("my reply");
     expect(provider.sent[0].to).toBeUndefined();
     // The provider's thread id names the conversation the email went out in.
-    expect(receipt).toEqual({ conversationId: "t_out", messageId: "m_out" });
+    expect(receipt).toEqual({ chatId: "t_out", messageId: "m_out" });
   });
 
   it("starts a fresh email when a chat-style conversation names an address", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    await adapter.send("zoolsher@gmail.com" as ConversationId, { text: "cold open" });
+    await adapter.send("zoolsher@gmail.com" as ChatId, { text: "cold open" });
 
     expect(provider.sent).toHaveLength(1);
     expect(provider.sent[0].to).toBe("zoolsher@gmail.com");
@@ -282,7 +282,7 @@ describe("EmailAdapter.send", () => {
     });
     await adapter.start();
 
-    await adapter.send("" as ConversationId, {
+    await adapter.send("" as ChatId, {
       kind: "email",
       text: "**hi**",
       to: ["guardian", "Other <other@x.com>"],
@@ -304,7 +304,7 @@ describe("EmailAdapter.send", () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    await adapter.send("t-restarted" as ConversationId, {
+    await adapter.send("t-restarted" as ChatId, {
       kind: "email",
       text: "after restart",
       inReplyToMessageId: "msg_persisted",
@@ -319,7 +319,7 @@ describe("EmailAdapter.send", () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    await adapter.send("" as ConversationId, {
+    await adapter.send("" as ChatId, {
       kind: "email",
       to: "report@x.com",
       subject: "Report",
@@ -336,18 +336,18 @@ describe("EmailAdapter.send", () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    const receipt = await adapter.send("t-empty" as ConversationId, { text: "   " });
+    const receipt = await adapter.send("t-empty" as ChatId, { text: "   " });
 
     expect(provider.sent).toHaveLength(0);
     expect(provider.listMessages).not.toHaveBeenCalled();
-    expect(receipt).toEqual({ conversationId: "t-empty" });
+    expect(receipt).toEqual({ chatId: "t-empty" });
   });
 
   it("skips a parts-only approval card without a provider call or an error", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    const receipt = await adapter.send("t-approval" as ConversationId, {
+    const receipt = await adapter.send("t-approval" as ChatId, {
       parts: [
         {
           type: "approval_card",
@@ -359,7 +359,7 @@ describe("EmailAdapter.send", () => {
       ],
     });
 
-    expect(receipt).toEqual({ conversationId: "t-approval" });
+    expect(receipt).toEqual({ chatId: "t-approval" });
     expect(provider.send).not.toHaveBeenCalled();
     expect(provider.listMessages).not.toHaveBeenCalled();
   });
@@ -369,12 +369,12 @@ describe("EmailAdapter.send", () => {
     const adapter = makeAdapter(provider);
 
     await expect(
-      adapter.send("" as ConversationId, { kind: "email", to: "not-an-address", text: "hi" }),
+      adapter.send("" as ChatId, { kind: "email", to: "not-an-address", text: "hi" }),
     ).rejects.toThrow('"not-an-address" is not an email address. No email was sent.');
     await expect(
-      adapter.send("" as ConversationId, { kind: "email", to: "guardian", text: "hi" }),
+      adapter.send("" as ChatId, { kind: "email", to: "guardian", text: "hi" }),
     ).rejects.toThrow("Rome has no guardian email address yet");
-    await expect(adapter.send("guardian" as ConversationId, { text: "hi" })).rejects.toThrow(
+    await expect(adapter.send("guardian" as ChatId, { text: "hi" })).rejects.toThrow(
       "Rome has no guardian email address yet",
     );
     expect(provider.listMessages).not.toHaveBeenCalled();
@@ -386,7 +386,7 @@ describe("EmailAdapter.send", () => {
     const adapter = makeAdapter(provider);
 
     await expect(
-      adapter.send("" as ConversationId, { kind: "email", to: "a@example.com", text: "   " }),
+      adapter.send("" as ChatId, { kind: "email", to: "a@example.com", text: "   " }),
     ).rejects.toThrow("Email requires non-empty text or HTML. No email was sent.");
     expect(provider.send).not.toHaveBeenCalled();
   });
@@ -397,7 +397,7 @@ describe("EmailAdapter.send", () => {
       const provider = makeProvider();
       const adapter = makeAdapter(provider);
 
-      await adapter.send("zoolsher@gmail.com" as ConversationId, {
+      await adapter.send("zoolsher@gmail.com" as ChatId, {
         text: "Open [file.md](</memory/topics/file.md>)",
       });
 
@@ -481,7 +481,7 @@ describe("EmailAdapter inbound attachments", () => {
       channel: "email",
       direction: "inbound",
       messageId: "msg_unknown",
-      conversationId: "t1" as ConversationId,
+      chatId: "t1" as ChatId,
       senderId: GUARDIAN,
       text: "",
       attachments,
@@ -816,7 +816,7 @@ describe("EmailAdapter.fetchHistory", () => {
     (provider.listMessages as ReturnType<typeof rs.fn>).mockResolvedValue({
       messages: [listItem({ providerMessageId: "m2", threadId: "tA" })],
     });
-    await adapter.send("tA" as ConversationId, {
+    await adapter.send("tA" as ChatId, {
       kind: "email",
       to: "alice@example.com",
       text: "hello",

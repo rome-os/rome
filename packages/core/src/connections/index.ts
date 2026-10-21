@@ -1,4 +1,4 @@
-// Connection public surface. Messaging model: docs/concepts/messaging.md.
+// Connection public surface. Vocabulary: docs/domains/connections.md.
 
 export * from "./types.js";
 export * from "./errors.js";

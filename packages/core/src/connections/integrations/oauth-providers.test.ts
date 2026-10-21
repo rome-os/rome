@@ -1,17 +1,20 @@
 // The Rome Cloud-OAuth connection-state descriptors (github/slack/
-// google), exercised over a REAL ConnectionRegistry + drizzle grant ledger. This
+// google/shopify), exercised over a REAL ConnectionRegistry + drizzle grant ledger. This
 // phase migrates ONLY the connection state (no Actor/Watcher — capabilities are
 // deliberately empty), so the contracts under test are:
 //
-//   1. Shape: one grant per provider (github/google `user`, slack `workspace`),
+//   1. Shape: one grant per provider (github/google `user`, slack `workspace`,
+//      shopify `store`),
 //      no capabilities (act/talk/watch all unsupported).
 //   2. Grant lifecycle: import → authorized; revoke → unauthorized.
 //   3. Boot rehydration: a fresh registry over the same ledger rehydrates the
 //      authorized grant on load().
-//   4. romeCloudOAuth at-load renew: an EXPIRED credential (google's tokens do
-//      expire) renews via the scheme, which answers "re-confer" (no Rome Cloud
-//      refresh exchange yet), so the grant degrades until the guardian
-//      reconnects.
+//   4. romeCloudOAuth at-load renew: an EXPIRED credential (google's and
+//      shopify's tokens do expire) renews via the scheme. With no refresh wired
+//      it answers "re-confer" and the grant degrades until the guardian
+//      reconnects; with a refresh wired (shopify) the grant renews.
+//   5. Shopify's setup asks which store to connect before the redirect, and an
+//      expiring grant renews ahead of expiry.
 
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
@@ -34,8 +37,14 @@ import { createTestDb } from "../../test/helpers.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import type { GrantLedger } from "../ledger.js";
 import { ConnectionRegistry } from "../registry.js";
+import { RenewalUnavailable } from "../errors.js";
+import type { SetupContext, SetupForm, SetupInteraction } from "../setup/types.js";
 import type { Credential } from "../types.js";
-import { OAUTH_PROVIDER_GRANTS, makeOAuthProviderDescriptor } from "./oauth-providers.js";
+import {
+  OAUTH_PROVIDER_GRANTS,
+  makeOAuthProviderDescriptor,
+  makeOAuthProviderSetup,
+} from "./oauth-providers.js";
 
 function credential(material: Record<string, string>): Credential {
   return { material, expiresAt: "never" };
@@ -54,6 +63,7 @@ const CASES: Array<[OAuthProvider, string, Record<string, string>]> = [
   ["github", "user", { accessToken: "gho_live" }],
   ["google", "user", { accessToken: "ya29.live", refreshToken: "1//refresh" }],
   ["slack", "workspace", { botToken: "xoxb-live", userToken: "xoxp-live" }],
+  ["shopify", "store", { accessToken: "shpat_live", refreshToken: "shprt_live" }],
 ];
 
 describe("OAuth profile revival", () => {
@@ -124,6 +134,23 @@ describe("OAuth profile revival", () => {
     const revive = makeOAuthProviderDescriptor(provider).reviveProfile;
     expect(() => revive?.(grant, { displayName: 42 })).toThrow();
     expect(() => revive?.(grant, { email: "" })).toThrow();
+  });
+
+  it("revives Shopify's stored schema: the myshopify.com domain is the handle", () => {
+    const revive = makeOAuthProviderDescriptor("shopify").reviveProfile;
+    const display = revive?.("store", {
+      subject: "acme.myshopify.com",
+      login: "acme.myshopify.com",
+      displayName: "Acme Goods",
+      email: "owner@example.com",
+      scopes: ["read_products"],
+    });
+    expect(display?.displayName).toBe("Acme Goods");
+    expect(display?.handle).toBe("acme.myshopify.com");
+    expect(display?.email).toBe("owner@example.com");
+    expect(display?.avatarUrl).toBeUndefined();
+    // A store has no avatar: the schema refuses one.
+    expect(() => revive?.("store", { avatarUrl: "https://example.com/a.png" })).toThrow();
   });
 
   it("rejects reviving a stored record carrying keys outside the service's schema", () => {
@@ -233,6 +260,234 @@ describe("OAUTH_PROVIDER_GRANTS", () => {
       github: "user",
       google: "user",
       slack: "workspace",
+      shopify: "store",
     });
+  });
+});
+
+describe("OAuth conferral setup", () => {
+  const ctx: SetupContext = {
+    step: (_label, fn) => fn(new AbortController().signal),
+    signal: new AbortController().signal,
+  };
+
+  function scriptedInteraction(answers: string[]) {
+    const prompts: Array<SetupForm & { error?: string }> = [];
+    const interact: SetupInteraction = {
+      prompt: async (form) => {
+        prompts.push(form);
+        return { shop: answers.shift() ?? "" };
+      },
+      show: () => {},
+      redirect: async () => ({ handoff: "handoff-code", state: "state-1" }),
+    };
+    return { interact, prompts };
+  }
+
+  function deps() {
+    const beginRedirect = rs.fn(async (_opts?: { shop?: string }) => "https://broker/authorize");
+    return {
+      beginRedirect,
+      redeem: async () => ({
+        credential: { material: { accessToken: "t" }, expiresAt: "never" as const },
+      }),
+    };
+  }
+
+  it("asks for the Shopify store, re-asks on a bad answer, and names it on the redirect", async () => {
+    const d = deps();
+    const { interact, prompts } = scriptedInteraction(["acme.com", "https://Acme.myshopify.com/"]);
+
+    await makeOAuthProviderSetup("shopify", d)(interact, ctx);
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0].error).toBeUndefined();
+    expect(prompts[1].error).toMatch(/myshopify\.com/);
+    expect(d.beginRedirect).toHaveBeenCalledWith({ shop: "acme.myshopify.com" });
+  });
+
+  it("goes straight to the redirect for a provider that isn't per store", async () => {
+    const d = deps();
+    const { interact, prompts } = scriptedInteraction([]);
+
+    await makeOAuthProviderSetup("github", d)(interact, ctx);
+
+    expect(prompts).toHaveLength(0);
+    expect(d.beginRedirect).toHaveBeenCalledWith(undefined);
+  });
+});
+
+describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
+  afterEach(() => {
+    rs.restoreAllMocks();
+    while (openDbs.length) openDbs.pop()?.();
+  });
+
+  const setupDeps = (refresh: (refreshToken: string) => Promise<Credential>) => ({
+    beginRedirect: async () => "https://broker/authorize",
+    redeem: async () => ({ credential: credential({ accessToken: "t" }) }),
+    refresh,
+  });
+
+  function renewed(): Credential {
+    return {
+      material: { accessToken: "shpat_new", refreshToken: "shprt_new" },
+      expiresAt: new Date(Date.now() + 60 * 60_000),
+    };
+  }
+
+  async function connectedRegistry(
+    ledger: GrantLedger,
+    refresh: (refreshToken: string) => Promise<Credential>,
+    expiresInMs: number,
+  ) {
+    const registry = new ConnectionRegistry({ ledger });
+    registry.register(makeOAuthProviderDescriptor("shopify", setupDeps(refresh)));
+    const conn = await registry.connect("shopify");
+    await registry.importCredential(conn.id, "store", {
+      material: { accessToken: "shpat_old", refreshToken: "shprt_old" },
+      expiresAt: new Date(Date.now() + expiresInMs),
+    });
+    return { registry, conn };
+  }
+
+  async function storedAccessToken(ledger: GrantLedger, connectionId: string) {
+    const record = await ledger.getGrant(connectionId, "store");
+    const material = record?.credential?.material;
+    return material?.kind === "inline" ? material.record.accessToken : undefined;
+  }
+
+  it("renews an expired grant at load through the refresh", async () => {
+    const ledger = makeLedger();
+    const refresh = rs.fn(async () => renewed());
+    const { conn } = await connectedRegistry(ledger, refresh, -60_000);
+
+    const registry2 = new ConnectionRegistry({ ledger });
+    registry2.register(makeOAuthProviderDescriptor("shopify", setupDeps(refresh)));
+    await registry2.load();
+
+    expect(refresh).toHaveBeenCalledWith("shprt_old");
+    expect(registry2.find("shopify")[0].auth.grants().store).toBe("authorized");
+    expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_new");
+  });
+
+  it("renews a grant that expires within the window, and leaves a later one alone", async () => {
+    const ledger = makeLedger();
+    const refresh = rs.fn(async () => renewed());
+    const { registry, conn } = await connectedRegistry(ledger, refresh, 5 * 60_000);
+
+    await registry.renewExpiring(60_000);
+    expect(refresh).not.toHaveBeenCalled();
+
+    await registry.renewExpiring(10 * 60_000);
+    expect(refresh).toHaveBeenCalledWith("shprt_old");
+    expect(conn.auth.grants().store).toBe("authorized");
+    expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_new");
+  });
+
+  it("keeps a still-valid grant when an early refresh fails, so the next pass can retry", async () => {
+    const ledger = makeLedger();
+    const refresh = rs.fn(async (): Promise<Credential> => {
+      throw new Error("Rome Cloud unavailable");
+    });
+    const { registry, conn } = await connectedRegistry(ledger, refresh, 5 * 60_000);
+
+    await registry.renewExpiring(10 * 60_000);
+
+    expect(refresh).toHaveBeenCalled();
+    expect(conn.auth.grants().store).toBe("authorized");
+    expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_old");
+  });
+
+  it("keeps an expired grant when Rome Cloud can't answer, and renews it on a later pass", async () => {
+    const ledger = makeLedger();
+    const refresh = rs.fn(async (): Promise<Credential> => {
+      throw new RenewalUnavailable("Rome Cloud OAuth refresh did not complete.");
+    });
+    const { registry, conn } = await connectedRegistry(ledger, refresh, -1_000);
+
+    await registry.renewExpiring(10 * 60_000);
+    expect(conn.auth.grants().store).toBe("authorized");
+
+    refresh.mockImplementation(async () => renewed());
+    await registry.renewExpiring(10 * 60_000);
+    expect(conn.auth.grants().store).toBe("authorized");
+    expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_new");
+  });
+
+  it("recovers an expired grant once Rome Cloud accepts the instance again", async () => {
+    // A 401 from Rome Cloud rejects the instance, not the Shopify grant, so the
+    // refresh reports it as unavailable and the grant must survive until the
+    // instance authenticates again.
+    const ledger = makeLedger();
+    const refresh = rs.fn(async (): Promise<Credential> => {
+      throw new RenewalUnavailable("invalid_token");
+    });
+    const { registry, conn } = await connectedRegistry(ledger, refresh, -1_000);
+
+    await registry.renewExpiring(10 * 60_000);
+    await registry.renewExpiring(10 * 60_000);
+    expect(conn.auth.grants().store).toBe("authorized");
+
+    refresh.mockImplementation(async () => renewed());
+    await registry.renewExpiring(10 * 60_000);
+    expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_new");
+  });
+
+  it("keeps an expired grant at boot when Rome Cloud can't answer", async () => {
+    const ledger = makeLedger();
+    const unavailable = rs.fn(async (): Promise<Credential> => {
+      throw new RenewalUnavailable("Rome Cloud OAuth refresh did not complete.");
+    });
+    await connectedRegistry(ledger, unavailable, -60_000);
+
+    const registry2 = new ConnectionRegistry({ ledger });
+    registry2.register(makeOAuthProviderDescriptor("shopify", setupDeps(unavailable)));
+    await registry2.load();
+
+    expect(registry2.find("shopify")[0].auth.grants().store).toBe("authorized");
+  });
+
+  it("never lets a renewal in flight overwrite a reconnect that lands meanwhile", async () => {
+    const ledger = makeLedger();
+    let finishRefresh!: () => void;
+    const refresh = rs.fn(
+      () =>
+        new Promise<Credential>((resolve) => {
+          finishRefresh = () => resolve(renewed());
+        }),
+    );
+    const { registry, conn } = await connectedRegistry(ledger, refresh, 5 * 60_000);
+
+    // The renewal holds the grant while Rome Cloud is slow to answer...
+    const renewal = registry.renewExpiring(10 * 60_000);
+    await rs.waitFor(() => expect(refresh).toHaveBeenCalled());
+    // ...and the guardian reconnects in the meantime.
+    const reconnect = registry.confer(
+      "shopify",
+      conn.id,
+      "store",
+      {
+        material: { accessToken: "shpat_reconnected", refreshToken: "shprt_reconnected" },
+        expiresAt: new Date(Date.now() + 60 * 60_000),
+      },
+      undefined,
+    );
+    finishRefresh();
+    await Promise.all([renewal, reconnect]);
+
+    expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_reconnected");
+  });
+
+  it("degrades a grant that has already expired when the refresh fails", async () => {
+    const ledger = makeLedger();
+    const refresh = rs.fn(async (): Promise<Credential> => {
+      throw new Error("refresh token revoked");
+    });
+    const { registry, conn } = await connectedRegistry(ledger, refresh, -1_000);
+
+    await registry.renewExpiring(10 * 60_000);
+
+    expect(conn.auth.grants().store).toBe("degraded");
   });
 });

@@ -1,10 +1,10 @@
-import type { ConversationRef, StreamAgentEvent } from "@rome-os/app-runtime";
+import type { ChatRef, StreamAgentEvent } from "@rome-os/app-runtime";
 
 export interface ActiveAgentTurnStream {
   sessionId: string;
   turnId: string;
   agentName: string;
-  conversation?: ConversationRef;
+  conversation?: ChatRef;
   initiatorId?: string;
   startedAt: string;
   finished: boolean;
@@ -25,12 +25,12 @@ export interface AgentTurnStreamRegistry {
     sessionId: string;
     turnId: string;
     agentName: string;
-    conversation?: ConversationRef;
+    conversation?: ChatRef;
     initiatorId?: string;
     interrupt?(reason?: string): Promise<void>;
   }): MutableAgentTurnStream;
   get(turnId: string): ActiveAgentTurnStream | undefined;
-  getActiveByConversation(ref: ConversationRef): ActiveAgentTurnStream | undefined;
+  getActiveByConversation(ref: ChatRef): ActiveAgentTurnStream | undefined;
   listBySession(sessionId: string): ActiveAgentTurnStream[];
   /** Calls `listener` with the session id whenever one of its turns starts or finishes. */
   onSessionChange(listener: (sessionId: string) => void): () => void;
@@ -38,8 +38,8 @@ export interface AgentTurnStreamRegistry {
 
 const FINISHED_STREAM_TTL_MS = 30_000;
 
-function conversationKey(ref: ConversationRef): string {
-  return `${ref.connectionId}\u0000${ref.conversationId}`;
+function conversationKey(ref: ChatRef): string {
+  return `${ref.connectionId}\u0000${ref.chatId}`;
 }
 
 export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {

@@ -7,8 +7,8 @@ import { v4 as uuidv4 } from "uuid";
 const WEBCHAT_KEY_PREFIX = "webchat:";
 
 /** A webchat conversation's key. */
-export function webchatSessionKey(conversationId: string): string {
-  return `${WEBCHAT_KEY_PREFIX}${conversationId}`;
+export function webchatSessionKey(chatId: string): string {
+  return `${WEBCHAT_KEY_PREFIX}${chatId}`;
 }
 
 /** A fresh subagent's key, nested under its parent's so it never reuses the
@@ -37,7 +37,7 @@ const FORK_SUFFIX = /^(.+)#fork:([^:#]+)$/;
  * agent name in `channel`.
  */
 export type ParsedSessionKey =
-  | { kind: "webchat"; conversationId: string }
+  | { kind: "webchat"; chatId: string }
   | { kind: "channel"; channel: string; threadId: string }
   | { kind: "sentinel"; watched: ParsedSessionKey }
   | { kind: "subagent"; parent: ParsedSessionKey; subagentId: string }
@@ -62,7 +62,7 @@ export function parseSessionKey(key: string): ParsedSessionKey {
   const head = key.slice(0, separator);
   const rest = key.slice(separator + 1);
   if (head === "webchat" && rest && !rest.includes(":")) {
-    return { kind: "webchat", conversationId: rest };
+    return { kind: "webchat", chatId: rest };
   }
   return { kind: "channel", channel: head, threadId: rest };
 }
@@ -92,5 +92,5 @@ export function sessionKeyChannel(key: string | ParsedSessionKey): string | unde
  *  session, not a subagent or fork under it. */
 export function webchatConversationOfKey(key: string): string | undefined {
   const parsed = parseSessionKey(key);
-  return parsed.kind === "webchat" ? parsed.conversationId : undefined;
+  return parsed.kind === "webchat" ? parsed.chatId : undefined;
 }

@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import type { GrantLedger, GrantPatch } from "./ledger.js";
 import { ConnectionRegistry } from "./registry.js";
@@ -88,9 +88,7 @@ describe("registry faults", () => {
       expect(conn.auth.grants().bot).toBe("authorized");
 
       // Talk still works after the degrade — send is recorded.
-      await conn.withTalker((talker) =>
-        talker.send("thread-1" as ConversationId, { text: "still alive" }),
-      );
+      await conn.withTalker((talker) => talker.send("thread-1" as ChatId, { text: "still alive" }));
       const talker = fx.talkerFactory.instances.at(-1);
       if (!talker) throw new Error("talker not built");
       expect(talker.state.sends.map((s) => s.msg)).toContainEqual({ text: "still alive" });
@@ -354,7 +352,7 @@ describe("registry faults", () => {
       const heard: ChannelMessage[] = [];
       expect(conn.hearTalker(async (msg) => void heard.push(msg))).not.toBeNull();
       await conn.withTalker((talker) =>
-        talker.send("thread-1" as ConversationId, { text: "before revoke" }),
+        talker.send("thread-1" as ChatId, { text: "before revoke" }),
       );
       const oldTalker = fx.talkerFactory.instances.at(-1);
       if (!oldTalker) throw new Error("talker not built");
@@ -373,7 +371,7 @@ describe("registry faults", () => {
       if (!newTalker) throw new Error("talker not rebuilt");
       expect(newTalker).not.toBe(oldTalker);
       await conn.withTalker((talker) =>
-        talker.send("thread-1" as ConversationId, { text: "after reimport" }),
+        talker.send("thread-1" as ChatId, { text: "after reimport" }),
       );
       expect(newTalker.state.sends.map((s) => s.msg)).toEqual([{ text: "after reimport" }]);
       newTalker.state.deliver?.(makeInboundMessage({ messageId: "after-reimport" }));
@@ -587,7 +585,7 @@ describe("registry faults", () => {
       // A send through the Connection after the backoff rebuild routes to the
       // NEW instance.
       await conn.withTalker((talker) =>
-        talker.send("thread-1" as ConversationId, { text: "after reconnect" }),
+        talker.send("thread-1" as ChatId, { text: "after reconnect" }),
       );
       expect(instance1.state.sends.map((s) => s.msg)).toContainEqual({ text: "after reconnect" });
 
@@ -612,9 +610,7 @@ describe("registry faults", () => {
       // Wrapper still usable after the whole backoff run.
       const instance3 = fx.talkerFactory.instances.at(-1);
       if (!instance3) throw new Error("instance3 not built");
-      await conn.withTalker((talker) =>
-        talker.send("thread-1" as ConversationId, { text: "final" }),
-      );
+      await conn.withTalker((talker) => talker.send("thread-1" as ChatId, { text: "final" }));
       expect(instance3.state.sends.map((s) => s.msg)).toContainEqual({ text: "final" });
     });
 
@@ -646,7 +642,7 @@ describe("registry faults", () => {
         channel: "test",
         direction: "inbound",
         messageId: "m",
-        conversationId: "thread-1" as ConversationId,
+        chatId: "thread-1" as ChatId,
         senderId: "s",
         senderDisplayName: "S",
         thread: { kind: "dm" },
