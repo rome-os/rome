@@ -140,7 +140,7 @@ export class ApprovalsRepository {
   requestPairing(
     input: Pick<
       PairingPayload,
-      "channel" | "connectionId" | "channelUserId" | "displayName" | "username" | "conversationId"
+      "channel" | "connectionId" | "channelUserId" | "displayName" | "username" | "chatId"
     >,
     now = Date.now(),
   ) {
@@ -196,7 +196,7 @@ export class ApprovalsRepository {
             ...payload,
             displayName: hasDisplayName ? displayName : payload.displayName,
             username: input.username,
-            ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+            ...(input.chatId ? { chatId: input.chatId } : {}),
             lastGuidanceAt: guide ? now : payload.lastGuidanceAt,
           };
           tx.update(approvals).set({ payload: updated }).where(eq(approvals.id, previous.id)).run();

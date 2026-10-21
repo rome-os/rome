@@ -1,11 +1,11 @@
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
-import type { ChatSettingsControl } from "./conversation-settings.js";
+import type { ChatSettingsControl } from "./chat-settings.js";
 
 export { z };
 export type { JSONSchema };
-export * from "./conversation-settings.js";
+export * from "./chat-settings.js";
 
 // Browser-safe package entry point. Node-only CDP helpers live under the `/browser` subpath.
 

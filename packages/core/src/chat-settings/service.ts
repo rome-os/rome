@@ -33,7 +33,7 @@ import {
 } from "./support.js";
 import { assertProviderSessionResetPolicy } from "./reset-policy.js";
 
-const log = createLogger("conversation-settings");
+const log = createLogger("chat-settings");
 
 function fieldValue(settings: ChatSettingsOverrides, field: ChatSettingField) {
   switch (field) {

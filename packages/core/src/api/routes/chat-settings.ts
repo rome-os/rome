@@ -16,10 +16,18 @@ function parseRef(value: unknown): ChatRef {
   return ref as ChatRef;
 }
 
+// `/conversation-settings` is the path a dashboard from before the chat rename
+// calls, so both answer until that dashboard is gone.
+const PATHS = ["/chat-settings", "/conversation-settings"];
+
 export function chatSettingsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
+  for (const path of PATHS) mount(app, path, deps);
+  return app;
+}
 
-  app.get("/conversation-settings", async (c) => {
+function mount(app: Hono, path: string, deps: ApiDeps) {
+  app.get(path, async (c) => {
     const limit = Number.parseInt(c.req.query("limit") ?? "50", 10);
     const page = await deps.chatSettings.list({
       connectionId: c.req.query("connectionId"),
@@ -35,7 +43,7 @@ export function chatSettingsRoutes(deps: ApiDeps): Hono {
     return c.json(page);
   });
 
-  app.patch("/conversation-settings", async (c) => {
+  app.patch(path, async (c) => {
     try {
       const body = await c.req.json<{
         ref?: unknown;
@@ -55,7 +63,7 @@ export function chatSettingsRoutes(deps: ApiDeps): Hono {
     }
   });
 
-  app.post("/conversation-settings/reset", async (c) => {
+  app.post(`${path}/reset`, async (c) => {
     try {
       const body = await c.req.json<{ ref?: unknown }>();
       return c.json(
@@ -65,6 +73,4 @@ export function chatSettingsRoutes(deps: ApiDeps): Hono {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
   });
-
-  return app;
 }

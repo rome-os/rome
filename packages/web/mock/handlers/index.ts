@@ -4,7 +4,7 @@ import type {
   ChatSettings,
   ChatSettingsListItem,
   PartialChatSettings,
-} from "@rome/api-types/conversation-settings";
+} from "@rome/api-types/chat-settings";
 import type {
   AppRefDto,
   TraceEventDto,
@@ -1345,10 +1345,10 @@ export const handlers = [
   }),
   http.get("/api/tailscale/devices", () => HttpResponse.json(tailscale)),
   http.get("/api/integrations/composio/status", () => HttpResponse.json(composioStatus)),
-  http.get("/api/conversation-settings", () => HttpResponse.json(conversationSettings)),
+  http.get("/api/chat-settings", () => HttpResponse.json(conversationSettings)),
   // Auto-save writes through on every edit, so mock mode needs a real write
   // path or the dashboard would toast an error on each change.
-  http.patch("/api/conversation-settings", async ({ request }) => {
+  http.patch("/api/chat-settings", async ({ request }) => {
     const body = (await request.json()) as {
       ref: { connectionId: string; chatId: string };
       set: PartialChatSettings;

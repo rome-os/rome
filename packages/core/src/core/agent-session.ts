@@ -119,7 +119,7 @@ import type {
   WebChatRepository,
 } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
-import { evaluateProviderSessionReset } from "../conversation-settings/reset-policy.js";
+import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
 import {
   forkSessionKey,
   sessionKeyChannel,

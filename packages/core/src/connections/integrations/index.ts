@@ -17,7 +17,7 @@ import {
 } from "../../lib/rome-cloud-oauth.js";
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
-import type { ChatSettingsService } from "../../conversation-settings/service.js";
+import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";

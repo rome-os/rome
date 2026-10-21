@@ -94,8 +94,8 @@ function mockApi(options: { failPatch?: boolean; deferFirstPatch?: boolean } = {
     const url = String(input);
     if (url === "/api/connections") return ok({ connections: [] });
     if (url === "/api/agents") return ok({ agents: [] });
-    if (url.startsWith("/api/conversation-settings?") && !init?.method) return ok({ items: [row] });
-    if (url === "/api/conversation-settings" && init?.method === "PATCH") {
+    if (url.startsWith("/api/chat-settings?") && !init?.method) return ok({ items: [row] });
+    if (url === "/api/chat-settings" && init?.method === "PATCH") {
       patchBodies.push(JSON.parse(String(init.body)));
       if (options.deferFirstPatch && patchBodies.length === 1) {
         return new Promise<Response>((resolve, reject) => {
@@ -174,12 +174,12 @@ describe("ChannelsSettingsPage", () => {
       if (url === "/api/agents") {
         return ok({ agents: [{ name: "core:main" }, { name: "coding:build" }] });
       }
-      if (url.startsWith("/api/conversation-settings?") && !init?.method) {
+      if (url.startsWith("/api/chat-settings?") && !init?.method) {
         return url.includes("cursor=next")
           ? ok({ items: [item({ id: "releases", name: "releases" })] })
           : ok({ items: [parent], nextCursor: "next" });
       }
-      if (url === "/api/conversation-settings" && init?.method === "PATCH") {
+      if (url === "/api/chat-settings" && init?.method === "PATCH") {
         const body = JSON.parse(String(init.body));
         patchBodies.push(body);
         return ok({
@@ -275,7 +275,7 @@ describe("ChannelsSettingsPage", () => {
         });
       }
       if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
-      if (url.startsWith("/api/conversation-settings?")) {
+      if (url.startsWith("/api/chat-settings?")) {
         return ok({
           items: [
             item({
@@ -338,8 +338,8 @@ describe("ChannelsSettingsPage", () => {
         });
       }
       if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
-      if (url.startsWith("/api/conversation-settings?")) return ok({ items: [row] });
-      if (url === "/api/conversation-settings" && init?.method === "PATCH") {
+      if (url.startsWith("/api/chat-settings?")) return ok({ items: [row] });
+      if (url === "/api/chat-settings" && init?.method === "PATCH") {
         const body = JSON.parse(String(init.body));
         patchBodies.push(body);
         return ok({
@@ -391,7 +391,7 @@ describe("ChannelsSettingsPage", () => {
         });
       }
       if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
-      if (url.startsWith("/api/conversation-settings?")) {
+      if (url.startsWith("/api/chat-settings?")) {
         return ok({ items: [item({ id: "engineering", name: "engineering" })] });
       }
       if (init?.method === "PATCH") throw new Error("network down");
@@ -501,7 +501,7 @@ describe("ChannelsSettingsPage", () => {
       const url = String(input);
       if (url === "/api/connections") return ok({ connections: [] });
       if (url === "/api/agents") return ok({ agents: [] });
-      if (url.startsWith("/api/conversation-settings?")) {
+      if (url.startsWith("/api/chat-settings?")) {
         settingsLoads += 1;
         if (settingsLoads === 1) {
           return {

@@ -126,7 +126,7 @@ describe("channel pairing approvals", () => {
       addressing: "mention",
     });
     const request = (await repo.findPending())[0];
-    expect(pairingPayload(request)?.conversationId).toBeUndefined();
+    expect(pairingPayload(request)?.chatId).toBeUndefined();
     const result = await repo.resolvePending(request.id, "approve", "owner");
     if (result.outcome !== "resolved") throw new Error("Approval failed");
     send.mockClear();

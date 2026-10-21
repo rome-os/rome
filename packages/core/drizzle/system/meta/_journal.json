@@ -582,6 +582,13 @@
       "when": 1792543756472,
       "tag": "0083_lark_is_its_own_platform",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1792568813319,
+      "tag": "0084_chat_id_columns",
+      "breakpoints": true
     }
   ]
 }

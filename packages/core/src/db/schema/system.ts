@@ -28,11 +28,11 @@ export const sessions = sqliteTable(
     id: text("id").primaryKey(),
     agentName: text("agent_name").notNull(),
     channelThreadKey: text("channel_thread_key"),
-    /** The Rome conversation (`rome_sessions.id`) this session serves. Null for
-     *  rows written before the column existed and for sessions whose caller
-     *  named no conversation. No foreign key: channel, action and subagent
-     *  conversations are recorded after their first session is created. */
-    chatId: text("conversation_id"),
+    /** The Rome chat (`rome_sessions.id`) this session serves. Null for rows
+     *  written before the column existed and for sessions whose caller named
+     *  no chat. No foreign key: channel, action and subagent chats are
+     *  recorded after their first session is created. */
+    chatId: text("chat_id"),
     /** Which provider produced this conversation's thread, so a resumed session
      *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
      *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
@@ -57,7 +57,7 @@ export const sessions = sqliteTable(
       enum: ["active", "completed", "error"],
     }).notNull(),
   },
-  (table) => [index("idx_sessions_conversation").on(table.chatId)],
+  (table) => [index("idx_sessions_chat").on(table.chatId)],
 );
 
 // Provider-native history anchor for one successfully completed Rome turn.
@@ -172,9 +172,9 @@ export const outboundMessages = sqliteTable(
     id: text("id").primaryKey(),
     channel: text("channel").notNull(),
     channelUserId: text("channel_user_id").notNull(),
-    /** The conversation the channel resolved the address to, kept so a retry
-     *  does not have to ask again. */
-    chatId: text("conversation_id").notNull(),
+    /** The chat the channel resolved the address to, kept so a retry does
+     *  not have to ask again. */
+    chatId: text("chat_id").notNull(),
     text: text("text").notNull(),
     state: text("state", { enum: ["sending", "unconfirmed", "failed"] }).notNull(),
     /** The channel's own id for the message, once it has taken it. Null while

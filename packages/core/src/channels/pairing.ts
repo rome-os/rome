@@ -135,8 +135,7 @@ export function createPairingAdmission(deps: {
           channelUserId: message.senderId,
           displayName: message.senderDisplayName ?? message.senderId,
           username: message.senderUsername,
-          // Stored approval payloads keep the old name for the chat.
-          ...(message.thread?.kind === "dm" ? { conversationId: message.chatId } : {}),
+          ...(message.thread?.kind === "dm" ? { chatId: message.chatId } : {}),
         },
         deps.talkGrants(service),
       );
@@ -179,7 +178,7 @@ export async function notifyPairingResolution(
   if (!payload || approval.status !== "approved") return;
   try {
     const chatId =
-      (payload.conversationId as ChatId | undefined) ??
+      (payload.chatId as ChatId | undefined) ??
       (await registry
         .get(payload.connectionId)
         .withTalker((talker) => talker.directMessaging?.chatFor(payload.channelUserId)));

@@ -28,7 +28,7 @@ import {
   type NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import type { ChatSettingsService } from "../../conversation-settings/service.js";
+import type { ChatSettingsService } from "../../chat-settings/service.js";
 import {
   type CreateLarkChannel,
   FeishuAdapter,

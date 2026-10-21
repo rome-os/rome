@@ -77,7 +77,7 @@ export interface ChannelConnectConfig {
   /** Disconnect-failed fallback copy key; defaults to
    *  `channels.disconnectFailedFallback`. */
   disconnectFailedKey?: string;
-  /** Whether this service exposes the shared conversation-settings surface. */
+  /** Whether this service exposes the shared chat settings surface. */
   conversationSettings?: boolean;
 }
 

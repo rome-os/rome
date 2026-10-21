@@ -1,7 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import type { ApiDeps } from "../deps.js";
-import { chatSettingsRoutes } from "./conversation-settings.js";
+import { chatSettingsRoutes } from "./chat-settings.js";
 
 function harness() {
   const list = rs.fn(async () => ({ items: [], nextCursor: "next" }));
@@ -14,11 +14,11 @@ function harness() {
   return { app, list, update, reset };
 }
 
-describe("conversation settings routes", () => {
+describe("chat settings routes", () => {
   it("passes server-backed filters and pagination to the shared control", async () => {
     const { app, list } = harness();
     const response = await app.request(
-      "/conversation-settings?connectionId=conn-1&query=launch&cursor=next&limit=20&availability=offline",
+      "/chat-settings?connectionId=conn-1&query=launch&cursor=next&limit=20&availability=offline",
     );
 
     expect(response.status).toBe(200);
@@ -33,7 +33,7 @@ describe("conversation settings routes", () => {
 
   it("injects a trusted guardian actor for updates", async () => {
     const { app, update } = harness();
-    const response = await app.request("/conversation-settings", {
+    const response = await app.request("/chat-settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -55,7 +55,7 @@ describe("conversation settings routes", () => {
 
   it("resets through the same control and rejects malformed refs", async () => {
     const { app, reset } = harness();
-    const response = await app.request("/conversation-settings/reset", {
+    const response = await app.request("/chat-settings/reset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ref: { connectionId: "conn-1", chatId: "channel-1" } }),
@@ -66,12 +66,27 @@ describe("conversation settings routes", () => {
       actor: { kind: "guardian", id: "dashboard" },
     });
 
-    const invalid = await app.request("/conversation-settings/reset", {
+    const invalid = await app.request("/chat-settings/reset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ref: { chatId: "channel-1" } }),
     });
     expect(invalid.status).toBe(400);
     expect(await invalid.json()).toEqual({ error: "ref.connectionId is required" });
+  });
+
+  it("answers on the path a dashboard from before the chat rename calls", async () => {
+    const { app, list, reset } = harness();
+
+    expect((await app.request("/conversation-settings")).status).toBe(200);
+    const response = await app.request("/conversation-settings/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ref: { connectionId: "conn-1", chatId: "channel-1" } }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(reset).toHaveBeenCalledTimes(1);
   });
 });

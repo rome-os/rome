@@ -20,7 +20,7 @@ import type {
   ChatSettingsSnapshot,
   PartialChatSettings,
   ProviderSessionResetPolicy,
-} from "@rome/api-types/conversation-settings";
+} from "@rome/api-types/chat-settings";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -102,7 +102,7 @@ export function ChannelsSettingsPage() {
         if (availability) search.set("availability", availability);
         if (cursor) search.set("cursor", cursor);
         const [page, connectionList, agentPage] = await Promise.all([
-          api<PageResponse>(`/api/conversation-settings?${search}`),
+          api<PageResponse>(`/api/chat-settings?${search}`),
           fetchConnections(),
           api<AgentPage>("/api/agents"),
         ]);
@@ -426,7 +426,7 @@ function ConversationRow({
     setSaving(true);
     inFlight.current = inFlight.current
       .then(() =>
-        api<ChatSettingsSnapshot>("/api/conversation-settings", {
+        api<ChatSettingsSnapshot>("/api/chat-settings", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ref: conversation.ref, set, clear }),

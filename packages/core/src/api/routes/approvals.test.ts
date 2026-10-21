@@ -53,7 +53,7 @@ describe("Approvals API", () => {
       connectionId: "bot",
       channelUserId: "123",
       displayName: "Alice",
-      ...(stage === "send" ? { conversationId: "dm" } : {}),
+      ...(stage === "send" ? { chatId: "dm" } : {}),
     })!;
     const stalled = () => new Promise<never>(() => {});
     const send = rs.fn(stalled);
