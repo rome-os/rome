@@ -34,10 +34,15 @@ export const OAUTH_PROVIDER_DESCRIPTORS: Record<OAuthProvider, OAuthProviderDesc
 // A store's permanent `.myshopify.com` domain, per Shopify's own validation.
 const SHOPIFY_SHOP_DOMAIN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
 
+/** The Shopify admin URL of a store, `admin.shopify.com/store/<handle>[/...]`. */
+const SHOPIFY_ADMIN_STORE_URL = /^admin\.shopify\.com\/store\/([a-z0-9][a-z0-9-]*)(?:[/?#].*)?$/;
+
 /**
  * Normalize what a guardian typed for their Shopify store to its
  * `<store>.myshopify.com` domain, or `null` when it isn't one. Accepts the bare
- * store handle (`acme`) or the domain with an optional scheme and trailing slash.
+ * store handle (`acme`), the domain with an optional scheme and trailing slash,
+ * or the store's admin URL (`https://admin.shopify.com/store/acme`), which is
+ * the address a merchant has open.
  */
 export function normalizeShopifyShopDomain(value: string | null | undefined): string | null {
   const trimmed = value
@@ -46,6 +51,8 @@ export function normalizeShopifyShopDomain(value: string | null | undefined): st
     .replace(/^https?:\/\//, "")
     .replace(/\/+$/, "");
   if (!trimmed) return null;
+  const adminHandle = SHOPIFY_ADMIN_STORE_URL.exec(trimmed)?.[1];
+  if (adminHandle) return `${adminHandle}.myshopify.com`;
   const domain = trimmed.includes(".") ? trimmed : `${trimmed}.myshopify.com`;
   return SHOPIFY_SHOP_DOMAIN.test(domain) ? domain : null;
 }

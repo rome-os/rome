@@ -258,7 +258,7 @@ export interface OAuthProviderSetupDeps {
 /** The form that asks which store to connect, for Shopify. */
 const SHOPIFY_STORE_FORM = {
   instructions:
-    "Enter your store's myshopify.com address. You can find it in your Shopify admin under Settings → Domains.",
+    "Paste your Shopify admin address (admin.shopify.com/store/…) or enter your store's myshopify.com address.",
   fields: [{ name: "shop", label: "Store address", secret: false }],
   note: "Rome connects with the Rome OS app. Shopify asks you to approve it next.",
 } as const;
@@ -278,7 +278,8 @@ async function promptShopifyStore(interact: Parameters<SetupFn>[0]): Promise<str
     });
     const shop = normalizeShopifyShopDomain(answers.shop);
     if (shop) return shop;
-    error = "Enter a store address ending in .myshopify.com, for example acme.myshopify.com.";
+    error =
+      "Enter a store address like acme.myshopify.com, or paste your admin address like admin.shopify.com/store/acme.";
   }
 }
 

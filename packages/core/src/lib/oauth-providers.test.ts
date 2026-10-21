@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import {
+  normalizeShopifyShopDomain,
   getEnabledOAuthProviders,
   OAUTH_PROVIDERS,
   OAUTH_PROVIDER_DESCRIPTORS,
@@ -49,5 +50,19 @@ describe("oauth-providers", () => {
     expect(showGoogleOAuth()).toBe(true);
     expect(getEnabledOAuthProviders()).toEqual(["google", "github", "slack", "shopify"]);
     expect(isEnabledOAuthProvider("google")).toBe(true);
+  });
+
+  it("normalizes a Shopify store from a handle, its domain, or its admin URL", () => {
+    expect(normalizeShopifyShopDomain("acme")).toBe("acme.myshopify.com");
+    expect(normalizeShopifyShopDomain("https://Acme.myshopify.com/")).toBe("acme.myshopify.com");
+    expect(normalizeShopifyShopDomain("https://admin.shopify.com/store/acme")).toBe(
+      "acme.myshopify.com",
+    );
+    expect(normalizeShopifyShopDomain("admin.shopify.com/store/acme-2/products?x=1")).toBe(
+      "acme-2.myshopify.com",
+    );
+    expect(normalizeShopifyShopDomain("acme.com")).toBeNull();
+    expect(normalizeShopifyShopDomain("admin.shopify.com/store/")).toBeNull();
+    expect(normalizeShopifyShopDomain("evil.com/store/acme")).toBeNull();
   });
 });
