@@ -33,12 +33,12 @@ export interface SendDeps {
 
 /** A resolved target: the channel's send port, and the conversation on it
  *  that reaches this account. It names the channel, not the Connection: the
- *  port finds the channel's Connection again when it sends. A service holds at
+ *  port finds the channel's Connection again when it sends. A connection kind holds at
  *  most one Connection, so that is the one the conversation was resolved on,
  *  unless the Connection was replaced in between. This is deliberate. */
 export interface SendTarget {
   send: ChannelSend;
-  conversationId: ChatId;
+  chatId: ChatId;
 }
 
 export type Resolution = { ok: true; target: SendTarget } | { ok: false; send: RefusedState };
@@ -70,15 +70,15 @@ async function sendStateOf(
   // person read already gives for this account. Letting it escape would make
   // the send path report a 500 where the read reported `no-conversation`, so
   // the two would disagree about one condition.
-  let conversationId: ChatId | null;
+  let chatId: ChatId | null;
   try {
-    conversationId = await direct.chatFor(account.channelUserId);
+    chatId = await direct.chatFor(account.channelUserId);
   } catch (err) {
     if (err instanceof ChannelNotConnected) return { state: "not-connected" };
-    conversationId = null;
+    chatId = null;
   }
-  if (conversationId === null) return { state: "no-conversation" };
-  return { state: "yes", target: { send, conversationId } };
+  if (chatId === null) return { state: "no-conversation" };
+  return { state: "yes", target: { send, chatId } };
 }
 
 export async function resolveSendTarget(deps: SendDeps, account: SendAccount): Promise<Resolution> {
@@ -118,6 +118,6 @@ export interface SendReceipt {
  * only it knows which outbox row is waiting on the answer.
  */
 export async function sendToTarget(target: SendTarget, text: string): Promise<SendReceipt> {
-  const receipt = await target.send.send(target.conversationId, { text });
+  const receipt = await target.send.send(target.chatId, { text });
   return { messageId: receipt.messageId ?? null };
 }

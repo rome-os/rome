@@ -252,7 +252,7 @@ describe("Telegram-user setup discovery", () => {
   function makeRegistry(): SetupRegistry {
     const descriptor = makeTelegramUserDescriptor({ openLogin: () => makeLoginFake() });
     return {
-      getDescriptor: (service) => (service === "telegram_user" ? descriptor : null),
+      getDescriptor: (connectionKind) => (connectionKind === "telegram_user" ? descriptor : null),
       withGrantSection: (_s, _g, fn) => fn(),
       // Never reached in this test: the login parks at the code prompt and never
       // confers. Present only to satisfy SetupRegistry.
@@ -266,7 +266,7 @@ describe("Telegram-user setup discovery", () => {
       personMappingRepo: {} as PersonMappingRepository,
     });
 
-    const started = await manager.start({ service: "telegram_user" }, "session");
+    const started = await manager.start({ connectionKind: "telegram_user" }, "session");
     expect(started.reattached).toBe(false);
     expect(started.state.status).toBe("awaiting-input");
     expect(manager.activeFor("telegram_user", "session")).toBe(started.cid);
@@ -277,7 +277,7 @@ describe("Telegram-user setup discovery", () => {
     expect(manager.activeFor("telegram_user", "session")).toBe(started.cid);
 
     // A duplicate start re-attaches instead of spawning a second login client.
-    const again = await manager.start({ service: "telegram_user" }, "session");
+    const again = await manager.start({ connectionKind: "telegram_user" }, "session");
     expect(again.reattached).toBe(true);
     expect(again.cid).toBe(started.cid);
   });

@@ -22,7 +22,7 @@ import { connectionsRoutes } from "../../api/routes/connections.js";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
-import { createTestDb, identityServiceOf } from "../../test/helpers.js";
+import { createTestDb, identityConnectionKindOf } from "../../test/helpers.js";
 import type { MailProvider, RomeMailEvent, RomeMailMessage } from "../../lib/rome-cloud-mail.js";
 import { ConnectionRegistry } from "../registry.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
@@ -266,7 +266,7 @@ function makeSetupApp() {
     db: testDb,
     approvalsRepo: new ApprovalsRepository(
       testDb,
-      new PersonMappingRepository(testDb, identityServiceOf),
+      new PersonMappingRepository(testDb, identityConnectionKindOf),
     ),
     personMappingRepo,
   } as unknown as ApiDeps;
@@ -281,8 +281,8 @@ function makeSetupApp() {
 }
 
 /** Start (or restart) the email setup and poll it to a terminal state. */
-async function runSetup(app: Hono, idOrService = "email") {
-  const started = await app.request(`/connections/${idOrService}/grants/inbox/setup`, {
+async function runSetup(app: Hono, idOrKind = "email") {
+  const started = await app.request(`/connections/${idOrKind}/grants/inbox/setup`, {
     method: "POST",
     headers: { ...SAME_ORIGIN, "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -314,9 +314,12 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     // The provisioned address renders from the grant profile.
     const list = await app.request("/connections");
     const { connections } = (await list.json()) as {
-      connections: Array<{ service: string; display: Record<string, { email: string | null }> }>;
+      connections: Array<{
+        connectionKind: string;
+        display: Record<string, { email: string | null }>;
+      }>;
     };
-    const email = connections.find((c) => c.service === "email");
+    const email = connections.find((c) => c.connectionKind === "email");
     expect(email?.display.inbox?.email).toBe(EMAIL_ADDRESS);
 
     // The settings row is pure config — no credential fields ever landed there.

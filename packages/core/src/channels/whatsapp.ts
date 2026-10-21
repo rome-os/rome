@@ -250,7 +250,7 @@ export class WhatsAppAdapter {
         if (!msg.text && msg.attachments.length === 0) continue;
         log.info("message received", {
           from: msg.senderId,
-          conversationId: msg.conversationId,
+          chatId: msg.chatId,
           threadKind: msg.thread?.kind,
         });
 
@@ -471,9 +471,9 @@ export class WhatsAppAdapter {
     return normalized;
   }
 
-  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     if (!this.sock) throw new Error("WhatsApp not connected");
-    const threadId: string = conversationId;
+    const threadId: string = chatId;
     const jid = this.canonicalJid(threadId);
 
     try {
@@ -513,7 +513,7 @@ export class WhatsAppAdapter {
       }
 
       log.info("message sent", { threadId, jid });
-      return { conversationId, ...(messageId ? { messageId } : {}) };
+      return { chatId, ...(messageId ? { messageId } : {}) };
     } catch (err) {
       log.error("failed to send message", {
         threadId,
@@ -593,15 +593,15 @@ export class WhatsAppAdapter {
   private toChannelMessage(waMsg: WAMessage): ChannelMessage {
     const remoteJid = waMsg.key.remoteJid!;
     const isGroup = remoteJid.endsWith("@g.us");
-    const conversationId = this.canonicalJid(remoteJid);
+    const chatId = this.canonicalJid(remoteJid);
     const content = describeContent(waMsg.message);
 
     return {
       channel: "whatsapp",
       direction: "inbound",
       messageId: waMsg.key.id!,
-      conversationId: conversationId as ChatId,
-      senderId: isGroup ? this.canonicalJid(waMsg.key.participant ?? remoteJid) : conversationId,
+      chatId: chatId as ChatId,
+      senderId: isGroup ? this.canonicalJid(waMsg.key.participant ?? remoteJid) : chatId,
       senderDisplayName: waMsg.pushName ?? "Unknown",
       text: content.text ?? "",
       attachments: this.extractAttachments(waMsg),

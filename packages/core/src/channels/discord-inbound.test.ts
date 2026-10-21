@@ -84,8 +84,8 @@ describe("DiscordAdapter inbound messages", () => {
         channel: "discord",
         direction: "inbound",
         messageId: "msg-7",
-        conversationId: "thread-1",
-        parentConversationId: "channel-1",
+        chatId: "thread-1",
+        parentChatId: "channel-1",
         senderId: "user-1",
         senderDisplayName: "Alice Smith",
         senderUsername: "alice",
@@ -126,13 +126,13 @@ describe("DiscordAdapter inbound messages", () => {
 
     expect(captured).toHaveLength(1);
     expect(captured[0]).toMatchObject({
-      conversationId: "dm-1",
+      chatId: "dm-1",
       senderDisplayName: "Alice",
       thread: { kind: "dm" },
       addressing: "direct",
     });
     expect(captured[0].thread).toStrictEqual({ kind: "dm" });
-    expect(captured[0]).not.toHaveProperty("parentConversationId");
+    expect(captured[0]).not.toHaveProperty("parentChatId");
     expect(captured[0]).not.toHaveProperty("replyTo");
   });
 
@@ -155,7 +155,7 @@ describe("DiscordAdapter inbound messages", () => {
     await dispatch(adapter, message, { isDm: false, isThread: false, addressing: "ambient" });
 
     expect(captured[0].thread).toStrictEqual({ kind: "group", name: "general" });
-    expect(captured[0]).not.toHaveProperty("parentConversationId");
+    expect(captured[0]).not.toHaveProperty("parentChatId");
   });
 });
 
@@ -186,7 +186,7 @@ describe("DiscordAdapter.saveIncomingAttachments", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "msg-7",
-      conversationId: "thread-1" as ChatId,
+      chatId: "thread-1" as ChatId,
       senderId: "user-1",
       text: "",
       attachments: [{ type: "image", url: "https://cdn.discordapp.com/attachments/1/2/photo.png" }],
@@ -211,7 +211,7 @@ describe("DiscordAdapter.saveIncomingAttachments", () => {
         channel: "discord",
         direction: "inbound",
         messageId: "msg-8",
-        conversationId: "channel-1" as ChatId,
+        chatId: "channel-1" as ChatId,
         senderId: "user-1",
         text: "",
         attachments,

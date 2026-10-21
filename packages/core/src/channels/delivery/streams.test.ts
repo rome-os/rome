@@ -10,12 +10,12 @@ const transport: DeliveryTransport = {
   codec: plainText,
   create: async (conversation, text) => ({
     messageId: `id-${text.trim()}`,
-    conversationId: conversation,
+    chatId: conversation,
   }),
 };
 const target = {
   channel: "telegram",
-  conversationId: "chat-1",
+  chatId: "chat-1",
   replyToMessageId: "msg-1",
   romeSessionId: "conversation-1",
   turnId: "turn-1",
@@ -115,7 +115,7 @@ describe("ReplyStreams", () => {
       ...transport,
       create: async (conversation, text) => {
         if (text === "six") throw new DeliveryFailure("unknown", "no answer");
-        return { messageId: `id-${text.trim()}`, conversationId: conversation };
+        return { messageId: `id-${text.trim()}`, chatId: conversation };
       },
     };
     const streams = new ReplyStreams({

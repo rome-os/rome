@@ -37,12 +37,12 @@ export function telegramTransport(api: Api): DeliveryTransport {
               }
             : {}),
         });
-        return { messageId: String(sent.message_id), conversationId: String(sent.chat.id) };
+        return { messageId: String(sent.message_id), chatId: String(sent.chat.id) };
       }),
     edit: (receipt, text) =>
       call(async () => {
         try {
-          await api.editMessageText(receipt.conversationId, Number(receipt.messageId), text);
+          await api.editMessageText(receipt.chatId, Number(receipt.messageId), text);
         } catch (error) {
           // The message already shows this text, which is what the edit asked for.
           if (error instanceof GrammyError && error.description.includes("message is not modified"))

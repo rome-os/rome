@@ -119,7 +119,7 @@ function restMessageToChannelMessage(
     channel: "discord",
     direction: "inbound",
     messageId: msg.id,
-    conversationId: channelId as ChatId,
+    chatId: channelId as ChatId,
     senderId: msg.author.id,
     senderDisplayName: msg.author.global_name ?? msg.author.username,
     senderUsername: msg.author.username,
@@ -648,9 +648,10 @@ export class DiscordAdapter {
     containerName?: string,
   ): ChatDescriptor {
     if (!this.connectionId) throw new Error("Discord connection id is unavailable");
-    const ref = { connectionId: this.connectionId, conversationId: channelId as ChatId };
+    const ref = { connectionId: this.connectionId, chatId: channelId as ChatId };
     return {
       ref,
+      connectionKind: "discord",
       service: "discord",
       kind: parentId ? "topic" : "channel",
       displayName: displayName ?? channelId,
@@ -659,7 +660,7 @@ export class DiscordAdapter {
         ? {
             parent: {
               connectionId: this.connectionId,
-              conversationId: parentId as ChatId,
+              chatId: parentId as ChatId,
             },
           }
         : {}),
@@ -898,8 +899,8 @@ export class DiscordAdapter {
       channel: "discord",
       direction: "inbound",
       messageId: message.id,
-      conversationId: message.channelId as ChatId,
-      ...(parentId ? { parentConversationId: parentId as ChatId } : {}),
+      chatId: message.channelId as ChatId,
+      ...(parentId ? { parentChatId: parentId as ChatId } : {}),
       senderId: message.author.id,
       senderDisplayName:
         message.member?.displayName ?? message.author.displayName ?? message.author.username,
@@ -919,7 +920,7 @@ export class DiscordAdapter {
 
     log.info("message received", {
       from: msg.senderId,
-      conversationId: msg.conversationId,
+      chatId: msg.chatId,
       threadKind: msg.thread?.kind,
       isDm,
       isThread,
@@ -948,7 +949,7 @@ export class DiscordAdapter {
         const result = await this.chatStop({
           ref: {
             connectionId: this.connectionId,
-            conversationId: interaction.channelId as ChatId,
+            chatId: interaction.channelId as ChatId,
           },
           service: "discord",
           senderId: interaction.user.id,
@@ -1414,8 +1415,8 @@ Use \`/channel agent clear\` to undo.`,
     return (await this.client.users.createDM(channelUserId)).id;
   }
 
-  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const threadId: string = conversationId;
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const threadId: string = chatId;
     const channel = await this.client.channels.fetch(threadId);
     if (!channel || !channel.isTextBased()) {
       throw new Error(`Channel ${threadId} is not a text channel`);
@@ -1459,7 +1460,7 @@ Use \`/channel agent clear\` to undo.`,
       // A reply posted into an auto-thread lands in that thread, so the
       // receipt names the thread, not the channel it was asked for.
       return {
-        conversationId: targetChannel.id as ChatId,
+        chatId: targetChannel.id as ChatId,
         ...(messageId ? { messageId } : {}),
       };
     } catch (err) {

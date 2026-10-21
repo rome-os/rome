@@ -25,3 +25,26 @@ declare global {
 export function isElectronShell(): boolean {
   return typeof window !== "undefined" && window.rome !== undefined;
 }
+
+/** This computer as a device of the signed-in account, as the Mac app reports it. */
+export type DesktopDeviceStatus =
+  | { state: "off" }
+  | { state: "disabled" | "connecting" | "connected" | "offline"; deviceId: string; name: string };
+
+/** The Mac app's device controls, which it offers only to the Rome it opened. */
+export interface DesktopDeviceBridge {
+  get(): Promise<DesktopDeviceStatus>;
+  setEnabled(enabled: boolean): Promise<DesktopDeviceStatus>;
+  onStatus(callback: (status: DesktopDeviceStatus) => void): () => void;
+}
+
+/** The Mac app's device controls, or null in a browser or an app without them. */
+export function desktopDevice(): DesktopDeviceBridge | null {
+  if (!isElectronShell()) return null;
+  const device = (window.rome as { device?: Partial<DesktopDeviceBridge> }).device;
+  return typeof device?.get === "function" &&
+    typeof device.setEnabled === "function" &&
+    typeof device.onStatus === "function"
+    ? (device as DesktopDeviceBridge)
+    : null;
+}

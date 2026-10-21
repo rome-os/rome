@@ -12,7 +12,7 @@ import type {
 
 const log = createAppLogger("channel-message-hook");
 
-/** Core's `AGENTS_SERVICE`, which an app cannot import. */
+/** Core's `AGENTS_KIND`, which an app cannot import. */
 const AGENTS_CHANNEL = "agents";
 
 /**
@@ -143,7 +143,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         ? "core:main"
         : (snapshot.effective.routing.agentName ?? undefined);
     if (!enabled) {
-      log.debug("conversation disabled", { connectionId, conversationId: message.conversationId });
+      log.debug("conversation disabled", { connectionId, chatId: message.chatId });
       return;
     }
 
@@ -167,7 +167,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         () =>
           // Typing follows the channel's current Connection, the one a reply would go out on.
           channel.send?.activity?.begin({
-            conversationId: message.conversationId,
+            chatId: message.chatId,
             messageId: message.messageId,
           }) ?? null,
       )
@@ -215,8 +215,8 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           channelUserId: message.senderId,
           threadName: message.thread?.name,
           threadType: message.thread?.kind === "dm" ? "private" : "group",
-          threadId: message.conversationId,
-          parentThreadId: message.parentConversationId,
+          threadId: message.chatId,
+          parentThreadId: message.parentChatId,
           displayName: message.senderDisplayName ?? message.senderId,
           text: message.text,
           timestamp: message.timestamp.toISOString(),
@@ -230,8 +230,8 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           channelContext: {
             connectionId,
             channel: service,
-            threadId: message.conversationId,
-            parentThreadId: message.parentConversationId,
+            threadId: message.chatId,
+            parentThreadId: message.parentChatId,
             channelUserId: message.senderId,
             threadName: message.thread?.name,
             threadType: message.thread?.kind === "dm" ? "private" : "group",
@@ -260,10 +260,10 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     }
   }
 
-  /** Answer in a conversation on the channel it arrived on, where it can send.
-   *  The channel sends through the Connection backing it, which is `ref`'s. */
-  /** Answers `message` where it was said. Outside a direct message the answer
-   *  replies to it, so it stays in the message's thread. */
+  /** Answers `message` in its chat on the channel it arrived on, where it can
+   *  send. The channel sends through the Connection backing it, which is
+   *  `ref`'s. Outside a direct message the answer replies to `message`, so it
+   *  stays in the message's thread. */
   private async reply(
     channel: Channel,
     message: InboundEvent["message"],
@@ -273,7 +273,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       log.warn("cannot answer on a channel that does not send", { service: channel.name });
       return;
     }
-    await channel.send.send(message.conversationId, {
+    await channel.send.send(message.chatId, {
       text,
       ...(message.thread?.kind === "dm" ? {} : { replyToMessageId: message.messageId }),
     });

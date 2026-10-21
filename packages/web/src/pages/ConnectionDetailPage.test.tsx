@@ -21,11 +21,11 @@ afterEach(() => {
 });
 
 function connection(
-  overrides: Partial<ApiConnection> & Pick<ApiConnection, "service">,
+  overrides: Partial<ApiConnection> & Pick<ApiConnection, "connectionKind">,
 ): ApiConnection {
   return {
-    id: `conn-${overrides.service}`,
-    label: overrides.service,
+    id: `conn-${overrides.connectionKind}`,
+    label: overrides.connectionKind,
     grants: {},
     display: {},
     capabilities: {
@@ -48,7 +48,7 @@ function oauth(
   display: GrantDisplay | null = null,
 ): ApiConnection {
   return connection({
-    service,
+    connectionKind: service,
     grants: { user: state },
     display: { user: display },
     connect: { url: `https://oauth/${service}`, available: true, unavailableReason: null },
@@ -59,9 +59,9 @@ function oauth(
  *  unconnected, webchat always on. */
 function minimalConnections(): ApiConnection[] {
   return [
-    connection({ service: "telegram", grants: { bot: "unauthorized" } }),
-    connection({ service: "whatsapp", grants: { session: "unauthorized" } }),
-    connection({ service: "webchat" }),
+    connection({ connectionKind: "telegram", grants: { bot: "unauthorized" } }),
+    connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" } }),
+    connection({ connectionKind: "webchat" }),
   ];
 }
 
@@ -152,8 +152,8 @@ describe("ConnectionDetailPage — unknown serviceId redirects", () => {
 
 it("redirects the retired telegram-user route to a Telegram card on an opaque channel", async () => {
   mockApi([
-    connection({ service: "telegram", grants: { bot: "authorized" }, channel: "chan-7" }),
-    connection({ service: "telegram_user", grants: { session: "authorized" } }),
+    connection({ connectionKind: "telegram", grants: { bot: "authorized" }, channel: "chan-7" }),
+    connection({ connectionKind: "telegram_user", grants: { session: "authorized" } }),
   ]);
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -292,7 +292,7 @@ describe("ConnectionDetailPage — enablement bullets", () => {
 describe("ConnectionDetailPage — several accounts", () => {
   function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
     return connection({
-      service: "feishu",
+      connectionKind: "feishu",
       channel: "feishu",
       grants: { app: "authorized" },
       capabilities: {

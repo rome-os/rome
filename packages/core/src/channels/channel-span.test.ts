@@ -14,7 +14,7 @@ import {
   FakeTransport,
   installTestSpanHarness,
   noAccounts,
-  serviceChannelOf,
+  kindChannelOf,
   type SpanHarness,
   type TestDb,
 } from "../test/helpers.js";
@@ -42,7 +42,7 @@ function hear(
       linkedInAccounts: noAccounts,
       connections: {
         registry: createTestConnections(new Map([[channel, transport]])),
-        channelOf: serviceChannelOf,
+        channelOf: kindChannelOf,
       },
     }),
     "channel-message",
@@ -103,7 +103,7 @@ describe("channel:{name}.handle span", () => {
 
     await deliver({
       messageId: "msg-1",
-      conversationId: "chat-42" as ChatId,
+      chatId: "chat-42" as ChatId,
       senderId: "user-7",
       text: "hi",
     });
@@ -170,7 +170,7 @@ describe("channel:{name}.handle span", () => {
         linkedInAccounts: noAccounts,
         connections: {
           registry: createTestConnections(new Map([["telegram", transport]])),
-          channelOf: serviceChannelOf,
+          channelOf: kindChannelOf,
         },
       }),
       "channel-message",
@@ -216,7 +216,7 @@ describe("inbound channel message log", () => {
     const deliver = hear("whatsapp");
     await deliver({
       messageId: "msg-77",
-      conversationId: "chat-9" as ChatId,
+      chatId: "chat-9" as ChatId,
       senderId: "user-3",
       text: "dinner at 8?",
     });

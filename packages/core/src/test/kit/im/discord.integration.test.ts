@@ -87,8 +87,8 @@ describe("DiscordAdapter.send against the peer", () => {
     const receipt = await adapter.send(dm, { text: "hi there" });
     const inbound = await receive("hello");
 
-    expect(receipt).toEqual({ conversationId: dm, messageId: expect.any(String) });
-    expect(inbound).toMatchObject({ conversationId: dm, text: "hello" });
+    expect(receipt).toEqual({ chatId: dm, messageId: expect.any(String) });
+    expect(inbound).toMatchObject({ chatId: dm, text: "hello" });
     expect(peer.visible()).toEqual([
       expect.objectContaining({ id: receipt.messageId, from: "rome", text: "hi there" }),
       expect.objectContaining({ id: inbound.messageId, from: "user", text: "hello" }),

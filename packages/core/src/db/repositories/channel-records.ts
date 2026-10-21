@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
@@ -7,13 +7,13 @@ import { channels } from "../schema.js";
 import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
 
 /**
- * A channel a Connection backs, as stored: its id, the service and platform
+ * A channel a Connection backs, as stored: its id, the connection kind and platform
  * it is on, the Connection behind it now (null once that Connection is gone),
  * and the agent linked to it. Vocabulary: docs/domains/chats.md#account.
  */
 export interface ChannelRecord {
   id: string;
-  service: string;
+  connectionKind: string;
   platform: string;
   connectionId: string | null;
   agent: string | null;
@@ -35,27 +35,27 @@ export class ChannelUnbacked extends Error {
   }
 }
 
-/** A link asked of a channel whose service takes no agent. */
+/** A link asked of a channel whose connection kind takes no agent. */
 export class ChannelNotLinkable extends Error {
   constructor(
     readonly channel: string,
-    readonly service: string,
+    readonly connectionKind: string,
   ) {
-    super(`A ${service} account cannot be linked to an agent`);
+    super(`A ${connectionKind} account cannot be linked to an agent`);
     this.name = "ChannelNotLinkable";
   }
 }
 
 type Exec = DrizzleDb | DrizzleTx;
 
-/** The service a channel belongs to. A service's first channel carries the
- *  service's name, so a name with no record answers for itself. */
-export type ServiceOfChannel = (channel: string) => string;
+/** The connection kind a channel belongs to. A connection kind's first channel carries the
+ *  connection kind's name, so a name with no record answers for itself. */
+export type ConnectionKindOfChannel = (channel: string) => string;
 
 function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
   return {
     id: row.id,
-    service: row.service,
+    connectionKind: row.connectionKind,
     platform: row.platform,
     connectionId: row.connectionId,
     agent: row.agent,
@@ -67,12 +67,12 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
  * The channels the Connections back, and which agent each is linked to.
  *
  * A channel's id is minted once and never changes, since every stored row
- * spells it. It is an opaque id, except that a service's first channel carries
- * the service's name, which is what data stored before channels were recorded
+ * spells it. It is an opaque id, except that a connection kind's first channel carries
+ * the connection kind's name, which is what data stored before channels were recorded
  * spells. A row stays when its Connection goes, so its id is never minted
- * again. An account of a linkable service starts fresh: the service's next
- * Connection gets a channel of its own. Another service's next Connection
- * takes the row back, since apps address that service's one channel by its
+ * again. An account of a linkable connection kind starts fresh: the connection kind's next
+ * Connection gets a channel of its own. Another connection kind's next Connection
+ * takes the row back, since apps address that connection kind's one channel by its
  * name.
  */
 export class ChannelRecordsRepository {
@@ -92,10 +92,16 @@ export class ChannelRecordsRepository {
     return row ? toRecord(row) : null;
   }
 
-  /** The service behind channel `id`, or `id` itself when no channel
-   *  records it: a service's first channel's id is the service's name. */
-  serviceOf(id: string): string {
-    return this.byId(id)?.service ?? id;
+  /** The connection kind behind channel `id`, or `id` itself when no channel
+   *  records it: a connection kind's first channel's id is the connection kind's name. */
+  connectionKindOf(id: string): string {
+    return this.byId(id)?.connectionKind ?? id;
+  }
+
+  /** The platform channel `id` is an account on, or null when no channel
+   *  records it. */
+  platformOf(id: string): string | null {
+    return this.byId(id)?.platform ?? null;
   }
 
   /** The id of the channel `connectionId` backs, or null for none. */
@@ -119,18 +125,18 @@ export class ChannelRecordsRepository {
   /**
    * The channel `connection` backs, recorded in `exec` (the transaction that
    * mints the Connection). A Connection that already has one keeps it. A
-   * Connection of a linkable service never takes over another account's
-   * channel, so it starts with no history. A Connection of any other service
-   * takes back the service's unbacked channel, the one carrying the service's
-   * name first. Failing that, it gets the service's name if no channel holds
+   * Connection of a linkable connection kind never takes over another account's
+   * channel, so it starts with no history. A Connection of any other connection kind
+   * takes back the connection kind's unbacked channel, the one carrying the connection kind's
+   * name first. Failing that, it gets the connection kind's name if no channel holds
    * it, and a fresh opaque id otherwise. A new channel is linked to `agent`
-   * when its service takes one, and to none by default: Rome picks no agent
+   * when its connection kind takes one, and to none by default: Rome picks no agent
    * for an account. `domain` is a Feishu app's domain, which decides its
    * channel's platform.
    */
   claim(
     exec: Exec,
-    connection: { id: string; service: string; domain?: string },
+    connection: { id: string; connectionKind: string; domain?: string },
     now: Date,
     { agent = null }: { agent?: string | null } = {},
   ): ChannelRecord {
@@ -138,21 +144,21 @@ export class ChannelRecordsRepository {
     if (held) return toRecord(held);
     this.ids.clear();
 
-    const service = connection.service;
-    const vacant = LINKABLE_SERVICES.has(service)
+    const connectionKind = connection.connectionKind;
+    const vacant = LINKABLE_KINDS.has(connectionKind)
       ? undefined
       : exec
           .select()
           .from(channels)
-          .where(and(eq(channels.service, service), isNull(channels.connectionId)))
+          .where(and(eq(channels.connectionKind, connectionKind), isNull(channels.connectionId)))
           .all()
           .sort(
             (a, b) =>
-              Number(b.id === service) - Number(a.id === service) ||
+              Number(b.id === connectionKind) - Number(a.id === connectionKind) ||
               a.createdAt.getTime() - b.createdAt.getTime(),
           )[0];
     if (vacant) {
-      // Only a service that takes no agent gets here, so the channel starts with none.
+      // Only a connection kind that takes no agent gets here, so the channel starts with none.
       exec
         .update(channels)
         .set({ connectionId: connection.id, agent: null })
@@ -161,16 +167,19 @@ export class ChannelRecordsRepository {
       return toRecord({ ...vacant, connectionId: connection.id, agent: null });
     }
 
-    const serviceIdTaken =
-      exec.select({ id: channels.id }).from(channels).where(eq(channels.id, service)).get() !==
-      undefined;
-    const id = serviceIdTaken ? randomUUID() : service;
+    const kindIdTaken =
+      exec
+        .select({ id: channels.id })
+        .from(channels)
+        .where(eq(channels.id, connectionKind))
+        .get() !== undefined;
+    const id = kindIdTaken ? randomUUID() : connectionKind;
     const row = {
       id,
-      service,
-      platform: platformOf(service, connection.domain),
+      connectionKind,
+      platform: platformOf(connectionKind, connection.domain),
       connectionId: connection.id,
-      agent: LINKABLE_SERVICES.has(service) ? agent : null,
+      agent: LINKABLE_KINDS.has(connectionKind) ? agent : null,
       createdAt: now,
     };
     exec.insert(channels).values(row).run();
@@ -192,7 +201,7 @@ export class ChannelRecordsRepository {
    * Link `agent` to channel `id`, or unlink it with null, and return the
    * channel as it now stands. Only channel `id` changes: an agent may be the
    * agent of any number of channels, several on one platform included. Main is
-   * stored by its canonical id. Only a channel of a linkable service takes a
+   * stored by its canonical id. Only a channel of a linkable connection kind takes a
    * link; unlinking is always open.
    */
   link(id: string, requested: string | null): ChannelRecord {
@@ -200,8 +209,8 @@ export class ChannelRecordsRepository {
     return this.db.transaction((tx) => {
       const row = tx.select().from(channels).where(eq(channels.id, id)).get();
       if (!row) throw new ChannelRecordNotFound(id);
-      if (agent !== null && !LINKABLE_SERVICES.has(row.service)) {
-        throw new ChannelNotLinkable(id, row.service);
+      if (agent !== null && !LINKABLE_KINDS.has(row.connectionKind)) {
+        throw new ChannelNotLinkable(id, row.connectionKind);
       }
       if (agent !== null && row.connectionId === null) throw new ChannelUnbacked(id);
       tx.update(channels).set({ agent }).where(eq(channels.id, id)).run();
@@ -211,9 +220,9 @@ export class ChannelRecordsRepository {
 
   /** The Connections no channel records yet, for the boot pass that gives
    *  each a channel. */
-  unclaimed(connections: ReadonlyArray<{ id: string; service: string }>): Array<{
+  unclaimed(connections: ReadonlyArray<{ id: string; connectionKind: string }>): Array<{
     id: string;
-    service: string;
+    connectionKind: string;
   }> {
     const claimed = new Set(
       this.db

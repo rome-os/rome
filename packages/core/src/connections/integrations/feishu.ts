@@ -28,7 +28,7 @@ import {
   type NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import type { ChatSettingsService } from "../../conversation-settings/service.js";
+import type { ChatSettingsService } from "../../chat-settings/service.js";
 import {
   type CreateLarkChannel,
   FeishuAdapter,
@@ -527,7 +527,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
   });
 
   return {
-    service: "feishu",
+    connectionKind: "feishu",
     severalAccounts: true,
     reviveProfile: (_grant, record) => reviveFeishuProfile(record),
     accountIdOf: (_grant, record) => (typeof record.appId === "string" && record.appId) || null,
@@ -597,8 +597,9 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
                 conversations: page.items.map((conversation) => ({
                   ref: {
                     connectionId: kit.connectionId,
-                    conversationId: conversation.id as import("@rome-os/app-runtime").ChatId,
+                    chatId: conversation.id as import("@rome-os/app-runtime").ChatId,
                   },
+                  connectionKind: "feishu",
                   service: "feishu",
                   kind: conversation.kind,
                   displayName: conversation.displayName,
@@ -624,9 +625,9 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             stop(): Promise<void> {
               return adapter.stop();
             },
-            async send(conversationId, msg) {
+            async send(chatId, msg) {
               try {
-                return await adapter.send(conversationId, msg);
+                return await adapter.send(chatId, msg);
               } catch (err) {
                 // A tenant-access-token failure from send is a refused credential.
                 if (isFeishuAuthError(err)) {

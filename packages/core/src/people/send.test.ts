@@ -9,7 +9,7 @@ function channel(name: string, send: ChannelSend | null): Channel {
 
 function sending(talker: Pick<ChannelDirectMessaging, "chatFor"> | null): ChannelSend {
   const direct = talker && { ...talker, conversationFor: talker.chatFor };
-  return { send: async (conversationId) => ({ conversationId }), direct, activity: null };
+  return { send: async (chatId) => ({ chatId }), direct, activity: null };
 }
 
 describe("readSendStates", () => {

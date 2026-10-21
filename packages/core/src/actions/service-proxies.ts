@@ -228,10 +228,10 @@ export class ChannelsServiceProxy implements ChannelsService {
     return summaries.map((summary) => withRemovedMembers(summary, REMOVED_SUMMARY_MEMBERS));
   }
 
-  send(channel: string, conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+  send(channel: string, chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     return callMain<MessageReceipt>("channels.send", {
       channel,
-      conversationId,
+      chatId,
       message,
     });
   }

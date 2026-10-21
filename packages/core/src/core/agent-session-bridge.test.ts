@@ -90,7 +90,7 @@ describe("AgentSessionBridge turn routing", () => {
 
     const ref = {
       connectionId: "connection:discord",
-      conversationId: "channel-1" as ChatId,
+      chatId: "channel-1" as ChatId,
     };
     await rs.waitFor(() =>
       expect(child.sent).toContainEqual(expect.objectContaining({ type: "rpc_response" })),
@@ -548,7 +548,7 @@ describe("AgentSessionBridge reply streaming", () => {
       codec: plainText,
       async create(conversation, text, replyTo) {
         written.push([conversation, text, replyTo]);
-        return { messageId: `m${written.length}`, conversationId: conversation };
+        return { messageId: `m${written.length}`, chatId: conversation };
       },
       async edit(_receipt, text) {
         edits.push(text);
@@ -780,7 +780,7 @@ describe("AgentSessionBridge reply streaming", () => {
     })();
     const interrupt = rs.fn(async () => undefined);
     const { written, edits, turnEnd, turns } = run(events, { streamReply: true, interrupt });
-    const ref = { connectionId: "c", conversationId: "chat-1" as ChatId };
+    const ref = { connectionId: "c", chatId: "chat-1" as ChatId };
 
     await rs.waitFor(() => expect(written).toEqual([["chat-1", "Hello", "msg-1"]]));
     await turns.getActiveByConversation(ref)?.interrupt?.("chat-stop");
@@ -835,7 +835,7 @@ describe("AgentSessionBridge reply streaming", () => {
       async create(conversation, text) {
         created.push(text);
         if (created.length === 1) await held;
-        return { messageId: `m${created.length}`, conversationId: conversation };
+        return { messageId: `m${created.length}`, chatId: conversation };
       },
       async edit() {},
     };
@@ -924,7 +924,7 @@ describe("AgentSessionBridge reply streaming", () => {
         codec: plainText,
         async create(conversation, text) {
           if (text !== "Looking.") throw new DeliveryFailure("rejected", "refused");
-          return { messageId: "m1", conversationId: conversation };
+          return { messageId: "m1", chatId: conversation };
         },
         async edit() {},
       };

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DrizzleDb } from "../db/index.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
-import type { ServiceOfChannel } from "../db/repositories/channel-records.js";
+import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
@@ -10,8 +10,8 @@ import { ActionExecutionsRepository } from "../db/repositories/action-executions
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { GUARDIAN_PROFILE_PATH } from "../profile-memory.js";
 
-/** Maps every channel to itself. Valid only where no service has a later channel. */
-const identity: ServiceOfChannel = (channel) => channel;
+/** Maps every channel to itself. Valid only where no connection kind has a later channel. */
+const identity: ConnectionKindOfChannel = (channel) => channel;
 
 /**
  * Unified, deterministic baseline seed.

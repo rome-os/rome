@@ -62,13 +62,13 @@ export function addressIsConversationFeature(): Pick<ChannelDirectMessaging, "ch
 }
 
 export function typingActivityFeature(adapter: {
-  notifyTyping(conversationId: string): Promise<void>;
+  notifyTyping(chatId: string): Promise<void>;
 }): ChannelActivity {
   return {
     async begin(input) {
-      await adapter.notifyTyping(input.conversationId);
+      await adapter.notifyTyping(input.chatId);
       return {
-        update: async () => adapter.notifyTyping(input.conversationId),
+        update: async () => adapter.notifyTyping(input.chatId),
         finish: async () => {},
       };
     },

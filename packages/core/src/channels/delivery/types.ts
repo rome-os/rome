@@ -99,7 +99,7 @@ export interface PartReceipt {
   messageId: string;
   /** Where the message landed, which can differ from where it was sent (a
    *  thread the platform opened). */
-  conversationId: string;
+  chatId: string;
 }
 
 /** The platform's write operations, as a transport implements them. Every
@@ -107,7 +107,7 @@ export interface PartReceipt {
 export interface DeliveryTransport {
   readonly capabilities: DeliveryCapabilities;
   readonly codec: TextCodec;
-  create(conversationId: string, text: string, replyTo?: string): Promise<PartReceipt>;
+  create(chatId: string, text: string, replyTo?: string): Promise<PartReceipt>;
   /** Present when `capabilities.edit`. Replacing text with the text already
    *  there succeeds. */
   edit?(receipt: PartReceipt, text: string): Promise<void>;

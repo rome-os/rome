@@ -44,6 +44,10 @@ export const pairingPayloadSchema = z.object({
   expiresAt: z.number().int(),
   failedAttempts: z.number().int().nonnegative(),
   lastGuidanceAt: z.number().int(),
+  /** The direct chat the request came from, where the outcome is sent. */
+  chatId: z.string().optional(),
+  /** The same chat, as requests stored before the chat rename name it.
+   *  `pairingPayload` reads it into `chatId`. */
   conversationId: z.string().optional(),
   resolution: z
     .enum(["web", "verification_code", "rejected", "expired", "account_linked", "superseded"])
@@ -57,5 +61,8 @@ export function pairingPayload(approval: {
 }): PairingPayload | null {
   if (approval.type !== "person_mapping") return null;
   const parsed = pairingPayloadSchema.safeParse(approval.payload);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) return null;
+  const { conversationId, ...payload } = parsed.data;
+  const chatId = payload.chatId ?? conversationId;
+  return chatId === undefined ? payload : { ...payload, chatId };
 }

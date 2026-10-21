@@ -1,6 +1,6 @@
 # Rome dev image.
 #
-# Minimal Node + pnpm + build deps for better-sqlite3 / node-pty. At runtime
+# Minimal Node + pnpm + build deps for node-pty. At runtime
 # /workspace is the container-owned `rome-workspace` named volume: source is
 # synced into it (read-only) by the rome-sync sidecar via mutagen, and
 # node_modules + dist are populated in-container by `pnpm install

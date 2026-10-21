@@ -46,7 +46,7 @@ describe("Test Helpers", () => {
       expect(msg.direction).toBe("inbound");
       expect(msg.senderId).toBe("user-123");
       expect(msg.senderDisplayName).toBe("Test User");
-      expect(msg.conversationId).toBe("thread-001");
+      expect(msg.chatId).toBe("thread-001");
       expect(msg.thread).toEqual({ kind: "dm" });
       expect(msg.text).toBe("Hello, world!");
       expect(msg.attachments).toEqual([]);
@@ -145,11 +145,9 @@ describe("Test Helpers", () => {
       expect(transport.channel).toBe("telegram");
 
       const receipt = await transport.send("thread-1" as ChatId, { text: "Hi" });
-      expect(receipt.conversationId).toBe("thread-1");
+      expect(receipt.chatId).toBe("thread-1");
       expect(receipt.messageId).toEqual(expect.any(String));
-      expect(transport.sentMessages).toEqual([
-        { conversationId: "thread-1", message: { text: "Hi" } },
-      ]);
+      expect(transport.sentMessages).toEqual([{ chatId: "thread-1", message: { text: "Hi" } }]);
     });
 
     it("delivers a received message, named for its channel, to every listener", async () => {

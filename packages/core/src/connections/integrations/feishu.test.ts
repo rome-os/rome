@@ -164,7 +164,7 @@ describe("isFeishuAuthError", () => {
 describe("feishu descriptor shape", () => {
   it("declares one `app` grant and a talker needing it", () => {
     const desc = makeDescriptor(new FakeLarkChannel());
-    expect(desc.service).toBe("feishu");
+    expect(desc.connectionKind).toBe("feishu");
     expect(Object.keys(desc.auth)).toEqual(["app"]);
     expect(desc.capabilities.talker?.needs).toEqual(["app"]);
     expect(desc.capabilities.actor).toBeUndefined();
@@ -216,7 +216,7 @@ describe("feishu talk lifecycle", () => {
 
     const received: string[] = [];
     conn.hearTalker(async (msg) => {
-      received.push(`${msg.senderId}/${msg.conversationId}:${msg.text}`);
+      received.push(`${msg.senderId}/${msg.chatId}:${msg.text}`);
       return;
     });
     await channel.emitMessage({ content: "hello there" });
@@ -224,7 +224,7 @@ describe("feishu talk lifecycle", () => {
 
     await expect(sendThrough(conn, "oc_chat" as ChatId, { text: "reply" })).resolves.toEqual({
       messageId: "om_sent",
-      conversationId: "oc_chat",
+      chatId: "oc_chat",
     });
 
     const direct = await conn.withTalker((talker) => talker.directMessaging?.chatFor("ou_alice"));
@@ -233,7 +233,7 @@ describe("feishu talk lifecycle", () => {
     expect(channel.sent.at(-1)).toMatchObject({ to: "ou_alice", input: { markdown: "paired" } });
     const session = await conn.withTalker((talker) =>
       talker.activity?.begin({
-        conversationId: "oc_chat" as ChatId,
+        chatId: "oc_chat" as ChatId,
         messageId: "om_1",
       }),
     );
@@ -283,7 +283,7 @@ describe("feishu inbound delivery", () => {
         channel: "feishu",
         direction: "inbound",
         messageId: "om_7",
-        conversationId: "oc_chat",
+        chatId: "oc_chat",
         senderId: "ou_alice",
         senderDisplayName: "Alice",
         text: "Rome see this",

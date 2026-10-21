@@ -396,11 +396,8 @@ jobs:
       # when the suite starts its web server.
       #
       # `--ignore-scripts` makes the toolchain-free image safe rather than
-      # lucky. Narrowing the closure does not remove every native lifecycle:
-      # better-sqlite3 reaches it through drizzle-orm and runs
-      # `prebuild-install || node-gyp rebuild`, which only stays on its first
-      # branch while a prebuild exists for the runner's node and architecture.
-      # The fallback would compile, and there is nothing here to compile with.
+      # lucky. Narrowing the closure does not prove that no native lifecycle
+      # reaches it, and one that compiled would find nothing to compile with.
       # No package in this job needs its build step: the suite's web server
       # runs `build:kit` itself, which is what compiles the workspace packages.
       - run: pnpm install --frozen-lockfile --filter "rome-web..." --ignore-scripts

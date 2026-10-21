@@ -20,7 +20,7 @@ import type {
   ChatSettingsSnapshot,
   PartialChatSettings,
   ProviderSessionResetPolicy,
-} from "@rome/api-types/conversation-settings";
+} from "@rome/api-types/chat-settings";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +46,7 @@ import { Switch } from "@/components/ui/switch";
 import { artifactLocalName, artifactOwnerId } from "@/lib/artifact-name";
 import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
 import { fetchConnections, type ApiConnection } from "@/lib/connections-api";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 
 interface PageResponse {
   items: ChatSettingsListItem[];
@@ -102,7 +102,7 @@ export function ChannelsSettingsPage() {
         if (availability) search.set("availability", availability);
         if (cursor) search.set("cursor", cursor);
         const [page, connectionList, agentPage] = await Promise.all([
-          api<PageResponse>(`/api/conversation-settings?${search}`),
+          api<PageResponse>(`/api/chat-settings?${search}`),
           fetchConnections(),
           api<AgentPage>("/api/agents"),
         ]);
@@ -144,7 +144,7 @@ export function ChannelsSettingsPage() {
       new Map(
         connections.flatMap((connection) =>
           connection.id !== null &&
-          LINKABLE_SERVICES.has(connection.service) &&
+          LINKABLE_KINDS.has(connection.connectionKind) &&
           connection.agent === null
             ? [
                 [
@@ -165,7 +165,7 @@ export function ChannelsSettingsPage() {
       new Map(
         connections.flatMap((connection) =>
           connection.id !== null &&
-          LINKABLE_SERVICES.has(connection.service) &&
+          LINKABLE_KINDS.has(connection.connectionKind) &&
           typeof connection.agent === "string"
             ? [[connection.id, connection.agent]]
             : [],
@@ -181,8 +181,7 @@ export function ChannelsSettingsPage() {
       current.map((candidate) =>
         candidate.snapshot.conversation.ref.connectionId ===
           snapshot.conversation.ref.connectionId &&
-        candidate.snapshot.conversation.ref.conversationId ===
-          snapshot.conversation.ref.conversationId
+        candidate.snapshot.conversation.ref.chatId === snapshot.conversation.ref.chatId
           ? { ...candidate, snapshot, source: hasOverrides(snapshot) ? "configured" : "known" }
           : candidate,
       ),
@@ -282,7 +281,7 @@ export function ChannelsSettingsPage() {
           <div className="space-y-4">
             {items.map((item) => (
               <ConversationRow
-                key={`${item.snapshot.conversation.ref.connectionId}:${item.snapshot.conversation.ref.conversationId}`}
+                key={`${item.snapshot.conversation.ref.connectionId}:${item.snapshot.conversation.ref.chatId}`}
                 item={item}
                 agentNames={agentNames}
                 silentAccount={silentAccounts.get(item.snapshot.conversation.ref.connectionId)}
@@ -427,7 +426,7 @@ function ConversationRow({
     setSaving(true);
     inFlight.current = inFlight.current
       .then(() =>
-        api<ChatSettingsSnapshot>("/api/conversation-settings", {
+        api<ChatSettingsSnapshot>("/api/chat-settings", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ref: conversation.ref, set, clear }),
@@ -538,7 +537,7 @@ function ConversationRow({
       className="overflow-hidden rounded-12 border border-border bg-surface px-4"
     >
       <header className="-mx-4 flex items-start gap-3 border-b border-border px-4 py-4">
-        <ConnectionBrandBadge connection={conversation.service} />
+        <ConnectionBrandBadge connection={conversation.connectionKind} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             {/* The container reads as the place the conversation lives, so it
@@ -569,7 +568,7 @@ function ConversationRow({
               list the service would otherwise be absent from the a11y tree. */}
           <p className="mt-1 truncate text-aux text-muted-foreground">
             {t(`channels.conversationSettings.kinds.${conversation.kind}`)}
-            <span className="sr-only">{` · ${serviceLabel(conversation.service)}`}</span>
+            <span className="sr-only">{` · ${serviceLabel(conversation.connectionKind)}`}</span>
           </p>
         </div>
         {saving && (

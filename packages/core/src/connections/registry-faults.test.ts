@@ -642,7 +642,7 @@ describe("registry faults", () => {
         channel: "test",
         direction: "inbound",
         messageId: "m",
-        conversationId: "thread-1" as ChatId,
+        chatId: "thread-1" as ChatId,
         senderId: "s",
         senderDisplayName: "S",
         thread: { kind: "dm" },
@@ -771,7 +771,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     });
     let renewStarted = false;
     const descriptor: ConnectionDescriptor = {
-      service: "fake-session-svc",
+      connectionKind: "fake-session-svc",
       auth: {
         session: {
           async confer(): Promise<Credential> {
@@ -862,7 +862,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     renew: () => Promise<Credential | "re-confer">,
   ): ConnectionDescriptor {
     return {
-      service: "fake-session-svc",
+      connectionKind: "fake-session-svc",
       auth: {
         session: {
           async confer(): Promise<Credential> {

@@ -40,6 +40,13 @@ import {
   shutdown as shutdownTelemetry,
   withInboundSpans,
 } from "./telemetry.js";
+import {
+  legacyChatIdChannels,
+  legacyChatIdChannelsService,
+  legacyChatIdSettings,
+  legacyChatIdSettingsChange,
+  legacyChatIdStop,
+} from "./apps/legacy-chat-id.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 
 const log = createLogger("startup");
@@ -209,11 +216,12 @@ import {
   parseLegacyArtifactBindings,
 } from "./apps/artifact-id.js";
 import { ConnectionRegistry, DrizzleGrantLedger } from "./connections/index.js";
+import { startExpiringCredentialRenewal } from "./connections/expiring-renewal.js";
 import { SetupManager } from "./connections/setup/manager.js";
-import { AGENTS_SERVICE } from "./connections/integrations/agents.js";
+import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
-import { ChatSettingsRepository, ChatSettingsService } from "./conversation-settings/index.js";
+import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
 import { ensureZeroGrantConnections } from "./connections/zero-grant.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
@@ -277,13 +285,13 @@ async function main() {
 
   const sessionsRepo = new SessionsRepository(db);
   const channelRecords = new ChannelRecordsRepository(db);
-  // Rome listens to an account of a linkable service only while it has an
+  // Rome listens to an account of a linkable connection kind only while it has an
   // agent: each channel's inbound port reads this, and a link tells it.
   const accountListening = new AccountListening(channelRecords);
-  // The service a channel name belongs to. Whatever is keyed by service, such
+  // The connection kind a channel name belongs to. Whatever is keyed by connection kind, such
   // as a descriptor, a channel policy, or a person's link, reads it.
-  const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
-  const personMappingRepo = new PersonMappingRepository(db, serviceOfChannel);
+  const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
+  const personMappingRepo = new PersonMappingRepository(db, connectionKindOfChannel);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -360,14 +368,14 @@ async function main() {
   // Connection registry (use side). Descriptors are registered here at boot, but
   // the load()/import that hydrate + rebuild live connections run LATER — after
   // the message hook exists, so the first Talk unlock can attach its subscription.
-  // Each Connection of a service with a Talk backs one channel, recorded and
+  // Each Connection of a connection kind with a Talk backs one channel, recorded and
   // released in the same transaction as the Connection.
-  const talks = (service: string) =>
-    connectionRegistry.getDescriptor(service)?.capabilities.talker !== undefined;
+  const talks = (connectionKind: string) =>
+    connectionRegistry.getDescriptor(connectionKind)?.capabilities.talker !== undefined;
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
     ledger: new DrizzleGrantLedger(db),
     onMint: (tx, record, profile) => {
-      if (!talks(record.service)) return;
+      if (!talks(record.connectionKind)) return;
       channelRecords.claim(tx, { ...record, domain: domainOf(profile) }, record.createdAt);
     },
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
@@ -376,23 +384,23 @@ async function main() {
   const pairingAdmission = createPairingAdmission({
     approvalsRepo,
     personMappingRepo,
-    talkGrants: (service) =>
-      connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
+    talkGrants: (connectionKind) =>
+      connectionRegistry.getDescriptor(connectionKind)?.capabilities.talker?.needs ?? [],
     registry: connectionRegistry,
   });
   const linkAgentToGuardian = createAgentsGuardianLink({
     personMappingRepo,
     settingsRepo,
-    channel: AGENTS_SERVICE,
+    channel: AGENTS_KIND,
   });
-  const admit: Admission = async (connectionId, service, message) => {
+  const admit: Admission = async (connectionId, connectionKind, message) => {
     // Before the inbox resolves the sender, so the first message already
     // reads as the guardian's.
-    if (service === AGENTS_SERVICE) await linkAgentToGuardian(message);
-    return pairingAdmission(connectionId, service, message);
+    if (connectionKind === AGENTS_KIND) await linkAgentToGuardian(message);
+    return pairingAdmission(connectionId, connectionKind, message);
   };
   // How app actions — here and, over RPC, in workers — send and read on
-  // channels by name. The channel list is built further down, and the service
+  // channels by name. The channel list is built further down, and the connection kind
   // answers from the Connections alone until then (startup hooks, approvals).
   let builtChannels: ReturnType<typeof channelList> | undefined;
   // Reply streaming is off until the guardian turns it on under
@@ -412,14 +420,14 @@ async function main() {
     channels: () => builtChannels,
     registry: connectionRegistry,
     channelOf,
+    platformOf: (name: string) => channelRecords.platformOf(name),
     pacing: replyPacing,
   });
   // The agents this Rome can message, one read for the People page and for
   // sending by name.
   const listedAgents = externalAgents({
     client: createRomeCloudAgentsClient(),
-    isConnected: () =>
-      connectionRegistry.find(AGENTS_SERVICE).some((conn) => conn.isUnlocked("talk")),
+    isConnected: () => connectionRegistry.find(AGENTS_KIND).some((conn) => conn.isUnlocked("talk")),
   });
   const agentNameResolver = createAgentNames(listedAgents);
   // Conferral setups: in-memory session store keyed per grant,
@@ -590,7 +598,7 @@ async function main() {
     promptBuilder.invalidateAll();
   });
 
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, serviceOfChannel);
+  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
 
   // The worker cap bounds memory, so its default follows the instance's
   // memory: the fixed 8 was tight on 4 GB and idle on 16 GB. The limit comes
@@ -741,7 +749,7 @@ async function main() {
       await eventService.publish({
         name: "conversation-settings.changed",
         source: "conversation-settings",
-        payload: { ref, actor, fields, reset },
+        payload: legacyChatIdSettingsChange({ ref, actor, fields, reset }),
       });
     },
   });
@@ -774,8 +782,8 @@ async function main() {
   const chatStop: ChatStopHandler = (input) =>
     stopActiveConversationTurn(input, {
       turns: agentTurnStreamRegistry,
-      isGuardian: async (service, senderId) =>
-        (await personMappingRepo.findByChannelUser(service, senderId))?.bondLevel === "guardian",
+      isGuardian: async (channel, senderId) =>
+        (await personMappingRepo.findByChannelUser(channel, senderId))?.bondLevel === "guardian",
     });
   const subagentExecutionService = createSubagentExecutionService({
     webchatRepo,
@@ -837,11 +845,11 @@ async function main() {
         (await chatSettings.get(ref)).effective.session.reset,
       usageRecorder,
       channelSurface: (channel) => {
-        const talker = connectionRegistry.getDescriptor(serviceOfChannel(channel))?.capabilities
-          .talker;
+        const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))
+          ?.capabilities.talker;
         return talker ? talkerChannelSurface(talker) : null;
       },
-      serviceOfChannel,
+      connectionKindOfChannel,
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
@@ -934,15 +942,18 @@ async function main() {
     agentLoader,
     actionRegistry,
   });
+  // What apps get of the chat settings, with the chat ids an app built for
+  // SDK 0.7 reads.
+  const appChatSettings = legacyChatIdSettings(chatSettings);
   const appActionDeps = {
     agentRunner,
     resolveOneOffDate: (trigger: Trigger) =>
       resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
     resolveArtifactReference,
-    channelsService,
-    chatSettings,
+    channelsService: legacyChatIdChannelsService(channelsService),
+    chatSettings: appChatSettings,
     // Apps built before the chat rename read `conversationSettings`.
-    conversationSettings: chatSettings,
+    conversationSettings: appChatSettings,
     capabilityDiscovery,
     personMappingRepo,
     sentinelLogRepo,
@@ -1223,7 +1234,7 @@ async function main() {
     // connection. Its key recovery runs a local debugger in this container.
     ...(wechatUserRuntime ? { wechatUserRuntime } : {}),
   });
-  // Built after every descriptor is registered: each service with a Talk backs
+  // Built after every descriptor is registered: each connection kind with a Talk backs
   // its channel's send and inbound ports.
   const channels = channelList({
     db,
@@ -1238,7 +1249,7 @@ async function main() {
       listening: accountListening,
     },
     connectionAccounts: {
-      [AGENTS_SERVICE]: agentsAccounts(listedAgents),
+      [AGENTS_KIND]: agentsAccounts(listedAgents),
     },
     laterChannels: channelRecords
       .all()
@@ -1247,16 +1258,19 @@ async function main() {
       // below is still built, and lists as unsendable until the next boot.
       .filter(
         (record) =>
-          record.id !== record.service && record.connectionId !== null && talks(record.service),
+          record.id !== record.connectionKind &&
+          record.connectionId !== null &&
+          talks(record.connectionKind),
       )
-      .map((record) => ({ name: record.id, service: record.service })),
+      .map((record) => ({ name: record.id, connectionKind: record.connectionKind })),
   });
   builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
 
   // The channel-message hook hears every channel through these, so each
   // inbound message it handles is traced and logged once.
-  const hookChannels = withInboundSpans(channels, "channel-message");
+  const hookChannels = legacyChatIdChannels(withInboundSpans(channels, "channel-message"));
+  const hookChatStop = legacyChatIdStop(chatStop);
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
     .listArtifacts("hook")
@@ -1265,9 +1279,9 @@ async function main() {
     try {
       const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, {
         actionEngine,
-        chatSettings,
-        conversationSettings: chatSettings,
-        chatStop,
+        chatSettings: appChatSettings,
+        conversationSettings: appChatSettings,
+        chatStop: hookChatStop,
         channels: hookChannels,
         accountAgentOf,
         linkedAgentOf: accountAgentOf,
@@ -1307,9 +1321,9 @@ async function main() {
         catalog: appCatalog,
         deps: {
           actionEngine,
-          chatSettings,
-          conversationSettings: chatSettings,
-          chatStop,
+          chatSettings: appChatSettings,
+          conversationSettings: appChatSettings,
+          chatStop: hookChatStop,
           channels: hookChannels,
           accountAgentOf,
           linkedAgentOf: accountAgentOf,
@@ -1338,7 +1352,7 @@ async function main() {
       connection,
     );
     if (!channel) return;
-    const added = withInboundSpans([channel], "channel-message");
+    const added = legacyChatIdChannels(withInboundSpans([channel], "channel-message"));
     hookChannels.push(...added);
     const hook = messageHook;
     // A hook without `addChannels` re-registers, as the app-keys reloader
@@ -1380,15 +1394,18 @@ async function main() {
   // unconnected goes before any channel is recorded for it.
   await removeUnconnectedAccounts(connectionRegistry);
   // Connections minted before channels were recorded get theirs now. Each
-  // service held one, so each takes its service's name.
+  // connection kind held one, so each takes its connection kind's name.
   await claimChannels(
     db,
     channelRecords,
-    connectionRegistry.all().filter((c) => talks(c.service)),
+    connectionRegistry.all().filter((c) => talks(c.connectionKind)),
     async (id) => domainOfGrants(await connectionRegistry.getLedger().listGrants(id)),
   );
   await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();
+  // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
+  // token the connector reads from its custody file as rejected.
+  const stopExpiringCredentialRenewal = startExpiringCredentialRenewal(connectionRegistry);
 
   try {
     await writeAppRuntimeStatus(refreshRuntimeAppStatus());
@@ -1804,6 +1821,7 @@ async function main() {
       }
     }
 
+    stopExpiringCredentialRenewal();
     try {
       await connectionRegistry.stopAll();
       shutdownLog.info("connection registry stopped");

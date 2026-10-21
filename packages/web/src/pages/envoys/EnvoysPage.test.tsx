@@ -21,7 +21,7 @@ afterEach(() => {
 function connection(service: string, name: string, agent: string | null): ApiConnection {
   return {
     id: `${service}-id`,
-    service,
+    connectionKind: service,
     label: service,
     grants: { bot: "authorized" },
     display: { bot: { displayName: name } },

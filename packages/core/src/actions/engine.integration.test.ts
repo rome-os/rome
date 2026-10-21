@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
-import { createTestDb, type TestDb, identityServiceOf } from "../test/helpers.js";
+import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/helpers.js";
 import { ActionEngine } from "./engine.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -60,7 +60,7 @@ describe("Approval flow integration", () => {
     testDb = createTestDb();
     approvalsRepo = new ApprovalsRepository(
       testDb.db,
-      new PersonMappingRepository(testDb.db, identityServiceOf),
+      new PersonMappingRepository(testDb.db, identityConnectionKindOf),
     );
     journalRepo = new ExecutionJournalRepository(testDb.db);
     executionsRepo = new ActionExecutionsRepository(testDb.db);

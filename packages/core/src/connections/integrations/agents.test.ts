@@ -75,7 +75,7 @@ describe("agents channel", () => {
     const inbound = toAgentInboundMessage(envelope({ data: { order: 41 }, inReplyTo: "msg_0" }))!;
     expect(inbound).toMatchObject({
       messageId: "msg_1",
-      conversationId: ATLAS,
+      chatId: ATLAS,
       senderId: ATLAS,
       senderDisplayName: "atlas (dot)",
       thread: { kind: "dm" },
@@ -96,7 +96,7 @@ describe("agents channel", () => {
       },
     });
     expect(toAgentInboundMessage(external)).toMatchObject({
-      conversationId: ATLAS,
+      chatId: ATLAS,
       senderId: ATLAS,
       senderDisplayName: "atlas (@friend's dot)",
     });
@@ -257,7 +257,7 @@ describe("agents channel", () => {
       replyToMessageId: "msg_1",
     });
     expect(client.sent).toEqual([{ to: ATLAS, text: "On it", inReplyTo: "msg_1" }]);
-    expect(receipt).toEqual({ conversationId: ATLAS, messageId: "msg_sent" });
+    expect(receipt).toEqual({ chatId: ATLAS, messageId: "msg_sent" });
     await expect(talker.send(ATLAS as ChatId, { text: " " })).rejects.toThrow(/text/);
   });
 

@@ -1,11 +1,11 @@
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
-import type { ChatSettingsControl } from "./conversation-settings.js";
+import type { ChatSettingsControl } from "./chat-settings.js";
 
 export { z };
 export type { JSONSchema };
-export * from "./conversation-settings.js";
+export * from "./chat-settings.js";
 
 // Browser-safe package entry point. Node-only CDP helpers live under the `/browser` subpath.
 
@@ -1673,17 +1673,20 @@ export interface MessageReplyReference {
   senderName?: string;
 }
 
-/** Opaque provider-owned conversation address. Callers may persist and
+/** Opaque provider-owned chat address. Callers may persist and
  * round-trip this value, but must never parse or construct one. */
 export type ChatId = string & { readonly __brand: "ChatId" };
 
 export interface ChatRef {
   connectionId: string;
-  conversationId: ChatId;
+  chatId: ChatId;
 }
 
 export interface ChatDescriptor {
   ref: ChatRef;
+  /** The kind of connection the chat is reached through, such as `telegram_user`. */
+  connectionKind: string;
+  /** @deprecated Read `connectionKind`, which carries the same value. */
   service: string;
   kind: "dm" | "group" | "channel" | "topic";
   displayName: string;
@@ -1707,9 +1710,9 @@ export interface ChannelMessage {
   channel: string;
   direction: "inbound" | "outbound";
   messageId: string;
-  conversationId: ChatId;
-  /** Parent conversation when this message belongs to a native thread. */
-  parentConversationId?: ChatId;
+  chatId: ChatId;
+  /** Parent chat when this message belongs to a native thread. */
+  parentChatId?: ChatId;
   /** Who said it, as the channel addresses them. Empty when the channel
    *  recorded no sender for the line. */
   senderId: string;
@@ -1729,9 +1732,9 @@ export interface ChannelMessage {
  *  messages. A channel read live through its Connection reaches back a bounded
  *  default (the last day) when no `since` is named. */
 export interface ChannelMessageQuery {
-  /** One conversation, by the platform's own id for it. Absent for every
-   *  conversation the channel can read. */
-  conversationId?: ChatId;
+  /** One chat, by the platform's own id for it. Absent for every chat the
+   *  channel can read. */
+  chatId?: ChatId;
   /** Only messages said at or after this instant. */
   since?: Date;
   /** At most this many, newest first. Defaults to 100, capped at 1,000. */
@@ -1742,6 +1745,12 @@ export interface ChannelMessageQuery {
 export interface ChannelSummary {
   /** The channel's name, as every stored row and link spells it. */
   name: string;
+  /** The platform the channel is an account on, such as `telegram`. Rome can
+   *  hold several accounts on one platform, each its own channel: a Telegram
+   *  bot and a signed-in Telegram are both on `telegram`. A channel named after
+   *  its platform is only one of them. Absent where Rome does not know the
+   *  platform. */
+  platform?: string;
   /** Whether a Connection backs the channel, so `send` has something to send
    *  through. A send can still fail while that Connection is locked or
    *  offline. */
@@ -1762,7 +1771,7 @@ export interface ChannelsService {
   list(): Promise<ChannelSummary[]>;
   /** Send on a channel, through the Connection backing it. Rejects when no
    *  Connection backs the channel. */
-  send(channel: string, conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
+  send(channel: string, chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   /**
    * The channel's `messages.query`: its newest messages, newest first.
    *
@@ -1807,7 +1816,7 @@ export type ChatStopHandler = (input: ChatStopInput) => Promise<ChatStopResult>;
 
 export interface MessageReceipt {
   messageId?: string;
-  conversationId: ChatId;
+  chatId: ChatId;
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
@@ -1821,10 +1830,7 @@ export interface ChannelActivitySession {
 }
 
 export interface ChannelActivity {
-  begin(input: {
-    conversationId: ChatId;
-    messageId?: string;
-  }): Promise<ChannelActivitySession | null>;
+  begin(input: { chatId: ChatId; messageId?: string }): Promise<ChannelActivitySession | null>;
 }
 
 /**
@@ -1866,7 +1872,7 @@ export interface ChannelDirectMessaging {
 
 /** Sending on a channel. */
 export interface ChannelSend {
-  send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
+  send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   /** Showing the account that a reply is on its way (a typing indicator), or
    *  null or absent where the channel cannot. Cosmetic: a caller never waits
    *  on it to answer. */

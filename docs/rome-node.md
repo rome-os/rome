@@ -348,6 +348,33 @@ It derives `from` from the authenticated connection. Requests carry
 `{ type: "response", ok: false, error: { code, message } }`.
 The CLI daemon accepts a response only from the selected target with the matching request ID.
 
+## Rome desktop
+
+The macOS app connects its computer as a device when it opens a Rome from Rome
+Cloud. It runs `connectHost()` in its main process with the app's own Rome Cloud
+sign-in, so the one browser approval that opens the Rome also connects the computer.
+Cloud keeps that sign-in and the device as one record. Revoking the device signs
+the app out, and signing out of the app disconnects the device. The app never
+starts a second authorization: a rejected credential signs it out instead.
+
+The connection runs while the app runs, with or without a window, and ends when
+the app quits. A launch that opens the private VM does not connect the computer.
+Programs run as the user who runs the app. Before it connects, the app adopts the
+PATH of the user's login shell, because an app opened from Finder or the Dock
+gets only the system directories.
+
+The user can turn the computer off as a device and on again. The choice persists
+across restarts: while it is off, the app stays signed in and opens the Rome, but
+does not connect the computer. Settings → Devices in the Rome the app opened shows
+a "This device" card with that switch, only inside the app. The app answers the
+card's requests only from the top frame of that Rome's origin. Other pages in its
+window, and the Rome in a browser, cannot read or change the device.
+
+The app keeps its credential in its own encrypted store and never reads the CLI's
+configuration directory. `rome-node connect` on the same computer is a separate
+device. Each configuration directory holds one identity, so `ROME_NODE_CONFIG_DIR`
+lets one computer connect to several accounts.
+
 ## Binary frames
 
 Gateway also relays binary WebSocket messages. One binary message is one frame,

@@ -4,7 +4,7 @@ import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 
 const conversation = {
   connectionId: "connection:discord",
-  conversationId: "channel-1" as ChatId,
+  chatId: "channel-1" as ChatId,
 };
 
 describe("AgentTurnStreamRegistry conversation routing", () => {

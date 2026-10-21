@@ -1,5 +1,5 @@
 import {
-  LINKABLE_SERVICES,
+  LINKABLE_KINDS,
   MAIN_AGENT_ID,
   agentLabel,
   canonicalAgent,
@@ -65,7 +65,7 @@ function connectedGrant(connection: ApiConnection): string | null {
 }
 
 function toAccount(connection: ApiConnection): EnvoyAccount | null {
-  if (!LINKABLE_SERVICES.has(connection.service)) return null;
+  if (!LINKABLE_KINDS.has(connection.connectionKind)) return null;
   // A core that predates agent links omits `agent`, and a placeholder has no
   // channel, so neither is an account that can carry an agent.
   if (connection.id === null || !connection.channel || connection.agent === undefined) return null;
@@ -73,13 +73,13 @@ function toAccount(connection: ApiConnection): EnvoyAccount | null {
   if (!grant) return null;
   // A core that predates `platform` omits it, and the service alone cannot
   // tell a Lark app from a Feishu one, so such an app reads as Feishu.
-  const platform = connection.platform ?? platformOf(connection.service);
-  const kind = DELEGATE_SERVICES.has(connection.service) ? "delegate" : "own";
+  const platform = connection.platform ?? platformOf(connection.connectionKind);
+  const kind = DELEGATE_SERVICES.has(connection.connectionKind) ? "delegate" : "own";
   return {
     channel: connection.channel,
     connectionId: connection.id,
     grant,
-    service: connection.service,
+    service: connection.connectionKind,
     platform,
     name: accountName(connection) ?? serviceLabel(platform),
     kind,
@@ -162,7 +162,7 @@ export interface ConnectChoice {
 export function connectChoices(connections: readonly ApiConnection[]): ConnectChoice[] {
   const choices: ConnectChoice[] = [];
   for (const service of [...OWN_SERVICES, ...DELEGATE_SERVICES]) {
-    const rows = connections.filter((connection) => connection.service === service);
+    const rows = connections.filter((connection) => connection.connectionKind === service);
     if (rows.length === 0) continue;
     const anyConnected = rows.some((connection) => connectedGrant(connection) !== null);
     const several = rows.some((connection) => connection.severalAccounts === true);

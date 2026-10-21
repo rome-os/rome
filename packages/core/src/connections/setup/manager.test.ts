@@ -66,7 +66,7 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
     confer: async (service, connectionId, grant, credential, profile, opts) => {
       let conn = connectionId
         ? connected.find((c) => c.id === connectionId)
-        : connected.find((c) => c.service === service);
+        : connected.find((c) => c.connectionKind === service);
       if (connectionId && !conn) {
         throw new Error(`Connection "${connectionId}" no longer exists; setup cannot confer.`);
       }
@@ -92,7 +92,7 @@ function fakePersonRepo(writeChannelMapping = rs.fn(() => "id")): PersonMappingR
   } as unknown as PersonMappingRepository;
 }
 
-const PLACEHOLDER = { service: "discord" } as const;
+const PLACEHOLDER = { connectionKind: "discord" } as const;
 
 describe("SetupManager", () => {
   it("starts a setup and exposes its initial awaiting-input state", async () => {
@@ -153,7 +153,7 @@ describe("SetupManager", () => {
       mkConn("conn-B"),
     ]);
     const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
-    const started = await mgr.start({ service: "discord", connectionId: "conn-B" }, "bot");
+    const started = await mgr.start({ connectionKind: "discord", connectionId: "conn-B" }, "bot");
     expect(mgr.activeFor("conn-B", "bot")).toBe(started.cid);
     await mgr.provideInput(started.cid, { token: "abc" })!;
     expect(connect).not.toHaveBeenCalled();
@@ -163,7 +163,7 @@ describe("SetupManager", () => {
   it("fails the setup when the addressed connection has vanished (no resurrection)", async () => {
     const { registry, imports, connect } = fakeRegistry(discordSetup, []);
     const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
-    const started = await mgr.start({ service: "discord", connectionId: "gone" }, "bot");
+    const started = await mgr.start({ connectionKind: "discord", connectionId: "gone" }, "bot");
     const outcome = await mgr.provideInput(started.cid, { token: "abc" })!;
     expect(outcome.state.status).toBe("failed");
     expect(connect).not.toHaveBeenCalled();
@@ -208,7 +208,7 @@ describe("SetupManager", () => {
   it("cancelActive cancels a live setup for the addressed grant", async () => {
     const { registry } = fakeRegistry(discordSetup, [mkConn("conn-A")]);
     const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
-    const started = await mgr.start({ service: "discord", connectionId: "conn-A" }, "bot");
+    const started = await mgr.start({ connectionKind: "discord", connectionId: "conn-A" }, "bot");
     await mgr.cancelActive("conn-A", "bot");
     expect(mgr.state(started.cid)).toEqual({ status: "cancelled" });
     expect(mgr.activeFor("conn-A", "bot")).toBeNull();

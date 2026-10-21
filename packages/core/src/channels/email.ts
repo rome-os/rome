@@ -333,9 +333,9 @@ export class EmailAdapter {
    * A thread reply targets the newest received message in the thread, falling
    * back to the newest message Rome sent for a thread nobody else wrote in.
    */
-  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const outcome = await this.sendMail(conversationId, message);
-    if (!outcome) return { conversationId };
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const outcome = await this.sendMail(chatId, message);
+    if (!outcome) return { chatId };
     const { sent, startedThread } = outcome;
     // An explicit reply on an uncached thread says nothing about whether the
     // thread has inbound mail, so only a new or cached thread records the send.
@@ -343,7 +343,7 @@ export class EmailAdapter {
       this.rememberReplyTarget(sent.threadId, { messageId: sent.messageId, outbound: true });
     }
     log.info("email accepted by provider", { threadId: sent.threadId, messageId: sent.messageId });
-    return { conversationId: sent.threadId as ChatId, messageId: sent.messageId };
+    return { chatId: sent.threadId as ChatId, messageId: sent.messageId };
   }
 
   // A sent message never replaces a received one, so once a thread has inbound
@@ -640,7 +640,7 @@ export class EmailAdapter {
       channel: "email",
       direction: "inbound",
       messageId,
-      conversationId: threadId as ChatId,
+      chatId: threadId as ChatId,
       senderId,
       senderDisplayName: fromName,
       text,
@@ -782,7 +782,7 @@ export class EmailAdapter {
       channel: "email",
       direction: isOutbound ? "outbound" : "inbound",
       messageId: item.providerMessageId,
-      conversationId: item.threadId as ChatId,
+      chatId: item.threadId as ChatId,
       // The list already excludes unauthenticated mail, so no `unauthenticated:`
       // namespacing is needed here (unlike ingestInbound).
       senderId,

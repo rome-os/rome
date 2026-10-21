@@ -359,7 +359,7 @@ async function handleTrustedMessage(
   args: Record<string, unknown>,
   channelThreadKey: string,
   contextSuffix: string,
-  conversationId: string,
+  chatId: string,
   targetAgent: string,
 ): Promise<ActionResult> {
   const { connectionId, channel, channelUserId, threadId, text, messageId } = args as Record<
@@ -384,7 +384,7 @@ async function handleTrustedMessage(
       agentName: targetAgent,
       prompt: text,
       channelThreadKey,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       platformMessageId: messageId,
       replyTo: parseMessageReplyReference(args.replyTo),
       // The guardian can see the reply as it is written in a direct
@@ -396,7 +396,7 @@ async function handleTrustedMessage(
         channel,
         threadId,
         parentThreadId: typeof args.parentThreadId === "string" ? args.parentThreadId : undefined,
-        romeSessionId: conversationId,
+        romeSessionId: chatId,
         threadPath,
         channelUserId,
         threadName: typeof args.threadName === "string" ? args.threadName : undefined,
@@ -451,7 +451,7 @@ async function handleTrustedMessage(
       text: response,
       channelUserId,
       replyToMessageId: messageId,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
       knownToProvider: true,
     });
@@ -477,7 +477,7 @@ async function handleTrustedMessage(
       text: response,
       channelUserId,
       replyToMessageId: messageId,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
       knownToProvider: true,
     });
@@ -524,7 +524,7 @@ async function handleUntrustedMessage(
   args: Record<string, unknown>,
   channelThreadKey: string,
   contextSuffix: string,
-  conversationId: string,
+  chatId: string,
   targetAgent: string,
 ): Promise<ActionResult> {
   const { channel, channelUserId, threadId, text, messageId, displayName } = args as Record<
@@ -555,13 +555,13 @@ async function handleUntrustedMessage(
       channelUserId,
       error: sentinelResult.error,
     });
-    await requireChatRepository(deps).promoteMessageToUser(conversationId, messageId);
+    await requireChatRepository(deps).promoteMessageToUser(chatId, messageId);
     return handleTrustedMessage(
       deps,
       { ...args, bondLevel },
       channelThreadKey,
       contextSuffix,
-      conversationId,
+      chatId,
       targetAgent,
     );
   }
@@ -588,20 +588,20 @@ async function handleUntrustedMessage(
       text: decision.response,
       channelUserId,
       replyToMessageId: messageId,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       knownToProvider: false,
     });
     return { status: "ok", data: { action: "sentinel_replied" } };
   }
 
   if (decision.action === "escalated") {
-    await requireChatRepository(deps).promoteMessageToUser(conversationId, messageId);
+    await requireChatRepository(deps).promoteMessageToUser(chatId, messageId);
     return handleTrustedMessage(
       deps,
       { ...args, bondLevel },
       channelThreadKey,
       contextSuffix,
-      conversationId,
+      chatId,
       targetAgent,
     );
   }

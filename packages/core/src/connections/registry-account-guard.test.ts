@@ -153,12 +153,18 @@ describe("ConnectionRegistry.confer account guard", () => {
         personMappingRepo: {} as PersonMappingRepository,
       });
       const first = await registry.connect(SERVICE);
-      const firstSetup = await manager.start({ service: SERVICE, connectionId: first.id }, "bot");
+      const firstSetup = await manager.start(
+        { connectionKind: SERVICE, connectionId: first.id },
+        "bot",
+      );
       const done = await manager.provideInput(firstSetup.cid, { token: "t-1", botId: "100" });
       expect(done?.state.status).toBe("done");
 
       const second = await registry.connectAnother(SERVICE);
-      const secondSetup = await manager.start({ service: SERVICE, connectionId: second.id }, "bot");
+      const secondSetup = await manager.start(
+        { connectionKind: SERVICE, connectionId: second.id },
+        "bot",
+      );
       const outcome = await manager.provideInput(secondSetup.cid, { token: "t-1b", botId: "100" });
 
       expect(outcome?.state).toEqual({

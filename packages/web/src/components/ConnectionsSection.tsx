@@ -92,7 +92,7 @@ export function ConnectionsSection({
           <SectionHeading>
             <SectionTitle>Connections</SectionTitle>
             <SectionDescription>
-              Every channel and service your agent can use, in one place. Open one to connect it and
+              Every account and tool your agent can use, in one place. Open one to connect it and
               see what it enables.
             </SectionDescription>
           </SectionHeading>

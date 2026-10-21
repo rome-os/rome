@@ -57,6 +57,7 @@ import { createArtifactReferenceResolver } from "../apps/artifact-reference.js";
 import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
 import { resolveOneOffDate } from "../routines/schedule-trigger-provider.js";
 import type { Trigger } from "../routines/types.js";
+import { legacyChatIdChannelsService, legacyChatIdSettings } from "../apps/legacy-chat-id.js";
 
 const log = createLogger("action-worker");
 
@@ -105,8 +106,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   await skillCatalog.loadFromCatalog(appCatalog);
 
   const channelRecords = new ChannelRecordsRepository(db);
-  const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
-  const personMappingRepo = new PersonMappingRepository(db, serviceOfChannel);
+  const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
+  const personMappingRepo = new PersonMappingRepository(db, connectionKindOfChannel);
   const sentinelLogRepo = new SentinelLogRepository(db);
   const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
   const webchatRepo = new WebChatRepository(db);
@@ -118,7 +119,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
 
   const channelsService = new ChannelsServiceProxy();
   const chatSettings = new ChatSettingsControlProxy();
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, serviceOfChannel);
+  const appChatSettings = legacyChatIdSettings(chatSettings);
+  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
 
   const actionEngine = new ActionEngine(
     actionRegistry,
@@ -150,10 +152,10 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     {
       agentRunner,
       resolveArtifactReference,
-      channelsService,
-      chatSettings,
+      channelsService: legacyChatIdChannelsService(channelsService),
+      chatSettings: appChatSettings,
       // Apps built before the chat rename read `conversationSettings`.
-      conversationSettings: chatSettings,
+      conversationSettings: appChatSettings,
       capabilityDiscovery,
       personMappingRepo,
       sentinelLogRepo,

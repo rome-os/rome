@@ -167,7 +167,7 @@ describe("WhatsApp setup discovery", () => {
       openPairing: () => makePairingFake(new Promise<string>(() => {})),
     });
     return {
-      getDescriptor: (service) => (service === "whatsapp" ? descriptor : null),
+      getDescriptor: (connectionKind) => (connectionKind === "whatsapp" ? descriptor : null),
       withGrantSection: (_s, _g, fn) => fn(),
       // Never reached: the discovery test parks the pairing promise unresolved,
       // so the setup never confers. Present only to satisfy SetupRegistry.
@@ -181,7 +181,7 @@ describe("WhatsApp setup discovery", () => {
       personMappingRepo: {} as PersonMappingRepository,
     });
 
-    const started = await manager.start({ service: "whatsapp" }, "session");
+    const started = await manager.start({ connectionKind: "whatsapp" }, "session");
     expect(started.reattached).toBe(false);
     expect(started.state.status).toBe("awaiting-input");
     expect(manager.activeFor("whatsapp", "session")).toBe(started.cid);
@@ -193,7 +193,7 @@ describe("WhatsApp setup discovery", () => {
     expect(manager.state(started.cid)?.status).toBe("presenting");
 
     // A duplicate start re-attaches instead of spawning a second socket.
-    const again = await manager.start({ service: "whatsapp" }, "session");
+    const again = await manager.start({ connectionKind: "whatsapp" }, "session");
     expect(again.reattached).toBe(true);
     expect(again.cid).toBe(started.cid);
   });

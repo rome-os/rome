@@ -24,7 +24,7 @@ import {
   buildTestDeps,
   FakeTransport,
   createMockAgentRunner,
-  identityServiceOf,
+  identityConnectionKindOf,
 } from "../test/helpers.js";
 import { buildApp } from "../api/index.js";
 import { COOKIE_NAME, createSession } from "../lib/auth.js";
@@ -71,7 +71,7 @@ function buildHarness() {
   const testDb = createTestDb();
   const approvalsRepo = new ApprovalsRepository(
     testDb.db,
-    new PersonMappingRepository(testDb.db, identityServiceOf),
+    new PersonMappingRepository(testDb.db, identityConnectionKindOf),
   );
   const journalRepo = new ExecutionJournalRepository(testDb.db);
   const executionsRepo = new ActionExecutionsRepository(testDb.db);
@@ -271,7 +271,7 @@ describe("Approval flow E2E — triggering an approval", () => {
     expect(r1.approval.approvalId).not.toBe(r2.approval.approvalId);
     const pending = await h.approvalsRepo.findPending();
     expect(pending.length).toBeGreaterThanOrEqual(2);
-    expect(h.channel.sentMessages.map((m) => m.conversationId)).toEqual(["thread-A", "thread-B"]);
+    expect(h.channel.sentMessages.map((m) => m.chatId)).toEqual(["thread-A", "thread-B"]);
 
     h.testDb.close();
   });

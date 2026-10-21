@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusIndicator } from "@/lib/connection-status";
 import { fetchJson } from "@/lib/fetch-json";
+import { ThisDeviceCard } from "./this-device-card";
 
 export function nodeConsoleUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -81,6 +82,13 @@ export function DevicesSection() {
         checkedAt={Date.parse(data.checkedAt)}
         refreshing={query.isFetching}
         onRefresh={() => void query.refetch()}
+        thisDevice={
+          <ThisDeviceCard
+            devices={devices}
+            locale={i18n.language}
+            onChange={() => void query.refetch()}
+          />
+        }
       />
     );
 
@@ -88,6 +96,8 @@ export function DevicesSection() {
   // bring the service back and how to link a computer.
   return (
     <Measure className="space-y-6">
+      {/* The Mac app's computer works without Rome's device service. */}
+      <ThisDeviceCard devices={devices} locale={i18n.language} />
       <Section aria-labelledby="devices-title">
         <SectionHeader>
           <SectionHeading>

@@ -21,7 +21,7 @@ afterEach(() => {
 function connection(service: string, overrides: Partial<ApiConnection> = {}): ApiConnection {
   return {
     id: `${service}-id`,
-    service,
+    connectionKind: service,
     label: service,
     grants: { bot: "authorized" },
     display: { bot: { displayName: service } },

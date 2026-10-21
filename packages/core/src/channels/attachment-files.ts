@@ -227,7 +227,7 @@ export function isAllowedAttachmentUrl(value: string): boolean {
  *  carried them. */
 export type IncomingAttachmentOwner = Pick<
   ChannelMessage,
-  "channel" | "conversationId" | "messageId" | "attachments"
+  "channel" | "chatId" | "messageId" | "attachments"
 >;
 
 export function getIncomingAttachmentDirectory(message: IncomingAttachmentOwner): string {
@@ -235,7 +235,7 @@ export function getIncomingAttachmentDirectory(message: IncomingAttachmentOwner)
     getProfileMemoryDir(),
     "channel-attachments",
     safePathSegment(message.channel),
-    safePathSegment(message.conversationId),
+    safePathSegment(message.chatId),
     safePathSegment(message.messageId),
   );
 }

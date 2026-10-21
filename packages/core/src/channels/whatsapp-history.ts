@@ -76,7 +76,7 @@ export function whatsAppHistoryMessage(row: WaHistoryMessage): ChannelMessage {
     channel: "whatsapp",
     direction: row.fromMe ? "outbound" : "inbound",
     messageId: row.id,
-    conversationId: row.chatJid as ChatId,
+    chatId: row.chatJid as ChatId,
     senderId,
     ...(senderName ? { senderDisplayName: senderName } : {}),
     text: historyText(row),

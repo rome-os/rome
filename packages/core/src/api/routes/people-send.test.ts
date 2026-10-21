@@ -94,7 +94,7 @@ describe("People send API", () => {
     });
 
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([
-      { conversationId: TG, message: { text: "on my way" } },
+      { chatId: TG, message: { text: "on my way" } },
     ]);
   });
 
@@ -210,12 +210,10 @@ describe("People send API", () => {
     const replayed = await send(body);
     expect(replayed.status).toBe(202);
     expect(await replayed.json()).toEqual(original);
-    expect(await deps.outboxRepo.openOnce({ ...body, conversationId: row.conversationId })).toEqual(
-      {
-        created: false,
-        message: original,
-      },
-    );
+    expect(await deps.outboxRepo.openOnce({ ...body, chatId: row.chatId })).toEqual({
+      created: false,
+      message: original,
+    });
     expect(await deps.outboxRepo.find(body.id)).toBeNull();
     expect(await outbox()).toEqual([]);
     expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
@@ -448,7 +446,7 @@ describe("People send API — delivery bookkeeping", () => {
     const row = await deps.outboxRepo.open({
       channel: "whatsapp",
       channelUserId: LID,
-      conversationId: LID,
+      chatId: LID,
       text: "stranded",
     });
     // Older than the window a send is given to answer in.
@@ -506,7 +504,7 @@ describe("People send API — delivery bookkeeping", () => {
     const row = await deps.outboxRepo.open({
       channel: "whatsapp",
       channelUserId: LID,
-      conversationId: LID,
+      chatId: LID,
       text: "still going",
     });
     // The one state where Rome does not yet know what happened. Dropping the
@@ -652,7 +650,7 @@ describe("People send API — delivery bookkeeping", () => {
       const row = await deps.outboxRepo.open({
         channel: "telegram",
         channelUserId: "tg-unmirrored",
-        conversationId: "tg-unmirrored",
+        chatId: "tg-unmirrored",
         text: "still going",
       });
       rs.setSystemTime(startedAt + 4 * MINUTE);

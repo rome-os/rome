@@ -31,7 +31,7 @@ export interface TestChannel {
 }
 
 interface Adapter {
-  send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
+  send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   onInbound(handler: (message: ChannelMessage) => Promise<void>): void;
   stop(): Promise<void>;
 }

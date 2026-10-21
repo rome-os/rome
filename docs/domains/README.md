@@ -64,3 +64,4 @@ Diffs still owed to the model, each a change of its own:
 - The reply rule takes the value "when it is needed", backed by the lightweight check.
 - A woken agent gets the recent messages of its place as its default view, and a tool to read more of the chat.
 - A message to a chat other than the one the agent was woken in waits on an approval card.
+- Code, docs and the dashboard say platform for where an account lives and kind of connection for how Rome got in. Neither says service.

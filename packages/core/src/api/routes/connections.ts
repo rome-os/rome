@@ -2,15 +2,15 @@
 //
 // One list for everything the ConnectionRegistry holds — channels and OAuth
 // integrations alike — the sole feed for the dashboard's Connections surface.
-// Registered services with no connection row yet appear as offerable
+// Registered connection kinds with no connection row yet appear as offerable
 // placeholders (`id: null`) so a fresh install still renders the full catalog.
 // The projection speaks registry vocabulary (GrantState / CapabilityStatus)
 // verbatim; identity only ever crosses through the descriptor's `reviveProfile`
-// hook, so no service-owned profile field name is known here. Minting stays in
-// the connect setup, a later account of a service included.
+// hook, so no kind-specific profile field name is known here. Minting stays in
+// the connect setup, a later account of a connection kind included.
 
 import type { ConnectionAccountFields } from "@rome/api-types/channel-accounts";
-import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { createLogger } from "../../logger.js";
@@ -39,18 +39,18 @@ import { requireConnectionRegistry } from "../helpers.js";
 const log = createLogger("api:connections");
 
 /** Per-grant active-setup ids for a connection.
- *  `idOrService` is the connection id for a real connection, or the service name
+ *  `idOrKind` is the connection id for a real connection, or the connection kind
  *  for an offerable placeholder (the same key the setup route addresses).
  *  Empty when no manager is wired or no setup is live. */
 function activeSetups(
   manager: SetupManager | null,
-  idOrService: string,
+  idOrKind: string,
   grantNames: string[],
 ): Record<GrantName, string> {
   const out: Record<GrantName, string> = {};
   if (!manager) return out;
   for (const name of grantNames) {
-    const cid = manager.activeFor(idOrService, name);
+    const cid = manager.activeFor(idOrKind, name);
     if (cid) out[name] = cid;
   }
   return out;
@@ -66,7 +66,7 @@ interface GrantDisplayView {
 }
 
 /** Where the guardian goes to (re-)confer this connection's grants. Resolved
- *  server-side for Rome Cloud-brokered OAuth services; null for services whose
+ *  server-side for Rome Cloud-brokered OAuth connection kinds; null for connection kinds whose
  *  connect setup is dashboard-local (channels). */
 interface ConnectHint {
   url: string | null;
@@ -78,9 +78,13 @@ interface ConnectionView
   extends Required<Pick<ConnectionAccountFields, "channel" | "platform" | "severalAccounts">>,
     Pick<ConnectionAccountFields, "agent"> {
   /** Ledger connection id, or null for an offerable placeholder — a registered
-   *  service the guardian has never connected (nothing to address or tear down
+   *  connection kind the guardian has never connected (nothing to address or tear down
    *  yet; the connect setup mints the row). */
   id: string | null;
+  /** The kind of connection, such as `telegram_user`. */
+  connectionKind: string;
+  /** @deprecated The kind of connection under its old name, which apps built
+   *  before the rename read. */
   service: string;
   label: string;
   grants: Record<GrantName, GrantState>;
@@ -104,9 +108,9 @@ interface GrantDetailView {
   tokenExpiresAt: string | null;
 }
 
-function connectHint(service: string): ConnectHint | null {
-  if (!isOAuthProvider(service)) return null;
-  const link = createRomeCloudOAuthStartUrl(service);
+function connectHint(connectionKind: string): ConnectHint | null {
+  if (!isOAuthProvider(connectionKind)) return null;
+  const link = createRomeCloudOAuthStartUrl(connectionKind);
   return {
     url: link.connectUrl,
     available: link.available,
@@ -130,7 +134,7 @@ function buildConnectionView(
   manager: SetupManager | null,
   channel: ChannelRecord | null,
 ): ConnectionView {
-  const revive = registry.getDescriptor(conn.service)?.reviveProfile;
+  const revive = registry.getDescriptor(conn.connectionKind)?.reviveProfile;
   const grants = conn.auth.grants();
 
   const display: Record<GrantName, GrantDisplayView | null> = {};
@@ -149,18 +153,19 @@ function buildConnectionView(
 
   return {
     id: conn.id,
-    service: conn.service,
+    connectionKind: conn.connectionKind,
+    service: conn.connectionKind,
     label: conn.label,
     grants,
     display,
     capabilities: conn.status(),
-    connect: connectHint(conn.service),
+    connect: connectHint(conn.connectionKind),
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
     channel: channel?.id ?? null,
     platform: channel?.platform ?? null,
-    // Null means silent, so a service that takes no link reports none.
-    agent: LINKABLE_SERVICES.has(conn.service) ? (channel?.agent ?? null) : undefined,
-    severalAccounts: registry.getDescriptor(conn.service)?.severalAccounts === true,
+    // Null means silent, so a connection kind that takes no link reports none.
+    agent: LINKABLE_KINDS.has(conn.connectionKind) ? (channel?.agent ?? null) : undefined,
+    severalAccounts: registry.getDescriptor(conn.connectionKind)?.severalAccounts === true,
   };
 }
 
@@ -199,13 +204,13 @@ async function serializeConnection(
   );
 }
 
-/** An offerable placeholder: a registered service with no connection row yet.
+/** An offerable placeholder: a registered connection kind with no connection row yet.
  *  Mirrors exactly what a freshly minted connection would project — every grant
  *  unauthorized, every declared capability needs-auth (zero-need capabilities
  *  unlock at birth) — without writing a row: minting stays in the connect
  *  setup. */
 function placeholderView(
-  service: string,
+  connectionKind: string,
   descriptor: ConnectionDescriptor,
   manager: SetupManager | null,
 ): ConnectionView {
@@ -229,8 +234,9 @@ function placeholderView(
 
   return {
     id: null,
-    service,
-    label: service,
+    connectionKind,
+    service: connectionKind,
+    label: connectionKind,
     grants,
     display,
     capabilities: {
@@ -238,16 +244,16 @@ function placeholderView(
       act: capStatus("actor"),
       watch: capStatus("watcher"),
     },
-    connect: connectHint(service),
-    setups: activeSetups(manager, service, grantNames),
+    connect: connectHint(connectionKind),
+    setups: activeSetups(manager, connectionKind, grantNames),
     channel: null,
     platform: null,
     severalAccounts: descriptor.severalAccounts === true,
   };
 }
 
-/** The offerable catalog: every registered service with no connection row.
- *  OAuth-brokered services only appear when the host actually offers them
+/** The offerable catalog: every registered connection kind with no connection row.
+ *  OAuth-brokered connection kinds only appear when the host actually offers them
  *  (env-enabled) — their descriptors register unconditionally so an existing
  *  account's state imports regardless, but a placeholder is a connect
  *  invitation. */
@@ -256,12 +262,15 @@ function placeholderViews(
   manager: SetupManager | null,
 ): ConnectionView[] {
   return registry
-    .registeredServices()
-    .filter((service) => registry.find(service).length === 0)
-    .filter((service) => !isOAuthProvider(service) || isEnabledOAuthProvider(service))
-    .map((service) => {
-      const descriptor = registry.getDescriptor(service);
-      return descriptor ? placeholderView(service, descriptor, manager) : null;
+    .registeredKinds()
+    .filter((connectionKind) => registry.find(connectionKind).length === 0)
+    .filter(
+      (connectionKind) =>
+        !isOAuthProvider(connectionKind) || isEnabledOAuthProvider(connectionKind),
+    )
+    .map((connectionKind) => {
+      const descriptor = registry.getDescriptor(connectionKind);
+      return descriptor ? placeholderView(connectionKind, descriptor, manager) : null;
     })
     .filter((view): view is ConnectionView => view !== null);
 }
@@ -279,12 +288,12 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const connected = await Promise.all(
       registry.all().map((conn) => serializeConnection(registry, conn, manager, channels)),
     );
-    // Stable ordering for the UI: by service, then label, then id — the
+    // Stable ordering for the UI: by connection kind, then label, then id — the
     // registry's own iteration order is insertion-dependent. Placeholders sort
-    // like a connection whose label is its service name and whose id is empty.
+    // like a connection whose label is its connection kind and whose id is empty.
     const connections = [...connected, ...placeholderViews(registry, manager)].sort(
       (a, b) =>
-        a.service.localeCompare(b.service) ||
+        a.connectionKind.localeCompare(b.connectionKind) ||
         a.label.localeCompare(b.label) ||
         (a.id ?? "").localeCompare(b.id ?? ""),
     );
@@ -319,12 +328,12 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     conn: Connection,
     grant?: string,
   ): ((tx: DrizzleTx) => void) | undefined => {
-    const talker = registry.getDescriptor(conn.service)?.capabilities.talker;
+    const talker = registry.getDescriptor(conn.connectionKind)?.capabilities.talker;
     if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return undefined;
     return (tx) => {
       deps.approvalsRepo.supersedePairings(conn.id, tx);
-      // Guardian links are keyed by service, so they stay while another
-      // Connection of the service still has every Talk grant conferred: the
+      // Guardian links are keyed by connection kind, so they stay while another
+      // Connection of the connection kind still has every Talk grant conferred: the
       // guardian can still reach Rome through that bot. A degraded grant
       // counts, since its credential is still held and the link is needed when
       // it recovers. Backing a channel does not count, because a channel stays
@@ -332,12 +341,13 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
       // The grant states are read through `tx`, so a teardown of the other
       // Connection that commits first is seen here.
       // This assumes a user's id is the same through every bot of the
-      // service. Where ids are per app (Feishu's open_id), a link paired only
+      // connection kind. Where ids are per app (Feishu's open_id), a link paired only
       // through the removed bot stays behind and never matches again.
       const stillTalks =
-        registry.getLedger().connectionsHoldingIn(tx, conn.service, talker.needs, conn.id).length >
-        0;
-      if (!stillTalks) deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
+        registry.getLedger().connectionsHoldingIn(tx, conn.connectionKind, talker.needs, conn.id)
+          .length > 0;
+      if (!stillTalks)
+        deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.connectionKind);
     };
   };
 
@@ -356,14 +366,14 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     // credential after we revoke (a setup waiting at its guardian-link unwinds
     // with no write; one already committing runs to `done` first, then our
     // revoke below wins as the final state). Then run the revoke INSIDE the same
-    // per-(service, grant) critical section the setup's terminal write uses, so
+    // per-(connection kind, grant) critical section the setup's terminal write uses, so
     // the two can never interleave.
     await deps.setupManager?.cancelActive(conn.id, name);
     // An account exists only while it is connected, so revoking the last grant
     // a channel's Connection holds removes the Connection, and its channel with
     // it. The revoke runs first either way, since it is what clears the
     // grant's custody artifacts.
-    const removed = await registry.withGrantSection(conn.service, name, async () => {
+    const removed = await registry.withGrantSection(conn.connectionKind, name, async () => {
       // A disconnect that ran while this one waited may have removed it.
       if (!registry.all().some((held) => held.id === conn.id)) return true;
       await registry.revoke(conn.id, name, { inTx: guardianMappingTeardown(registry, conn, name) });

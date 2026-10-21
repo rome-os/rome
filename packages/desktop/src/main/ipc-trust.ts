@@ -26,3 +26,35 @@ export function handleTrusted(
     return handler(event, ...args);
   });
 }
+
+/**
+ * Whether a call comes from the top frame of the Rome this launch opened. Its
+ * dashboard shows and changes whether this computer is a device; other pages
+ * in the main window, such as sign-in or checkout, never reach it.
+ */
+export function isInstanceSender(
+  event: { senderFrame: { url: string; parent: unknown } | null },
+  instanceOrigin: string | null,
+): boolean {
+  const frame = event.senderFrame;
+  if (!frame || !instanceOrigin || frame.parent !== null) return false;
+  try {
+    return new URL(frame.url).origin === instanceOrigin;
+  } catch {
+    return false;
+  }
+}
+
+/** `ipcMain.handle` for channels the app's own pages and the open Rome may call. */
+export function handleFromAppOrInstance(
+  channel: string,
+  instanceOrigin: () => string | null,
+  handler: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown,
+): void {
+  ipcMain.handle(channel, (event, ...args: unknown[]) => {
+    if (!isTrustedSender(event) && !isInstanceSender(event, instanceOrigin())) {
+      throw new Error(`${channel} is not available to this page`);
+    }
+    return handler(event, ...args);
+  });
+}

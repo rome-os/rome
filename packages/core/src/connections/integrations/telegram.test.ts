@@ -177,7 +177,7 @@ describe("isTelegramAuthError", () => {
 describe("telegram descriptor shape", () => {
   it("declares one `bot` grant and a talker needing it", () => {
     const desc = makeTelegramDescriptor();
-    expect(desc.service).toBe("telegram");
+    expect(desc.connectionKind).toBe("telegram");
     expect(Object.keys(desc.auth)).toEqual(["bot"]);
     expect(desc.capabilities.talker?.needs).toEqual(["bot"]);
     expect(desc.capabilities.actor).toBeUndefined();
@@ -207,7 +207,7 @@ describe("telegram descriptor shape", () => {
       channel: "telegram",
       direction: "inbound",
       messageId: "message-1",
-      conversationId: "999" as ChatId,
+      chatId: "999" as ChatId,
       senderId: "111",
       text: "hi",
       attachments: [],
@@ -236,7 +236,7 @@ describe("telegram descriptor shape", () => {
     expect(talker.replyDelivery?.capabilities).toMatchObject({ maxPartLength: 4096, edit: true });
     await expect(talker.replyDelivery?.create("55", "hello", "3")).resolves.toEqual({
       messageId: "7",
-      conversationId: "55",
+      chatId: "55",
     });
     expect(factory.sent).toEqual([
       {
@@ -269,7 +269,7 @@ describe("telegram descriptor shape", () => {
     const received: string[] = [];
     expect(conn.isUnlocked("talk")).toBe(true);
     conn.hearTalker(async (msg) => {
-      received.push(`${msg.conversationId}:${msg.text}`);
+      received.push(`${msg.chatId}:${msg.text}`);
       return;
     });
     await factory.untilPolling();
@@ -338,7 +338,7 @@ describe("telegram inbound delivery", () => {
         channel: "telegram",
         direction: "inbound",
         messageId: "7",
-        conversationId: "-555",
+        chatId: "-555",
         senderId: "111",
         senderDisplayName: "Alice Smith",
         senderUsername: "alice",

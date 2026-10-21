@@ -59,7 +59,7 @@ function toStructuredMessages(channel: string, messages: ChannelMessage[]): Stru
     id: m.messageId,
     displayName: senderLabel(channel, m),
     timestamp: m.timestamp.toISOString(),
-    threadId: m.conversationId,
+    threadId: m.chatId,
     threadName: m.thread?.name,
     text: m.text,
     attachments: m.attachments.map((a) => ({
@@ -80,7 +80,7 @@ function formatMessages(channel: string, messages: ChannelMessage[], windowHours
   // Group by threadName (or threadId as fallback)
   const threads = new Map<string, ChannelMessage[]>();
   for (const msg of messages) {
-    const key = msg.thread?.name ?? msg.conversationId;
+    const key = msg.thread?.name ?? msg.chatId;
     let bucket = threads.get(key);
     if (!bucket) {
       bucket = [];
@@ -93,9 +93,7 @@ function formatMessages(channel: string, messages: ChannelMessage[], windowHours
   for (const [threadLabel, msgs] of threads) {
     const first = msgs[0];
     const heading =
-      first && threadLabel !== first.conversationId
-        ? `${threadLabel} (${first.conversationId})`
-        : threadLabel;
+      first && threadLabel !== first.chatId ? `${threadLabel} (${first.chatId})` : threadLabel;
     const lines = msgs
       .map((m) => {
         const time = m.timestamp.toISOString();
@@ -176,7 +174,7 @@ export function createAction(
         // `query` answers newest first; the transcript reads oldest first.
         messages = (
           await channels.query(channel, {
-            ...(threadId ? { conversationId: threadId as ChatId } : {}),
+            ...(threadId ? { chatId: threadId as ChatId } : {}),
             since: new Date(Date.now() - windowHours * 60 * 60 * 1000),
           })
         ).reverse();

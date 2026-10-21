@@ -28,6 +28,9 @@ const inputSchema = z.object({
     .describe("Toolkit slug to connect, e.g. 'github', 'gmail', 'slack', 'supabase', 'neon'"),
 });
 
+/** Rome-managed toolkits whose connect the inline card can drive. */
+const INLINE_CONNECT_ROME_MANAGED = new Set(["github", "shopify"]);
+
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
   return defineAction({
     config,
@@ -46,10 +49,11 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       // connected, GitHub is driven through gh/git or connector_proxy — never
       // connector_tool_execute, which is Composio-only.
       if (isRomeManagedToolkit(toolkit)) {
-        if (toolkit.toLowerCase() === "github") {
+        if (INLINE_CONNECT_ROME_MANAGED.has(toolkit.toLowerCase())) {
           // The unified connect card selects the Rome-managed (Rome Cloud OAuth)
-          // adapter for github from the toolkit prop — same componentId the
-          // Composio branch renders below, so there's one card for both brokers.
+          // adapter from the toolkit prop — same componentId the Composio branch
+          // renders below, so there's one card for both brokers. Shopify's card
+          // opens its Settings card, which asks for the store first.
           return {
             status: "pending_interaction",
             interaction: {

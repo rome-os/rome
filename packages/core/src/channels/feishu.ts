@@ -208,9 +208,9 @@ export class FeishuAdapter {
     log.info("feishu adapter stopped");
   }
 
-  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    if (!message.text) return { conversationId };
-    const threadId: string = conversationId;
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    if (!message.text) return { chatId };
+    const threadId: string = chatId;
 
     // Agent output is Markdown; let the SDK render it as a rich-text post.
     const opts = message.replyToMessageId
@@ -231,7 +231,7 @@ export class FeishuAdapter {
       };
       log.info("message sent", { threadId });
       const messageId = sent?.messageId ?? sent?.message_id;
-      return { conversationId, ...(messageId ? { messageId } : {}) };
+      return { chatId, ...(messageId ? { messageId } : {}) };
     } catch (err) {
       log.error("failed to send message", {
         threadId,
@@ -313,7 +313,7 @@ export class FeishuAdapter {
       channel: "feishu",
       direction: "inbound",
       messageId: m.messageId,
-      conversationId: m.chatId as ChatId,
+      chatId: m.chatId as ChatId,
       senderId: m.senderId,
       senderDisplayName: m.senderName ?? "Feishu User",
       text,
@@ -330,7 +330,7 @@ export class FeishuAdapter {
 
     log.info("message received", {
       from: msg.senderId,
-      conversationId: msg.conversationId,
+      chatId: msg.chatId,
       threadKind: msg.thread?.kind,
     });
 
@@ -580,7 +580,8 @@ export class FeishuAdapter {
     }
     const observed = this.observedConversations.get(chatId);
     const descriptor: ChatDescriptor = {
-      ref: { connectionId: this.connectionId, conversationId: chatId as ChatId },
+      ref: { connectionId: this.connectionId, chatId: chatId as ChatId },
+      connectionKind: "feishu",
       service: "feishu",
       kind: observed?.kind ?? "group",
       displayName: observed?.displayName ?? chatId,
@@ -605,7 +606,7 @@ export class FeishuAdapter {
   ): Promise<FeishuChannelConfig> {
     if (!this.chatSettings || !this.connectionId) return {};
     const current = await this.getChannelConfig(chatId);
-    const ref = { connectionId: this.connectionId, conversationId: chatId as ChatId };
+    const ref = { connectionId: this.connectionId, chatId: chatId as ChatId };
     if (patch === null) {
       const saved = await this.chatSettings.reset({
         ref,

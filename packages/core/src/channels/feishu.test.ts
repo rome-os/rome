@@ -156,16 +156,17 @@ function makeChatSettings(initial: ChatSettingsOverrides = {}) {
   };
   const descriptors = new Map<string, ChatDescriptor>();
   const observe = rs.fn((descriptor: ChatDescriptor) => {
-    descriptors.set(descriptor.ref.conversationId, descriptor);
+    descriptors.set(descriptor.ref.chatId, descriptor);
   });
-  const makeSnapshot = (conversationId: ChatId): ChatSettingsSnapshot => ({
+  const makeSnapshot = (chatId: ChatId): ChatSettingsSnapshot => ({
     conversation:
-      descriptors.get(conversationId) ??
+      descriptors.get(chatId) ??
       ({
-        ref: { connectionId: FEISHU_CONNECTION_ID, conversationId },
+        ref: { connectionId: FEISHU_CONNECTION_ID, chatId },
+        connectionKind: "feishu",
         service: "feishu",
         kind: "group",
-        displayName: conversationId,
+        displayName: chatId,
       } satisfies ChatDescriptor),
     supportedFields: ["enabled", "activation.mode", "replies.placement", "routing.agentName"],
     effective: structuredClone(effective),
@@ -175,7 +176,7 @@ function makeChatSettings(initial: ChatSettingsOverrides = {}) {
         ? { routing: { agentName: null } }
         : {},
   });
-  const get = rs.fn(async (ref: { conversationId: ChatId }) => makeSnapshot(ref.conversationId));
+  const get = rs.fn(async (ref: { chatId: ChatId }) => makeSnapshot(ref.chatId));
   const update = rs.fn(async (input: Parameters<ChatSettingsControl["update"]>[0]) => {
     for (const field of input.clear) {
       if (field === "enabled") effective.enabled = defaults.enabled;
@@ -193,11 +194,11 @@ function makeChatSettings(initial: ChatSettingsOverrides = {}) {
     if (input.set.routing?.agentName !== undefined) {
       effective.routing.agentName = input.set.routing.agentName;
     }
-    return makeSnapshot(input.ref.conversationId);
+    return makeSnapshot(input.ref.chatId);
   });
   const reset = rs.fn(async (input: Parameters<ChatSettingsControl["reset"]>[0]) => {
     effective = structuredClone(defaults);
-    return makeSnapshot(input.ref.conversationId);
+    return makeSnapshot(input.ref.chatId);
   });
   const control = {
     observe,
@@ -264,7 +265,7 @@ describe("FeishuAdapter", () => {
         channel: "feishu",
         direction: "inbound",
         messageId: "om_123",
-        conversationId: "oc_chat",
+        chatId: "oc_chat",
         senderId: "ou_alice",
         senderDisplayName: "Alice",
         text: "hi there",
@@ -795,7 +796,7 @@ describe("FeishuAdapter", () => {
     const receipt = await adapter.send("oc_chat" as ChatId, {
       text: "## Title\n**bold**\n- [x] done",
     });
-    expect(receipt).toStrictEqual({ conversationId: "oc_chat", messageId: "om_sent" });
+    expect(receipt).toStrictEqual({ chatId: "oc_chat", messageId: "om_sent" });
     expect(channel.sent).toHaveLength(1);
     expect(channel.sent[0]).toEqual({
       to: "oc_chat",
@@ -880,7 +881,7 @@ describe("FeishuAdapter", () => {
     });
 
     expect(chatSettings.update).toHaveBeenCalledWith({
-      ref: { connectionId: FEISHU_CONNECTION_ID, conversationId: "oc_chat" },
+      ref: { connectionId: FEISHU_CONNECTION_ID, chatId: "oc_chat" },
       set: {
         enabled: false,
         activation: { mode: "all" },
@@ -990,7 +991,7 @@ describe("FeishuAdapter", () => {
     });
 
     expect(chatSettings.update).toHaveBeenCalledWith({
-      ref: { connectionId: FEISHU_CONNECTION_ID, conversationId: "oc_chat" },
+      ref: { connectionId: FEISHU_CONNECTION_ID, chatId: "oc_chat" },
       set: { routing: { agentName: "main" } },
       clear: ["enabled", "activation.mode", "replies.placement"],
       actor: { kind: "guardian", id: "Alice" },
@@ -1042,7 +1043,7 @@ describe("FeishuAdapter", () => {
     });
 
     expect(chatSettings.reset).toHaveBeenCalledWith({
-      ref: { connectionId: FEISHU_CONNECTION_ID, conversationId: "oc_chat" },
+      ref: { connectionId: FEISHU_CONNECTION_ID, chatId: "oc_chat" },
       actor: { kind: "guardian", id: "Alice" },
     });
   });
@@ -1083,7 +1084,7 @@ describe("FeishuAdapter", () => {
 
   it("skips sending when there is no text body", async () => {
     const receipt = await adapter.send("oc_chat" as ChatId, {});
-    expect(receipt).toStrictEqual({ conversationId: "oc_chat" });
+    expect(receipt).toStrictEqual({ chatId: "oc_chat" });
     expect(channel.sent).toHaveLength(0);
   });
 

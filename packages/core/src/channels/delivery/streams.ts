@@ -19,7 +19,7 @@ const DEFAULT_POLICY: DeliveryPolicy = {
 /** Where a run's reply goes. */
 export interface ReplyTarget {
   channel: string;
-  conversationId: string;
+  chatId: string;
   /** The message the reply answers. */
   replyToMessageId?: string;
   /** The conversation the run's turn is recorded in. */
@@ -70,7 +70,7 @@ export class ReplyStreams {
       transport: replies.transport,
       pacer: replies.pacer,
       policy: this.deps.policy ?? DEFAULT_POLICY,
-      conversation: target.conversationId,
+      conversation: target.chatId,
       ...(target.replyToMessageId ? { replyTo: target.replyToMessageId } : {}),
       clock: this.deps.clock,
     });

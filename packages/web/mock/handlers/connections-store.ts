@@ -16,7 +16,7 @@ export const connections: { connections: ApiConnection[] } = {
   connections: [
     {
       id: "github-demo",
-      service: "github",
+      connectionKind: "github",
       label: "GitHub · Rome Demo",
       grants: { user: "authorized" },
       display: {
@@ -46,7 +46,7 @@ export const connections: { connections: ApiConnection[] } = {
     ].map(
       ({ service, label, grant, email, severalAccounts }): ApiConnection => ({
         id: `${service}-demo`,
-        service,
+        connectionKind: service,
         label: `${label} · Rome Demo`,
         grants: { [grant]: "authorized" },
         display: {
@@ -67,7 +67,7 @@ export const connections: { connections: ApiConnection[] } = {
     ),
     {
       id: "discord-1",
-      service: "discord",
+      connectionKind: "discord",
       label: "Discord · Rome",
       grants: { bot: "authorized" },
       display: {
@@ -86,7 +86,7 @@ export const connections: { connections: ApiConnection[] } = {
     },
     {
       id: "telegram-1",
-      service: "telegram",
+      connectionKind: "telegram",
       label: "Telegram · Rome",
       grants: { bot: "authorized" },
       display: {
@@ -109,7 +109,7 @@ export const connections: { connections: ApiConnection[] } = {
       // so dropping this entry would leave the two surfaces disagreeing about
       // whether WhatsApp is connected at all.
       id: "whatsapp-1",
-      service: "whatsapp",
+      connectionKind: "whatsapp",
       label: "WhatsApp · Rome",
       grants: { session: "authorized" },
       display: {
@@ -128,7 +128,7 @@ export const connections: { connections: ApiConnection[] } = {
     },
     {
       id: "linkedin-1",
-      service: "linkedin",
+      connectionKind: "linkedin",
       label: "LinkedIn · Rome",
       grants: { session: "authorized" },
       display: {
@@ -157,6 +157,6 @@ export const connections: { connections: ApiConnection[] } = {
 export function talkConnections(service: string): ApiConnection[] {
   return connections.connections.filter(
     (connection) =>
-      connection.service === service && connection.capabilities.talk.state === "unlocked",
+      connection.connectionKind === service && connection.capabilities.talk.state === "unlocked",
   );
 }

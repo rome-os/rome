@@ -3,7 +3,7 @@
 // docs/architecture/channels.md#an-accounts-agent.
 
 import type { ChannelMessageHookDeps, ChatSettingsSnapshot } from "@rome-os/app-runtime";
-import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
@@ -21,18 +21,18 @@ export function readAccountAgent(
   channelName: string,
 ): string | null | undefined {
   const record = records.byId(channelName);
-  // A service's first channel carries the service's name, so a channel with
-  // no record answers for its own service.
-  if (!LINKABLE_SERVICES.has(record?.service ?? channelName)) return undefined;
+  // A connection kind's first channel carries the connection kind's name, so a channel with
+  // no record answers for its own connection kind.
+  if (!LINKABLE_KINDS.has(record?.connectionKind ?? channelName)) return undefined;
   const agent = record?.agent ?? null;
   return agent !== null && (isCoreMainAgentId(agent) || agents.has(agent)) ? agent : null;
 }
 
 /**
- * Which accounts Rome listens to. An account of a service in
- * `LINKABLE_SERVICES` is listened to only while its record names an agent,
- * loaded or not; an account of any other service always is. A channel with
- * no record answers for its own service, as in {@link readAccountAgent}.
+ * Which accounts Rome listens to. An account of a connection kind in
+ * `LINKABLE_KINDS` is listened to only while its record names an agent,
+ * loaded or not; an account of any other connection kind always is. A channel with
+ * no record answers for its own connection kind, as in {@link readAccountAgent}.
  *
  * Call `changed` after each write to an account's agent, naming every account
  * the write touched, so its inbound port starts or stops listening.
@@ -44,7 +44,7 @@ export class AccountListening implements InboundListening {
 
   listens(channel: string): boolean {
     const record = this.records.byId(channel);
-    if (!LINKABLE_SERVICES.has(record?.service ?? channel)) return true;
+    if (!LINKABLE_KINDS.has(record?.connectionKind ?? channel)) return true;
     return (record?.agent ?? null) !== null;
   }
 
@@ -71,8 +71,8 @@ export class AccountListening implements InboundListening {
 /**
  * The hook's `accountAgentOf`, reading the channel's record on each call, so a
  * switched agent, or a channel whose record lands after wiring, is right on the next
- * message. It answers undefined for a channel whose service is outside
- * `LINKABLE_SERVICES`, the stored agent for a linked one, and null for one with
+ * message. It answers undefined for a channel whose connection kind is outside
+ * `LINKABLE_KINDS`, the stored agent for a linked one, and null for one with
  * no agent or whose agent is not loaded. Each silent state logs once per
  * channel until the channel answers again: an account with no agent at
  * info, since a newly added one starts that way, and one whose agent is not

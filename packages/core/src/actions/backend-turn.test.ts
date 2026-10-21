@@ -17,9 +17,9 @@ describe("backend turn delivery", () => {
         { type: "result", content: "The deferred check is complete." },
       ],
     ]);
-    const send = rs.fn(async (conversationId) => ({
+    const send = rs.fn(async (chatId) => ({
       messageId: "wechat-message-1",
-      conversationId,
+      chatId,
     }));
     const wechat: Channel = {
       name: "wechat",
@@ -80,9 +80,9 @@ describe("backend turn delivery", () => {
       ],
     ]);
     const order: string[] = [];
-    const send = rs.fn(async (conversationId: string) => {
+    const send = rs.fn(async (chatId: string) => {
       order.push("send");
-      return { messageId: "webchat-message-1", conversationId };
+      return { messageId: "webchat-message-1", chatId };
     });
     const webchat: Channel = {
       name: "webchat",

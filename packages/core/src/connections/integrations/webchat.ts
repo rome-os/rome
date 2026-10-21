@@ -38,7 +38,7 @@ export interface WebchatDescriptorDeps {
  */
 export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDescriptor {
   return {
-    service: "webchat",
+    connectionKind: "webchat",
     auth: {},
     capabilities: {
       talker: {
@@ -58,7 +58,7 @@ export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDe
             history: {
               async query(input) {
                 const messages = await adapter.fetchHistory(
-                  input.conversationId ?? null,
+                  input.chatId ?? null,
                   historyWindowHours(input.since),
                 );
                 return messages.slice(0, historyQueryLimit(input.limit));
@@ -75,8 +75,8 @@ export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDe
             stop(): Promise<void> {
               return adapter.stop();
             },
-            send(conversationId, msg) {
-              return adapter.send(conversationId, msg);
+            send(chatId, msg) {
+              return adapter.send(chatId, msg);
             },
             ...features,
           };

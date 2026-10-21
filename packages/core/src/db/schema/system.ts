@@ -28,11 +28,11 @@ export const sessions = sqliteTable(
     id: text("id").primaryKey(),
     agentName: text("agent_name").notNull(),
     channelThreadKey: text("channel_thread_key"),
-    /** The Rome conversation (`rome_sessions.id`) this session serves. Null for
-     *  rows written before the column existed and for sessions whose caller
-     *  named no conversation. No foreign key: channel, action and subagent
-     *  conversations are recorded after their first session is created. */
-    conversationId: text("conversation_id"),
+    /** The Rome chat (`rome_sessions.id`) this session serves. Null for rows
+     *  written before the column existed and for sessions whose caller named
+     *  no chat. No foreign key: channel, action and subagent chats are
+     *  recorded after their first session is created. */
+    chatId: text("chat_id"),
     /** Which provider produced this conversation's thread, so a resumed session
      *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
      *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
@@ -57,7 +57,7 @@ export const sessions = sqliteTable(
       enum: ["active", "completed", "error"],
     }).notNull(),
   },
-  (table) => [index("idx_sessions_conversation").on(table.conversationId)],
+  (table) => [index("idx_sessions_chat").on(table.chatId)],
 );
 
 // Provider-native history anchor for one successfully completed Rome turn.
@@ -172,9 +172,9 @@ export const outboundMessages = sqliteTable(
     id: text("id").primaryKey(),
     channel: text("channel").notNull(),
     channelUserId: text("channel_user_id").notNull(),
-    /** The conversation the channel resolved the address to, kept so a retry
-     *  does not have to ask again. */
-    conversationId: text("conversation_id").notNull(),
+    /** The chat the channel resolved the address to, kept so a retry does
+     *  not have to ask again. */
+    chatId: text("chat_id").notNull(),
     text: text("text").notNull(),
     state: text("state", { enum: ["sending", "unconfirmed", "failed"] }).notNull(),
     /** The channel's own id for the message, once it has taken it. Null while
@@ -865,22 +865,22 @@ export const executionJournal = sqliteTable(
   ],
 );
 
-// One row per minted Connection. A Service may hold several. The many-to-many
+// One row per minted Connection. A connection kind may hold several. The many-to-many
 // grant ledger lives in `connection_grants` below, keyed by custody (the
 // connectionId).
 export const connections = sqliteTable("connections", {
   id: text("id").primaryKey(),
-  service: text("service").notNull(),
+  connectionKind: text("connection_kind").notNull(),
   label: text("label").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
 // One row per channel a Connection backs: Rome's presence on a platform, with
-// an id minted once and never changed. The first channel of a service takes
-// the service's name as its id, and later ones get an opaque id. A row
+// an id minted once and never changed. The first channel of a connection kind takes
+// the connection kind's name as its id, and later ones get an opaque id. A row
 // outlives its Connection, unbacked and unlinked, so its id is never minted
-// again: a linkable service's next Connection gets a channel of its own, and
-// another service's takes the row back. `agent` is the canonical id of the
+// again: a linkable connection kind's next Connection gets a channel of its own, and
+// another connection kind's takes the row back. `agent` is the canonical id of the
 // account's agent, and one agent may be the agent of any number of channels,
 // several on one platform included. `platform` is the platform the row was
 // minted on, and the row keeps it.
@@ -888,7 +888,7 @@ export const channels = sqliteTable(
   "channels",
   {
     id: text("id").primaryKey(),
-    service: text("service").notNull(),
+    connectionKind: text("connection_kind").notNull(),
     platform: text("platform").notNull(),
     connectionId: text("connection_id"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),

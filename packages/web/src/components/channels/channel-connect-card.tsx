@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { User } from "lucide-react";
-import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
@@ -77,7 +77,7 @@ export interface ChannelConnectConfig {
   /** Disconnect-failed fallback copy key; defaults to
    *  `channels.disconnectFailedFallback`. */
   disconnectFailedKey?: string;
-  /** Whether this service exposes the shared conversation-settings surface. */
+  /** Whether this service exposes the shared chat settings surface. */
   conversationSettings?: boolean;
 }
 
@@ -195,14 +195,14 @@ export function ChannelConnectCard({
   const [disconnecting, setDisconnecting] = useState(false);
   // Disconnecting an account removes it, so the guardian confirms the cost first.
   const [confirming, setConfirming] = useState(false);
-  const confirmsDisconnect = LINKABLE_SERVICES.has(config.service);
+  const confirmsDisconnect = LINKABLE_KINDS.has(config.service);
   const [error, setError] = useState<string | null>(null);
 
   // The setup addresses the connection by id, or by the bare service name when
   // the guardian has never connected or is adding another account (the
   // terminal conferral mints the row).
   const setup = useSetup({
-    idOrService: (another ? null : slot.connectionId) ?? config.service,
+    idOrKind: (another ? null : slot.connectionId) ?? config.service,
     grant: slot.grant ?? config.defaultGrant,
     another,
     cancelOnLeave,

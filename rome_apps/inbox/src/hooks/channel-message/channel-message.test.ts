@@ -34,7 +34,7 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
     channel: "telegram",
     direction: "inbound",
     messageId: "message-1",
-    conversationId: "chat-1" as ChatId,
+    chatId: "chat-1" as ChatId,
     senderId: "user-1",
     senderDisplayName: "Alice",
     text: "Hello team",
@@ -47,15 +47,16 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
 
 function snapshot(
   connectionId: string,
-  conversationId: ChatId,
+  chatId: ChatId,
   overrides: { enabled?: boolean; agentName?: string | null } = {},
 ) {
   return {
     conversation: {
-      ref: { connectionId, conversationId },
+      ref: { connectionId, chatId },
+      connectionKind: SERVICES[connectionId] ?? "unknown",
       service: SERVICES[connectionId] ?? "unknown",
       kind: "group" as const,
-      displayName: conversationId,
+      displayName: chatId,
     },
     supportedFields: [],
     effective: {
@@ -78,17 +79,13 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
   const features = new Map<string, Partial<ChannelFeatures>>();
   const run = rs.fn(async () => ({ status: "ok" as const }));
   const actionEngine = { run } as unknown as ActionEngineLike;
-  const get = rs.fn(async ({ connectionId, conversationId }) =>
-    snapshot(connectionId, conversationId),
-  );
+  const get = rs.fn(async ({ connectionId, chatId }) => snapshot(connectionId, chatId));
   const chatSettings = { get } as unknown as ChatSettingsControl;
   const stop = rs.fn(async () => ({ status: "stop_requested" as const, turnId: "turn-1" }));
   const chatStop: ChatStopHandler = stop;
-  const send = rs.fn(
-    async (_connectionId: string, conversationId: ChatId, _outgoing?: unknown) => ({
-      conversationId,
-    }),
-  );
+  const send = rs.fn(async (_connectionId: string, chatId: ChatId, _outgoing?: unknown) => ({
+    chatId,
+  }));
   const feature = <K extends keyof ChannelFeatures>(connectionId: string, name: K) =>
     (features.get(connectionId)?.[name] ?? null) as ChannelFeatures[K] | null;
   // One channel per Connection, as the channel list builds them.
@@ -96,7 +93,7 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
   const channel = (name: string, connectionId: string): Channel => ({
     name,
     send: {
-      send: (conversationId, outgoing) => send(connectionId, conversationId, outgoing),
+      send: (chatId, outgoing) => send(connectionId, chatId, outgoing),
       get activity() {
         return feature(connectionId, "activity");
       },
@@ -124,12 +121,12 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
   const emit = (connectionId: string, incoming: ChannelMessage): Promise<void> => {
     const handler = handlers.get(connectionId);
     if (!handler) return Promise.reject(new Error(`no subscription for ${connectionId}`));
-    const key = `${connectionId}:${incoming.conversationId}`;
+    const key = `${connectionId}:${incoming.chatId}`;
     const handled = (tails.get(key) ?? Promise.resolve()).then(() =>
       handler({
         kind: "message",
         message: incoming,
-        ref: { connectionId, conversationId: incoming.conversationId },
+        ref: { connectionId, chatId: incoming.chatId },
       }),
     );
     tails.set(
@@ -156,8 +153,8 @@ describe("ChannelMessageHook", () => {
       TELEGRAM_ID,
       message({
         messageId: "tg-100",
-        conversationId: "thread-1" as ChatId,
-        parentConversationId: "group-1" as ChatId,
+        chatId: "thread-1" as ChatId,
+        parentChatId: "group-1" as ChatId,
         thread: { kind: "topic", name: "Dev thread" },
         attachments: [{ type: "image", url: "file-id-1", caption: "pic" }],
         replyTo: { messageId: "tg-99", content: "Earlier message", senderName: "Bob" },
@@ -196,7 +193,7 @@ describe("ChannelMessageHook", () => {
     );
 
     expect(harness.stop).toHaveBeenCalledWith({
-      ref: { connectionId: TELEGRAM_ID, conversationId: "chat-1" },
+      ref: { connectionId: TELEGRAM_ID, chatId: "chat-1" },
       service: "telegram",
       senderId: "user-1",
     });
@@ -208,8 +205,8 @@ describe("ChannelMessageHook", () => {
   });
 
   it("accepts an addressed group /stop even when the conversation is disabled", async () => {
-    harness.get.mockImplementation(async ({ connectionId, conversationId }) =>
-      snapshot(connectionId, conversationId, { enabled: false }),
+    harness.get.mockImplementation(async ({ connectionId, chatId }) =>
+      snapshot(connectionId, chatId, { enabled: false }),
     );
 
     await harness.emit(
@@ -244,7 +241,7 @@ describe("ChannelMessageHook", () => {
       message({
         channel: "agents",
         senderId: agentId,
-        conversationId: agentId as ChatId,
+        chatId: agentId as ChatId,
         senderDisplayName: "Atlas",
         text: "/stop",
         thread: { kind: "dm" },
@@ -253,7 +250,7 @@ describe("ChannelMessageHook", () => {
 
     expect(harness.stop).not.toHaveBeenCalled();
     expect(harness.send).not.toHaveBeenCalled();
-    expect(harness.get).toHaveBeenCalledWith({ connectionId: AGENTS_ID, conversationId: agentId });
+    expect(harness.get).toHaveBeenCalledWith({ connectionId: AGENTS_ID, chatId: agentId });
     expect(harness.run).toHaveBeenCalledWith(
       "message_handler",
       expect.objectContaining({
@@ -267,14 +264,14 @@ describe("ChannelMessageHook", () => {
   });
 
   it("honors disabled conversations and routed agents from shared settings", async () => {
-    harness.get.mockImplementation(async ({ connectionId, conversationId }) =>
-      snapshot(connectionId, conversationId, { enabled: false }),
+    harness.get.mockImplementation(async ({ connectionId, chatId }) =>
+      snapshot(connectionId, chatId, { enabled: false }),
     );
     await harness.emit(TELEGRAM_ID, message());
     expect(harness.run).not.toHaveBeenCalled();
 
-    harness.get.mockImplementation(async ({ connectionId, conversationId }) =>
-      snapshot(connectionId, conversationId, { agentName: "envoy" }),
+    harness.get.mockImplementation(async ({ connectionId, chatId }) =>
+      snapshot(connectionId, chatId, { agentName: "envoy" }),
     );
     await harness.emit(TELEGRAM_ID, message({ messageId: "routed" }));
     expect(harness.run).toHaveBeenCalledWith(
@@ -351,10 +348,7 @@ describe("ChannelMessageHook", () => {
     expect(harness.run).not.toHaveBeenCalled();
 
     await harness.emit(TELEGRAM_ID, message({ text: "from telegram" }));
-    await harness.emit(
-      WHATSAPP_ID,
-      message({ conversationId: "dm-1" as ChatId, text: "from whatsapp" }),
-    );
+    await harness.emit(WHATSAPP_ID, message({ chatId: "dm-1" as ChatId, text: "from whatsapp" }));
 
     expect(harness.run).toHaveBeenCalledTimes(2);
     expect(harness.run.mock.calls[0]?.[1]).toEqual(
@@ -451,8 +445,8 @@ describe("ChannelMessageHook", () => {
       harness = createHarness({ accountAgentOf });
       harness.channels.push(harness.channel("feishu-2", FEISHU_2_ID));
       await harness.hook.register();
-      harness.get.mockImplementation(async ({ connectionId, conversationId }) =>
-        snapshot(connectionId, conversationId, { agentName: "override" }),
+      harness.get.mockImplementation(async ({ connectionId, chatId }) =>
+        snapshot(connectionId, chatId, { agentName: "override" }),
       );
     });
 
@@ -484,8 +478,8 @@ describe("ChannelMessageHook", () => {
     });
 
     it("passes a group's explicit pin to main as its choice", async () => {
-      harness.get.mockImplementation(async ({ connectionId, conversationId }) => ({
-        ...snapshot(connectionId, conversationId),
+      harness.get.mockImplementation(async ({ connectionId, chatId }) => ({
+        ...snapshot(connectionId, chatId),
         overrides: { routing: { agentName: null } },
       }));
 

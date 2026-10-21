@@ -432,7 +432,7 @@ async function fetchCheckout(dir: string, url: string, branch: string): Promise<
  * known identity survives. */
 async function readGithubGrantProfile(db: DrizzleDb): Promise<GithubGrantProfile | null> {
   const ledger = new DrizzleGrantLedger(db);
-  const github = (await ledger.listConnections()).filter((c) => c.service === "github");
+  const github = (await ledger.listConnections()).filter((c) => c.connectionKind === "github");
   // GitHub is a single-slot provider connection; more than one is a corrupt
   // ledger state that would make "the connected identity" ambiguous. Fail loud
   // rather than silently attributing commits to whichever row sorts first.

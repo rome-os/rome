@@ -24,7 +24,7 @@ import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { domainOf } from "../../channels/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import { createTestDb, identityServiceOf } from "../../test/helpers.js";
+import { createTestDb, identityConnectionKindOf } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { connectionsRoutes } from "./connections.js";
 
@@ -58,7 +58,7 @@ function makeApp(
       db,
       approvalsRepo: new ApprovalsRepository(
         db,
-        new PersonMappingRepository(db, identityServiceOf),
+        new PersonMappingRepository(db, identityConnectionKindOf),
       ),
       connectionRegistry: registry,
       personMappingRepo,
@@ -111,6 +111,7 @@ describe("GET /connections", () => {
     const [d, t] = connections;
     expect(t).toEqual({
       id: tg.id,
+      connectionKind: "fake-telegram",
       service: "fake-telegram",
       label: "Telegram",
       grants: { bot: "authorized" },
@@ -208,6 +209,7 @@ describe("GET /connections", () => {
     const [placeholder] = connections;
     expect(placeholder).toEqual({
       id: null,
+      connectionKind: "fake-discord",
       service: "fake-discord",
       label: "fake-discord",
       grants: { bot: "unauthorized", user: "unauthorized" },
@@ -234,7 +236,7 @@ describe("GET /connections", () => {
       // import regardless), but only enabled providers are connect invitations.
       for (const provider of ["github", "google"]) {
         registry.register({
-          service: provider,
+          connectionKind: provider,
           auth: { user: tokenPaste({ label: "token", validate: async () => {} }) },
           capabilities: {},
         });
@@ -255,7 +257,7 @@ describe("GET /connections", () => {
     try {
       const registry = new ConnectionRegistry({ ledger: makeLedger() });
       registry.register({
-        service: "github",
+        connectionKind: "github",
         auth: { user: tokenPaste({ label: "token", validate: async () => {} }) },
         capabilities: {},
       });
@@ -503,7 +505,11 @@ describe("GET /connections accounts", () => {
         records.claim(tx, record, record.createdAt);
       },
     });
-    registry.register({ ...telegram.descriptor, service: "telegram", severalAccounts: true });
+    registry.register({
+      ...telegram.descriptor,
+      connectionKind: "telegram",
+      severalAccounts: true,
+    });
     const first = await registry.connect("telegram");
     await registry.importCredential(first.id, "bot", telegram.validCredential());
     const connection = await registry.connectAnother("telegram");
@@ -528,7 +534,7 @@ describe("GET /connections accounts", () => {
         records.claim(tx, { ...record, domain: domainOf(profile) }, record.createdAt);
       },
     });
-    registry.register({ ...telegram.descriptor, service: "feishu", severalAccounts: true });
+    registry.register({ ...telegram.descriptor, connectionKind: "feishu", severalAccounts: true });
     const lark = await registry.confer("feishu", undefined, "bot", telegram.validCredential(), {
       domain: "lark",
     });
@@ -553,7 +559,7 @@ describe("GET /connections accounts", () => {
         records.claim(tx, record, record.createdAt);
       },
     });
-    registry.register({ ...telegram.descriptor, service: "telegram" });
+    registry.register({ ...telegram.descriptor, connectionKind: "telegram" });
     const conn = await registry.connect("telegram");
     records.link("telegram", "sales:agent");
 
@@ -585,7 +591,7 @@ describe("GET /connections accounts", () => {
         records.claim(tx, record, record.createdAt);
       },
     });
-    registry.register({ ...telegram.descriptor, service: "whatsapp" });
+    registry.register({ ...telegram.descriptor, connectionKind: "whatsapp" });
     const conn = await registry.connect("whatsapp");
 
     const { connections } = await (
@@ -690,13 +696,13 @@ describe("guardian links across Connections of one service", () => {
     openDbs.push(close);
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
     const fixture = makePasteTalk();
-    fixture.descriptor.service = "telegram";
+    fixture.descriptor.connectionKind = "telegram";
     registry.register(fixture.descriptor);
     const first = await registry.connect("telegram");
     const second = await registry.connectAnother("telegram");
     await registry.importCredential(first.id, "bot", fixture.validCredential());
     await registry.importCredential(second.id, "bot", fixture.validCredential());
-    const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
+    const personMappingRepo = new PersonMappingRepository(db, identityConnectionKindOf);
     await personMappingRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",
@@ -742,7 +748,7 @@ describe("guardian links across Connections of one service", () => {
     registry.register(makeZeroGrantTalk().descriptor);
     const first = await registry.connect("fake-webchat");
     await registry.connectAnother("fake-webchat");
-    const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
+    const personMappingRepo = new PersonMappingRepository(db, identityConnectionKindOf);
     await personMappingRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",
@@ -792,12 +798,12 @@ describe("connection pairing teardown", () => {
     const ledger = new DrizzleGrantLedger(db);
     const registry = new ConnectionRegistry({ ledger });
     const fixture = makeTwoGrant();
-    fixture.descriptor.service = "discord";
+    fixture.descriptor.connectionKind = "discord";
     registry.register(fixture.descriptor);
     const conn = await registry.connect("discord");
     await registry.importCredential(conn.id, "bot", fixture.botCredential());
     await registry.importCredential(conn.id, "user", fixture.userCredential());
-    const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
+    const personMappingRepo = new PersonMappingRepository(db, identityConnectionKindOf);
     await personMappingRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",
@@ -805,7 +811,7 @@ describe("connection pairing teardown", () => {
     });
     const approvalsRepo = new ApprovalsRepository(
       db,
-      new PersonMappingRepository(db, identityServiceOf),
+      new PersonMappingRepository(db, identityConnectionKindOf),
       () => Buffer.alloc(32, 1),
     );
     const input = {

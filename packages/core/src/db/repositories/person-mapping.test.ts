@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import {
   createTestDb,
   type TestDb,
-  identityServiceOf,
-  recordedServiceOf,
+  identityConnectionKindOf,
+  recordedConnectionKindOf,
 } from "../../test/helpers.js";
 import { AccountHeldError, PersonMappingRepository } from "./person-mapping.js";
 import { eq } from "drizzle-orm";
@@ -17,7 +17,7 @@ describe("PersonMappingRepository", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new PersonMappingRepository(testDb.db, identityServiceOf);
+    repo = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
   });
 
   afterEach(() => {
@@ -133,10 +133,10 @@ describe("PersonMappingRepository", () => {
 
   it("findByChannelUser() reads a later channel's sender from its service's links", async () => {
     const records = new ChannelRecordsRepository(testDb.db);
-    repo = new PersonMappingRepository(testDb.db, recordedServiceOf(testDb.db));
+    repo = new PersonMappingRepository(testDb.db, recordedConnectionKindOf(testDb.db));
     const now = new Date();
-    records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
-    const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).id;
+    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now);
+    const second = records.claim(testDb.db, { id: "c2", connectionKind: "telegram" }, now).id;
     const personId = await repo.create({
       displayName: "Erin",
       bondLevel: "guardian",
@@ -149,10 +149,10 @@ describe("PersonMappingRepository", () => {
 
   it("writes a later channel's links under its service", async () => {
     const records = new ChannelRecordsRepository(testDb.db);
-    repo = new PersonMappingRepository(testDb.db, recordedServiceOf(testDb.db));
+    repo = new PersonMappingRepository(testDb.db, recordedConnectionKindOf(testDb.db));
     const now = new Date();
-    records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
-    const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).id;
+    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now);
+    const second = records.claim(testDb.db, { id: "c2", connectionKind: "telegram" }, now).id;
     const personId = await repo.create({ displayName: "Erin", bondLevel: "inner-circle" });
 
     await repo.addChannelMapping(personId, second, "tg-erin");

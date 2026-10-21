@@ -27,13 +27,13 @@ import type { Connection } from "../connections/types.js";
 import type { StoredChatRow } from "./repository.js";
 import { ChatSettingsRepository } from "./repository.js";
 import {
-  CONVERSATION_SETTING_FIELDS_BY_SERVICE,
+  CONVERSATION_SETTING_FIELDS_BY_KIND,
   CORE_CONVERSATION_SETTING_FIELDS,
   defaultConversationSettings,
 } from "./support.js";
 import { assertProviderSessionResetPolicy } from "./reset-policy.js";
 
-const log = createLogger("conversation-settings");
+const log = createLogger("chat-settings");
 
 function fieldValue(settings: ChatSettingsOverrides, field: ChatSettingField) {
   switch (field) {
@@ -231,9 +231,10 @@ export class ChatSettingsService implements ChatSettingsControl {
       if (!existing) {
         this.remember({
           ref: descriptor.parent,
-          service: descriptor.service,
+          connectionKind: descriptor.connectionKind,
+          service: descriptor.connectionKind,
           kind: "channel",
-          displayName: descriptor.containerName ?? descriptor.parent.conversationId,
+          displayName: descriptor.containerName ?? descriptor.parent.chatId,
           containerName: descriptor.containerName,
         });
       }
@@ -258,7 +259,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       input.connectionId && !selectedChannel
         ? []
         : this.deps.repository.listKnown({
-            service: selectedChannel ?? undefined,
+            channel: selectedChannel ?? undefined,
             query: input.query,
           });
     const byRef = new Map<
@@ -286,12 +287,12 @@ export class ChatSettingsService implements ChatSettingsControl {
       )
         continue;
       // Removing a Connection hides its persisted conversations from settings.
-      // Keep the rows intact so reconnecting the same service can recover them,
+      // Keep the rows intact so reconnecting the same account can recover them,
       // but do not let one orphaned row abort the cross-provider list.
       if (row.sourceChannel && this.connectionsOf(row.sourceChannel).length === 0) {
         log.debug("conversation_settings.removed_connection_hidden", {
-          service: row.sourceChannel,
-          conversationId: row.sourceThreadId,
+          channel: row.sourceChannel,
+          chatId: row.sourceThreadId,
         });
         continue;
       }
@@ -317,7 +318,11 @@ export class ChatSettingsService implements ChatSettingsControl {
       // Their effective settings are resolved through the parent conversation.
       if (this.isThread(descriptor)) continue;
       if (query) {
-        const haystack = [descriptor.service, descriptor.containerName, descriptor.displayName]
+        const haystack = [
+          descriptor.connectionKind,
+          descriptor.containerName,
+          descriptor.displayName,
+        ]
           .filter(Boolean)
           .join(" ")
           .toLocaleLowerCase();
@@ -328,8 +333,8 @@ export class ChatSettingsService implements ChatSettingsControl {
       candidates.push({ descriptor, availability, source });
     }
     candidates.sort((a, b) => {
-      const left = `${a.descriptor.service}\0${a.descriptor.containerName ?? ""}\0${a.descriptor.displayName}\0${a.descriptor.ref.connectionId}\0${a.descriptor.ref.conversationId}`;
-      const right = `${b.descriptor.service}\0${b.descriptor.containerName ?? ""}\0${b.descriptor.displayName}\0${b.descriptor.ref.connectionId}\0${b.descriptor.ref.conversationId}`;
+      const left = `${a.descriptor.connectionKind}\0${a.descriptor.containerName ?? ""}\0${a.descriptor.displayName}\0${a.descriptor.ref.connectionId}\0${a.descriptor.ref.chatId}`;
+      const right = `${b.descriptor.connectionKind}\0${b.descriptor.containerName ?? ""}\0${b.descriptor.displayName}\0${b.descriptor.ref.connectionId}\0${b.descriptor.ref.chatId}`;
       return left.localeCompare(right);
     });
     const page = candidates.slice(offset, offset + limit);
@@ -350,7 +355,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     const { descriptor, row } = this.resolveConversation(ref);
     if (this.isThread(descriptor)) {
       if (!descriptor.parent) {
-        throw new Error(`Thread conversation "${ref.conversationId}" has no parent settings owner`);
+        throw new Error(`Thread conversation "${ref.chatId}" has no parent settings owner`);
       }
       const parent = await this.get(descriptor.parent);
       const settingsOwner = parent.inheritedFrom ?? parent.conversation.ref;
@@ -365,8 +370,8 @@ export class ChatSettingsService implements ChatSettingsControl {
       };
       log.debug("conversation_settings.opened", {
         connectionId: ref.connectionId,
-        conversationId: ref.conversationId,
-        settingsOwnerConversationId: settingsOwner.conversationId,
+        chatId: ref.chatId,
+        settingsOwnerChatId: settingsOwner.chatId,
       });
       return snapshot;
     }
@@ -383,7 +388,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     };
     log.debug("conversation_settings.opened", {
       connectionId: ref.connectionId,
-      conversationId: ref.conversationId,
+      chatId: ref.chatId,
     });
     return snapshot;
   }
@@ -461,7 +466,7 @@ export class ChatSettingsService implements ChatSettingsControl {
         });
         log.info("conversation_settings.updated", {
           connectionId: input.ref.connectionId,
-          conversationId: input.ref.conversationId,
+          chatId: input.ref.chatId,
           fields: [...changed],
           actor: input.actor,
         });
@@ -492,7 +497,7 @@ export class ChatSettingsService implements ChatSettingsControl {
         await this.deps.onChanged({ ref: input.ref, actor: input.actor, fields, reset: true });
         log.info("conversation_settings.reset", {
           connectionId: input.ref.connectionId,
-          conversationId: input.ref.conversationId,
+          chatId: input.ref.chatId,
           actor: input.actor,
         });
         return this.get(input.ref);
@@ -562,13 +567,14 @@ export class ChatSettingsService implements ChatSettingsControl {
     }
     const ref = {
       connectionId: connections[0]!.id,
-      conversationId: row.sourceThreadId as ChatId,
+      chatId: row.sourceThreadId as ChatId,
     };
     const remembered = this.descriptors.get(this.key(ref));
     const descriptor: ChatDescriptor = {
       ...remembered,
       ref,
-      service: connections[0]!.service,
+      connectionKind: connections[0]!.connectionKind,
+      service: connections[0]!.connectionKind,
       kind:
         row.sourceThreadType === "private"
           ? "dm"
@@ -581,12 +587,12 @@ export class ChatSettingsService implements ChatSettingsControl {
     };
     if (row.parentSessionId) {
       const parent = this.deps.repository
-        .listKnown({ service: row.sourceChannel })
+        .listKnown({ channel: row.sourceChannel })
         .find((candidate) => candidate.id === row.parentSessionId);
       if (parent?.sourceThreadId) {
         descriptor.parent = {
           connectionId: connections[0]!.id,
-          conversationId: parent.sourceThreadId as ChatId,
+          chatId: parent.sourceThreadId as ChatId,
         };
       }
     }
@@ -614,9 +620,10 @@ export class ChatSettingsService implements ChatSettingsControl {
     if (row) return { descriptor: this.descriptorFromRow(row), row };
     const descriptor: ChatDescriptor = {
       ref,
-      service: connection.service,
+      connectionKind: connection.connectionKind,
+      service: connection.connectionKind,
       kind: "channel",
-      displayName: ref.conversationId,
+      displayName: ref.chatId,
     };
     this.remember(descriptor);
     return { descriptor, row: null };
@@ -639,7 +646,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       return CORE_CONVERSATION_SETTING_FIELDS;
     }
     return (
-      CONVERSATION_SETTING_FIELDS_BY_SERVICE.get(descriptor.service) ??
+      CONVERSATION_SETTING_FIELDS_BY_KIND.get(descriptor.connectionKind) ??
       CORE_CONVERSATION_SETTING_FIELDS
     );
   }
@@ -663,23 +670,23 @@ export class ChatSettingsService implements ChatSettingsControl {
     if (!this.isThread(descriptor)) return;
     if (!descriptor.parent) {
       throw new Error(
-        `Thread conversation "${descriptor.ref.conversationId}" has no parent settings owner`,
+        `Thread conversation "${descriptor.ref.chatId}" has no parent settings owner`,
       );
     }
     throw new Error(
-      `Conversation "${descriptor.ref.conversationId}" is a thread and follows parent "${descriptor.parent.conversationId}"; update the parent conversation instead`,
+      `Conversation "${descriptor.ref.chatId}" is a thread and follows parent "${descriptor.parent.chatId}"; update the parent conversation instead`,
     );
   }
 
   private key(ref: ChatRef): string {
-    return `${ref.connectionId}\0${ref.conversationId}`;
+    return `${ref.connectionId}\0${ref.chatId}`;
   }
 
   /** A conversation on no channel stores nothing, so it locks on its own
    *  key, which no channel's conversation shares. */
   private storageKey(ref: ChatRef): string {
     const channel = this.channelName(ref);
-    return channel === null ? this.key(ref) : `${channel}\0${ref.conversationId}`;
+    return channel === null ? this.key(ref) : `${channel}\0${ref.chatId}`;
   }
 
   /** The channel the conversation `ref` addresses belongs to, or null when
@@ -698,7 +705,7 @@ export class ChatSettingsService implements ChatSettingsControl {
 
   /** The row of the conversation `ref` on `channel`, and none on no channel. */
   private find(channel: string | null | undefined, ref: ChatRef): StoredChatRow | null {
-    return channel ? this.deps.repository.find(channel, ref.conversationId) : null;
+    return channel ? this.deps.repository.find(channel, ref.chatId) : null;
   }
 
   /** The Connections backing the channel named `channel`. */
@@ -711,7 +718,7 @@ export class ChatSettingsService implements ChatSettingsControl {
   private logRejected(ref: ChatRef, err: unknown): void {
     log.warn("conversation_settings.rejected", {
       connectionId: ref.connectionId,
-      conversationId: ref.conversationId,
+      chatId: ref.chatId,
       error: err instanceof Error ? err.message : String(err),
     });
   }

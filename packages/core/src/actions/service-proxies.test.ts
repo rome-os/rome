@@ -30,7 +30,7 @@ describe("ChannelsServiceProxy", () => {
     channel: "discord",
     direction: "inbound",
     messageId: "message-1",
-    conversationId: "conversation-1",
+    chatId: "conversation-1",
     senderId: "user-1",
     text: "hello",
     attachments: [],
@@ -70,7 +70,7 @@ describe("ChannelsServiceProxy", () => {
 
     await proxy.send("discord", "c1" as never, { text: "a" });
 
-    expect(calls).toEqual([{ channel: "discord", conversationId: "c1", message: { text: "a" } }]);
+    expect(calls).toEqual([{ channel: "discord", chatId: "c1", message: { text: "a" } }]);
   });
 
   // TODO(0.8): remove with the migration getters.

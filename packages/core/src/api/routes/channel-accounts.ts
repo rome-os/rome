@@ -28,7 +28,8 @@ const linkBodySchema: z.ZodType<LinkAccountAgentRequest> = z.object({
 function accountView(record: ChannelRecord): ChannelAccount {
   return {
     id: record.id,
-    service: record.service,
+    connectionKind: record.connectionKind,
+    service: record.connectionKind,
     platform: record.platform,
     connectionId: record.connectionId,
     agent: record.agent,
@@ -48,8 +49,8 @@ export function channelAccountsRoutes(
 
   // Link an agent to an account, or unlink it with `null`. Only this account
   // changes: the agent keeps every other account it is linked to. Only an
-  // account of a linkable service takes a link; unlinking is always open.
-  // Rome listens to an account of a linkable service only while it has an
+  // account of a linkable connection kind takes a link; unlinking is always open.
+  // Rome listens to an account of a linkable connection kind only while it has an
   // agent, so the account starts or stops listening.
   app.put("/channels/accounts/:id/agent", async (c) => {
     if (!isSameOriginMutationRequest(c.req.raw)) {

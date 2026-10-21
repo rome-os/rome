@@ -9,6 +9,12 @@ import {
 
 import type { ProxiedResponse } from "../../api/composio-client.js";
 import { githubProxyCall, readGithubOAuthToken } from "../../api/github-proxy.js";
+import {
+  readShopifyOAuthToken,
+  shopifyGraphqlError,
+  shopifyProxyCall,
+  type ShopifyOAuthToken,
+} from "../../api/shopify-proxy.js";
 import { readSlackOAuthTokens, slackProxyCall } from "../../api/slack-proxy.js";
 import {
   buildProxyEndpoint,
@@ -24,6 +30,7 @@ const log = createAppLogger("connector_proxy");
 
 const GITHUB_TOOLKIT = "github";
 const SLACK_TOOLKIT = "slack";
+const SHOPIFY_TOOLKIT = "shopify";
 
 /**
  * Map a verbatim upstream response to an ActionResult, fail-closed. The proxy
@@ -64,7 +71,7 @@ const inputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Provider API host. Omit it for single-host toolkits — Rome fills in the toolkit's default host. Supply it only when the toolkit has no fixed host (Supabase's '<project-ref>.supabase.co') or to target a non-default host (Dropbox content 'content.dropboxapi.com', GitHub uploads 'uploads.github.com').",
+      "Provider API host. Omit it for single-host toolkits — Rome fills in the toolkit's default host. Omit it for Shopify too — Rome uses the connected store's '<store>.myshopify.com'. Supply it only when the toolkit has no fixed host (Supabase's '<project-ref>.supabase.co') or to target a non-default host (Dropbox content 'content.dropboxapi.com', GitHub uploads 'uploads.github.com').",
     ),
   method: z
     .enum(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
@@ -92,11 +99,24 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
     config,
     schema: inputSchema,
     execute: async ({ toolkit, path, host, method, body, query, headers }) => {
+      // Shopify's API host is the connected store's own domain, which only the
+      // token file knows, so read it before assembling the endpoint. The store
+      // domain isn't secret; the token is not used until the endpoint clears
+      // the checks below.
+      let shopifyToken: ShopifyOAuthToken | null = null;
+      if (toolkit.toLowerCase() === SHOPIFY_TOOLKIT) {
+        shopifyToken = await readShopifyOAuthToken();
+        if (!shopifyToken) {
+          return { status: "error", error: romeManagedConnectHint(toolkit) };
+        }
+      }
+
       // Assemble the absolute endpoint from the relative `path` + (optional)
       // `host`. For single-host toolkits Rome fills the host from its catalog; a
-      // per-connection host (Supabase) must pass `host`. Done before any network
-      // call or credential use, so a malformed path/host can't reach the token.
-      const built = buildProxyEndpoint(toolkit, path, host);
+      // per-connection host (Supabase) must pass `host`, and Shopify's defaults to
+      // the connected store. Done before any network call or credential use, so a
+      // malformed path/host can't reach the token.
+      const built = buildProxyEndpoint(toolkit, path, host ?? shopifyToken?.shop);
       if (!built.ok) {
         return { status: "error", error: `Refusing to proxy: ${built.message}` };
       }
@@ -165,6 +185,45 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
           const message = err instanceof Error ? err.message : String(err);
           log.error("slack proxy call failed", { endpoint, method, error: message });
           return { status: "error", error: `Slack proxy call failed: ${message}` };
+        }
+      }
+
+      // Shopify is brokered by Rome's own integration (Rome Cloud OAuth), not
+      // Composio. A store's token opens only that store, so beyond the
+      // myshopify.com allowlist the endpoint must be the connected store itself.
+      if (shopifyToken) {
+        const endpointHost = new URL(endpoint).hostname.toLowerCase();
+        if (endpointHost !== shopifyToken.shop) {
+          return {
+            status: "error",
+            error: `Refusing to proxy: the connected Shopify store is ${shopifyToken.shop}, not ${endpointHost}. Omit "host" to call the connected store.`,
+          };
+        }
+        try {
+          const res = await shopifyProxyCall({
+            token: shopifyToken,
+            endpoint,
+            method,
+            body,
+            query,
+            headers,
+          });
+          // Shopify answers a failed GraphQL query with HTTP 200 and an `errors`
+          // array; fail closed on it so a refusal can't be read as success.
+          if (res.status >= 200 && res.status < 300) {
+            const graphqlError = shopifyGraphqlError(res.data);
+            if (graphqlError) {
+              return {
+                status: "error",
+                error: `shopify API returned errors for ${method} ${endpoint}: ${graphqlError}`,
+              };
+            }
+          }
+          return mapProxyResponse(toolkit, method, endpoint, res);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.error("shopify proxy call failed", { endpoint, method, error: message });
+          return { status: "error", error: `Shopify proxy call failed: ${message}` };
         }
       }
 

@@ -2,7 +2,7 @@
  * Client types + fetchers for the generic conferral-setup surface.
  * The state/content types mirror the backend `SetupState` verbatim — payloads
  * are semantically complete (copy authored server-side), so the standard
- * renderers narrate any setup from these shapes alone. Per-`(service, state)`
+ * renderers narrate any setup from these shapes alone. Per-`(connection kind, state)`
  * custom components override rendering only; they never need extra data.
  */
 
@@ -78,17 +78,17 @@ export interface SetupStart {
 
 export type SetupStartResult = { ok: true; start: SetupStart } | { ok: false; error: string };
 
-/** Start or re-attach a setup for one grant. `idOrService` is the connection
- *  id, or the bare service name for a never-connected service (the terminal
- *  conferral mints the row). With `another`, `idOrService` is the service and
+/** Start or re-attach a setup for one grant. `idOrKind` is the connection
+ *  id, or the bare connection kind for a never-connected connection kind (the terminal
+ *  conferral mints the row). With `another`, `idOrKind` is the connection kind and
  *  the setup connects a new account of it. */
 export async function startSetup(
-  idOrService: string,
+  idOrKind: string,
   grant: string,
   opts: { force?: boolean; another?: boolean } = {},
 ): Promise<SetupStartResult> {
   const res = await fetch(
-    `/api/connections/${encodeURIComponent(idOrService)}/grants/${encodeURIComponent(grant)}/setup`,
+    `/api/connections/${encodeURIComponent(idOrKind)}/grants/${encodeURIComponent(grant)}/setup`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -164,9 +164,9 @@ export interface SetupReturnResult {
    *  confusing error for a setup that actually connected); it re-polls instead. */
   ambiguous?: boolean;
   cid?: string;
-  /** The service the matched setup belongs to — where the guardian returns to
+  /** The connection kind of the matched setup — where the guardian returns to
    *  watch it settle. Absent when nothing matched. */
-  service?: string;
+  connectionKind?: string;
   state?: SetupState;
 }
 
@@ -196,7 +196,9 @@ export async function submitSetupReturn(params: {
       matched: true,
       accepted: payload.accepted === true,
       cid: payload.cid,
-      ...(typeof payload.service === "string" ? { service: payload.service } : {}),
+      ...(typeof payload.connectionKind === "string"
+        ? { connectionKind: payload.connectionKind }
+        : {}),
       state: payload.state,
     };
   }

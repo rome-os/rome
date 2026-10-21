@@ -35,7 +35,7 @@ const AppIdSchema = z.string().min(1);
 
 const ChannelsSendParams = z.object({
   channel: z.string().min(1),
-  conversationId: z.string(),
+  chatId: z.string(),
   message: z.custom<OutgoingMessage>((val) => typeof val === "object" && val !== null, {
     message: "message must be an object",
   }),
@@ -46,7 +46,7 @@ const ChannelsSendParams = z.object({
 const ChannelsQueryParams = z
   .object({
     channel: z.string().min(1),
-    conversationId: z.string().optional(),
+    chatId: z.string().optional(),
     since: z.string().datetime().optional(),
     limit: z.number().int().positive().optional(),
   })
@@ -55,7 +55,7 @@ const ChannelsQueryParams = z
 const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
 
 const ChatRefParams = z.object({
-  ref: z.object({ connectionId: z.string().min(1), conversationId: z.string() }),
+  ref: z.object({ connectionId: z.string().min(1), chatId: z.string() }),
 });
 const ChatSettingsInput = z.custom<
   UpdateChatSettingsInput | ResetChatSettingsInput | ListChatSettingsInput
@@ -373,22 +373,18 @@ export class WorkerRpcServer {
   }
 
   private async handleChannelsSend(params: unknown): Promise<MessageReceipt> {
-    const { channel, conversationId, message } = parseParams(
-      "channels.send",
-      ChannelsSendParams,
-      params,
-    );
-    return await this.services.channelsService.send(channel, conversationId as ChatId, message);
+    const { channel, chatId, message } = parseParams("channels.send", ChannelsSendParams, params);
+    return await this.services.channelsService.send(channel, chatId as ChatId, message);
   }
 
   private async handleChannelsQuery(params: unknown): Promise<ChannelMessage[]> {
-    const { channel, conversationId, since, limit } = parseParams(
+    const { channel, chatId, since, limit } = parseParams(
       "channels.query",
       ChannelsQueryParams,
       params,
     );
     return await this.services.channelsService.query(channel, {
-      ...(conversationId ? { conversationId: conversationId as ChatId } : {}),
+      ...(chatId ? { chatId: chatId as ChatId } : {}),
       ...(since ? { since: new Date(since) } : {}),
       ...(limit ? { limit } : {}),
     });

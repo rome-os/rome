@@ -10,8 +10,8 @@ import type { ChannelRecordsRepository } from "../db/repositories/channel-record
 /**
  * Record a channel for every Connection that has none. A Connection minted
  * after channels were recorded got its channel in the same transaction, so
- * this only reaches Connections from before. A service held one Connection
- * then, so each takes its service's own name. Such an account answered as
+ * this only reaches Connections from before. A connection kind held one Connection
+ * then, so each takes its connection kind's own name. Such an account answered as
  * main before accounts took agents, so it keeps main, as migration 0081 kept
  * it for the channels recorded then. `domainOf` answers a Feishu
  * app's domain, and is asked only of a Connection that has no channel.
@@ -19,7 +19,7 @@ import type { ChannelRecordsRepository } from "../db/repositories/channel-record
 export async function claimChannels(
   db: DrizzleDb,
   records: Pick<ChannelRecordsRepository, "claim" | "unclaimed">,
-  connections: ReadonlyArray<{ id: string; service: string }>,
+  connections: ReadonlyArray<{ id: string; connectionKind: string }>,
   domainOf: (connectionId: string) => Promise<string | undefined> = async () => undefined,
 ): Promise<void> {
   const unclaimed = records.unclaimed(connections);

@@ -86,7 +86,7 @@ describe("TelegramAdapter", () => {
           channel: "telegram",
           direction: "inbound",
           messageId: "42",
-          conversationId: "999",
+          chatId: "999",
           senderId: "111",
           senderDisplayName: "Alice Smith",
           senderUsername: "alice_smith",
@@ -168,7 +168,7 @@ describe("TelegramAdapter", () => {
       );
 
       expect(captured[0].thread).toEqual({ kind: "group", name: "My Group" });
-      expect(captured[0].conversationId).toBe("555");
+      expect(captured[0].chatId).toBe("555");
     });
 
     it("extracts photo attachments (uses largest)", async () => {
@@ -276,7 +276,7 @@ describe("TelegramAdapter", () => {
       expect(captured[0].senderId).toBe("-1001234");
       expect(captured[0].senderDisplayName).toBe("My Channel");
       expect(captured[0]).not.toHaveProperty("senderUsername");
-      expect(captured[0].conversationId).toBe("-1001234");
+      expect(captured[0].chatId).toBe("-1001234");
       expect(captured[0].thread).toEqual({ kind: "group", name: "My Channel" });
       expect(captured[0].text).toBe("channel announcement");
     });
@@ -304,7 +304,7 @@ describe("TelegramAdapter", () => {
       const outgoing: OutgoingMessage = { text: "hi there" };
       const receipt = await adapter.send(CHAT, outgoing);
 
-      expect(receipt).toEqual({ conversationId: CHAT, messageId: expect.any(String) });
+      expect(receipt).toEqual({ chatId: CHAT, messageId: expect.any(String) });
       expect(telegram.sent).toEqual([
         {
           method: "sendMessage",
@@ -408,7 +408,7 @@ describe("TelegramAdapter", () => {
         channel: "telegram",
         direction: "inbound",
         messageId: "42",
-        conversationId: "999" as ChatId,
+        chatId: "999" as ChatId,
         senderId: "111",
         timestamp: new Date("2026-05-10T00:00:00Z"),
         text: "",

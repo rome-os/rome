@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   SlackAdapter,
   SlackApiError,
@@ -9,7 +9,7 @@ import {
   type SlackSocketLike,
   type SlackWebApi,
   decodeSlackText,
-  parseSlackConversationId,
+  parseSlackChatId,
   readSocketAppId,
   splitSlackText,
 } from "./slack.js";
@@ -112,7 +112,7 @@ describe("SlackAdapter inbound", () => {
     expect(received[0]).toMatchObject({
       channel: "slack_bot",
       direction: "inbound",
-      conversationId: "D1",
+      chatId: "D1",
       senderId: "T1/UADA",
       senderDisplayName: "Ada",
       senderUsername: "ada",
@@ -137,7 +137,7 @@ describe("SlackAdapter inbound", () => {
     );
     await rs.waitFor(() => expect(received).toHaveLength(1));
     expect(received[0]).toMatchObject({
-      conversationId: "C1",
+      chatId: "C1",
       thread: { kind: "group" },
       addressing: "mention",
       replyTo: { messageId: "150.0" },
@@ -398,7 +398,7 @@ describe("SlackAdapter send", () => {
     sockets[0].emit("message", mention("200.2", "150.0"));
     await rs.waitFor(() => expect(received).toHaveLength(1));
     expect(received[0].messageId).toBe("150.0:200.2");
-    const receipt = await adapter.send("C1" as ConversationId, {
+    const receipt = await adapter.send("C1" as ChatId, {
       text: "**done**",
       replyToMessageId: received[0].messageId,
     });
@@ -407,16 +407,16 @@ describe("SlackAdapter send", () => {
       { channel: "C1", markdown: "**done**", threadTs: "150.0" },
       expect.anything(),
     );
-    expect(receipt).toEqual({ conversationId: "C1", messageId: "150.0:100.1" });
+    expect(receipt).toEqual({ chatId: "C1", messageId: "150.0:100.1" });
   });
 
   it("answers a reply to its own message in the same thread", async () => {
     const { adapter, api } = await startedAdapter();
-    const first = await adapter.send("C1" as ConversationId, {
+    const first = await adapter.send("C1" as ChatId, {
       text: "one",
       replyToMessageId: "150.0:200.2",
     });
-    await adapter.send("C1" as ConversationId, { text: "two", replyToMessageId: first.messageId });
+    await adapter.send("C1" as ChatId, { text: "two", replyToMessageId: first.messageId });
     expect(api.postMessage).toHaveBeenLastCalledWith(
       "xoxb-1",
       { channel: "C1", markdown: "two", threadTs: "150.0" },
@@ -426,7 +426,7 @@ describe("SlackAdapter send", () => {
 
   it("finds a mention's thread after a restart, with nothing remembered", async () => {
     const { adapter, api } = await startedAdapter();
-    await adapter.send("C1" as ConversationId, { text: "late", replyToMessageId: "150.0:200.2" });
+    await adapter.send("C1" as ChatId, { text: "late", replyToMessageId: "150.0:200.2" });
     expect(api.postMessage).toHaveBeenCalledWith(
       "xoxb-1",
       { channel: "C1", markdown: "late", threadTs: "150.0" },
@@ -438,7 +438,7 @@ describe("SlackAdapter send", () => {
     const { adapter, api, sockets, received } = await startedAdapter();
     sockets[0].emit("message", mention("300.3"));
     await rs.waitFor(() => expect(received).toHaveLength(1));
-    await adapter.send("C1" as ConversationId, { text: "ok", replyToMessageId: "300.3" });
+    await adapter.send("C1" as ChatId, { text: "ok", replyToMessageId: "300.3" });
     expect(api.postMessage).toHaveBeenCalledWith(
       "xoxb-1",
       { channel: "C1", markdown: "ok", threadTs: "300.3" },
@@ -448,7 +448,7 @@ describe("SlackAdapter send", () => {
 
   it("answers a direct message in place", async () => {
     const { adapter, api } = await startedAdapter();
-    await adapter.send("D1" as ConversationId, { text: "ok", replyToMessageId: "400.4" });
+    await adapter.send("D1" as ChatId, { text: "ok", replyToMessageId: "400.4" });
     expect(api.postMessage).toHaveBeenCalledWith(
       "xoxb-1",
       { channel: "D1", markdown: "ok", threadTs: undefined },
@@ -458,13 +458,13 @@ describe("SlackAdapter send", () => {
 
   it("still replies in the thread an older thread-keyed chat names", async () => {
     const { adapter, api } = await startedAdapter();
-    const receipt = await adapter.send("C1:150.0" as ConversationId, { text: "**done**" });
+    const receipt = await adapter.send("C1:150.0" as ChatId, { text: "**done**" });
     expect(api.postMessage).toHaveBeenCalledWith(
       "xoxb-1",
       { channel: "C1", markdown: "**done**", threadTs: "150.0" },
       expect.anything(),
     );
-    expect(receipt).toEqual({ conversationId: "C1:150.0", messageId: "150.0:100.1" });
+    expect(receipt).toEqual({ chatId: "C1:150.0", messageId: "150.0:100.1" });
   });
 
   it("opens the direct message for a member's address", async () => {
@@ -498,7 +498,7 @@ describe("slack text", () => {
   });
 
   it("reads a thread address back into channel and thread", () => {
-    expect(parseSlackConversationId("C1:150.0")).toEqual({ channelId: "C1", threadTs: "150.0" });
-    expect(parseSlackConversationId("D1")).toEqual({ channelId: "D1" });
+    expect(parseSlackChatId("C1:150.0")).toEqual({ channelId: "C1", threadTs: "150.0" });
+    expect(parseSlackChatId("D1")).toEqual({ channelId: "D1" });
   });
 });

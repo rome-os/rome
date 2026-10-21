@@ -59,7 +59,7 @@ export class DrizzleGrantLedger implements GrantLedger {
       .insert(connections)
       .values({
         id: rec.id,
-        service: rec.service,
+        connectionKind: rec.connectionKind,
         label: rec.label,
         createdAt: rec.createdAt,
       })
@@ -71,8 +71,8 @@ export class DrizzleGrantLedger implements GrantLedger {
   }
 
   async listConnections(): Promise<ConnectionRecord[]> {
-    // Oldest first: a Service's first Connection is the one that backs its
-    // first channel, and readers of `find(service)[0]` rely on that.
+    // Oldest first: a connection kind's first Connection is the one that backs its
+    // first channel, and readers of `find(connectionKind)[0]` rely on that.
     // `created_at` holds whole seconds, so rowid (write order) breaks a tie.
     const rows = await this.db
       .select()
@@ -80,7 +80,7 @@ export class DrizzleGrantLedger implements GrantLedger {
       .orderBy(asc(connections.createdAt), asc(sql`rowid`));
     return rows.map((row) => ({
       id: row.id,
-      service: row.service,
+      connectionKind: row.connectionKind,
       label: row.label,
       createdAt: row.createdAt,
     }));
@@ -148,7 +148,7 @@ export class DrizzleGrantLedger implements GrantLedger {
 
   connectionsHoldingIn(
     tx: DrizzleTx,
-    service: string,
+    connectionKind: string,
     needs: readonly GrantName[],
     exceptId: ConnectionId,
   ): ConnectionId[] {
@@ -156,7 +156,7 @@ export class DrizzleGrantLedger implements GrantLedger {
       return tx
         .select({ id: connections.id })
         .from(connections)
-        .where(and(eq(connections.service, service), ne(connections.id, exceptId)))
+        .where(and(eq(connections.connectionKind, connectionKind), ne(connections.id, exceptId)))
         .all()
         .map((row) => row.id);
     }
@@ -166,7 +166,7 @@ export class DrizzleGrantLedger implements GrantLedger {
       .innerJoin(connections, eq(connections.id, connectionGrants.custody))
       .where(
         and(
-          eq(connections.service, service),
+          eq(connections.connectionKind, connectionKind),
           ne(connections.id, exceptId),
           inArray(connectionGrants.name, [...needs]),
           ne(connectionGrants.state, "unauthorized"),

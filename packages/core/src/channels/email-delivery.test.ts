@@ -88,8 +88,8 @@ async function harness(overrides: Partial<MailProvider> = {}) {
   });
   await adapter.start();
   adapter.onInbound(async () => undefined);
-  const send: ChannelsService["send"] = (_channel, conversationId, message) =>
-    adapter.send(conversationId, message);
+  const send: ChannelsService["send"] = (_channel, chatId, message) =>
+    adapter.send(chatId, message);
   const channels: ChannelsService = {
     list: async () => [{ name: "email", sendable: true }],
     send: rs.fn(send),
@@ -580,10 +580,10 @@ describe("email delivery through send_message", () => {
     for (const receipt of [
       undefined,
       {},
-      { conversationId: THREAD },
-      { conversationId: THREAD, messageId: " " },
+      { chatId: THREAD },
+      { chatId: THREAD, messageId: " " },
       { messageId: "sent" },
-      { messageId: "sent", conversationId: " " },
+      { messageId: "sent", chatId: " " },
     ]) {
       const h = await harness();
       h.channels.send = rs.fn(async () => receipt as MessageReceipt);
@@ -628,11 +628,11 @@ describe("email thread lookup under the channel-send RPC deadline", () => {
     setWorkerRpcInProcessDispatcher(async (method, params) => {
       if (method === "channels.list") return [{ name: "email", sendable: true }];
       if (method !== "channels.send") throw new Error(`unexpected RPC ${method}`);
-      const { conversationId, message } = params as {
-        conversationId: ChatId;
+      const { chatId, message } = params as {
+        chatId: ChatId;
         message: Parameters<ChannelsService["send"]>[2];
       };
-      return h.adapter.send(conversationId, message);
+      return h.adapter.send(chatId, message);
     });
     return { ...h, channels: new ChannelsServiceProxy() };
   }

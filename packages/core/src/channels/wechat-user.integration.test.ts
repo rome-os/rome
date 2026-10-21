@@ -69,11 +69,11 @@ withClient("the WeChat reader contract", () => {
       expect(conversations.length).toBeGreaterThan(0);
 
       const chat = conversations.find((c) => c.isGroup) ?? conversations[0]!;
-      const messages = await reader.messages({ conversationId: chat.id, limit: 5 });
+      const messages = await reader.messages({ chatId: chat.id, limit: 5 });
       expect(messages.length).toBeGreaterThan(0);
 
       for (const message of messages) {
-        expect(message.conversationId).toBe(chat.id);
+        expect(message.chatId).toBe(chat.id);
         expect(message.timestamp).toBeGreaterThan(0);
         // A rich message keeps its placeholder and drops its XML envelope.
         expect(message.text).not.toContain("<?xml");

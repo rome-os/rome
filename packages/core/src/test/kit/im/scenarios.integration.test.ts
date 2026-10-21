@@ -77,8 +77,8 @@ describe.each(platforms)("%s", (platform) => {
 
       await step("The user sees the answer after their message", () => {
         const [first, second, ...rest] = channel.peer.visible(channel.conversation);
-        expect(inbound.conversationId).toBe(channel.conversation);
-        expect(receipt.conversationId).toBe(channel.conversation);
+        expect(inbound.chatId).toBe(channel.conversation);
+        expect(receipt.chatId).toBe(channel.conversation);
         expect(first).toMatchObject({ id: inbound.messageId, from: "user", text: "hello" });
         expect(second).toMatchObject({ id: receipt.messageId, from: "rome" });
         expect(second?.text).toContain("hi there");

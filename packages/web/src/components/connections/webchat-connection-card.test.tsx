@@ -18,7 +18,7 @@ afterEach(() => {
 // synthesizes its single always-authorized slot.
 const webchatConnection: ApiConnection = {
   id: "conn-webchat",
-  service: "webchat",
+  connectionKind: "webchat",
   label: "Webchat",
   grants: {},
   display: {},

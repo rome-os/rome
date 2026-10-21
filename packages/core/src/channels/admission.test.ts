@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
-import { createTestDb, serviceChannelOf, type TestDb } from "../test/helpers.js";
+import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
@@ -22,7 +22,7 @@ describe("a channel's Connection across epochs", () => {
       epoch: number;
     }> = [];
     const descriptor: ConnectionDescriptor = {
-      service: "discord",
+      connectionKind: "discord",
       auth: {
         bot: tokenPaste({ label: "token", validate: async () => {} }),
       },
@@ -40,9 +40,9 @@ describe("a channel's Connection across epochs", () => {
                 state.deliver = deliver;
               },
               stop() {},
-              async send(conversationId, message) {
+              async send(chatId, message) {
                 state.sends.push(message.text ?? "");
-                return { conversationId, messageId: `sent-${state.epoch}` };
+                return { chatId, messageId: `sent-${state.epoch}` };
               },
               history: {
                 query: async () => [
@@ -50,7 +50,7 @@ describe("a channel's Connection across epochs", () => {
                     channel: "discord",
                     direction: "inbound",
                     messageId: `history-${state.epoch}`,
-                    conversationId: "general" as ChatId,
+                    chatId: "general" as ChatId,
                     senderId: "guardian",
                     text: `epoch ${state.epoch}`,
                     attachments: [],
@@ -71,7 +71,7 @@ describe("a channel's Connection across epochs", () => {
         message.senderId === "guardian",
     );
     const ports = connectionPorts(
-      { registry, channelOf: serviceChannelOf, ...(gated ? { admit } : {}) },
+      { registry, channelOf: kindChannelOf, ...(gated ? { admit } : {}) },
       "discord",
     )!;
     const sibling: string[] = [];
@@ -91,7 +91,7 @@ describe("a channel's Connection across epochs", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "inbound-1",
-      conversationId: "general" as ChatId,
+      chatId: "general" as ChatId,
       senderId: "guardian",
       text: "hello",
       attachments: [],
@@ -120,7 +120,7 @@ describe("a channel's Connection across epochs", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "inbound-2",
-      conversationId: "general" as ChatId,
+      chatId: "general" as ChatId,
       senderId: "guardian",
       text: "hello again",
       attachments: [],
@@ -134,7 +134,7 @@ describe("a channel's Connection across epochs", () => {
         channel: "discord",
         direction: "inbound",
         messageId: "blocked",
-        conversationId: "general" as ChatId,
+        chatId: "general" as ChatId,
         senderId: "unknown",
         text: "not authorized",
         attachments: [],
@@ -156,7 +156,7 @@ describe("a channel's Connection across epochs", () => {
     let deliver: ((message: ChannelMessage) => void) | undefined;
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     registry.register({
-      service: "telegram",
+      connectionKind: "telegram",
       auth: { bot: tokenPaste({ label: "token", validate: async () => {} }) },
       capabilities: {
         talker: {
@@ -166,13 +166,13 @@ describe("a channel's Connection across epochs", () => {
               deliver = next;
             },
             stop() {},
-            send: async (conversationId) => ({ conversationId }),
+            send: async (chatId) => ({ chatId }),
           }),
         },
       },
     });
     const admit = rs.fn(async () => false);
-    connectionPorts({ registry, admit, channelOf: serviceChannelOf }, "telegram");
+    connectionPorts({ registry, admit, channelOf: kindChannelOf }, "telegram");
     const connection = await registry.connect("telegram");
     await registry.importCredential(connection.id, "bot", {
       material: { token: "t" },
@@ -184,7 +184,7 @@ describe("a channel's Connection across epochs", () => {
       channel: "telegram",
       direction: "inbound",
       messageId: "code",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
       senderId: "stranger",
       text: "PAIR-123",
       attachments: [],

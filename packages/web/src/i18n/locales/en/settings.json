@@ -231,6 +231,15 @@
           "privacyNote": "You approve access on Slack; you can disconnect here anytime."
         }
       },
+      "shopify": {
+        "user": {
+          "title": "Your Shopify store",
+          "bullets": {
+            "work": "Update products and inventory, and read orders, in your store"
+          },
+          "privacyNote": "You approve access on Shopify; you can disconnect here anytime."
+        }
+      },
       "composio": {
         "user": {
           "title": "Your Composio account",
@@ -343,7 +352,7 @@
       },
       "loading": "Loading chats…",
       "emptyTitle": "No configurable chats found",
-      "emptyDescription": "Connect a supported chat service, or send a message so Rome can discover the chat.",
+      "emptyDescription": "Connect an account on a supported platform, or send a message so Rome can discover the chat.",
       "loadMore": "Load more",
       "overrideCount_one": "{{count}} override",
       "overrideCount_other": "{{count}} overrides",

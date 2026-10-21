@@ -26,7 +26,7 @@ function messageWithAttachments(attachments: Attachment[]): ChannelMessage {
     channel: "discord",
     direction: "inbound",
     messageId: "msg-1",
-    conversationId: "thread-1" as ChatId,
+    chatId: "thread-1" as ChatId,
     senderId: "user-1",
     senderDisplayName: "User",
     text: "",
@@ -220,7 +220,7 @@ describe("attachment file sanitization", () => {
       fileName: `${"a".repeat(300)}.png`,
     };
     const message = messageWithAttachments([duplicateA, duplicateB, generated, unicode, longName]);
-    message.conversationId = "thread/../../secret" as ChatId;
+    message.chatId = "thread/../../secret" as ChatId;
     message.messageId = "..";
 
     const attachments = await saveIncomingAttachmentPayloads(message, [

@@ -83,7 +83,7 @@ describe("WechatAdapter.send against the peer", () => {
 
     const sent = peer.visible().find((message) => message.from === "rome");
     expect(sent).toMatchObject({ text: "hi there" });
-    expect(receipt).toEqual({ conversationId: user, messageId: sent?.id });
+    expect(receipt).toEqual({ chatId: user, messageId: sent?.id });
     const request = peer.server.exchanges.find((e) => e.request.path === SEND_PATH)?.request.body;
     expect(request).toMatchObject({
       msg: { to_user_id: WECHAT_USER, context_token: `context-${WECHAT_USER}` },

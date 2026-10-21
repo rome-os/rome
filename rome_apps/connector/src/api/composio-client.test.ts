@@ -201,15 +201,15 @@ describe("auth config selection", () => {
       selectReusableAuthConfig(
         [
           {
-            id: "ac_shopify",
+            id: "ac_byo",
             status: "ENABLED",
-            toolkit: { slug: "shopify" },
+            toolkit: { slug: "acme_crm" },
             auth_scheme: "OAUTH2",
           },
         ],
-        "shopify",
+        "acme_crm",
       ),
-    ).toBe("ac_shopify");
+    ).toBe("ac_byo");
   });
 
   it("prefers an API-key config over a guardian-created OAuth config", () => {

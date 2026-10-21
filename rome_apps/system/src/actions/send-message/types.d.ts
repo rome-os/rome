@@ -36,7 +36,11 @@ export interface SendMessageAttachment {
   caption?: string;
 }
 
-/** Chat-style channels: addressed by a thread id, no email-specific fields. */
+/**
+ * Chat-style channels: addressed by a thread id, no email-specific fields. The
+ * channel is the id of the account to send as, such as the `channel` a message
+ * arrived on. A platform's name is an account id only for the account it names.
+ */
 export type ChatChannel =
   | "telegram"
   | "telegram_user"
@@ -45,7 +49,8 @@ export type ChatChannel =
   | "discord"
   | "webchat"
   | "feishu"
-  | "agents";
+  | "agents"
+  | (string & {});
 
 interface SendMessageBase {
   /** The message text to send (supports markdown). Optional when attachments are provided. */

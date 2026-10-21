@@ -1,22 +1,15 @@
 /**
- * Rebuild better-sqlite3's native .node addon for Electron's ABI.
+ * Place better-sqlite3's native addon at native/better_sqlite3.node.
  *
- * In a pnpm workspace, better-sqlite3 is hoisted and compiled for system Node.js.
- * We compile a separate .node binary for Electron into native/better_sqlite3.node.
+ * better-sqlite3 13 is a Node-API addon and ships prebuilt binaries in its
+ * package, so the same file loads in system Node.js and in any Electron
+ * version. The packaged app reads it from native/ (see electron-builder.yml),
+ * and database.ts passes this path via the `nativeBinding` option.
  * macOS release builds can request a universal binding with
  * ROME_DESKTOP_NATIVE_ARCH=universal.
- * At runtime, database.ts passes this path via the `nativeBinding` option.
  */
 import { execSync } from "child_process";
-import {
-  cpSync,
-  mkdirSync,
-  existsSync,
-  readFileSync,
-  rmSync,
-  realpathSync,
-  writeFileSync,
-} from "fs";
+import { cpSync, mkdirSync, existsSync, readFileSync, realpathSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
@@ -38,19 +31,16 @@ function getSqlitePackageDir() {
   }
 }
 
-function getElectronVersion() {
-  return require("electron/package.json").version;
-}
-
 function getSqliteVersion() {
   return require("better-sqlite3/package.json").version;
 }
 
-function readBindingMetadata() {
-  if (!existsSync(bindingPath) || !existsSync(metadataPath)) {
-    return null;
-  }
+function requestedArch() {
+  return process.env.ROME_DESKTOP_NATIVE_ARCH || process.arch;
+}
 
+function readBindingMetadata() {
+  if (!existsSync(bindingPath) || !existsSync(metadataPath)) return null;
   try {
     return JSON.parse(readFileSync(metadataPath, "utf8"));
   } catch {
@@ -58,97 +48,54 @@ function readBindingMetadata() {
   }
 }
 
-function requestedArch() {
-  return process.env.ROME_DESKTOP_NATIVE_ARCH || process.arch;
-}
-
-function isBindingCurrent(electronVersion) {
+function isBindingCurrent() {
   const metadata = readBindingMetadata();
-  const sqliteVersion = getSqliteVersion();
   return Boolean(
     metadata &&
-      metadata.electronVersion === electronVersion &&
-      metadata.sqliteVersion === sqliteVersion &&
+      metadata.sqliteVersion === getSqliteVersion() &&
       metadata.arch === requestedArch() &&
       metadata.platform === process.platform,
   );
 }
 
-function buildBindingForArch(sqlitePkgDir, electronVersion, arch) {
-  const buildDir = resolve(nativeDir, `_build_${arch}`);
-  if (existsSync(buildDir)) rmSync(buildDir, { recursive: true });
-  mkdirSync(buildDir, { recursive: true });
-  cpSync(sqlitePkgDir, buildDir, { recursive: true, dereference: true });
-
-  execSync(
-    `npx --yes node-gyp rebuild --directory="${buildDir}" --target=${electronVersion} --arch=${arch} --dist-url=https://electronjs.org/headers --runtime=electron`,
-    { stdio: "inherit", cwd: buildDir },
-  );
-
-  const builtNode = resolve(buildDir, "build", "Release", "better_sqlite3.node");
-  if (!existsSync(builtNode)) {
-    console.error(`Build succeeded but ${arch} .node file was not found!`);
+function prebuildFor(sqlitePkgDir, arch) {
+  const file = resolve(sqlitePkgDir, "prebuilds", `${process.platform}-${arch}.node`);
+  if (!existsSync(file)) {
+    console.error(`better-sqlite3 ships no prebuilt binary for ${process.platform}-${arch}.`);
     process.exit(1);
   }
-
-  return { buildDir, builtNode };
+  return file;
 }
 
 export function ensureBetterSqlite3Binding() {
-  const electronVersion = getElectronVersion();
   const sqliteVersion = getSqliteVersion();
   const arch = requestedArch();
-  if (isBindingCurrent(electronVersion)) {
+  if (isBindingCurrent()) {
     console.log(
-      `Native binding up to date: better_sqlite3.node (Electron ${electronVersion}, ${arch})`,
+      `Native binding up to date: better_sqlite3.node (better-sqlite3 ${sqliteVersion}, ${arch})`,
     );
     return false;
   }
 
   const sqlitePkgDir = getSqlitePackageDir();
-  console.log(`Source: ${sqlitePkgDir}`);
-  console.log(`Target: Electron ${electronVersion}`);
-
-  const buildResults = [];
+  mkdirSync(nativeDir, { recursive: true });
   if (arch === "universal") {
     if (process.platform !== "darwin") {
-      console.error("Universal native binding builds are only supported on macOS.");
+      console.error("Universal native bindings are only supported on macOS.");
       process.exit(1);
     }
-
-    buildResults.push(buildBindingForArch(sqlitePkgDir, electronVersion, "x64"));
-    buildResults.push(buildBindingForArch(sqlitePkgDir, electronVersion, "arm64"));
-    mkdirSync(nativeDir, { recursive: true });
-    execSync(
-      `lipo -create -output "${bindingPath}" "${buildResults[0].builtNode}" "${buildResults[1].builtNode}"`,
-      { stdio: "inherit" },
-    );
+    const x64 = prebuildFor(sqlitePkgDir, "x64");
+    const arm64 = prebuildFor(sqlitePkgDir, "arm64");
+    execSync(`lipo -create -output "${bindingPath}" "${x64}" "${arm64}"`, { stdio: "inherit" });
   } else {
-    const result = buildBindingForArch(sqlitePkgDir, electronVersion, arch);
-    buildResults.push(result);
-    mkdirSync(nativeDir, { recursive: true });
-    cpSync(result.builtNode, bindingPath);
+    cpSync(prebuildFor(sqlitePkgDir, arch), bindingPath);
   }
 
   writeFileSync(
     metadataPath,
-    JSON.stringify(
-      {
-        electronVersion,
-        sqliteVersion,
-        arch,
-        platform: process.platform,
-      },
-      null,
-      2,
-    ) + "\n",
+    JSON.stringify({ sqliteVersion, arch, platform: process.platform }, null, 2) + "\n",
   );
-
-  for (const { buildDir } of buildResults) {
-    rmSync(buildDir, { recursive: true });
-  }
-
-  console.log(`Done: native/better_sqlite3.node (Electron ${electronVersion}, ${arch})`);
+  console.log(`Done: native/better_sqlite3.node (better-sqlite3 ${sqliteVersion}, ${arch})`);
   return true;
 }
 

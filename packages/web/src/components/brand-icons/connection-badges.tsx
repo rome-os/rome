@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { RomeLogo } from "@/components/logo";
 import { GithubIcon } from "@/components/brand-icons/github-icon";
 import { GoogleIcon } from "@/components/brand-icons/google-icon";
+import { ShopifyIcon } from "@/components/brand-icons/shopify-icon";
 import { SlackIcon } from "@/components/brand-icons/slack-icon";
 
 /**
@@ -129,6 +130,7 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
   slack: { Icon: SlackIcon, badge: "border border-border bg-white" },
   google: { Icon: GoogleIcon, badge: "border border-border bg-white" },
   github: { Icon: GithubIcon, badge: "bg-foreground text-background" },
+  shopify: { Icon: ShopifyIcon, badge: "bg-foreground text-background" },
   webchat: {
     Icon: RomeLogo,
     badge: "bg-foreground text-background",

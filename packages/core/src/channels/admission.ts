@@ -14,7 +14,7 @@ const log = createLogger("channel-admission");
 /** Decides whether subscribers may hear a message from one Connection. */
 export type Admission = (
   connectionId: string,
-  service: string,
+  connectionKind: string,
   message: ChannelMessage,
 ) => Promise<boolean>;
 
@@ -49,7 +49,7 @@ export class OrderedAdmission {
   /** Hands `message` to `hear` once it is admitted. Resolves when `hear` has
    *  finished; the conversation is released as soon as `hear` starts. */
   async deliver(
-    connection: { id: string; service: string },
+    connection: { id: string; connectionKind: string },
     message: ChannelMessage,
     hear: (message: ChannelMessage) => Promise<unknown>,
   ): Promise<void> {
@@ -58,7 +58,7 @@ export class OrderedAdmission {
       await hear(message);
       return;
     }
-    const key = `${connection.id}\0${message.conversationId}`;
+    const key = `${connection.id}\0${message.chatId}`;
     // The handlers' completion is returned inside an object so the
     // conversation is released once they start, not once they finish.
     const started = await this.admissions.runExclusive(key, async () => {
@@ -69,7 +69,7 @@ export class OrderedAdmission {
   }
 
   private async admitWithin(
-    connection: { id: string; service: string },
+    connection: { id: string; connectionKind: string },
     message: ChannelMessage,
     admit: Admission,
   ): Promise<boolean> {
@@ -79,7 +79,7 @@ export class OrderedAdmission {
       timer = setTimeout(() => {
         log.warn("admission timed out; message not admitted", {
           connectionId: connection.id,
-          conversationId: message.conversationId,
+          chatId: message.chatId,
           messageId: message.messageId,
           timeoutMs,
         });
@@ -87,7 +87,10 @@ export class OrderedAdmission {
       }, timeoutMs);
     });
     try {
-      return await Promise.race([admit(connection.id, connection.service, message), timedOut]);
+      return await Promise.race([
+        admit(connection.id, connection.connectionKind, message),
+        timedOut,
+      ]);
     } finally {
       clearTimeout(timer);
     }

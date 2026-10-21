@@ -20,7 +20,7 @@ import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rom
 import type { TalkDirectory, TalkFeatures, TalkHistory } from "../types.js";
 import { DiscordAdapter } from "../../channels/discord.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import type { ChatSettingsService } from "../../conversation-settings/service.js";
+import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
@@ -236,7 +236,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
   botScheme.setup = makeDiscordSetup({ probeBotIdentity });
 
   return {
-    service: "discord",
+    connectionKind: "discord",
     severalAccounts: true,
     reviveProfile: (_grant, record) => reviveDiscordProfile(record),
     accountIdOf: (_grant, record) => (typeof record.botId === "string" && record.botId) || null,
@@ -283,7 +283,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
           const history: TalkHistory = {
             async query(input) {
               const messages = await adapter.fetchHistory(
-                input.conversationId ?? null,
+                input.chatId ?? null,
                 historyWindowHours(input.since),
               );
               return messages.slice(0, historyQueryLimit(input.limit));
@@ -294,9 +294,9 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
           };
           const activity: ChannelActivity = {
             async begin(input) {
-              await adapter.notifyTyping(input.conversationId);
+              await adapter.notifyTyping(input.chatId);
               return {
-                update: async () => adapter.notifyTyping(input.conversationId),
+                update: async () => adapter.notifyTyping(input.chatId),
                 finish: async () => {},
               };
             },
@@ -324,8 +324,9 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                 conversations: page.items.map((channel) => ({
                   ref: {
                     connectionId: kit.connectionId,
-                    conversationId: channel.id as import("@rome-os/app-runtime").ChatId,
+                    chatId: channel.id as import("@rome-os/app-runtime").ChatId,
                   },
+                  connectionKind: "discord",
                   service: "discord",
                   kind: channel.type === "thread" ? ("topic" as const) : ("channel" as const),
                   displayName: channel.name,
@@ -336,7 +337,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                     ? {
                         parent: {
                           connectionId: kit.connectionId,
-                          conversationId: channel.parentId as import("@rome-os/app-runtime").ChatId,
+                          chatId: channel.parentId as import("@rome-os/app-runtime").ChatId,
                         },
                       }
                     : {}),
@@ -370,8 +371,8 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             stop(): Promise<void> {
               return adapter.stop();
             },
-            send(conversationId, msg) {
-              return adapter.send(conversationId, msg);
+            send(chatId, msg) {
+              return adapter.send(chatId, msg);
             },
             ...features,
           };

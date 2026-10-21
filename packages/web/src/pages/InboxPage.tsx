@@ -33,10 +33,10 @@ interface SentinelEntry {
 }
 
 // Lean subset of /api/connections — only what the read-only source overview
-// needs: per-service grant states (conferred or not) and whether the Talk
+// needs: per-kind grant states (conferred or not) and whether the Talk
 // capability is actually unlocked (the live transport).
 interface ConnectionLite {
-  service: string;
+  connectionKind: string;
   grants: Record<string, "unauthorized" | "authorized" | "degraded">;
   capabilities: { talk: { state: string } };
 }
@@ -389,14 +389,14 @@ function sourceStatus(conn: ConnectionLite | undefined): SourceStatus {
 function MessageSourcesSection({ connections }: { connections: ConnectionLite[] | null }) {
   const { t } = useTranslation("inbox");
 
-  const byService = (service: string) => connections?.find((c) => c.service === service);
+  const byKind = (kind: string) => connections?.find((c) => c.connectionKind === kind);
 
   const rows: { key: string; status: SourceStatus }[] = [
-    { key: "telegram", status: sourceStatus(byService("telegram")) },
-    { key: "telegramUser", status: sourceStatus(byService("telegram_user")) },
-    { key: "whatsapp", status: sourceStatus(byService("whatsapp")) },
-    { key: "wechat", status: sourceStatus(byService("wechat")) },
-    { key: "discord", status: sourceStatus(byService("discord")) },
+    { key: "telegram", status: sourceStatus(byKind("telegram")) },
+    { key: "telegramUser", status: sourceStatus(byKind("telegram_user")) },
+    { key: "whatsapp", status: sourceStatus(byKind("whatsapp")) },
+    { key: "wechat", status: sourceStatus(byKind("wechat")) },
+    { key: "discord", status: sourceStatus(byKind("discord")) },
     { key: "webchat", status: "alwaysOn" },
   ];
 

@@ -1,22 +1,22 @@
 import { and, asc, eq, like } from "drizzle-orm";
 import type { ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
-import { channelConversationId } from "../db/repositories/webchat.js";
+import { channelChatId } from "../db/repositories/webchat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
 export type StoredChatRow = typeof romeSessions.$inferSelect;
 
-function rowByAddress(exec: DrizzleDb | DrizzleTx, service: string, conversationId: ChatId) {
+function rowByAddress(exec: DrizzleDb | DrizzleTx, channel: string, chatId: ChatId) {
   return exec
     .select()
     .from(romeSessions)
     .where(
       and(
         isChannelConversation,
-        eq(romeSessions.sourceChannel, service),
-        eq(romeSessions.sourceThreadId, conversationId),
+        eq(romeSessions.sourceChannel, channel),
+        eq(romeSessions.sourceThreadId, chatId),
       ),
     )
     .limit(1)
@@ -26,14 +26,14 @@ function rowByAddress(exec: DrizzleDb | DrizzleTx, service: string, conversation
 export class ChatSettingsRepository {
   constructor(private readonly db: DrizzleDb) {}
 
-  find(service: string, conversationId: ChatId): StoredChatRow | null {
-    return rowByAddress(this.db, service, conversationId) ?? null;
+  find(channel: string, chatId: ChatId): StoredChatRow | null {
+    return rowByAddress(this.db, channel, chatId) ?? null;
   }
 
-  listKnown(input: { service?: string; query?: string }): StoredChatRow[] {
+  listKnown(input: { channel?: string; query?: string }): StoredChatRow[] {
     const predicates = [isChannelConversation];
-    if (input.service) {
-      predicates.push(eq(romeSessions.sourceChannel, input.service));
+    if (input.channel) {
+      predicates.push(eq(romeSessions.sourceChannel, input.channel));
     }
     if (input.query?.trim()) {
       predicates.push(like(romeSessions.sourceThreadName, `%${input.query.trim()}%`));
@@ -59,7 +59,7 @@ export class ChatSettingsRepository {
 
   /** Create if missing, then mutate one aggregate in one SQLite transaction. Callers
    * serialize by address before entering this method. `channel` is the name of
-   * the channel the conversation belongs to, which a service's later channels
+   * the channel the conversation belongs to, which a connection kind's later channels
    * do not share with it. */
   mutate(
     descriptor: ChatDescriptor,
@@ -70,18 +70,18 @@ export class ChatSettingsRepository {
     },
   ): void {
     // A webchat address is a guardian chat, which has no conversation settings.
-    if (descriptor.service === "webchat") {
+    if (descriptor.connectionKind === "webchat") {
       throw new Error("Webchat chats have no conversation settings");
     }
     this.db.transaction((tx) => {
       const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
       const parentSessionId = descriptor.parent
-        ? (rowByAddress(tx, channel, descriptor.parent.conversationId)?.id ?? null)
+        ? (rowByAddress(tx, channel, descriptor.parent.chatId)?.id ?? null)
         : null;
       const now = new Date();
       tx.insert(romeSessions)
         .values({
-          id: channelConversationId(channel, descriptor.ref.conversationId),
+          id: channelChatId(channel, descriptor.ref.chatId),
           name: descriptor.displayName,
           personaId: null,
           projectName: DEFAULT_WEBCHAT_PROJECT_NAME,
@@ -90,7 +90,7 @@ export class ChatSettingsRepository {
           agentName: null,
           type: "channel",
           sourceChannel: channel,
-          sourceThreadId: descriptor.ref.conversationId,
+          sourceThreadId: descriptor.ref.chatId,
           sourceThreadName: descriptor.displayName,
           sourceThreadType,
           channelSettings: null,
@@ -102,11 +102,9 @@ export class ChatSettingsRepository {
         .onConflictDoNothing({ target: romeSessions.id })
         .run();
 
-      const current = rowByAddress(tx, channel, descriptor.ref.conversationId);
+      const current = rowByAddress(tx, channel, descriptor.ref.chatId);
       if (!current) {
-        throw new Error(
-          `Failed to resolve conversation ${channel}:${descriptor.ref.conversationId}`,
-        );
+        throw new Error(`Failed to resolve conversation ${channel}:${descriptor.ref.chatId}`);
       }
 
       tx.update(romeSessions)
