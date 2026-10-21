@@ -224,7 +224,7 @@ function ConnectOn({
 
   const slot: ConnectionSlot = {
     key: delegate ? "session" : "bot",
-    connectionId: choice.connectionId,
+    connectionId: null,
     grant: config.defaultGrant,
     state: "unauthorized",
     display: null,

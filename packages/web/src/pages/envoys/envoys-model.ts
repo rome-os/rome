@@ -141,35 +141,35 @@ export interface ConnectChoice {
   service: string;
   platform: string;
   kind: LinkKind;
-  /** The connection the setup confers, or null to address the service. */
-  connectionId: string | null;
-  /** Whether the setup mints another account of a service already connected. */
+  /** Whether the setup mints a new account rather than filling the service's
+   *  one. A setup for a new account is cancelled when the page that runs it
+   *  closes, so no account connects without its agent being linked. */
   another: boolean;
-  /** A setup already under way for this account, to re-attach to. */
+  /** A setup already under way for the service's one account, to re-attach to. */
   activeSetupCid: string | null;
   /** The service holds one account and it is connected, so none can be added. */
   taken: boolean;
 }
 
-/** The platforms a new account can be connected on, own accounts first. A
- *  service's first account connects in place of its placeholder, as on its
- *  Connections card, and later ones as another account where the service
- *  offers several. Services core does not register are left out. */
+/** The platforms a new account can be connected on, own accounts first. Each
+ *  setup addresses the service, never a row, since a row left by a failed
+ *  removal is gone once a setup starts. Where the service offers several
+ *  accounts, even the first connects as a new account. Services core does not
+ *  register are left out. */
 export function connectChoices(connections: readonly ApiConnection[]): ConnectChoice[] {
   const choices: ConnectChoice[] = [];
   for (const service of [...OWN_SERVICES, ...DELEGATE_SERVICES]) {
     const rows = connections.filter((connection) => connection.service === service);
-    const first = rows[0];
-    if (!first) continue;
+    if (rows.length === 0) continue;
     const anyConnected = rows.some((connection) => connectedGrant(connection) !== null);
     const several = rows.some((connection) => connection.severalAccounts === true);
+    const live = rows.flatMap((connection) => Object.values(connection.setups))[0] ?? null;
     choices.push({
       service,
       platform: platformOf(service),
       kind: DELEGATE_SERVICES.has(service) ? "delegate" : "own",
-      connectionId: anyConnected ? null : first.id,
-      another: anyConnected && several,
-      activeSetupCid: anyConnected ? null : (Object.values(first.setups)[0] ?? null),
+      another: several,
+      activeSetupCid: several ? null : live,
       taken: anyConnected && !several,
     });
   }

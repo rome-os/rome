@@ -50,7 +50,7 @@ type Call = { url: string; method: string; body: unknown };
 function mockServer(
   connections: ApiConnection[],
   added: { id: string; service: string; agent: string | null } | null,
-  options: { failLinks?: (agent: string | null) => boolean } = {},
+  options: { failLinks?: (agent: string | null) => boolean; presenting?: boolean } = {},
 ) {
   const calls: Call[] = [];
   const server = { calls, holdNextList: null as Promise<void> | null };
@@ -69,6 +69,14 @@ function mockServer(
       server.holdNextList = null;
       if (hold) await hold;
       return Response.json({ connections: snapshot });
+    }
+    const presenting = { status: "presenting", view: { title: "Scan the code" } };
+    if (options.presenting && url.endsWith("/setup") && method === "POST") {
+      return Response.json({ cid: "cid-new", state: presenting, reattached: false });
+    }
+    if (url === "/api/setups/cid-new") return Response.json({ state: presenting });
+    if (url === "/api/setups/cid-new/cancel") {
+      return Response.json({ state: { status: "cancelled" } });
     }
     if (url.endsWith("/setup") && method === "POST") {
       if (added) {
@@ -163,7 +171,7 @@ describe("Connect an account", () => {
     ]);
   });
 
-  it("connects a service's first account in place of its placeholder", async () => {
+  it("connects a service's first account as a new one, keeping core's main link", async () => {
     const { calls } = mockServer([placeholder("telegram")], {
       id: "telegram-id",
       service: "telegram",
@@ -177,7 +185,7 @@ describe("Connect an account", () => {
     await rs.waitFor(() => expect(location()).toBe(`/envoys/${encodeURIComponent(MAIN_AGENT_ID)}`));
     const setup = calls.find((call) => call.url.endsWith("/setup"));
     expect(setup?.url).toBe("/api/connections/telegram/grants/bot/setup");
-    expect(setup?.body).not.toHaveProperty("another");
+    expect(setup?.body).toMatchObject({ another: true });
     // Core already linked main to the service's first account.
     expect(calls.filter((call) => call.method === "PUT")).toEqual([]);
   });
@@ -245,6 +253,48 @@ describe("Connect an account", () => {
         body: { agent: "sales:agent" },
       },
     ]);
+  });
+
+  it("cancels a new account's setup when the guardian leaves the page", async () => {
+    const { calls } = mockServer([placeholder("telegram")], null, { presenting: true });
+    renderAt("/envoys/connect/sales:agent/telegram");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("Scan the code")).toBeTruthy();
+    await user.click(screen.getByRole("link", { name: "Platforms" }));
+
+    await rs.waitFor(() =>
+      expect(calls.some((call) => call.url === "/api/setups/cid-new/cancel")).toBe(true),
+    );
+  });
+
+  it("addresses the service, not a row a failed removal left behind", async () => {
+    const { calls } = mockServer(
+      [
+        connection("telegram_user", {
+          id: "left",
+          channel: null,
+          grants: { session: "unauthorized" },
+          display: { session: null },
+          agent: null,
+          severalAccounts: false,
+        }),
+      ],
+      null,
+      { presenting: true },
+    );
+    renderAt("/envoys/connect/main/telegram_user");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Connect" }));
+
+    await rs.waitFor(() =>
+      expect(calls.find((call) => call.url.endsWith("/setup"))).toMatchObject({
+        url: "/api/connections/telegram_user/grants/session/setup",
+        body: { force: false },
+      }),
+    );
   });
 
   it("returns to the list when the new account cannot be found to link", async () => {

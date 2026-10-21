@@ -115,17 +115,28 @@ describe("connectChoices", () => {
   const placeholder = (service: string) =>
     connection({ service, id: null, channel: null, grants: { bot: "unauthorized" } });
 
-  it("connects a service's first account in place of its placeholder", () => {
+  it("starts even a first account as a new one where the service offers several", () => {
     const [choice] = connectChoices([
-      placeholder("telegram"),
-      connection({ service: "telegram", id: "left", grants: { bot: "unauthorized" } }),
+      connection({
+        service: "telegram",
+        grants: { bot: "unauthorized" },
+        severalAccounts: true,
+        setups: { bot: "cid-old" },
+      }),
     ]);
-    expect(choice).toMatchObject({ service: "telegram", connectionId: null, another: false });
+    expect(choice).toMatchObject({ another: true, activeSetupCid: null, taken: false });
   });
 
-  it("adds another account where the service offers several", () => {
-    const [choice] = connectChoices([connection({ service: "discord", severalAccounts: true })]);
-    expect(choice).toMatchObject({ connectionId: null, another: true, taken: false });
+  it("re-attaches the setup of a service that holds one account", () => {
+    const [choice] = connectChoices([
+      connection({
+        service: "telegram_user",
+        id: "left",
+        grants: { session: "unauthorized" },
+        setups: { session: "cid-live" },
+      }),
+    ]);
+    expect(choice).toMatchObject({ another: false, activeSetupCid: "cid-live", taken: false });
   });
 
   it("marks a service whose one account is connected as taken", () => {
