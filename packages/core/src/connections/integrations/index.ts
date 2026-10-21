@@ -9,7 +9,7 @@ import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
 import type { WechatUserRuntime } from "../../channels/wechat-user.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
-import { OAUTH_PROVIDERS } from "../../lib/oauth-providers.js";
+import { OAUTH_PROVIDERS, ROME_CLOUD_REFRESHABLE_PROVIDERS } from "../../lib/oauth-providers.js";
 import {
   createRomeCloudOAuthStartRedirect,
   redeemRomeCloudOAuthHandoff,
@@ -187,16 +187,18 @@ export function registerBuiltinConnections(
           // (parity with the redeem route's sparse-profile handling).
           return { credential, profile: Object.keys(profile).length > 0 ? profile : undefined };
         },
-        refresh: async (refreshToken) => {
-          const credential = credentialFromBundle(
-            provider,
-            await refreshRomeCloudOAuthGrant(provider, refreshToken),
-          );
-          if (!credential) {
-            throw new Error("OAuth refresh produced no usable credential.");
-          }
-          return credential;
-        },
+        refresh: ROME_CLOUD_REFRESHABLE_PROVIDERS.has(provider)
+          ? async (refreshToken) => {
+              const credential = credentialFromBundle(
+                provider,
+                await refreshRomeCloudOAuthGrant(provider, refreshToken),
+              );
+              if (!credential) {
+                throw new Error("OAuth refresh produced no usable credential.");
+              }
+              return credential;
+            }
+          : undefined,
       }),
     );
   }
