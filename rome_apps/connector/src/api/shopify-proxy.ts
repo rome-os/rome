@@ -136,10 +136,20 @@ export async function shopifyProxyCall(params: {
 /**
  * The GraphQL failure in a 2xx Admin API response, or null. Shopify answers a
  * failed query (a syntax error, a missing scope, throttling) with HTTP 200 and a
- * top-level `errors` array, so a 200 alone isn't success.
+ * top-level `errors` array, and a mutation it rejects (validation) with a
+ * non-empty `userErrors` array in that mutation's payload, so a 200 alone isn't
+ * success.
  */
 export function shopifyGraphqlError(data: unknown): string | null {
   const errors = (data as { errors?: unknown } | null)?.errors;
-  if (Array.isArray(errors) ? errors.length === 0 : errors == null) return null;
-  return JSON.stringify(errors);
+  if (Array.isArray(errors) ? errors.length > 0 : errors != null) {
+    return JSON.stringify(errors);
+  }
+  const fields = (data as { data?: unknown } | null)?.data;
+  if (!fields || typeof fields !== "object") return null;
+  const userErrors = Object.values(fields).flatMap((payload) => {
+    const list = (payload as { userErrors?: unknown } | null)?.userErrors;
+    return Array.isArray(list) ? list : [];
+  });
+  return userErrors.length > 0 ? JSON.stringify(userErrors) : null;
 }

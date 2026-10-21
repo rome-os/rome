@@ -297,7 +297,9 @@ export async function refreshRomeCloudOAuthGrant(
     throw new RenewalUnavailable(message);
   }
   if (data?.provider !== provider || !data.tokens?.accessToken) {
-    throw new Error("Rome Cloud returned an invalid OAuth refresh payload.");
+    // A 200 that isn't a refresh answer (an outage page, a truncated body) is
+    // Rome Cloud not answering properly, not a refusal of the grant.
+    throw new RenewalUnavailable("Rome Cloud returned an invalid OAuth refresh payload.");
   }
   return data.tokens;
 }

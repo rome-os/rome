@@ -125,6 +125,24 @@ describe("shopifyGraphqlError", () => {
     expect(shopifyGraphqlError({ errors: "Invalid API key" })).toMatch(/Invalid API key/);
   });
 
+  it("reports a mutation's userErrors", () => {
+    const data = {
+      data: {
+        productUpdate: {
+          product: null,
+          userErrors: [{ field: ["title"], message: "Title can't be blank" }],
+        },
+      },
+    };
+    expect(shopifyGraphqlError(data)).toMatch(/Title can't be blank/);
+  });
+
+  it("passes a mutation with an empty userErrors list", () => {
+    expect(
+      shopifyGraphqlError({ data: { productUpdate: { product: { id: "1" }, userErrors: [] } } }),
+    ).toBeNull();
+  });
+
   it("passes a response with no errors", () => {
     expect(shopifyGraphqlError({ data: { shop: { name: "Acme" } } })).toBeNull();
     expect(shopifyGraphqlError({ data: {}, errors: [] })).toBeNull();

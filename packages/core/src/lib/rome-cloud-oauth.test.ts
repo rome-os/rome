@@ -277,6 +277,17 @@ describe("Rome Cloud OAuth brokering", () => {
       );
     });
 
+    it("keeps a malformed 200 retryable", async () => {
+      stubFetch(async () => new Response("<html>maintenance</html>", { status: 200 }));
+      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+        RenewalUnavailable,
+      );
+      stubFetch(async () => json({ provider: "shopify", tokens: {} }, 200));
+      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+        RenewalUnavailable,
+      );
+    });
+
     it("reports a refusal as a plain error, so the grant needs a reconnect", async () => {
       stubFetch(async () =>
         json({ error: "invalid_grant", error_description: "Reconnect it in Rome." }, 400),
