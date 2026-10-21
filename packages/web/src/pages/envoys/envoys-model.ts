@@ -22,6 +22,9 @@ const DELEGATE_SERVICES: ReadonlySet<string> = new Set(["telegram_user"]);
 export interface EnvoyAccount {
   /** The account's channel id, which the link route addresses. */
   channel: string;
+  /** The connection and grant that disconnecting the account revokes. */
+  connectionId: string;
+  grant: string;
   service: string;
   platform: string;
   /** The name people see on the platform, else the platform's name. */
@@ -60,12 +63,14 @@ function toAccount(connection: ApiConnection): EnvoyAccount | null {
   // A core that predates agent links omits `agent`, and a placeholder has no
   // channel, so neither is an account that can carry an agent.
   if (connection.id === null || !connection.channel || connection.agent === undefined) return null;
-  const connected = Object.values(connection.grants).some((state) => state !== "unauthorized");
-  if (!connected) return null;
+  const grant = Object.entries(connection.grants).find(([, state]) => state !== "unauthorized");
+  if (!grant) return null;
   const platform = platformOf(connection.service);
   const kind = DELEGATE_SERVICES.has(connection.service) ? "delegate" : "own";
   return {
     channel: connection.channel,
+    connectionId: connection.id,
+    grant: grant[0],
     service: connection.service,
     platform,
     name: accountName(connection) ?? serviceLabel(platform),

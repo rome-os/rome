@@ -46,5 +46,13 @@
     "failed": "无法更改智能体",
     "agentsFailed": "无法加载智能体",
     "agentFor": "{{account}} 的智能体"
+  },
+  "disconnect": {
+    "action": "断开",
+    "pending": "断开中…",
+    "accountLabel": "断开 {{account}}",
+    "confirm": "断开 {{account}}？Rome 将失去对该账号的访问，并停止在它的聊天中回复。再次连接时，它会从零开始，不带之前的聊天。",
+    "delegateConfirm": "断开你自己的账号 {{account}}？Rome 将失去对它的访问，并不再代你在个人聊天中回复。",
+    "failed": "无法断开账号"
   }
 }

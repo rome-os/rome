@@ -57,6 +57,12 @@ function mockServer(
       account.agent = agent;
       return Response.json({ account: {} });
     }
+    const revoke = url.match(/^\/api\/connections\/(.+)\/grants\/.+$/);
+    if (revoke && init?.method === "DELETE") {
+      const index = connections.findIndex((c) => c.id === decodeURIComponent(revoke[1]!));
+      connections.splice(index, 1);
+      return new Response(null, { status: 204 });
+    }
     return new Response("not found", { status: 404 });
   });
 }
@@ -164,5 +170,34 @@ describe("EnvoysPage", () => {
     await rs.waitFor(() =>
       expect(location()).toBe(`/envoys/${encodeURIComponent(MAIN_AGENT_ID)}/settings`),
     );
+  });
+
+  it("returns to the list after disconnecting the agent's last account", async () => {
+    mockServer([connection("discord", "Sales", "sales:agent")]);
+    renderAt("/envoys/sales:agent/settings");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Disconnect Sales" }));
+    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+
+    await rs.waitFor(() => expect(location()).toBe("/envoys"));
+  });
+
+  it("stays on Settings after disconnecting one of the agent's accounts", async () => {
+    mockServer([
+      connection("discord", "Sales", "sales:agent"),
+      connection("telegram", "Sales TG", "sales:agent"),
+    ]);
+    renderAt("/envoys/sales:agent/settings");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Disconnect Sales" }));
+    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+
+    await rs.waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Disconnect Sales" })).toBeNull(),
+    );
+    expect(screen.getByRole("button", { name: "Disconnect Sales TG" })).toBeTruthy();
+    expect(location()).toBe("/envoys/sales:agent/settings");
   });
 });

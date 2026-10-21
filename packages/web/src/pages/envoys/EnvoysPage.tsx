@@ -61,8 +61,8 @@ import {
  * Envoys: the agents people can reach on chat platforms, each listed with the
  * accounts it speaks through. Connected accounts with no agent are listed
  * apart, each with a picker that links an agent. An agent's Settings switch or
- * unlink the agent of each of its accounts. Connecting an account still
- * happens on the Connections cards.
+ * unlink the agent of each of its accounts. Every such row also disconnects
+ * its account. Connecting an account still happens on the Connections cards.
  */
 export default function EnvoysPage() {
   const open = useRef(true);
@@ -316,15 +316,17 @@ function AccountRow({ account }: { account: EnvoyAccount }) {
   );
 }
 
-/** One account with the select that changes its agent. */
+/** One account with the select that changes its agent, and Disconnect. */
 function AccountAgentRow({
   account,
   data,
   onChanged,
+  onDisconnected = () => {},
 }: {
   account: EnvoyAccount;
   data: EnvoysData;
   onChanged: (agent: string | null) => void;
+  onDisconnected?: () => void;
 }) {
   return (
     <div className="py-3">
@@ -333,6 +335,7 @@ function AccountAgentRow({
         agents={data.agents}
         disabled={data.agentsPending}
         onChanged={onChanged}
+        onDisconnected={onDisconnected}
       >
         <AccountSummary account={account} linked />
       </AgentChange>
@@ -485,6 +488,9 @@ function Settings({ envoy, data }: { envoy: Envoy; data: EnvoysData }) {
               // account to its new agent's page, or back to the list.
               if (keepsAccounts()) return;
               navigate(agent ? `${envoyPath(agent)}/settings` : "/envoys");
+            }}
+            onDisconnected={() => {
+              if (!keepsAccounts()) navigate("/envoys");
             }}
           />
         ))}

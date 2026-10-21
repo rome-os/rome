@@ -46,5 +46,13 @@
     "failed": "Failed to change the agent",
     "agentsFailed": "Failed to load agents",
     "agentFor": "Agent for {{account}}"
+  },
+  "disconnect": {
+    "action": "Disconnect",
+    "pending": "Disconnecting…",
+    "accountLabel": "Disconnect {{account}}",
+    "confirm": "Disconnect {{account}}? Rome loses access to the account and stops answering in its chats. If you connect it again, it starts with no chats.",
+    "delegateConfirm": "Disconnect {{account}}, your own account? Rome loses access to it and stops answering in your personal chats for you.",
+    "failed": "Failed to disconnect the account"
   }
 }
