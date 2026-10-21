@@ -1,4 +1,4 @@
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
@@ -36,6 +36,9 @@ import {
 
 const BACK_TO_LIST = "/settings/connections";
 
+// A store's permanent `.myshopify.com` domain, as core validates it.
+const SHOPIFY_SHOP_DOMAIN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
+
 const CONNECTIONS_QUERY_KEY = ["connection-detail", "connections"] as const;
 const COMPOSIO_QUERY_KEY = ["connection-detail", "composio"] as const;
 
@@ -62,6 +65,7 @@ function useComposioStatus() {
 
 export default function ConnectionDetailPage() {
   const { serviceId } = useParams<{ serviceId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
   const connectionsQuery = useConnections();
@@ -140,6 +144,12 @@ export default function ConnectionDetailPage() {
     return <Navigate to={BACK_TO_LIST} replace />;
   }
 
+  // Core sends a signed-out browser here with `?shop=` when Shopify installed
+  // the app, so after sign-in the guardian connects that store without typing it.
+  const installedShop = card.service === "shopify" ? searchParams.get("shop") : null;
+  const shopToConnect =
+    installedShop && SHOPIFY_SHOP_DOMAIN.test(installedShop) ? installedShop : null;
+
   return (
     <Page>
       <PageHeader>
@@ -161,6 +171,19 @@ export default function ConnectionDetailPage() {
         </div>
       </PageHeader>
       <Measure>
+        {shopToConnect ? (
+          <Alert className="mb-6">
+            <AlertTitle>Finish connecting {shopToConnect}</AlertTitle>
+            <AlertDescription className="space-y-3">
+              <p>Shopify installed Rome OS on this store. Connect it so Rome can work in it.</p>
+              <Button asChild size="sm">
+                <a href={`/api/oauth/shopify/start?shop=${encodeURIComponent(shopToConnect)}`}>
+                  Connect {shopToConnect}
+                </a>
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <ConnectionDetailBody
           key={card.route}
           card={card}

@@ -432,3 +432,31 @@ describe("ConnectionDetailPage — several accounts", () => {
     expect(locations).not.toContain("/settings/connections");
   });
 });
+
+describe("ConnectionDetailPage — Shopify install return", () => {
+  function shopify(): ApiConnection {
+    return connection({
+      service: "shopify",
+      grants: { store: "unauthorized" },
+      display: { store: null },
+      connect: { url: "/settings/connections/shopify", available: true, unavailableReason: null },
+    });
+  }
+
+  it("offers to connect the store Shopify installed the app on", async () => {
+    mockApi([shopify()]);
+    renderDetail("shopify?shop=acme.myshopify.com");
+
+    const link = await screen.findByRole("link", { name: "Connect acme.myshopify.com" });
+    expect(link.getAttribute("href")).toBe("/api/oauth/shopify/start?shop=acme.myshopify.com");
+  });
+
+  it("ignores a value that is not a myshopify.com store", async () => {
+    mockApi([shopify()]);
+    renderDetail(`shopify?shop=${encodeURIComponent("evil.example.com")}`);
+
+    await screen.findByRole("heading", { name: "Shopify" });
+    expect(screen.queryByText(/Finish connecting/)).toBeNull();
+    expect(screen.queryByRole("link", { name: /evil\.example\.com/ })).toBeNull();
+  });
+});

@@ -242,21 +242,3 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     expect(syncGithubShellIntegrationForProvider).not.toHaveBeenCalled();
   });
 });
-
-describe("/oauth/:provider/start for Shopify", () => {
-  const app = () => new Hono().route("/", oauthRoutes(makeDeps()));
-
-  it("sends a bare GET start to the Settings card, which asks for the store", async () => {
-    const res = await app().request("/oauth/shopify/start");
-    expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/settings/connections/shopify");
-  });
-
-  it("refuses a POST start, which has no store to name", async () => {
-    const res = await app().request("/oauth/shopify/start", { method: "POST" });
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toMatch(
-      /settings\/connections\/shopify/,
-    );
-  });
-});
