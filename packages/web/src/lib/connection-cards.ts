@@ -107,6 +107,7 @@ const LABELS: Record<string, string> = {
   discord: "Discord",
   email: "Email",
   feishu: "Feishu",
+  lark: "Lark",
   agents: "Agents",
   webchat: "Webchat",
   github: "GitHub",

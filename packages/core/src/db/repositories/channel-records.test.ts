@@ -40,6 +40,18 @@ describe("ChannelRecordsRepository", () => {
     });
   });
 
+  it("puts a Feishu app on the platform its domain names", () => {
+    const records = repository();
+    const db = testDb!.db;
+
+    const platformOf = (id: string, domain?: string) =>
+      records.claim(db, { id, service: "feishu", domain }, NOW).platform;
+
+    expect(platformOf("c1")).toBe("feishu");
+    expect(platformOf("c2", "feishu")).toBe("feishu");
+    expect(platformOf("c3", "lark")).toBe("lark");
+  });
+
   it("keeps the channel a Connection already holds", () => {
     const records = repository();
     const db = testDb!.db;

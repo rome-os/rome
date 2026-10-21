@@ -13,6 +13,9 @@ export interface ConnectionAccountFields {
    *  is named after it (`feishu`), and later ones get an opaque id. Null for
    *  placeholders and services without a Talk. */
   channel?: string | null;
+  /** Platform of the channel this Connection backs (`telegram`, `lark`), as
+   *  `ChannelAccount.platform` names it. Null where `channel` is null. */
+  platform?: string | null;
   /** Canonical id of the agent linked to this account (`sales:agent`,
    *  `core:main`), or null when none is, which leaves the account silent.
    *  Absent for placeholders and for a service that takes no link. */

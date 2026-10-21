@@ -49,7 +49,7 @@ One of Rome's accounts is an account on a platform that Rome holds a connection 
 
 - **[Message](#message)** — the message is what was said. One of Rome's accounts is what it arrived through.
 - **[Person](people.md#person)** — one of Rome's accounts is where a message arrives. The person is who sent it, resolved across accounts.
-- **Platform** — the platform, such as Telegram, holds the conversations and everyone's accounts. Rome maps each service to a fixed platform: Feishu and Lark are one, and so are a Telegram account made for an agent and a signed-in Telegram user.
+- **Platform** — the platform, such as Telegram, holds the conversations and everyone's accounts. Rome stores a fixed platform for each of its accounts, mapped from the service and, for a Feishu app, from its domain. A Telegram account made for an agent and a signed-in Telegram user are one platform. Feishu and Lark are two, since one account cannot sign in to both.
 - **Connection** — a connection is the access the guardian granted to an account. A connection that can talk carries exactly one of Rome's accounts. The same connection to Slack can also let Rome act on the workspace without messaging anyone.
 - **Channel** — the code's name for the layer that carries an account's messages ([Channels](../architecture/channels.md)). It is not something the guardian sees or manages.
 - **[Hook](apps.md#hooks)** — the `channel-message` hook is how an inbound message enters app code. One of Rome's accounts is where the message came from.

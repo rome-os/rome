@@ -62,7 +62,9 @@ function toAccount(connection: ApiConnection): EnvoyAccount | null {
   if (connection.id === null || !connection.channel || connection.agent === undefined) return null;
   const connected = Object.values(connection.grants).some((state) => state !== "unauthorized");
   if (!connected) return null;
-  const platform = platformOf(connection.service);
+  // A core that predates `platform` omits it, and the service alone cannot
+  // tell a Lark app from a Feishu one, so such an app reads as Feishu.
+  const platform = connection.platform ?? platformOf(connection.service);
   const kind = DELEGATE_SERVICES.has(connection.service) ? "delegate" : "own";
   return {
     channel: connection.channel,

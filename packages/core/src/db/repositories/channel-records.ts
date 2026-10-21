@@ -138,8 +138,13 @@ export class ChannelRecordsRepository {
    * name first. Failing that, it gets the service's name if no channel holds
    * it, and a fresh opaque id otherwise. A linkable service's only connected
    * account is linked to main, so a guardian's first account answers.
+   * `domain` is a Feishu app's domain, which decides its channel's platform.
    */
-  claim(exec: Exec, connection: { id: string; service: string }, now: Date): ChannelRecord {
+  claim(
+    exec: Exec,
+    connection: { id: string; service: string; domain?: string },
+    now: Date,
+  ): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
     this.ids.clear();
@@ -174,7 +179,7 @@ export class ChannelRecordsRepository {
     const row = {
       id,
       service,
-      platform: platformOf(service),
+      platform: platformOf(service, connection.domain),
       connectionId: connection.id,
       agent: firstAccountAgent(exec, service),
       createdAt: now,
