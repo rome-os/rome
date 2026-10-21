@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { RenewalUnavailable } from "../connections/errors.js";
 import { eq, lt } from "drizzle-orm";
 import { oauthPendingAttempts } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -219,12 +220,19 @@ export async function redeemRomeCloudOAuthHandoff(
   };
 }
 
+/** How long a refresh may take. It runs under the grant's lock and at boot. */
+const REFRESH_TIMEOUT_MS = 15_000;
+
 /**
  * Renew an expiring provider grant through Rome Cloud. Rome Cloud holds the
  * provider client secret, so it runs the refresh and answers with the
  * replacement bundle; it only refreshes a refresh token it stores for this
  * instance's account. The instance authenticates with its enrolled token, as
  * for the handoff redeem.
+ *
+ * Throws `RenewalUnavailable` when Rome Cloud can't answer (network error,
+ * timeout, 429, 5xx including `temporarily_unavailable`), so the grant is kept
+ * and retried. Any other failure is a refusal, and the grant needs a reconnect.
  */
 export async function refreshRomeCloudOAuthGrant(
   provider: OAuthProvider,
@@ -239,16 +247,22 @@ export async function refreshRomeCloudOAuthGrant(
     throw new Error("This instance is not enrolled with Rome Cloud.");
   }
 
-  const response = await fetch(new URL("/connections/token", romeCloudOrigin), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store",
-      Authorization: `Bearer ${instanceToken}`,
-    },
-    cache: "no-store",
-    body: JSON.stringify({ grant_type: "refresh_token", provider, refresh_token: refreshToken }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(new URL("/connections/token", romeCloudOrigin), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        Authorization: `Bearer ${instanceToken}`,
+      },
+      cache: "no-store",
+      body: JSON.stringify({ grant_type: "refresh_token", provider, refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new RenewalUnavailable("Rome Cloud OAuth refresh did not complete.", error);
+  }
 
   const data = (await response.json().catch(() => null)) as {
     provider?: unknown;
@@ -258,11 +272,14 @@ export async function refreshRomeCloudOAuthGrant(
   } | null;
 
   if (!response.ok) {
-    throw new Error(
+    const message =
       data?.error_description ||
-        data?.error ||
-        `Rome Cloud OAuth refresh failed with status ${response.status}.`,
-    );
+      data?.error ||
+      `Rome Cloud OAuth refresh failed with status ${response.status}.`;
+    if (response.status === 429 || response.status >= 500) {
+      throw new RenewalUnavailable(message);
+    }
+    throw new Error(message);
   }
   if (data?.provider !== provider || !data.tokens?.accessToken) {
     throw new Error("Rome Cloud returned an invalid OAuth refresh payload.");

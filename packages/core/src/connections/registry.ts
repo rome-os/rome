@@ -12,6 +12,7 @@ import {
   CredentialRejected,
   Disconnected,
   DuplicateServiceConnectionsError,
+  RenewalUnavailable,
 } from "./errors.js";
 import type {
   Act,
@@ -470,38 +471,45 @@ export class ConnectionRegistry {
 
     // One transaction spanning every durable write of the conferral: mint (if a
     // placeholder), the credential/profile, and the caller's participant.
-    ledger.runInTransaction((tx) => {
-      if (minting) {
-        const record = { id, service, label: service, createdAt };
-        ledger.writeConnection(tx, record);
-        for (const name of Object.keys(registered!.descriptor.auth)) {
-          ledger.writeEnsureGrant(tx, id, name);
+    const commit = () =>
+      ledger.runInTransaction((tx) => {
+        if (minting) {
+          const record = { id, service, label: service, createdAt };
+          ledger.writeConnection(tx, record);
+          for (const name of Object.keys(registered!.descriptor.auth)) {
+            ledger.writeEnsureGrant(tx, id, name);
+          }
+          this.onMint?.(tx, record, profile);
         }
-        this.onMint?.(tx, record, profile);
-      }
-      ledger.writeGrant(tx, id, grant, patch);
-      opts.inTx?.(tx);
-    });
-
-    // Committed — ledger + mapping are consistent. Bring the adapter live;
-    // best-effort per the doc comment. A minted connection hydrates exactly as
-    // it would at boot (rebuilds the epoch from the just-persisted grant); an
-    // existing one activates just this grant in memory.
-    try {
-      if (minting) {
-        conn = new ConnectionImpl(id, service, service, registered!.descriptor, this);
-        this.connections.set(id, conn);
-        await conn.hydrate();
-      } else {
-        await conn!.activatePersistedGrant(grant, credential);
-      }
-    } catch (err) {
+        ledger.writeGrant(tx, id, grant, patch);
+        opts.inTx?.(tx);
+      });
+    const logActivationFailure = (err: unknown) => {
       this.log.error("conferral committed but adapter activation failed", {
         service,
         connectionId: id,
         grant,
         error: err instanceof Error ? err.message : String(err),
       });
+    };
+
+    // Committed — ledger + mapping are consistent. Bring the adapter live;
+    // best-effort per the doc comment. A minted connection hydrates exactly as
+    // it would at boot (rebuilds the epoch from the just-persisted grant); an
+    // existing one commits and activates just this grant under the grant's
+    // lock, so a renewal in flight on the same grant finishes before this
+    // conferral writes and can never land over it.
+    if (minting) {
+      commit();
+      try {
+        conn = new ConnectionImpl(id, service, service, registered!.descriptor, this);
+        this.connections.set(id, conn);
+        await conn.hydrate();
+      } catch (err) {
+        logActivationFailure(err);
+      }
+    } else {
+      await conn!.commitAndActivateGrant(grant, credential, commit, logActivationFailure);
     }
     return conn as Connection;
   }
@@ -838,8 +846,10 @@ class ConnectionImpl implements Connection {
   /** Renew each authorized grant whose credential expires within `withinMs`.
    *  Runs under the grant's lock, so it serializes with conferral and revoke.
    *  Unlike the fault-driven renew, a failure here does not degrade a credential
-   *  that still works: it keeps the current one and the next pass retries. Only a
-   *  credential that has already expired degrades, matching the at-load rule. */
+   *  that still works: it keeps the current one and the next pass retries. A
+   *  renewer that can't answer (`RenewalUnavailable`) never degrades the grant,
+   *  even once the credential has expired. Only a refusal (`re-confer`, or any
+   *  other throw) degrades, and only an already-expired credential. */
   async renewExpiring(withinMs: number): Promise<void> {
     const deadline = this.registry.now().getTime() + withinMs;
     for (const [grant, scheme] of Object.entries(this.descriptor.auth)) {
@@ -865,12 +875,13 @@ class ConnectionImpl implements Connection {
     try {
       renewed = await scheme.renew(cred);
     } catch (err) {
-      renewed = "re-confer";
       this.log.warn("expiring-credential renew threw", {
         connectionId: this.id,
         grant,
         error: errMsg(err),
       });
+      if (err instanceof RenewalUnavailable) return;
+      renewed = "re-confer";
     }
     if (!stillCurrent()) return;
     if (renewed === "re-confer") {
@@ -899,6 +910,19 @@ class ConnectionImpl implements Connection {
     try {
       renewed = await scheme.renew(cred);
     } catch (err) {
+      if (err instanceof RenewalUnavailable) {
+        // The renewer couldn't answer (offline at boot, a Rome Cloud deploy).
+        // Keep the grant on its expired credential; the renewal pass retries.
+        this.log.warn("expired credential could not renew at load; will retry", {
+          connectionId: this.id,
+          grant: name,
+          error: errMsg(err),
+        });
+        this.grantState.set(name, "authorized");
+        this.liveCreds.set(name, cred);
+        await this.syncCustody(name, cred);
+        return;
+      }
       // Load runs before any epoch exists — nothing can supersede this flow.
       await this.degradeGrant(name, `renew threw at load: ${errMsg(err)}`, () => true);
       return;
@@ -1380,14 +1404,27 @@ class ConnectionImpl implements Connection {
     await this.activateGrantInMemory(grant, cred);
   }
 
-  /** Bring a grant live in memory after its authorized credential has been
-   *  DURABLY persisted (by `applyNewCredential` above, or by the registry's
-   *  transactional `confer` which persists the row inside its own transaction and
-   *  then calls this on the already-committed grant). Mirror → reconcile (build
-   *  the epoch / start the adapter) → custody. Under the per-grant lock so it
-   *  serializes against a concurrent renew/fault on the same grant. */
-  activatePersistedGrant(grant: GrantName, cred: Credential): Promise<void> {
-    return this.withGrantLock(grant, () => this.activateGrantInMemory(grant, cred));
+  /** The registry's transactional `confer` for an existing connection: run its
+   *  durable write (`commit`), then bring the grant live in memory, as ONE step
+   *  under the per-grant lock. Holding the lock across the write is what keeps a
+   *  renewal on the same grant from writing its older credential over this
+   *  conferral: the renewal either finishes first or starts after. A failed
+   *  write throws to the caller; a failed activation goes to `onActivationError`
+   *  (the conferral is durable either way). */
+  commitAndActivateGrant(
+    grant: GrantName,
+    cred: Credential,
+    commit: () => void,
+    onActivationError: (err: unknown) => void,
+  ): Promise<void> {
+    return this.withGrantLock(grant, async () => {
+      commit();
+      try {
+        await this.activateGrantInMemory(grant, cred);
+      } catch (err) {
+        onActivationError(err);
+      }
+    });
   }
 
   private async activateGrantInMemory(grant: GrantName, cred: Credential): Promise<void> {

@@ -104,7 +104,16 @@ export async function shopifyProxyCall(params: {
   headers.delete("Authorization");
   headers.set("X-Shopify-Access-Token", params.token.accessToken);
 
-  const res = await fetch(url, { method: params.method, headers, body: serializedBody });
+  // Never follow a redirect: fetch keeps custom headers across a cross-origin
+  // redirect, so a store redirect (Shopify lets merchants define them) would
+  // carry the token off the store. A 3xx returns as-is, and the caller maps a
+  // non-2xx to an action error.
+  const res = await fetch(url, {
+    method: params.method,
+    headers,
+    body: serializedBody,
+    redirect: "manual",
+  });
 
   const text = await res.text();
   let data: unknown = text;

@@ -1,4 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -74,6 +76,46 @@ describe("shopifyProxyCall", () => {
     expect(headers.get("Content-Type")).toBe("application/json");
     expect(JSON.parse(init?.body as string)).toEqual({ query: "{ shop { name } }" });
     expect(res).toMatchObject({ status: 200, data: { data: { shop: { name: "Acme" } } } });
+  });
+});
+
+describe("shopifyProxyCall redirects", () => {
+  const servers: Server[] = [];
+
+  async function listen(handler: Parameters<typeof createServer>[1]): Promise<string> {
+    const server = createServer(handler);
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  }
+
+  afterEach(async () => {
+    await Promise.all(
+      servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))),
+    );
+  });
+
+  it("never follows a redirect, so the token can't reach another host", async () => {
+    // A store answers with a redirect to an outside host (a merchant URL
+    // redirect); the outside host records whatever reaches it.
+    const received: IncomingHttpHeaders[] = [];
+    const outside = await listen((req, res) => {
+      received.push(req.headers);
+      res.end("{}");
+    });
+    const store = await listen((_req, res) => {
+      res.writeHead(302, { Location: `${outside}/collect` });
+      res.end();
+    });
+
+    const res = await shopifyProxyCall({
+      token: { accessToken: "shpat_secret", shop: "acme.myshopify.com" },
+      endpoint: `${store}/admin/api/2026-10/graphql.json`,
+      method: "GET",
+    });
+
+    expect(res.status).toBe(302);
+    expect(received).toEqual([]);
   });
 });
 

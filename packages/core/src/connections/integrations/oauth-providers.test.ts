@@ -37,6 +37,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import type { GrantLedger } from "../ledger.js";
 import { ConnectionRegistry } from "../registry.js";
+import { RenewalUnavailable } from "../errors.js";
 import type { SetupContext, SetupForm, SetupInteraction } from "../setup/types.js";
 import type { Credential } from "../types.js";
 import {
@@ -396,6 +397,67 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     expect(refresh).toHaveBeenCalled();
     expect(conn.auth.grants().store).toBe("authorized");
     expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_old");
+  });
+
+  it("keeps an expired grant when Rome Cloud can't answer, and renews it on a later pass", async () => {
+    const ledger = makeLedger();
+    const refresh = rs.fn(async (): Promise<Credential> => {
+      throw new RenewalUnavailable("Rome Cloud OAuth refresh did not complete.");
+    });
+    const { registry, conn } = await connectedRegistry(ledger, refresh, -1_000);
+
+    await registry.renewExpiring(10 * 60_000);
+    expect(conn.auth.grants().store).toBe("authorized");
+
+    refresh.mockImplementation(async () => renewed());
+    await registry.renewExpiring(10 * 60_000);
+    expect(conn.auth.grants().store).toBe("authorized");
+    expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_new");
+  });
+
+  it("keeps an expired grant at boot when Rome Cloud can't answer", async () => {
+    const ledger = makeLedger();
+    const unavailable = rs.fn(async (): Promise<Credential> => {
+      throw new RenewalUnavailable("Rome Cloud OAuth refresh did not complete.");
+    });
+    await connectedRegistry(ledger, unavailable, -60_000);
+
+    const registry2 = new ConnectionRegistry({ ledger });
+    registry2.register(makeOAuthProviderDescriptor("shopify", setupDeps(unavailable)));
+    await registry2.load();
+
+    expect(registry2.find("shopify")[0].auth.grants().store).toBe("authorized");
+  });
+
+  it("never lets a renewal in flight overwrite a reconnect that lands meanwhile", async () => {
+    const ledger = makeLedger();
+    let finishRefresh!: () => void;
+    const refresh = rs.fn(
+      () =>
+        new Promise<Credential>((resolve) => {
+          finishRefresh = () => resolve(renewed());
+        }),
+    );
+    const { registry, conn } = await connectedRegistry(ledger, refresh, 5 * 60_000);
+
+    // The renewal holds the grant while Rome Cloud is slow to answer...
+    const renewal = registry.renewExpiring(10 * 60_000);
+    await rs.waitFor(() => expect(refresh).toHaveBeenCalled());
+    // ...and the guardian reconnects in the meantime.
+    const reconnect = registry.confer(
+      "shopify",
+      conn.id,
+      "store",
+      {
+        material: { accessToken: "shpat_reconnected", refreshToken: "shprt_reconnected" },
+        expiresAt: new Date(Date.now() + 60 * 60_000),
+      },
+      undefined,
+    );
+    finishRefresh();
+    await Promise.all([renewal, reconnect]);
+
+    expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_reconnected");
   });
 
   it("degrades a grant that has already expired when the refresh fails", async () => {
