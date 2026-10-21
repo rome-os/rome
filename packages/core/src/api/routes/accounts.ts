@@ -8,6 +8,7 @@ import {
   sliceAccountDirectory,
   sliceAccountStream,
   type AccountState,
+  type StreamAccount,
 } from "@rome/api-types/people";
 import { readAccountDirectory, readAccountStream } from "../../people/account-directory.js";
 import type { ApiDeps } from "../deps.js";
@@ -30,6 +31,27 @@ import type { ApiDeps } from "../deps.js";
 
 export function accountsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
+
+  /**
+   * The stream read already running, which a request arriving meanwhile joins
+   * instead of starting its own. The stream asks every live store for every
+   * account's newest message, which can take a while on a slow source, and the
+   * People page polls it every 30 seconds and refetches each loaded page — so
+   * without this, reads pile up faster than they finish. Only shared while in
+   * flight: a request after it settles reads afresh.
+   */
+  let streamRead: Promise<StreamAccount[]> | null = null;
+  const readStream = (): Promise<StreamAccount[]> => {
+    if (!streamRead) {
+      const read = readAccountStream(deps);
+      streamRead = read;
+      const settle = () => {
+        if (streamRead === read) streamRead = null;
+      };
+      read.then(settle, settle);
+    }
+    return streamRead;
+  };
 
   /** The `?state=` both reads narrow by, or the 400 a value that names no state
    *  earns — answering it as the whole listing would silently show the wrong
@@ -80,7 +102,7 @@ export function accountsRoutes(deps: ApiDeps): Hono {
     }
 
     return c.json(
-      sliceAccountStream(await readAccountStream(deps), {
+      sliceAccountStream(await readStream(), {
         query: c.req.query("q"),
         state: state.state,
         cursor,

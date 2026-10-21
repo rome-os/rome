@@ -163,6 +163,35 @@ describe("Accounts API", () => {
     }
   });
 
+  it("shares one stream read between overlapping requests, and reads afresh after", async () => {
+    const repo = deps.sentinelLogRepo;
+    const listSenders = repo.listSenders.bind(repo);
+    let reads = 0;
+    repo.listSenders = async () => {
+      reads += 1;
+      return listSenders();
+    };
+
+    const [whole, first] = await Promise.all([fetchStream(), fetchStream("?limit=1")]);
+    expect(reads).toBe(1);
+    expect(first.accounts).toEqual(whole.accounts.slice(0, 1));
+
+    await fetchStream();
+    expect(reads).toBe(2);
+  });
+
+  it("does not hold on to a failed stream read", async () => {
+    const repo = deps.sentinelLogRepo;
+    const listSenders = repo.listSenders.bind(repo);
+    repo.listSenders = async () => {
+      throw new Error("store unavailable");
+    };
+    expect((await app.request("/accounts/stream")).status).toBe(500);
+
+    repo.listSenders = listSenders;
+    expect((await fetchStream()).accounts.length).toBeGreaterThan(0);
+  });
+
   it("keeps an account nothing has happened on off the stream", async () => {
     const stream = await fetchStream();
     expect(find(stream, `whatsapp:${SILENT_JID}`)).toBeUndefined();
