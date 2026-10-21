@@ -9,6 +9,7 @@ import {
   type SlackWebApi,
   decodeSlackText,
   parseSlackConversationId,
+  readSocketAppId,
   splitSlackText,
 } from "./slack.js";
 
@@ -27,11 +28,18 @@ class FakeSocket implements SlackSocketLike {
   close(): void {
     this.closed = true;
   }
+  listenerCount(type: string): number {
+    return this.listeners.get(type)?.length ?? 0;
+  }
   addEventListener(type: string, listener: (event: never) => void): void {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
-  emit(type: "message" | "close" | "pong", data?: unknown): void {
+  emit(type: "message" | "close" | "pong" | "error", data?: unknown): void {
     for (const listener of this.listeners.get(type) ?? []) {
+      if (type === "error") {
+        (listener as (event: unknown) => void)(data);
+        continue;
+      }
       (listener as (event: { data: unknown }) => void)({ data: JSON.stringify(data) });
     }
   }
@@ -246,6 +254,42 @@ describe("SlackAdapter inbound", () => {
       }),
     });
     await expect(startedAdapter(api)).rejects.toThrow(SlackApiError);
+  });
+
+  it("stays down when stopped while auth.test is in flight", async () => {
+    let answer!: () => void;
+    const api = fakeApi({
+      authTest: rs.fn(
+        () =>
+          new Promise((resolve) => {
+            answer = () => resolve({ teamId: "T1", botUserId: "UBOT", appId: "A1" });
+          }),
+      ),
+    });
+    const adapter = new SlackAdapter({
+      botToken: "xoxb-1",
+      appToken: "xapp-1",
+      channel: "slack_bot",
+      api,
+      createSocket: () => new FakeSocket(),
+    });
+    const starting = adapter.start();
+    adapter.stop();
+    answer();
+    await starting;
+    expect(api.openConnection).not.toHaveBeenCalled();
+    expect(await adapter.directConversationFor("T1/UADA")).toBeNull();
+  });
+});
+
+describe("readSocketAppId", () => {
+  it("rejects when the connection fails instead of leaving the error unhandled", async () => {
+    const socket = new FakeSocket();
+    const probe = readSocketAppId(fakeApi(), "xapp-1", { createSocket: () => socket });
+    await rs.waitFor(() => expect(socket.listenerCount("error")).toBe(1));
+    socket.emit("error", new Error("connect ECONNREFUSED"));
+    await expect(probe).rejects.toThrow(/ECONNREFUSED/);
+    expect(socket.closed).toBe(true);
   });
 });
 

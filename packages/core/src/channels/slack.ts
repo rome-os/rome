@@ -359,20 +359,25 @@ export async function readSocketAppId(
   const socket = (options.createSocket ?? createWebSocket)(url);
   try {
     return await new Promise<string | undefined>((resolve, reject) => {
-      const fail = (error: Error) => reject(error);
+      const onAbort = () =>
+        settle(() =>
+          reject(
+            options.signal?.reason instanceof Error ? options.signal.reason : new Error("aborted"),
+          ),
+        );
+      const settle = (finish: () => void) => {
+        clearTimeout(timer);
+        options.signal?.removeEventListener("abort", onAbort);
+        finish();
+      };
+      const fail = (error: Error) => settle(() => reject(error));
       const timer = setTimeout(
         () => fail(new SlackApiError("hello_timeout", "Slack did not answer on Socket Mode.")),
         options.timeoutMs ?? SLACK_HELLO_TIMEOUT_MS,
       );
       timer.unref?.();
-      options.signal?.addEventListener(
-        "abort",
-        () =>
-          fail(
-            options.signal?.reason instanceof Error ? options.signal.reason : new Error("aborted"),
-          ),
-        { once: true },
-      );
+      if (options.signal?.aborted) onAbort();
+      else options.signal?.addEventListener("abort", onAbort, { once: true });
       socket.addEventListener("message", (event) => {
         let envelope: SocketEnvelope;
         try {
@@ -381,13 +386,22 @@ export async function readSocketAppId(
           return;
         }
         if (envelope.type !== "hello") return;
-        clearTimeout(timer);
-        resolve(envelope.connection_info?.app_id);
+        settle(() => resolve(envelope.connection_info?.app_id));
       });
-      socket.addEventListener("close", () => {
-        clearTimeout(timer);
-        fail(new SlackApiError("socket_closed", "Slack closed the Socket Mode connection."));
-      });
+      socket.addEventListener("close", () =>
+        fail(new SlackApiError("socket_closed", "Slack closed the Socket Mode connection.")),
+      );
+      // `ws` emits `error` for a refused or cancelled connection, and an
+      // unhandled one would end the process. The listener stays attached, so
+      // an error after the probe settles is ignored too.
+      socket.addEventListener("error", (event) =>
+        fail(
+          new SlackApiError(
+            "socket_error",
+            `Socket Mode connection failed: ${event instanceof Error ? event.message : String(event)}`,
+          ),
+        ),
+      );
     });
   } finally {
     socket.close();
@@ -711,7 +725,11 @@ export class SlackAdapter {
    *  is refused. */
   async start(): Promise<void> {
     if (this.sendAbort.signal.aborted) this.sendAbort = new AbortController();
-    this.identity = await this.api.authTest(this.config.botToken, this.sendAbort.signal);
+    const signal = this.sendAbort.signal;
+    const identity = await this.api.authTest(this.config.botToken, signal);
+    // A stop() while auth.test was in flight wins: the adapter stays down.
+    if (signal.aborted) return;
+    this.identity = identity;
     const socket = new SlackSocketMode({
       appToken: this.config.appToken,
       api: this.api,
