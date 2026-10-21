@@ -397,16 +397,41 @@ describe("SlackAdapter send", () => {
     const { adapter, api, sockets, received } = await startedAdapter();
     sockets[0].emit("message", mention("200.2", "150.0"));
     await rs.waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0].messageId).toBe("150.0:200.2");
     const receipt = await adapter.send("C1" as ConversationId, {
       text: "**done**",
-      replyToMessageId: "200.2",
+      replyToMessageId: received[0].messageId,
     });
     expect(api.postMessage).toHaveBeenCalledWith(
       "xoxb-1",
       { channel: "C1", markdown: "**done**", threadTs: "150.0" },
       expect.anything(),
     );
-    expect(receipt).toEqual({ conversationId: "C1", messageId: "100.1" });
+    expect(receipt).toEqual({ conversationId: "C1", messageId: "150.0:100.1" });
+  });
+
+  it("answers a reply to its own message in the same thread", async () => {
+    const { adapter, api } = await startedAdapter();
+    const first = await adapter.send("C1" as ConversationId, {
+      text: "one",
+      replyToMessageId: "150.0:200.2",
+    });
+    await adapter.send("C1" as ConversationId, { text: "two", replyToMessageId: first.messageId });
+    expect(api.postMessage).toHaveBeenLastCalledWith(
+      "xoxb-1",
+      { channel: "C1", markdown: "two", threadTs: "150.0" },
+      expect.anything(),
+    );
+  });
+
+  it("finds a mention's thread after a restart, with nothing remembered", async () => {
+    const { adapter, api } = await startedAdapter();
+    await adapter.send("C1" as ConversationId, { text: "late", replyToMessageId: "150.0:200.2" });
+    expect(api.postMessage).toHaveBeenCalledWith(
+      "xoxb-1",
+      { channel: "C1", markdown: "late", threadTs: "150.0" },
+      expect.anything(),
+    );
   });
 
   it("starts a thread under a mention in the channel itself", async () => {
