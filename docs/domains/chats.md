@@ -14,11 +14,11 @@ A place where people and agents talk: a group, a direct message, the chat built 
 
 ## Thread
 
-A chat inside a chat, started from one of its messages. A thread is not a chat of its own: it lives in one and is seen from it.
+A chat inside a chat, usually started from one of its messages. A thread is not a chat of its own: it lives in one and is seen from it.
 
 - A thread is known by its chat and the platform's own id for it. The message it was opened from is kept when there is one. A private thread may have none in the chat.
 - A thread starts existing in Rome when the first message said in it reaches Rome. Opening it from a message does not move that message: it stays a message of the open chat.
-- A thread belongs to the chat it was started in. The message it was started from is its first, and every message said in it is a message of the chat, marked as said in that thread.
+- A thread belongs to the chat it was started in. The message it was opened from, when there is one, is its first, and every message said in it is a message of the chat, marked as said in that thread.
 - A thread has its own participants: those the platform lists in it, and writing in it makes you one.
 - Everyone in the chat whom the platform lets see a thread sees it: who is in it and what is said. An agent in the chat sees its threads the same way, and can write in them. A thread the platform hides from some members, such as a private thread, is hidden from them in Rome too.
 - The chat's reply rule applies in its threads. A thread has no reply rule of its own.
