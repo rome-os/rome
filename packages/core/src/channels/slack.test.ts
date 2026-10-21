@@ -3,6 +3,7 @@ import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import {
   SlackAdapter,
   SlackApiError,
+  type SlackBotIdentity,
   SlackSocketMode,
   type SlackEventCallback,
   type SlackSocketLike,
@@ -261,7 +262,7 @@ describe("SlackAdapter inbound", () => {
     const api = fakeApi({
       authTest: rs.fn(
         () =>
-          new Promise((resolve) => {
+          new Promise<SlackBotIdentity>((resolve) => {
             answer = () => resolve({ teamId: "T1", botUserId: "UBOT", appId: "A1" });
           }),
       ),
