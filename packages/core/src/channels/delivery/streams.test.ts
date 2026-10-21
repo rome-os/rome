@@ -84,6 +84,28 @@ describe("ReplyStreams", () => {
     );
   });
 
+  it("records the source the messages show, not the codec's rendering of each", async () => {
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    const wrapped: DeliveryTransport = {
+      ...transport,
+      codec: { ...plainText, render: (s) => `[${s}]` },
+    };
+    const streams = new ReplyStreams({
+      streaming: async () => true,
+      replies: () => ({ transport: wrapped, pacer: new Pacer(budget, systemClock) }),
+      clock: systemClock,
+      chats: { recordOutboundMessage },
+    });
+    const stream = (await streams.open(target))!;
+
+    stream.accept({ type: "result", content: "a b c" });
+    await stream.settle(false);
+
+    expect(recordOutboundMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: JSON.stringify([{ type: "text", content: "a b c" }]) }),
+    );
+  });
+
   it("records each block as its own paragraph, under the first message of the last block", async () => {
     const recordOutboundMessage = rs.fn(async () => undefined);
     const chats = { recordOutboundMessage };

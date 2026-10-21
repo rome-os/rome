@@ -9,9 +9,6 @@ import { neverConnected } from "./network.js";
 
 /** Feishu lets a message be edited this many times. */
 export const FEISHU_MAX_EDITS = 20;
-/** Messages whose edits are counted, oldest dropped first. A dropped message's
- *  count starts again, and Feishu's own refusal then stops its edits. */
-const TRACKED_MESSAGES = 1000;
 /** Marks a conversation as a thread, which later messages of a reply join. */
 const THREAD = "#thread:";
 
@@ -46,21 +43,13 @@ export interface FeishuTransportOptions {
  * directly: the SDK's `send` repeats a failed create on its own and falls back
  * to plain text, which would hide what happened from the reply.
  *
- * Feishu lets a message be edited 20 times. The capabilities say so, and the
- * transport also counts the edits and refuses the next as `unsupported`
- * without asking Feishu.
+ * Feishu lets a message be edited 20 times. The capabilities say so, and
+ * Feishu's refusal of one more is `unsupported`.
  */
 export function feishuTransport({
   client,
   replyInThread,
 }: FeishuTransportOptions): DeliveryTransport {
-  const edits = new Map<string, number>();
-  const count = (messageId: string, used: number) => {
-    edits.delete(messageId);
-    edits.set(messageId, used);
-    if (edits.size > TRACKED_MESSAGES) edits.delete(edits.keys().next().value!);
-  };
-
   const reply = async (to: string, content: string, inThread: boolean) =>
     answered(
       await client.im.v1.message.reply({
@@ -113,28 +102,14 @@ export function feishuTransport({
         return receiptOf(chat, created);
       }),
     edit: async (receipt, text) => {
-      const used = edits.get(receipt.messageId) ?? 0;
-      if (used >= FEISHU_MAX_EDITS)
-        throw new DeliveryFailure(
-          "unsupported",
-          `Feishu allows a message ${FEISHU_MAX_EDITS} edits, and this one has had them`,
-        );
-      count(receipt.messageId, used + 1);
-      try {
-        await call(async () =>
-          answered(
-            await client.im.v1.message.update({
-              path: { message_id: receipt.messageId },
-              data: { msg_type: "post", content: postOf(text) },
-            }),
-          ),
-        );
-      } catch (error) {
-        // Only an edit that may have arrived counts against the message.
-        if (error instanceof DeliveryFailure && error.kind !== "unknown")
-          count(receipt.messageId, used);
-        throw error;
-      }
+      await call(async () =>
+        answered(
+          await client.im.v1.message.update({
+            path: { message_id: receipt.messageId },
+            data: { msg_type: "post", content: postOf(text) },
+          }),
+        ),
+      );
     },
   };
 }
@@ -144,16 +119,28 @@ export function feishuTransport({
  * `@larksuiteoapi/node-sdk`): headings come down to H4 and H5 when the text has
  * a large one, since Feishu shows H1 to H3 very large, and runs of blank lines
  * shrink to one. Fenced code is left alone. A preview is rendered the same way.
- * The measure counts UTF-16 code units, as the SDK's split does.
+ * The measure counts UTF-16 code units, as the SDK's split does, and one more
+ * for each H5 heading, so an H6 heading brought down to H5 measures as before.
  *
  * Code that runs past the end of a message is closed there and opened again
  * at the start of the next, as the SDK's split does, so each message shows it
- * as code.
+ * as code. Code the next message closes, or ends, before any of it shows is
+ * not opened again, so a closing fence alone shows nothing.
  */
 export const feishuMarkdown: TextCodec = {
   render: (source, _settled, context) => {
-    const open = fenceAfter(context?.before ?? "");
-    const lines = `${open ? `${open.line}\n` : ""}${source}`.split("\n");
+    let open = fenceAfter(context?.before ?? "");
+    let rest = source;
+    if (open) {
+      const head = source.split("\n");
+      const first = head.findIndex((line) => line.trim() !== "");
+      if (first < 0) return "";
+      if (closes(head[first]!, open)) {
+        rest = head.slice(first + 1).join("\n");
+        open = undefined;
+      } else if (first === head.length - 1 && closing(head[first]!, open)) return "";
+    }
+    const lines = `${open ? `${open.line}\n` : ""}${rest}`.split("\n");
     const code: string[] = [];
     const prose: string[] = [];
     let fence: Fence | undefined;
@@ -176,8 +163,7 @@ export const feishuMarkdown: TextCodec = {
       // closing fence that has begun to arrive is finished rather than shown
       // as code, so the rendering never shrinks as the source grows.
       const last = block.at(-1)!;
-      if (block.length > 1 && (last === "" || new RegExp(`^ {0,3}\\${fence.char}+$`).test(last)))
-        block.pop();
+      if (block.length > 1 && (last === "" || closing(last, fence))) block.pop();
       block.push(fence.char.repeat(fence.length));
       prose.push(placeholder(code, block.join("\n")));
     }
@@ -190,7 +176,7 @@ export const feishuMarkdown: TextCodec = {
       .replace(/\n{3,}/g, "\n\n")
       .replace(/\u0000(\d+)\u0000/g, (_, index: string) => code[Number(index)]!);
   },
-  measure: (rendered) => rendered.length,
+  measure: (rendered) => rendered.length + (rendered.match(/^##### /gm)?.length ?? 0),
 };
 
 /** An open code fence: its opening line, and what a closing line must repeat. */
@@ -209,6 +195,11 @@ function opener(line: string): Fence | undefined {
 function closes(line: string, fence: Fence): boolean {
   const match = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
   return match !== null && match[1]![0] === fence.char && match[1]!.length >= fence.length;
+}
+
+/** Whether `line` is a closing fence of `fence` that has begun to arrive. */
+function closing(line: string, fence: Fence): boolean {
+  return new RegExp(`^ {0,3}\\${fence.char}+$`).test(line);
 }
 
 /** The fence still open at the end of `text`, if any. */

@@ -97,9 +97,9 @@ export class ReplyStreams {
     // likely landed, and nothing sends it again.
     const shown = outcome.parts;
     if (!this.deps.chats || shown.length === 0) return;
-    // A block's parts split its text, and each block is a message of its own.
+    // A block's parts split its source, and each block is a message of its own.
     const text = shown
-      .map((part, i) => (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.text)
+      .map((part, i) => (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.source)
       .join("");
     // A row holds one message id. A quote names it to reach the row, and the
     // message quoted is most often the answer, which the last block starts.

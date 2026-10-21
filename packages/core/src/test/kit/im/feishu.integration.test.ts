@@ -175,35 +175,18 @@ describe("feishuTransport against the peer", () => {
     expect(peer.visible().at(-1)?.replyTo).toBeUndefined();
   });
 
-  it("edits a message as a post, and refuses the edit after Feishu's last without asking", async () => {
+  it("edits a message as a post, and names Feishu's refusal after its last edit unsupported", async () => {
     const receipt = await transport.create(FEISHU_CHAT, "0");
     for (let edit = 1; edit <= FEISHU_MAX_EDITS; edit += 1)
       await transport.edit!(receipt, String(edit));
 
     await expect(transport.edit!(receipt, "21")).rejects.toMatchObject({ kind: "unsupported" });
     const edits = peer.server.exchanges.filter((e) => e.request.method === "PUT");
-    expect(edits).toHaveLength(FEISHU_MAX_EDITS);
+    expect(edits).toHaveLength(FEISHU_MAX_EDITS + 1);
     expect(edits.every((e) => e.request.body.msg_type === "post")).toBe(true);
     expect(peer.visible()).toEqual([
       expect.objectContaining({ text: String(FEISHU_MAX_EDITS), edits: FEISHU_MAX_EDITS }),
     ]);
-  });
-
-  it("does not count an edit Feishu refused against the message", async () => {
-    const receipt = await transport.create(FEISHU_CHAT, "0");
-    peer.server.once({
-      method: "PUT",
-      path: `${MESSAGES}/${receipt.messageId}`,
-      respond: { status: 400, body: { code: 230020, msg: "request trigger frequency limit" } },
-    });
-
-    await expect(transport.edit!(receipt, "x")).rejects.toMatchObject({
-      kind: "rate-limited",
-      retryAfterMs: 1000,
-    });
-    for (let edit = 1; edit <= FEISHU_MAX_EDITS; edit += 1)
-      await transport.edit!(receipt, String(edit));
-    expect(peer.visible()[0]?.edits).toBe(FEISHU_MAX_EDITS);
   });
 
   it.each([
@@ -434,6 +417,7 @@ describe("a reply streamed to Feishu", () => {
       expect(message.match(/^```/gm)!.length % 2).toBe(0);
     }
     expect(messages.slice(1).every((message) => message.startsWith("```python\n"))).toBe(true);
+    expect(messages.some((message) => message.startsWith("```python\n```"))).toBe(false);
     // The comments stay comments, not headings brought down to H4.
     expect(messages.join("\n")).not.toContain("#### step");
     expect(messages.at(-1)).toMatch(/\n```\n\nThat is all\.$/);

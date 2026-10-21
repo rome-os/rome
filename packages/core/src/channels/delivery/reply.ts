@@ -33,6 +33,9 @@ interface DeliveredPart {
   block: number;
   /** The text the platform shows, as far as Rome knows. */
   text: string;
+  /** The source text behind `text`. A block's parts join into the source the
+   *  user was shown, where their renderings may not join into one text. */
+  source: string;
   receipt?: PartReceipt;
   /**
    * `settled`: its text is final. `open`: a preview the reply never settled.
@@ -888,6 +891,7 @@ export class ReplyDelivery {
       state.parts.map((part) => ({
         block,
         text: part.sent,
+        source: part.sentSource,
         ...(part.receipt ? { receipt: part.receipt } : {}),
         state: part.unknown ? "unknown" : part.settled ? "settled" : "open",
         ...(part.diverged ? { diverged: true as const } : {}),

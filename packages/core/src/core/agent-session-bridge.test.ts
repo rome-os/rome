@@ -722,7 +722,7 @@ describe("AgentSessionBridge reply streaming", () => {
         },
         settle: async () => ({
           status: "unknown",
-          parts: [{ block: 0, text: "hi there", state: "unknown" }],
+          parts: [{ block: 0, text: "hi there", source: "hi there", state: "unknown" }],
         }),
         stop: () => {},
       },
