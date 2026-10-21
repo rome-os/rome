@@ -80,7 +80,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
-import { domainOf } from "./channels/platform.js";
+import { domainOf, domainOfGrants } from "./channels/platform.js";
 import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
@@ -1386,10 +1386,7 @@ async function main() {
     db,
     channelRecords,
     connectionRegistry.all().filter((c) => talks(c.service)),
-    async (id) =>
-      (await connectionRegistry.getLedger().listGrants(id))
-        .map((grant) => domainOf(grant.profile))
-        .find((domain) => domain !== undefined),
+    async (id) => domainOfGrants(await connectionRegistry.getLedger().listGrants(id)),
   );
   await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();
