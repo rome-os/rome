@@ -75,8 +75,8 @@ export interface SetupTarget {
   connectionId?: string;
   another?: boolean;
   /** The agent the account is linked to as it connects, in place of the one
-   *  its channel would start with. A start that re-attaches keeps the agent
-   *  of the setup it joins. */
+   *  its channel would start with. A start re-attaches only to a setup for
+   *  the same agent, and replaces one for another. */
   agent?: string;
 }
 
@@ -160,7 +160,9 @@ export class SetupManager {
   }
 
   /** Start a setup for the addressed `(target, grant)`, or re-attach to the one
-   *  already running there. `force` cancels a live setup and starts a fresh one.
+   *  already running there. `force` cancels a live setup and starts a fresh one,
+   *  and so does a start that names a different agent, so the account never
+   *  connects with an agent the latest start did not ask for.
    *  Serialized per key so the one-active-setup invariant holds under concurrent
    *  starts. */
   start(target: SetupTarget, grant: string, opts: { force?: boolean } = {}): Promise<SetupStart> {
@@ -176,7 +178,7 @@ export class SetupManager {
   ): Promise<SetupStart> {
     const existing = this.#byKey.get(key);
     if (existing && !existing.session.isTerminal) {
-      if (opts.force) {
+      if (opts.force || existing.target.agent !== target.agent) {
         await this.#cancelManaged(existing);
         // Leave it reachable by cid for a final poll; it is no longer active.
       } else {

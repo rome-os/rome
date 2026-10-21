@@ -166,6 +166,21 @@ describe("SetupManager", () => {
     expect(order).toEqual(["link conn-discord sales:agent", "changed channel-1"]);
   });
 
+  it("replaces a live setup when a start names a different agent", async () => {
+    const { registry } = fakeRegistry(discordSetup);
+    const agentLink = { inTx: rs.fn(() => "channel-1"), changed: rs.fn() };
+    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo(), agentLink });
+    const forMain = await mgr.start({ ...PLACEHOLDER, agent: "core:main" }, "bot");
+    const same = await mgr.start({ ...PLACEHOLDER, agent: "core:main" }, "bot");
+    expect(same.cid).toBe(forMain.cid);
+
+    const forSales = await mgr.start({ ...PLACEHOLDER, agent: "sales:agent" }, "bot");
+    expect(forSales.reattached).toBe(false);
+    expect(mgr.state(forMain.cid)).toEqual({ status: "cancelled" });
+    await mgr.provideInput(forSales.cid, { token: "abc" });
+    expect(agentLink.inTx).toHaveBeenCalledWith(FAKE_TX, "conn-discord", "sales:agent");
+  });
+
   it("links no agent when the start names none", async () => {
     const { registry } = fakeRegistry(discordSetup);
     const agentLink = { inTx: rs.fn(() => "channel-1"), changed: rs.fn() };

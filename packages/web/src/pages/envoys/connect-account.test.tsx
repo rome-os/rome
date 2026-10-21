@@ -230,6 +230,35 @@ describe("Connect an account", () => {
     );
   });
 
+  it("starts its own setup for the picked agent rather than adopting a live one", async () => {
+    const { calls } = mockServer(
+      [
+        connection("telegram_user", {
+          id: null,
+          channel: null,
+          grants: { session: "unauthorized" },
+          display: { session: null },
+          agent: null,
+          severalAccounts: false,
+          setups: { session: "cid-live" },
+        }),
+      ],
+      null,
+      { presenting: true },
+    );
+    renderAt("/envoys/connect/sales:agent/telegram_user");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Connect" }));
+
+    await rs.waitFor(() =>
+      expect(calls.find((call) => call.url.endsWith("/setup"))?.body).toMatchObject({
+        agent: "sales:agent",
+      }),
+    );
+    expect(calls.some((call) => call.url === "/api/setups/cid-live")).toBe(false);
+  });
+
   it("offers no platform whose one account is already connected", async () => {
     mockServer(
       [

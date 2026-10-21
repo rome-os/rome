@@ -228,7 +228,7 @@ function ConnectOn({
     state: "unauthorized",
     display: null,
     identity: null,
-    activeSetupCid: choice.activeSetupCid,
+    activeSetupCid: null,
   };
 
   const refetch = () =>
