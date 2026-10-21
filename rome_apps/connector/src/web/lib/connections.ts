@@ -153,3 +153,36 @@ export const ROME_MANAGED_CATALOG: CatalogEntry[] = CATALOG.filter((e) => e.rome
 export function romeManagedGrantsUsable(grants: Record<string, string> | undefined): boolean {
   return Object.values(grants ?? {}).some((state) => state === "authorized");
 }
+
+/** A connection as core's registry reports it (`/api/connections`). */
+export interface RegistryConnectionStatus {
+  service: string;
+  grants: Record<string, string>;
+}
+
+/**
+ * The Rome-managed catalog slugs whose registry grants are usable. Core's
+ * registry is the system of record for these providers; the Composio account
+ * list says nothing about them (a Rome-managed Shopify connection has no
+ * Composio account, and a leftover Composio one doesn't make it connected).
+ */
+export function connectedRomeManagedSlugs(
+  connections: readonly RegistryConnectionStatus[] | undefined,
+): Set<string> {
+  const managed = new Set(ROME_MANAGED_CATALOG.map((e) => e.slug.toLowerCase()));
+  return new Set(
+    (connections ?? [])
+      .filter((c) => managed.has(c.service.toLowerCase()) && romeManagedGrantsUsable(c.grants))
+      .map((c) => c.service.toLowerCase()),
+  );
+}
+
+/**
+ * Whether a connect link is a page of Rome's own dashboard (Shopify's Settings
+ * card) rather than an OAuth start. A dashboard page needs the guardian's Rome
+ * session, so it opens in the current window: the desktop app hands a new
+ * window to the system browser, which isn't signed in to Rome.
+ */
+export function isRomeSettingsLink(url: string): boolean {
+  return url.startsWith("/settings/");
+}

@@ -8,6 +8,7 @@ import {
 } from "@rome-os/app-web-sdk";
 import {
   CATALOG_BY_SLUG,
+  isRomeSettingsLink,
   romeManagedGrantsUsable,
   titleCase,
   type ConnectedAccount,
@@ -312,6 +313,13 @@ function ConnectCard({ ctx }: { ctx: AppComponentContext }) {
       }
       if (result.kind === "already_connected") {
         finish();
+        return;
+      }
+      if (isRomeSettingsLink(result.authorizationUrl)) {
+        // A Settings page needs the Rome session, so stay in this window; the
+        // card re-checks the connection when the guardian comes back to chat.
+        navigateRome({ path: "settings", tab: "connections" });
+        setPhase("authorizing");
         return;
       }
       // Authorize in a new tab (not a full navigation) so the chat transcript and
