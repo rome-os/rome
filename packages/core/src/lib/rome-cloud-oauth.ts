@@ -230,9 +230,11 @@ const REFRESH_TIMEOUT_MS = 15_000;
  * instance's account. The instance authenticates with its enrolled token, as
  * for the handoff redeem.
  *
- * Throws `RenewalUnavailable` when Rome Cloud can't answer (network error,
- * timeout, 429, 5xx including `temporarily_unavailable`), so the grant is kept
- * and retried. Any other failure is a refusal, and the grant needs a reconnect.
+ * Only Rome Cloud's explicit `invalid_grant` is a refusal, after which the grant
+ * needs a reconnect. Every other failure throws `RenewalUnavailable`, so the
+ * grant is kept and retried: Rome Cloud not answering (network, timeout, 429,
+ * 5xx), or this instance failing to authenticate to it (not enrolled, a 401 or
+ * 403), says nothing about the provider grant itself.
  */
 export async function refreshRomeCloudOAuthGrant(
   provider: OAuthProvider,
@@ -240,11 +242,11 @@ export async function refreshRomeCloudOAuthGrant(
 ): Promise<OAuthTokenBundle> {
   const romeCloudOrigin = getRomeCloudOrigin();
   if (!romeCloudOrigin) {
-    throw new Error("Rome Cloud origin is not configured for OAuth refresh.");
+    throw new RenewalUnavailable("Rome Cloud origin is not configured for OAuth refresh.");
   }
   const instanceToken = getInstanceToken();
   if (!instanceToken) {
-    throw new Error("This instance is not enrolled with Rome Cloud.");
+    throw new RenewalUnavailable("This instance is not enrolled with Rome Cloud.");
   }
 
   let response: Response;
@@ -289,10 +291,10 @@ export async function refreshRomeCloudOAuthGrant(
       data?.error_description ||
       data?.error ||
       `Rome Cloud OAuth refresh failed with status ${response.status}.`;
-    if (response.status === 429 || response.status >= 500) {
-      throw new RenewalUnavailable(message);
+    if (response.status === 400 && data?.error === "invalid_grant") {
+      throw new Error(message);
     }
-    throw new Error(message);
+    throw new RenewalUnavailable(message);
   }
   if (data?.provider !== provider || !data.tokens?.accessToken) {
     throw new Error("Rome Cloud returned an invalid OAuth refresh payload.");

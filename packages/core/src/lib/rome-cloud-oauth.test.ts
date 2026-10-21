@@ -264,6 +264,19 @@ describe("Rome Cloud OAuth brokering", () => {
       );
     });
 
+    it("keeps a Rome Cloud that rejects this instance's credentials retryable", async () => {
+      for (const status of [401, 403]) {
+        stubFetch(async () => json({ error: "invalid_token" }, status));
+        await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+          RenewalUnavailable,
+        );
+      }
+      setInstanceTokenInMemory(null);
+      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+        RenewalUnavailable,
+      );
+    });
+
     it("reports a refusal as a plain error, so the grant needs a reconnect", async () => {
       stubFetch(async () =>
         json({ error: "invalid_grant", error_description: "Reconnect it in Rome." }, 400),

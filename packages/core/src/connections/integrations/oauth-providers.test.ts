@@ -415,6 +415,25 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_new");
   });
 
+  it("recovers an expired grant once Rome Cloud accepts the instance again", async () => {
+    // A 401 from Rome Cloud rejects the instance, not the Shopify grant, so the
+    // refresh reports it as unavailable and the grant must survive until the
+    // instance authenticates again.
+    const ledger = makeLedger();
+    const refresh = rs.fn(async (): Promise<Credential> => {
+      throw new RenewalUnavailable("invalid_token");
+    });
+    const { registry, conn } = await connectedRegistry(ledger, refresh, -1_000);
+
+    await registry.renewExpiring(10 * 60_000);
+    await registry.renewExpiring(10 * 60_000);
+    expect(conn.auth.grants().store).toBe("authorized");
+
+    refresh.mockImplementation(async () => renewed());
+    await registry.renewExpiring(10 * 60_000);
+    expect(await storedAccessToken(ledger, conn.id)).toBe("shpat_new");
+  });
+
   it("keeps an expired grant at boot when Rome Cloud can't answer", async () => {
     const ledger = makeLedger();
     const unavailable = rs.fn(async (): Promise<Credential> => {
