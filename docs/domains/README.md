@@ -13,7 +13,18 @@ This folder is the source of truth for what these words mean. Other docs link he
 | **Participation** | When an agent takes part in a chat, what wakes it, what it reads, and where it speaks | [participation.md](participation.md) |
 | **Agents** | What an agent is and how it runs | [agents.md](agents.md) |
 
-![Context map](context-map.svg)
+```mermaid
+flowchart LR
+    Connections["Connections<br/><i>what access Rome has to which external account</i>"]
+    Chats["Chats<br/><i>who said what, where, and as whom</i>"]
+    Participation["Participation<br/><i>what wakes an agent, what it reads, and where it speaks</i>"]
+    Agents["Agents<br/><i>what an agent is and how it runs</i>"]
+    Connections -- carries messages --> Chats
+    Participation -- reads --> Chats
+    Participation -- speaks --> Chats
+    Participation -- starts a turn --> Agents
+    Connections -. which agent speaks through this account .-> Agents
+```
 
 Connections carry messages between chats and Rome. Participation sits between Chats and Agents: it reads the chat's record, speaks back into it, and starts an agent's turn. The dashed line is the link the guardian sets after connecting an account, as a separate step: which agent speaks through it. An account may have none. Chats follows the definitions of Connections and Agents and changes neither. Connections and Agents do not depend on each other.
 
