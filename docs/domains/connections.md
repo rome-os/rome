@@ -18,7 +18,7 @@ Rome's access to an external account: what the guardian granted so Rome can act 
 What the guardian picks when they connect: the kind of access they hand Rome. A Telegram bot, the guardian's signed-in Telegram, a Feishu app, a Discord bot, a Slack bot, email, WhatsApp and a GitHub sign-in are each a kind of connection.
 
 - Each kind has its own setup flow and its own grants.
-- A platform may offer more than one kind. A Telegram bot and a signed-in Telegram user are two kinds of connection on one platform. One kind may reach more than one platform. A Feishu app connects to Feishu or to Lark.
+- Each kind of connection belongs to one platform, and a platform may offer more than one kind. A Telegram bot and a signed-in Telegram user are two kinds on one platform. A Feishu app and a Lark app are two kinds on two platforms, whatever code they share.
 - A kind of connection says how Rome got in. Where an account lives and who is who is the account's [platform](chats.md#platform), never its kind of connection.
 - Some kinds have no platform, such as GitHub, since no chats live there.
 
