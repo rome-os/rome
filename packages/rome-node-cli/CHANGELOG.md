@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.5](https://github.com/rome-os/rome/compare/node-v0.1.4...node-v0.1.5) (2026-10-21)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/node-core bumped to 0.1.4
+
 ## [0.1.4](https://github.com/rome-os/rome/compare/node-v0.1.3...node-v0.1.4) (2026-10-16)
 
 

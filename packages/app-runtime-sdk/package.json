@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/app-runtime",
-  "version": "0.7.9",
+  "version": "0.8.0",
   "description": "Runtime SDK for Rome apps",
   "repository": {
     "type": "git",

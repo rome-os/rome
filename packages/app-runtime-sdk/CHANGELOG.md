@@ -1,5 +1,19 @@
 # @rome-os/app-runtime
 
+## [0.8.0](https://github.com/rome-os/rome/compare/app-runtime-v0.7.9...app-runtime-v0.8.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **app-runtime:** name the chat id chatId on refs, messages, queries and receipts ([#1206](https://github.com/rome-os/rome/issues/1206))
+
+### Features
+
+* **app-runtime:** name a channel's platform, and send to any account by its id ([#1203](https://github.com/rome-os/rome/issues/1203)) ([52f84af](https://github.com/rome-os/rome/commit/52f84af097ee9aace8a2bdccfdbe978f47dab0a7))
+* **app-runtime:** name a chat's connection kind, and say connection kind across core ([#1214](https://github.com/rome-os/rome/issues/1214)) ([a533d3a](https://github.com/rome-os/rome/commit/a533d3a534f55112a6609bf73bdd39f51578b512))
+* **app-runtime:** name chat services chatSettings and chats, keep old names as deprecated aliases ([#1194](https://github.com/rome-os/rome/issues/1194)) ([c585a25](https://github.com/rome-os/rome/commit/c585a25e3f55382b4a51bdc8d6a953ba589a1eb2))
+* **app-runtime:** name the chat id chatId on refs, messages, queries and receipts ([#1206](https://github.com/rome-os/rome/issues/1206)) ([c42b46b](https://github.com/rome-os/rome/commit/c42b46baed7780f12141aaa16a838ac28e9e50be))
+
 ## [0.7.9](https://github.com/rome-os/rome/compare/app-runtime-v0.7.8...app-runtime-v0.7.9) (2026-10-21)
 
 

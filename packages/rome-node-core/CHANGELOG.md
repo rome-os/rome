@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/rome-os/rome/compare/node-core-v0.1.3...node-core-v0.1.4) (2026-10-21)
+
+
+### Features
+
+* **desktop:** connect the Mac as a device when it signs in to Rome Cloud ([#1217](https://github.com/rome-os/rome/issues/1217)) ([1df1834](https://github.com/rome-os/rome/commit/1df1834d085d3d1d5b5106795056c6f0f931ae90))
+
 ## [0.1.3](https://github.com/rome-os/rome/compare/node-core-v0.1.2...node-core-v0.1.3) (2026-10-16)
 
 
