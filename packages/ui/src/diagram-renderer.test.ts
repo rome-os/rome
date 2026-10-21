@@ -52,6 +52,17 @@ describe("diagram renderer", () => {
     expect(svg).not.toContain("#000000");
   });
 
+  it("hands diagram options from the Mermaid config to Pele", async () => {
+    const source = "sequenceDiagram\n  Alice->>Bob: Hello";
+    const actors = (svg: string) => svg.match(/>Alice</g)?.length ?? 0;
+    const mirrored = await diagram.getMermaid().render("mermaid-7", source);
+    const single = await diagram
+      .getMermaid({ theme: "base", sequence: { mirrorActors: false } })
+      .render("mermaid-8", source);
+    expect(actors(mirrored.svg)).toBe(2);
+    expect(actors(single.svg)).toBe(1);
+  });
+
   it("keeps replacement patterns in a theme value literal", async () => {
     const renderer = diagram.getMermaid({
       themeVariables: { lineColor: "$1 onload=alert(1) x=" },

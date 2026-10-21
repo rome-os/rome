@@ -4,7 +4,7 @@
 // Mermaid's themeVariables. The plugin keeps Streamdown's Mermaid contract,
 // so callers still pass a Mermaid config and this file translates it.
 
-import { renderAsync } from "pele/lazy";
+import { type RenderOptions, renderAsync } from "pele/lazy";
 import type { DiagramPlugin, MermaidOptions } from "streamdown";
 
 type MermaidConfig = NonNullable<MermaidOptions["config"]>;
@@ -55,6 +55,14 @@ function applyTheme(svg: string, declarations: string): string {
   );
 }
 
+// The palette reaches Pele as CSS variables, so only the rest of the config,
+// such as `sequence.mirrorActors`, is handed to Pele's layout.
+function layoutConfig(config: MermaidConfig | undefined): RenderOptions["config"] {
+  if (!config) return undefined;
+  const { theme: _theme, themeVariables: _variables, themeCSS: _css, ...rest } = config;
+  return rest as RenderOptions["config"];
+}
+
 function createRenderer(initial: MermaidConfig | undefined) {
   let config = initial;
   return {
@@ -69,6 +77,7 @@ function createRenderer(initial: MermaidConfig | undefined) {
         idPrefix: id,
         // Pele escapes the font itself and uses it where --pele-font is unset.
         ...(font ? { fontFamily: font } : {}),
+        config: layoutConfig(config),
       });
       return { svg: applyTheme(svg, peleThemeDeclarations(config)) };
     },
