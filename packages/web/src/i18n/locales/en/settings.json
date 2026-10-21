@@ -57,13 +57,11 @@
       "add": "Add another account",
       "addedNotShown": "Account connected. Find it in the Connections list.",
       "newAccount": "New account",
-      "agent": "Agent",
-      "agentDescription": "The agent answers messages on this account. Without one, Rome does not listen to the account, and its messages are neither received nor recorded. One agent can answer on any number of accounts, several on one platform included.",
       "noAgent": "None. Rome does not listen to this account.",
-      "agentsFailed": "Could not load agents",
-      "linked": "{{agent}} now answers on {{account}}.",
-      "linkCleared": "Rome does not listen to {{account}} until an agent is linked.",
-      "linkFailed": "Could not link the agent"
+      "changeInEnvoys": "Change in Envoys",
+      "agentAnswers": "Answers messages on this account",
+      "noAgentTitle": "No agent",
+      "agentNone": "Rome does not listen to this account"
     },
     "headings": {
       "connected": "This connection lets your agent",
@@ -139,7 +137,7 @@
           "title": "Your LinkedIn",
           "bullets": {
             "read": "Keep a synced copy of your LinkedIn inbox",
-            "recap": "Read and recap your LinkedIn conversations"
+            "recap": "Read and recap your LinkedIn chats"
           }
         }
       },
@@ -158,13 +156,13 @@
       },
       "slack_bot": {
         "bot": {
-          "titleFallback": "Your agent's Slack bot",
+          "titleFallback": "Your agent's Slack account",
           "bullets": {
             "reply": "Reply when people message {{identity}} or mention it in a channel",
             "start": "Start a task when a new message arrives"
           },
           "bulletsFallback": {
-            "reply": "Reply when people message this bot or mention it in a channel",
+            "reply": "Reply when people message this account or mention it in a channel",
             "start": "Start a task when a new message arrives"
           }
         }
@@ -325,10 +323,9 @@
     }
   },
   "channels": {
-    "title": "Channel Connections",
     "conversationSettings": {
-      "configure": "Configure conversations",
-      "searchPlaceholder": "Search provider, workspace, or conversation",
+      "configure": "Configure chats",
+      "searchPlaceholder": "Search provider, workspace, or chat",
       "allConnections": "All connections",
       "anyStatus": "Any status",
       "connectionFilterAria": "Filter by connection",
@@ -344,9 +341,9 @@
         "dm": "Direct message",
         "topic": "Topic"
       },
-      "loading": "Loading conversations…",
-      "emptyTitle": "No configurable conversations found",
-      "emptyDescription": "Connect a supported chat service, or send a message so Rome can discover the conversation.",
+      "loading": "Loading chats…",
+      "emptyTitle": "No configurable chats found",
+      "emptyDescription": "Connect a supported chat service, or send a message so Rome can discover the chat.",
       "loadMore": "Load more",
       "overrideCount_one": "{{count}} override",
       "overrideCount_other": "{{count}} overrides",
@@ -358,16 +355,16 @@
         "routing": "Routing"
       },
       "fields": {
-        "enabled": "Rome in this conversation",
+        "enabled": "Rome in this chat",
         "respond": "Respond",
-        "botMessages": "Bot messages",
+        "botMessages": "Messages from automated accounts",
         "whenOthersMentioned": "When others are mentioned",
         "replies": "Reply placement",
         "agent": "Agent",
         "sessionReset": "Provider session reset"
       },
       "descriptions": {
-        "sessionReset": "Clears the provider-side conversation memory"
+        "sessionReset": "Clears the agent's memory kept by the model provider"
       },
       "source": {
         "overridden": "Overridden"
@@ -385,7 +382,7 @@
       "accountAgent": "{{agent}} (this account's agent)",
       "silentAccount": "Messages here do not reach Rome until this account has an agent.",
       "silentAccountLink": "<account>Link one on the account</account>.",
-      "silentAccountOverride": "This conversation's choice, {{agent}}, applies once one is linked.",
+      "silentAccountOverride": "This chat's choice, {{agent}}, applies once one is linked.",
       "sessionReset": {
         "never": "Never",
         "afterInactivity": "After inactivity",
@@ -423,7 +420,7 @@
       "linkAccount": "Link your Telegram account",
       "sendCodeTo": "Send this code to <link>{{target}}</link> on Telegram:",
       "sendCodeToPlain": "Send this code to {{target}} on Telegram:",
-      "yourBot": "your bot",
+      "yourBot": "your agent's account",
       "waitingVerification": "Waiting for verification...",
       "codeShownEarlier": "Verification code was shown when you first connected. Disconnect and reconnect to generate a new code.",
       "botTokenLabel": "Bot Token",
@@ -469,7 +466,7 @@
         "addCancel": "Cancel",
         "addPickBoth": "Pick both a channel and an agent first.",
         "addAllBound": "Every discoverable channel already has a binding — edit one above to rebind.",
-        "addDiscordOffline": "Discord isn't connected. Connect the bot above to populate this list.",
+        "addDiscordOffline": "Discord isn't connected. Connect the account above to populate this list.",
         "suggestionsTitle": "App suggestions",
         "suggestionFromApp": "{{app}} suggests routing a Discord channel to"
       }

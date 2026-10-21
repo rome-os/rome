@@ -102,6 +102,8 @@ export const TOOLKIT_API_HOSTS: Record<string, string[]> = {
   neon: ["neon.tech"],
   hubspot: ["hubapi.com"],
   stripe: ["stripe.com"],
+  shopify: ["myshopify.com"],
+  otter_ai_mcp: ["otter.ai"],
 };
 
 export type ProxyEndpointRejection =

@@ -142,7 +142,7 @@ describe("channel account routes", () => {
       body: "{}",
     });
     expect(empty.status).toBe(400);
-    expect(records.byId("feishu")?.agent).toBe("core:main");
+    expect(records.byId("feishu")?.agent).toBeNull();
   });
 
   it("links main like any agent, by its canonical id", async () => {
@@ -175,7 +175,7 @@ describe("channel account routes", () => {
     const { records, link, db } = setup({ main: "core:main" });
     records.claim(db, { id: "c1", service: "telegram" }, NOW);
     records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
-    records.link("telegram_user", null);
+    records.link("telegram", "main");
 
     expect((await link("telegram_user", "main")).status).toBe(200);
     expect(records.byId("telegram")?.agent).toBe("core:main");
@@ -201,8 +201,9 @@ describe("channel account routes", () => {
   });
 
   it("rejects a cross-site link", async () => {
-    const { records, link, db } = setup();
+    const { records, link, db } = setup({ "sales:agent": "sales:agent", other: "other:agent" });
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    records.link("feishu", "other:agent");
 
     const res = await link("feishu", "sales:agent", {
       "sec-fetch-site": "cross-site",
@@ -210,6 +211,6 @@ describe("channel account routes", () => {
     });
 
     expect(res.status).toBe(403);
-    expect(records.byId("feishu")?.agent).toBe("core:main");
+    expect(records.byId("feishu")?.agent).toBe("other:agent");
   });
 });

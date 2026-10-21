@@ -8,6 +8,7 @@ import {
   isComposioAuthenticationError,
   reconcileManagedConnection,
   ROME_MANAGED_ALIAS,
+  selectProvisionableAuthScheme,
   selectReusableAuthConfig,
   toEstablishedAccountSummaries,
   toManagedAccountSummaries,
@@ -195,6 +196,34 @@ describe("auth config selection", () => {
     ).toBe("ac_neon");
   });
 
+  it("reuses a guardian-created OAuth config when Rome cannot create one", () => {
+    expect(
+      selectReusableAuthConfig(
+        [
+          {
+            id: "ac_shopify",
+            status: "ENABLED",
+            toolkit: { slug: "shopify" },
+            auth_scheme: "OAUTH2",
+          },
+        ],
+        "shopify",
+      ),
+    ).toBe("ac_shopify");
+  });
+
+  it("prefers an API-key config over a guardian-created OAuth config", () => {
+    expect(
+      selectReusableAuthConfig(
+        [
+          { id: "ac_oauth", status: "ENABLED", toolkit: { slug: "neon" }, auth_scheme: "OAUTH2" },
+          { id: "ac_key", status: "ENABLED", toolkit: { slug: "neon" }, auth_scheme: "API_KEY" },
+        ],
+        "neon",
+      ),
+    ).toBe("ac_key");
+  });
+
   it("ignores disabled and wrong-toolkit auth configs", () => {
     expect(
       selectReusableAuthConfig(
@@ -215,6 +244,60 @@ describe("auth config selection", () => {
         "neon",
       ),
     ).toBeNull();
+  });
+});
+
+describe("auth config provisioning", () => {
+  afterEach(() => rs.restoreAllMocks());
+
+  it("provisions API key over DCR, DCR when it is the only option, and nothing for BYO OAuth", () => {
+    expect(selectProvisionableAuthScheme([{ mode: "dcr_oauth" }, { mode: "API_KEY" }])).toBe(
+      "API_KEY",
+    );
+    expect(selectProvisionableAuthScheme([{ mode: "DCR_OAUTH" }])).toBe("DCR_OAUTH");
+    expect(selectProvisionableAuthScheme([{ mode: "OAUTH2" }, { mode: "S2S_OAUTH2" }])).toBeNull();
+    expect(selectProvisionableAuthScheme(undefined)).toBeNull();
+  });
+
+  it("creates a DCR config for a DCR-only toolkit on an empty project", async () => {
+    const created: unknown[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+      if (url.pathname.endsWith("/auth_configs") && method === "GET") {
+        return Response.json({ items: [], next_cursor: null, total_pages: 0 });
+      }
+      if (url.pathname.endsWith("/toolkits/otter_ai_mcp")) {
+        return Response.json({
+          slug: "otter_ai_mcp",
+          name: "Otter.ai",
+          composio_managed_auth_schemes: [],
+          auth_config_details: [{ mode: "DCR_OAUTH", name: "Otter OAuth", fields: {} }],
+        });
+      }
+      if (url.pathname.endsWith("/auth_configs") && method === "POST") {
+        created.push(JSON.parse(String(init?.body)));
+        return Response.json({
+          auth_config: { id: "ac_otter" },
+          toolkit: { slug: "otter_ai_mcp" },
+        });
+      }
+      return Response.json({ error: `unexpected ${method} ${url.pathname}` }, { status: 500 });
+    });
+
+    const id = await new ComposioClient({ apiKey: "ak_test" }).ensureAuthConfig("otter_ai_mcp");
+
+    expect(id).toBe("ac_otter");
+    expect(created).toEqual([
+      {
+        toolkit: { slug: "otter_ai_mcp" },
+        auth_config: {
+          type: "use_custom_auth",
+          authScheme: "DCR_OAUTH",
+          name: "Rome Otter.ai OAuth",
+        },
+      },
+    ]);
   });
 });
 

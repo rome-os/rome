@@ -20,6 +20,8 @@ afterEach(() => {
 function account(overrides: Partial<EnvoyAccount> = {}): EnvoyAccount {
   return {
     channel: "discord",
+    connectionId: "discord-id",
+    grant: "bot",
     service: "discord",
     platform: "discord",
     name: "Sales",
@@ -42,6 +44,7 @@ function mockLink() {
 function renderChange(props: {
   account: EnvoyAccount;
   onChanged?: (agent: string | null) => void;
+  onDisconnected?: () => void;
 }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
@@ -50,6 +53,7 @@ function renderChange(props: {
         account={props.account}
         agents={[MAIN_AGENT_ID, "sales:agent"]}
         onChanged={props.onChanged ?? (() => {})}
+        onDisconnected={props.onDisconnected ?? (() => {})}
       >
         {props.account.name}
       </AgentChange>
@@ -144,5 +148,46 @@ describe("AgentChange", () => {
         { url: "/api/channels/accounts/discord/agent", body: { agent: MAIN_AGENT_ID } },
       ]),
     );
+  });
+
+  it("asks before disconnecting, and revokes the account's grant on confirm", async () => {
+    const calls: { url: string; method?: string }[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      calls.push({ url: String(input), method: init?.method });
+      return new Response(null, { status: 204 });
+    });
+    const onDisconnected = rs.fn();
+    renderChange({ account: account({ agent: "sales:agent" }), onDisconnected });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Disconnect Sales" }));
+    expect(screen.getByText(/Rome loses access to the account/)).toBeTruthy();
+    expect(calls).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(onDisconnected).toHaveBeenCalled());
+    expect(calls).toEqual([{ url: "/api/connections/discord-id/grants/bot", method: "DELETE" }]);
+  });
+
+  it("keeps the account and shows the error when disconnecting fails", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Core is busy" }), { status: 500 }),
+    );
+    const onDisconnected = rs.fn();
+    renderChange({ account: account(), onDisconnected });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Disconnect Sales" }));
+    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+
+    expect(await screen.findByText("Core is busy")).toBeTruthy();
+    expect(onDisconnected).not.toHaveBeenCalled();
+  });
+
+  it("names the guardian's own account in the disconnect confirm", async () => {
+    renderChange({ account: account({ kind: "delegate", route: null }) });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Disconnect Sales" }));
+    expect(screen.getByText(/your own account\? Rome loses access to it/)).toBeTruthy();
   });
 });

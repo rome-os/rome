@@ -80,6 +80,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
+import { domainOf, domainOfGrants } from "./channels/platform.js";
 import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
@@ -368,8 +369,9 @@ async function main() {
     connectionRegistry.getDescriptor(service)?.capabilities.talker !== undefined;
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
     ledger: new DrizzleGrantLedger(db),
-    onMint: (tx, record) => {
-      if (talks(record.service)) channelRecords.claim(tx, record, record.createdAt);
+    onMint: (tx, record, profile) => {
+      if (!talks(record.service)) return;
+      channelRecords.claim(tx, { ...record, domain: domainOf(profile) }, record.createdAt);
     },
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
@@ -1380,10 +1382,11 @@ async function main() {
   await removeUnconnectedAccounts(connectionRegistry);
   // Connections minted before channels were recorded get theirs now. Each
   // service held one, so each takes its service's name.
-  claimChannels(
+  await claimChannels(
     db,
     channelRecords,
     connectionRegistry.all().filter((c) => talks(c.service)),
+    async (id) => domainOfGrants(await connectionRegistry.getLedger().listGrants(id)),
   );
   await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();

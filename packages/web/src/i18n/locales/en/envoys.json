@@ -46,5 +46,35 @@
     "failed": "Failed to change the agent",
     "agentsFailed": "Failed to load agents",
     "agentFor": "Agent for {{account}}"
+  },
+  "disconnect": {
+    "action": "Disconnect",
+    "pending": "Disconnecting…",
+    "accountLabel": "Disconnect {{account}}",
+    "confirm": "Disconnect {{account}}? Rome loses access to the account and stops answering in its chats. If you connect it again, it starts with no chats.",
+    "delegateConfirm": "Disconnect {{account}}, your own account? Rome loses access to it and stops answering in your personal chats for you.",
+    "failed": "Failed to disconnect the account"
+  },
+  "connect": {
+    "title": "Connect an account",
+    "description": "Pick the agent that speaks through the new account. The platform comes next.",
+    "agents": "Agents",
+    "platforms": "Platforms",
+    "forAgent": "Connect an account for <agent>{{agent}}</agent>",
+    "anyNumber": "An agent can speak through any number of accounts, on one platform or several.",
+    "ownTitle": "<agent>{{agent}}</agent>'s own account",
+    "ownBody": "People see <agent>{{agent}}</agent> as a member of its own, under the account's name.",
+    "delegateTitle": "Your own account",
+    "delegateBody": "<agent>{{agent}}</agent> answers from your account. People see your name on its replies.",
+    "yourAccount": "Your {{app}}",
+    "taken": "Already connected. Rome holds one of these accounts.",
+    "onTitle": "Connect an account on {{app}} for <agent>{{agent}}</agent>",
+    "onDescription": "<agent>{{agent}}</agent> answers in every chat this account is in.",
+    "delegateOnTitle": "Connect your {{app}} account",
+    "delegateOnDescription": "<agent>{{agent}}</agent> answers from your own account on your behalf. People in your chats see your name, not the agent's.",
+    "unavailable": "No new account can be connected on this platform.",
+    "linkFailed": "The account is connected, but linking {{agent}} to it failed. Link an agent under Connected, no agent.",
+    "notFound": "The account is connected, but Envoys could not find it to link {{agent}}. Check its agent in Envoys.",
+    "linkFailedKept": "The account is connected, but linking {{agent}} to it failed, and {{kept}} still answers on it. Change its agent in {{kept}}'s Settings."
   }
 }

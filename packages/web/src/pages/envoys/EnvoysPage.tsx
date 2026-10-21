@@ -1,8 +1,7 @@
-import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef } from "react";
 import { Link, Navigate, Route, Routes, useMatch, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft } from "lucide-react";
 import {
   Page,
   PageActions,
@@ -37,6 +36,7 @@ import {
   TelegramIcon,
   WeChatIcon,
 } from "@/components/brand-icons/connection-badges";
+import { SlackIcon } from "@/components/brand-icons/slack-icon";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import {
   type ApiConnection,
@@ -49,6 +49,8 @@ import { Avatar } from "../people/avatar";
 import { agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
 import { AgentChange } from "./agent-change";
 import { AgentText } from "./agent-text";
+import { BackLink } from "./back-link";
+import { CONNECT_PATH, ConnectAccount } from "./connect-account";
 import {
   type AgentListing,
   CONNECTIONS_KEY,
@@ -61,8 +63,8 @@ import {
  * Envoys: the agents people can reach on chat platforms, each listed with the
  * accounts it speaks through. Connected accounts with no agent are listed
  * apart, each with a picker that links an agent. An agent's Settings switch or
- * unlink the agent of each of its accounts. Connecting an account still
- * happens on the Connections cards.
+ * unlink the agent of each of its accounts. Every such row also disconnects
+ * its account. Connect an account picks the agent first, then the platform.
  */
 export default function EnvoysPage() {
   const open = useRef(true);
@@ -76,6 +78,7 @@ export default function EnvoysPage() {
     <EnvoysOpen.Provider value={open}>
       <Routes>
         <Route index element={<EnvoysIndex />} />
+        <Route path="connect/*" element={<EnvoysConnect />} />
         <Route path=":agent/*" element={<EnvoyDetail />} />
       </Routes>
     </EnvoysOpen.Provider>
@@ -105,6 +108,7 @@ const envoyPath = (agent: string) => `/envoys/${encodeURIComponent(agent)}`;
 const accountPath = (route: string) => `${CONNECTIONS_PATH}/${encodeURIComponent(route)}`;
 
 type EnvoysData = ReturnType<typeof buildEnvoys> & {
+  connections: ApiConnection[];
   agentsPending: boolean;
   agentsFailed: boolean;
 };
@@ -129,6 +133,7 @@ function useEnvoys() {
     data: connections.data
       ? {
           ...buildEnvoys(connections.data, agents.data?.agents ?? null),
+          connections: connections.data,
           agentsPending: agents.isPending,
           agentsFailed: agents.isError,
         }
@@ -136,17 +141,6 @@ function useEnvoys() {
     isPending: connections.isPending,
     error: connections.error,
   };
-}
-
-function BackLink({ to, children }: { to: string; children: ReactNode }) {
-  return (
-    <Button asChild variant="ghost" size="sm" align="start" className="self-start">
-      <Link to={to}>
-        <ArrowLeft data-icon="inline-start" />
-        {children}
-      </Link>
-    </Button>
-  );
 }
 
 function Loading() {
@@ -164,6 +158,7 @@ const PLATFORM_ICONS: Partial<Record<string, typeof FeishuIcon>> = {
   telegram: TelegramIcon,
   discord: DiscordIcon,
   wechat: WeChatIcon,
+  slack: SlackIcon,
 };
 
 function AccountPills({ accounts }: { accounts: EnvoyAccount[] }) {
@@ -182,12 +177,28 @@ function AccountPills({ accounts }: { accounts: EnvoyAccount[] }) {
   );
 }
 
-function ConnectButton({ primary }: { primary: boolean }) {
+/** Opens Connect an account, at the platform step when the agent is known. */
+function ConnectButton({ primary, agent }: { primary: boolean; agent?: string }) {
   const { t } = useTranslation("envoys");
   return (
     <Button asChild variant={primary ? "default" : "ghost"} size={primary ? undefined : "sm"}>
-      <Link to={CONNECTIONS_PATH}>{t("index.add")}</Link>
+      <Link to={agent ? `${CONNECT_PATH}/${encodeURIComponent(agent)}` : CONNECT_PATH}>
+        {t("index.add")}
+      </Link>
     </Button>
+  );
+}
+
+function EnvoysConnect() {
+  const query = useEnvoys();
+  const navigate = useNavigateAfterChange();
+  if (!query.data) return <Page>{query.isPending ? <Loading /> : <LoadError />}</Page>;
+  return (
+    <ConnectAccount
+      connections={query.data.connections}
+      agents={query.data.agents}
+      navigate={navigate}
+    />
   );
 }
 
@@ -316,15 +327,17 @@ function AccountRow({ account }: { account: EnvoyAccount }) {
   );
 }
 
-/** One account with the select that changes its agent. */
+/** One account with the select that changes its agent, and Disconnect. */
 function AccountAgentRow({
   account,
   data,
   onChanged,
+  onDisconnected = () => {},
 }: {
   account: EnvoyAccount;
   data: EnvoysData;
   onChanged: (agent: string | null) => void;
+  onDisconnected?: () => void;
 }) {
   return (
     <div className="py-3">
@@ -333,6 +346,7 @@ function AccountAgentRow({
         agents={data.agents}
         disabled={data.agentsPending}
         onChanged={onChanged}
+        onDisconnected={onDisconnected}
       >
         <AccountSummary account={account} linked />
       </AgentChange>
@@ -450,7 +464,7 @@ function Overview({ envoy }: { envoy: Envoy }) {
           ))}
         </List>
         <div className="flex flex-wrap gap-2">
-          <ConnectButton primary={false} />
+          <ConnectButton primary={false} agent={envoy.agent} />
         </div>
       </CardContent>
     </Card>
@@ -485,6 +499,9 @@ function Settings({ envoy, data }: { envoy: Envoy; data: EnvoysData }) {
               // account to its new agent's page, or back to the list.
               if (keepsAccounts()) return;
               navigate(agent ? `${envoyPath(agent)}/settings` : "/envoys");
+            }}
+            onDisconnected={() => {
+              if (!keepsAccounts()) navigate("/envoys");
             }}
           />
         ))}

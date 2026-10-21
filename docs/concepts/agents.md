@@ -9,7 +9,7 @@ An agent is an LLM-backed runtime entity: a named configuration that sets a mode
 - An agent can remain provider-agnostic by declaring `tier: large|medium|small`. The runtime maps the tier to an available provider and concrete model.
 - An agent whose behavior depends on a provider-specific capability may pin a provider. A provider-pinned tier resolves only on that provider and fails rather than falling back to another provider.
 - An agent that needs a specific model may declare `provider` with `modelId` instead of a tier. Rome requests that exact ID without tier mapping or automatic substitution. The provider and connected account must support the requested model.
-- Every agent conversation happens within a [session](sessions.md). There is no session-less agent turn. Explicit guardian selections and saved session pins take precedence over the agent's configured model.
+- Every agent's chat happens within a [session](sessions.md). There is no session-less agent turn. Explicit guardian selections and saved session pins take precedence over the agent's configured model.
 - Each subagent has a restricted capability set appropriate to its role. Delegation never widens capabilities.
 
 ## Model selection

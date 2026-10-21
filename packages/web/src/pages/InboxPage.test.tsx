@@ -46,13 +46,13 @@ function renderPage() {
 }
 
 describe("InboxPage message sources", () => {
-  it("renders 'channel settings' as a link to /settings/connections in the description", async () => {
+  it("renders 'Connections settings' as a link to /settings/connections in the description", async () => {
     mockBackend();
     renderPage();
 
     // The Trans-embedded link only renders if the component map matches the
     // <link> tag in the i18n string — a plain-text fallback would have no role.
-    const link = await screen.findByRole("link", { name: /channel settings/i });
+    const link = await screen.findByRole("link", { name: /Connections settings/i });
     expect(link.getAttribute("href")).toBe("/settings/connections");
   });
 

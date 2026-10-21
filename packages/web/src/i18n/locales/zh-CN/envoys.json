@@ -46,5 +46,35 @@
     "failed": "无法更改智能体",
     "agentsFailed": "无法加载智能体",
     "agentFor": "{{account}} 的智能体"
+  },
+  "disconnect": {
+    "action": "断开",
+    "pending": "断开中…",
+    "accountLabel": "断开 {{account}}",
+    "confirm": "断开 {{account}}？Rome 将失去对该账号的访问，并停止在它的聊天中回复。再次连接时，它会从零开始，不带之前的聊天。",
+    "delegateConfirm": "断开你自己的账号 {{account}}？Rome 将失去对它的访问，并不再代你在个人聊天中回复。",
+    "failed": "无法断开账号"
+  },
+  "connect": {
+    "title": "连接账号",
+    "description": "选择通过新账号发言的智能体，下一步再选平台。",
+    "agents": "智能体",
+    "platforms": "平台",
+    "forAgent": "为 <agent>{{agent}}</agent> 连接账号",
+    "anyNumber": "一个智能体可以通过任意数量的账号发言，可在同一平台，也可跨多个平台。",
+    "ownTitle": "<agent>{{agent}}</agent> 自己的账号",
+    "ownBody": "人们会看到 <agent>{{agent}}</agent> 以该账号的名字作为独立成员出现。",
+    "delegateTitle": "你自己的账号",
+    "delegateBody": "<agent>{{agent}}</agent> 用你的账号回复。人们在它的回复上看到的是你的名字。",
+    "yourAccount": "你的 {{app}}",
+    "taken": "已连接。Rome 只能持有一个此类账号。",
+    "onTitle": "为 <agent>{{agent}}</agent> 连接 {{app}} 账号",
+    "onDescription": "<agent>{{agent}}</agent> 会在该账号所在的每个聊天中回复。",
+    "delegateOnTitle": "连接你的 {{app}} 账号",
+    "delegateOnDescription": "<agent>{{agent}}</agent> 会用你自己的账号代你回复。聊天中的人看到的是你的名字，而不是智能体的。",
+    "unavailable": "无法在此平台上连接新账号。",
+    "linkFailed": "账号已连接，但关联 {{agent}} 失败。请在“已连接，无智能体”中关联智能体。",
+    "notFound": "账号已连接，但外派智能体找不到它来关联 {{agent}}。请在外派智能体中查看它的智能体。",
+    "linkFailedKept": "账号已连接，但关联 {{agent}} 失败，{{kept}} 仍在该账号上回复。请在 {{kept}} 的设置中更改它的智能体。"
   }
 }

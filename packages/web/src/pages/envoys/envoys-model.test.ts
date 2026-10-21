@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import type { ApiConnection } from "@/lib/connections-api";
-import { buildEnvoys } from "./envoys-model";
+import { buildEnvoys, connectChoices } from "./envoys-model";
 
 function connection(overrides: Partial<ApiConnection> & { service: string }): ApiConnection {
   return {
@@ -42,6 +42,23 @@ describe("buildEnvoys", () => {
     expect(envoys[0]!.description).toBe("The guardian's agent");
     expect(envoys[0]!.accounts.map((account) => account.name)).toEqual(["Sales", "Telegram"]);
     expect(unlinked).toEqual([]);
+  });
+
+  it("names an account with no name after its platform, Lark apart from Feishu", () => {
+    const { unlinked } = buildEnvoys(
+      [
+        connection({ service: "feishu", platform: "feishu" }),
+        connection({ service: "feishu", id: "lark-id", channel: "lark-app", platform: "lark" }),
+        // A core that predates `platform`.
+        connection({ service: "telegram_user", channel: "telegram_user" }),
+      ],
+      [],
+    );
+    expect(unlinked.map(({ platform, name }) => ({ platform, name }))).toEqual([
+      { platform: "feishu", name: "Feishu" },
+      { platform: "lark", name: "Lark" },
+      { platform: "telegram", name: "Telegram" },
+    ]);
   });
 
   it("lists connected accounts with no agent apart", () => {
@@ -102,9 +119,70 @@ describe("buildEnvoys", () => {
       kind: "delegate",
       platform: "telegram",
       route: null,
+      connectionId: "telegram_user-id",
+      grant: "session",
     });
     expect(buildEnvoys([own(null)], []).unlinked.map((account) => account.kind)).toEqual([
       "delegate",
     ]);
+  });
+});
+
+describe("connectChoices", () => {
+  const placeholder = (service: string) =>
+    connection({ service, id: null, channel: null, grants: { bot: "unauthorized" } });
+
+  it("starts even a first account as a new one where the service offers several", () => {
+    const [choice] = connectChoices([
+      connection({
+        service: "telegram",
+        grants: { bot: "unauthorized" },
+        severalAccounts: true,
+        setups: { bot: "cid-old" },
+      }),
+    ]);
+    expect(choice).toMatchObject({ another: true, activeSetupCid: null, taken: false });
+  });
+
+  it("re-attaches the setup of a service that holds one account", () => {
+    const [choice] = connectChoices([
+      connection({
+        service: "telegram_user",
+        id: "left",
+        grants: { session: "unauthorized" },
+        setups: { session: "cid-live" },
+      }),
+    ]);
+    expect(choice).toMatchObject({ another: false, activeSetupCid: "cid-live", taken: false });
+  });
+
+  it("marks a service whose one account is connected as taken", () => {
+    const [choice] = connectChoices([
+      connection({ service: "telegram_user", grants: { session: "authorized" } }),
+    ]);
+    expect(choice).toMatchObject({ kind: "delegate", platform: "telegram", taken: true });
+  });
+
+  it("offers a Slack account on the Slack platform", () => {
+    const [choice] = connectChoices([
+      connection({
+        service: "slack_bot",
+        id: null,
+        channel: null,
+        grants: { bot: "unauthorized" },
+        severalAccounts: true,
+      }),
+    ]);
+    expect(choice).toMatchObject({ kind: "own", platform: "slack", another: true, taken: false });
+  });
+
+  it("offers own accounts first and leaves out services core does not register", () => {
+    const choices = connectChoices([
+      placeholder("telegram_user"),
+      placeholder("discord"),
+      placeholder("feishu"),
+      placeholder("whatsapp"),
+    ]);
+    expect(choices.map((choice) => choice.service)).toEqual(["feishu", "discord", "telegram_user"]);
   });
 });

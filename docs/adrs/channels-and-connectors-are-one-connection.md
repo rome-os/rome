@@ -124,3 +124,19 @@ Each channel keeps its stored platform, mapped from its service as the 2026-10-1
 ### Alternatives
 
 - **Keep the rule and let a guardian lift it per agent.** Rejected because the rule protects nothing: each channel answers only its own conversations, so an agent on two channels of one platform answers two separate sets of conversations, as main already does.
+
+## Amendment (2026-10-21): Feishu and Lark are two platforms
+
+Feishu and Lark are two platforms, because one account cannot sign in to both. A channel of the `feishu` service is on `lark` when its app's domain is `lark`, and on `feishu` otherwise ([`platform.ts`](../../packages/api-types/src/platform.ts)). The domain comes from the app grant's profile when the channel is made. `telegram` and `telegram_user` stay one platform, and so do `wechat` and `wechat_user`. The 2026-10-16 amendment's "Feishu and Lark are one platform" is withdrawn. A channel's id and its conversations do not depend on its platform, so only the stored platform and the name the dashboard shows for it change. `GET /api/connections` reports each account's platform beside its channel, which is how the dashboard tells a Lark account from a Feishu one. On upgrade, each channel whose Connection holds a Lark app moves to `lark`.
+
+### Alternatives
+
+- **Add a `lark` service.** Rejected because Feishu and Lark share one SDK, one setup and one adapter, and differ only in the host the app talks to. The domain already tells them apart.
+
+## Amendment (2026-10-21): Rome never picks an account's agent
+
+A newly connected account of a linkable service has no agent, so it is silent until the guardian links one. Connecting an account and linking its agent are two operations, and no step can make them one, so an account always passes through a state with no agent. The 2026-10-16 amendment's "a linkable service's first channel is linked to main when it is made" is withdrawn, and so is the same rule in the 2026-10-20 amendment. An account already connected keeps the agent it has. The boot pass that records a channel for a Connection from before channels were recorded links main, since that account answered as main before accounts took agents, as migration `0081` kept main for the channels recorded then. Where the dashboard asks for an agent is the dashboard's choice.
+
+### Alternatives
+
+- **Link main to a service's first account.** Rejected by the guardian: Rome choosing an agent nobody asked for is confusing.

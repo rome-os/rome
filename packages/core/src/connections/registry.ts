@@ -66,8 +66,9 @@ export interface ConnectionRegistryDeps {
   sleep?: (ms: number) => Promise<void>;
   /** Runs inside the transaction that mints a Connection, so whatever the
    *  caller records for it (the channel it backs) commits or rolls back with
-   *  the row. */
-  onMint?: (tx: DrizzleTx, record: ConnectionRecord) => void;
+   *  the row. `profile` is the profile of the grant whose conferral mints the
+   *  Connection, and undefined for a mint with no grant held. */
+  onMint?: (tx: DrizzleTx, record: ConnectionRecord, profile?: ProfileRecord) => void;
   /** Runs inside the transaction that deletes a Connection, before any
    *  caller participant. */
   onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
@@ -173,7 +174,7 @@ export class ConnectionRegistry {
   private readonly clock: () => Date;
   private readonly backoff: { baseMs: number; maxMs: number };
   private readonly sleep: (ms: number) => Promise<void>;
-  private readonly onMint?: (tx: DrizzleTx, record: ConnectionRecord) => void;
+  private readonly onMint?: ConnectionRegistryDeps["onMint"];
   private readonly onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
 
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
@@ -476,7 +477,7 @@ export class ConnectionRegistry {
         for (const name of Object.keys(registered!.descriptor.auth)) {
           ledger.writeEnsureGrant(tx, id, name);
         }
-        this.onMint?.(tx, record);
+        this.onMint?.(tx, record, profile);
       }
       ledger.writeGrant(tx, id, grant, patch);
       opts.inTx?.(tx);

@@ -42,15 +42,15 @@ Every action reports its outcome through one result envelope carrying exactly on
 
 ## Suspensions
 
-A suspension is an action result that parks the calling agent until the guardian resolves it in webchat. Two kinds exist: an **inline interaction** mounts a component owned by the app inside the caller's own conversation, and a **handoff** transfers the floor to a child session where the guardian collaborates with a summoned agent.
+A suspension is an action result that parks the calling agent until the guardian resolves it in webchat. Two kinds exist: an **inline interaction** mounts a component owned by the app inside the caller's own chat, and a **handoff** transfers the floor to a child session where the guardian collaborates with a summoned agent.
 
 **Contracts:**
 
 - The parked caller is told to wait and receives no artifact. The resolution arrives as a new turn carrying the outcome, and the action body does not run again.
 - Every resolution is either the produced artifact or a dismissal. A dismissal is a first-class outcome the caller acknowledges and continues from, not an error.
 - The artifact schema belongs to the owning app. Rome carries the artifact to the caller without interpreting it, so a new suspending action ships without a platform change.
-- An inline interaction does not lock the conversation, and several can be open at once. A handoff locks the parent conversation until control returns.
-- A handoff's child session is bound to the summoned agent for its whole life. It never appears in the chat sidebar — the guardian reaches it through the card in the parent conversation.
+- An inline interaction does not lock the chat, and several can be open at once. A handoff locks the parent chat until control returns.
+- A handoff's child session is bound to the summoned agent for its whole life. It never appears in the chat sidebar — the guardian reaches it through the card in the parent chat.
 - A handoff that declares a handback contract hands control back only through it: the candidate artifact must satisfy the contract, and the guardian approves the candidate before it resumes the caller. A validation failure bounces to the summoned agent, never to the caller.
 - Only webchat renders suspensions. On a messaging channel, inside a subagent, or on a forked turn, the calling agent relays the prompt text as prose and the guardian's reply arrives as the next turn.
 

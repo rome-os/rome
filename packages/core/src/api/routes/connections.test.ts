@@ -21,6 +21,7 @@ import {
 } from "../../connections/test-fixtures.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
+import { domainOf } from "../../channels/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { createTestDb, identityServiceOf } from "../../test/helpers.js";
@@ -124,6 +125,7 @@ describe("GET /connections", () => {
       connect: null,
       setups: {},
       channel: null,
+      platform: null,
       severalAccounts: false,
     });
 
@@ -218,6 +220,7 @@ describe("GET /connections", () => {
       connect: null,
       setups: {},
       channel: null,
+      platform: null,
       severalAccounts: false,
     });
   });
@@ -513,6 +516,31 @@ describe("GET /connections accounts", () => {
     expect(channelOf(first.id)).toBe("telegram");
     expect(channelOf(connection.id)).toBe(records.idOf(connection.id));
     expect(channelOf(connection.id)).not.toBe("telegram");
+  });
+
+  it("reports a Lark app's account on the Lark platform", async () => {
+    const { db, close } = createTestDb();
+    openDbs.push(close);
+    const records = new ChannelRecordsRepository(db);
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(db),
+      onMint: (tx, record, profile) => {
+        records.claim(tx, { ...record, domain: domainOf(profile) }, record.createdAt);
+      },
+    });
+    registry.register({ ...telegram.descriptor, service: "feishu", severalAccounts: true });
+    const lark = await registry.confer("feishu", undefined, "bot", telegram.validCredential(), {
+      domain: "lark",
+    });
+
+    const { connections } = await (
+      await makeApp(registry, undefined, { db }).request("/connections")
+    ).json();
+
+    expect(connections.find((each: { id: string }) => each.id === lark.id)).toMatchObject({
+      channel: "feishu",
+      platform: "lark",
+    });
   });
 
   it("reports the agent linked to each account", async () => {

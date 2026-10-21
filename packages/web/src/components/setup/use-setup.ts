@@ -21,6 +21,8 @@ export interface UseSetupOptions {
   grant: string;
   /** Connect a new account of the service `idOrService` names. */
   another?: boolean;
+  /** Cancel the setup when the card unmounts. Defaults to `another`. */
+  cancelOnLeave?: boolean;
   /** A live setup id discovered on the connection response — the hook
    *  re-attaches to it (polls its state) instead of starting fresh. */
   activeCid?: string | null;
@@ -49,6 +51,7 @@ export interface SetupRunner {
 
 export function useSetup(options: UseSetupOptions): SetupRunner {
   const { idOrService, grant, another, activeCid, onDone } = options;
+  const cancelOnLeave = options.cancelOnLeave ?? another ?? false;
   const [cid, setCid] = useState<string | null>(activeCid ?? null);
   const [state, setState] = useState<SetupState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -105,7 +108,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         if (unmountedRef.current) {
           // The card that asked went away first, so nothing could finish this
           // new account's setup.
-          if (another && result.ok) void cancelSetup(result.start.cid);
+          if (cancelOnLeave && result.ok) void cancelSetup(result.start.cid);
           return;
         }
         setBusy(false);
@@ -119,7 +122,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         settle(result.start.state);
       })();
     },
-    [idOrService, grant, another, settle],
+    [idOrService, grant, another, cancelOnLeave, settle],
   );
 
   const submit = useCallback(
@@ -188,7 +191,8 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   }, [settled]);
 
   // A new account's setup has no connection a reopened card could find it
-  // through, so it ends with the card that started it. Otherwise a flow left
+  // through, so it ends with the card that started it, as does any setup whose
+  // caller asks for that. Otherwise a flow left
   // running (a QR code still on a phone) could connect an account after the
   // guardian navigated away. A start still in flight is cancelled when it
   // answers. That includes a setup this card re-attached to. A reload or a
@@ -197,11 +201,11 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   const liveCidRef = useRef<string | null>(null);
   liveCidRef.current = cid && !settled ? cid : null;
   useEffect(() => {
-    if (!another) return;
+    if (!cancelOnLeave) return;
     return () => {
       if (liveCidRef.current) void cancelSetup(liveCidRef.current);
     };
-  }, [another]);
+  }, [cancelOnLeave]);
   useEffect(() => {
     unmountedRef.current = false;
     return () => {

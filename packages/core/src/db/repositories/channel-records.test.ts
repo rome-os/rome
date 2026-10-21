@@ -40,6 +40,18 @@ describe("ChannelRecordsRepository", () => {
     });
   });
 
+  it("puts a Feishu app on the platform its domain names", () => {
+    const records = repository();
+    const db = testDb!.db;
+
+    const platformOf = (id: string, domain?: string) =>
+      records.claim(db, { id, service: "feishu", domain }, NOW).platform;
+
+    expect(platformOf("c1")).toBe("feishu");
+    expect(platformOf("c2", "feishu")).toBe("feishu");
+    expect(platformOf("c3", "lark")).toBe("lark");
+  });
+
   it("keeps the channel a Connection already holds", () => {
     const records = repository();
     const db = testDb!.db;
@@ -49,7 +61,7 @@ describe("ChannelRecordsRepository", () => {
     expect(records.all()).toHaveLength(1);
   });
 
-  it("gives a re-added bot a fresh channel, linked to main as the only account", () => {
+  it("gives a re-added bot a fresh channel, with no agent", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
@@ -60,19 +72,23 @@ describe("ChannelRecordsRepository", () => {
 
     const readded = records.claim(db, { id: "c2", service: "feishu" }, NOW);
     expect(readded.id).toMatch(UUID);
-    expect(readded.agent).toBe("core:main");
+    expect(readded.agent).toBeNull();
     // The released channel keeps its id, so no later account is given it.
     expect(records.byId("feishu")).toMatchObject({ connectionId: null, agent: null });
   });
 
-  it("links main to a linkable service's first account only", () => {
+  it("starts every new account with no agent, and with the one asked only where it takes one", () => {
     const records = repository();
     const db = testDb!.db;
 
-    expect(records.claim(db, { id: "c1", service: "telegram" }, NOW).agent).toBe("core:main");
-    expect(records.claim(db, { id: "c2", service: "telegram_user" }, NOW).agent).toBe("core:main");
-    expect(records.claim(db, { id: "c3", service: "telegram" }, NOW).agent).toBeNull();
-    expect(records.claim(db, { id: "c4", service: "webchat" }, NOW).agent).toBeNull();
+    expect(records.claim(db, { id: "c1", service: "telegram" }, NOW).agent).toBeNull();
+    expect(records.claim(db, { id: "c2", service: "telegram_user" }, NOW).agent).toBeNull();
+    expect(
+      records.claim(db, { id: "c3", service: "feishu" }, NOW, { agent: "core:main" }).agent,
+    ).toBe("core:main");
+    expect(
+      records.claim(db, { id: "c4", service: "webchat" }, NOW, { agent: "core:main" }).agent,
+    ).toBeNull();
     expect(records.claim(db, { id: "c5", service: "agents" }, NOW).agent).toBeNull();
   });
 
@@ -175,6 +191,7 @@ describe("ChannelRecordsRepository", () => {
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "telegram" }, NOW);
     const later = records.claim(db, { id: "c2", service: "telegram" }, NOW).id;
+    records.link("telegram", "main");
 
     expect(records.link(later, "main")).toMatchObject({ agent: "core:main" });
     expect(records.byId("telegram")?.agent).toBe("core:main");

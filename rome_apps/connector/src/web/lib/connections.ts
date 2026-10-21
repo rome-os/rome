@@ -58,6 +58,8 @@ const CATALOG_PRESENTATION: Record<string, CatalogPresentation> = {
   neon: { scope: "Manages Postgres projects, branches, databases, and roles.", glyph: "neon" },
   hubspot: { scope: "Tracks your contacts and deals.", glyph: "hubspot" },
   stripe: { scope: "Looks up payments and customers.", glyph: "stripe" },
+  shopify: { scope: "Manages your store's orders, products, and customers.", glyph: "shopify" },
+  otter_ai_mcp: { scope: "Searches your meetings and reads their transcripts.", glyph: "otter" },
 };
 
 export const CATALOG: CatalogEntry[] = SUPPORTED_CONNECTORS.map((connector) => {

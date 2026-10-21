@@ -79,7 +79,7 @@
     "branch": {
       "open": "从此回复发起侧边对话",
       "title": "创建侧边对话",
-      "description": "继续追问，同时不改变当前对话。",
+      "description": "继续追问，同时不改变当前聊天。",
       "suggestionsLabel": "推荐提示词",
       "suggestions": {
         "mermaid": "用 Mermaid 图表呈现",

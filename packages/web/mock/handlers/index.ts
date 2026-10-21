@@ -1285,7 +1285,7 @@ export const handlers = [
       account: {
         id,
         service: target.service,
-        platform: platformOf(target.service),
+        platform: target.platform ?? platformOf(target.service),
         connectionId: target.id,
         agent,
       },

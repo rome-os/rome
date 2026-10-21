@@ -11,28 +11,46 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { linkAccountAgent } from "@/lib/connections-api";
+import { linkAccountAgent, revokeConnectionGrant } from "@/lib/connections-api";
 import { AgentText } from "./agent-text";
 import { CONNECTIONS_KEY, type EnvoyAccount } from "./envoys-model";
 
 /** Radix Select reserves the empty string, so "no agent" needs a value of its own. */
 const NO_AGENT = "__none__";
 
-/** Links, switches or unlinks an account's agent. Envoys and the Connections
- *  cards (ConnectionDetailPage's connections key) are stale once
- *  it lands. */
+/** Envoys and the Connections cards (ConnectionDetailPage's connections key)
+ *  are stale once a change to an account lands. */
+function useRefetchAccounts() {
+  const queryClient = useQueryClient();
+  return () =>
+    Promise.all(
+      [CONNECTIONS_KEY, ["connection-detail", "connections"]].map((queryKey) =>
+        queryClient.invalidateQueries({ queryKey }),
+      ),
+    );
+}
+
+/** Links, switches or unlinks an account's agent. */
 function useLinkAgent() {
   const { t } = useTranslation("envoys");
-  const queryClient = useQueryClient();
+  const refetch = useRefetchAccounts();
   return useMutation({
     mutationFn: (vars: { channel: string; agent: string | null }) =>
       linkAccountAgent(vars.channel, vars.agent, t("change.failed")),
-    onSuccess: () =>
-      Promise.all(
-        [CONNECTIONS_KEY, ["connection-detail", "connections"]].map((queryKey) =>
-          queryClient.invalidateQueries({ queryKey }),
-        ),
-      ),
+    onSuccess: refetch,
+  });
+}
+
+/** Disconnects an account, which removes it. */
+function useDisconnect() {
+  const { t } = useTranslation("envoys");
+  const refetch = useRefetchAccounts();
+  return useMutation({
+    mutationFn: async (account: EnvoyAccount) => {
+      const result = await revokeConnectionGrant(account.connectionId, account.grant);
+      if (!result.ok) throw new Error(result.error || t("disconnect.failed"));
+    },
+    onSuccess: refetch,
   });
 }
 
@@ -41,16 +59,18 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 /**
- * The agent select for one account, with the confirmation a change needs.
- * Switching or unlinking always asks first. Linking an account with no agent
- * asks only when the account is the guardian's own, since the agent then
- * answers on their behalf. Only this account changes.
+ * The agent select for one account, with the confirmation a change needs, and
+ * Disconnect. Switching or unlinking always asks first. Linking an account
+ * with no agent asks only when the account is the guardian's own, since the
+ * agent then answers on their behalf. Disconnecting always asks first. Only
+ * this account changes.
  */
 export function AgentChange({
   account,
   agents,
   disabled = false,
   onChanged,
+  onDisconnected,
   children,
 }: {
   account: EnvoyAccount;
@@ -58,12 +78,16 @@ export function AgentChange({
   /** The agent list is still loading, so the options are not final yet. */
   disabled?: boolean;
   onChanged: (agent: string | null) => void;
+  onDisconnected: () => void;
   /** The account as the row shows it, beside the select. */
   children: ReactNode;
 }) {
   const { t } = useTranslation("envoys");
   const link = useLinkAgent();
+  const disconnect = useDisconnect();
   const [pending, setPending] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const busy = link.isPending || disconnect.isPending;
   const current = account.agent ?? NO_AGENT;
 
   // A delegate is the guardian's pick, with main suggested.
@@ -83,8 +107,21 @@ export function AgentChange({
     );
   };
 
+  const confirmDisconnect = () => {
+    // Like a link, this settles even once the refetch has removed the row.
+    disconnect.mutateAsync(account).then(
+      () => {
+        setDisconnecting(false);
+        onDisconnected();
+      },
+      () => {},
+    );
+  };
+
   const choose = (value: string) => {
     link.reset();
+    disconnect.reset();
+    setDisconnecting(false);
     if (value === current) {
       setPending(null);
     } else if (account.agent === null && account.kind !== "delegate") {
@@ -96,39 +133,88 @@ export function AgentChange({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="flex min-w-0 flex-1 items-center gap-3">{children}</div>
-        {/* Radix shows the placeholder only for an empty value. */}
-        <Select
-          value={
-            pending ??
-            (link.isPending ? (link.variables?.agent ?? NO_AGENT) : null) ??
-            account.agent ??
-            ""
-          }
-          disabled={disabled || link.isPending}
-          onValueChange={choose}
-        >
-          <SelectTrigger
-            className="w-40 shrink-0 sm:w-48"
-            aria-label={t("change.agentFor", { account: account.name })}
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Radix shows the placeholder only for an empty value. */}
+          <Select
+            value={
+              pending ??
+              (link.isPending ? (link.variables?.agent ?? NO_AGENT) : null) ??
+              account.agent ??
+              ""
+            }
+            disabled={disabled || busy}
+            onValueChange={choose}
           >
-            <SelectValue placeholder={t("change.pick")} />
-          </SelectTrigger>
-          <SelectContent>
-            {options.map((agent) => (
-              <SelectItem key={agent} value={agent}>
-                {suggestMain && agent === MAIN_AGENT_ID
-                  ? t("change.suggested", { agent: agentLabel(agent) })
-                  : agentLabel(agent)}
-              </SelectItem>
-            ))}
-            {account.agent !== null && (
-              <SelectItem value={NO_AGENT}>{t("change.noAgent")}</SelectItem>
-            )}
-          </SelectContent>
-        </Select>
+            <SelectTrigger
+              className="min-w-0 flex-1 sm:w-48 sm:flex-none"
+              aria-label={t("change.agentFor", { account: account.name })}
+            >
+              <SelectValue placeholder={t("change.pick")} />
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((agent) => (
+                <SelectItem key={agent} value={agent}>
+                  {suggestMain && agent === MAIN_AGENT_ID
+                    ? t("change.suggested", { agent: agentLabel(agent) })
+                    : agentLabel(agent)}
+                </SelectItem>
+              ))}
+              {account.agent !== null && (
+                <SelectItem value={NO_AGENT}>{t("change.noAgent")}</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={busy}
+            aria-label={t("disconnect.accountLabel", { account: account.name })}
+            onClick={() => {
+              link.reset();
+              disconnect.reset();
+              setPending(null);
+              setDisconnecting(true);
+            }}
+          >
+            {t("disconnect.action")}
+          </Button>
+        </div>
       </div>
+      {disconnecting && (
+        <div className="flex flex-col gap-3 rounded-8 bg-surface-muted p-3 text-ui">
+          <p>
+            {t(account.kind === "delegate" ? "disconnect.delegateConfirm" : "disconnect.confirm", {
+              account: account.name,
+            })}
+          </p>
+          {disconnect.error && (
+            <FormError>{errorMessage(disconnect.error, t("disconnect.failed"))}</FormError>
+          )}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={disconnect.isPending}
+              onClick={confirmDisconnect}
+            >
+              {disconnect.isPending ? t("disconnect.pending") : t("disconnect.action")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disconnect.isPending}
+              onClick={() => {
+                disconnect.reset();
+                setDisconnecting(false);
+              }}
+            >
+              {t("change.cancel")}
+            </Button>
+          </div>
+        </div>
+      )}
       {link.error && !pending && (
         <FormError>{errorMessage(link.error, t("change.failed"))}</FormError>
       )}

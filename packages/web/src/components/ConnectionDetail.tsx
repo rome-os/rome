@@ -78,12 +78,7 @@ export function ConnectionDetailBody({
           </div>
         );
       })}
-      <AccountControls
-        card={card}
-        onRefresh={onRefresh}
-        onFlash={onFlash}
-        onOpenAccount={onOpenAccount}
-      />
+      <AccountControls card={card} onRefresh={onRefresh} onOpenAccount={onOpenAccount} />
     </div>
   );
 

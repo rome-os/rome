@@ -563,14 +563,14 @@ describe("PersonDetailPage", () => {
     expect(await screen.findByText("Couldn't load")).toBeTruthy();
     // "Nothing has happened yet" is a claim about this person, and a failed
     // fetch has not earned it.
-    expect(screen.queryByText("Nothing has happened on any channel yet.")).toBeNull();
+    expect(screen.queryByText("Nothing has happened on any account yet.")).toBeNull();
   });
 
   it("keeps a genuinely empty history on its own empty state", async () => {
     mockApi({ entries: [] });
     renderPage();
 
-    expect(await screen.findByText("Nothing has happened on any channel yet.")).toBeTruthy();
+    expect(await screen.findByText("Nothing has happened on any account yet.")).toBeTruthy();
   });
 
   it("goes back to the stream when the dossier is the address the guardian arrived on", async () => {
