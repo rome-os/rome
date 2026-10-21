@@ -376,9 +376,8 @@ function connectionSend(backing: Backing): ChannelSend {
   // What `direct` answers while no Connection exists for the channel: the
   // lookup itself says so, the way `send` does, rather than passing for a
   // channel that cannot reach an account directly.
-  const unbacked: ChannelDirectMessaging = {
-    chatFor: () => Promise.reject(new ChannelNotConnected(channel)),
-  };
+  const notConnected = () => Promise.reject(new ChannelNotConnected(channel));
+  const unbacked: ChannelDirectMessaging = { chatFor: notConnected, conversationFor: notConnected };
   return {
     async send(conversationId, message) {
       const connection = connectionFor(backing);
@@ -394,10 +393,9 @@ function connectionSend(backing: Backing): ChannelSend {
       const connection = connectionFor(backing);
       if (!connection) return unbacked;
       if (!offers(connection, "directMessaging")) return null;
-      const direct: ChannelDirectMessaging = {
-        chatFor: (channelUserId) =>
-          callTalker(connection, (talker) => talker.directMessaging?.chatFor(channelUserId)),
-      };
+      const chatFor = (channelUserId: string) =>
+        callTalker(connection, (talker) => talker.directMessaging?.chatFor(channelUserId));
+      const direct: ChannelDirectMessaging = { chatFor, conversationFor: chatFor };
       return direct;
     },
     get activity() {

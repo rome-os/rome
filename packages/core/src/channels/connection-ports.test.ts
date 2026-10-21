@@ -331,6 +331,7 @@ describe("connection-backed send, across epochs", () => {
       ?.direct;
     if (!direct) throw new Error("the talker offers direct messaging");
     await expect(direct.chatFor("7")).resolves.toBe("first");
+    await expect(direct.conversationFor?.("7")).resolves.toBe("first");
 
     await connection.auth.revoke("bot");
     await expect(direct.chatFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
@@ -513,6 +514,9 @@ describe("a Connection with no channel record", () => {
       ChannelNotConnected,
     );
     expect(talker.state.sends).toHaveLength(0);
+    for (const lookup of [ports.send!.direct!.chatFor, ports.send!.direct!.conversationFor!]) {
+      await expect(lookup("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+    }
   });
 });
 
