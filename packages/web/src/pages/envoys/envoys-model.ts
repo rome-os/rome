@@ -58,19 +58,25 @@ function accountName(connection: ApiConnection): string | null {
   return null;
 }
 
+/** The grant through which an account is connected, if any. */
+function connectedGrant(connection: ApiConnection): string | null {
+  const grant = Object.entries(connection.grants).find(([, state]) => state !== "unauthorized");
+  return grant ? grant[0] : null;
+}
+
 function toAccount(connection: ApiConnection): EnvoyAccount | null {
   if (!LINKABLE_SERVICES.has(connection.service)) return null;
   // A core that predates agent links omits `agent`, and a placeholder has no
   // channel, so neither is an account that can carry an agent.
   if (connection.id === null || !connection.channel || connection.agent === undefined) return null;
-  const grant = Object.entries(connection.grants).find(([, state]) => state !== "unauthorized");
+  const grant = connectedGrant(connection);
   if (!grant) return null;
   const platform = platformOf(connection.service);
   const kind = DELEGATE_SERVICES.has(connection.service) ? "delegate" : "own";
   return {
     channel: connection.channel,
     connectionId: connection.id,
-    grant: grant[0],
+    grant,
     service: connection.service,
     platform,
     name: accountName(connection) ?? serviceLabel(platform),
@@ -125,4 +131,47 @@ export function buildEnvoys(
   // in its select (`AgentChange`).
   const names = new Set([MAIN_AGENT_ID, ...(loaded ? descriptions.keys() : byAgent.keys())]);
   return { envoys, unlinked, agents: [...names].sort(compareAgents) };
+}
+
+/** Services an agent's own account is made on, in the order Envoys offers them. */
+const OWN_SERVICES = ["feishu", "telegram", "discord"] as const;
+
+/** One platform a new account can be connected on, and how its setup starts. */
+export interface ConnectChoice {
+  service: string;
+  platform: string;
+  kind: LinkKind;
+  /** The connection the setup confers, or null to address the service. */
+  connectionId: string | null;
+  /** Whether the setup mints another account of a service already connected. */
+  another: boolean;
+  /** A setup already under way for this account, to re-attach to. */
+  activeSetupCid: string | null;
+  /** The service holds one account and it is connected, so none can be added. */
+  taken: boolean;
+}
+
+/** The platforms a new account can be connected on, own accounts first. A
+ *  service's first account connects in place of its placeholder, as on its
+ *  Connections card, and later ones as another account where the service
+ *  offers several. Services core does not register are left out. */
+export function connectChoices(connections: readonly ApiConnection[]): ConnectChoice[] {
+  const choices: ConnectChoice[] = [];
+  for (const service of [...OWN_SERVICES, ...DELEGATE_SERVICES]) {
+    const rows = connections.filter((connection) => connection.service === service);
+    const first = rows[0];
+    if (!first) continue;
+    const anyConnected = rows.some((connection) => connectedGrant(connection) !== null);
+    const several = rows.some((connection) => connection.severalAccounts === true);
+    choices.push({
+      service,
+      platform: platformOf(service),
+      kind: DELEGATE_SERVICES.has(service) ? "delegate" : "own",
+      connectionId: anyConnected ? null : first.id,
+      another: anyConnected && several,
+      activeSetupCid: anyConnected ? null : (Object.values(first.setups)[0] ?? null),
+      taken: anyConnected && !several,
+    });
+  }
+  return choices;
 }

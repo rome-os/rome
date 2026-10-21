@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import type { ApiConnection } from "@/lib/connections-api";
-import { buildEnvoys } from "./envoys-model";
+import { buildEnvoys, connectChoices } from "./envoys-model";
 
 function connection(overrides: Partial<ApiConnection> & { service: string }): ApiConnection {
   return {
@@ -108,5 +108,40 @@ describe("buildEnvoys", () => {
     expect(buildEnvoys([own(null)], []).unlinked.map((account) => account.kind)).toEqual([
       "delegate",
     ]);
+  });
+});
+
+describe("connectChoices", () => {
+  const placeholder = (service: string) =>
+    connection({ service, id: null, channel: null, grants: { bot: "unauthorized" } });
+
+  it("connects a service's first account in place of its placeholder", () => {
+    const [choice] = connectChoices([
+      placeholder("telegram"),
+      connection({ service: "telegram", id: "left", grants: { bot: "unauthorized" } }),
+    ]);
+    expect(choice).toMatchObject({ service: "telegram", connectionId: null, another: false });
+  });
+
+  it("adds another account where the service offers several", () => {
+    const [choice] = connectChoices([connection({ service: "discord", severalAccounts: true })]);
+    expect(choice).toMatchObject({ connectionId: null, another: true, taken: false });
+  });
+
+  it("marks a service whose one account is connected as taken", () => {
+    const [choice] = connectChoices([
+      connection({ service: "telegram_user", grants: { session: "authorized" } }),
+    ]);
+    expect(choice).toMatchObject({ kind: "delegate", platform: "telegram", taken: true });
+  });
+
+  it("offers own accounts first and leaves out services core does not register", () => {
+    const choices = connectChoices([
+      placeholder("telegram_user"),
+      placeholder("discord"),
+      placeholder("feishu"),
+      placeholder("whatsapp"),
+    ]);
+    expect(choices.map((choice) => choice.service)).toEqual(["feishu", "discord", "telegram_user"]);
   });
 });
