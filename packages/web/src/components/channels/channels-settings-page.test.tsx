@@ -220,9 +220,7 @@ describe("ChannelsSettingsPage", () => {
     // name still reads as a place.
     expect(engineeringHeading.textContent).toBe("Rome / engineering");
 
-    await user.click(
-      within(engineeringRow).getByRole("switch", { name: "Rome in this conversation" }),
-    );
+    await user.click(within(engineeringRow).getByRole("switch", { name: "Rome in this chat" }));
     await choose(user, within(engineeringRow).getByLabelText(/Respond/), "All");
     // The canonical id comes from /api/agents. Its owner remains visible for
     // disambiguation, while selecting it preserves the runtime value.
@@ -302,9 +300,7 @@ describe("ChannelsSettingsPage", () => {
     // The stored agent choice has no effect yet, so it is not counted, but the
     // card says it applies once an agent is linked.
     expect(within(silent).queryByText(/override/)).toBeNull();
-    expect(
-      within(silent).getByText(/This conversation's choice, build · coding, applies/),
-    ).toBeTruthy();
+    expect(within(silent).getByText(/This chat's choice, build · coding, applies/)).toBeTruthy();
 
     // A chat's own choice wins over the account's agent, so the picker stays.
     const linked = (await screen.findByRole("heading", { name: /support/ })).closest(
@@ -414,7 +410,7 @@ describe("ChannelsSettingsPage", () => {
     renderPage();
     const user = userEvent.setup();
     const card = await findCard();
-    const toggle = within(card).getByRole("switch", { name: "Rome in this conversation" });
+    const toggle = within(card).getByRole("switch", { name: "Rome in this chat" });
 
     await user.click(toggle);
     await user.click(toggle);
@@ -432,7 +428,7 @@ describe("ChannelsSettingsPage", () => {
     renderPage();
     const user = userEvent.setup();
     const card = await findCard();
-    const toggle = within(card).getByRole("switch", { name: "Rome in this conversation" });
+    const toggle = within(card).getByRole("switch", { name: "Rome in this chat" });
 
     await user.click(toggle);
     await waitFor(() => expect(patchBodies).toHaveLength(1));
@@ -447,7 +443,7 @@ describe("ChannelsSettingsPage", () => {
     const user = userEvent.setup();
     const card = await findCard();
 
-    await user.click(within(card).getByRole("switch", { name: "Rome in this conversation" }));
+    await user.click(within(card).getByRole("switch", { name: "Rome in this chat" }));
     expect(patchBodies).toEqual([]);
 
     view.unmount();
@@ -461,7 +457,7 @@ describe("ChannelsSettingsPage", () => {
     const user = userEvent.setup();
     const card = await findCard();
 
-    await user.click(within(card).getByRole("switch", { name: "Rome in this conversation" }));
+    await user.click(within(card).getByRole("switch", { name: "Rome in this chat" }));
     await waitFor(() => expect(patchBodies).toHaveLength(1));
 
     // Second edit lands while the first PATCH is still open, then that one fails.
@@ -481,7 +477,7 @@ describe("ChannelsSettingsPage", () => {
     renderPage();
     const user = userEvent.setup();
     const card = await findCard();
-    const toggle = within(card).getByRole("switch", { name: "Rome in this conversation" });
+    const toggle = within(card).getByRole("switch", { name: "Rome in this chat" });
 
     await user.click(toggle);
     await waitFor(() => expect(patchBodies).toHaveLength(1));
@@ -523,11 +519,11 @@ describe("ChannelsSettingsPage", () => {
     const user = userEvent.setup();
 
     expect(await screen.findByText("Could not load conversations")).toBeTruthy();
-    expect(screen.queryByText("No configurable conversations found")).toBeNull();
+    expect(screen.queryByText("No configurable chats found")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
-    expect(await screen.findByText("No configurable conversations found")).toBeTruthy();
+    expect(await screen.findByText("No configurable chats found")).toBeTruthy();
     expect(settingsLoads).toBe(2);
   });
 });

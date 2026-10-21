@@ -48,19 +48,6 @@ export class ChannelNotLinkable extends Error {
 
 type Exec = DrizzleDb | DrizzleTx;
 
-/** The agent a newly backed channel starts linked to: main when it is a
- *  linkable service's only connected account, so a guardian's first account
- *  answers. A later account starts with none. */
-function firstAccountAgent(exec: Exec, service: string): string | null {
-  if (!LINKABLE_SERVICES.has(service)) return null;
-  const backed = exec
-    .select({ id: channels.id })
-    .from(channels)
-    .where(and(eq(channels.service, service), isNotNull(channels.connectionId)))
-    .get();
-  return backed === undefined ? MAIN_AGENT_ID : null;
-}
-
 /** The service a channel belongs to. A service's first channel carries the
  *  service's name, so a name with no record answers for itself. */
 export type ServiceOfChannel = (channel: string) => string;
@@ -136,14 +123,16 @@ export class ChannelRecordsRepository {
    * channel, so it starts with no history. A Connection of any other service
    * takes back the service's unbacked channel, the one carrying the service's
    * name first. Failing that, it gets the service's name if no channel holds
-   * it, and a fresh opaque id otherwise. A linkable service's only connected
-   * account is linked to main, so a guardian's first account answers.
-   * `domain` is a Feishu app's domain, which decides its channel's platform.
+   * it, and a fresh opaque id otherwise. A new channel is linked to `agent`
+   * when its service takes one, and to none by default: Rome picks no agent
+   * for an account. `domain` is a Feishu app's domain, which decides its
+   * channel's platform.
    */
   claim(
     exec: Exec,
     connection: { id: string; service: string; domain?: string },
     now: Date,
+    { agent = null }: { agent?: string | null } = {},
   ): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
@@ -181,7 +170,7 @@ export class ChannelRecordsRepository {
       service,
       platform: platformOf(service, connection.domain),
       connectionId: connection.id,
-      agent: firstAccountAgent(exec, service),
+      agent: LINKABLE_SERVICES.has(service) ? agent : null,
       createdAt: now,
     };
     exec.insert(channels).values(row).run();

@@ -1,5 +1,7 @@
-name: Rome Node platforms
+name: Rome Node package
 
+# The unit suites of both packages run in ci.yml. This workflow checks only what they cannot:
+# that the packed archives install from npm and run on their own.
 on:
   pull_request:
     paths:
@@ -20,12 +22,8 @@ permissions:
   contents: read
 
 jobs:
-  platform:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  package:
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -35,11 +33,8 @@ jobs:
           node-version: 24
       - run: pnpm install --frozen-lockfile --ignore-scripts --filter @rome-os/node...
       - run: pnpm --filter @rome-os/node build
-      - run: pnpm --filter @rome-os/node-core exec rstest
-      - run: pnpm --filter @rome-os/node exec rstest
       - run: node packages/rome-node-cli/bin/rome-node.js --help
       - name: Install the standalone archive
-        shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/rome-node-package"
           pnpm --filter @rome-os/node-core pack --pack-destination "$RUNNER_TEMP/rome-node-package"

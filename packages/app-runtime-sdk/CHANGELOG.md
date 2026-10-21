@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.7.8](https://github.com/rome-os/rome/compare/app-runtime-v0.7.7...app-runtime-v0.7.8) (2026-10-21)
+
+
+### Features
+
+* **connector:** add Shopify and Otter.ai to the connectable toolkits ([#1169](https://github.com/rome-os/rome/issues/1169)) ([0441336](https://github.com/rome-os/rome/commit/0441336425f019158603908cf66000230e040b76))
+
 ## [0.7.7](https://github.com/rome-os/rome/compare/app-runtime-v0.7.6...app-runtime-v0.7.7) (2026-10-20)
 
 

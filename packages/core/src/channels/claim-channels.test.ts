@@ -26,6 +26,8 @@ describe("claimChannels", () => {
     expect(records.byConnection("c1")?.id).toBe("feishu");
     expect(records.byConnection("c2")?.id).toBe("telegram");
     expect(records.byConnection("c3")?.id).toBe("discord");
+    // They answered as main before accounts took agents.
+    expect(records.byConnection("c2")?.agent).toBe("core:main");
     expect(records.all()).toHaveLength(3);
   });
 

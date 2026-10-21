@@ -113,7 +113,7 @@
     "changeBond": "Change bond",
     "memoryProfile": "Memory profile",
     "timeline": "Timeline",
-    "timelineEmpty": "Nothing has happened on any channel yet.",
+    "timelineEmpty": "Nothing has happened on any account yet.",
     "loadOlder": "Load older",
     "outboundPrefix": "You:",
     "sendVia": "Send via",
@@ -145,7 +145,7 @@
     },
     "refusal": {
       "notConnected": "{{channel}} isn't connected, so Rome can't send there. Connect it in Settings.",
-      "noConversation": "Rome could not identify a direct {{channel}} conversation for this account. Open {{channel}} to reply.",
+      "noConversation": "Rome could not identify a direct {{channel}} chat for this account. Open {{channel}} to reply.",
       "unsupported": {
         "default": "Rome cannot send on {{channel}} yet."
       }
@@ -169,7 +169,7 @@
   },
   "linkPicker": {
     "columns": {
-      "channel": "Channel",
+      "channel": "Platform",
       "name": "Name",
       "handle": "Handle",
       "heldBy": "Held by"
