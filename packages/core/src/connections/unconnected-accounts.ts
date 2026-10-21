@@ -1,5 +1,5 @@
 // An account exists only while it is connected. Model:
-// docs/domain/chats.md#account.
+// docs/domains/chats.md#account.
 
 import { createLogger } from "../logger.js";
 import type { ConnectionRegistry } from "./registry.js";

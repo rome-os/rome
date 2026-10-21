@@ -1,4 +1,4 @@
-// Connection management HTTP surface. Vocabulary: docs/domain/connections.md.
+// Connection management HTTP surface. Vocabulary: docs/domains/connections.md.
 //
 // One list for everything the ConnectionRegistry holds — channels and OAuth
 // integrations alike — the sole feed for the dashboard's Connections surface.

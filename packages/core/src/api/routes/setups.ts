@@ -1,4 +1,4 @@
-// Connection conferral HTTP surface. Vocabulary: docs/domain/connections.md.
+// Connection conferral HTTP surface. Vocabulary: docs/domains/connections.md.
 //
 // Four routes for EVERY service's connect setup (channels + brokered OAuth
 // alike); per-service knowledge lives in the integration descriptor's

@@ -1,6 +1,6 @@
 /**
  * The boot pass that records a channel for each Connection from before
- * channels were recorded. Vocabulary: docs/domain/chats.md#account.
+ * channels were recorded. Vocabulary: docs/domains/chats.md#account.
  */
 
 import type { DrizzleDb } from "../db/index.js";

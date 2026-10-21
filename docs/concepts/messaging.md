@@ -1,6 +1,6 @@
 # Messaging: Policies, Sentinel, Approvals
 
-What a message, a chat, an account and an agent in a chat are is defined in [`domain/chats.md`](../domain/chats.md). This file holds how Rome decides what to do with an inbound message.
+What a message, a chat, an account and an agent in a chat are is defined in [`domain/chats.md`](../domains/chats.md). This file holds how Rome decides what to do with an inbound message.
 
 ## Policies
 
@@ -10,7 +10,7 @@ Evaluation order (first match wins):
 1. **Sender-specific** — exact [person](people.md#person) match
 2. **Thread-specific** — thread name + type match
 3. **Sender tier** — [bond level](people.md#bond-levels) match
-4. **Account-specific** — match on one of Rome's [accounts](../domain/chats.md#account). A policy on a later account's own id wins, and a policy on its service covers it otherwise
+4. **Account-specific** — match on one of Rome's [accounts](../domains/chats.md#account). A policy on a later account's own id wins, and a policy on its service covers it otherwise
 5. **Global** — catch-all
 
 Policy actions:

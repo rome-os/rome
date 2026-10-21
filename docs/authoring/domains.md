@@ -1,6 +1,6 @@
-# Domain Entries
+# Domains Entries
 
-**Domain entries** — the shared language for chats, accounts, agents and connections — live in [`domain/`](../domain/README.md), one file per bounded context. The family follows Domain-Driven Design: a context answers one question, and every word inside it has one meaning. Unlike a [concepts](concepts.md) entry, which records one term and its contracts wherever it is used, a domain entry belongs to a context and means nothing outside it. The miss that earned this family: the same thing was called channel, connection, bot account and linked agent on different surfaces, and every design discussion started by defining the words again.
+**Domain entries** — the shared language for chats, accounts, agents and connections — live in [`domains/`](../domains/README.md), one file per bounded context. The family follows Domain-Driven Design: a context answers one question, and every word inside it has one meaning. Unlike a [concepts](concepts.md) entry, which records one term and its contracts wherever it is used, a domain entry belongs to a context and means nothing outside it. The miss that earned this family: the same thing was called channel, connection, bot account and linked agent on different surfaces, and every design discussion started by defining the words again.
 
 ## Format
 
@@ -25,7 +25,7 @@ Entries name no file, type or function. A rule states behaviour the guardian can
 A word earns an entry when all hold: `[llm]`
 
 1. The guardian uses it, or needs one word for a thing they describe in several.
-2. It belongs to one context. A word two contexts need is two entries, one per context, each with the meaning that context gives it ([Agent](../domain/chats.md#agent) in Chats and [Agent](../domain/agents.md#agent) in Agents).
+2. It belongs to one context. A word two contexts need is two entries, one per context, each with the meaning that context gives it ([Agent](../domains/chats.md#agent) in Chats and [Agent](../domains/agents.md#agent) in Agents).
 3. It is separable from every word in its context in one line. If that line cannot be written, it is the same word.
 
 > Prefer: adding "thread" after the guardian described a side conversation started from a message.

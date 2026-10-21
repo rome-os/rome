@@ -1,4 +1,4 @@
-# docs/domain/
+# docs/domains/
 
 The language Rome's code, docs and dashboard share for chats, accounts, agents and connections, written with the guardian as the domain expert. It follows Domain-Driven Design: the language is split into contexts, each answering one question, and inside a context every word has one meaning. The code carries the same words, so a reader of the code reads the model.
 
@@ -25,7 +25,7 @@ Each word has a heading, its meaning in one or two sentences, and the rules that
 - A new word enters its context file before it enters code, UI copy or a doc. If it fits no context, it is not one of these words and belongs in [`concepts/`](../concepts/index.md).
 - A change to a rule lands in the same PR as the code that follows it.
 - One meaning per word within a context. A word that needs two meanings is two words.
-- The rules for writing here are in [`authoring/domain.md`](../authoring/domain.md).
+- The rules for writing here are in [`authoring/domains.md`](../authoring/domains.md).
 
 ## Where the code stands
 

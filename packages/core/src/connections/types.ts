@@ -1,4 +1,4 @@
-// Connection caller and builder contracts. Vocabulary: docs/domain/connections.md.
+// Connection caller and builder contracts. Vocabulary: docs/domains/connections.md.
 //
 // The runtime never inspects the contents of a credential's `material` (only
 // the `expiresAt` envelope).
@@ -314,7 +314,7 @@ export interface ConnectionDescriptor {
    *  with its own Connection and channel. A service that keeps its stores or
    *  adapter state under one channel, or is a single presence by nature
    *  (webchat, email), leaves it unset. Vocabulary:
-   *  docs/domain/chats.md#account. */
+   *  docs/domains/chats.md#account. */
   severalAccounts?: boolean;
   /** The platform account a grant's profile names (a bot id, an app id), or
    *  null when the profile names none. It reads the one field rather than

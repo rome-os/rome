@@ -1,4 +1,4 @@
-// Connection public surface. Vocabulary: docs/domain/connections.md.
+// Connection public surface. Vocabulary: docs/domains/connections.md.
 
 export * from "./types.js";
 export * from "./errors.js";

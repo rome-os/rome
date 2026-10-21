@@ -9,7 +9,7 @@ Browse by domain:
 - [`rome-cloud.md`](rome-cloud.md) — Rome Cloud, Instance sign-in, OAuth handoff. *The operator-run service in front of all instances.*
 - [`agents.md`](agents.md) — Agents (incl. the agent hierarchy). *The LLM-backed runtime entities.*
 - [`sessions.md`](sessions.md) — Sessions, Model pin, Turns, Events, Blocks, Deltas, Owning app, Forked turns. *The durable boundary around agent work.*
-- [`messaging.md`](messaging.md) — Policies, Sentinel, Approvals. *How the system decides what to do with an inbound message.* What a message, a chat and an account are is in [`../domain/`](../domain/README.md).
+- [`messaging.md`](messaging.md) — Policies, Sentinel, Approvals. *How the system decides what to do with an inbound message.* What a message, a chat and an account are is in [`../domains/`](../domains/README.md).
 - [`apps.md`](apps.md) — Rome Apps (incl. ids, SDKs, caller identity, lockfile, install sources, app store, handles, app data, hooks). *The extensibility surface.*
 - [`actions.md`](actions.md) — Actions, Action results, Suspensions, Actor. *The primary unit of executable behavior, its result envelope, and the session identity accountable for it.*
 - [`host-execution.md`](host-execution.md) — Host jobs. *Privileged scripts whose lifetime belongs to the host service outside Rome.*
@@ -18,7 +18,7 @@ Browse by domain:
 
 ## Entry candidates
 
-Terms used on multiple surfaces with no entry yet. Chats, accounts, agents in chats and connections are defined in [`../domain/`](../domain/README.md), not here. Each needs a full pass through the [admission bar](../authoring/concepts.md#admission) before it becomes an entry. They are listed here so recurring confusion has a place to land. Format: term — surfaces — suspected contract.
+Terms used on multiple surfaces with no entry yet. Chats, accounts, agents in chats and connections are defined in [`../domains/`](../domains/README.md), not here. Each needs a full pass through the [admission bar](../authoring/concepts.md#admission) before it becomes an entry. They are listed here so recurring confusion has a place to land. Format: term — surfaces — suspected contract.
 
 - **Setup (conferral setup)** — connection setup runtime, dashboard setup renderer, [`architecture/channels.md`](../architecture/channels.md) — a server-owned resumable connect protocol with a closed verb set. Any surface can render any setup.
 - **Trace** — per-turn evidence storage, dashboard trace drawer, replay app agent prompt — append-only per-turn evidence stream, distinct from OTEL spans, which docs never disambiguate.
