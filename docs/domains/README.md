@@ -49,3 +49,6 @@ Diffs still owed to the model, each a change of its own:
 - A thread's messages are the parent chat's, marked by thread.
 - A disconnected account's record is deleted, with the messages only it carried.
 - No automatic link of a service's first account to main.
+- The reply rule takes the value "when it is needed", backed by the lightweight check.
+- A woken agent gets the recent messages of its place as its default view, and a tool to read more of the chat.
+- A message to a chat other than the one the agent was woken in waits on an approval card.
