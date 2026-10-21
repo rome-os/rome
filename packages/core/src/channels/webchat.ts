@@ -71,8 +71,8 @@ export class WebChatAdapter {
 
   /** Persist an assistant reply into the session. A message with no text,
    *  parts or attachments writes nothing, and its receipt has no `messageId`. */
-  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const threadId: string = conversationId;
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const threadId: string = chatId;
     // Only the host authors routine cards (see host-only-parts.ts).
     const given = withoutHostOnlyParts(message.parts ?? []);
     if (message.parts && given.length < message.parts.length) {
@@ -90,12 +90,12 @@ export class WebChatAdapter {
       parts.push({ type: "text" as const, content: `[${att.type}] ${label}` });
     }
 
-    if (parts.length === 0) return { conversationId };
+    if (parts.length === 0) return { chatId };
 
     const messageId = uuid();
     await this.webchatRepo.addSentMessage(messageId, threadId, parts, message.turnId ?? null);
     log.info("webchat message persisted", { threadId });
-    return { conversationId, messageId };
+    return { chatId, messageId };
   }
 
   onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
@@ -121,7 +121,7 @@ export class WebChatAdapter {
       channel: "webchat",
       direction: senderId === WEBCHAT_GUARDIAN_USER_ID ? "inbound" : "outbound",
       messageId: row.id,
-      conversationId: row.sessionId as ChatId,
+      chatId: row.sessionId as ChatId,
       senderId,
       senderDisplayName: isUser ? "Guardian" : prettyAgentName(row.sessionAgentName),
       text: contentToText(row.content),

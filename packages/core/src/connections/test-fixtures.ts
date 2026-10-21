@@ -131,7 +131,7 @@ export function makeFakeTalker(
       }
       state.sends.push({ address, msg });
       return {
-        conversationId: address,
+        chatId: address,
       } satisfies MessageReceipt;
     },
   };
@@ -342,7 +342,7 @@ export function makeInboundMessage(overrides?: Partial<ChannelMessage>): Channel
     channel: "test",
     direction: "inbound",
     messageId: "msg-1",
-    conversationId: "thread-1" as ChatId,
+    chatId: "thread-1" as ChatId,
     senderId: "sender-1",
     senderDisplayName: "Sender",
     thread: { kind: "dm" },

@@ -52,9 +52,9 @@ export function directoryPage<T>(
  * implementation instead, opening or looking up the thread; that one is a
  * provider call and should be priced as one.
  */
-export function addressIsConversationFeature(): ChannelDirectMessaging {
+export function addressIsConversationFeature(): Pick<ChannelDirectMessaging, "chatFor"> {
   return {
-    async conversationFor(channelUserId: string) {
+    async chatFor(channelUserId: string) {
       const trimmed = channelUserId.trim();
       return trimmed === "" ? null : (trimmed as ChatId);
     },
@@ -62,13 +62,13 @@ export function addressIsConversationFeature(): ChannelDirectMessaging {
 }
 
 export function typingActivityFeature(adapter: {
-  notifyTyping(conversationId: string): Promise<void>;
+  notifyTyping(chatId: string): Promise<void>;
 }): ChannelActivity {
   return {
     async begin(input) {
-      await adapter.notifyTyping(input.conversationId);
+      await adapter.notifyTyping(input.chatId);
       return {
-        update: async () => adapter.notifyTyping(input.conversationId),
+        update: async () => adapter.notifyTyping(input.chatId),
         finish: async () => {},
       };
     },

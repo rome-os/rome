@@ -658,7 +658,7 @@ export class ReplyDelivery {
           transport.create(this.conversation, rendered, first ? this.options.replyTo : undefined),
         );
         // Later messages follow the first wherever it landed.
-        this.conversation = receipt.conversationId;
+        this.conversation = receipt.chatId;
         this.unavailableRetries = 0;
         const part: Part = {
           start: plan.start,

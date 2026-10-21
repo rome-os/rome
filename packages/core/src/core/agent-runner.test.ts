@@ -4086,7 +4086,7 @@ describe("AgentRunner", () => {
 
     it("skips stored-message context for a channel whose surface needs none", async () => {
       const webchatRepo = new WebChatRepository(testDb.db);
-      const conversation = await webchatRepo.ensureChannelConversation({
+      const conversation = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "quiet-context",
         agentName: "main",
@@ -4134,7 +4134,7 @@ describe("AgentRunner", () => {
 
     it("injects pending channel notifications and exact reply context once before the current message", async () => {
       const webchatRepo = new WebChatRepository(testDb.db);
-      const conversation = await webchatRepo.ensureChannelConversation({
+      const conversation = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "channel-context",
         agentName: "main",
@@ -4211,12 +4211,12 @@ describe("AgentRunner", () => {
 
     it("injects a child thread's parent starter before Rome's first reply and the current message", async () => {
       const webchatRepo = new WebChatRepository(testDb.db);
-      const parent = await webchatRepo.ensureChannelConversation({
+      const parent = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "parent-channel-thread-starter",
         agentName: "main",
       });
-      const child = await webchatRepo.ensureChannelConversation({
+      const child = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "child-thread-starter-context",
         parentThreadId: "parent-channel-thread-starter",
@@ -4290,7 +4290,7 @@ describe("AgentRunner", () => {
 
     it("injects only the latest 20 pending notifications and marks the omitted snapshot consumed", async () => {
       const webchatRepo = new WebChatRepository(testDb.db);
-      const conversation = await webchatRepo.ensureChannelConversation({
+      const conversation = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "bounded-channel-context",
         agentName: "main",
@@ -4348,7 +4348,7 @@ describe("AgentRunner", () => {
 
     it("uses provider-supplied reply content for the current turn without persisting a synthetic message", async () => {
       const webchatRepo = new WebChatRepository(testDb.db);
-      const conversation = await webchatRepo.ensureChannelConversation({
+      const conversation = await webchatRepo.ensureChannelChat({
         channel: "wechat",
         threadId: "wechat-runtime-reply",
         agentName: "main",

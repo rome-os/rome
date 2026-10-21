@@ -429,7 +429,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
                 conversations: page.items.map((dialog) => ({
                   ref: {
                     connectionId: kit.connectionId,
-                    conversationId: dialog.id as import("@rome-os/app-runtime").ChatId,
+                    chatId: dialog.id as import("@rome-os/app-runtime").ChatId,
                   },
                   service: "telegram_user",
                   kind:
@@ -451,7 +451,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
             history: {
               async query(input) {
                 const lines = await adapter.fetchHistory(
-                  input.conversationId ?? null,
+                  input.chatId ?? null,
                   historyWindowHours(input.since),
                 );
                 return lines.slice(0, historyQueryLimit(input.limit)).map(
@@ -489,9 +489,9 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
               }
               return adapter.stop();
             },
-            async send(conversationId, msg) {
+            async send(chatId, msg) {
               try {
-                return await adapter.send(conversationId, msg);
+                return await adapter.send(chatId, msg);
               } catch (err) {
                 // A 401 / session-revoked from send() is a refused credential.
                 if (isTelegramUserSessionRejected(err)) {

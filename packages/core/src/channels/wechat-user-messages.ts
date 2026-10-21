@@ -70,8 +70,8 @@ export function toWechatUserChannelMessage(message: WechatUserMessage): ChannelM
     channel: WECHAT_USER_CHANNEL,
     direction: message.isSelf ? "outbound" : "inbound",
     messageId: message.id,
-    conversationId: message.conversationId as ChatId,
-    senderId: message.senderId || message.conversationId,
+    chatId: message.chatId as ChatId,
+    senderId: message.senderId || message.chatId,
     ...(message.senderName ? { senderDisplayName: message.senderName } : {}),
     text: message.text,
     attachments: [],
@@ -108,9 +108,9 @@ function directAddresses(accounts: readonly MessageAccount[]): string[] {
  */
 export function wechatUserMessages(reader: WechatUserReader): Messages {
   return {
-    async query({ conversationId, since, limit }) {
+    async query({ chatId, since, limit }) {
       const messages = await reader.messages({
-        ...(conversationId ? { conversationId } : {}),
+        ...(chatId ? { chatId } : {}),
         ...(since ? { since: querySince(since) } : {}),
         limit: queryLimit(limit),
       });
@@ -129,10 +129,10 @@ function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
   ): Promise<Message[]> {
     const before = opts.before ? new Date(opts.before.timestamp * 1000) : undefined;
     const perConversation = await Promise.all(
-      addresses.map((conversationId) =>
+      addresses.map((chatId) =>
         reader
           .messages({
-            conversationId,
+            chatId,
             ...(before ? { before } : {}),
             limit: opts.limit,
             includeBoundaryTies: true,
@@ -161,7 +161,7 @@ function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
       const addresses = directAddresses(accounts);
       if (addresses.length === 0) return 0;
       const counts = await Promise.all(
-        addresses.map((conversationId) => reader.count(conversationId).catch(() => 0)),
+        addresses.map((chatId) => reader.count(chatId).catch(() => 0)),
       );
       return counts.reduce((total, n) => total + n, 0);
     },

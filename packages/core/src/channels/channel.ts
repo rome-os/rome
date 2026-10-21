@@ -4,7 +4,7 @@
  * reach (`Accounts`, accounts.ts) and what was said to them (`Messages`,
  * messages.ts). So a caller reads one list of channels rather than naming each
  * provider's transport, address book and message store one at a time.
- * Vocabulary: docs/concepts/messaging.md. Invariants:
+ * Vocabulary: docs/domains/chats.md. Invariants:
  * docs/architecture/channels.md#channel-ports.
  *
  * A channel is not a Connection. A Connection may back a channel's `send` and
@@ -48,7 +48,7 @@ export interface ChannelSend extends AppChannelSend {
   /**
    * Reaching one account directly rather than replying in a conversation that
    * exists, or null where the channel cannot. When no Connection
-   * exists for the channel, `conversationFor` rejects with
+   * exists for the channel, `chatFor` rejects with
    * {@link ChannelNotConnected}, as `send` does. A Connection that exists but
    * has no live talker (locked, awaiting re-authorization) reads as null.
    */

@@ -52,7 +52,7 @@ describe("DiscordAdapter history", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "m1",
-      conversationId: "chan-1",
+      chatId: "chan-1",
       senderId: "u1",
       senderDisplayName: "Ann",
       senderUsername: "ann",

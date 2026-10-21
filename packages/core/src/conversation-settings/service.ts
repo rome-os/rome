@@ -233,7 +233,7 @@ export class ChatSettingsService implements ChatSettingsControl {
           ref: descriptor.parent,
           service: descriptor.service,
           kind: "channel",
-          displayName: descriptor.containerName ?? descriptor.parent.conversationId,
+          displayName: descriptor.containerName ?? descriptor.parent.chatId,
           containerName: descriptor.containerName,
         });
       }
@@ -291,7 +291,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       if (row.sourceChannel && this.connectionsOf(row.sourceChannel).length === 0) {
         log.debug("conversation_settings.removed_connection_hidden", {
           service: row.sourceChannel,
-          conversationId: row.sourceThreadId,
+          chatId: row.sourceThreadId,
         });
         continue;
       }
@@ -328,8 +328,8 @@ export class ChatSettingsService implements ChatSettingsControl {
       candidates.push({ descriptor, availability, source });
     }
     candidates.sort((a, b) => {
-      const left = `${a.descriptor.service}\0${a.descriptor.containerName ?? ""}\0${a.descriptor.displayName}\0${a.descriptor.ref.connectionId}\0${a.descriptor.ref.conversationId}`;
-      const right = `${b.descriptor.service}\0${b.descriptor.containerName ?? ""}\0${b.descriptor.displayName}\0${b.descriptor.ref.connectionId}\0${b.descriptor.ref.conversationId}`;
+      const left = `${a.descriptor.service}\0${a.descriptor.containerName ?? ""}\0${a.descriptor.displayName}\0${a.descriptor.ref.connectionId}\0${a.descriptor.ref.chatId}`;
+      const right = `${b.descriptor.service}\0${b.descriptor.containerName ?? ""}\0${b.descriptor.displayName}\0${b.descriptor.ref.connectionId}\0${b.descriptor.ref.chatId}`;
       return left.localeCompare(right);
     });
     const page = candidates.slice(offset, offset + limit);
@@ -350,7 +350,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     const { descriptor, row } = this.resolveConversation(ref);
     if (this.isThread(descriptor)) {
       if (!descriptor.parent) {
-        throw new Error(`Thread conversation "${ref.conversationId}" has no parent settings owner`);
+        throw new Error(`Thread conversation "${ref.chatId}" has no parent settings owner`);
       }
       const parent = await this.get(descriptor.parent);
       const settingsOwner = parent.inheritedFrom ?? parent.conversation.ref;
@@ -365,8 +365,8 @@ export class ChatSettingsService implements ChatSettingsControl {
       };
       log.debug("conversation_settings.opened", {
         connectionId: ref.connectionId,
-        conversationId: ref.conversationId,
-        settingsOwnerConversationId: settingsOwner.conversationId,
+        chatId: ref.chatId,
+        settingsOwnerChatId: settingsOwner.chatId,
       });
       return snapshot;
     }
@@ -383,7 +383,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     };
     log.debug("conversation_settings.opened", {
       connectionId: ref.connectionId,
-      conversationId: ref.conversationId,
+      chatId: ref.chatId,
     });
     return snapshot;
   }
@@ -461,7 +461,7 @@ export class ChatSettingsService implements ChatSettingsControl {
         });
         log.info("conversation_settings.updated", {
           connectionId: input.ref.connectionId,
-          conversationId: input.ref.conversationId,
+          chatId: input.ref.chatId,
           fields: [...changed],
           actor: input.actor,
         });
@@ -492,7 +492,7 @@ export class ChatSettingsService implements ChatSettingsControl {
         await this.deps.onChanged({ ref: input.ref, actor: input.actor, fields, reset: true });
         log.info("conversation_settings.reset", {
           connectionId: input.ref.connectionId,
-          conversationId: input.ref.conversationId,
+          chatId: input.ref.chatId,
           actor: input.actor,
         });
         return this.get(input.ref);
@@ -562,7 +562,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     }
     const ref = {
       connectionId: connections[0]!.id,
-      conversationId: row.sourceThreadId as ChatId,
+      chatId: row.sourceThreadId as ChatId,
     };
     const remembered = this.descriptors.get(this.key(ref));
     const descriptor: ChatDescriptor = {
@@ -586,7 +586,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       if (parent?.sourceThreadId) {
         descriptor.parent = {
           connectionId: connections[0]!.id,
-          conversationId: parent.sourceThreadId as ChatId,
+          chatId: parent.sourceThreadId as ChatId,
         };
       }
     }
@@ -616,7 +616,7 @@ export class ChatSettingsService implements ChatSettingsControl {
       ref,
       service: connection.service,
       kind: "channel",
-      displayName: ref.conversationId,
+      displayName: ref.chatId,
     };
     this.remember(descriptor);
     return { descriptor, row: null };
@@ -663,23 +663,23 @@ export class ChatSettingsService implements ChatSettingsControl {
     if (!this.isThread(descriptor)) return;
     if (!descriptor.parent) {
       throw new Error(
-        `Thread conversation "${descriptor.ref.conversationId}" has no parent settings owner`,
+        `Thread conversation "${descriptor.ref.chatId}" has no parent settings owner`,
       );
     }
     throw new Error(
-      `Conversation "${descriptor.ref.conversationId}" is a thread and follows parent "${descriptor.parent.conversationId}"; update the parent conversation instead`,
+      `Conversation "${descriptor.ref.chatId}" is a thread and follows parent "${descriptor.parent.chatId}"; update the parent conversation instead`,
     );
   }
 
   private key(ref: ChatRef): string {
-    return `${ref.connectionId}\0${ref.conversationId}`;
+    return `${ref.connectionId}\0${ref.chatId}`;
   }
 
   /** A conversation on no channel stores nothing, so it locks on its own
    *  key, which no channel's conversation shares. */
   private storageKey(ref: ChatRef): string {
     const channel = this.channelName(ref);
-    return channel === null ? this.key(ref) : `${channel}\0${ref.conversationId}`;
+    return channel === null ? this.key(ref) : `${channel}\0${ref.chatId}`;
   }
 
   /** The channel the conversation `ref` addresses belongs to, or null when
@@ -698,7 +698,7 @@ export class ChatSettingsService implements ChatSettingsControl {
 
   /** The row of the conversation `ref` on `channel`, and none on no channel. */
   private find(channel: string | null | undefined, ref: ChatRef): StoredChatRow | null {
-    return channel ? this.deps.repository.find(channel, ref.conversationId) : null;
+    return channel ? this.deps.repository.find(channel, ref.chatId) : null;
   }
 
   /** The Connections backing the channel named `channel`. */
@@ -711,7 +711,7 @@ export class ChatSettingsService implements ChatSettingsControl {
   private logRejected(ref: ChatRef, err: unknown): void {
     log.warn("conversation_settings.rejected", {
       connectionId: ref.connectionId,
-      conversationId: ref.conversationId,
+      chatId: ref.chatId,
       error: err instanceof Error ? err.message : String(err),
     });
   }

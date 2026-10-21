@@ -369,7 +369,7 @@ function toConversationDescriptor(
   conversation: WechatUserChat,
 ): ChatDescriptor {
   return {
-    ref: { connectionId, conversationId: conversation.id as ChatId },
+    ref: { connectionId, chatId: conversation.id as ChatId },
     service: WECHAT_USER_SERVICE,
     kind: conversation.isGroup ? "group" : "dm",
     displayName: conversation.name || conversation.id,

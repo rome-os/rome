@@ -997,7 +997,7 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
       source: "configured",
       snapshot: {
         conversation: {
-          ref: { connectionId: "discord-1", conversationId: "engineering" as ChatId },
+          ref: { connectionId: "discord-1", chatId: "engineering" as ChatId },
           service: "discord",
           kind: "group",
           displayName: "can you see active chats?",
@@ -1023,7 +1023,7 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
       source: "known",
       snapshot: {
         conversation: {
-          ref: { connectionId: "telegram-1", conversationId: "dm-42" as ChatId },
+          ref: { connectionId: "telegram-1", chatId: "dm-42" as ChatId },
           service: "telegram",
           kind: "dm",
           displayName: "Ray",
@@ -1350,14 +1350,14 @@ export const handlers = [
   // path or the dashboard would toast an error on each change.
   http.patch("/api/conversation-settings", async ({ request }) => {
     const body = (await request.json()) as {
-      ref: { connectionId: string; conversationId: string };
+      ref: { connectionId: string; chatId: string };
       set: PartialChatSettings;
       clear?: string[];
     };
     const found = conversationSettings.items.find(
       (candidate) =>
         candidate.snapshot.conversation.ref.connectionId === body.ref.connectionId &&
-        candidate.snapshot.conversation.ref.conversationId === body.ref.conversationId,
+        candidate.snapshot.conversation.ref.chatId === body.ref.chatId,
     );
     if (!found) return HttpResponse.json({ error: "Unknown conversation" }, { status: 404 });
     found.snapshot.effective = mergeSettings(found.snapshot.effective, body.set);

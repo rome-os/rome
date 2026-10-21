@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { RenewalUnavailable } from "../connections/errors.js";
 import { eq, lt } from "drizzle-orm";
 import { oauthPendingAttempts } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -60,10 +61,12 @@ export function createRomeCloudOAuthStartUrl(provider: OAuthProvider): RomeCloud
   // Available whenever Rome Cloud is reachable. The connect link is the instance's
   // own start route as a same-origin relative path — the browser resolves it
   // against the dashboard origin, which is exactly where that route lives. No
-  // request needed.
+  // request needed. Shopify authorizes per store, and a bare link can't ask which
+  // store, so its link opens the Settings card, whose setup asks first.
   return {
     provider,
-    connectUrl: `/api/oauth/${provider}/start`,
+    connectUrl:
+      provider === "shopify" ? `/settings/connections/${provider}` : `/api/oauth/${provider}/start`,
     available: true,
     unavailableReason: null,
   };
@@ -72,7 +75,7 @@ export function createRomeCloudOAuthStartUrl(provider: OAuthProvider): RomeCloud
 export async function createRomeCloudOAuthStartRedirect(
   db: DrizzleDb,
   provider: OAuthProvider,
-  opts?: { reconnect?: boolean },
+  opts?: { reconnect?: boolean; shop?: string },
 ): Promise<string> {
   const romeCloudOrigin = getRomeCloudOrigin();
   if (!romeCloudOrigin) {
@@ -112,6 +115,11 @@ export async function createRomeCloudOAuthStartRedirect(
   // on the existing connection.
   if (opts?.reconnect) {
     authorizeUrl.searchParams.set("reconnect", "1");
+  }
+  // Shopify authorizes per store; Rome Cloud validates the domain and builds the
+  // store's own authorize URL from it.
+  if (opts?.shop) {
+    authorizeUrl.searchParams.set("shop", opts.shop);
   }
 
   return authorizeUrl.toString();
@@ -210,4 +218,103 @@ export async function redeemRomeCloudOAuthHandoff(
         ? (data.metadata as Record<string, unknown>)
         : null,
   };
+}
+
+/** How long a refresh may take. It runs under the grant's lock and at boot. */
+const REFRESH_TIMEOUT_MS = 15_000;
+
+/**
+ * Renew an expiring provider grant through Rome Cloud. Rome Cloud holds the
+ * provider client secret, so it runs the refresh and answers with the
+ * replacement bundle; it only refreshes a refresh token it stores for this
+ * instance's account. The instance authenticates with its enrolled token, as
+ * for the handoff redeem.
+ *
+ * Only Rome Cloud's explicit `invalid_grant` is a refusal, after which the grant
+ * needs a reconnect. Every other failure throws `RenewalUnavailable`, so the
+ * grant is kept and retried: Rome Cloud not answering (network, timeout, 429,
+ * 5xx), or this instance failing to authenticate to it (not enrolled, a 401 or
+ * 403), says nothing about the provider grant itself.
+ */
+export async function refreshRomeCloudOAuthGrant(
+  provider: OAuthProvider,
+  refreshToken: string,
+): Promise<OAuthTokenBundle> {
+  const romeCloudOrigin = getRomeCloudOrigin();
+  if (!romeCloudOrigin) {
+    throw new RenewalUnavailable("Rome Cloud origin is not configured for OAuth refresh.");
+  }
+  const instanceToken = getInstanceToken();
+  if (!instanceToken) {
+    throw new RenewalUnavailable("This instance is not enrolled with Rome Cloud.");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(new URL("/connections/token", romeCloudOrigin), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        Authorization: `Bearer ${instanceToken}`,
+      },
+      cache: "no-store",
+      body: JSON.stringify({ grant_type: "refresh_token", provider, refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new RenewalUnavailable("Rome Cloud OAuth refresh did not complete.", error);
+  }
+
+  // fetch resolves at the headers, so the body can still time out or drop.
+  // That is Rome Cloud not answering, not a refusal.
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    throw new RenewalUnavailable("Rome Cloud OAuth refresh response did not complete.", error);
+  }
+  let data: {
+    provider?: unknown;
+    tokens?: OAuthTokenBundle;
+    error?: string;
+    error_description?: string;
+  } | null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const message =
+      data?.error_description ||
+      data?.error ||
+      `Rome Cloud OAuth refresh failed with status ${response.status}.`;
+    if (response.status === 400 && data?.error === "invalid_grant") {
+      throw new Error(message);
+    }
+    throw new RenewalUnavailable(message);
+  }
+  // A 200 that isn't a complete refresh answer (an outage page, a truncated
+  // body, a bundle missing its refresh token or expiry) is Rome Cloud not
+  // answering properly, not a refusal of the grant. Accepting a partial bundle
+  // would replace a renewable credential with one that can never renew.
+  if (data?.provider !== provider || !isCompleteRefreshBundle(data.tokens)) {
+    throw new RenewalUnavailable("Rome Cloud returned an invalid OAuth refresh payload.");
+  }
+  return data.tokens;
+}
+
+/** A refreshed grant must carry a new access token, a refresh token for the
+ *  next renewal, and the access token's expiry. */
+function isCompleteRefreshBundle(tokens: OAuthTokenBundle | undefined): tokens is OAuthTokenBundle {
+  const nonEmpty = (value: unknown) => typeof value === "string" && value.trim().length > 0;
+  return (
+    !!tokens &&
+    nonEmpty(tokens.accessToken) &&
+    nonEmpty(tokens.refreshToken) &&
+    nonEmpty(tokens.expiresAt) &&
+    !Number.isNaN(Date.parse(tokens.expiresAt as string))
+  );
 }

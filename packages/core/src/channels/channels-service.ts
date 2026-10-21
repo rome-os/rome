@@ -104,12 +104,12 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
 
       async send(
         channel: string,
-        conversationId: ChatId,
+        chatId: ChatId,
         message: OutgoingMessage,
       ): Promise<MessageReceipt> {
         const backing = backingConnection(deps.registry, channel, deps.channelOf);
         if (!backing) throw new Error(`No Talk connection registered for "${channel}"`);
-        return sendThrough(backing, conversationId, message, deps.pacing);
+        return sendThrough(backing, chatId, message, deps.pacing);
       },
 
       query,

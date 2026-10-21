@@ -42,7 +42,7 @@ export function linkedInHistoryMessage(row: LinkedInHistoryMessage): ChannelMess
     channel: "linkedin",
     direction: row.senderIsSelf ? "outbound" : "inbound",
     messageId: row.messageId,
-    conversationId: row.threadId as ChatId,
+    chatId: row.threadId as ChatId,
     senderId: linkedInChannelUserId(row),
     ...(row.senderName ? { senderDisplayName: row.senderName } : {}),
     text: linkedInHistoryText(row),

@@ -8,7 +8,7 @@ import type { AgentSessionManager } from "./agent-session.js";
 import type { AgentLoader } from "./agent-loader.js";
 import { createLogger } from "../logger.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { channelConversationId } from "../db/session-kind.js";
+import { channelChatId } from "../db/session-kind.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import {
   AgentTraceRecorder,
@@ -524,7 +524,7 @@ export class AgentRunner {
       promptPreview: params.prompt.slice(0, 200),
     });
 
-    const threadContext = await this.withConversationId(params.threadContext);
+    const threadContext = await this.withChatId(params.threadContext);
     const init = {
       workingDir: params.workingDir,
       threadContext,
@@ -617,11 +617,11 @@ export class AgentRunner {
    * resumes carry only the channel address, and an approval saved before
    * callers set the id carries no id at all.
    */
-  private async withConversationId(
+  private async withChatId(
     threadContext: ThreadContext | undefined,
   ): Promise<ThreadContext | undefined> {
     if (!threadContext || threadContext.romeSessionId || !this.webchatRepo) return threadContext;
-    const romeSessionId = await this.webchatRepo.findConversationIdByAddress(
+    const romeSessionId = await this.webchatRepo.findChatIdByAddress(
       threadContext.channel,
       threadContext.threadId,
     );
@@ -719,7 +719,7 @@ export class AgentRunner {
   private async createForkTraceRecorder(
     params: ForkRunParams,
     turnStart: Extract<AgentEvent, { type: "turn_start" }>,
-    sourceConversationId?: string,
+    sourceChatId?: string,
   ): Promise<AgentTraceRecorder | null> {
     if (!this.webchatRepo) return null;
     try {
@@ -727,11 +727,11 @@ export class AgentRunner {
       // Prefer the source's conversation while it exists. Read again rather
       // than trusting the session's cached row, which can outlive a deletion.
       // The fallbacks cover rows that recorded none, or one since deleted.
-      const recorded = await findRecordedConversation(this.webchatRepo, sourceConversationId);
+      const recorded = await findRecordedConversation(this.webchatRepo, sourceChatId);
       const parentSessionId =
         recorded?.id ??
         thread?.romeSessionId ??
-        (thread ? channelConversationId(thread.channel, thread.threadId) : null);
+        (thread ? channelChatId(thread.channel, thread.threadId) : null);
       const parent =
         recorded ?? (parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null);
       const parentName = parent?.name ?? thread?.threadName ?? params.sourceSessionId;

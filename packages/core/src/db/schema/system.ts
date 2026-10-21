@@ -32,7 +32,7 @@ export const sessions = sqliteTable(
      *  rows written before the column existed and for sessions whose caller
      *  named no conversation. No foreign key: channel, action and subagent
      *  conversations are recorded after their first session is created. */
-    conversationId: text("conversation_id"),
+    chatId: text("conversation_id"),
     /** Which provider produced this conversation's thread, so a resumed session
      *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
      *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
@@ -57,7 +57,7 @@ export const sessions = sqliteTable(
       enum: ["active", "completed", "error"],
     }).notNull(),
   },
-  (table) => [index("idx_sessions_conversation").on(table.conversationId)],
+  (table) => [index("idx_sessions_conversation").on(table.chatId)],
 );
 
 // Provider-native history anchor for one successfully completed Rome turn.
@@ -174,7 +174,7 @@ export const outboundMessages = sqliteTable(
     channelUserId: text("channel_user_id").notNull(),
     /** The conversation the channel resolved the address to, kept so a retry
      *  does not have to ask again. */
-    conversationId: text("conversation_id").notNull(),
+    chatId: text("conversation_id").notNull(),
     text: text("text").notNull(),
     state: text("state", { enum: ["sending", "unconfirmed", "failed"] }).notNull(),
     /** The channel's own id for the message, once it has taken it. Null while

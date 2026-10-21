@@ -9,7 +9,7 @@ import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
 /**
  * A channel a Connection backs, as stored: its id, the service and platform
  * it is on, the Connection behind it now (null once that Connection is gone),
- * and the agent linked to it. Vocabulary: docs/concepts/messaging.md#romes-accounts.
+ * and the agent linked to it. Vocabulary: docs/domains/chats.md#account.
  */
 export interface ChannelRecord {
   id: string;

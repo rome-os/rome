@@ -34,7 +34,7 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 
 ## Person
 
-Rome tracks people the guardian knows. Each person carries a [bond level](#bond-levels) that determines how the system interacts with them. [Links](#link) to multiple [accounts](#account) let the system recognize the same person across [Rome's accounts](messaging.md#romes-accounts).
+Rome tracks people the guardian knows. Each person carries a [bond level](#bond-levels) that determines how the system interacts with them. [Links](#link) to multiple [accounts](#account) let the system recognize the same person across Rome's own [accounts](../domains/chats.md#account).
 
 **Contracts:**
 
@@ -63,7 +63,7 @@ An account is a party on an external messaging platform — a Telegram user, a W
 
 - **[Person](#person)** — Rome owns persons, and platforms own accounts. A person aggregates the accounts linked to them.
 - **[Address](#address)** — an account is the party. An address is one of the forms it is reachable at.
-- **[Rome's accounts](messaging.md#romes-accounts)** — one of Rome's accounts is an account Rome holds a connection to, which messages arrive through. An account here is one party Rome sees through it.
+- **[Account in Chats](../domains/chats.md#account)** — the domain language names every identity on a platform an account, Rome's own included. An account here is one party Rome sees through one of its own.
 - **Connection** — a connection joins the Rome instance to a service. An account belongs to a party on that service.
 
 ## Address

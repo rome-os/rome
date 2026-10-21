@@ -1673,13 +1673,13 @@ export interface MessageReplyReference {
   senderName?: string;
 }
 
-/** Opaque provider-owned conversation address. Callers may persist and
+/** Opaque provider-owned chat address. Callers may persist and
  * round-trip this value, but must never parse or construct one. */
 export type ChatId = string & { readonly __brand: "ChatId" };
 
 export interface ChatRef {
   connectionId: string;
-  conversationId: ChatId;
+  chatId: ChatId;
 }
 
 export interface ChatDescriptor {
@@ -1707,9 +1707,9 @@ export interface ChannelMessage {
   channel: string;
   direction: "inbound" | "outbound";
   messageId: string;
-  conversationId: ChatId;
-  /** Parent conversation when this message belongs to a native thread. */
-  parentConversationId?: ChatId;
+  chatId: ChatId;
+  /** Parent chat when this message belongs to a native thread. */
+  parentChatId?: ChatId;
   /** Who said it, as the channel addresses them. Empty when the channel
    *  recorded no sender for the line. */
   senderId: string;
@@ -1729,9 +1729,9 @@ export interface ChannelMessage {
  *  messages. A channel read live through its Connection reaches back a bounded
  *  default (the last day) when no `since` is named. */
 export interface ChannelMessageQuery {
-  /** One conversation, by the platform's own id for it. Absent for every
-   *  conversation the channel can read. */
-  conversationId?: ChatId;
+  /** One chat, by the platform's own id for it. Absent for every chat the
+   *  channel can read. */
+  chatId?: ChatId;
   /** Only messages said at or after this instant. */
   since?: Date;
   /** At most this many, newest first. Defaults to 100, capped at 1,000. */
@@ -1768,7 +1768,7 @@ export interface ChannelsService {
   list(): Promise<ChannelSummary[]>;
   /** Send on a channel, through the Connection backing it. Rejects when no
    *  Connection backs the channel. */
-  send(channel: string, conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
+  send(channel: string, chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   /**
    * The channel's `messages.query`: its newest messages, newest first.
    *
@@ -1813,7 +1813,7 @@ export type ChatStopHandler = (input: ChatStopInput) => Promise<ChatStopResult>;
 
 export interface MessageReceipt {
   messageId?: string;
-  conversationId: ChatId;
+  chatId: ChatId;
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
@@ -1827,10 +1827,7 @@ export interface ChannelActivitySession {
 }
 
 export interface ChannelActivity {
-  begin(input: {
-    conversationId: ChatId;
-    messageId?: string;
-  }): Promise<ChannelActivitySession | null>;
+  begin(input: { chatId: ChatId; messageId?: string }): Promise<ChannelActivitySession | null>;
 }
 
 /**
@@ -1865,12 +1862,14 @@ export interface ChannelDirectMessaging {
    * key a thread separately, it opens or looks up that thread, which is a
    * provider call: callers pricing a listing should treat it as one.
    */
+  chatFor(channelUserId: string): Promise<ChatId | null>;
+  /** @deprecated Use `chatFor`, which answers the same. */
   conversationFor(channelUserId: string): Promise<ChatId | null>;
 }
 
 /** Sending on a channel. */
 export interface ChannelSend {
-  send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
+  send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   /** Showing the account that a reply is on its way (a typing indicator), or
    *  null or absent where the channel cannot. Cosmetic: a caller never waits
    *  on it to answer. */
@@ -1947,6 +1946,10 @@ export interface Channel {
  */
 export interface ChannelMessageHookDeps {
   actionEngine: ActionEngineLike;
+  /** Each chat's settings. A host that predates the name passes only
+   *  `conversationSettings`, so read `chatSettings ?? conversationSettings`. */
+  chatSettings?: ChatSettingsControl;
+  /** @deprecated Use `chatSettings`, which is the same control. */
   conversationSettings: ChatSettingsControl;
   chatStop: ChatStopHandler;
   /** A live array: the host appends a channel added later, such as a second
@@ -2175,6 +2178,8 @@ export interface AppFavorCapability {
 export interface AppRuntimeRepositories {
   settings: AppSettingsRepository;
   webchatRecaps?: WebChatRecapRepository;
+  chats?: ChatRepository;
+  /** @deprecated Use `chats`, which is the same repository. */
   conversations?: ChatRepository;
   guardianProfile?: GuardianProfileRepository;
 }
@@ -2205,17 +2210,22 @@ export interface ChatRecord {
   agentName: string | null;
 }
 
+/** The chat a channel thread opens, or the one already open for it. */
+export interface EnsureChannelChatInput {
+  channel: string;
+  threadId: string;
+  parentThreadId?: string;
+  threadName?: string;
+  threadType?: "private" | "group";
+  agentName: string;
+  projectName?: string;
+  projectPath?: string;
+}
+
 export interface ChatRepository {
-  ensureChannelConversation(input: {
-    channel: string;
-    threadId: string;
-    parentThreadId?: string;
-    threadName?: string;
-    threadType?: "private" | "group";
-    agentName: string;
-    projectName?: string;
-    projectPath?: string;
-  }): Promise<ChatRecord>;
+  ensureChannelChat(input: EnsureChannelChatInput): Promise<ChatRecord>;
+  /** @deprecated Use `ensureChannelChat`, which does the same. */
+  ensureChannelConversation(input: EnsureChannelChatInput): Promise<ChatRecord>;
   addMessage(input: {
     sessionId: string;
     role: "user" | "notification";

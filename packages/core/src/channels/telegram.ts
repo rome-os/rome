@@ -134,7 +134,7 @@ export class TelegramAdapter {
         channel: "telegram",
         direction: "inbound",
         messageId: String(rawMsg.message_id),
-        conversationId: String(chat.id) as ChatId,
+        chatId: String(chat.id) as ChatId,
         senderId: ctx.channelPost
           ? String(chat.id)
           : rawMsg.sender_chat
@@ -179,7 +179,7 @@ export class TelegramAdapter {
 
       log.info("message received", {
         from: msg.senderId,
-        conversationId: msg.conversationId,
+        chatId: msg.chatId,
         threadKind: msg.thread?.kind,
       });
 
@@ -223,8 +223,8 @@ export class TelegramAdapter {
     return telegramTransport(this.bot.api);
   }
 
-  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const threadId: string = conversationId;
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const threadId: string = chatId;
     const replyParams = message.replyToMessageId
       ? { reply_parameters: { message_id: Number(message.replyToMessageId) } }
       : {};
@@ -274,7 +274,7 @@ export class TelegramAdapter {
       }
 
       log.info("message sent", { threadId });
-      return { conversationId, ...(messageId ? { messageId } : {}) };
+      return { chatId, ...(messageId ? { messageId } : {}) };
     } catch (err) {
       log.error("failed to send message", {
         threadId,

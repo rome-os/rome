@@ -6,12 +6,7 @@
 // instance needs no public events address. Events arrive as Socket Mode
 // envelopes, which Rome acknowledges before handling.
 
-import type {
-  ChannelMessage,
-  ConversationId,
-  MessageReceipt,
-  OutgoingMessage,
-} from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import { WebSocket } from "ws";
 import { createLogger } from "../logger.js";
 import { InboundDedup } from "./inbound-dedup.js";
@@ -624,19 +619,19 @@ export function slackUserIdOf(senderId: string): string {
 
 /** A thread in a Slack channel is its own conversation, addressed by the
  *  channel and the thread's first message. */
-export function slackThreadConversationId(channelId: string, threadTs: string): ConversationId {
-  return `${channelId}:${threadTs}` as ConversationId;
+export function slackThreadChatId(channelId: string, threadTs: string): ChatId {
+  return `${channelId}:${threadTs}` as ChatId;
 }
 
-export function parseSlackConversationId(conversationId: string): {
+export function parseSlackChatId(chatId: string): {
   channelId: string;
   threadTs?: string;
 } {
-  const separator = conversationId.indexOf(":");
-  if (separator === -1) return { channelId: conversationId };
+  const separator = chatId.indexOf(":");
+  if (separator === -1) return { channelId: chatId };
   return {
-    channelId: conversationId.slice(0, separator),
-    threadTs: conversationId.slice(separator + 1),
+    channelId: chatId.slice(0, separator),
+    threadTs: chatId.slice(separator + 1),
   };
 }
 
@@ -765,14 +760,14 @@ export class SlackAdapter {
     this.identity = null;
   }
 
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     const omittedAttachments = message.attachments?.length ?? 0;
     if (omittedAttachments > 0) {
       log.warn("slack omitted outbound attachments", { attachments: omittedAttachments });
     }
     const text = message.text?.trim();
-    if (!text) return { conversationId };
-    const { channelId, threadTs } = parseSlackConversationId(conversationId);
+    if (!text) return { chatId };
+    const { channelId, threadTs } = parseSlackChatId(chatId);
     let firstTs: string | undefined;
     for (const chunk of splitSlackText(text)) {
       const sent = await this.api.postMessage(
@@ -782,11 +777,11 @@ export class SlackAdapter {
       );
       firstTs ??= sent.ts;
     }
-    return { conversationId, ...(firstTs ? { messageId: firstTs } : {}) };
+    return { chatId, ...(firstTs ? { messageId: firstTs } : {}) };
   }
 
   /** The direct-message conversation with a workspace member. */
-  async directConversationFor(senderId: string): Promise<ConversationId | null> {
+  async directConversationFor(senderId: string): Promise<ChatId | null> {
     // An address names its workspace. A member of another workspace is not
     // reachable through this bot, even when the user id resolves here.
     const separator = senderId.indexOf("/");
@@ -798,7 +793,7 @@ export class SlackAdapter {
       this.config.botToken,
       userId,
       this.sendAbort.signal,
-    )) as ConversationId;
+    )) as ChatId;
   }
 
   private handleEvent(payload: SlackEventCallback): void {
@@ -832,12 +827,12 @@ export class SlackAdapter {
     const message = this.toChannelMessage(payload, identity);
     if (!message) return;
     const user = event.user;
-    const previous = this.deliveries.get(message.conversationId) ?? Promise.resolve();
+    const previous = this.deliveries.get(message.chatId) ?? Promise.resolve();
     const next = previous.then(() => this.deliver(message, identity.teamId, user));
-    this.deliveries.set(message.conversationId, next);
+    this.deliveries.set(message.chatId, next);
     void next.finally(() => {
-      if (this.deliveries.get(message.conversationId) === next) {
-        this.deliveries.delete(message.conversationId);
+      if (this.deliveries.get(message.chatId) === next) {
+        this.deliveries.delete(message.chatId);
       }
     });
   }
@@ -864,7 +859,7 @@ export class SlackAdapter {
     if (event.type === "message" && event.channel_type === "im") {
       return {
         ...base,
-        conversationId: channel as ConversationId,
+        chatId: channel as ChatId,
         ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
         thread: { kind: "dm" },
         addressing: "direct",
@@ -874,8 +869,8 @@ export class SlackAdapter {
       const rootTs = event.thread_ts ?? ts;
       return {
         ...base,
-        conversationId: slackThreadConversationId(channel, rootTs),
-        parentConversationId: channel as ConversationId,
+        chatId: slackThreadChatId(channel, rootTs),
+        parentChatId: channel as ChatId,
         ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
         thread: { kind: "topic" },
         addressing: "mention",
@@ -892,7 +887,7 @@ export class SlackAdapter {
       ...(name.username ? { senderUsername: name.username } : {}),
     };
     log.info("message received", {
-      conversationId: named.conversationId,
+      chatId: named.chatId,
       threadKind: named.thread?.kind,
     });
     try {

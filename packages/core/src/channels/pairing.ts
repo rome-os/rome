@@ -71,7 +71,7 @@ export function createPairingAdmission(deps: {
     // agent's first answer. Approval is recorded before the send, so only the
     // order of the two bot messages is at stake.
     const reply = (text: string): void => {
-      sendOn(deps.registry, connectionId, message.conversationId, text).catch(() => {
+      sendOn(deps.registry, connectionId, message.chatId, text).catch(() => {
         // Provider errors may include the rejected request body. Do not log them.
         log.error("pairing reply failed", { connectionId, senderId: message.senderId });
       });
@@ -135,7 +135,8 @@ export function createPairingAdmission(deps: {
           channelUserId: message.senderId,
           displayName: message.senderDisplayName ?? message.senderId,
           username: message.senderUsername,
-          ...(message.thread?.kind === "dm" ? { conversationId: message.conversationId } : {}),
+          // Stored approval payloads keep the old name for the chat.
+          ...(message.thread?.kind === "dm" ? { conversationId: message.chatId } : {}),
         },
         deps.talkGrants(service),
       );
@@ -177,16 +178,16 @@ export async function notifyPairingResolution(
   const payload = pairingPayload(approval);
   if (!payload || approval.status !== "approved") return;
   try {
-    const conversationId =
+    const chatId =
       (payload.conversationId as ChatId | undefined) ??
       (await registry
         .get(payload.connectionId)
-        .withTalker((talker) => talker.directMessaging?.conversationFor(payload.channelUserId)));
-    if (!conversationId) throw new Error("Direct conversation unavailable");
+        .withTalker((talker) => talker.directMessaging?.chatFor(payload.channelUserId)));
+    if (!chatId) throw new Error("Direct conversation unavailable");
     await sendOn(
       registry,
       payload.connectionId,
-      conversationId,
+      chatId,
       pairingSuccess(payload.channel, payload.channelUserId, payload.displayName, payload.username),
     );
   } catch {
@@ -201,8 +202,8 @@ export async function notifyPairingResolution(
 async function sendOn(
   registry: Pick<ConnectionRegistry, "get">,
   connectionId: string,
-  conversationId: ChatId,
+  chatId: ChatId,
   text: string,
 ): Promise<void> {
-  await sendThrough(registry.get(connectionId), conversationId, { text });
+  await sendThrough(registry.get(connectionId), chatId, { text });
 }

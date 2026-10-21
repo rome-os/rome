@@ -5,7 +5,7 @@ client through its accessibility tree, for channels/wechat-user.ts.
     send --chat <wxid> --name <display name> --text <body>
     check
 
-`send` prints one JSON object: {"ok": true, "conversationId", "messageId"} or
+`send` prints one JSON object: {"ok": true, "chatId", "messageId"} or
 {"ok": false, "code", "typed", "reason"}. `typed` says whether any text reached
 a chat input. `check` prints {"ready", "reason"} and does not touch the client.
 Every error after argument parsing is such a JSON answer with exit 0; argparse's
@@ -196,7 +196,7 @@ class Store:
         """One chat's messages in the shape the driver compares: the bridge's
         `content` cut the way the Rome reader cuts it."""
         page = self.call("query", chat_id, *args, timeout=timeout)
-        return [{"id": m["id"], "conversationId": m["session"], "conversationName": name,
+        return [{"id": m["id"], "chatId": m["session"], "conversationName": name,
                  "isSelf": m["isSelf"], "type": m["type"], "text": clean_text(m["content"])}
                 for m in page["messages"]]
 
@@ -470,13 +470,13 @@ class Driver:
                 # (the same text sent there from the phone) is not ours.
                 if not fresh:
                     stray = [m for m in self.store.recent(since, timeout=left(deadline)) if is_echo(m, body)
-                             and m["conversationId"] != chat_id and m["id"] not in elsewhere_before]
+                             and m["chatId"] != chat_id and m["id"] not in elsewhere_before]
             except Exception:  # noqa: BLE001 — a read that fails after Return is no echo yet
                 pass
             if fresh:
                 self.clear_leftover(name, body)
                 return fresh[-1]["id"]
-            elsewhere = elsewhere or (stray[0]["conversationId"] if stray else None)
+            elsewhere = elsewhere or (stray[0]["chatId"] if stray else None)
             if self.clock.time() > deadline:
                 self.clear_leftover(name, body)
                 if elsewhere:
@@ -516,7 +516,7 @@ def main():
                           f"--text 1 to {MAX_TEXT} characters, no {ENVELOPE_MARKERS}")
         app, desktop = ready_client()
         message_id = Driver(app, desktop, Store()).send(args.chat, args.name, args.text)
-        print(json.dumps({"ok": True, "conversationId": args.chat, "messageId": message_id}, ensure_ascii=False))
+        print(json.dumps({"ok": True, "chatId": args.chat, "messageId": message_id}, ensure_ascii=False))
     except Exception as e:  # noqa: BLE001 — every answer is one JSON object; Driver.send sets typed
         e = e if isinstance(e, Failure) else Failure("not-ready", f"{type(e).__name__}: {e}")
         answer = {"ready": False} if args.command == "check" else {"ok": False, "code": e.code, "typed": e.typed}

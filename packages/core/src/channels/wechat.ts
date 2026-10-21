@@ -982,7 +982,7 @@ export function normalizeWechatMessage(msg: WechatMessage): ChannelMessage | nul
   const senderId = msg.from_user_id?.trim() || "unknown";
   const rawGroupId = msg.group_id?.trim();
   const groupId = rawGroupId || undefined;
-  const conversationId = senderId;
+  const chatId = senderId;
   const senderShort = senderId.split("@")[0] || senderId;
 
   return {
@@ -992,8 +992,8 @@ export function normalizeWechatMessage(msg: WechatMessage): ChannelMessage | nul
       extracted.messageId ??
       normalizeWechatMessageId(msg.message_id) ??
       msg.client_id ??
-      `${conversationId}:${msg.create_time_ms ?? Date.now()}`,
-    conversationId: conversationId as ChatId,
+      `${chatId}:${msg.create_time_ms ?? Date.now()}`,
+    chatId: chatId as ChatId,
     senderId,
     senderDisplayName: senderShort,
     text: extracted.text,
@@ -1211,9 +1211,9 @@ export class WechatAdapter {
     this.connectionStatus = "disconnected";
   }
 
-  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     this.assertSessionActive();
-    const target = this.resolveSendTarget(conversationId);
+    const target = this.resolveSendTarget(chatId);
 
     let messageId: string | undefined;
     if (message.text) {
@@ -1250,7 +1250,7 @@ export class WechatAdapter {
         fileName,
       );
     }
-    return { conversationId, ...(messageId ? { messageId } : {}) };
+    return { chatId, ...(messageId ? { messageId } : {}) };
   }
 
   onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
@@ -1389,7 +1389,7 @@ export class WechatAdapter {
     if (!message) return;
 
     if (raw.context_token) {
-      this.rememberContextToken(message.conversationId, raw.context_token, message.senderId);
+      this.rememberContextToken(message.chatId, raw.context_token, message.senderId);
       this.rememberContextToken(message.senderId, raw.context_token, message.senderId);
       await this.saveContextTokens().catch(() => {});
     }
@@ -1406,11 +1406,11 @@ export class WechatAdapter {
     }
   }
 
-  private resolveSendTarget(conversationId: string): WechatSendTarget {
-    const target = conversationId.trim();
-    const contextToken = target ? this.contextTokens.get(conversationId) : undefined;
+  private resolveSendTarget(chatId: string): WechatSendTarget {
+    const target = chatId.trim();
+    const contextToken = target ? this.contextTokens.get(chatId) : undefined;
     if (contextToken) {
-      return { to: this.typingTargets.get(conversationId) ?? target, contextToken };
+      return { to: this.typingTargets.get(chatId) ?? target, contextToken };
     }
 
     throw new Error(

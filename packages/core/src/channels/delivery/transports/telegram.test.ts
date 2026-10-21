@@ -28,7 +28,7 @@ describe("telegramTransport", () => {
       },
     });
 
-    expect(await create("7", "hello", "12")).toEqual({ messageId: "41", conversationId: "-100" });
+    expect(await create("7", "hello", "12")).toEqual({ messageId: "41", chatId: "-100" });
     // The reply still goes out if the user deleted the message it answers.
     expect(sent).toEqual([
       ["7", "hello", { reply_parameters: { message_id: 12, allow_sending_without_reply: true } }],
@@ -55,7 +55,7 @@ describe("telegramTransport", () => {
       },
     });
 
-    await expect(edit({ messageId: "41", conversationId: "7" }, "same")).resolves.toBeUndefined();
+    await expect(edit({ messageId: "41", chatId: "7" }, "same")).resolves.toBeUndefined();
   });
 
   const failureOf = async (error: unknown) => {
@@ -64,9 +64,7 @@ describe("telegramTransport", () => {
         throw error;
       },
     });
-    return edit({ messageId: "41", conversationId: "7" }, "text").catch(
-      (failed: unknown) => failed,
-    );
+    return edit({ messageId: "41", chatId: "7" }, "text").catch((failed: unknown) => failed);
   };
 
   it("asks to wait as long as Telegram says when it rate-limits a write", async () => {

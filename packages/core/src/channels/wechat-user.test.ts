@@ -1082,12 +1082,12 @@ describe("WechatUserReader", () => {
     const { reader } = await readerWith((argv) =>
       argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
     );
-    const plain = await reader.messages({ conversationId: "wxid_friend", limit: 300 });
+    const plain = await reader.messages({ chatId: "wxid_friend", limit: 300 });
     expect(plain).toHaveLength(300);
     expect(plain[0]!.text).toBe("line 100");
     expect(plain.at(-1)!.text).toBe("line 399");
     const paged = await reader.messages({
-      conversationId: "wxid_friend",
+      chatId: "wxid_friend",
       before: new Date("2026-10-01T00:05:00Z"),
       limit: 250,
       includeBoundaryTies: true,
@@ -1153,7 +1153,7 @@ describe("WechatUserReader", () => {
           }),
     );
     const messages = await reader.messages({
-      conversationId: "wxid_friend",
+      chatId: "wxid_friend",
       since: new Date("2026-10-01T00:00:00.500Z"),
       before: new Date("2026-10-02T00:00:00Z"),
       limit: 10,
@@ -1171,7 +1171,7 @@ describe("WechatUserReader", () => {
     expect(messages).toEqual([
       {
         id: "wxid_friend:message/message_0.db:1",
-        conversationId: "wxid_friend",
+        chatId: "wxid_friend",
         conversationName: "A Friend",
         isGroup: false,
         senderId: "wxid_friend",
@@ -1204,7 +1204,7 @@ describe("WechatUserReader", () => {
       argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
     );
     const messages = await reader.messages({
-      conversationId: "wxid_friend",
+      chatId: "wxid_friend",
       limit: 2,
       includeBoundaryTies: true,
     });
@@ -1223,7 +1223,7 @@ describe("WechatUserReader", () => {
       argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
     );
     const messages = await reader.messages({
-      conversationId: "wxid_friend",
+      chatId: "wxid_friend",
       before: new Date(cursorSecond),
       limit: 50,
       includeBoundaryTies: true,
@@ -1261,7 +1261,7 @@ describe("WechatUserReader", () => {
       "wxid_quiet",
     ]);
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({ conversationId: "45357963768@chatroom", isGroup: true });
+    expect(messages[0]).toMatchObject({ chatId: "45357963768@chatroom", isGroup: true });
   });
 
   it("reads in smaller pages when a page overflows the output limit", async () => {
@@ -1271,7 +1271,7 @@ describe("WechatUserReader", () => {
     const { reader, calls } = await readerWith((argv) =>
       argv[0] === "sessions" ? envelope(SESSIONS) : queryOver(history, 200)(argv),
     );
-    const messages = await reader.messages({ conversationId: "wxid_friend", limit: 300 });
+    const messages = await reader.messages({ chatId: "wxid_friend", limit: 300 });
     expect(messages).toHaveLength(300);
     expect(messages[0]!.text).toBe("line 100");
     expect(calls.filter((argv) => argv[0] === "query").map((argv) => argv[3])).toContain("150");
@@ -1297,7 +1297,7 @@ describe("WechatUserReader", () => {
     const { reader } = await readerWith((argv) =>
       argv[0] === "sessions" ? envelope([]) : failure("SESSION_NOT_FOUND"),
     );
-    expect(await reader.messages({ conversationId: "wxid_gone", limit: 5 })).toEqual([]);
+    expect(await reader.messages({ chatId: "wxid_gone", limit: 5 })).toEqual([]);
     expect(await reader.count("wxid_gone")).toBe(0);
   });
 

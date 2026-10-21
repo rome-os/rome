@@ -7,7 +7,9 @@ import {
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
   redeemRomeCloudOAuthHandoff,
+  refreshRomeCloudOAuthGrant,
 } from "./rome-cloud-oauth.js";
+import { RenewalUnavailable } from "../connections/errors.js";
 
 describe("Rome Cloud OAuth brokering", () => {
   const savedEnv = { ...process.env };
@@ -32,6 +34,12 @@ describe("Rome Cloud OAuth brokering", () => {
       const link = createRomeCloudOAuthStartUrl("github");
       expect(link.available).toBe(true);
       expect(link.connectUrl).toBe("/api/oauth/github/start");
+    });
+
+    it("sends Shopify to its Settings card, which asks for the store first", () => {
+      const link = createRomeCloudOAuthStartUrl("shopify");
+      expect(link.available).toBe(true);
+      expect(link.connectUrl).toBe("/settings/connections/shopify");
     });
 
     it("is unavailable when Rome Cloud is not configured", () => {
@@ -72,6 +80,20 @@ describe("Rome Cloud OAuth brokering", () => {
     it("carries reconnect=1 through to the authorize URL when reconnecting", async () => {
       const url = await createRomeCloudOAuthStartRedirect(db, "github", { reconnect: true });
       expect(new URL(url).searchParams.get("reconnect")).toBe("1");
+    });
+
+    it("names the store on the authorize URL for Shopify", async () => {
+      const url = await createRomeCloudOAuthStartRedirect(db, "shopify", {
+        shop: "acme.myshopify.com",
+      });
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe("/connections/shopify/authorize");
+      expect(parsed.searchParams.get("shop")).toBe("acme.myshopify.com");
+    });
+
+    it("omits the store for providers that don't authorize per store", async () => {
+      const url = await createRomeCloudOAuthStartRedirect(db, "github");
+      expect(new URL(url).searchParams.has("shop")).toBe(false);
     });
 
     it("persists an empty tenant sentinel on the pending attempt", async () => {
@@ -178,6 +200,119 @@ describe("Rome Cloud OAuth brokering", () => {
       expect(body.subject_token).toBe("handoff-code");
       expect(body.code_verifier).toBeTruthy();
       expect(body).not.toHaveProperty("tenant");
+    });
+  });
+
+  describe("refreshRomeCloudOAuthGrant", () => {
+    function stubFetch(impl: () => Promise<Response>) {
+      const fetchMock = rs.fn(async (_input: unknown, _init?: RequestInit) => impl());
+      rs.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+    const json = (body: unknown, status: number) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const complete = {
+      accessToken: "shpat_new",
+      refreshToken: "shprt_new",
+      expiresAt: "2026-10-21T07:00:00.000Z",
+    };
+
+    beforeEach(() => {
+      setInstanceTokenInMemory("romeinst_test-token");
+    });
+
+    it("posts a refresh_token grant with a timeout and returns the bundle", async () => {
+      const fetchMock = stubFetch(async () => json({ provider: "shopify", tokens: complete }, 200));
+      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).resolves.toEqual(complete);
+      const init = fetchMock.mock.calls[0][1];
+      expect(JSON.parse(init?.body as string)).toEqual({
+        grant_type: "refresh_token",
+        provider: "shopify",
+        refresh_token: "shprt_old",
+      });
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it("reports a Rome Cloud that can't answer as RenewalUnavailable", async () => {
+      for (const status of [429, 503]) {
+        stubFetch(async () => json({ error: "temporarily_unavailable" }, status));
+        await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+          RenewalUnavailable,
+        );
+      }
+      stubFetch(async () => {
+        throw new TypeError("fetch failed");
+      });
+      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+        RenewalUnavailable,
+      );
+    });
+
+    it("reports a body that fails mid-read as RenewalUnavailable", async () => {
+      stubFetch(async () => {
+        const body = new ReadableStream({
+          start(controller) {
+            controller.error(new Error("socket hang up"));
+          },
+        });
+        return new Response(body, { status: 200 });
+      });
+      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+        RenewalUnavailable,
+      );
+    });
+
+    it("keeps a Rome Cloud that rejects this instance's credentials retryable", async () => {
+      for (const status of [401, 403]) {
+        stubFetch(async () => json({ error: "invalid_token" }, status));
+        await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+          RenewalUnavailable,
+        );
+      }
+      setInstanceTokenInMemory(null);
+      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+        RenewalUnavailable,
+      );
+    });
+
+    it("keeps a malformed 200 retryable", async () => {
+      stubFetch(async () => new Response("<html>maintenance</html>", { status: 200 }));
+      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+        RenewalUnavailable,
+      );
+      stubFetch(async () => json({ provider: "shopify", tokens: {} }, 200));
+      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+        RenewalUnavailable,
+      );
+    });
+
+    it("keeps a refresh answer missing its refresh token, expiry, or token retryable", async () => {
+      const partials = [
+        { accessToken: "shpat_new", expiresAt: complete.expiresAt },
+        { accessToken: "shpat_new", refreshToken: "shprt_new" },
+        { ...complete, accessToken: " " },
+        { ...complete, expiresAt: "not a date" },
+      ];
+      for (const tokens of partials) {
+        stubFetch(async () => json({ provider: "shopify", tokens }, 200));
+        await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+          RenewalUnavailable,
+        );
+      }
+    });
+
+    it("reports a refusal as a plain error, so the grant needs a reconnect", async () => {
+      stubFetch(async () =>
+        json({ error: "invalid_grant", error_description: "Reconnect it in Rome." }, 400),
+      );
+      const error = await refreshRomeCloudOAuthGrant("shopify", "shprt_old").catch((e) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(RenewalUnavailable);
+      expect(error.message).toMatch(/Reconnect it in Rome/);
     });
   });
 });

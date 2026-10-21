@@ -10,6 +10,29 @@ import {
 } from "./index.js";
 
 describe("registerBuiltinConnections", () => {
+  it("renews through Rome Cloud only for providers Rome Cloud can refresh", async () => {
+    const fetchMock = rs.fn(async () => new Response("{}", { status: 400 }));
+    rs.stubGlobal("fetch", fetchMock);
+    const registered = new Map<string, ConnectionDescriptor>();
+    const registry = {
+      register: (descriptor: ConnectionDescriptor) =>
+        registered.set(descriptor.service, descriptor),
+    } as unknown as ConnectionRegistry;
+    registerBuiltinConnections(registry, {
+      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
+      listAgents: () => [],
+    } as unknown as BuiltinConnectionDeps);
+
+    const expired = {
+      material: { accessToken: "ya29.old", refreshToken: "1//refresh" },
+      expiresAt: new Date(0),
+    };
+    // Google: Rome Cloud has no refresh for it, so renew answers at once.
+    await expect(registered.get("google")!.auth.user.renew(expired)).resolves.toBe("re-confer");
+    expect(fetchMock).not.toHaveBeenCalled();
+    rs.unstubAllGlobals();
+  });
+
   it("gives WeChat personal the client runtime boot shares with the channel list", async () => {
     const bridgeCommand = rs.fn(async () => [
       {
@@ -46,7 +69,7 @@ describe("registerBuiltinConnections", () => {
       );
     const page = await talker.directory!.listConversations({ limit: 10 });
 
-    expect(page.conversations.map((c) => c.ref.conversationId)).toEqual(["wxid_friend"]);
+    expect(page.conversations.map((c) => c.ref.chatId)).toEqual(["wxid_friend"]);
     expect(bridgeCommand).toHaveBeenCalled();
   });
   it("offers no WeChat personal connection without a runtime, so none is built twice", () => {

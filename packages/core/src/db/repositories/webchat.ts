@@ -27,7 +27,7 @@ import {
 } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 import {
-  channelConversationId,
+  channelChatId,
   isWebchatChat,
   romeSessionKind,
   storedSessionType,
@@ -367,7 +367,7 @@ const SEARCH_MESSAGE_SCAN_LIMIT = 400;
 const SEARCH_SNIPPET_CONTEXT = 40;
 const SEARCH_SNIPPET_LENGTH = 160;
 
-export { channelConversationId };
+export { channelChatId };
 
 /** The row id a recorded outbound message takes when the provider named it.
  *  Derived rather than random so a caller that knows the provider's id can
@@ -959,7 +959,7 @@ export class WebChatRepository {
       .onConflictDoNothing({ target: romeSessions.id });
   }
 
-  async ensureChannelConversation(input: {
+  async ensureChannelChat(input: {
     channel: string;
     threadId: string;
     parentThreadId?: string;
@@ -971,7 +971,7 @@ export class WebChatRepository {
   }): Promise<{ id: string; agentName: string | null }> {
     const parent =
       input.parentThreadId && input.parentThreadId !== input.threadId
-        ? await this.ensureChannelConversation({
+        ? await this.ensureChannelChat({
             ...input,
             threadId: input.parentThreadId,
             parentThreadId: undefined,
@@ -1000,7 +1000,7 @@ export class WebChatRepository {
       throw new Error(`No chat at webchat address ${input.threadId}`);
     }
 
-    const id = channelConversationId(input.channel, input.threadId);
+    const id = channelChatId(input.channel, input.threadId);
     const now = new Date();
     await this.db
       .insert(romeSessions)
@@ -1398,7 +1398,7 @@ export class WebChatRepository {
    *  exists yet. A webchat conversation's address is its own id. Forks and
    *  subagent runs copy their parent's address, so only conversation types
    *  match. */
-  async findConversationIdByAddress(channel: string, threadId: string): Promise<string | null> {
+  async findChatIdByAddress(channel: string, threadId: string): Promise<string | null> {
     const rows = await this.db
       .select({ id: romeSessions.id })
       .from(romeSessions)

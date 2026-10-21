@@ -75,7 +75,7 @@ describe("agents channel", () => {
     const inbound = toAgentInboundMessage(envelope({ data: { order: 41 }, inReplyTo: "msg_0" }))!;
     expect(inbound).toMatchObject({
       messageId: "msg_1",
-      conversationId: ATLAS,
+      chatId: ATLAS,
       senderId: ATLAS,
       senderDisplayName: "atlas (dot)",
       thread: { kind: "dm" },
@@ -96,7 +96,7 @@ describe("agents channel", () => {
       },
     });
     expect(toAgentInboundMessage(external)).toMatchObject({
-      conversationId: ATLAS,
+      chatId: ATLAS,
       senderId: ATLAS,
       senderDisplayName: "atlas (@friend's dot)",
     });
@@ -257,7 +257,7 @@ describe("agents channel", () => {
       replyToMessageId: "msg_1",
     });
     expect(client.sent).toEqual([{ to: ATLAS, text: "On it", inReplyTo: "msg_1" }]);
-    expect(receipt).toEqual({ conversationId: ATLAS, messageId: "msg_sent" });
+    expect(receipt).toEqual({ chatId: ATLAS, messageId: "msg_sent" });
     await expect(talker.send(ATLAS as ChatId, { text: " " })).rejects.toThrow(/text/);
   });
 
@@ -281,10 +281,10 @@ describe("agents channel", () => {
 
   it("reaches a dot directly at its agent id, so People can write to it first", async () => {
     const direct = createAgentsTalker(fakeClient([])).directMessaging;
-    expect(await direct?.conversationFor(ATLAS)).toBe(ATLAS);
-    expect(await direct?.conversationFor(" ")).toBeNull();
+    expect(await direct?.chatFor(ATLAS)).toBe(ATLAS);
+    expect(await direct?.chatFor(" ")).toBeNull();
     // A link left from before agent ids offers nothing to write to.
-    expect(await direct?.conversationFor("atlas")).toBeNull();
+    expect(await direct?.chatFor("atlas")).toBeNull();
   });
 
   it("records the agent Cloud assigned when the guardian connects", async () => {

@@ -241,7 +241,7 @@ function connectionMessages(backing: Backing): Messages {
   }
 
   return {
-    async query({ conversationId, since, limit }) {
+    async query({ chatId, since, limit }) {
       const connection = connectionFor(backing);
       if (!connection) throw new ChannelNotConnected(channel);
       const connectionId = connection.id;
@@ -255,11 +255,11 @@ function connectionMessages(backing: Backing): Messages {
       // names the read along with the conversation.
       const hours = historyWindowHours(from);
       const lines = await read(
-        `${connectionId}\n${conversationId ?? ""}\n${hours}`,
+        `${connectionId}\n${chatId ?? ""}\n${hours}`,
         () =>
           connection.withTalker((talker) =>
             talker.history?.query({
-              ...(conversationId ? { conversationId } : {}),
+              ...(chatId ? { chatId } : {}),
               since: from,
               limit: MAX_QUERY_LIMIT,
             }),
@@ -308,16 +308,16 @@ function connectionFor(backing: Backing): Connection | null {
  */
 export async function sendThrough(
   connection: Connection,
-  conversationId: ChatId,
+  chatId: ChatId,
   message: OutgoingMessage,
   pacing?: ConnectionPacing,
 ): Promise<MessageReceipt> {
   const send = async () => {
-    const sent = connection.withTalker((talker) => talker.send(conversationId, message));
+    const sent = connection.withTalker((talker) => talker.send(chatId, message));
     if (!sent) throw new Error(`Talk is unavailable for connection "${connection.id}"`);
     return sent;
   };
-  return pacing ? pacing.run(connection, conversationId, send) : send();
+  return pacing ? pacing.run(connection, chatId, send) : send();
 }
 
 /**
@@ -376,14 +376,13 @@ function connectionSend(backing: Backing): ChannelSend {
   // What `direct` answers while no Connection exists for the channel: the
   // lookup itself says so, the way `send` does, rather than passing for a
   // channel that cannot reach an account directly.
-  const unbacked: ChannelDirectMessaging = {
-    conversationFor: () => Promise.reject(new ChannelNotConnected(channel)),
-  };
+  const notConnected = () => Promise.reject(new ChannelNotConnected(channel));
+  const unbacked: ChannelDirectMessaging = { chatFor: notConnected, conversationFor: notConnected };
   return {
-    async send(conversationId, message) {
+    async send(chatId, message) {
       const connection = connectionFor(backing);
       if (!connection) throw new ChannelNotConnected(channel);
-      return sendThrough(connection, conversationId, message, backing.deps.pacing);
+      return sendThrough(connection, chatId, message, backing.deps.pacing);
     },
     get replies() {
       const connection = connectionFor(backing);
@@ -394,12 +393,9 @@ function connectionSend(backing: Backing): ChannelSend {
       const connection = connectionFor(backing);
       if (!connection) return unbacked;
       if (!offers(connection, "directMessaging")) return null;
-      const direct: ChannelDirectMessaging = {
-        conversationFor: (channelUserId) =>
-          callTalker(connection, (talker) =>
-            talker.directMessaging?.conversationFor(channelUserId),
-          ),
-      };
+      const chatFor = (channelUserId: string) =>
+        callTalker(connection, (talker) => talker.directMessaging?.chatFor(channelUserId));
+      const direct: ChannelDirectMessaging = { chatFor, conversationFor: chatFor };
       return direct;
     },
     get activity() {
@@ -445,10 +441,10 @@ function connectionInbound(backing: Backing): ChannelInbound {
       const event: InboundEvent = {
         kind: "message",
         message: message.channel === channel ? message : { ...message, channel },
-        ref: { connectionId, conversationId: message.conversationId },
+        ref: { connectionId, chatId: message.chatId },
       };
       // A Connection id is a UUID, so the first colon ends it.
-      const conversation = `${connectionId}:${message.conversationId}`;
+      const conversation = `${connectionId}:${message.chatId}`;
       for (const buffers of subscriptions) buffers.push(conversation, event);
     };
 

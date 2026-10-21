@@ -250,7 +250,7 @@ describe("slack bot talker", () => {
       () => {},
     );
     await rs.waitFor(() => expect(api.openConnection).toHaveBeenCalled());
-    await expect(talker.directMessaging!.conversationFor("T1/UADA")).rejects.toBeInstanceOf(
+    await expect(talker.directMessaging!.chatFor("T1/UADA")).rejects.toBeInstanceOf(
       CredentialRejected,
     );
     await talker.stop();

@@ -90,7 +90,7 @@ describe("golden-trace integration", () => {
 
   it("emits the expected span hierarchy for one inbound message", async () => {
     await rig.simulateInbound("telegram", {
-      conversationId: "thread-golden" as ChatId,
+      chatId: "thread-golden" as ChatId,
       text: "hi",
     });
 

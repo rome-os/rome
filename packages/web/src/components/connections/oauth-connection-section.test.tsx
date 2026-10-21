@@ -259,6 +259,62 @@ describe("OAuthConnectionSection", () => {
     expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ force: true });
   });
 
+  it("shows the store form when Reconnect starts with a question (Shopify)", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            cid: "setup-shop",
+            reattached: false,
+            state: {
+              status: "awaiting-input",
+              form: {
+                instructions: "Enter your store's myshopify.com address.",
+                fields: [{ name: "shop", label: "Store address", secret: false }],
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    renderSection(
+      githubCard("degraded", {
+        display: { displayName: "Acme Goods", handle: null, email: null, avatarUrl: null },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    expect(await screen.findByLabelText("Store address")).toBeTruthy();
+    expect(screen.getByText("Enter your store's myshopify.com address.")).toBeTruthy();
+  });
+
+  it("opens the hand-off on its own after the guardian submits the store form", async () => {
+    const assign = rs.fn();
+    rs.stubGlobal("location", { ...window.location, assign });
+    const asksForStore = {
+      status: "awaiting-input",
+      form: { fields: [{ name: "shop", label: "Store address", secret: false }] },
+    };
+    const handOff = { status: "awaiting-redirect", url: "https://broker/authorize?state=shop" };
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const requested = typeof input === "string" ? input : (input as Request).url;
+      const body = requested.endsWith("/input")
+        ? { accepted: true, state: handOff }
+        : requested.endsWith("/setup")
+          ? { cid: "setup-shop", reattached: false, state: asksForStore }
+          : { state: asksForStore };
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+    renderSection(githubCard("unauthorized"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.change(await screen.findByLabelText("Store address"), {
+      target: { value: "acme" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://broker/authorize?state=shop"));
+  });
+
   it("hands Connect to the system browser in the desktop shell", async () => {
     const assign = rs.fn();
     const open = rs.fn();

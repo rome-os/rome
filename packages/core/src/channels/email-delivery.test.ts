@@ -88,24 +88,24 @@ async function harness(overrides: Partial<MailProvider> = {}) {
   });
   await adapter.start();
   adapter.onInbound(async () => undefined);
-  const send: ChannelsService["send"] = (_channel, conversationId, message) =>
-    adapter.send(conversationId, message);
+  const send: ChannelsService["send"] = (_channel, chatId, message) =>
+    adapter.send(chatId, message);
   const channels: ChannelsService = {
     list: async () => [{ name: "email", sendable: true }],
     send: rs.fn(send),
     query: async () => [],
   };
-  const ensureChannelConversation = rs.fn(async () => ({ id: "session", agentName: null }));
+  const ensureChannelChat = rs.fn(async () => ({ id: "session", agentName: null }));
   const recordOutboundMessage = rs.fn(
     async (_input: Parameters<ChatRepository["recordOutboundMessage"]>[0]) => undefined,
   );
   const deps = {
-    conversations: {
-      ensureChannelConversation,
+    chats: {
+      ensureChannelChat,
       recordOutboundMessage,
     } as unknown as ChatRepository,
   };
-  return { provider, adapter, channels, deps, ensureChannelConversation, recordOutboundMessage };
+  return { provider, adapter, channels, deps, ensureChannelChat, recordOutboundMessage };
 }
 
 describe("email delivery through send_message", () => {
@@ -463,7 +463,7 @@ describe("email delivery through send_message", () => {
         ),
       ).rejects.toThrow("Cannot resolve email thread");
       expect(h.provider.send).not.toHaveBeenCalled();
-      expect(h.ensureChannelConversation).not.toHaveBeenCalled();
+      expect(h.ensureChannelChat).not.toHaveBeenCalled();
       expect(h.recordOutboundMessage).not.toHaveBeenCalled();
     }
   });
@@ -485,7 +485,7 @@ describe("email delivery through send_message", () => {
       ).rejects.toThrow("Email attachments are not supported");
       expect(h.provider.send).not.toHaveBeenCalled();
       expect(h.provider.listMessages).not.toHaveBeenCalled();
-      expect(h.ensureChannelConversation).not.toHaveBeenCalled();
+      expect(h.ensureChannelChat).not.toHaveBeenCalled();
       expect(h.recordOutboundMessage).not.toHaveBeenCalled();
     }
   });
@@ -568,7 +568,7 @@ describe("email delivery through send_message", () => {
       ),
     ).rejects.toBe(sendError);
     expect(failed.provider.send).toHaveBeenCalledTimes(1);
-    expect(failed.ensureChannelConversation).not.toHaveBeenCalled();
+    expect(failed.ensureChannelChat).not.toHaveBeenCalled();
     expect(failed.recordOutboundMessage).not.toHaveBeenCalled();
     await expect(failed.adapter.send(THREAD as ChatId, { text: "reply" })).rejects.toThrow(
       "Cannot resolve email thread",
@@ -580,10 +580,10 @@ describe("email delivery through send_message", () => {
     for (const receipt of [
       undefined,
       {},
-      { conversationId: THREAD },
-      { conversationId: THREAD, messageId: " " },
+      { chatId: THREAD },
+      { chatId: THREAD, messageId: " " },
       { messageId: "sent" },
-      { messageId: "sent", conversationId: " " },
+      { messageId: "sent", chatId: " " },
     ]) {
       const h = await harness();
       h.channels.send = rs.fn(async () => receipt as MessageReceipt);
@@ -591,7 +591,7 @@ describe("email delivery through send_message", () => {
         executeSendMessage(h.channels, { channel: "email", to: "guardian", text: "hello" }, h.deps),
       ).rejects.toThrow("Check email history before retrying");
       expect(h.channels.send).toHaveBeenCalledTimes(1);
-      expect(h.ensureChannelConversation).not.toHaveBeenCalled();
+      expect(h.ensureChannelChat).not.toHaveBeenCalled();
       expect(h.recordOutboundMessage).not.toHaveBeenCalled();
     }
   });
@@ -628,11 +628,11 @@ describe("email thread lookup under the channel-send RPC deadline", () => {
     setWorkerRpcInProcessDispatcher(async (method, params) => {
       if (method === "channels.list") return [{ name: "email", sendable: true }];
       if (method !== "channels.send") throw new Error(`unexpected RPC ${method}`);
-      const { conversationId, message } = params as {
-        conversationId: ChatId;
+      const { chatId, message } = params as {
+        chatId: ChatId;
         message: Parameters<ChannelsService["send"]>[2];
       };
-      return h.adapter.send(conversationId, message);
+      return h.adapter.send(chatId, message);
     });
     return { ...h, channels: new ChannelsServiceProxy() };
   }

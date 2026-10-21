@@ -334,8 +334,8 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
               // must not swallow the last creds/keys mutation on shutdown.
               await auth.flush();
             },
-            async send(conversationId, msg) {
-              return adapter.send(conversationId, msg);
+            async send(chatId, msg) {
+              return adapter.send(chatId, msg);
             },
             ...features,
           };

@@ -58,7 +58,7 @@ export class OrderedAdmission {
       await hear(message);
       return;
     }
-    const key = `${connection.id}\0${message.conversationId}`;
+    const key = `${connection.id}\0${message.chatId}`;
     // The handlers' completion is returned inside an object so the
     // conversation is released once they start, not once they finish.
     const started = await this.admissions.runExclusive(key, async () => {
@@ -79,7 +79,7 @@ export class OrderedAdmission {
       timer = setTimeout(() => {
         log.warn("admission timed out; message not admitted", {
           connectionId: connection.id,
-          conversationId: message.conversationId,
+          chatId: message.chatId,
           messageId: message.messageId,
           timeoutMs,
         });

@@ -36,8 +36,8 @@ function directoryDescriptor(
           return {
             start() {},
             stop() {},
-            async send(conversationId) {
-              return { conversationId };
+            async send(chatId) {
+              return { chatId };
             },
             directory,
           };
@@ -71,19 +71,19 @@ describe("ChatSettingsService", () => {
     registry.register(
       directoryDescriptor("discord", (connectionId) => [
         {
-          ref: { connectionId, conversationId: "parent" as ChatId },
+          ref: { connectionId, chatId: "parent" as ChatId },
           service: "discord",
           kind: "channel",
           displayName: "general",
           containerName: "Rome",
         },
         {
-          ref: { connectionId, conversationId: "child" as ChatId },
+          ref: { connectionId, chatId: "child" as ChatId },
           service: "discord",
           kind: "topic",
           displayName: "launch thread",
           containerName: "Rome",
-          parent: { connectionId, conversationId: "parent" as ChatId },
+          parent: { connectionId, chatId: "parent" as ChatId },
         },
       ]),
     );
@@ -102,11 +102,10 @@ describe("ChatSettingsService", () => {
       onChanged,
     });
     const listed = await service.list();
-    const parent = listed.items.find(
-      (item) => item.snapshot.conversation.ref.conversationId === "parent",
-    )!.snapshot.conversation.ref;
+    const parent = listed.items.find((item) => item.snapshot.conversation.ref.chatId === "parent")!
+      .snapshot.conversation.ref;
     const childDescriptor: ChatDescriptor = {
-      ref: { connectionId: discord.id, conversationId: "child" as ChatId },
+      ref: { connectionId: discord.id, chatId: "child" as ChatId },
       service: "discord",
       kind: "topic",
       displayName: "launch thread",
@@ -132,9 +131,7 @@ describe("ChatSettingsService", () => {
   it("keeps settings on the parent while threads inherit without overrides", async () => {
     const { repository, service, changed, parent, child, childDescriptor, listed } = await setup();
 
-    expect(listed.items.map((item) => item.snapshot.conversation.ref.conversationId)).toEqual([
-      "parent",
-    ]);
+    expect(listed.items.map((item) => item.snapshot.conversation.ref.chatId)).toEqual(["parent"]);
 
     await expect(service.get(parent)).resolves.toMatchObject({
       effective: {
@@ -218,7 +215,7 @@ describe("ChatSettingsService", () => {
     });
     const thread: ChatRef = {
       connectionId: discord.id,
-      conversationId: "new-thread" as ChatId,
+      chatId: "new-thread" as ChatId,
     };
     service.observe({ ref: thread, service: "discord", kind: "topic", displayName: "new", parent });
 
@@ -232,7 +229,7 @@ describe("ChatSettingsService", () => {
     const { service, discord, parent } = await setup();
     const child: ChatRef = {
       connectionId: discord.id,
-      conversationId: "first-seen-topic" as ChatId,
+      chatId: "first-seen-topic" as ChatId,
     };
 
     const placeholder = await service.get(child);
@@ -246,7 +243,7 @@ describe("ChatSettingsService", () => {
       clear: [],
       actor: { kind: "guardian", id: "guardian-1" },
     });
-    await new WebChatRepository(testDb!.db).ensureChannelConversation({
+    await new WebChatRepository(testDb!.db).ensureChannelChat({
       channel: "discord",
       threadId: "first-seen-topic",
       parentThreadId: "parent",
@@ -319,7 +316,7 @@ describe("ChatSettingsService", () => {
   it("lists only established direct messages and lets them own only session.reset", async () => {
     const { service, repository, changed, discord } = await setup();
     const webchat = new WebChatRepository(testDb!.db);
-    await webchat.ensureChannelConversation({
+    await webchat.ensureChannelChat({
       channel: "discord",
       threadId: "dm-1",
       threadName: "Ray",
@@ -328,12 +325,10 @@ describe("ChatSettingsService", () => {
     });
     const ref: ChatRef = {
       connectionId: discord.id,
-      conversationId: "dm-1" as ChatId,
+      chatId: "dm-1" as ChatId,
     };
     const listed = await service.list();
-    expect(listed.items.map((item) => item.snapshot.conversation.ref.conversationId)).not.toContain(
-      "dm-1",
-    );
+    expect(listed.items.map((item) => item.snapshot.conversation.ref.chatId)).not.toContain("dm-1");
     await expect(service.get(ref)).resolves.toMatchObject({
       supportedFields: ["session.reset"],
       effective: {
@@ -380,7 +375,7 @@ describe("ChatSettingsService", () => {
       platformMessageId: "dm-message-1",
     });
     expect(
-      (await service.list()).items.map((item) => item.snapshot.conversation.ref.conversationId),
+      (await service.list()).items.map((item) => item.snapshot.conversation.ref.chatId),
     ).toContain("dm-1");
 
     expect(repository.find("discord", "dm-1" as ChatId)).toMatchObject({
@@ -404,7 +399,7 @@ describe("ChatSettingsService", () => {
 
     const feishuRef: ChatRef = {
       connectionId: feishu.id,
-      conversationId: "oc_group" as ChatId,
+      chatId: "oc_group" as ChatId,
     };
     service.observe({
       ref: feishuRef,
@@ -423,7 +418,7 @@ describe("ChatSettingsService", () => {
 
     const wechatRef: ChatRef = {
       connectionId: wechat.id,
-      conversationId: "wechat-contact" as ChatId,
+      chatId: "wechat-contact" as ChatId,
     };
     service.observe({
       ref: wechatRef,
@@ -471,7 +466,7 @@ describe("ChatSettingsService", () => {
 
     expect(
       (await service.list()).items.find(
-        (item) => item.snapshot.conversation.ref.conversationId === "parent",
+        (item) => item.snapshot.conversation.ref.chatId === "parent",
       )?.source,
     ).toBe("configured");
 
@@ -501,7 +496,7 @@ describe("ChatSettingsService", () => {
 
     const wechatRef: ChatRef = {
       connectionId: wechat.id,
-      conversationId: "wechat-group" as ChatId,
+      chatId: "wechat-group" as ChatId,
     };
     service.observe({
       ref: wechatRef,
@@ -557,7 +552,7 @@ describe("ChatSettingsService", () => {
     const { registry, service, wechat } = await setup();
     const ref: ChatRef = {
       connectionId: wechat.id,
-      conversationId: "wechat-group" as ChatId,
+      chatId: "wechat-group" as ChatId,
     };
     service.observe({ ref, service: "wechat", kind: "group", displayName: "WeChat group" });
     await service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } });
@@ -612,7 +607,7 @@ describe("ChatSettingsService", () => {
         Array.from({ length: 5 }, (_, index) => ({
           ref: {
             connectionId,
-            conversationId: `channel-${index}` as ChatId,
+            chatId: `channel-${index}` as ChatId,
           },
           service: "discord",
           kind: "channel" as const,
@@ -654,7 +649,7 @@ describe("ChatSettingsService", () => {
     const descriptors = Array.from({ length: 5 }, (_, index) => ({
       ref: {
         connectionId: discord.id,
-        conversationId: `channel-${index}` as ChatId,
+        chatId: `channel-${index}` as ChatId,
       },
       service: "discord",
       kind: "channel" as const,
@@ -665,7 +660,7 @@ describe("ChatSettingsService", () => {
     }
     repository.mutate(
       {
-        ref: { connectionId: discord.id, conversationId: "topic-1" as ChatId },
+        ref: { connectionId: discord.id, chatId: "topic-1" as ChatId },
         service: "discord",
         kind: "topic",
         displayName: "topic-1",
@@ -705,7 +700,7 @@ describe("ChatSettingsService", () => {
     expect(() =>
       repository.mutate(
         {
-          ref: { connectionId: "webchat", conversationId: "chat-2" as ChatId },
+          ref: { connectionId: "webchat", chatId: "chat-2" as ChatId },
           service: "webchat",
           kind: "channel",
           displayName: "chat-2",

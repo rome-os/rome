@@ -17,7 +17,7 @@ import {
 } from "@rome/api-types/people";
 import { createLogger } from "../logger.js";
 import type { AccountMessages, MessageAccount } from "../channels/messages.js";
-import { channelConversationId } from "../db/repositories/webchat.js";
+import { channelChatId } from "../db/repositories/webchat.js";
 import { conversationPlatformMessageId } from "../db/repositories/webchat.js";
 import type { OutboxAccount, OutboxRepository, OutboxRow } from "../db/repositories/outbox.js";
 import { outboxMessage as wire } from "../db/repositories/outbox.js";
@@ -52,7 +52,7 @@ const log = createLogger("people-outbox");
  *  session, and Rome's own record of what it said there. Named as `ApiDeps`
  *  names it so no adapter sits between the two. */
 export interface ChatStore {
-  ensureChannelConversation(input: {
+  ensureChannelChat(input: {
     channel: string;
     threadId: string;
     agentName?: string;
@@ -106,7 +106,7 @@ export async function sendToAccount(
   const input = {
     channel: account.channel,
     channelUserId: account.channelUserId,
-    conversationId: resolution.target.conversationId,
+    chatId: resolution.target.chatId,
     text,
   };
   const claimed = id ? await deps.outboxRepo.openOnce({ ...input, id }) : null;
@@ -194,7 +194,7 @@ export async function retrySend(
     await deps.outboxRepo.refused(row.id, error);
     return wire({ ...row, state: "failed", error });
   }
-  if (resolution.target.conversationId !== row.conversationId) {
+  if (resolution.target.chatId !== row.chatId) {
     const error = "The account's conversation changed. Discard this reply and compose a new one.";
     await deps.outboxRepo.refused(row.id, error);
     return wire({ ...row, state: "failed", error });
@@ -229,9 +229,9 @@ async function heldBy(
 }
 
 async function record(deps: OutboxDeps, row: OutboxRow, messageId: string | null): Promise<void> {
-  const conversation = await deps.webchatRepo.ensureChannelConversation({
+  const conversation = await deps.webchatRepo.ensureChannelChat({
     channel: row.channel,
-    threadId: row.conversationId,
+    threadId: row.chatId,
   });
   await deps.webchatRepo.recordOutboundConversationMessage({
     sessionId: conversation.id,
@@ -325,9 +325,9 @@ export async function readOutbox(
 function refsFor(row: OutboxRow, addresses: readonly string[]): string[] {
   const messageId = row.providerMessageId;
   if (messageId === null) return [];
-  const sessionId = channelConversationId(row.channel, row.conversationId);
+  const sessionId = channelChatId(row.channel, row.chatId);
   return [
-    `${row.conversationId}:${messageId}`,
+    `${row.chatId}:${messageId}`,
     ...new Set(addresses.map((address) => `${address}:${messageId}`)),
     `agent:${conversationPlatformMessageId(sessionId, messageId)}`,
   ];

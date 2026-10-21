@@ -348,8 +348,8 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
             stop(): Promise<void> {
               return adapter.stop();
             },
-            send(conversationId, msg) {
-              return adapter.send(conversationId, msg);
+            send(chatId, msg) {
+              return adapter.send(chatId, msg);
             },
             ...features,
           };

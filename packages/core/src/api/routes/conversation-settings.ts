@@ -6,22 +6,22 @@ const dashboardActor = { kind: "guardian" as const, id: "dashboard" };
 
 function parseRef(value: unknown): ChatRef {
   if (!value || typeof value !== "object") throw new Error("ref is required");
-  const ref = value as { connectionId?: unknown; conversationId?: unknown };
+  const ref = value as { connectionId?: unknown; chatId?: unknown };
   if (typeof ref.connectionId !== "string" || !ref.connectionId) {
     throw new Error("ref.connectionId is required");
   }
-  if (typeof ref.conversationId !== "string") {
-    throw new Error("ref.conversationId is required");
+  if (typeof ref.chatId !== "string") {
+    throw new Error("ref.chatId is required");
   }
   return ref as ChatRef;
 }
 
-export function conversationSettingsRoutes(deps: ApiDeps): Hono {
+export function chatSettingsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
   app.get("/conversation-settings", async (c) => {
     const limit = Number.parseInt(c.req.query("limit") ?? "50", 10);
-    const page = await deps.conversationSettings.list({
+    const page = await deps.chatSettings.list({
       connectionId: c.req.query("connectionId"),
       query: c.req.query("query"),
       cursor: c.req.query("cursor"),
@@ -43,7 +43,7 @@ export function conversationSettingsRoutes(deps: ApiDeps): Hono {
         clear?: ChatSettingField[];
       }>();
       return c.json(
-        await deps.conversationSettings.update({
+        await deps.chatSettings.update({
           ref: parseRef(body.ref),
           set: body.set ?? {},
           clear: Array.isArray(body.clear) ? body.clear : [],
@@ -59,7 +59,7 @@ export function conversationSettingsRoutes(deps: ApiDeps): Hono {
     try {
       const body = await c.req.json<{ ref?: unknown }>();
       return c.json(
-        await deps.conversationSettings.reset({ ref: parseRef(body.ref), actor: dashboardActor }),
+        await deps.chatSettings.reset({ ref: parseRef(body.ref), actor: dashboardActor }),
       );
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);

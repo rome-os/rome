@@ -1,14 +1,14 @@
 import { and, asc, eq, like } from "drizzle-orm";
 import type { ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
-import { channelConversationId } from "../db/repositories/webchat.js";
+import { channelChatId } from "../db/repositories/webchat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
 export type StoredChatRow = typeof romeSessions.$inferSelect;
 
-function rowByAddress(exec: DrizzleDb | DrizzleTx, service: string, conversationId: ChatId) {
+function rowByAddress(exec: DrizzleDb | DrizzleTx, service: string, chatId: ChatId) {
   return exec
     .select()
     .from(romeSessions)
@@ -16,7 +16,7 @@ function rowByAddress(exec: DrizzleDb | DrizzleTx, service: string, conversation
       and(
         isChannelConversation,
         eq(romeSessions.sourceChannel, service),
-        eq(romeSessions.sourceThreadId, conversationId),
+        eq(romeSessions.sourceThreadId, chatId),
       ),
     )
     .limit(1)
@@ -26,8 +26,8 @@ function rowByAddress(exec: DrizzleDb | DrizzleTx, service: string, conversation
 export class ChatSettingsRepository {
   constructor(private readonly db: DrizzleDb) {}
 
-  find(service: string, conversationId: ChatId): StoredChatRow | null {
-    return rowByAddress(this.db, service, conversationId) ?? null;
+  find(service: string, chatId: ChatId): StoredChatRow | null {
+    return rowByAddress(this.db, service, chatId) ?? null;
   }
 
   listKnown(input: { service?: string; query?: string }): StoredChatRow[] {
@@ -76,12 +76,12 @@ export class ChatSettingsRepository {
     this.db.transaction((tx) => {
       const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
       const parentSessionId = descriptor.parent
-        ? (rowByAddress(tx, channel, descriptor.parent.conversationId)?.id ?? null)
+        ? (rowByAddress(tx, channel, descriptor.parent.chatId)?.id ?? null)
         : null;
       const now = new Date();
       tx.insert(romeSessions)
         .values({
-          id: channelConversationId(channel, descriptor.ref.conversationId),
+          id: channelChatId(channel, descriptor.ref.chatId),
           name: descriptor.displayName,
           personaId: null,
           projectName: DEFAULT_WEBCHAT_PROJECT_NAME,
@@ -90,7 +90,7 @@ export class ChatSettingsRepository {
           agentName: null,
           type: "channel",
           sourceChannel: channel,
-          sourceThreadId: descriptor.ref.conversationId,
+          sourceThreadId: descriptor.ref.chatId,
           sourceThreadName: descriptor.displayName,
           sourceThreadType,
           channelSettings: null,
@@ -102,11 +102,9 @@ export class ChatSettingsRepository {
         .onConflictDoNothing({ target: romeSessions.id })
         .run();
 
-      const current = rowByAddress(tx, channel, descriptor.ref.conversationId);
+      const current = rowByAddress(tx, channel, descriptor.ref.chatId);
       if (!current) {
-        throw new Error(
-          `Failed to resolve conversation ${channel}:${descriptor.ref.conversationId}`,
-        );
+        throw new Error(`Failed to resolve conversation ${channel}:${descriptor.ref.chatId}`);
       }
 
       tx.update(romeSessions)

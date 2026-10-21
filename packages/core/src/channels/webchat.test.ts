@@ -75,7 +75,7 @@ describe("WebChatAdapter", () => {
       channel: "webchat",
       direction: "inbound",
       messageId: "msg-user",
-      conversationId: "sess-1",
+      chatId: "sess-1",
       senderId: "guardian",
       senderDisplayName: "Guardian",
       text: "Please draft the plan.",
@@ -88,7 +88,7 @@ describe("WebChatAdapter", () => {
       direction: "outbound",
       senderId: "workflow-planner",
       senderDisplayName: "Workflow Planner",
-      conversationId: "sess-1",
+      chatId: "sess-1",
       thread: { kind: "dm", name: "Build Planner" },
       text: "Working on it.\nPlan draft complete.",
     });
@@ -152,12 +152,12 @@ describe("WebChatAdapter", () => {
     );
 
     await expect(adapter.fetchHistory(null, 24)).resolves.toEqual([
-      expect.objectContaining({ messageId: "msg-parent", conversationId: "sess-parent" }),
+      expect.objectContaining({ messageId: "msg-parent", chatId: "sess-parent" }),
     ]);
     await expect(adapter.fetchHistory("sess-child", 24)).resolves.toEqual([
       expect.objectContaining({
         messageId: "msg-child",
-        conversationId: "sess-child",
+        chatId: "sess-child",
         text: "Hidden specialist context",
       }),
     ]);
@@ -192,7 +192,7 @@ describe("WebChatAdapter", () => {
     });
 
     const messages = await repo.getMessages("sess-block");
-    expect(receipt).toStrictEqual({ conversationId: "sess-block", messageId: messages[0]?.id });
+    expect(receipt).toStrictEqual({ chatId: "sess-block", messageId: messages[0]?.id });
     expect(messages).toEqual([
       expect.objectContaining({
         turnId: "turn-block",
@@ -267,7 +267,7 @@ describe("WebChatAdapter", () => {
     await repo.createSession("sess-empty", "Empty");
 
     await expect(adapter.send("sess-empty" as ChatId, {})).resolves.toStrictEqual({
-      conversationId: "sess-empty",
+      chatId: "sess-empty",
     });
     await expect(repo.getMessages("sess-empty")).resolves.toEqual([]);
   });

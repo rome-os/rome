@@ -1,5 +1,5 @@
 // The agent linked to a channel, as the channel-message hook reads it.
-// Vocabulary: docs/concepts/messaging.md#romes-accounts. Invariants:
+// Vocabulary: docs/domains/chats.md#account. Invariants:
 // docs/architecture/channels.md#an-accounts-agent.
 
 import type { ChannelMessageHookDeps, ChatSettingsSnapshot } from "@rome-os/app-runtime";

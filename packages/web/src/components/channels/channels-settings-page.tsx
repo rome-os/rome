@@ -181,8 +181,7 @@ export function ChannelsSettingsPage() {
       current.map((candidate) =>
         candidate.snapshot.conversation.ref.connectionId ===
           snapshot.conversation.ref.connectionId &&
-        candidate.snapshot.conversation.ref.conversationId ===
-          snapshot.conversation.ref.conversationId
+        candidate.snapshot.conversation.ref.chatId === snapshot.conversation.ref.chatId
           ? { ...candidate, snapshot, source: hasOverrides(snapshot) ? "configured" : "known" }
           : candidate,
       ),
@@ -282,7 +281,7 @@ export function ChannelsSettingsPage() {
           <div className="space-y-4">
             {items.map((item) => (
               <ConversationRow
-                key={`${item.snapshot.conversation.ref.connectionId}:${item.snapshot.conversation.ref.conversationId}`}
+                key={`${item.snapshot.conversation.ref.connectionId}:${item.snapshot.conversation.ref.chatId}`}
                 item={item}
                 agentNames={agentNames}
                 silentAccount={silentAccounts.get(item.snapshot.conversation.ref.connectionId)}

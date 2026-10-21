@@ -1,6 +1,6 @@
 // Accounts and their agents. An account is a channel, as the dashboard
 // shows it; one whose Connection was deleted is listed with no Connection.
-// Vocabulary: docs/concepts/messaging.md#romes-accounts.
+// Vocabulary: docs/domains/chats.md#account.
 // Invariants: docs/architecture/channels.md#an-accounts-agent.
 
 import type {

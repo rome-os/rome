@@ -65,7 +65,7 @@ describe("Discord stop command", () => {
 
     expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
     expect(stop).toHaveBeenCalledWith({
-      ref: { connectionId: "connection:discord", conversationId: "channel-1" },
+      ref: { connectionId: "connection:discord", chatId: "channel-1" },
       service: "discord",
       senderId: "user-1",
     });

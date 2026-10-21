@@ -271,7 +271,7 @@ describe("Approval flow E2E — triggering an approval", () => {
     expect(r1.approval.approvalId).not.toBe(r2.approval.approvalId);
     const pending = await h.approvalsRepo.findPending();
     expect(pending.length).toBeGreaterThanOrEqual(2);
-    expect(h.channel.sentMessages.map((m) => m.conversationId)).toEqual(["thread-A", "thread-B"]);
+    expect(h.channel.sentMessages.map((m) => m.chatId)).toEqual(["thread-A", "thread-B"]);
 
     h.testDb.close();
   });

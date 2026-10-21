@@ -7,8 +7,9 @@ function channel(name: string, send: ChannelSend | null): Channel {
   return { name, send, inbound: null, accounts: null, messages: null, directory: null };
 }
 
-function sending(direct: ChannelDirectMessaging | null): ChannelSend {
-  return { send: async (conversationId) => ({ conversationId }), direct, activity: null };
+function sending(talker: Pick<ChannelDirectMessaging, "chatFor"> | null): ChannelSend {
+  const direct = talker && { ...talker, conversationFor: talker.chatFor };
+  return { send: async (chatId) => ({ chatId }), direct, activity: null };
 }
 
 describe("readSendStates", () => {
@@ -17,19 +18,19 @@ describe("readSendStates", () => {
       channel(
         "unbacked",
         sending({
-          conversationFor: () => Promise.reject(new ChannelNotConnected("unbacked")),
+          chatFor: () => Promise.reject(new ChannelNotConnected("unbacked")),
         }),
       ),
       channel("read-only", null),
       channel("no-direct", sending(null)),
-      channel("no-thread", sending({ conversationFor: async () => null })),
+      channel("no-thread", sending({ chatFor: async () => null })),
       channel(
         "down",
         sending({
-          conversationFor: () => Promise.reject(new Error("provider is down")),
+          chatFor: () => Promise.reject(new Error("provider is down")),
         }),
       ),
-      channel("open", sending({ conversationFor: async (id) => id as ChatId })),
+      channel("open", sending({ chatFor: async (id) => id as ChatId })),
     ];
 
     const states = await readSendStates({ channels }, [

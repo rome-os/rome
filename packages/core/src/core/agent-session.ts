@@ -372,7 +372,7 @@ export interface AgentSessionManager {
    * Never overwrites a recorded conversation. Only sessions cached by this
    * manager see the new value, so call it on the manager that acquired them.
    */
-  recordConversation(sessionId: string, conversationId: string): Promise<void>;
+  recordConversation(sessionId: string, chatId: string): Promise<void>;
   shutdown(): Promise<void>;
 }
 
@@ -512,7 +512,7 @@ export function createAgentSessionManager(
     span: Span,
     init?: AgentSessionInit,
     /** Set when the reset policy already ran for this acquire. */
-    resetChecked?: { preparedSessionId?: string; preparedConversationId?: string },
+    resetChecked?: { preparedSessionId?: string; preparedChatId?: string },
   ): Promise<AgentSession> => {
     const k = keyOf(key);
     const resetRef =
@@ -521,13 +521,13 @@ export function createAgentSessionManager(
       deps.resolveProviderSessionReset
         ? {
             connectionId: init.threadContext.connectionId,
-            conversationId: init.threadContext.threadId as ChatId,
+            chatId: init.threadContext.threadId as ChatId,
           }
         : undefined;
     if (init && resetRef && !init.resumeSessionId && !resetChecked) {
       const interactionAt = new Date();
       const reset = await deps.resolveProviderSessionReset!(resetRef);
-      const conversationId = init.romeSessionId ?? init.threadContext?.romeSessionId;
+      const chatId = init.romeSessionId ?? init.threadContext?.romeSessionId;
       return await lifecycleMutex.runExclusive(k, async () => {
         const active = await deps.sessionManager.findReusableSession(
           key.channelThreadKey,
@@ -539,7 +539,7 @@ export function createAgentSessionManager(
         const cached = sessions.get(k);
         if (decision.due) {
           log.info("provider_session.reset_due", {
-            conversationId,
+            chatId,
             agentName: key.agentName,
             provider: active?.provider ?? undefined,
             oldSessionId: active?.id,
@@ -553,19 +553,19 @@ export function createAgentSessionManager(
           }
         }
         let preparedSessionId: string | undefined;
-        let preparedConversationId: string | undefined;
+        let preparedChatId: string | undefined;
         if (decision.due) {
-          warnOnConversationMismatch(key, active?.id, active?.conversationId, init.romeSessionId);
+          warnOnConversationMismatch(key, active?.id, active?.chatId, init.romeSessionId);
           const replacement = await deps.sessionsRepo.rotateProviderGeneration({
             agentName: key.agentName,
             channelThreadKey: key.channelThreadKey,
             newSessionId: uuidv4(),
-            conversationId: init.romeSessionId,
+            chatId: init.romeSessionId,
           });
           preparedSessionId = replacement.id;
-          preparedConversationId = replacement.conversationId ?? undefined;
+          preparedChatId = replacement.chatId ?? undefined;
           log.info("provider_session.rotated", {
-            conversationId,
+            chatId,
             agentName: key.agentName,
             provider: active?.provider ?? undefined,
             oldSessionId: active?.id,
@@ -577,7 +577,7 @@ export function createAgentSessionManager(
         }
         return await acquireInner(key, span, init, {
           preparedSessionId,
-          preparedConversationId,
+          preparedChatId,
         });
       });
     }
@@ -653,7 +653,7 @@ export function createAgentSessionManager(
     const promise = (async () => {
       const sess = await openSession(deps, key, init ?? {}, {
         preparedSessionId: resetChecked?.preparedSessionId,
-        preparedConversationId: resetChecked?.preparedConversationId,
+        preparedChatId: resetChecked?.preparedChatId,
         keepAlive,
         onClosed: onSessionClosed,
         isSubagent,
@@ -722,15 +722,15 @@ export function createAgentSessionManager(
       }
       return undefined;
     },
-    async recordConversation(sessionId, conversationId) {
-      const filled = await deps.sessionsRepo.fillConversationId(sessionId, conversationId);
+    async recordConversation(sessionId, chatId) {
+      const filled = await deps.sessionsRepo.fillChatId(sessionId, chatId);
       if (!filled) return;
       // A cached session reads the same value a cold reopen would. A session
       // still opening is not cached yet and misses this, so callers record
       // only after their acquire has returned.
       for (const session of [...sessions.values()]) {
         if (session.sessionId !== sessionId || session.conversation) continue;
-        const recorded = await findRecordedConversation(deps.webchatRepo, conversationId);
+        const recorded = await findRecordedConversation(deps.webchatRepo, chatId);
         if (recorded) session.conversation = { origin: "recorded", ...recorded };
       }
     },
@@ -747,7 +747,7 @@ interface OpenOptions {
   /** Id of a generation the reset path already created transactionally. */
   preparedSessionId?: string;
   /** The conversation that prepared generation recorded, if any. */
-  preparedConversationId?: string;
+  preparedChatId?: string;
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
   isSubagent: boolean;
@@ -854,17 +854,17 @@ async function reachableRecordedWorkingDir(recorded: string): Promise<string | u
 function warnOnConversationMismatch(
   key: AgentSessionKey,
   sessionId: string | undefined,
-  storedConversationId: string | null | undefined,
-  requestedConversationId: string | undefined,
+  storedChatId: string | null | undefined,
+  requestedChatId: string | undefined,
 ): void {
-  if (!storedConversationId || !requestedConversationId) return;
-  if (storedConversationId === requestedConversationId) return;
+  if (!storedChatId || !requestedChatId) return;
+  if (storedChatId === requestedChatId) return;
   log.warn("agent session serves a different conversation than requested", {
     sessionId,
     agentName: key.agentName,
     channelThreadKey: key.channelThreadKey,
-    storedConversationId,
-    requestedConversationId,
+    storedChatId,
+    requestedChatId,
   });
 }
 
@@ -893,7 +893,7 @@ async function openSession(
         providerThreadId: string | null;
         model: string | null;
         workingDir?: string | null;
-        conversationId?: string | null;
+        chatId?: string | null;
       }
     | undefined;
   if (opts.preparedSessionId) {
@@ -921,7 +921,7 @@ async function openSession(
   // The provider keeps a transcript per cwd, so a resumed row reopens where it
   // was written unless the caller names a dir. Legacy rows record none.
   let preparedSessionId = opts.preparedSessionId;
-  let preparedConversationId = opts.preparedConversationId;
+  let preparedChatId = opts.preparedChatId;
   let recordedWorkingDir: string | undefined;
   if (init.workingDir === undefined && resumeResult?.workingDir) {
     recordedWorkingDir = await reachableRecordedWorkingDir(resumeResult.workingDir);
@@ -941,20 +941,15 @@ async function openSession(
         channelThreadKey: key.channelThreadKey,
         workingDir: resumeResult.workingDir,
       });
-      warnOnConversationMismatch(
-        key,
-        resumeResult.id,
-        resumeResult.conversationId,
-        requestedRomeSessionId,
-      );
+      warnOnConversationMismatch(key, resumeResult.id, resumeResult.chatId, requestedRomeSessionId);
       const replacement = await deps.sessionsRepo.rotateProviderGeneration({
         agentName: key.agentName,
         channelThreadKey: key.channelThreadKey,
         newSessionId: uuidv4(),
-        conversationId: requestedRomeSessionId,
+        chatId: requestedRomeSessionId,
       });
       preparedSessionId = replacement.id;
-      preparedConversationId = replacement.conversationId ?? undefined;
+      preparedChatId = replacement.chatId ?? undefined;
       resumeResult = undefined;
     }
   }
@@ -965,10 +960,7 @@ async function openSession(
   // A caller that names no conversation still serves the one the row recorded.
   const recordedConversation = requestedRomeSessionId
     ? undefined
-    : await findRecordedConversation(
-        deps.webchatRepo,
-        resumeResult?.conversationId ?? preparedConversationId,
-      );
+    : await findRecordedConversation(deps.webchatRepo, resumeResult?.chatId ?? preparedChatId);
   const conversation: SessionConversation | undefined = requestedRomeSessionId
     ? { origin: "named", id: requestedRomeSessionId }
     : recordedConversation && { origin: "recorded", ...recordedConversation };
@@ -985,11 +977,11 @@ async function openSession(
   // model that actually ran), so it only applies to unpinned (legacy) resumes.
   // Only the chat's own session, keyed `webchat:<conversation id>`, reads it.
   // Subagent keys carry a suffix, and app sessions use keys of their own.
-  const conversationId = webchatConversationOfKey(key.channelThreadKey);
+  const chatId = webchatConversationOfKey(key.channelThreadKey);
   const persistedSelection =
-    init.resumeSessionId && !sessionPin && !init.selectionId && conversationId
+    init.resumeSessionId && !sessionPin && !init.selectionId && chatId
       ? resolveWebchatLargeModelSelection(
-          (await deps.webchatRepo?.getSession(conversationId))?.largeModelSelection,
+          (await deps.webchatRepo?.getSession(chatId))?.largeModelSelection,
         )
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
@@ -999,7 +991,7 @@ async function openSession(
       id: sessionId,
       agentName: key.agentName,
       channelThreadKey: key.channelThreadKey,
-      conversationId: requestedRomeSessionId,
+      chatId: requestedRomeSessionId,
       workingDir,
       createdAt: new Date(),
       lastActiveAt: new Date(),
@@ -1008,15 +1000,10 @@ async function openSession(
     await deps.sessionManager.createSession(dbSession);
   } else if (preparedSessionId) {
     await deps.sessionsRepo.setWorkingDir(sessionId, workingDir);
-  } else if (requestedRomeSessionId && !resumeResult?.conversationId) {
-    await deps.sessionsRepo.fillConversationId(sessionId, requestedRomeSessionId);
+  } else if (requestedRomeSessionId && !resumeResult?.chatId) {
+    await deps.sessionsRepo.fillChatId(sessionId, requestedRomeSessionId);
   } else {
-    warnOnConversationMismatch(
-      key,
-      sessionId,
-      resumeResult?.conversationId,
-      requestedRomeSessionId,
-    );
+    warnOnConversationMismatch(key, sessionId, resumeResult?.chatId, requestedRomeSessionId);
   }
 
   if (config.outputSchema && init.handback) {
@@ -2704,7 +2691,7 @@ class AgentSessionImpl implements AgentSession {
         agentName: this.key.agentName,
         channelThreadKey,
         // A persisted fork's conversation is minted under the fork's own id.
-        conversationId: forkSessionId,
+        chatId: forkSessionId,
         workingDir: this.workingDir,
         createdAt: new Date(),
         lastActiveAt: new Date(),

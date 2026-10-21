@@ -153,7 +153,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
         for await (const _m of runner.run({
           agentName: options.agentName,
           prompt: message.text,
-          channelThreadKey: `${message.channel}:${message.conversationId}`,
+          channelThreadKey: `${message.channel}:${message.chatId}`,
           workingDir: "/tmp",
         })) {
           // intentionally empty

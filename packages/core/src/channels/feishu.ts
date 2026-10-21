@@ -39,7 +39,7 @@ export interface FeishuConfig {
    *  (International). Defaults to "feishu". */
   domain?: "feishu" | "lark";
   connectionId?: string;
-  conversationSettings?: ChatSettingsControl & {
+  chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
   personMappingRepo?: PersonMappingRepository;
@@ -133,7 +133,7 @@ export class FeishuAdapter {
   private channel: LarkChannel;
   private handler?: (msg: ChannelMessage) => Promise<void>;
   private readonly connectionId?: string;
-  private readonly conversationSettings?: ChatSettingsControl & {
+  private readonly chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
   private readonly personMappingRepo?: PersonMappingRepository;
@@ -170,7 +170,7 @@ export class FeishuAdapter {
   ) {
     this.channel = createChannel(config);
     this.connectionId = config.connectionId;
-    this.conversationSettings = config.conversationSettings;
+    this.chatSettings = config.chatSettings;
     this.personMappingRepo = config.personMappingRepo;
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
@@ -208,9 +208,9 @@ export class FeishuAdapter {
     log.info("feishu adapter stopped");
   }
 
-  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    if (!message.text) return { conversationId };
-    const threadId: string = conversationId;
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    if (!message.text) return { chatId };
+    const threadId: string = chatId;
 
     // Agent output is Markdown; let the SDK render it as a rich-text post.
     const opts = message.replyToMessageId
@@ -231,7 +231,7 @@ export class FeishuAdapter {
       };
       log.info("message sent", { threadId });
       const messageId = sent?.messageId ?? sent?.message_id;
-      return { conversationId, ...(messageId ? { messageId } : {}) };
+      return { chatId, ...(messageId ? { messageId } : {}) };
     } catch (err) {
       log.error("failed to send message", {
         threadId,
@@ -313,7 +313,7 @@ export class FeishuAdapter {
       channel: "feishu",
       direction: "inbound",
       messageId: m.messageId,
-      conversationId: m.chatId as ChatId,
+      chatId: m.chatId as ChatId,
       senderId: m.senderId,
       senderDisplayName: m.senderName ?? "Feishu User",
       text,
@@ -330,7 +330,7 @@ export class FeishuAdapter {
 
     log.info("message received", {
       from: msg.senderId,
-      conversationId: msg.conversationId,
+      chatId: msg.chatId,
       threadKind: msg.thread?.kind,
     });
 
@@ -437,7 +437,7 @@ export class FeishuAdapter {
   private async handleGroupConfigAction(evt: CardActionEvent): Promise<void> {
     const value = evt.action.value;
     if (!isFeishuGroupConfigAction(value)) return;
-    if (!this.conversationSettings || !this.connectionId) {
+    if (!this.chatSettings || !this.connectionId) {
       await this.sendGroupConfigStatus(
         evt.chatId,
         evt.messageId,
@@ -573,20 +573,20 @@ export class FeishuAdapter {
   /** The group's settings. `withAgents` adds `storedAgent` and
    *  `answeringAgent`, which read the link and the loaded agents. */
   private async getChannelConfig(chatId: string, withAgents = false): Promise<FeishuChannelConfig> {
-    if (!this.conversationSettings || !this.connectionId) {
+    if (!this.chatSettings || !this.connectionId) {
       return withAgents
         ? { answeringAgent: answeringAgentOf(this.accountAgent?.(), undefined, "group") }
         : {};
     }
     const observed = this.observedConversations.get(chatId);
     const descriptor: ChatDescriptor = {
-      ref: { connectionId: this.connectionId, conversationId: chatId as ChatId },
+      ref: { connectionId: this.connectionId, chatId: chatId as ChatId },
       service: "feishu",
       kind: observed?.kind ?? "group",
       displayName: observed?.displayName ?? chatId,
     };
-    this.conversationSettings.observe?.(descriptor);
-    const snapshot = await this.conversationSettings.get(descriptor.ref);
+    this.chatSettings.observe?.(descriptor);
+    const snapshot = await this.chatSettings.get(descriptor.ref);
     return {
       chatName: descriptor.displayName,
       mode: snapshot.effective.enabled ? "allow" : "ignore",
@@ -603,11 +603,11 @@ export class FeishuAdapter {
     patch: Partial<FeishuChannelConfig> | null,
     updatedBy?: string,
   ): Promise<FeishuChannelConfig> {
-    if (!this.conversationSettings || !this.connectionId) return {};
+    if (!this.chatSettings || !this.connectionId) return {};
     const current = await this.getChannelConfig(chatId);
-    const ref = { connectionId: this.connectionId, conversationId: chatId as ChatId };
+    const ref = { connectionId: this.connectionId, chatId: chatId as ChatId };
     if (patch === null) {
-      const saved = await this.conversationSettings.reset({
+      const saved = await this.chatSettings.reset({
         ref,
         actor: { kind: "guardian", id: updatedBy ?? "feishu-card" },
       });
@@ -635,7 +635,7 @@ export class FeishuAdapter {
     }
     // A patch carries an agent only to set one. Reset clears it.
     if (patch.agentName) (set.routing ??= {}).agentName = patch.agentName;
-    await this.conversationSettings.update({
+    await this.chatSettings.update({
       ref,
       set,
       clear,

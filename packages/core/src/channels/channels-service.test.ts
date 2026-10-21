@@ -23,7 +23,7 @@ function line(id: string, at: number): ChannelMessage {
     channel: "whatsapp",
     direction: "inbound",
     messageId: id,
-    conversationId: "c1" as ChatId,
+    chatId: "c1" as ChatId,
     senderId: "s1",
     text: id,
     attachments: [],
@@ -31,7 +31,7 @@ function line(id: string, at: number): ChannelMessage {
   };
 }
 
-const RECEIPT: MessageReceipt = { messageId: "m1", conversationId: "c1" as ChatId };
+const RECEIPT: MessageReceipt = { messageId: "m1", chatId: "c1" as ChatId };
 
 /** A registry holding `connections`, each with a talker that sends through
  *  `send`, told which Connection is sending. */

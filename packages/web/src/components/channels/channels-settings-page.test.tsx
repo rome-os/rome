@@ -55,7 +55,7 @@ function item(input: {
     source: input.overrides ? "configured" : "live",
     snapshot: {
       conversation: {
-        ref: { connectionId: `${service}-1`, conversationId: input.id },
+        ref: { connectionId: `${service}-1`, chatId: input.id },
         service,
         kind: "channel",
         displayName: input.name,
@@ -231,7 +231,7 @@ describe("ChannelsSettingsPage", () => {
     // because they landed inside a single debounce window.
     await waitFor(() => expect(patchBodies).toHaveLength(1));
     expect(patchBodies[0]).toMatchObject({
-      ref: { connectionId: "discord-1", conversationId: "engineering" },
+      ref: { connectionId: "discord-1", chatId: "engineering" },
       set: {
         enabled: false,
         activation: { mode: "all" },

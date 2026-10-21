@@ -231,6 +231,15 @@
           "privacyNote": "You approve access on Slack; you can disconnect here anytime."
         }
       },
+      "shopify": {
+        "user": {
+          "title": "Your Shopify store",
+          "bullets": {
+            "work": "Update products and inventory, and read orders, in your store"
+          },
+          "privacyNote": "You approve access on Shopify; you can disconnect here anytime."
+        }
+      },
       "composio": {
         "user": {
           "title": "Your Composio account",

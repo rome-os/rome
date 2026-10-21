@@ -43,7 +43,7 @@ describe("DiscordAdapter.send", () => {
         ],
       }),
     ).resolves.toStrictEqual({
-      conversationId: channel.id,
+      chatId: channel.id,
       messageId: "discord-attachment-1",
     });
     expect(send).toHaveBeenCalledTimes(1);
@@ -63,7 +63,7 @@ describe("DiscordAdapter.send", () => {
     });
 
     await expect(adapter.send(channel.id as ChatId, {})).resolves.toStrictEqual({
-      conversationId: channel.id,
+      chatId: channel.id,
     });
   });
 });

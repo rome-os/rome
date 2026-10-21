@@ -33,11 +33,13 @@ import {
   buildConnectionViews,
   CATALOG,
   CATALOG_BY_SLUG,
+  connectedRomeManagedSlugs,
   ROME_MANAGED_CATALOG,
   titleCase,
   type CatalogEntry,
   type ConnectedAccount,
   type ConnectionView,
+  type RegistryConnectionStatus,
 } from "@/lib/connections";
 
 function openConnectionSettings() {
@@ -53,6 +55,15 @@ interface StatusPayload {
 }
 
 type Notice = { kind: "info" | "error"; text: string } | null;
+
+/** Core's registry connections, read in the browser with the guardian's session
+ *  (the connector server can't see them). */
+async function fetchRomeConnections(): Promise<RegistryConnectionStatus[]> {
+  const res = await fetch("/api/connections", { credentials: "include", cache: "no-store" });
+  if (!res.ok) throw new Error(`Couldn't load Rome's connections (HTTP ${res.status}).`);
+  const body = (await res.json()) as { connections?: RegistryConnectionStatus[] };
+  return body.connections ?? [];
+}
 
 async function fetchStatus(): Promise<StatusPayload> {
   const res = await fetchAppApi("status");
@@ -253,14 +264,15 @@ function ConnectionsPage() {
     // already reflects a freshly bridged GitHub account.
   }, [qc]);
 
+  // Rome-managed cards read core's registry, not Composio: their connections
+  // live there, and need no Composio sign-in.
+  const registryQuery = useQuery({ queryKey: ["rome-connections"], queryFn: fetchRomeConnections });
   const connections = buildConnectionViews(accounts);
   // Rome-managed providers (e.g. GitHub) are brokered by Rome's own integration,
   // so they get a managed card and never a Composio connect — split them out of
   // both the Composio "Your connectors" list and the connectable catalog.
   const composioConnections = connections.filter((c) => !c.romeManaged);
-  const managedConnectionSlugs = new Set(
-    connections.filter((c) => c.romeManaged && !c.needsAttention).map((c) => c.slug.toLowerCase()),
-  );
+  const managedConnectionSlugs = connectedRomeManagedSlugs(registryQuery.data);
   const connectedSlugs = new Set(composioConnections.map((c) => c.slug.toLowerCase()));
   const available = CATALOG.filter((e) => !e.romeManaged && !connectedSlugs.has(e.slug));
   const attentionCount = composioConnections.filter((c) => c.needsAttention).length;

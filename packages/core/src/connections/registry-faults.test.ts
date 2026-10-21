@@ -642,7 +642,7 @@ describe("registry faults", () => {
         channel: "test",
         direction: "inbound",
         messageId: "m",
-        conversationId: "thread-1" as ChatId,
+        chatId: "thread-1" as ChatId,
         senderId: "s",
         senderDisplayName: "S",
         thread: { kind: "dm" },

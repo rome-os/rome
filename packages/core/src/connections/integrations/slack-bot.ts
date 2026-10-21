@@ -365,9 +365,9 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
             stop(): void {
               adapter.stop();
             },
-            async send(conversationId, message) {
+            async send(chatId, message) {
               try {
-                return await adapter.send(conversationId, message);
+                return await adapter.send(chatId, message);
               } catch (error) {
                 if (isSlackCredentialError(error)) {
                   throw new CredentialRejected({ grant: "bot", cause: error });
@@ -378,7 +378,7 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
             // A Slack direct message is its own conversation, opened with
             // conversations.open, so this is a provider call.
             directMessaging: {
-              async conversationFor(senderId) {
+              async chatFor(senderId) {
                 try {
                   return await adapter.directConversationFor(senderId);
                 } catch (error) {

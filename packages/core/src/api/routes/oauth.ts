@@ -15,6 +15,9 @@ import {
 import { importProviderBundle } from "../../connections/providers-import.js";
 import type { ApiDeps } from "../deps.js";
 
+/** Where Shopify connects: its Settings card asks for the store first. */
+const SHOPIFY_SETTINGS_PATH = "/settings/connections/shopify";
+
 export function oauthRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
@@ -46,6 +49,11 @@ export function oauthRoutes(deps: ApiDeps): Hono {
     if (!isEnabledOAuthProvider(provider)) {
       return c.json({ error: "Unsupported provider." }, 404);
     }
+    // Shopify authorizes per store, which a bare start link can't name. Its
+    // Settings card asks for the store first.
+    if (provider === "shopify") {
+      return c.redirect(SHOPIFY_SETTINGS_PATH, 303);
+    }
 
     try {
       const reconnect = c.req.query("reconnect") === "1";
@@ -61,6 +69,12 @@ export function oauthRoutes(deps: ApiDeps): Hono {
     const provider = c.req.param("provider");
     if (!isEnabledOAuthProvider(provider)) {
       return c.json({ error: "Unsupported provider." }, 404);
+    }
+    if (provider === "shopify") {
+      return c.json(
+        { error: `Connect Shopify from ${SHOPIFY_SETTINGS_PATH}, which asks for the store.` },
+        400,
+      );
     }
 
     try {

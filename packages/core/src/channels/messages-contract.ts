@@ -175,7 +175,7 @@ export function testMessagesQueryContract(
     it("answers every conversation, newest first, as the store's channel", async () => {
       const store = await subject();
       const all = await store.messages.query({ limit: WHOLE_QUERY });
-      expect(new Set(all.map((entry) => entry.conversationId)).size).toBeGreaterThan(1);
+      expect(new Set(all.map((entry) => entry.chatId)).size).toBeGreaterThan(1);
       expect(newestFirst(all)).toBe(true);
       for (const entry of all) {
         expect(entry.channel).toBe(store.channel);
@@ -193,18 +193,18 @@ export function testMessagesQueryContract(
     it("answers only the conversation it names", async () => {
       const store = await subject();
       const held = await store.messages.query({
-        conversationId: store.conversation,
+        chatId: store.conversation,
         limit: WHOLE_QUERY,
       });
       expect(held.length).toBeGreaterThanOrEqual(3);
-      expect(held.every((entry) => entry.conversationId === store.conversation)).toBe(true);
+      expect(held.every((entry) => entry.chatId === store.conversation)).toBe(true);
       expect(newestFirst(held)).toBe(true);
     });
 
     it("answers only what was said at or after `since`", async () => {
       const store = await subject();
       const held = await store.messages.query({
-        conversationId: store.conversation,
+        chatId: store.conversation,
         limit: WHOLE_QUERY,
       });
       const times = [...new Set(held.map((entry) => entry.timestamp.getTime()))].sort(
@@ -212,7 +212,7 @@ export function testMessagesQueryContract(
       );
       const since = new Date(times[times.length - 1]!);
       const recent = await store.messages.query({
-        conversationId: store.conversation,
+        chatId: store.conversation,
         since,
         limit: WHOLE_QUERY,
       });
@@ -227,7 +227,7 @@ export function testMessagesQueryContract(
       const store = await subject();
       expect(
         await store.messages.query({
-          conversationId: store.silentConversation,
+          chatId: store.silentConversation,
           limit: WHOLE_QUERY,
         }),
       ).toEqual([]);

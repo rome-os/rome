@@ -39,7 +39,7 @@ export interface AgentTurnStreamRegistry {
 const FINISHED_STREAM_TTL_MS = 30_000;
 
 function conversationKey(ref: ChatRef): string {
-  return `${ref.connectionId}\u0000${ref.conversationId}`;
+  return `${ref.connectionId}\u0000${ref.chatId}`;
 }
 
 export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {

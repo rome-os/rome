@@ -1,4 +1,4 @@
-// Connection conferral HTTP surface. Messaging model: docs/concepts/messaging.md.
+// Connection conferral HTTP surface. Vocabulary: docs/domains/connections.md.
 //
 // Four routes for EVERY service's connect setup (channels + brokered OAuth
 // alike); per-service knowledge lives in the integration descriptor's

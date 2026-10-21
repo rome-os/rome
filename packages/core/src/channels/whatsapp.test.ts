@@ -134,7 +134,7 @@ describe("WhatsAppAdapter", () => {
         channel: "whatsapp",
         direction: "inbound",
         messageId: "wa-msg-001",
-        conversationId: "1234567890@s.whatsapp.net",
+        chatId: "1234567890@s.whatsapp.net",
         senderId: "1234567890@s.whatsapp.net",
         senderDisplayName: "Bob",
         text: "hello from whatsapp",
@@ -166,7 +166,7 @@ describe("WhatsAppAdapter", () => {
       });
 
       expect(captured!.thread).toEqual({ kind: "group" });
-      expect(captured!.conversationId).toBe("group123@g.us");
+      expect(captured!.chatId).toBe("group123@g.us");
       expect(captured!.senderId).toBe("sender@s.whatsapp.net");
     });
 
@@ -641,14 +641,14 @@ describe("WhatsAppAdapter", () => {
       expect(mockSendMessage).toHaveBeenCalledWith("jid@s.whatsapp.net", {
         text: "hi from bot",
       });
-      expect(receipt).toStrictEqual({ conversationId: CHAT, messageId: "sent-1" });
+      expect(receipt).toStrictEqual({ chatId: CHAT, messageId: "sent-1" });
     });
 
     it("leaves messageId out of the receipt when the socket returns none", async () => {
       await adapter.start();
       const receipt = await adapter.send(CHAT, { text: "hi" });
 
-      expect(receipt).toStrictEqual({ conversationId: CHAT });
+      expect(receipt).toStrictEqual({ chatId: CHAT });
     });
 
     it("throws if socket is not connected", async () => {
@@ -802,7 +802,7 @@ describe("WhatsAppAdapter", () => {
         channel: "whatsapp",
         direction: "inbound",
         messageId: "wa-msg-001",
-        conversationId: "1234567890@s.whatsapp.net" as ChatId,
+        chatId: "1234567890@s.whatsapp.net" as ChatId,
         senderId: "1234567890@s.whatsapp.net",
         senderDisplayName: "Bob",
         timestamp: new Date("2026-05-10T00:00:00Z"),

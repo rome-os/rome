@@ -5,7 +5,7 @@ import { stopActiveConversationTurn } from "./chat-stop.js";
 
 const ref = {
   connectionId: "connection:discord",
-  conversationId: "channel-1" as ChatId,
+  chatId: "channel-1" as ChatId,
 };
 
 function activeTurn(initiatorId = "user-1") {

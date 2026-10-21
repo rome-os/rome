@@ -17,7 +17,7 @@ function makeMessage(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
     channel: "discord",
     direction: "inbound",
     messageId: "msg1",
-    conversationId: "general" as ChatId,
+    chatId: "general" as ChatId,
     senderId: "user1",
     senderDisplayName: "Alice",
     thread: { kind: "group", name: "general" },
@@ -29,17 +29,17 @@ function makeMessage(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
 }
 
 interface HistoryAdapter {
-  fetchHistory?: (conversationId: string | null, windowHours: number) => Promise<ChannelMessage[]>;
+  fetchHistory?: (chatId: string | null, windowHours: number) => Promise<ChannelMessage[]>;
 }
 
 function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: ChannelsService } {
   return {
     channelsService: {
       list: async () => [...adapters.keys()].map((name) => ({ name, sendable: true })),
-      async send(_channel, conversationId) {
-        return { conversationId };
+      async send(_channel, chatId) {
+        return { chatId };
       },
-      async query(channel, { conversationId, since } = {}) {
+      async query(channel, { chatId, since } = {}) {
         const adapter = adapters.get(channel);
         // What the channels service says of a channel that reads no messages.
         if (!adapter?.fetchHistory) throw new Error(`Channel "${channel}" reads no messages`);
@@ -47,7 +47,7 @@ function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: Cha
           ? Math.max(1, Math.ceil((Date.now() - since.getTime()) / 3_600_000))
           : 24;
         // An adapter answers oldest first, and `query` newest first.
-        return [...(await adapter.fetchHistory(conversationId ?? null, hours))].reverse();
+        return [...(await adapter.fetchHistory(chatId ?? null, hours))].reverse();
       },
     },
   };

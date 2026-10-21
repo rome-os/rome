@@ -7,7 +7,9 @@ import type {
   AppActionRuntimeDeps,
   ApprovalsRepository,
   Attachment,
+  ChatRecord,
   ChatRepository,
+  EnsureChannelChatInput,
   MessageReplyReference,
   PersonMappingRepository,
   PersonRecord,
@@ -303,10 +305,22 @@ async function collectAgentResult(
   return { success: true, content: response, turnId, ...(replyDelivery ? { replyDelivery } : {}) };
 }
 
-function requireConversationRepository(deps: MessageHandlerRuntimeDeps): ChatRepository {
-  const repository = deps.appContext.repositories.conversations;
-  if (!repository) throw new Error("Conversation repository is unavailable");
+function requireChatRepository(deps: MessageHandlerRuntimeDeps): ChatRepository {
+  const repository =
+    deps.appContext.repositories.chats ?? deps.appContext.repositories.conversations;
+  if (!repository) throw new Error("Chat repository is unavailable");
   return repository;
+}
+
+/** Opens the chat for a channel thread, or finds the one already open. A host
+ *  that predates the chat names offers only `ensureChannelConversation`. */
+function ensureChannelChat(
+  repository: ChatRepository,
+  input: EnsureChannelChatInput,
+): Promise<ChatRecord> {
+  return typeof repository.ensureChannelChat === "function"
+    ? repository.ensureChannelChat(input)
+    : repository.ensureChannelConversation(input);
 }
 
 /**
@@ -345,7 +359,7 @@ async function handleTrustedMessage(
   args: Record<string, unknown>,
   channelThreadKey: string,
   contextSuffix: string,
-  conversationId: string,
+  chatId: string,
   targetAgent: string,
 ): Promise<ActionResult> {
   const { connectionId, channel, channelUserId, threadId, text, messageId } = args as Record<
@@ -370,7 +384,7 @@ async function handleTrustedMessage(
       agentName: targetAgent,
       prompt: text,
       channelThreadKey,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       platformMessageId: messageId,
       replyTo: parseMessageReplyReference(args.replyTo),
       // The guardian can see the reply as it is written in a direct
@@ -382,7 +396,7 @@ async function handleTrustedMessage(
         channel,
         threadId,
         parentThreadId: typeof args.parentThreadId === "string" ? args.parentThreadId : undefined,
-        romeSessionId: conversationId,
+        romeSessionId: chatId,
         threadPath,
         channelUserId,
         threadName: typeof args.threadName === "string" ? args.threadName : undefined,
@@ -437,7 +451,7 @@ async function handleTrustedMessage(
       text: response,
       channelUserId,
       replyToMessageId: messageId,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
       knownToProvider: true,
     });
@@ -463,7 +477,7 @@ async function handleTrustedMessage(
       text: response,
       channelUserId,
       replyToMessageId: messageId,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
       knownToProvider: true,
     });
@@ -510,7 +524,7 @@ async function handleUntrustedMessage(
   args: Record<string, unknown>,
   channelThreadKey: string,
   contextSuffix: string,
-  conversationId: string,
+  chatId: string,
   targetAgent: string,
 ): Promise<ActionResult> {
   const { channel, channelUserId, threadId, text, messageId, displayName } = args as Record<
@@ -541,13 +555,13 @@ async function handleUntrustedMessage(
       channelUserId,
       error: sentinelResult.error,
     });
-    await requireConversationRepository(deps).promoteMessageToUser(conversationId, messageId);
+    await requireChatRepository(deps).promoteMessageToUser(chatId, messageId);
     return handleTrustedMessage(
       deps,
       { ...args, bondLevel },
       channelThreadKey,
       contextSuffix,
-      conversationId,
+      chatId,
       targetAgent,
     );
   }
@@ -574,20 +588,20 @@ async function handleUntrustedMessage(
       text: decision.response,
       channelUserId,
       replyToMessageId: messageId,
-      romeSessionId: conversationId,
+      romeSessionId: chatId,
       knownToProvider: false,
     });
     return { status: "ok", data: { action: "sentinel_replied" } };
   }
 
   if (decision.action === "escalated") {
-    await requireConversationRepository(deps).promoteMessageToUser(conversationId, messageId);
+    await requireChatRepository(deps).promoteMessageToUser(chatId, messageId);
     return handleTrustedMessage(
       deps,
       { ...args, bondLevel },
       channelThreadKey,
       contextSuffix,
-      conversationId,
+      chatId,
       targetAgent,
     );
   }
@@ -670,7 +684,7 @@ export function createMessageHandlerAction(
         }
 
         const settings = deps.appContext.repositories.settings;
-        const conversations = requireConversationRepository(deps);
+        const conversations = requireChatRepository(deps);
         const requestedAgent =
           typeof args.routedAgentName === "string" && args.routedAgentName.trim()
             ? args.routedAgentName.trim()
@@ -680,7 +694,7 @@ export function createMessageHandlerAction(
           typeof args.parentThreadId === "string" && args.parentThreadId
             ? args.parentThreadId
             : undefined;
-        const conversation = await conversations.ensureChannelConversation({
+        const conversation = await ensureChannelChat(conversations, {
           channel,
           threadId,
           parentThreadId,

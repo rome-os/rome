@@ -9,10 +9,11 @@ import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
 import type { WechatUserRuntime } from "../../channels/wechat-user.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
-import { OAUTH_PROVIDERS } from "../../lib/oauth-providers.js";
+import { OAUTH_PROVIDERS, ROME_CLOUD_REFRESHABLE_PROVIDERS } from "../../lib/oauth-providers.js";
 import {
   createRomeCloudOAuthStartRedirect,
   redeemRomeCloudOAuthHandoff,
+  refreshRomeCloudOAuthGrant,
 } from "../../lib/rome-cloud-oauth.js";
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
@@ -53,7 +54,7 @@ export { makeSlackBotDescriptor, SLACK_BOT_SERVICE } from "./slack-bot.js";
  */
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
-  conversationSettings: ChatSettingsService;
+  chatSettings: ChatSettingsService;
   chatStop: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   webchatRepo: WebChatRepository;
@@ -100,7 +101,7 @@ export function registerBuiltinConnections(
   registry.register(makeTelegramDescriptor());
   registry.register(
     makeDiscordDescriptor({
-      conversationSettings: deps.conversationSettings,
+      chatSettings: deps.chatSettings,
       chatStop: deps.chatStop,
       personMappingRepo: deps.personMappingRepo,
       listAgents: deps.listAgents,
@@ -121,7 +122,7 @@ export function registerBuiltinConnections(
   }
   registry.register(
     createFeishuDescriptor({
-      conversationSettings: deps.conversationSettings,
+      chatSettings: deps.chatSettings,
       personMappingRepo: deps.personMappingRepo,
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
@@ -155,7 +156,7 @@ export function registerBuiltinConnections(
     }),
   );
   // Rome Cloud-OAuth provider connection state (github/slack/
-  // google; grant ledger only, no capabilities yet — Actors land in follow-ups).
+  // google/shopify; grant ledger only, no capabilities yet — Actors land in follow-ups).
   // The conferral setup drives connect through the generic setup
   // surface: begin-redirect → guardian consents on the broker → the return leg
   // resumes the coroutine → redeem → terminal confer (which re-materializes the
@@ -169,8 +170,8 @@ export function registerBuiltinConnections(
   for (const provider of OAUTH_PROVIDERS) {
     registry.register(
       makeOAuthProviderDescriptor(provider, {
-        beginRedirect: () =>
-          createRomeCloudOAuthStartRedirect(deps.db, provider, { reconnect: true }),
+        beginRedirect: (opts) =>
+          createRomeCloudOAuthStartRedirect(deps.db, provider, { ...opts, reconnect: true }),
         redeem: async (handoff, state) => {
           const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
           const credential = credentialFromBundle(redeemed.provider, redeemed.tokens);
@@ -186,6 +187,18 @@ export function registerBuiltinConnections(
           // (parity with the redeem route's sparse-profile handling).
           return { credential, profile: Object.keys(profile).length > 0 ? profile : undefined };
         },
+        refresh: ROME_CLOUD_REFRESHABLE_PROVIDERS.has(provider)
+          ? async (refreshToken) => {
+              const credential = credentialFromBundle(
+                provider,
+                await refreshRomeCloudOAuthGrant(provider, refreshToken),
+              );
+              if (!credential) {
+                throw new Error("OAuth refresh produced no usable credential.");
+              }
+              return credential;
+            }
+          : undefined,
       }),
     );
   }

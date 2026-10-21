@@ -1,4 +1,4 @@
-// Connection caller and builder contracts. Messaging model: docs/concepts/messaging.md.
+// Connection caller and builder contracts. Vocabulary: docs/domains/connections.md.
 //
 // The runtime never inspects the contents of a credential's `material` (only
 // the `expiresAt` envelope).
@@ -31,11 +31,7 @@ import type { CredentialRejected, Disconnected } from "./errors.js";
  * store of its own (channels/connection-ports.ts).
  */
 export interface TalkHistory {
-  query(input: {
-    conversationId?: ChatId;
-    since?: Date;
-    limit?: number;
-  }): Promise<ChannelMessage[]>;
+  query(input: { chatId?: ChatId; since?: Date; limit?: number }): Promise<ChannelMessage[]>;
 }
 
 /** The conversations a Connection can see, for conversation settings. */
@@ -53,7 +49,9 @@ export interface TalkFeatureMap {
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
   directory: TalkDirectory;
-  directMessaging: ChannelDirectMessaging;
+  /** A talker answers only `chatFor`. The channel port adds the deprecated
+   *  `conversationFor` for callers. */
+  directMessaging: Pick<ChannelDirectMessaging, "chatFor">;
   /** Writing a reply as it is generated: creating and editing messages. */
   replyDelivery: DeliveryTransport;
 }
@@ -256,7 +254,7 @@ export interface Talker extends TalkFeatures {
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
   stop(): void | Promise<void>;
-  send(conversationId: ChatId, msg: OutgoingMessage): Promise<MessageReceipt>;
+  send(chatId: ChatId, msg: OutgoingMessage): Promise<MessageReceipt>;
 }
 
 /** Builder-side Act implementation. */
@@ -314,7 +312,7 @@ export interface ConnectionDescriptor {
    *  with its own Connection and channel. A service that keeps its stores or
    *  adapter state under one channel, or is a single presence by nature
    *  (webchat, email), leaves it unset. Vocabulary:
-   *  docs/concepts/messaging.md#romes-accounts. */
+   *  docs/domains/chats.md#account. */
   severalAccounts?: boolean;
   /** The platform account a grant's profile names (a bot id, an app id), or
    *  null when the profile names none. It reads the one field rather than

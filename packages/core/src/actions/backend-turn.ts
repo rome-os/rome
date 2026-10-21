@@ -84,7 +84,7 @@ export interface BackendTurnRunnerDeps {
    * falls back to the default working dir. */
   resolveWorkingDir?: (channel: string, threadId: string) => Promise<string | undefined>;
   /** Durable conversation projection used to attach provider delivery ids. */
-  conversations?: ChatRepository;
+  chats?: ChatRepository;
 }
 
 export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBackendTurnRunner {
@@ -195,14 +195,14 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         text: reply,
         ...(turnId ? { turnId } : {}),
       });
-      if (deps.conversations) {
+      if (deps.chats) {
         try {
-          const conversation = await deps.conversations.ensureChannelConversation({
+          const conversation = await deps.chats.ensureChannelChat({
             channel: params.channel,
             threadId: params.threadId,
             agentName: params.agentName,
           });
-          await deps.conversations.recordOutboundMessage({
+          await deps.chats.recordOutboundMessage({
             sessionId: conversation.id,
             content: JSON.stringify([{ type: "text", content: reply }]),
             platformMessageId: delivery?.messageId,

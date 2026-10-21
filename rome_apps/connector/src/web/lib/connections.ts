@@ -58,7 +58,11 @@ const CATALOG_PRESENTATION: Record<string, CatalogPresentation> = {
   neon: { scope: "Manages Postgres projects, branches, databases, and roles.", glyph: "neon" },
   hubspot: { scope: "Tracks your contacts and deals.", glyph: "hubspot" },
   stripe: { scope: "Looks up payments and customers.", glyph: "stripe" },
-  shopify: { scope: "Manages your store's orders, products, and customers.", glyph: "shopify" },
+  shopify: {
+    scope: "Updates your store's products and inventory, and reads orders.",
+    glyph: "shopify",
+    romeManaged: true,
+  },
   otter_ai_mcp: { scope: "Searches your meetings and reads their transcripts.", glyph: "otter" },
 };
 
@@ -139,3 +143,46 @@ export function buildConnectionViews(accounts: ConnectedAccount[]): ConnectionVi
     connector renders these as managed cards and never offers a Composio connect
     for them. */
 export const ROME_MANAGED_CATALOG: CatalogEntry[] = CATALOG.filter((e) => e.romeManaged);
+
+/**
+ * Whether a Rome-managed connection's grants can serve the agent, which is what
+ * the inline connect card waits for. Only an authorized grant counts: a degraded
+ * one is still on file (the dashboard lists it) but its token no longer works,
+ * so the card must keep offering the reconnect instead of reporting success.
+ */
+export function romeManagedGrantsUsable(grants: Record<string, string> | undefined): boolean {
+  return Object.values(grants ?? {}).some((state) => state === "authorized");
+}
+
+/** A connection as core's registry reports it (`/api/connections`). */
+export interface RegistryConnectionStatus {
+  service: string;
+  grants: Record<string, string>;
+}
+
+/**
+ * The Rome-managed catalog slugs whose registry grants are usable. Core's
+ * registry is the system of record for these providers; the Composio account
+ * list says nothing about them (a Rome-managed Shopify connection has no
+ * Composio account, and a leftover Composio one doesn't make it connected).
+ */
+export function connectedRomeManagedSlugs(
+  connections: readonly RegistryConnectionStatus[] | undefined,
+): Set<string> {
+  const managed = new Set(ROME_MANAGED_CATALOG.map((e) => e.slug.toLowerCase()));
+  return new Set(
+    (connections ?? [])
+      .filter((c) => managed.has(c.service.toLowerCase()) && romeManagedGrantsUsable(c.grants))
+      .map((c) => c.service.toLowerCase()),
+  );
+}
+
+/**
+ * Whether a connect link is a page of Rome's own dashboard (Shopify's Settings
+ * card) rather than an OAuth start. A dashboard page needs the guardian's Rome
+ * session, so it opens in the current window: the desktop app hands a new
+ * window to the system browser, which isn't signed in to Rome.
+ */
+export function isRomeSettingsLink(url: string): boolean {
+  return url.startsWith("/settings/");
+}

@@ -47,7 +47,7 @@ class FakeWechatAdapter {
   handler?: (msg: ChannelMessage) => Promise<void>;
   started = false;
   stopped = false;
-  readonly sent: Array<{ conversationId: ChatId; text?: string }> = [];
+  readonly sent: Array<{ chatId: ChatId; text?: string }> = [];
   readonly typed: string[] = [];
   degradation: { reason: string; retryAt: string } | null = null;
   private readonly onFault?: (err: unknown) => void;
@@ -65,9 +65,9 @@ class FakeWechatAdapter {
   async stop(): Promise<void> {
     this.stopped = true;
   }
-  async send(conversationId: ChatId, message: { text?: string }) {
-    this.sent.push({ conversationId, text: message.text });
-    return { conversationId };
+  async send(chatId: ChatId, message: { text?: string }) {
+    this.sent.push({ chatId, text: message.text });
+    return { chatId };
   }
   async saveIncomingAttachments(msg: ChannelMessage) {
     return msg.attachments;
@@ -153,14 +153,14 @@ describe("wechat descriptor shape", () => {
     expect(adapters[0].started).toBe(true);
 
     await expect(sendThrough(conn, "addr-1" as ChatId, { text: "hi" })).resolves.toEqual({
-      conversationId: "addr-1",
+      chatId: "addr-1",
     });
-    expect(adapters[0].sent).toEqual([{ conversationId: "addr-1", text: "hi" }]);
+    expect(adapters[0].sent).toEqual([{ chatId: "addr-1", text: "hi" }]);
     const message = {
       channel: "wechat",
       direction: "inbound",
       messageId: "message-1",
-      conversationId: "addr-1" as ChatId,
+      chatId: "addr-1" as ChatId,
       senderId: "user-1",
       text: "hi",
       attachments: [],
@@ -335,7 +335,7 @@ describe("wechat inbound delivery", () => {
         channel: "wechat",
         direction: "inbound",
         messageId: "item-7",
-        conversationId: "bob@im.wechat",
+        chatId: "bob@im.wechat",
         senderId: "bob@im.wechat",
         senderDisplayName: "bob",
         text: "[Image (640x480)]",

@@ -15,6 +15,7 @@ A pnpm monorepo. All code lives under `packages/*` and `rome_apps/*`. Runtime de
 - Before opening a PR, read [`docs/authoring/prs.md`](docs/authoring/prs.md).
 - Before changing code, follow the [established patterns](DEVELOPMENT.md#established-patterns).
 - Before explaining a concept or asserting how a surface behaves, check [`docs/`](docs/README.md) and link instead of re-deriving.
+- Before naming a chat, thread, account, agent, connection or their operations in code, UI copy or docs, use the words in [`docs/domains/`](docs/domains/README.md). When a rule there changes, change the word's entry in the same PR as the code.
 - Before building or editing an app, read [`rome_apps/CLAUDE.md`](rome_apps/CLAUDE.md).
 - When handling code review on an open PR, use the `/babysit-pr` skill ([`.claude/skills/babysit-pr`](.claude/skills/babysit-pr/SKILL.md)). It answers review feedback through `respond-to-review`, fixes failing CI, and resolves merge conflicts until the PR is clean.
 - When writing prose (docs, PR text), follow [`docs/authoring/WRITING.md`](docs/authoring/WRITING.md).

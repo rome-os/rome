@@ -40,9 +40,9 @@ describe("a channel's Connection across epochs", () => {
                 state.deliver = deliver;
               },
               stop() {},
-              async send(conversationId, message) {
+              async send(chatId, message) {
                 state.sends.push(message.text ?? "");
-                return { conversationId, messageId: `sent-${state.epoch}` };
+                return { chatId, messageId: `sent-${state.epoch}` };
               },
               history: {
                 query: async () => [
@@ -50,7 +50,7 @@ describe("a channel's Connection across epochs", () => {
                     channel: "discord",
                     direction: "inbound",
                     messageId: `history-${state.epoch}`,
-                    conversationId: "general" as ChatId,
+                    chatId: "general" as ChatId,
                     senderId: "guardian",
                     text: `epoch ${state.epoch}`,
                     attachments: [],
@@ -91,7 +91,7 @@ describe("a channel's Connection across epochs", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "inbound-1",
-      conversationId: "general" as ChatId,
+      chatId: "general" as ChatId,
       senderId: "guardian",
       text: "hello",
       attachments: [],
@@ -120,7 +120,7 @@ describe("a channel's Connection across epochs", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "inbound-2",
-      conversationId: "general" as ChatId,
+      chatId: "general" as ChatId,
       senderId: "guardian",
       text: "hello again",
       attachments: [],
@@ -134,7 +134,7 @@ describe("a channel's Connection across epochs", () => {
         channel: "discord",
         direction: "inbound",
         messageId: "blocked",
-        conversationId: "general" as ChatId,
+        chatId: "general" as ChatId,
         senderId: "unknown",
         text: "not authorized",
         attachments: [],
@@ -166,7 +166,7 @@ describe("a channel's Connection across epochs", () => {
               deliver = next;
             },
             stop() {},
-            send: async (conversationId) => ({ conversationId }),
+            send: async (chatId) => ({ chatId }),
           }),
         },
       },
@@ -184,7 +184,7 @@ describe("a channel's Connection across epochs", () => {
       channel: "telegram",
       direction: "inbound",
       messageId: "code",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
       senderId: "stranger",
       text: "PAIR-123",
       attachments: [],

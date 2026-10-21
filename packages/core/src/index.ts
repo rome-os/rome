@@ -40,6 +40,12 @@ import {
   shutdown as shutdownTelemetry,
   withInboundSpans,
 } from "./telemetry.js";
+import {
+  legacyChatIdChannels,
+  legacyChatIdChannelsService,
+  legacyChatIdSettings,
+  legacyChatIdStop,
+} from "./apps/legacy-chat-id.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 
 const log = createLogger("startup");
@@ -209,6 +215,7 @@ import {
   parseLegacyArtifactBindings,
 } from "./apps/artifact-id.js";
 import { ConnectionRegistry, DrizzleGrantLedger } from "./connections/index.js";
+import { startExpiringCredentialRenewal } from "./connections/expiring-renewal.js";
 import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_SERVICE } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
@@ -406,9 +413,7 @@ async function main() {
     streaming: replyStreamingOn,
     replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
     clock: systemClock,
-    ...(appRuntimeRepositories.conversations
-      ? { conversations: appRuntimeRepositories.conversations }
-      : {}),
+    ...(appRuntimeRepositories.chats ? { chats: appRuntimeRepositories.chats } : {}),
   });
   const channelsService = createChannelsService({
     channels: () => builtChannels,
@@ -734,7 +739,7 @@ async function main() {
   // (injected into appActionDeps) and the WorkerRPC handlers, so a worker's
   // proxy and a main-process call resolve to identical behavior.
   const eventService = new EventService(eventBus, eventCatalog);
-  const conversationSettings = new ChatSettingsService({
+  const chatSettings = new ChatSettingsService({
     repository: new ChatSettingsRepository(db),
     connections: connectionRegistry,
     channelOf,
@@ -837,7 +842,7 @@ async function main() {
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
       resolveProviderSessionReset: async (ref) =>
-        (await conversationSettings.get(ref)).effective.session.reset,
+        (await chatSettings.get(ref)).effective.session.reset,
       usageRecorder,
       channelSurface: (channel) => {
         const talker = connectionRegistry.getDescriptor(serviceOfChannel(channel))?.capabilities
@@ -908,7 +913,7 @@ async function main() {
     // no backend turn runs before boot completes.
     channel: (name) => channels.find((channel) => channel.name === name) ?? null,
     resolveWorkingDir: resolveContinuationWorkingDir,
-    conversations: appRuntimeRepositories.conversations!,
+    chats: appRuntimeRepositories.chats!,
   });
 
   const approvalHandler = new ApprovalHandler(
@@ -937,13 +942,18 @@ async function main() {
     agentLoader,
     actionRegistry,
   });
+  // What apps get of the chat settings, with the chat ids an app built for
+  // SDK 0.7 reads.
+  const appChatSettings = legacyChatIdSettings(chatSettings);
   const appActionDeps = {
     agentRunner,
     resolveOneOffDate: (trigger: Trigger) =>
       resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
     resolveArtifactReference,
-    channelsService,
-    conversationSettings,
+    channelsService: legacyChatIdChannelsService(channelsService),
+    chatSettings: appChatSettings,
+    // Apps built before the chat rename read `conversationSettings`.
+    conversationSettings: appChatSettings,
     capabilityDiscovery,
     personMappingRepo,
     sentinelLogRepo,
@@ -1185,7 +1195,7 @@ async function main() {
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
     settingsRepo,
-    conversationSettings,
+    chatSettings,
     chatStop,
     personMappingRepo,
     webchatRepo,
@@ -1257,7 +1267,8 @@ async function main() {
 
   // The channel-message hook hears every channel through these, so each
   // inbound message it handles is traced and logged once.
-  const hookChannels = withInboundSpans(channels, "channel-message");
+  const hookChannels = legacyChatIdChannels(withInboundSpans(channels, "channel-message"));
+  const hookChatStop = legacyChatIdStop(chatStop);
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
     .listArtifacts("hook")
@@ -1266,8 +1277,9 @@ async function main() {
     try {
       const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, {
         actionEngine,
-        conversationSettings,
-        chatStop,
+        chatSettings: appChatSettings,
+        conversationSettings: appChatSettings,
+        chatStop: hookChatStop,
         channels: hookChannels,
         accountAgentOf,
         linkedAgentOf: accountAgentOf,
@@ -1307,8 +1319,9 @@ async function main() {
         catalog: appCatalog,
         deps: {
           actionEngine,
-          conversationSettings,
-          chatStop,
+          chatSettings: appChatSettings,
+          conversationSettings: appChatSettings,
+          chatStop: hookChatStop,
           channels: hookChannels,
           accountAgentOf,
           linkedAgentOf: accountAgentOf,
@@ -1337,7 +1350,7 @@ async function main() {
       connection,
     );
     if (!channel) return;
-    const added = withInboundSpans([channel], "channel-message");
+    const added = legacyChatIdChannels(withInboundSpans([channel], "channel-message"));
     hookChannels.push(...added);
     const hook = messageHook;
     // A hook without `addChannels` re-registers, as the app-keys reloader
@@ -1388,6 +1401,9 @@ async function main() {
   );
   await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();
+  // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
+  // token the connector reads from its custody file as rejected.
+  const stopExpiringCredentialRenewal = startExpiringCredentialRenewal(connectionRegistry);
 
   try {
     await writeAppRuntimeStatus(refreshRuntimeAppStatus());
@@ -1430,7 +1446,7 @@ async function main() {
     channelsService,
     connectionRegistry,
     channelOf,
-    conversationSettings,
+    chatSettings,
     routinesRepo,
     routineEngine,
     eventService,
@@ -1562,7 +1578,7 @@ async function main() {
       nodeDevices,
       notifyPairingResolution: (approval) => notifyPairingResolution(connectionRegistry, approval),
       channelsService,
-      conversationSettings,
+      chatSettings,
       actionEngine,
       actionLoader,
       personMappingRepo,
@@ -1803,6 +1819,7 @@ async function main() {
       }
     }
 
+    stopExpiringCredentialRenewal();
     try {
       await connectionRegistry.stopAll();
       shutdownLog.info("connection registry stopped");

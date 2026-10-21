@@ -1,4 +1,4 @@
-// Connection conferral setup contracts. Messaging model: docs/concepts/messaging.md.
+// Connection conferral setup contracts. Vocabulary: docs/domains/connections.md.
 //
 // A setup is a server-owned coroutine that walks a guardian through
 // connecting one grant of one service. Builders write linear async code

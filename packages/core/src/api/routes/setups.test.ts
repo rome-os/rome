@@ -299,7 +299,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       },
     };
     return createFeishuDescriptor({
-      conversationSettings: {} as never,
+      chatSettings: {} as never,
       personMappingRepo: personRepo as PersonMappingRepository,
       listAgents: () => [],
       createChannel: () => fakeLarkChannel as never,

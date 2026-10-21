@@ -1,6 +1,6 @@
 // The one thing Rome renders whenever it shows what was said: a line, which way
 // it went, when it was said, and a stable id for it. That is a message
-// (docs/concepts/messaging.md#message).
+// (docs/domains/chats.md#message).
 //
 // It lives on its own, not inside any one surface's contract, because more than
 // one surface reads it. A person's timeline pages messages, and a conversation

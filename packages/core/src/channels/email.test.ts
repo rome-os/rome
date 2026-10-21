@@ -120,7 +120,7 @@ describe("EmailAdapter.ingestInbound", () => {
         channel: "email",
         direction: "inbound",
         messageId: "msg_1",
-        conversationId: "t1",
+        chatId: "t1",
         senderId: GUARDIAN,
         senderDisplayName: "Guardian",
         text: "hello from the full body",
@@ -248,7 +248,7 @@ describe("EmailAdapter.send", () => {
     expect(provider.sent[0].html).toContain("my reply");
     expect(provider.sent[0].to).toBeUndefined();
     // The provider's thread id names the conversation the email went out in.
-    expect(receipt).toEqual({ conversationId: "t_out", messageId: "m_out" });
+    expect(receipt).toEqual({ chatId: "t_out", messageId: "m_out" });
   });
 
   it("starts a fresh email when a chat-style conversation names an address", async () => {
@@ -340,7 +340,7 @@ describe("EmailAdapter.send", () => {
 
     expect(provider.sent).toHaveLength(0);
     expect(provider.listMessages).not.toHaveBeenCalled();
-    expect(receipt).toEqual({ conversationId: "t-empty" });
+    expect(receipt).toEqual({ chatId: "t-empty" });
   });
 
   it("skips a parts-only approval card without a provider call or an error", async () => {
@@ -359,7 +359,7 @@ describe("EmailAdapter.send", () => {
       ],
     });
 
-    expect(receipt).toEqual({ conversationId: "t-approval" });
+    expect(receipt).toEqual({ chatId: "t-approval" });
     expect(provider.send).not.toHaveBeenCalled();
     expect(provider.listMessages).not.toHaveBeenCalled();
   });
@@ -481,7 +481,7 @@ describe("EmailAdapter inbound attachments", () => {
       channel: "email",
       direction: "inbound",
       messageId: "msg_unknown",
-      conversationId: "t1" as ChatId,
+      chatId: "t1" as ChatId,
       senderId: GUARDIAN,
       text: "",
       attachments,

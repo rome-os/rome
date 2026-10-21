@@ -46,9 +46,9 @@ describe("0075_backfill_session_conversation_id migration", () => {
       runMigration(sqlite);
 
       const rows = sqlite
-        .prepare("SELECT id, conversation_id AS conversationId FROM sessions ORDER BY rowid")
-        .all() as { id: string; conversationId: string | null }[];
-      expect(Object.fromEntries(rows.map((row) => [row.id, row.conversationId]))).toEqual({
+        .prepare("SELECT id, conversation_id AS chatId FROM sessions ORDER BY rowid")
+        .all() as { id: string; chatId: string | null }[];
+      expect(Object.fromEntries(rows.map((row) => [row.id, row.chatId]))).toEqual({
         webchat: "chat",
         fork: "fork",
         child: "child",

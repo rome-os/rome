@@ -26,7 +26,7 @@ import { appsRoutes, subscribeCatalogChanges } from "./routes/apps.js";
 import { agentsRoutes } from "./routes/agents.js";
 import { skillsRoutes } from "./routes/skills.js";
 import { discordCliRoutes } from "./routes/discord-cli.js";
-import { conversationSettingsRoutes } from "./routes/conversation-settings.js";
+import { chatSettingsRoutes } from "./routes/conversation-settings.js";
 import { connectionsRoutes } from "./routes/connections.js";
 import { channelAccountsRoutes } from "./routes/channel-accounts.js";
 import { setupsRoutes } from "./routes/setups.js";
@@ -174,7 +174,7 @@ export function buildApp(
   api.route("/", appStoreRoutes(deps.appStore));
   api.route("/", showcasePresetRoutes());
   api.route("/", favorRoutes(deps));
-  api.route("/", conversationSettingsRoutes(deps));
+  api.route("/", chatSettingsRoutes(deps));
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
   api.route("/", devicesRoutes(deps));

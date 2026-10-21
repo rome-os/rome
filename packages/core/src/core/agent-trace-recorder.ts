@@ -3,7 +3,7 @@ import {
   type CurrentActionContext,
   type RomeSessionType,
 } from "@rome-os/app-runtime";
-import { channelConversationId } from "../db/session-kind.js";
+import { channelChatId } from "../db/session-kind.js";
 import type {
   RomeAgentTranscriptMessageInput,
   RomeAgentTraceTriggerMetadata,
@@ -66,7 +66,7 @@ export function resolveRomeSessionId(input: RomeSessionIdInput): string {
   if (input.existingSessionId) return input.existingSessionId;
   if (input.threadContext) {
     if (input.threadContext.romeSessionId) return input.threadContext.romeSessionId;
-    return channelConversationId(input.threadContext.channel, input.threadContext.threadId);
+    return channelChatId(input.threadContext.channel, input.threadContext.threadId);
   }
   const actionContext = input.actionContext ?? getCurrentActionContext();
   if (actionContext?.executionId) {

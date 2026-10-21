@@ -35,7 +35,7 @@ describe("Session continuity (integration)", () => {
       model: "gpt-5",
       reasoningEffort: null,
       workingDir: null,
-      conversationId: null,
+      chatId: null,
       createdAt: expect.any(Date),
       lastActiveAt: expect.any(Date),
     });

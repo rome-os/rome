@@ -186,8 +186,8 @@ export class TelegramUserAdapter {
     }
   }
 
-  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const threadId: string = conversationId;
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const threadId: string = chatId;
     const entity = entityFromThreadId(threadId);
     const replyTo = message.replyToMessageId
       ? Number.parseInt(message.replyToMessageId, 10)
@@ -210,7 +210,7 @@ export class TelegramUserAdapter {
     }
 
     log.info("telegram user message sent", { threadId });
-    return { conversationId, ...(messageId ? { messageId } : {}) };
+    return { chatId, ...(messageId ? { messageId } : {}) };
   }
 
   onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
@@ -358,7 +358,7 @@ export class TelegramUserAdapter {
       channel: "telegram_user",
       direction: "inbound",
       messageId: String(message.id),
-      conversationId: threadId as ChatId,
+      chatId: threadId as ChatId,
       senderId: isOutgoing ? this.settings.userId : fromId,
       senderDisplayName: isOutgoing ? this.settings.displayName : (context.threadName ?? fromId),
       text: message.message ?? "",

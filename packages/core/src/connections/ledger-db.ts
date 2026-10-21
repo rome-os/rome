@@ -1,4 +1,4 @@
-// Drizzle-backed grant ledger. Messaging model: docs/concepts/messaging.md.
+// Drizzle-backed grant ledger. Vocabulary: docs/domains/connections.md.
 // Persists connections and grants into the `connections` / `connection_grants` tables. The registry
 // contract suites (registry-*.test.ts) run against this implementation.
 //

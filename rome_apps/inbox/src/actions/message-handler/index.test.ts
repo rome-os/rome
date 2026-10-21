@@ -100,7 +100,7 @@ function createMessageHandlerDeps(
   const approvals: Record<string, unknown>[] = [];
   const settings = overrides.settings ?? {};
   const conversations = {
-    ensureChannelConversation: rs.fn(async (input: Record<string, unknown>) => ({
+    ensureChannelChat: rs.fn(async (input: Record<string, unknown>) => ({
       id: `channel:${String(input.channel)}:${String(input.threadId)}`,
       agentName: input.agentName === "main" ? null : String(input.agentName),
     })),
@@ -145,7 +145,7 @@ function createMessageHandlerDeps(
           get: rs.fn(async (key: string) => (key in settings ? settings[key] : null)),
           set: rs.fn(async () => undefined),
         },
-        conversations,
+        chats: conversations,
       },
       runAction: rs.fn(async (_name: string, args: Record<string, unknown>) => {
         sentMessages.push(args);
@@ -843,7 +843,7 @@ describe("per-channel agent routing (trusted path)", () => {
       routedAgentName: "parent-agent",
     });
 
-    expect(conversations.ensureChannelConversation).toHaveBeenCalledWith(
+    expect(conversations.ensureChannelChat).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: "discord",
         threadId: "child-thread",
@@ -851,6 +851,42 @@ describe("per-channel agent routing (trusted path)", () => {
         agentName: "parent-agent",
       }),
     );
+  });
+
+  it("opens the chat through a host that predates the chat names", async () => {
+    const { deps, conversations } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
+      agentResponses: [[{ type: "result", content: "Hi." }]],
+    });
+    // An older host offers the repository only as `conversations`, with only
+    // the old method, which reads its own receiver.
+    const { ensureChannelChat, ...rest } = conversations;
+    const legacy = {
+      ...rest,
+      open: ensureChannelChat,
+      ensureChannelConversation(input: Record<string, unknown>) {
+        return this.open(input);
+      },
+    };
+    const repositories = deps.appContext.repositories as unknown as Record<string, unknown>;
+    delete repositories.chats;
+    repositories.conversations = legacy;
+    const action = createAction(actionConfig, deps);
+
+    await action.execute({
+      channel: "discord",
+      channelUserId: "g-discord",
+      threadId: "channel-legacy",
+      threadType: "group",
+      displayName: "Guardian",
+      text: "hello",
+      messageId: "msg-legacy",
+    });
+
+    expect(ensureChannelChat).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "discord", threadId: "channel-legacy" }),
+    );
+    expect(conversations.addMessage).toHaveBeenCalled();
   });
 
   it("falls back to main when the routed agent is not in the catalog (e.g. app uninstalled)", async () => {
@@ -1045,7 +1081,7 @@ describe("account agent", () => {
         "sales:agent",
         "pm:assistant",
       ]);
-      conversations.ensureChannelConversation.mockImplementation(async () => ({
+      conversations.ensureChannelChat.mockImplementation(async () => ({
         id: "channel:feishu-2:group-1",
         agentName: "pm:assistant",
       }));
@@ -1064,7 +1100,7 @@ describe("account agent", () => {
       "envoy",
       "sales:agent",
     ]);
-    conversations.ensureChannelConversation.mockImplementation(async () => ({
+    conversations.ensureChannelChat.mockImplementation(async () => ({
       id: "channel:feishu-2:group-1",
       agentName: "pm:assistant",
     }));
@@ -1094,7 +1130,7 @@ describe("account agent", () => {
       "sales:agent",
       "pm:assistant",
     ]);
-    conversations.ensureChannelConversation.mockImplementation(async () => ({
+    conversations.ensureChannelChat.mockImplementation(async () => ({
       id: "channel:feishu-2:g-feishu",
       agentName: "pm:assistant",
     }));
@@ -1121,7 +1157,7 @@ describe("account agent", () => {
       inbound({ routedAgentName: "pm:assistant", accountAgentName: "sales:agent" }),
     );
 
-    expect(conversations.ensureChannelConversation).toHaveBeenCalledWith(
+    expect(conversations.ensureChannelChat).toHaveBeenCalledWith(
       expect.objectContaining({ channel: "feishu-2", agentName: "pm:assistant" }),
     );
   });
@@ -1132,7 +1168,7 @@ describe("account agent", () => {
 
     await action.execute(inbound({ accountAgentName: "sales:agent" }));
 
-    expect(conversations.ensureChannelConversation).toHaveBeenCalledWith(
+    expect(conversations.ensureChannelChat).toHaveBeenCalledWith(
       expect.objectContaining({ channel: "feishu-2", threadId: "group-1", agentName: "main" }),
     );
   });
@@ -1145,7 +1181,7 @@ describe("account agent", () => {
 
     expect(result).toEqual({ status: "ok", data: { action: "silent" } });
     expect(agentRunner.calls).toHaveLength(0);
-    expect(conversations.ensureChannelConversation).not.toHaveBeenCalled();
+    expect(conversations.ensureChannelChat).not.toHaveBeenCalled();
     expect(conversations.addMessage).not.toHaveBeenCalled();
   });
 });

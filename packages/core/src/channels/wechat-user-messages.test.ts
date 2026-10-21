@@ -26,7 +26,7 @@ import { wechatUserAccounts, wechatUserMessages } from "./wechat-user-messages.j
 
 const msg = (over: Partial<WechatUserMessage>): WechatUserMessage => ({
   id: "wxid_a:1",
-  conversationId: "wxid_a",
+  chatId: "wxid_a",
   isGroup: false,
   senderId: "wxid_a",
   isSelf: false,
@@ -50,13 +50,13 @@ function fakeReader(opts: {
 }): WechatUserReader {
   return {
     async messages(input: {
-      conversationId?: string;
+      chatId?: string;
       before?: Date;
       since?: Date;
       limit: number;
       includeBoundaryTies?: boolean;
     }) {
-      let rows = opts.byConversation?.[input.conversationId ?? ""] ?? [];
+      let rows = opts.byConversation?.[input.chatId ?? ""] ?? [];
       if (input.before) {
         const before = Math.floor(input.before.getTime() / 1000);
         rows = rows.filter((m) => m.timestamp <= before);
@@ -73,8 +73,8 @@ function fakeReader(opts: {
           (edge !== undefined && row.timestamp >= edge),
       );
     },
-    async count(conversationId: string) {
-      return (opts.byConversation?.[conversationId] ?? []).length;
+    async count(chatId: string) {
+      return (opts.byConversation?.[chatId] ?? []).length;
     },
     async conversations(input: { query?: string; limit: number }) {
       let rows = opts.conversations ?? [];
@@ -126,10 +126,10 @@ describe("wechatUserMessages", () => {
       async messages(input: unknown) {
         asked.push(input);
         return [
-          msg({ id: "room@chatroom:1", conversationId: "room@chatroom", isSelf: true }),
+          msg({ id: "room@chatroom:1", chatId: "room@chatroom", isSelf: true }),
           msg({
             id: "room@chatroom:2",
-            conversationId: "room@chatroom",
+            chatId: "room@chatroom",
             conversationName: "Team",
             isGroup: true,
             senderId: "wxid_b",
@@ -142,17 +142,17 @@ describe("wechatUserMessages", () => {
     const since = new Date(500_000);
 
     const page = await wechatUserMessages(reader).query({
-      conversationId: "room@chatroom" as ChatId,
+      chatId: "room@chatroom" as ChatId,
       since,
       limit: 5,
     });
 
-    expect(asked).toEqual([{ conversationId: "room@chatroom", since, limit: 5 }]);
+    expect(asked).toEqual([{ chatId: "room@chatroom", since, limit: 5 }]);
     expect(page[0]).toMatchObject({
       channel: "wechat_user",
       direction: "inbound",
       messageId: "room@chatroom:2",
-      conversationId: "room@chatroom",
+      chatId: "room@chatroom",
       senderId: "wxid_b",
       senderDisplayName: "Bob",
       timestamp: new Date(2_000_000),
@@ -239,8 +239,8 @@ describe("wechatUserMessages", () => {
         byConversation: {
           wxid_a: [msg({ id: "wxid_a:1", timestamp: 1000 })],
           wxid_b: [
-            msg({ id: "wxid_b:1", conversationId: "wxid_b", timestamp: 500 }),
-            msg({ id: "wxid_b:2", conversationId: "wxid_b", timestamp: 4000 }),
+            msg({ id: "wxid_b:1", chatId: "wxid_b", timestamp: 500 }),
+            msg({ id: "wxid_b:2", chatId: "wxid_b", timestamp: 4000 }),
           ],
         },
       }),
@@ -305,10 +305,10 @@ describe("wechatUserAccounts", () => {
  */
 function readerOrderReader(rows: WechatUserMessage[]): WechatUserReader {
   return {
-    async messages(input: { conversationId?: string; since?: Date; limit: number }) {
+    async messages(input: { chatId?: string; since?: Date; limit: number }) {
       const since = input.since ? Math.floor(input.since.getTime() / 1000) : null;
       const held = rows
-        .filter((row) => !input.conversationId || row.conversationId === input.conversationId)
+        .filter((row) => !input.chatId || row.chatId === input.chatId)
         .filter((row) => since === null || row.timestamp >= since)
         .sort((a, b) => a.timestamp - b.timestamp);
       return held.slice(-input.limit);
@@ -324,7 +324,7 @@ describe("wechatUserMessages query order", () => {
         msg({ id: "wxid_a:2", timestamp: 1000, text: "second" }),
       ]),
     );
-    const page = await store.query({ conversationId: "wxid_a" as ChatId });
+    const page = await store.query({ chatId: "wxid_a" as ChatId });
     expect(page.map((entry) => entry.messageId)).toEqual(["wxid_a:2", "wxid_a:1"]);
   });
 });
@@ -334,24 +334,24 @@ testMessagesQueryContract("wechatUserMessages", () => ({
     readerOrderReader([
       msg({
         id: "room@chatroom:1",
-        conversationId: "room@chatroom",
+        chatId: "room@chatroom",
         isGroup: true,
         timestamp: 100,
       }),
       msg({
         id: "room@chatroom:2",
-        conversationId: "room@chatroom",
+        chatId: "room@chatroom",
         isGroup: true,
         timestamp: 200,
       }),
       msg({
         id: "room@chatroom:3",
-        conversationId: "room@chatroom",
+        chatId: "room@chatroom",
         isGroup: true,
         isSelf: true,
         timestamp: 300,
       }),
-      msg({ id: "wxid_a:1", conversationId: "wxid_a", timestamp: 250 }),
+      msg({ id: "wxid_a:1", chatId: "wxid_a", timestamp: 250 }),
     ]),
   ),
   channel: "wechat_user",

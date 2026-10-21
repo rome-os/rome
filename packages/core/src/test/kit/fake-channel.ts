@@ -19,8 +19,8 @@ export class FakeChannelEndpoint extends FakeTransport {
   private waiters: ReplyWaiter[] = [];
   private readCursor = 0;
 
-  override async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const receipt = await super.send(conversationId, message);
+  override async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const receipt = await super.send(chatId, message);
     this.drainWaiters();
     return receipt;
   }

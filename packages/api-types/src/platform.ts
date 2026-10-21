@@ -4,7 +4,7 @@
  * Telegram user are one platform. Feishu and Lark share the `feishu` service
  * but are two platforms, told apart by the app's domain. It is a fixed value,
  * never parsed out of a channel's name. Vocabulary:
- * docs/concepts/messaging.md#romes-accounts.
+ * docs/domains/chats.md#platform.
  */
 
 /** Services whose platform is another service's name. */

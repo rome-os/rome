@@ -478,8 +478,8 @@ describe("scenario 17: register() validation", () => {
             build: () => ({
               start() {},
               stop() {},
-              async send(conversationId) {
-                return { conversationId };
+              async send(chatId) {
+                return { chatId };
               },
             }),
           },

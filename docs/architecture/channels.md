@@ -1,6 +1,6 @@
 # Channels
 
-A channel is the layer in core that carries the messages of one of [Rome's accounts](../concepts/messaging.md#romes-accounts). The word belongs to the code: the guardian meets accounts, not channels. This page covers the channel ports, the server-owned setup protocol every adapter goes through, and the rules that keep the connect flow generic across services.
+A channel is the layer in core that carries the messages of one of Rome's [accounts](../domains/chats.md#account). The word belongs to the code: the guardian meets accounts, not channels. This page covers the channel ports, the server-owned setup protocol every adapter goes through, and the rules that keep the connect flow generic across services.
 
 ## Channel ports
 

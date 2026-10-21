@@ -52,7 +52,7 @@ export class SessionsRepository {
     id?: string;
     agentName: string;
     channelThreadKey?: string;
-    conversationId?: string;
+    chatId?: string;
     status?: "active" | "completed" | "error";
     workingDir?: string;
   }) {
@@ -62,7 +62,7 @@ export class SessionsRepository {
       id,
       agentName: data.agentName,
       channelThreadKey: data.channelThreadKey ?? null,
-      conversationId: data.conversationId ?? null,
+      chatId: data.chatId ?? null,
       workingDir: data.workingDir ?? null,
       createdAt: now,
       lastActiveAt: now,
@@ -79,7 +79,7 @@ export class SessionsRepository {
     agentName: string;
     channelThreadKey: string;
     newSessionId: string;
-    conversationId?: string;
+    chatId?: string;
   }): Promise<typeof sessions.$inferSelect> {
     return this.db.transaction((tx) => {
       const exactKey = and(
@@ -89,7 +89,7 @@ export class SessionsRepository {
       );
       const now = new Date();
       const retired = tx
-        .select({ conversationId: sessions.conversationId })
+        .select({ chatId: sessions.chatId })
         .from(sessions)
         .where(exactKey)
         .orderBy(desc(sessions.createdAt), desc(sessions.lastActiveAt))
@@ -100,7 +100,7 @@ export class SessionsRepository {
           id: input.newSessionId,
           agentName: input.agentName,
           channelThreadKey: input.channelThreadKey,
-          conversationId: input.conversationId ?? retired?.conversationId ?? null,
+          chatId: input.chatId ?? retired?.chatId ?? null,
           provider: null,
           providerThreadId: null,
           model: null,
@@ -120,11 +120,11 @@ export class SessionsRepository {
   }
 
   /** Record the conversation on a row that has none. Never overwrites. */
-  async fillConversationId(id: string, conversationId: string): Promise<boolean> {
+  async fillChatId(id: string, chatId: string): Promise<boolean> {
     const result = await this.db
       .update(sessions)
-      .set({ conversationId })
-      .where(and(eq(sessions.id, id), isNull(sessions.conversationId)));
+      .set({ chatId })
+      .where(and(eq(sessions.id, id), isNull(sessions.chatId)));
     return Number(result.changes ?? 0) > 0;
   }
 

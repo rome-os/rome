@@ -10,7 +10,7 @@ import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
 
 // Envoys reads the same feed as Connections and regroups it by agent. An
 // account is one connected account of a linkable service; it has at most one
-// agent. Vocabulary: docs/concepts/messaging.md#romes-accounts.
+// agent. Vocabulary: docs/domains/chats.md#account.
 
 /** How an agent is linked to an account: the account is the agent's own, or it
  *  is the guardian's and the agent answers on their behalf as a delegate. */

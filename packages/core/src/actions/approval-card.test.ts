@@ -2,7 +2,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { ChannelsService, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import { sendApprovalCard } from "./approval-card.js";
 
-const RECEIPT: MessageReceipt = { messageId: "m1", conversationId: "c1" as ChatId };
+const RECEIPT: MessageReceipt = { messageId: "m1", chatId: "c1" as ChatId };
 
 describe("sendApprovalCard", () => {
   const approval = {

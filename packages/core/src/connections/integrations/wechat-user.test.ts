@@ -349,7 +349,7 @@ describe("toWechatUserChannelMessage", () => {
   it("attributes an authorless notice to the chat it arrived in", () => {
     const message = toWechatUserChannelMessage({
       id: "notifymessage:44",
-      conversationId: "notifymessage",
+      chatId: "notifymessage",
       isGroup: false,
       senderId: "",
       isSelf: false,
@@ -364,7 +364,7 @@ describe("toWechatUserChannelMessage", () => {
   it("carries the group name and sender through", () => {
     const message = toWechatUserChannelMessage({
       id: "45357963768@chatroom:8123",
-      conversationId: "45357963768@chatroom",
+      chatId: "45357963768@chatroom",
       conversationName: "Karball",
       isGroup: true,
       senderId: "wxid_zhs",
@@ -594,13 +594,13 @@ describe("the WeChat personal Talker", () => {
     const page = await talker.directory!.listConversations({ limit: 10 });
     expect(page.conversations).toEqual([
       {
-        ref: { connectionId: "conn-wechat-user", conversationId: "45357963768@chatroom" },
+        ref: { connectionId: "conn-wechat-user", chatId: "45357963768@chatroom" },
         service: WECHAT_USER_SERVICE,
         kind: "group",
         displayName: "Karball",
       },
       {
-        ref: { connectionId: "conn-wechat-user", conversationId: "wxid_friend" },
+        ref: { connectionId: "conn-wechat-user", chatId: "wxid_friend" },
         service: WECHAT_USER_SERVICE,
         kind: "dm",
         displayName: "A Friend",

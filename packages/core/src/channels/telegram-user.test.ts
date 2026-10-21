@@ -127,7 +127,7 @@ describe("TelegramUserAdapter", () => {
         channel: "telegram_user",
         direction: "inbound",
         messageId: "7",
-        conversationId: "-100555",
+        chatId: "-100555",
         senderId: "111",
         senderDisplayName: "111",
         text: "see this",
@@ -146,7 +146,7 @@ describe("TelegramUserAdapter", () => {
     internals.client = { sendMessage };
 
     await expect(adapter.send("123" as ChatId, { text: "hi" })).resolves.toStrictEqual({
-      conversationId: "123",
+      chatId: "123",
       messageId: "99",
     });
     expect(sendMessage).toHaveBeenCalledWith(123, { message: "hi", replyTo: undefined });
@@ -159,7 +159,7 @@ describe("TelegramUserAdapter", () => {
       adapter.send("123" as ChatId, {
         attachments: [{ type: "document", source: "/tmp/a.pdf" }],
       }),
-    ).resolves.toStrictEqual({ conversationId: "123" });
+    ).resolves.toStrictEqual({ chatId: "123" });
   });
 
   it("reads each dialog's history with its kind and name, own lines carrying `out`", async () => {
@@ -177,7 +177,7 @@ describe("TelegramUserAdapter", () => {
         channel: "telegram_user",
         direction: "inbound",
         messageId: "7",
-        conversationId: "111",
+        chatId: "111",
         senderId: "42",
         senderDisplayName: "Me",
         text: "see this",
@@ -196,7 +196,7 @@ describe("TelegramUserAdapter", () => {
         channel: "telegram_user",
         direction: "inbound",
         messageId: "7",
-        conversationId: "-100555" as ChatId,
+        chatId: "-100555" as ChatId,
         senderId: "111",
         text: "",
         attachments: [{ type: "document" }],

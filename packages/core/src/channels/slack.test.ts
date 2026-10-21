@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   SlackAdapter,
   SlackApiError,
@@ -9,7 +9,7 @@ import {
   type SlackSocketLike,
   type SlackWebApi,
   decodeSlackText,
-  parseSlackConversationId,
+  parseSlackChatId,
   readSocketAppId,
   splitSlackText,
 } from "./slack.js";
@@ -112,7 +112,7 @@ describe("SlackAdapter inbound", () => {
     expect(received[0]).toMatchObject({
       channel: "slack_bot",
       direction: "inbound",
-      conversationId: "D1",
+      chatId: "D1",
       senderId: "T1/UADA",
       senderDisplayName: "Ada",
       senderUsername: "ada",
@@ -137,8 +137,8 @@ describe("SlackAdapter inbound", () => {
     );
     await rs.waitFor(() => expect(received).toHaveLength(1));
     expect(received[0]).toMatchObject({
-      conversationId: "C1:150.0",
-      parentConversationId: "C1",
+      chatId: "C1:150.0",
+      parentChatId: "C1",
       thread: { kind: "topic" },
       addressing: "mention",
       replyTo: { messageId: "150.0" },
@@ -385,13 +385,13 @@ describe("SlackSocketMode liveness", () => {
 describe("SlackAdapter send", () => {
   it("replies in the thread a conversation names", async () => {
     const { adapter, api } = await startedAdapter();
-    const receipt = await adapter.send("C1:150.0" as ConversationId, { text: "**done**" });
+    const receipt = await adapter.send("C1:150.0" as ChatId, { text: "**done**" });
     expect(api.postMessage).toHaveBeenCalledWith(
       "xoxb-1",
       { channel: "C1", markdown: "**done**", threadTs: "150.0" },
       expect.anything(),
     );
-    expect(receipt).toEqual({ conversationId: "C1:150.0", messageId: "100.1" });
+    expect(receipt).toEqual({ chatId: "C1:150.0", messageId: "100.1" });
   });
 
   it("opens the direct message for a member's address", async () => {
@@ -425,7 +425,7 @@ describe("slack text", () => {
   });
 
   it("reads a thread address back into channel and thread", () => {
-    expect(parseSlackConversationId("C1:150.0")).toEqual({ channelId: "C1", threadTs: "150.0" });
-    expect(parseSlackConversationId("D1")).toEqual({ channelId: "D1" });
+    expect(parseSlackChatId("C1:150.0")).toEqual({ channelId: "C1", threadTs: "150.0" });
+    expect(parseSlackChatId("D1")).toEqual({ channelId: "D1" });
   });
 });

@@ -331,7 +331,7 @@ describe("email Talker fault mapping", () => {
 
     expect(provider.sent).toHaveLength(1);
     expect(provider.sent[0]).toMatchObject({ to: "someone@example.com", text: "hi there" });
-    expect(receipt).toStrictEqual({ conversationId: "t_out", messageId: "m_out" });
+    expect(receipt).toStrictEqual({ chatId: "t_out", messageId: "m_out" });
   });
 
   it("marks the lines this inbox sent as outbound, however its address is written", async () => {
@@ -443,7 +443,7 @@ describe("email inbound delivery", () => {
         channel: "email",
         direction: "inbound",
         messageId: "msg_1",
-        conversationId: "t1",
+        chatId: "t1",
         senderId: GUARDIAN,
         senderDisplayName: "Guardian",
         text: "hello from the full body",
@@ -485,7 +485,7 @@ describe("email inbound delivery", () => {
       channel: "email",
       direction: "inbound",
       messageId: "msg_unknown",
-      conversationId: "t1" as ChatId,
+      chatId: "t1" as ChatId,
       senderId: GUARDIAN,
       text: "",
       attachments,

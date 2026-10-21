@@ -1,4 +1,4 @@
-// Capability-to-grant-state signals. Messaging model: docs/concepts/messaging.md.
+// Capability-to-grant-state signals. Vocabulary: docs/domains/connections.md.
 //
 // `CredentialRejected` is the ONLY bridge from capabilities to grant state: any
 // capability that gets "credential refused" from the service (401, invalid_auth,
@@ -71,6 +71,19 @@ export class CredentialRejected extends Error {
     super("credential rejected", opts?.cause !== undefined ? { cause: opts.cause } : undefined);
     this.name = "CredentialRejected";
     this.grant = opts?.grant;
+  }
+}
+
+/**
+ * A scheme's `renew()` couldn't reach the party that renews the credential (a
+ * network error, a timeout, a 429 or 5xx). Unlike a refusal, the credential may
+ * still renew later, so the registry keeps the grant authorized and retries on
+ * its next renewal pass instead of degrading it.
+ */
+export class RenewalUnavailable extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause !== undefined ? { cause } : undefined);
+    this.name = "RenewalUnavailable";
   }
 }
 

@@ -4,6 +4,9 @@ import {
   CATALOG,
   CATALOG_BY_SLUG,
   ROME_MANAGED_CATALOG,
+  romeManagedGrantsUsable,
+  connectedRomeManagedSlugs,
+  isRomeSettingsLink,
   type ConnectedAccount,
 } from "./connections.js";
 
@@ -154,18 +157,19 @@ describe("buildConnectionViews", () => {
 });
 
 describe("Rome-managed providers", () => {
-  it("marks GitHub and Slack as Rome-managed (brokered by Rome's integration, not Composio)", () => {
+  it("marks GitHub, Slack, and Shopify as Rome-managed (brokered by Rome's integration, not Composio)", () => {
     expect(CATALOG_BY_SLUG.get("github")).toMatchObject({ name: "GitHub", romeManaged: true });
     expect(CATALOG_BY_SLUG.get("slack")).toMatchObject({ name: "Slack", romeManaged: true });
+    expect(CATALOG_BY_SLUG.get("shopify")).toMatchObject({ name: "Shopify", romeManaged: true });
   });
 
   it("treats every other catalog provider as a normal Composio connect", () => {
     const managed = CATALOG.filter((e) => e.romeManaged).map((e) => e.slug);
-    expect(managed).toEqual(["github", "slack"]);
+    expect(managed).toEqual(["github", "slack", "shopify"]);
   });
 
   it("exposes Rome-managed entries via ROME_MANAGED_CATALOG", () => {
-    expect(ROME_MANAGED_CATALOG.map((e) => e.slug)).toEqual(["github", "slack"]);
+    expect(ROME_MANAGED_CATALOG.map((e) => e.slug)).toEqual(["github", "slack", "shopify"]);
   });
 
   it("carries the romeManaged flag onto connected GitHub and Slack views so they render as managed", () => {
@@ -178,5 +182,38 @@ describe("Rome-managed providers", () => {
   it("leaves non-managed connections with romeManaged=false", () => {
     const [view] = buildConnectionViews([account({ toolkitSlug: "gmail" })]);
     expect(view.romeManaged).toBe(false);
+  });
+});
+
+describe("romeManagedGrantsUsable", () => {
+  it("counts only an authorized grant as connected", () => {
+    expect(romeManagedGrantsUsable({ store: "authorized" })).toBe(true);
+    // A degraded grant is on file but its token is dead: the card keeps
+    // offering the reconnect.
+    expect(romeManagedGrantsUsable({ store: "degraded" })).toBe(false);
+    expect(romeManagedGrantsUsable({ store: "unauthorized" })).toBe(false);
+    expect(romeManagedGrantsUsable(undefined)).toBe(false);
+  });
+});
+
+describe("connectedRomeManagedSlugs", () => {
+  it("marks a Rome-managed card connected from the registry, not Composio", () => {
+    const slugs = connectedRomeManagedSlugs([
+      { service: "shopify", grants: { store: "authorized" } },
+      { service: "github", grants: { user: "degraded" } },
+      { service: "slack", grants: { workspace: "unauthorized" } },
+      // A registry service outside the Rome-managed catalog never counts.
+      { service: "telegram", grants: { bot: "authorized" } },
+    ]);
+    expect([...slugs]).toEqual(["shopify"]);
+    expect(connectedRomeManagedSlugs(undefined).size).toBe(0);
+  });
+});
+
+describe("isRomeSettingsLink", () => {
+  it("tells a dashboard Settings page from an OAuth start", () => {
+    expect(isRomeSettingsLink("/settings/connections/shopify")).toBe(true);
+    expect(isRomeSettingsLink("/api/oauth/github/start")).toBe(false);
+    expect(isRomeSettingsLink("https://broker.example/authorize")).toBe(false);
   });
 });

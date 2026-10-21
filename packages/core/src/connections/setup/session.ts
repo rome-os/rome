@@ -1,4 +1,4 @@
-// Connection setup coroutine pump. Messaging model: docs/concepts/messaging.md.
+// Connection setup coroutine pump. Vocabulary: docs/domains/connections.md.
 //
 // One session drives one builder-written `setup(interact, ctx)` coroutine.
 // The pump suspends the coroutine at each verb; the pending verb IS the

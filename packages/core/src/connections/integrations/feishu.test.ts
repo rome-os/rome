@@ -115,7 +115,7 @@ function fakePersonRepo(): PersonMappingRepository {
 
 function makeDescriptor(channel: FakeLarkChannel) {
   return createFeishuDescriptor({
-    conversationSettings: {
+    chatSettings: {
       observe: () => {},
       get: async () => ({
         effective: {
@@ -216,7 +216,7 @@ describe("feishu talk lifecycle", () => {
 
     const received: string[] = [];
     conn.hearTalker(async (msg) => {
-      received.push(`${msg.senderId}/${msg.conversationId}:${msg.text}`);
+      received.push(`${msg.senderId}/${msg.chatId}:${msg.text}`);
       return;
     });
     await channel.emitMessage({ content: "hello there" });
@@ -224,18 +224,16 @@ describe("feishu talk lifecycle", () => {
 
     await expect(sendThrough(conn, "oc_chat" as ChatId, { text: "reply" })).resolves.toEqual({
       messageId: "om_sent",
-      conversationId: "oc_chat",
+      chatId: "oc_chat",
     });
 
-    const direct = await conn.withTalker((talker) =>
-      talker.directMessaging?.conversationFor("ou_alice"),
-    );
+    const direct = await conn.withTalker((talker) => talker.directMessaging?.chatFor("ou_alice"));
     expect(direct).toBe("ou_alice");
     await sendThrough(conn, direct!, { text: "paired" });
     expect(channel.sent.at(-1)).toMatchObject({ to: "ou_alice", input: { markdown: "paired" } });
     const session = await conn.withTalker((talker) =>
       talker.activity?.begin({
-        conversationId: "oc_chat" as ChatId,
+        chatId: "oc_chat" as ChatId,
         messageId: "om_1",
       }),
     );
@@ -285,7 +283,7 @@ describe("feishu inbound delivery", () => {
         channel: "feishu",
         direction: "inbound",
         messageId: "om_7",
-        conversationId: "oc_chat",
+        chatId: "oc_chat",
         senderId: "ou_alice",
         senderDisplayName: "Alice",
         text: "Rome see this",
