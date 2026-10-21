@@ -1,6 +1,6 @@
 # Chats
 
-Who said what, where, and as whom. Chats follows the definitions in [Connections](connections.md) and [Agents](agents.md) and changes neither.
+Who said what, where, and as whom. Chats follows the definitions in [Connections](connections.md) and [Agents](agents.md) and changes neither. What happens when an agent is woken by a chat is in [Participation](participation.md).
 
 ## Chat
 
@@ -43,33 +43,8 @@ One of Rome's agents, such as main, sales or support, taking part in a chat. Wha
 A setting on a chat, for each of Rome's accounts in it, saying when that account's agent is woken: on every message, only when mentioned, or when it is needed. The same account can be chatty in one group and quiet in another.
 
 - It decides when the agent is woken, nothing more. What reaches the chat is whatever the platform delivers, and how much of it the agent reads when woken is the agent's own business ([Agents](agents.md)).
-- "When it is needed" hands the decision to a lightweight check. A mention always wakes the agent under it.
+- "When it is needed" hands the decision to a lightweight check. A mention always wakes the agent under it. What a wake is and what follows it is in [Participation](participation.md#wake).
 - For a delegate on the guardian's own account, the current behaviour stays as it is.
-
-## Wake
-
-The moment a message is judged to need the agent and the agent starts a turn. The reply rule decides it.
-
-- Not every message wakes the agent. Under "when it is needed" a lightweight check decides whether the message needs the agent, and a mention always does.
-- A woken agent first catches up on what it has not seen, then acts.
-- Waking and speaking are two decisions. A woken agent may read, remember and act with its tools, and end its turn without saying anything in the chat.
-
-## Projection
-
-The agent's working memory of a chat: a view built from the chat's messages, not the record itself. Chats keeps the record and offers it. What the agent keeps of it is its own business ([Agents](agents.md)).
-
-- There is one default view and no setting. When the agent wakes, it reads the recent messages of the place the waking message was said in: the chat itself, or the thread, which starts with the message it was opened from. A message alone rarely carries the whole context, in a group or in a direct message.
-- Whoever writes chooses the place. Mentioning the agent in a thread hands it a task with the thread as its context. Asking in the open chat gives it the chat around the question.
-- How far back "recent" reaches is the agent's own bound.
-- Beyond the default view, the agent can read more of the chat on its own judgement: further back, the chat around a thread, other threads in the chat.
-
-## Reply
-
-What the agent says back after a wake, through the account it was woken on.
-
-- The agent decides where in the chat a reply goes: the thread the message was said in, the chat itself, or another of its threads.
-- A reply stays in the chat the agent was woken in. A message to any other chat pauses on an approval card for the guardian and leaves only once they allow it.
-- A reply is a message like any other, said by the agent as its own account or on the guardian's behalf under theirs, as the kind of link says.
 
 ## Message
 
@@ -123,5 +98,4 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **Linking a service's first account to main automatically.** Connecting and linking are two operations and cannot be made one, so a state with no agent exists anyway, and an agent the guardian did not pick is confusing.
 - **A thread as a chat of its own.** People do not think of a thread as a chat. It is a side conversation inside one, seen by everyone in it. Letting the thread model decide the agent's memory boundary went with it. Memory is the agent's own decision.
 - **"Bot" and "linked agent" as names.** A person's identity and an agent's identity on a platform are the same kind of thing, and one name per thing is the writing rule. Unlink stays: it is the verb for taking an agent off an account.
-- **A projection setting per agent or per chat.** One default serves every chat: the place the waking message was said in. A setting would move a reading decision that belongs to the agent into chat configuration.
 - **"Conversation" as the canonical word.** The guardian says chat. Conversation is kept as an alias until the rename lands.
