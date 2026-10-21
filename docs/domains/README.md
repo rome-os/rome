@@ -15,7 +15,7 @@ This folder is the source of truth for what these words mean. Other docs link he
 
 ![Context map](context-map.svg)
 
-Connections carry messages between chats and Rome. Participation sits between Chats and Agents: it reads the chat's record, speaks back into it, and starts an agent's turn. The dashed line is the link set when the guardian connects an account: which agent speaks through it. Chats follows the definitions of Connections and Agents and changes neither. Connections and Agents do not depend on each other.
+Connections carry messages between chats and Rome. Participation sits between Chats and Agents: it reads the chat's record, speaks back into it, and starts an agent's turn. The dashed line is the link the guardian sets after connecting an account, as a separate step: which agent speaks through it. An account may have none. Chats follows the definitions of Connections and Agents and changes neither. Connections and Agents do not depend on each other.
 
 ## How to read a context file
 
