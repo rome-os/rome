@@ -97,7 +97,7 @@ A Slack bot is one of Rome's accounts with one agent ([`slack-bot.ts`](../../pac
 - Rome opens its own Socket Mode connection to Slack, so an instance needs no public address and no Cloud relay for Slack's events.
 - Rome hears direct messages to the bot and mentions of it in a channel. It never asks for permission to read a channel's history, so other lines in a channel never reach it.
 - A direct message is one chat, and a Slack channel is one chat. A [thread](../domains/chats.md#thread) lives inside its channel's chat: a mention in a thread is a message of the channel's chat that names the thread it was said in. The reply goes into that thread, and a mention in the channel itself starts a thread under it. A direct message is answered in place.
-- Rome remembers which thread recent channel messages were in so a reply can find it. A reply to a message it no longer remembers, after a restart, starts a thread under that message.
+- Rome remembers which thread recent channel messages were in so a reply can find it. After a restart it has forgotten them, and a reply to such a message starts a thread under it.
 - Reconnecting an account asks for fresh tokens from its own app. A new app is a different bot, so it is a different account and cannot renew this one.
 - Members of the workspace reach the agent through [account pairing](#account-pairing), the guardian included.
 
