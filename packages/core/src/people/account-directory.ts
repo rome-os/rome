@@ -70,17 +70,84 @@ interface AccountLink {
  */
 export async function readAccountStream(deps: AccountDirectoryDeps): Promise<StreamAccount[]> {
   const accounts = await readAccountDirectory(deps);
-  const stores = personMessageStores(deps);
+  return streamRows(accounts, await readHeads(deps, accounts));
+}
 
-  const heads = new Map<DirectoryAccount, Message>();
-  for (const round of rounds(accounts)) {
-    for (const [account, owned] of await assignAccountHeads(stores, round)) {
-      heads.set(account, owned.head);
+/**
+ * {@link readAccountStream} for a caller that asks again before the last read
+ * finished. The People page polls the stream every 30 seconds and refetches
+ * every page it has loaded, and the head reads can take a while on a slow live
+ * store, so without sharing, reads pile up faster than they finish.
+ *
+ * Only the head reads are shared, never the directory. The directory carries
+ * every link and dismissal and is cheap to read, so each read takes it fresh:
+ * a refetch right after a write shows that write even while it joins heads a
+ * read started before it. Heads depend on nothing but an account's channel and
+ * addresses, so a joining read reuses them by that key, reads its own for any
+ * account the running read did not cover, and keeps nothing once it settles.
+ */
+export function accountStreamReader(deps: AccountDirectoryDeps): () => Promise<StreamAccount[]> {
+  let running: { keys: Set<string>; heads: Promise<Map<string, Message>> } | null = null;
+
+  async function heads(accounts: readonly DirectoryAccount[]): Promise<Map<string, Message>> {
+    const joined = running;
+    if (joined) {
+      const rest = accounts.filter((account) => !joined.keys.has(headKey(account)));
+      const [shared, own] = await Promise.all([
+        joined.heads,
+        rest.length > 0 ? readHeads(deps, rest) : new Map<string, Message>(),
+      ]);
+      return new Map([...shared, ...own]);
     }
+    const read = readHeads(deps, accounts);
+    const entry = { keys: new Set(accounts.map(headKey)), heads: read };
+    running = entry;
+    const settle = () => {
+      if (running === entry) running = null;
+    };
+    read.then(settle, settle);
+    return read;
   }
 
+  return async () => {
+    const accounts = await readAccountDirectory(deps);
+    return streamRows(accounts, await heads(accounts));
+  };
+}
+
+/** What a head read depends on: the channel and every address of the account. */
+function headKey(account: DirectoryAccount): string {
+  return JSON.stringify([account.channel, [...account.addresses].sort(compareCodePoints)]);
+}
+
+/**
+ * Each account's head, by {@link headKey}: the entry that claims it, through
+ * the same `assignAccountHeads` the person's own page and the people listing
+ * settle ownership with. Read in rounds rather than all at once — see
+ * {@link ADDRESSES_PER_ROUND}.
+ */
+async function readHeads(
+  deps: AccountDirectoryDeps,
+  accounts: readonly DirectoryAccount[],
+): Promise<Map<string, Message>> {
+  const stores = personMessageStores(deps);
+  const heads = new Map<string, Message>();
+  for (const round of rounds(accounts)) {
+    for (const [account, owned] of await assignAccountHeads(stores, round)) {
+      heads.set(headKey(account), owned.head);
+    }
+  }
+  return heads;
+}
+
+/** The directory as stream rows: each account with its head's dynamic, and
+ *  without the accounts that have none. */
+function streamRows(
+  accounts: readonly DirectoryAccount[],
+  heads: ReadonlyMap<string, Message>,
+): StreamAccount[] {
   return accounts.flatMap((account) => {
-    const head = heads.get(account);
+    const head = heads.get(headKey(account));
     const dynamic = latestDynamic(head ? [head] : []);
     return dynamic === null ? [] : [{ ...account, latest: dynamic }];
   });

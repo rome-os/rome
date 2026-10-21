@@ -163,33 +163,108 @@ describe("Accounts API", () => {
     }
   });
 
-  it("shares one stream read between overlapping requests, and reads afresh after", async () => {
-    const repo = deps.sentinelLogRepo;
-    const listSenders = repo.listSenders.bind(repo);
-    let reads = 0;
-    repo.listSenders = async () => {
-      reads += 1;
-      return listSenders();
-    };
+  describe("overlapping stream reads", () => {
+    /** Hold the WhatsApp store's head reads until `open` is called, counting
+     *  each account they are asked about. */
+    function gateWhatsAppHeads() {
+      const store = deps.channels.find((channel) => channel.name === "whatsapp")?.messages
+        ?.byAccount;
+      if (!store) throw new Error("the test deps carry a WhatsApp store");
+      const latest = store.latest.bind(store);
+      const asked: string[] = [];
+      let open!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      store.latest = async (accounts) => {
+        asked.push(...accounts.flatMap((account) => account.addresses));
+        await gate;
+        return latest(accounts);
+      };
+      return { asked, open };
+    }
 
-    const [whole, first] = await Promise.all([fetchStream(), fetchStream("?limit=1")]);
-    expect(reads).toBe(1);
-    expect(first.accounts).toEqual(whole.accounts.slice(0, 1));
+    /** Wait until `check` holds, failing after a deadline rather than guessing
+     *  how long the reads in between take. */
+    async function until(check: () => boolean) {
+      const deadline = Date.now() + 2_000;
+      while (!check()) {
+        if (Date.now() > deadline) throw new Error("timed out waiting");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    }
 
-    await fetchStream();
-    expect(reads).toBe(2);
-  });
+    it("share the head reads, and read the directory afresh each time", async () => {
+      const { asked, open } = gateWhatsAppHeads();
+      const first = fetchStream();
+      await until(() => asked.includes(TALKING_JID));
 
-  it("does not hold on to a failed stream read", async () => {
-    const repo = deps.sentinelLogRepo;
-    const listSenders = repo.listSenders.bind(repo);
-    repo.listSenders = async () => {
-      throw new Error("store unavailable");
-    };
-    expect((await app.request("/accounts/stream")).status).toBe(500);
+      // A write lands while the first read is waiting on its heads.
+      await deps.personMappingRepo.linkAccount({
+        personId: STRANGER_PERSON_ID,
+        channel: "whatsapp",
+        channelUserId: TALKING_JID,
+      });
+      // Naming is the directory's last read. Once it has answered, everything
+      // up to joining the heads is synchronous, so a timer tick later the
+      // second read has joined.
+      const names = deps.accountNames;
+      const displayNames = names.displayNames.bind(names);
+      let named = 0;
+      names.displayNames = async (accounts) => {
+        const answer = await displayNames(accounts);
+        named += 1;
+        return answer;
+      };
+      const second = fetchStream();
+      await until(() => named === 1);
+      open();
 
-    repo.listSenders = listSenders;
-    expect((await fetchStream()).accounts.length).toBeGreaterThan(0);
+      const [before, after] = await Promise.all([first, second]);
+      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(1);
+      expect(find(before, `whatsapp:${TALKING_JID}`)?.state).toBe("unlinked");
+      expect(find(after, `whatsapp:${TALKING_JID}`)?.state).toBe("dismissed");
+      expect(find(after, `whatsapp:${TALKING_JID}`)?.latest.preview).toBe("hello from tina");
+    });
+
+    it("read heads of their own for an account the running read did not cover", async () => {
+      const { asked, open } = gateWhatsAppHeads();
+      const first = fetchStream();
+      await until(() => asked.includes(TALKING_JID));
+
+      const NEW_JID = "15550004444@s.whatsapp.net";
+      await deps.whatsAppStoreRepo.upsertContacts([
+        { jid: NEW_JID, phoneNumber: "15550004444", name: "Newcomer" },
+      ]);
+      await deps.whatsAppStoreRepo.upsertMessages([
+        {
+          id: "wa-new",
+          chatJid: NEW_JID,
+          senderJid: NEW_JID,
+          fromMe: false,
+          timestamp: new Date("2026-08-17T12:00:00Z"),
+          type: "text",
+          text: "just arrived",
+          hasMedia: false,
+        },
+      ]);
+      const second = fetchStream();
+      await until(() => asked.includes(NEW_JID));
+      open();
+
+      const [before, after] = await Promise.all([first, second]);
+      expect(find(before, `whatsapp:${NEW_JID}`)).toBeUndefined();
+      expect(find(after, `whatsapp:${NEW_JID}`)?.latest.preview).toBe("just arrived");
+      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(1);
+    });
+
+    it("read afresh once the running read has settled", async () => {
+      const { asked, open } = gateWhatsAppHeads();
+      open();
+      await fetchStream();
+      await fetchStream();
+      expect(asked.filter((address) => address === TALKING_JID)).toHaveLength(2);
+    });
   });
 
   it("keeps an account nothing has happened on off the stream", async () => {
