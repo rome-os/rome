@@ -414,7 +414,7 @@ async function main() {
     channels: () => builtChannels,
     registry: connectionRegistry,
     channelOf,
-    serviceOf: serviceOfChannel,
+    platformOf: (name: string) => channelRecords.platformOf(name),
     pacing: replyPacing,
   });
   // The agents this Rome can message, one read for the People page and for

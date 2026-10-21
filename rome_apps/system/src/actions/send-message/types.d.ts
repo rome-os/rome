@@ -39,7 +39,7 @@ export interface SendMessageAttachment {
 /**
  * Chat-style channels: addressed by a thread id, no email-specific fields. The
  * channel is the id of the account to send as, such as the `channel` a message
- * arrived on. A service's name is an account id only for the account it names.
+ * arrived on. A platform's name is an account id only for the account it names.
  */
 export type ChatChannel =
   | "telegram"

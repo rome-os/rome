@@ -218,10 +218,10 @@ async function validateAttachmentSources(input: SendMessageInput): Promise<SendM
 }
 
 /** The guardian's address on `channel`: a link to the channel itself, or
- *  else the link People keys by the account's service. */
+ *  else the link People keys by the account's platform. */
 async function resolveGuardianThreadId(
   channel: string,
-  service: string,
+  platform: string,
   deps: SendMessageRuntimeDeps,
 ): Promise<string> {
   if (!deps.personMappingRepo) {
@@ -234,7 +234,7 @@ async function resolveGuardianThreadId(
   const mappings = guardians.flatMap((guardian) => guardian.channelMappings);
   const mapping =
     mappings.find((candidate) => candidate.channel === channel) ??
-    mappings.find((candidate) => candidate.channel === service);
+    mappings.find((candidate) => candidate.channel === platform);
 
   if (!mapping) {
     throw new Error(`No guardian mapping found for channel "${channel}"`);
@@ -303,7 +303,7 @@ function agentRecipient(channel: unknown, to: unknown): string | undefined {
 
 async function resolveChatThreadId(
   chat: SendMessageChatInput,
-  service: string,
+  platform: string,
   deps: SendMessageRuntimeDeps,
 ): Promise<string> {
   const agent = agentRecipient(chat.channel, chat.to);
@@ -317,26 +317,26 @@ async function resolveChatThreadId(
         : `Channel "${chat.channel}" only supports to: "guardian"; use threadId for explicit recipients`,
     );
   }
-  if (to === "guardian") return resolveGuardianThreadId(chat.channel, service, deps);
+  if (to === "guardian") return resolveGuardianThreadId(chat.channel, platform, deps);
   if (chat.threadId) return chat.threadId;
   throw new Error(`Channel "${chat.channel}" requires a threadId or to: "guardian"`);
 }
 
 /**
- * The service `channel` is an account on. `channel` is the account's id: its
+ * The platform `channel` is an account on. `channel` is the account's id: its
  * channel's name, as the channel a message arrived on spells it, and never a
- * service standing for one of its accounts. A service named after itself, such
- * as `webchat`, `email` or `agents`, is addressed by that name.
+ * platform standing for one of its accounts. A platform with one account named
+ * after it, such as `webchat`, `email` or `agents`, is addressed by that name.
  *
  * A channel no Connection can send on is refused before anything else is
  * checked, so an unconfigured channel is not reported as a bad attachment or a
  * missing guardian mapping. The text is the one the channels service rejects
  * with.
  */
-async function serviceOfSendable(channels: ChannelsService, channel: string): Promise<string> {
+async function platformOfSendable(channels: ChannelsService, channel: string): Promise<string> {
   const target = (await channels.list()).find((candidate) => candidate.name === channel);
   if (!target?.sendable) throw new Error(`No Talk connection registered for "${channel}"`);
-  return target.service ?? channel;
+  return target.platform ?? channel;
 }
 
 export async function executeSendMessage(
@@ -345,13 +345,13 @@ export async function executeSendMessage(
   deps: SendMessageRuntimeDeps = {},
 ): Promise<ActionResult> {
   const { channel, text, attachments, turnId, parts } = input;
-  const service = await serviceOfSendable(channels, channel);
+  const platform = await platformOfSendable(channels, channel);
   const hasAttachments = !!attachments && attachments.length > 0;
   const hasParts = !!parts && parts.length > 0;
 
   // The mail transport carries no attachments. Fail before validating sources
   // that email could never deliver. The adapter rejects them too.
-  if (service === "email" && hasAttachments) {
+  if (platform === "email" && hasAttachments) {
     throw new Error(
       "Email attachments are not supported by the mail transport. No email was sent.",
     );
@@ -359,7 +359,7 @@ export async function executeSendMessage(
 
   const safeInput = await validateAttachmentSources(input);
 
-  if (service === "email") {
+  if (platform === "email") {
     const email = input as SendMessageEmailInput;
     const hasHtml = !!email.html?.trim();
     const hasText =
@@ -416,7 +416,7 @@ export async function executeSendMessage(
   if (!text && !hasAttachments && !hasParts) {
     throw new Error("At least one of `text`, `attachments`, or `parts` must be provided");
   }
-  const threadId = await resolveChatThreadId(chat, service, deps);
+  const threadId = await resolveChatThreadId(chat, platform, deps);
   const channelUserId = chat.channelUserId ?? threadId;
 
   log.info("sending message", {
@@ -458,7 +458,7 @@ export function createSendMessageAction(
         channel: {
           type: "string",
           description:
-            'The id of the account to send as: the channel a message arrived on, such as "webchat", "email", "agents", or a Telegram, Discord or Feishu account\'s id. A service name such as "telegram" reaches only an account whose id it is. "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its id (a UUID, the threadId its messages arrive on) as `threadId`, or, from the main agent, its name as `to`.',
+            'The id of the account to send as: the channel a message arrived on, such as "webchat", "email", "agents", or a Telegram, Discord or Feishu account\'s id. A platform name such as "telegram" reaches only an account whose id it is. "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its id (a UUID, the threadId its messages arrive on) as `threadId`, or, from the main agent, its name as `to`.',
         },
         threadId: {
           type: "string",

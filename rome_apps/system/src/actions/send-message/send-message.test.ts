@@ -312,8 +312,8 @@ describe("send_message to an account with an opaque id", () => {
   function accounts(...names: string[]): ChannelsService {
     return {
       list: rs.fn(async () => [
-        { name: "telegram", service: "telegram", sendable: false },
-        ...names.map((name) => ({ name, service: "telegram", sendable: true })),
+        { name: "telegram", platform: "telegram", sendable: false },
+        ...names.map((name) => ({ name, platform: "telegram", sendable: true })),
       ]),
       send: rs.fn(async (_channel, conversationId) => ({ conversationId })),
       query: async () => [],
@@ -332,7 +332,7 @@ describe("send_message to an account with an opaque id", () => {
     );
   });
 
-  it("refuses a service name that is not an account's id", async () => {
+  it("refuses a platform name that is not an account's id", async () => {
     const adapter = accounts(FIRST);
 
     await expect(
@@ -341,7 +341,7 @@ describe("send_message to an account with an opaque id", () => {
     expect(adapter.send).not.toHaveBeenCalled();
   });
 
-  it("resolves to: guardian through the link People keys by service", async () => {
+  it("resolves to: guardian through the link People keys by platform", async () => {
     const adapter = accounts(FIRST);
     const personMappingRepo = {
       findByBondLevel: rs.fn(async () => [

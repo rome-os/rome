@@ -59,13 +59,13 @@ function service(channels: unknown[] = []) {
     channels: () => channels as Channels,
     registry: registryOf(CONNECTIONS, send),
     channelOf: serviceChannelOf,
-    serviceOf: (channel) => (channel === "whatsapp" ? "whatsapp" : null),
+    platformOf: (channel) => (channel === "whatsapp" ? "whatsapp" : null),
   });
   return { channelsService, send };
 }
 
 describe("createChannelsService", () => {
-  it("lists each channel, its service, and whether a Connection backs it", async () => {
+  it("lists each channel, its platform, and whether a Connection backs it", async () => {
     const { channelsService } = service([
       { name: "discord", messages: null },
       { name: "whatsapp", messages: null },
@@ -73,14 +73,15 @@ describe("createChannelsService", () => {
     ]);
 
     expect(await channelsService.list()).toEqual([
-      { name: "discord", service: "discord", sendable: true },
-      { name: "telegram_user", service: "telegram_user", sendable: true },
-      { name: "whatsapp", service: "whatsapp", sendable: false },
+      { name: "discord", platform: "discord", sendable: true },
+      // A signed-in Telegram is an account on the Telegram platform.
+      { name: "telegram_user", platform: "telegram", sendable: true },
+      { name: "whatsapp", platform: "whatsapp", sendable: false },
       { name: "unrecorded", sendable: false },
     ]);
   });
 
-  it("names the service of an account whose channel has an opaque id", async () => {
+  it("names the platform of an account whose channel has an opaque id", async () => {
     const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
     const channelsService = createChannelsService({
       channels: () => undefined,
@@ -89,7 +90,23 @@ describe("createChannelsService", () => {
     });
 
     expect(await channelsService.list()).toEqual([
-      { name: "b1f0c3d2-0000-4000-8000-000000000001", service: "telegram", sendable: true },
+      { name: "b1f0c3d2-0000-4000-8000-000000000001", platform: "telegram", sendable: true },
+    ]);
+  });
+
+  // Feishu and Lark are one kind of connection but two platforms, told apart
+  // by the app's domain, which the channel's record carries.
+  it("reads a recorded channel's platform from its record", async () => {
+    const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
+    const channelsService = createChannelsService({
+      channels: () => undefined,
+      registry: registryOf([{ connectionId: "fs-a", service: "feishu" }], send),
+      channelOf: () => "feishu",
+      platformOf: () => "lark",
+    });
+
+    expect(await channelsService.list()).toEqual([
+      { name: "feishu", platform: "lark", sendable: true },
     ]);
   });
 
@@ -185,7 +202,7 @@ describe("createChannelsService", () => {
     );
     expect(JSON.parse(JSON.stringify(summary))).toEqual({
       name: "discord",
-      service: "discord",
+      platform: "discord",
       sendable: true,
     });
   });

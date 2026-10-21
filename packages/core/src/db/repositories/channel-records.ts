@@ -98,6 +98,12 @@ export class ChannelRecordsRepository {
     return this.byId(id)?.service ?? id;
   }
 
+  /** The platform channel `id` is an account on, or null when no channel
+   *  records it. */
+  platformOf(id: string): string | null {
+    return this.byId(id)?.platform ?? null;
+  }
+
   /** The id of the channel `connectionId` backs, or null for none. */
   idOf(connectionId: string): string | null {
     const cached = this.ids.get(connectionId);

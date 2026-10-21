@@ -18,6 +18,7 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
+import { platformOf } from "./platform.js";
 import type { Connection } from "../connections/types.js";
 import type { Channels } from "./channel.js";
 import { sendThrough, type ChannelOf } from "./connection-ports.js";
@@ -45,9 +46,9 @@ export interface ChannelsServiceDeps {
   /** Names the channel each Connection backs. A Connection it answers null
    *  for backs no channel and is skipped. */
   channelOf: ChannelOf;
-  /** The service a channel no Connection backs belongs to, or null where no
-   *  record names one. A backed channel's service is its Connection's. */
-  serviceOf?: (channel: string) => string | null;
+  /** The platform a channel is an account on, or null where no record names
+   *  one. A backed channel no record names reads its Connection's. */
+  platformOf?: (channel: string) => string | null;
   /** Paces a send while reply streaming is on. */
   pacing?: ConnectionPacing;
 }
@@ -83,14 +84,15 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
         for (const connection of talking(deps.registry)) {
           const name = deps.channelOf(connection);
           if (name === null) continue;
-          summaries.set(name, { name, service: connection.service, sendable: true });
+          const platform = deps.platformOf?.(name) ?? platformOf(connection.service);
+          summaries.set(name, { name, platform, sendable: true });
         }
         for (const channel of deps.channels() ?? []) {
           if (!summaries.has(channel.name)) {
-            const service = deps.serviceOf?.(channel.name) ?? undefined;
+            const platform = deps.platformOf?.(channel.name) ?? undefined;
             summaries.set(channel.name, {
               name: channel.name,
-              ...(service ? { service } : {}),
+              ...(platform ? { platform } : {}),
               sendable: false,
             });
           }
