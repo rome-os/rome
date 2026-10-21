@@ -52,6 +52,16 @@ describe("diagram renderer", () => {
     expect(svg).not.toContain("#000000");
   });
 
+  it("keeps replacement patterns in a theme value literal", async () => {
+    const renderer = diagram.getMermaid({
+      themeVariables: { lineColor: "$1 onload=alert(1) x=" },
+    });
+    const { svg } = await renderer.render("mermaid-6", "graph TD; A-->B;");
+    const root = new DOMParser().parseFromString(svg, "image/svg+xml").documentElement;
+    expect(root.getAttributeNames().filter((name) => name.startsWith("on"))).toEqual([]);
+    expect(root.getAttribute("style")).toContain("--pele-line:$1 onload=alert(1) x=");
+  });
+
   it("rejects a diagram type Pele does not know, so Streamdown shows its error", async () => {
     await expect(
       diagram.getMermaid().render("mermaid-4", "zenuml\n  title Demo\n  A.method()"),

@@ -48,7 +48,11 @@ export function peleThemeDeclarations(config: MermaidConfig | undefined): string
 // SVG or PNG keeps the colors it was shown with.
 function applyTheme(svg: string, declarations: string): string {
   if (!declarations) return svg;
-  return svg.replace(/^<svg\b([^>]*?)\bstyle="/, `<svg$1style="${declarations};`);
+  // A callback keeps `$1` or `$&` inside a theme value literal.
+  return svg.replace(
+    /^<svg\b([^>]*?)\bstyle="/,
+    (_, attributes: string) => `<svg${attributes}style="${declarations};`,
+  );
 }
 
 function createRenderer(initial: MermaidConfig | undefined) {
