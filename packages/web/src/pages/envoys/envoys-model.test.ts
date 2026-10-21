@@ -119,6 +119,8 @@ describe("buildEnvoys", () => {
       kind: "delegate",
       platform: "telegram",
       route: null,
+      connectionId: "telegram_user-id",
+      grant: "session",
     });
     expect(buildEnvoys([own(null)], []).unlinked.map((account) => account.kind)).toEqual([
       "delegate",
