@@ -143,8 +143,11 @@ export interface ConnectChoice {
   kind: LinkKind;
   /** Whether the setup mints a new account rather than filling the service's
    *  one. A setup for a new account is cancelled when the page that runs it
-   *  closes, so no account connects without its agent being linked. */
+   *  closes. An account can still connect with no agent, when the link after
+   *  it fails, and waits under Connected, no agent. */
   another: boolean;
+  /** A setup already under way for the service's one account, to re-attach to. */
+  activeSetupCid: string | null;
   /** The service holds one account and it is connected, so none can be added. */
   taken: boolean;
 }
@@ -152,9 +155,8 @@ export interface ConnectChoice {
 /** The platforms a new account can be connected on, own accounts first. Each
  *  setup addresses the service, never a row, since a row left by a failed
  *  removal is gone once a setup starts. Where the service offers several
- *  accounts, even the first connects as a new account. A setup already under
- *  way is never adopted: each starts through core, which keeps it only when it
- *  is for the same agent. Services core does not register are left out. */
+ *  accounts, even the first connects as a new account. Services core does not
+ *  register are left out. */
 export function connectChoices(connections: readonly ApiConnection[]): ConnectChoice[] {
   const choices: ConnectChoice[] = [];
   for (const service of [...OWN_SERVICES, ...DELEGATE_SERVICES]) {
@@ -162,11 +164,13 @@ export function connectChoices(connections: readonly ApiConnection[]): ConnectCh
     if (rows.length === 0) continue;
     const anyConnected = rows.some((connection) => connectedGrant(connection) !== null);
     const several = rows.some((connection) => connection.severalAccounts === true);
+    const live = rows.flatMap((connection) => Object.values(connection.setups))[0] ?? null;
     choices.push({
       service,
       platform: platformOf(service),
       kind: DELEGATE_SERVICES.has(service) ? "delegate" : "own",
       another: several,
+      activeSetupCid: several ? null : live,
       taken: anyConnected && !several,
     });
   }

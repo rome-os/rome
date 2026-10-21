@@ -50,19 +50,9 @@ export interface SetupRegistry {
   ): Promise<Connection>;
 }
 
-/** Links an account's agent as the conferral that connects it commits. */
-export interface SetupAgentLink {
-  /** Link `agent` to the channel `connectionId` backs, inside the conferral's
-   *  transaction. Answers the channel's id, or null when it takes no agent. */
-  inTx(tx: DrizzleTx, connectionId: string, agent: string): string | null;
-  /** Called once the conferral commits, so the channel listens as its agent says. */
-  changed(channel: string): void;
-}
-
 export interface SetupManagerDeps {
   registry: SetupRegistry;
   personMappingRepo: PersonMappingRepository;
-  agentLink?: SetupAgentLink;
 }
 
 /** What a setup addresses: the service, plus the connection id when the route
@@ -74,10 +64,6 @@ export interface SetupTarget {
   service: string;
   connectionId?: string;
   another?: boolean;
-  /** The agent the account is linked to as it connects, in place of the one
-   *  its channel would start with. A start re-attaches only to a setup for
-   *  the same agent, and replaces one for another. */
-  agent?: string;
 }
 
 /** Raised when a start targets a grant whose descriptor declares no setup. */
@@ -160,9 +146,7 @@ export class SetupManager {
   }
 
   /** Start a setup for the addressed `(target, grant)`, or re-attach to the one
-   *  already running there. `force` cancels a live setup and starts a fresh one,
-   *  and so does a start that names a different agent, so the account never
-   *  connects with an agent the latest start did not ask for.
+   *  already running there. `force` cancels a live setup and starts a fresh one.
    *  Serialized per key so the one-active-setup invariant holds under concurrent
    *  starts. */
   start(target: SetupTarget, grant: string, opts: { force?: boolean } = {}): Promise<SetupStart> {
@@ -178,7 +162,7 @@ export class SetupManager {
   ): Promise<SetupStart> {
     const existing = this.#byKey.get(key);
     if (existing && !existing.session.isTerminal) {
-      if (opts.force || existing.target.agent !== target.agent) {
+      if (opts.force) {
         await this.#cancelManaged(existing);
         // Leave it reachable by cid for a final poll; it is no longer active.
       } else {
@@ -340,28 +324,19 @@ export class SetupManager {
       const plan = channelUserId
         ? await planGuardianMapping(this.#deps.personMappingRepo, target.service, channelUserId)
         : null;
-      const agentLink = target.agent ? this.#deps.agentLink : undefined;
-      // Set by the participant, which runs inside `confer`.
-      const linked: { channel: string | null } = { channel: null };
-      const inTx =
-        (plan && channelUserId) || agentLink
-          ? (tx: DrizzleTx, connectionId: string) => {
-              if (plan && channelUserId) {
+      const opts = {
+        ...(plan && channelUserId
+          ? {
+              inTx: (tx: DrizzleTx) =>
                 applyGuardianMappingWithinTx(
                   tx,
                   this.#deps.personMappingRepo,
                   target.service,
                   channelUserId,
                   plan,
-                );
-              }
-              if (agentLink && target.agent) {
-                linked.channel = agentLink.inTx(tx, connectionId, target.agent);
-              }
+                ),
             }
-          : undefined;
-      const opts = {
-        ...(inTx ? { inTx } : {}),
+          : {}),
         ...(target.another ? { another: true } : {}),
       };
       const connection = await this.#deps.registry.confer(
@@ -372,7 +347,6 @@ export class SetupManager {
         conferral.profile,
         Object.keys(opts).length > 0 ? opts : undefined,
       );
-      if (agentLink && linked.channel !== null) agentLink.changed(linked.channel);
       return connection.id;
     });
   }

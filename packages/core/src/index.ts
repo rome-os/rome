@@ -432,10 +432,6 @@ async function main() {
   const setupManager = new SetupManager({
     registry: connectionRegistry,
     personMappingRepo,
-    agentLink: {
-      inTx: (tx, connectionId, agent) => channelRecords.linkBacked(tx, connectionId, agent),
-      changed: (channel) => accountListening.changed([channel]),
-    },
   });
   // Descriptors are registered LATER (before registry.load(), just above the
   // Talk runtime) so their factories can be threaded the runtime

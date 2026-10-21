@@ -215,18 +215,6 @@ export class ChannelRecordsRepository {
     });
   }
 
-  /** Link `agent` to the channel `connectionId` backs, in `exec`, the
-   *  transaction that confers the Connection, so the account answers as
-   *  `agent` from its first message. Answers the channel's id, or null when
-   *  the Connection backs no channel that takes an agent. */
-  linkBacked(exec: Exec, connectionId: string, requested: string): string | null {
-    const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
-    if (!row || !LINKABLE_SERVICES.has(row.service)) return null;
-    const agent = isCoreMainAgentId(requested) ? MAIN_AGENT_ID : requested;
-    exec.update(channels).set({ agent }).where(eq(channels.id, row.id)).run();
-    return row.id;
-  }
-
   /** The Connections no channel records yet, for the boot pass that gives
    *  each a channel. */
   unclaimed(connections: ReadonlyArray<{ id: string; service: string }>): Array<{

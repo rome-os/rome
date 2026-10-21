@@ -41,7 +41,6 @@ import type { ApiDeps } from "../deps.js";
 import { setupsRoutes } from "./setups.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { connectionsRoutes } from "./connections.js";
-import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 
 const SAME_ORIGIN = { "content-type": "application/json", "sec-fetch-site": "same-origin" };
 
@@ -576,80 +575,6 @@ describe("another account", () => {
     const { res } = await start(app, "fake-telegram", { another: true });
     expect(res.status).toBe(400);
     expect(registry.find("fake-telegram")).toEqual([]);
-  });
-});
-
-describe("an account's agent", () => {
-  /** A linkable service whose minted accounts get channels, as core wires
-   *  them, with `sales:agent` loaded. */
-  function linkableHarness() {
-    const { db, close } = createTestDb();
-    openDbs.push(close);
-    const records = new ChannelRecordsRepository(db);
-    const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(db),
-      onMint: (tx, record) => records.claim(tx, record, record.createdAt),
-    });
-    const fixture = makePasteTalk();
-    fixture.descriptor.service = "discord";
-    fixture.descriptor.severalAccounts = true;
-    fixture.descriptor.auth.bot.setup = setupFn;
-    registry.register(fixture.descriptor);
-    const personMappingRepo = fakePersonRepo();
-    const changed = rs.fn();
-    const manager = new SetupManager({
-      registry,
-      personMappingRepo,
-      agentLink: {
-        inTx: (tx, connectionId, agent) => records.linkBacked(tx, connectionId, agent),
-        changed,
-      },
-    });
-    const deps = {
-      db,
-      connectionRegistry: registry,
-      setupManager: manager,
-      personMappingRepo,
-      agentLoader: {
-        has: (name: string) => name === "sales:agent" || name === "sales",
-        getCanonicalName: () => "sales:agent",
-      },
-    } as unknown as ApiDeps;
-    const app = new Hono().route("/", setupsRoutes(deps));
-    return { app, registry, records, changed };
-  }
-
-  it("links the requested agent as the account connects, in place of main", async () => {
-    const { app, registry, records, changed } = linkableHarness();
-    const started = await start(app, "discord", { another: true, agent: "sales" });
-    expect(started.res.status).toBe(200);
-    await submitInput(app, started.json.cid, "good");
-
-    const [account] = registry.find("discord");
-    const channel = records.byConnection(account!.id);
-    expect(channel?.agent).toBe("sales:agent");
-    expect(changed).toHaveBeenCalledWith(channel?.id);
-  });
-
-  it("stores main by its canonical id", async () => {
-    const { app, registry, records } = linkableHarness();
-    const started = await start(app, "discord", { agent: "main" });
-    await submitInput(app, started.json.cid, "good");
-    const [account] = registry.find("discord");
-    expect(records.byConnection(account!.id)?.agent).toBe("core:main");
-  });
-
-  it("refuses an agent that is not loaded, and starts nothing", async () => {
-    const { app, registry } = linkableHarness();
-    const { res } = await start(app, "discord", { agent: "gone:agent" });
-    expect(res.status).toBe(400);
-    expect(registry.find("discord")).toEqual([]);
-  });
-
-  it("refuses an agent for a service whose accounts take none", async () => {
-    const { app } = harness();
-    const { res } = await start(app, "fake-telegram", { agent: "main" });
-    expect(res.status).toBe(400);
   });
 });
 

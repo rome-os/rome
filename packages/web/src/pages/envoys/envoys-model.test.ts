@@ -124,10 +124,10 @@ describe("connectChoices", () => {
         setups: { bot: "cid-old" },
       }),
     ]);
-    expect(choice).toMatchObject({ another: true, taken: false });
+    expect(choice).toMatchObject({ another: true, activeSetupCid: null, taken: false });
   });
 
-  it("adopts no setup already under way", () => {
+  it("re-attaches the setup of a service that holds one account", () => {
     const [choice] = connectChoices([
       connection({
         service: "telegram_user",
@@ -136,8 +136,7 @@ describe("connectChoices", () => {
         setups: { session: "cid-live" },
       }),
     ]);
-    expect(choice).toMatchObject({ another: false, taken: false });
-    expect(choice).not.toHaveProperty("activeSetupCid");
+    expect(choice).toMatchObject({ another: false, activeSetupCid: "cid-live", taken: false });
   });
 
   it("marks a service whose one account is connected as taken", () => {
