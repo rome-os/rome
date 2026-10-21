@@ -1043,6 +1043,31 @@ describe("WechatUserReader", () => {
     ]);
   });
 
+  it("answers every chat's last activity from one shared session-list read", async () => {
+    let sessions = SESSIONS;
+    const { reader, calls } = await readerWith(() => envelope(sessions));
+    const [first, again] = await Promise.all([reader.lastActivity(), reader.lastActivity()]);
+    expect(calls).toEqual([["sessions", "--include-hidden"]]);
+    expect(again).toBe(first);
+    expect([...first.keys()]).toEqual(["45357963768@chatroom", "wxid_friend", "wxid_quiet"]);
+    expect(first.get("wxid_quiet")).toBe("");
+
+    sessions = SESSIONS.map((session) =>
+      session.username === "wxid_friend"
+        ? { ...session, lastMessage: { content: "new", createdAt: "2026-10-01T11:00:00.000Z" } }
+        : session,
+    );
+    const now = rs.spyOn(Date, "now").mockReturnValue(Date.now() + 60_000);
+    try {
+      const later = await reader.lastActivity();
+      expect(calls).toHaveLength(2);
+      expect(later.get("wxid_friend")).not.toBe(first.get("wxid_friend"));
+      expect(later.get("45357963768@chatroom")).toBe(first.get("45357963768@chatroom"));
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("reads a preview the client stored as bytes, compressed or not", async () => {
     const asJson = (bytes: Buffer) => JSON.parse(JSON.stringify(new Uint8Array(bytes)));
     const { reader } = await readerWith(() =>

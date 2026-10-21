@@ -144,6 +144,34 @@ function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
     return perConversation.flat().sort(compareMessages);
   }
 
+  /** Each chat's newest message, kept with the activity key it was read under. */
+  const heads = new Map<string, { key: string; head: Message | null }>();
+
+  /**
+   * A chat's newest message, read again only when the session list shows new
+   * activity in it. The people surfaces ask this of every contact on a timer,
+   * and the reader runs one query at a time, so reading every chat every time
+   * keeps it busy for minutes and starves every other read. A chat the session
+   * list does not know is read live; a failed read answers null and is not kept.
+   */
+  async function newestIn(
+    chatId: string,
+    activity: ReadonlyMap<string, string> | null,
+  ): Promise<Message | null> {
+    const key = activity?.get(chatId);
+    const cached = heads.get(chatId);
+    if (key !== undefined && cached?.key === key) return cached.head;
+    let head: Message | null;
+    try {
+      const newest = await reader.messages({ chatId, limit: 1, includeBoundaryTies: true });
+      head = newest.map(toMessage).sort(compareMessages)[0] ?? null;
+    } catch {
+      return null;
+    }
+    if (key !== undefined) heads.set(chatId, { key, head });
+    return head;
+  }
+
   function page(all: Message[], after: Message | null | undefined, limit: number): Message[] {
     const filtered = after ? all.filter((message) => isAfterMessageCursor(message, after)) : all;
     return filtered.slice(0, Math.max(limit, 0));
@@ -169,8 +197,9 @@ function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
     async latest(accounts: readonly MessageAccount[]): Promise<Message | null> {
       const addresses = directAddresses(accounts);
       if (addresses.length === 0) return null;
-      const newest = await windowFor(addresses, { limit: 1 });
-      return newest[0] ?? null;
+      const activity = await reader.lastActivity().catch(() => null);
+      const heads = await Promise.all(addresses.map((chatId) => newestIn(chatId, activity)));
+      return heads.filter((head) => head !== null).sort(compareMessages)[0] ?? null;
     },
   };
 }

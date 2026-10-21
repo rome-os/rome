@@ -1125,6 +1125,11 @@ const RECENT_CONVERSATIONS = 20;
  *  is reused before the session list is read again. */
 const NAMES_TTL_MS = 60_000;
 
+/** How long one read of each chat's last activity is shared. Short, because it
+ *  is what tells a cached newest message from a stale one; long enough that a
+ *  burst of per-contact reads costs one session-list read rather than one each. */
+const ACTIVITY_TTL_MS = 5_000;
+
 /** The first page size for reading a whole second. A page whose answer
  *  overflows the output limit is retried at half the size. */
 const TIES_PAGE = 200;
@@ -1204,6 +1209,7 @@ function toMessage(
  *  client's SQLite is the record, so a Rome-side copy would only add staleness. */
 export class WechatUserReader {
   private names: { at: number; byId: Promise<Map<string, string>> } | null = null;
+  private activity: { at: number; byId: Promise<Map<string, string>> } | null = null;
 
   constructor(private readonly runtime: WechatUserRuntime) {}
 
@@ -1253,6 +1259,34 @@ export class WechatUserReader {
       this.names = { at: Date.now(), byId };
     }
     return this.names.byId;
+  }
+
+  /**
+   * Each chat's last activity, as an opaque key that changes whenever a message
+   * arrives in it: the session list's last-message time and preview. One
+   * session-list read answers every chat, so a caller can tell which chats
+   * changed without asking each one. A chat with no last message keys as "".
+   */
+  lastActivity(): Promise<Map<string, string>> {
+    if (!this.activity || Date.now() - this.activity.at > ACTIVITY_TTL_MS) {
+      const byId = this.sessions().then(
+        (sessions) =>
+          new Map(
+            sessions.map((session) => [
+              session.username,
+              session.lastMessage
+                ? `${session.lastMessage.createdAt ?? ""}\n${session.lastMessage.content}`
+                : "",
+            ]),
+          ),
+      );
+      const entry = { at: Date.now(), byId };
+      byId.catch(() => {
+        if (this.activity === entry) this.activity = null;
+      });
+      this.activity = entry;
+    }
+    return this.activity.byId;
   }
 
   private async page(
