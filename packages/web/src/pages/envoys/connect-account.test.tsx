@@ -269,6 +269,33 @@ describe("Connect an account", () => {
     );
   });
 
+  it("cancels the setup of a service's one account when the guardian leaves the page", async () => {
+    const { calls } = mockServer(
+      [
+        connection("telegram_user", {
+          id: null,
+          channel: null,
+          grants: { session: "unauthorized" },
+          display: { session: null },
+          agent: null,
+          severalAccounts: false,
+        }),
+      ],
+      null,
+      { presenting: true },
+    );
+    renderAt("/envoys/connect/sales:agent/telegram_user");
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("Scan the code")).toBeTruthy();
+    await user.click(screen.getByRole("link", { name: "Platforms" }));
+
+    await rs.waitFor(() =>
+      expect(calls.some((call) => call.url === "/api/setups/cid-new/cancel")).toBe(true),
+    );
+  });
+
   it("addresses the service, not a row a failed removal left behind", async () => {
     const { calls } = mockServer(
       [

@@ -305,6 +305,9 @@ function ConnectOn({
           slot={slot}
           role="primary"
           another={choice.another}
+          // Only this page links the picked agent, so a setup it leaves behind
+          // could connect an account that answers as no agent anyone picked.
+          cancelOnLeave
           onRefresh={() => void refetch()}
           onConnected={(connectionId) => void connected(connectionId)}
         />

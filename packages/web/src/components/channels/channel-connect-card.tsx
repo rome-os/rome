@@ -159,6 +159,8 @@ export interface ChannelConnectCardProps {
   onRefresh: () => void | Promise<void>;
   /** Connect a new account of the service rather than the slot's own. */
   another?: boolean;
+  /** Cancel the setup when the card goes away. Defaults to `another`. */
+  cancelOnLeave?: boolean;
   /** Fired after a setup connects, in place of the refresh, with the
    *  connection it connected when core reports it. */
   onConnected?: (connectionId: string | null) => void;
@@ -177,6 +179,7 @@ export function ChannelConnectCard({
   role,
   onRefresh,
   another = false,
+  cancelOnLeave,
   onConnected,
 }: ChannelConnectCardProps) {
   const { t } = useTranslation("settings");
@@ -198,6 +201,7 @@ export function ChannelConnectCard({
     idOrService: (another ? null : slot.connectionId) ?? config.service,
     grant: slot.grant ?? config.defaultGrant,
     another,
+    cancelOnLeave,
     activeCid: slot.activeSetupCid,
     // A caller that opens the account it connected refetches as it does, so
     // the refresh does not first drop a card whose route the connect moved.

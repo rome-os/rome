@@ -142,9 +142,9 @@ export interface ConnectChoice {
   platform: string;
   kind: LinkKind;
   /** Whether the setup mints a new account rather than filling the service's
-   *  one. A setup for a new account is cancelled when the page that runs it
-   *  closes. An account can still connect with no agent, when the link after
-   *  it fails, and waits under Connected, no agent. */
+   *  one. Envoys cancels its setup when the page that runs it closes. An
+   *  account can still connect with no agent, when the link after it fails,
+   *  and waits under Connected, no agent. */
   another: boolean;
   /** A setup already under way for the service's one account, to re-attach to. */
   activeSetupCid: string | null;
