@@ -28,7 +28,10 @@ export async function claimChannels(
   const now = new Date();
   db.transaction((tx) => {
     for (const [i, connection] of unclaimed.entries()) {
-      records.claim(tx, { ...connection, domain: domains[i] }, now, { agent: MAIN_AGENT_ID });
+      records.claim(tx, { ...connection, domain: domains[i] }, now, {
+        agent: MAIN_AGENT_ID,
+        id: connection.service,
+      });
     }
   });
 }

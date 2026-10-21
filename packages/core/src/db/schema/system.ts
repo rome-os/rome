@@ -877,7 +877,9 @@ export const connections = sqliteTable("connections", {
 
 // One row per channel a Connection backs: Rome's presence on a platform, with
 // an id minted once and never changed. The first channel of a service takes
-// the service's name as its id, and later ones get an opaque id. A row
+// the service's name as its id, and later ones get an opaque id. A linkable
+// service's account connected through setup always gets an opaque id, and only
+// its account from before channels were recorded keeps the name. A row
 // outlives its Connection, unbacked and unlinked, so its id is never minted
 // again: a linkable service's next Connection gets a channel of its own, and
 // another service's takes the row back. `agent` is the canonical id of the

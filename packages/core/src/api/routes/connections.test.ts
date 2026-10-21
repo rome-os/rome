@@ -493,7 +493,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
 describe("GET /connections accounts", () => {
   const telegram = makePasteTalk();
 
-  it("reports each account's channel: the service name first, an opaque id after", async () => {
+  it("reports each account's channel, an opaque id of its own", async () => {
     const { db, close } = createTestDb();
     openDbs.push(close);
     const records = new ChannelRecordsRepository(db);
@@ -513,9 +513,10 @@ describe("GET /connections accounts", () => {
 
     const channelOf = (id: string) =>
       connections.find((each: { id: string }) => each.id === id)?.channel;
-    expect(channelOf(first.id)).toBe("telegram");
+    expect(channelOf(first.id)).toBe(records.idOf(first.id));
     expect(channelOf(connection.id)).toBe(records.idOf(connection.id));
-    expect(channelOf(connection.id)).not.toBe("telegram");
+    expect(channelOf(first.id)).not.toBe("telegram");
+    expect(channelOf(connection.id)).not.toBe(channelOf(first.id));
   });
 
   it("reports a Lark app's account on the Lark platform", async () => {
@@ -538,7 +539,7 @@ describe("GET /connections accounts", () => {
     ).json();
 
     expect(connections.find((each: { id: string }) => each.id === lark.id)).toMatchObject({
-      channel: "feishu",
+      channel: records.idOf(lark.id),
       platform: "lark",
     });
   });
@@ -555,18 +556,19 @@ describe("GET /connections accounts", () => {
     });
     registry.register({ ...telegram.descriptor, service: "telegram" });
     const conn = await registry.connect("telegram");
-    records.link("telegram", "sales:agent");
+    const channel = records.idOf(conn.id) as string;
+    records.link(channel, "sales:agent");
 
     const { connections } = await (
       await makeApp(registry, undefined, { db }).request("/connections")
     ).json();
 
     expect(connections.find((each: { id: string }) => each.id === conn.id)).toMatchObject({
-      channel: "telegram",
+      channel,
       agent: "sales:agent",
     });
 
-    records.link("telegram", null);
+    records.link(channel, null);
     const relisted = await (
       await makeApp(registry, undefined, { db }).request("/connections")
     ).json();

@@ -364,7 +364,9 @@ async function main() {
   // the load()/import that hydrate + rebuild live connections run LATER — after
   // the message hook exists, so the first Talk unlock can attach its subscription.
   // Each Connection of a service with a Talk backs one channel, recorded and
-  // released in the same transaction as the Connection.
+  // released in the same transaction as the Connection. A newly connected
+  // account of a linkable service gets an opaque id, so it never shares an id
+  // with an account that came before it.
   const talks = (service: string) =>
     connectionRegistry.getDescriptor(service)?.capabilities.talker !== undefined;
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({

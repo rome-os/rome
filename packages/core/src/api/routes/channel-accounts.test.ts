@@ -45,7 +45,7 @@ describe("channel account routes", () => {
 
   it("lists each account with its agent", async () => {
     const { records, app, db } = setup();
-    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    records.claim(db, { id: "c1", service: "feishu" }, NOW, { id: "feishu" });
     records.link("feishu", "sales:agent");
 
     const res = await app.request("/channels/accounts");
@@ -66,8 +66,8 @@ describe("channel account routes", () => {
 
   it("links an agent to a second account of a platform and keeps the first", async () => {
     const { records, link, db } = setup();
-    records.claim(db, { id: "c1", service: "telegram" }, NOW);
-    records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
+    records.claim(db, { id: "c1", service: "telegram" }, NOW, { id: "telegram" });
+    records.claim(db, { id: "c2", service: "telegram_user" }, NOW, { id: "telegram_user" });
     await link("telegram", "sales:agent");
 
     const res = await link("telegram_user", "sales:agent");
@@ -87,8 +87,8 @@ describe("channel account routes", () => {
 
   it("passes only the account a link touched on to the listening", async () => {
     const { records, link, changed, db } = setup();
-    records.claim(db, { id: "c1", service: "telegram" }, NOW);
-    records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
+    records.claim(db, { id: "c1", service: "telegram" }, NOW, { id: "telegram" });
+    records.claim(db, { id: "c2", service: "telegram_user" }, NOW, { id: "telegram_user" });
     await link("telegram", "sales:agent");
     expect(changed).toEqual(["telegram"]);
 
@@ -113,7 +113,7 @@ describe("channel account routes", () => {
 
   it("stores the agent's canonical id", async () => {
     const { records, link, db } = setup({ sales: "sales:agent" });
-    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    records.claim(db, { id: "c1", service: "feishu" }, NOW, { id: "feishu" });
 
     expect((await link("feishu", "sales")).status).toBe(200);
     expect(records.byId("feishu")?.agent).toBe("sales:agent");
@@ -121,7 +121,7 @@ describe("channel account routes", () => {
 
   it("unlinks with null", async () => {
     const { records, link, db } = setup();
-    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    records.claim(db, { id: "c1", service: "feishu" }, NOW, { id: "feishu" });
     records.link("feishu", "sales:agent");
 
     const res = await link("feishu", null);
@@ -133,7 +133,7 @@ describe("channel account routes", () => {
 
   it("refuses an agent that is not loaded, and a body without an agent", async () => {
     const { records, link, app, db } = setup();
-    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    records.claim(db, { id: "c1", service: "feishu" }, NOW, { id: "feishu" });
 
     expect((await link("feishu", "ghost:agent")).status).toBe(400);
     const empty = await app.request("/channels/accounts/feishu/agent", {
@@ -147,7 +147,7 @@ describe("channel account routes", () => {
 
   it("links main like any agent, by its canonical id", async () => {
     const { records, link, db } = setup({ main: "core:main", assistant: "core:main" });
-    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    records.claim(db, { id: "c1", service: "feishu" }, NOW, { id: "feishu" });
     records.link("feishu", null);
 
     const res = await link("feishu", "main");
@@ -163,7 +163,7 @@ describe("channel account routes", () => {
 
   it("links main even when no binding names it", async () => {
     const { records, link, db } = setup({});
-    records.claim(db, { id: "c1", service: "telegram" }, NOW);
+    records.claim(db, { id: "c1", service: "telegram" }, NOW, { id: "telegram" });
     records.claim(db, { id: "c2", service: "telegram" }, NOW);
     const second = records.byConnection("c2")!.id;
 
@@ -173,8 +173,8 @@ describe("channel account routes", () => {
 
   it("keeps main on every account of one platform it is linked to", async () => {
     const { records, link, db } = setup({ main: "core:main" });
-    records.claim(db, { id: "c1", service: "telegram" }, NOW);
-    records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
+    records.claim(db, { id: "c1", service: "telegram" }, NOW, { id: "telegram" });
+    records.claim(db, { id: "c2", service: "telegram_user" }, NOW, { id: "telegram_user" });
     records.link("telegram", "main");
 
     expect((await link("telegram_user", "main")).status).toBe(200);
@@ -193,7 +193,7 @@ describe("channel account routes", () => {
 
   it("answers 404 for a missing account and 409 for an unbacked one", async () => {
     const { records, link, db } = setup();
-    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    records.claim(db, { id: "c1", service: "feishu" }, NOW, { id: "feishu" });
     records.vacate(db, "c1");
 
     expect((await link("nope", "sales:agent")).status).toBe(404);
@@ -202,7 +202,7 @@ describe("channel account routes", () => {
 
   it("rejects a cross-site link", async () => {
     const { records, link, db } = setup({ "sales:agent": "sales:agent", other: "other:agent" });
-    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    records.claim(db, { id: "c1", service: "feishu" }, NOW, { id: "feishu" });
     records.link("feishu", "other:agent");
 
     const res = await link("feishu", "sales:agent", {
