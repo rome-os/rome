@@ -21,10 +21,12 @@ export interface CreateAppRuntimeRepositoriesDeps {
 export function createAppRuntimeRepositories(
   deps: CreateAppRuntimeRepositoriesDeps,
 ): AppRuntimeRepositories {
+  const chats = createChatRepository(deps.webchatRepo);
   return {
     settings: createAppSettingsRepository(deps.settingsRepo),
     webchatRecaps: createWebChatRecapRepository(deps.webchatRepo),
-    conversations: createConversationRepository(deps.webchatRepo),
+    chats,
+    conversations: chats,
     ...(deps.guardianProfile
       ? {
           guardianProfile: createGuardianProfileRepository({
@@ -53,9 +55,10 @@ function createGuardianProfileRepository(deps: {
   };
 }
 
-function createConversationRepository(repo: WebChatRepository): ChatRepository {
+function createChatRepository(repo: WebChatRepository): ChatRepository {
   return {
-    ensureChannelConversation: (input) => repo.ensureChannelConversation(input),
+    ensureChannelChat: (input) => repo.ensureChannelChat(input),
+    ensureChannelConversation: (input) => repo.ensureChannelChat(input),
     addMessage: (input) => repo.addConversationMessage(input),
     promoteMessageToUser: (sessionId, platformMessageId) =>
       repo.promoteConversationMessageToUser(sessionId, platformMessageId),

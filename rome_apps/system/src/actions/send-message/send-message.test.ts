@@ -312,7 +312,7 @@ describe("send_message conversation recording", () => {
       messageId: "platform-out-1",
       conversationId: "thread-1",
     });
-    const ensureChannelConversation = rs.fn(async () => ({
+    const ensureChannelChat = rs.fn(async () => ({
       id: "channel:discord:thread-1",
       agentName: null,
     }));
@@ -322,8 +322,8 @@ describe("send_message conversation recording", () => {
       adapter,
       { channel: "discord", threadId: "thread-1", text: "Background update" },
       {
-        conversations: {
-          ensureChannelConversation,
+        chats: {
+          ensureChannelChat,
           recordOutboundMessage,
           addMessage: rs.fn(),
           promoteMessageToUser: rs.fn(),
@@ -332,7 +332,7 @@ describe("send_message conversation recording", () => {
     );
 
     expect(result).toEqual({ status: "ok", data: { messageId: "platform-out-1" } });
-    expect(ensureChannelConversation).toHaveBeenCalledWith(
+    expect(ensureChannelChat).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: "discord",
         threadId: "thread-1",
@@ -356,15 +356,15 @@ describe("send_message conversation recording", () => {
       messageId: "webchat-out-1",
       conversationId: "session-1",
     });
-    const ensureChannelConversation = rs.fn();
+    const ensureChannelChat = rs.fn();
     const recordOutboundMessage = rs.fn();
 
     const result = await executeSendMessage(
       adapter,
       { channel: "webchat", threadId: "session-1", text: "Background update" },
       {
-        conversations: {
-          ensureChannelConversation,
+        chats: {
+          ensureChannelChat,
           recordOutboundMessage,
           addMessage: rs.fn(),
           promoteMessageToUser: rs.fn(),
@@ -373,7 +373,7 @@ describe("send_message conversation recording", () => {
     );
 
     expect(result).toEqual({ status: "ok", data: { messageId: "webchat-out-1" } });
-    expect(ensureChannelConversation).not.toHaveBeenCalled();
+    expect(ensureChannelChat).not.toHaveBeenCalled();
     expect(recordOutboundMessage).not.toHaveBeenCalled();
   });
 
@@ -396,8 +396,8 @@ describe("send_message conversation recording", () => {
           turnId: "turn-2",
         },
         {
-          conversations: {
-            ensureChannelConversation: rs.fn(),
+          chats: {
+            ensureChannelChat: rs.fn(),
             recordOutboundMessage: rs.fn(async () => {
               throw new Error("database unavailable");
             }),

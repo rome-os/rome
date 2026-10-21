@@ -174,7 +174,7 @@ export async function notifyPairingResolution(
       (payload.conversationId as ChatId | undefined) ??
       (await registry
         .get(payload.connectionId)
-        .withTalker((talker) => talker.directMessaging?.conversationFor(payload.channelUserId)));
+        .withTalker((talker) => talker.directMessaging?.chatFor(payload.channelUserId)));
     if (!conversationId) throw new Error("Direct conversation unavailable");
     await sendOn(
       registry,

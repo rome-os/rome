@@ -289,7 +289,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
           const features: TalkFeatures = {};
           if (sink.findReplyTarget) {
             features.directMessaging = {
-              async conversationFor(address: string) {
+              async chatFor(address: string) {
                 const participantId = linkedInMemberIdFromProfileUrl(address) ?? address.trim();
                 const target = await sink.findReplyTarget?.({ participantId });
                 return target ? (target.threadId as ChatId) : null;

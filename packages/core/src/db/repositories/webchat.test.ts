@@ -481,7 +481,7 @@ describe("WebChatRepository", () => {
 
     it("finds a conversation by its channel address", async () => {
       await repo.createSession("chat-1", "Webchat chat");
-      const channel = await repo.ensureChannelConversation({
+      const channel = await repo.ensureChannelChat({
         channel: "telegram",
         threadId: "thread-1",
         agentName: "main",
@@ -505,7 +505,7 @@ describe("WebChatRepository", () => {
     it("finds a chat by its webchat address like any channel conversation", async () => {
       await repo.createSession("chat-1", "Webchat chat");
 
-      const conversation = await repo.ensureChannelConversation({
+      const conversation = await repo.ensureChannelChat({
         channel: "webchat",
         threadId: "chat-1",
         agentName: "main",
@@ -520,7 +520,7 @@ describe("WebChatRepository", () => {
       await repo.deleteSession("chat-1");
 
       await expect(
-        repo.ensureChannelConversation({
+        repo.ensureChannelChat({
           channel: "webchat",
           threadId: "chat-1",
           agentName: "main",
@@ -558,7 +558,7 @@ describe("WebChatRepository", () => {
     });
 
     it("keeps one thread session while refreshing its routing from the parent", async () => {
-      const first = await repo.ensureChannelConversation({
+      const first = await repo.ensureChannelChat({
         channel: "discord",
         threadId: "thread-1",
         parentThreadId: "channel-1",
@@ -570,7 +570,7 @@ describe("WebChatRepository", () => {
         .update(romeSessions)
         .set({ agentName: "release-agent" })
         .where(eq(romeSessions.id, channelConversationId("discord", "channel-1")));
-      const second = await repo.ensureChannelConversation({
+      const second = await repo.ensureChannelChat({
         channel: "discord",
         threadId: "thread-1",
         parentThreadId: "channel-1",
@@ -600,7 +600,7 @@ describe("WebChatRepository", () => {
 
     it("backfills a conversation saved under its address, then keeps the name", async () => {
       const address = { channel: "feishu", threadId: "oc_chat", agentName: "main" };
-      const { id } = await repo.ensureChannelConversation(address);
+      const { id } = await repo.ensureChannelChat(address);
       const read = async () =>
         (
           await testDb.db
@@ -609,10 +609,10 @@ describe("WebChatRepository", () => {
             .where(eq(romeSessions.id, id))
         )[0];
 
-      await repo.ensureChannelConversation({ ...address, threadName: "Design Team" });
+      await repo.ensureChannelChat({ ...address, threadName: "Design Team" });
       expect(await read()).toEqual({ name: "Design Team", sourceThreadName: "Design Team" });
 
-      await repo.ensureChannelConversation({ ...address, threadName: "Design Guild" });
+      await repo.ensureChannelChat({ ...address, threadName: "Design Guild" });
       expect(await read()).toEqual({ name: "Design Team", sourceThreadName: "Design Team" });
     });
 
@@ -628,7 +628,7 @@ describe("WebChatRepository", () => {
         sourceThreadName: "oc_chat",
       });
 
-      await repo.ensureChannelConversation({
+      await repo.ensureChannelChat({
         channel: "feishu",
         threadId: "oc_chat",
         threadName: "Design Team",
@@ -641,21 +641,21 @@ describe("WebChatRepository", () => {
 
     it("keeps an email thread named after its first subject", async () => {
       const address = { channel: "email", threadId: "thread-1", agentName: "main" };
-      const { id } = await repo.ensureChannelConversation({ ...address, threadName: "Budget" });
+      const { id } = await repo.ensureChannelChat({ ...address, threadName: "Budget" });
 
-      await repo.ensureChannelConversation({ ...address, threadName: "Re: Budget" });
+      await repo.ensureChannelChat({ ...address, threadName: "Re: Budget" });
 
       const [row] = await testDb.db.select().from(romeSessions).where(eq(romeSessions.id, id));
       expect(row).toMatchObject({ name: "Budget", sourceThreadName: "Budget" });
     });
 
     it("deduplicates webhook retries within a conversation but not across conversations", async () => {
-      const first = await repo.ensureChannelConversation({
+      const first = await repo.ensureChannelChat({
         channel: "telegram",
         threadId: "chat-1",
         agentName: "main",
       });
-      const second = await repo.ensureChannelConversation({
+      const second = await repo.ensureChannelChat({
         channel: "telegram",
         threadId: "chat-2",
         agentName: "main",
@@ -679,7 +679,7 @@ describe("WebChatRepository", () => {
 
     describe("addConversationMessage atomicity", () => {
       it("writes the message and the session activity update through one transaction", async () => {
-        const conversation = await repo.ensureChannelConversation({
+        const conversation = await repo.ensureChannelChat({
           channel: "telegram",
           threadId: "atomic-single-transaction",
           agentName: "main",
@@ -701,7 +701,7 @@ describe("WebChatRepository", () => {
       });
 
       it("returns { inserted: false } for a duplicate platform message id without advancing session activity", async () => {
-        const conversation = await repo.ensureChannelConversation({
+        const conversation = await repo.ensureChannelChat({
           channel: "telegram",
           threadId: "atomic-duplicate",
           agentName: "main",
@@ -744,7 +744,7 @@ describe("WebChatRepository", () => {
       });
 
       it("leaves no message row behind when the session activity update fails", async () => {
-        const conversation = await repo.ensureChannelConversation({
+        const conversation = await repo.ensureChannelChat({
           channel: "telegram",
           threadId: "atomic-rollback",
           agentName: "main",
@@ -788,7 +788,7 @@ describe("WebChatRepository", () => {
     });
 
     it("loads pending notifications and the exact replied-to message, then marks only notifications injected", async () => {
-      const conversation = await repo.ensureChannelConversation({
+      const conversation = await repo.ensureChannelChat({
         channel: "discord",
         threadId: "thread-context",
         agentName: "main",
@@ -840,7 +840,7 @@ describe("WebChatRepository", () => {
     });
 
     it("projects the latest 20 notifications and consumes the full pending snapshot", async () => {
-      const conversation = await repo.ensureChannelConversation({
+      const conversation = await repo.ensureChannelChat({
         channel: "discord",
         threadId: "bounded-context",
         agentName: "main",
@@ -874,12 +874,12 @@ describe("WebChatRepository", () => {
     });
 
     it("resolves a native thread reply target from its parent conversation", async () => {
-      const parent = await repo.ensureChannelConversation({
+      const parent = await repo.ensureChannelChat({
         channel: "discord",
         threadId: "parent-channel",
         agentName: "main",
       });
-      const child = await repo.ensureChannelConversation({
+      const child = await repo.ensureChannelChat({
         channel: "discord",
         threadId: "child-thread",
         parentThreadId: "parent-channel",
@@ -905,12 +905,12 @@ describe("WebChatRepository", () => {
     });
 
     it("injects the parent message referenced by a pending Rome notification only once", async () => {
-      const parent = await repo.ensureChannelConversation({
+      const parent = await repo.ensureChannelChat({
         channel: "discord",
         threadId: "parent-channel-context",
         agentName: "main",
       });
-      const child = await repo.ensureChannelConversation({
+      const child = await repo.ensureChannelChat({
         channel: "discord",
         threadId: "child-thread-context",
         parentThreadId: "parent-channel-context",
@@ -956,7 +956,7 @@ describe("WebChatRepository", () => {
     // them; a sender-supplied routine card must not reach the transcript.
     it("strips routine cards from recorded outbound content", async () => {
       await repo.createSession("forged-card-thread", "Webchat chat");
-      const conversation = await repo.ensureChannelConversation({
+      const conversation = await repo.ensureChannelChat({
         channel: "webchat",
         threadId: "forged-card-thread",
         agentName: "main",
@@ -980,7 +980,7 @@ describe("WebChatRepository", () => {
     });
 
     it("keeps the pending Rome notification when its referenced parent message is missing", async () => {
-      const child = await repo.ensureChannelConversation({
+      const child = await repo.ensureChannelChat({
         channel: "discord",
         threadId: "child-thread-missing-root",
         parentThreadId: "parent-channel-missing-root",
@@ -1006,7 +1006,7 @@ describe("WebChatRepository", () => {
     });
 
     it("attaches delivery metadata to provider-known output and stores out-of-band output as notification", async () => {
-      const conversation = await repo.ensureChannelConversation({
+      const conversation = await repo.ensureChannelChat({
         channel: "telegram",
         threadId: "chat-output",
         agentName: "main",

@@ -131,7 +131,7 @@ export function feishuProfileFromSettings(
  * card offers. `createChannel` is injectable so tests drive a fake LarkChannel.
  */
 export interface FeishuDescriptorDeps {
-  conversationSettings: ChatSettingsService;
+  chatSettings: ChatSettingsService;
   personMappingRepo: PersonMappingRepository;
   listAgents: () => string[];
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
@@ -555,7 +555,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             appSecret: app.appSecret,
             domain: app.domain,
             connectionId: kit.connectionId,
-            conversationSettings: deps.conversationSettings,
+            chatSettings: deps.chatSettings,
             personMappingRepo: deps.personMappingRepo,
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),

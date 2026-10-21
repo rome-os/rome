@@ -14,7 +14,7 @@ const CHANNEL_ID = "channel-1" as ChatId;
 const GUARDIAN_ID = "discord-guardian-777";
 const UNLINKED_ID = "discord-user-888";
 
-function makeConversationSettings() {
+function makeChatSettings() {
   const effective: ChatSettings = {
     enabled: true,
     activation: {
@@ -142,14 +142,14 @@ describe("Discord configuration command authorization", () => {
   });
 
   it("lets the linked guardian read channel status", async () => {
-    const settings = makeConversationSettings();
+    const settings = makeChatSettings();
     const resolveDiscordPerson = rs.fn(async (discordUserId: string) =>
       discordUserId === GUARDIAN_ID ? { id: "guardian", bondLevel: "guardian" as const } : null,
     );
     const adapter = new DiscordAdapter({
       botToken: "test-token",
       connectionId: CONNECTION_ID,
-      conversationSettings: settings.control,
+      chatSettings: settings.control,
       resolveDiscordPerson,
     });
     const { interaction, editReply } = makeInteraction({
@@ -167,7 +167,7 @@ describe("Discord configuration command authorization", () => {
   });
 
   it("lets the linked guardian set a channel agent", async () => {
-    const settings = makeConversationSettings();
+    const settings = makeChatSettings();
     const resolveDiscordPerson = rs.fn(async () => ({
       id: "guardian",
       bondLevel: "guardian" as const,
@@ -175,7 +175,7 @@ describe("Discord configuration command authorization", () => {
     const adapter = new DiscordAdapter({
       botToken: "test-token",
       connectionId: CONNECTION_ID,
-      conversationSettings: settings.control,
+      chatSettings: settings.control,
       resolveDiscordPerson,
       listAgents: () => ["main", "pm-assistant"],
     });
@@ -201,11 +201,11 @@ describe("Discord configuration command authorization", () => {
   });
 
   it("names the account's agent in status and after a clear", async () => {
-    const settings = makeConversationSettings();
+    const settings = makeChatSettings();
     const adapter = new DiscordAdapter({
       botToken: "test-token",
       connectionId: CONNECTION_ID,
-      conversationSettings: settings.control,
+      chatSettings: settings.control,
       resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
       accountAgent: () => "sales:agent",
     });
@@ -227,13 +227,13 @@ describe("Discord configuration command authorization", () => {
   });
 
   it("names the account's agent in status when the stored agent is not loaded", async () => {
-    const settings = makeConversationSettings();
+    const settings = makeChatSettings();
     const snapshot = await settings.get();
     snapshot.effective.routing.agentName = "gone:agent";
     const adapter = new DiscordAdapter({
       botToken: "test-token",
       connectionId: CONNECTION_ID,
-      conversationSettings: settings.control,
+      chatSettings: settings.control,
       resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
       accountAgent: () => "sales:agent",
       hasAgent: (name) => name === "sales:agent",
@@ -249,11 +249,11 @@ describe("Discord configuration command authorization", () => {
   });
 
   it("says no agent answers when the account has no agent", async () => {
-    const settings = makeConversationSettings();
+    const settings = makeChatSettings();
     const adapter = new DiscordAdapter({
       botToken: "test-token",
       connectionId: CONNECTION_ID,
-      conversationSettings: settings.control,
+      chatSettings: settings.control,
       resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
       accountAgent: () => null,
     });
@@ -270,11 +270,11 @@ describe("Discord configuration command authorization", () => {
   });
 
   it("pins a channel to main on `set main`", async () => {
-    const settings = makeConversationSettings();
+    const settings = makeChatSettings();
     const adapter = new DiscordAdapter({
       botToken: "test-token",
       connectionId: CONNECTION_ID,
-      conversationSettings: settings.control,
+      chatSettings: settings.control,
       resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
       accountAgent: () => "sales:agent",
     });
@@ -294,13 +294,13 @@ describe("Discord configuration command authorization", () => {
   });
 
   it("follows the account's agent in a DM, whatever agent is stored", async () => {
-    const settings = makeConversationSettings();
+    const settings = makeChatSettings();
     const snapshot = await settings.get();
     snapshot.effective.routing.agentName = "pm-assistant";
     const adapter = new DiscordAdapter({
       botToken: "test-token",
       connectionId: CONNECTION_ID,
-      conversationSettings: settings.control,
+      chatSettings: settings.control,
       resolveDiscordPerson: async () => ({ id: "guardian", bondLevel: "guardian" as const }),
       accountAgent: () => "sales:agent",
       listAgents: () => ["pm-assistant", "sales:agent"],
@@ -328,12 +328,12 @@ describe("Discord configuration command authorization", () => {
 
   it("refuses an unlinked Discord user and records safe structured diagnostics", async () => {
     const warn = rs.spyOn(console, "warn").mockImplementation(() => undefined);
-    const settings = makeConversationSettings();
+    const settings = makeChatSettings();
     const resolveDiscordPerson = rs.fn(async () => null);
     const adapter = new DiscordAdapter({
       botToken: "credential-must-not-appear",
       connectionId: CONNECTION_ID,
-      conversationSettings: settings.control,
+      chatSettings: settings.control,
       resolveDiscordPerson,
       listAgents: () => ["pm-assistant"],
     });

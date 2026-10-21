@@ -29,19 +29,19 @@ describe("backend turn delivery", () => {
       messages: null,
       directory: null,
     };
-    const ensureChannelConversation = rs.fn(async () => ({
+    const ensureChannelChat = rs.fn(async () => ({
       id: "channel:wechat:wechat-thread-1",
       agentName: null,
     }));
     const recordOutboundMessage = rs.fn(async () => {});
-    const conversations = {
-      ensureChannelConversation,
+    const chats = {
+      ensureChannelChat,
       recordOutboundMessage,
     } as unknown as ChatRepository;
     const runner = createBackendTurnRunner({
       agentRunner,
       channel: (name) => (name === "wechat" ? wechat : null),
-      conversations,
+      chats,
     });
 
     await runner.runAndDeliver({
@@ -57,7 +57,7 @@ describe("backend turn delivery", () => {
       text: "The deferred check is complete.",
       turnId: "turn-1",
     });
-    expect(ensureChannelConversation).toHaveBeenCalledWith({
+    expect(ensureChannelChat).toHaveBeenCalledWith({
       channel: "wechat",
       threadId: "wechat-thread-1",
       agentName: "main",

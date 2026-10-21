@@ -103,7 +103,7 @@ export function isDiscordAuthError(err: unknown): boolean {
  * validation + autocomplete).
  */
 export interface DiscordDeps {
-  conversationSettings: ChatSettingsService;
+  chatSettings: ChatSettingsService;
   chatStop?: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   listAgents: () => string[];
@@ -254,7 +254,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
           const adapter = new DiscordAdapter({
             botToken: token.token,
             connectionId: kit.connectionId,
-            conversationSettings: deps.conversationSettings,
+            chatSettings: deps.chatSettings,
             chatStop: deps.chatStop,
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
@@ -347,7 +347,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
           };
           const features: TalkFeatures = {
             directMessaging: {
-              conversationFor: async (userId) =>
+              chatFor: async (userId) =>
                 (await adapter.directConversationFor(
                   userId,
                 )) as import("@rome-os/app-runtime").ChatId,

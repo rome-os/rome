@@ -115,7 +115,7 @@ function fakePersonRepo(): PersonMappingRepository {
 
 function makeDescriptor(channel: FakeLarkChannel) {
   return createFeishuDescriptor({
-    conversationSettings: {
+    chatSettings: {
       observe: () => {},
       get: async () => ({
         effective: {
@@ -227,9 +227,7 @@ describe("feishu talk lifecycle", () => {
       conversationId: "oc_chat",
     });
 
-    const direct = await conn.withTalker((talker) =>
-      talker.directMessaging?.conversationFor("ou_alice"),
-    );
+    const direct = await conn.withTalker((talker) => talker.directMessaging?.chatFor("ou_alice"));
     expect(direct).toBe("ou_alice");
     await sendThrough(conn, direct!, { text: "paired" });
     expect(channel.sent.at(-1)).toMatchObject({ to: "ou_alice", input: { markdown: "paired" } });

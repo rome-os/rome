@@ -80,7 +80,7 @@ export interface ApiDeps {
   notifyPairingResolution: PairingNotifier;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
-  conversationSettings: ChatSettingsControl;
+  chatSettings: ChatSettingsControl;
   actionEngine: ActionEngine;
   actionLoader: Pick<ActionLoader, "get">;
   db: DrizzleDb;

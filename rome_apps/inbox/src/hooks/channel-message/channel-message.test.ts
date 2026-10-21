@@ -81,7 +81,7 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
   const get = rs.fn(async ({ connectionId, conversationId }) =>
     snapshot(connectionId, conversationId),
   );
-  const conversationSettings = { get } as unknown as ChatSettingsControl;
+  const chatSettings = { get } as unknown as ChatSettingsControl;
   const stop = rs.fn(async () => ({ status: "stop_requested" as const, turnId: "turn-1" }));
   const chatStop: ChatStopHandler = stop;
   const send = rs.fn(
@@ -117,13 +117,7 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
     channel("whatsapp", WHATSAPP_ID),
     channel("agents", AGENTS_ID),
   ];
-  const hook = new ChannelMessageHook(
-    actionEngine,
-    conversationSettings,
-    chatStop,
-    channels,
-    options,
-  );
+  const hook = new ChannelMessageHook(actionEngine, chatSettings, chatStop, channels, options);
   // A conversation's events reach the handler one at a time, each after the
   // previous one settles, as rule R4 of `ChannelInbound` requires of a channel.
   const tails = new Map<string, Promise<void>>();
@@ -530,7 +524,7 @@ describe("ChannelMessageHook", () => {
   it("reads every channel as taking no link on a host that passes no accountAgentOf", async () => {
     const hook = createHook({
       actionEngine: { run: harness.run } as unknown as ActionEngineLike,
-      conversationSettings: { get: harness.get } as unknown as ChatSettingsControl,
+      chatSettings: { get: harness.get } as unknown as ChatSettingsControl,
       chatStop: harness.stop,
       channels: harness.channels,
     });
@@ -550,7 +544,7 @@ describe("ChannelMessageHook", () => {
     expect(() =>
       createHook({
         actionEngine: {} as ActionEngineLike,
-        conversationSettings: {} as ChatSettingsControl,
+        chatSettings: {} as ChatSettingsControl,
         chatStop: async () => ({ status: "idle" }),
       } as unknown as Parameters<typeof createHook>[0]),
     ).toThrow(MissingChannelsError);

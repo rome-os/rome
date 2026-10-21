@@ -323,21 +323,21 @@ describe("connection-backed send, across epochs", () => {
     const offerDirect = (answer: string) => {
       const talker = fx.talkerFactory.instances.at(-1);
       if (!talker) throw new Error("talker not built");
-      talker.directMessaging = { conversationFor: async () => answer as ChatId };
+      talker.directMessaging = { chatFor: async () => answer as ChatId };
     };
     await registry.importCredential(connection.id, "bot", fx.validCredential());
     offerDirect("first");
     const direct = connectionPorts({ registry, channelOf: serviceChannelOf }, "fake-telegram")?.send
       ?.direct;
     if (!direct) throw new Error("the talker offers direct messaging");
-    await expect(direct.conversationFor("7")).resolves.toBe("first");
+    await expect(direct.chatFor("7")).resolves.toBe("first");
 
     await connection.auth.revoke("bot");
-    await expect(direct.conversationFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+    await expect(direct.chatFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
 
     await registry.importCredential(connection.id, "bot", fx.validCredential());
     offerDirect("second");
-    await expect(direct.conversationFor("7")).resolves.toBe("second");
+    await expect(direct.chatFor("7")).resolves.toBe("second");
   });
 });
 

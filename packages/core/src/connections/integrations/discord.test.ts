@@ -107,7 +107,7 @@ function flush(): Promise<void> {
 }
 
 const deps = {
-  conversationSettings: {} as never,
+  chatSettings: {} as never,
   personMappingRepo: { findByChannelUser: rs.fn(async () => null) } as never,
   listAgents: () => [],
   validateToken: async () => {},
@@ -195,7 +195,7 @@ describe("discord descriptor shape", () => {
 
   it("exposes inbound media and returns an awaitable stop()", async () => {
     const h = buildTalker();
-    await expect(h.talker.directMessaging?.conversationFor("alice")).resolves.toBe("dm-alice");
+    await expect(h.talker.directMessaging?.chatFor("alice")).resolves.toBe("dm-alice");
     h.start();
     const inboundMedia = h.talker.inboundMedia;
     const message = {

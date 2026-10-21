@@ -1,16 +1,16 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import type { ApiDeps } from "../deps.js";
-import { conversationSettingsRoutes } from "./conversation-settings.js";
+import { chatSettingsRoutes } from "./conversation-settings.js";
 
 function harness() {
   const list = rs.fn(async () => ({ items: [], nextCursor: "next" }));
   const update = rs.fn(async (input: unknown) => ({ input }));
   const reset = rs.fn(async (input: unknown) => ({ input }));
   const deps = {
-    conversationSettings: { list, update, reset },
+    chatSettings: { list, update, reset },
   } as unknown as ApiDeps;
-  const app = new Hono().route("/", conversationSettingsRoutes(deps));
+  const app = new Hono().route("/", chatSettingsRoutes(deps));
   return { app, list, update, reset };
 }
 

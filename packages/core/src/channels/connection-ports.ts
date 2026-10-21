@@ -377,7 +377,7 @@ function connectionSend(backing: Backing): ChannelSend {
   // lookup itself says so, the way `send` does, rather than passing for a
   // channel that cannot reach an account directly.
   const unbacked: ChannelDirectMessaging = {
-    conversationFor: () => Promise.reject(new ChannelNotConnected(channel)),
+    chatFor: () => Promise.reject(new ChannelNotConnected(channel)),
   };
   return {
     async send(conversationId, message) {
@@ -395,10 +395,8 @@ function connectionSend(backing: Backing): ChannelSend {
       if (!connection) return unbacked;
       if (!offers(connection, "directMessaging")) return null;
       const direct: ChannelDirectMessaging = {
-        conversationFor: (channelUserId) =>
-          callTalker(connection, (talker) =>
-            talker.directMessaging?.conversationFor(channelUserId),
-          ),
+        chatFor: (channelUserId) =>
+          callTalker(connection, (talker) => talker.directMessaging?.chatFor(channelUserId)),
       };
       return direct;
     },

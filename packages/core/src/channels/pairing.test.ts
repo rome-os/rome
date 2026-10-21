@@ -103,8 +103,8 @@ describe("channel pairing approvals", () => {
       messageId: "sent",
       conversationId,
     }));
-    const conversationFor = rs.fn(async () => "private-chat" as ChatId);
-    const feature = rs.fn(() => ({ conversationFor }));
+    const chatFor = rs.fn(async () => "private-chat" as ChatId);
+    const feature = rs.fn(() => ({ chatFor }));
     const registry = registryOf(send, feature);
     const admit = createPairingAdmission({
       talkGrants,
@@ -132,7 +132,7 @@ describe("channel pairing approvals", () => {
     send.mockClear();
     await notifyPairingResolution(registry, result.approval);
     expect(feature).toHaveBeenCalledWith("connection", "directMessaging");
-    expect(conversationFor).toHaveBeenCalledWith(id);
+    expect(chatFor).toHaveBeenCalledWith(id);
     expect(send).toHaveBeenCalledWith("connection", "private-chat", {
       text: `✅ ${account} is paired with Rome. You can start chatting now.`,
     });
@@ -248,7 +248,7 @@ describe("channel pairing approvals", () => {
       conversationId: "dm" as ChatId,
     }));
     const registry = registryOf(send, () => ({
-      conversationFor: async () => "dm" as ChatId,
+      chatFor: async () => "dm" as ChatId,
     }));
     await notifyPairingResolution(registry, result.approval);
     expect(send).toHaveBeenCalledWith(input.connectionId, "dm", {

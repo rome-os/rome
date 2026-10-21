@@ -346,7 +346,7 @@ function talkerOver(transport: FakeTransport): TestTalker {
   return {
     send: (conversationId, message) => transport.send(conversationId, message),
     directMessaging: {
-      async conversationFor(channelUserId: string) {
+      async chatFor(channelUserId: string) {
         return channelUserId as ChatId;
       },
     },
@@ -378,7 +378,7 @@ export function channelNamed(channels: Channels): (name: string) => Channel | nu
   return (name) => channels.find((channel) => channel.name === name) ?? null;
 }
 
-const emptyConversationSettings: ChatSettingsControl = {
+const emptyChatSettings: ChatSettingsControl = {
   async list() {
     return { items: [] };
   },
@@ -706,7 +706,7 @@ export async function buildTestDeps(
     connections,
     notifyPairingResolution: (approval) => notifyPairingResolution(connections, approval),
     channelsService,
-    conversationSettings: emptyConversationSettings,
+    chatSettings: emptyChatSettings,
     actionEngine,
     actionLoader,
     db,

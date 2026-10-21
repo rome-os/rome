@@ -43,7 +43,7 @@ export interface ReplyStreamsDeps {
   /** The channel's reply port, read when a reply opens. */
   replies(channel: string): ChannelReplies | null | undefined;
   clock: Clock;
-  conversations?: Pick<ChatRepository, "recordOutboundMessage">;
+  chats?: Pick<ChatRepository, "recordOutboundMessage">;
   policy?: DeliveryPolicy;
 }
 
@@ -96,7 +96,7 @@ export class ReplyStreams {
     // Every part showed or may have: a create whose result is unknown most
     // likely landed, and nothing sends it again.
     const shown = outcome.parts;
-    if (!this.deps.conversations || shown.length === 0) return;
+    if (!this.deps.chats || shown.length === 0) return;
     // A block's parts split its text, and each block is a message of its own.
     const text = shown
       .map((part, i) => (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.text)
@@ -109,7 +109,7 @@ export class ReplyStreams {
     const lastBlock = receipted.at(-1)?.block;
     const quoted = receipted.find((part) => part.block === lastBlock)?.receipt;
     try {
-      await this.deps.conversations.recordOutboundMessage({
+      await this.deps.chats.recordOutboundMessage({
         sessionId: target.romeSessionId,
         content: JSON.stringify([{ type: "text", content: text }]),
         ...(quoted ? { platformMessageId: quoted.messageId } : {}),

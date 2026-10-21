@@ -30,7 +30,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
 
   constructor(
     private readonly actionEngine: ActionEngineLike,
-    private readonly conversationSettings: ChatSettingsControl,
+    private readonly chatSettings: ChatSettingsControl,
     private readonly chatStop: ChatStopHandler,
     private readonly channels: readonly Channel[],
     private readonly options: {
@@ -139,7 +139,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       return;
     }
 
-    const snapshot = await this.conversationSettings.get(ref);
+    const snapshot = await this.chatSettings.get(ref);
     const enabled = snapshot.effective.enabled;
     // A group's own agent choice, which wins over the account's agent.
     // An explicit pin to main is stored as null, apart from no choice at all.
@@ -292,7 +292,7 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
   if (!Array.isArray(deps.channels)) throw new MissingChannelsError();
   return new ChannelMessageHook(
     deps.actionEngine,
-    deps.conversationSettings,
+    deps.chatSettings ?? deps.conversationSettings,
     deps.chatStop,
     deps.channels,
     { accountAgentOf: deps.accountAgentOf ?? deps.linkedAgentOf },

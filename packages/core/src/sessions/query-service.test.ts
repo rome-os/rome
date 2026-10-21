@@ -557,7 +557,7 @@ describe("SessionQueryService", () => {
       "code-review-agent",
     ],
   ] as const)("labels a channel conversation by the agent that answers it: %s", async (_label, channel, threadType, stored, pinnedMain, expected) => {
-    const { id } = await webchat.ensureChannelConversation({
+    const { id } = await webchat.ensureChannelChat({
       channel,
       threadId: "thread-1",
       threadType,
@@ -614,13 +614,13 @@ describe("SessionQueryService", () => {
   });
 
   it("finds a channel conversation by the name of the agent that answers it", async () => {
-    const follows = await webchat.ensureChannelConversation({
+    const follows = await webchat.ensureChannelChat({
       channel: "telegram",
       threadId: "thread-1",
       threadType: "group",
       agentName: "main",
     });
-    const keeps = await webchat.ensureChannelConversation({
+    const keeps = await webchat.ensureChannelChat({
       channel: "telegram",
       threadId: "thread-2",
       threadType: "group",

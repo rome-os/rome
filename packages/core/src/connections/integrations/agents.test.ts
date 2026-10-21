@@ -281,10 +281,10 @@ describe("agents channel", () => {
 
   it("reaches a dot directly at its agent id, so People can write to it first", async () => {
     const direct = createAgentsTalker(fakeClient([])).directMessaging;
-    expect(await direct?.conversationFor(ATLAS)).toBe(ATLAS);
-    expect(await direct?.conversationFor(" ")).toBeNull();
+    expect(await direct?.chatFor(ATLAS)).toBe(ATLAS);
+    expect(await direct?.chatFor(" ")).toBeNull();
     // A link left from before agent ids offers nothing to write to.
-    expect(await direct?.conversationFor("atlas")).toBeNull();
+    expect(await direct?.chatFor("atlas")).toBeNull();
   });
 
   it("records the agent Cloud assigned when the guardian connects", async () => {

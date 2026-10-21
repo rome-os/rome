@@ -959,7 +959,7 @@ export class WebChatRepository {
       .onConflictDoNothing({ target: romeSessions.id });
   }
 
-  async ensureChannelConversation(input: {
+  async ensureChannelChat(input: {
     channel: string;
     threadId: string;
     parentThreadId?: string;
@@ -971,7 +971,7 @@ export class WebChatRepository {
   }): Promise<{ id: string; agentName: string | null }> {
     const parent =
       input.parentThreadId && input.parentThreadId !== input.threadId
-        ? await this.ensureChannelConversation({
+        ? await this.ensureChannelChat({
             ...input,
             threadId: input.parentThreadId,
             parentThreadId: undefined,

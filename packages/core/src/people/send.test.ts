@@ -17,19 +17,19 @@ describe("readSendStates", () => {
       channel(
         "unbacked",
         sending({
-          conversationFor: () => Promise.reject(new ChannelNotConnected("unbacked")),
+          chatFor: () => Promise.reject(new ChannelNotConnected("unbacked")),
         }),
       ),
       channel("read-only", null),
       channel("no-direct", sending(null)),
-      channel("no-thread", sending({ conversationFor: async () => null })),
+      channel("no-thread", sending({ chatFor: async () => null })),
       channel(
         "down",
         sending({
-          conversationFor: () => Promise.reject(new Error("provider is down")),
+          chatFor: () => Promise.reject(new Error("provider is down")),
         }),
       ),
-      channel("open", sending({ conversationFor: async (id) => id as ChatId })),
+      channel("open", sending({ chatFor: async (id) => id as ChatId })),
     ];
 
     const states = await readSendStates({ channels }, [

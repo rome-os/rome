@@ -590,9 +590,9 @@ describe("AgentSessionBridge reply streaming", () => {
     const conversations =
       repo &&
       ({
-        ensureChannelConversation: (input) => repo.ensureChannelConversation(input),
+        ensureChannelChat: (input) => repo.ensureChannelChat(input),
         recordOutboundMessage: (input) => repo.recordOutboundConversationMessage(input),
-      } satisfies Pick<ChatRepository, "ensureChannelConversation" | "recordOutboundMessage">);
+      } satisfies Pick<ChatRepository, "ensureChannelChat" | "recordOutboundMessage">);
     const session = {
       key: { agentName: "main", channelThreadKey: "telegram:chat-1" },
       sessionId: "session-1",

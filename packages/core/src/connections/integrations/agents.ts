@@ -243,7 +243,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
   // a link left from before agent ids, offers nothing to write to.
   const features: TalkFeatures = {
     directMessaging: {
-      async conversationFor(channelUserId) {
+      async chatFor(channelUserId) {
         const address = channelUserId.trim();
         return isAgentId(address) ? (address as ChatId) : null;
       },

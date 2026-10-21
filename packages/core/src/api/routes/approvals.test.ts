@@ -57,7 +57,7 @@ describe("Approvals API", () => {
     })!;
     const stalled = () => new Promise<never>(() => {});
     const send = rs.fn(stalled);
-    const conversationFor = rs.fn(stalled);
+    const chatFor = rs.fn(stalled);
     const deps = {
       ...(await buildTestDeps(testDb.db)),
       approvalHandler,
@@ -66,7 +66,7 @@ describe("Approvals API", () => {
           {
             get: () => ({
               withTalker: (call: (talker: object) => unknown) =>
-                call({ send, directMessaging: { conversationFor } }),
+                call({ send, directMessaging: { chatFor } }),
             }),
           } as unknown as Pick<ConnectionRegistry, "get">,
           resolved,
@@ -88,7 +88,7 @@ describe("Approvals API", () => {
       identityServiceOf,
     ).findByChannelUser("telegram", "123");
     expect(person?.bondLevel).toBe("guardian");
-    expect(stage === "send" ? send : conversationFor).toHaveBeenCalledTimes(1);
+    expect(stage === "send" ? send : chatFor).toHaveBeenCalledTimes(1);
   });
 
   it("returns a conflict when an account is linked after its pairing request", async () => {

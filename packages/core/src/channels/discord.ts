@@ -375,7 +375,7 @@ function projectDiscordBody(
 export class DiscordAdapter {
   private client: Client;
   private handler?: (msg: ChannelMessage) => Promise<void>;
-  private conversationSettings?: ChatSettingsControl & {
+  private chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
   private connectionId?: string;
@@ -413,7 +413,7 @@ export class DiscordAdapter {
   constructor(config: {
     botToken: string;
     connectionId?: string;
-    conversationSettings?: ChatSettingsControl & {
+    chatSettings?: ChatSettingsControl & {
       observe?(descriptor: ChatDescriptor): void;
     };
     maxMessagesPerChannel?: number;
@@ -434,7 +434,7 @@ export class DiscordAdapter {
     rest?: Partial<RESTOptions>;
   }) {
     this.connectionId = config.connectionId;
-    this.conversationSettings = config.conversationSettings;
+    this.chatSettings = config.chatSettings;
     this.maxMessagesPerChannel = config.maxMessagesPerChannel ?? 100;
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
@@ -667,7 +667,7 @@ export class DiscordAdapter {
   }
 
   private async settingsForMessage(message: Message): Promise<ChatSettingsSnapshot | null> {
-    if (!this.conversationSettings) return null;
+    if (!this.chatSettings) return null;
     const parentId =
       message.channel && "isThread" in message.channel && message.channel.isThread()
         ? message.channel.parentId
@@ -675,8 +675,8 @@ export class DiscordAdapter {
     const displayName = "name" in message.channel ? (message.channel.name ?? undefined) : undefined;
     const containerName = message.guild?.name;
     const descriptor = this.descriptor(message.channelId, displayName, parentId, containerName);
-    this.conversationSettings.observe?.(descriptor);
-    return this.conversationSettings.get(descriptor.ref);
+    this.chatSettings.observe?.(descriptor);
+    return this.chatSettings.get(descriptor.ref);
   }
 
   private legacyConfig(snapshot: ChatSettingsSnapshot | null): DiscordChannelConfig {
@@ -995,9 +995,9 @@ export class DiscordAdapter {
 
       if (cmd === "bot" && sub === "status") {
         const entries =
-          this.conversationSettings && this.connectionId
+          this.chatSettings && this.connectionId
             ? (
-                await this.conversationSettings.list({
+                await this.chatSettings.list({
                   connectionId: this.connectionId,
                   limit: 100,
                 })
@@ -1325,7 +1325,7 @@ Use \`/channel agent clear\` to undo.`,
     parentId?: string | null,
     containerName?: string,
   ): Promise<void> {
-    if (!this.conversationSettings) return;
+    if (!this.chatSettings) return;
     const snapshot = await this.getConversationSettings(
       channelId,
       channelName,
@@ -1334,7 +1334,7 @@ Use \`/channel agent clear\` to undo.`,
     );
     if (!snapshot) return;
     if (patch === null) {
-      await this.conversationSettings.reset({
+      await this.chatSettings.reset({
         ref: snapshot.conversation.ref,
         actor: { kind: "guardian", id: "discord-slash" },
       });
@@ -1370,7 +1370,7 @@ Use \`/channel agent clear\` to undo.`,
       if (patch.agentName) (set.routing ??= {}).agentName = patch.agentName;
       else clear.push("routing.agentName");
     }
-    await this.conversationSettings.update({
+    await this.chatSettings.update({
       ref: snapshot.conversation.ref,
       set,
       clear,
@@ -1384,7 +1384,7 @@ Use \`/channel agent clear\` to undo.`,
     parentId?: string | null,
     containerName?: string,
   ): Promise<ChatSettingsSnapshot | null> {
-    if (!this.conversationSettings) return null;
+    if (!this.chatSettings) return null;
     if (!channelName || parentId === undefined || !containerName) {
       const channel = await this.client.channels.fetch(channelId).catch(() => null);
       if (channel) {
@@ -1394,8 +1394,8 @@ Use \`/channel agent clear\` to undo.`,
       }
     }
     const descriptor = this.descriptor(channelId, channelName, parentId, containerName);
-    this.conversationSettings.observe?.(descriptor);
-    return this.conversationSettings.get(descriptor.ref);
+    this.chatSettings.observe?.(descriptor);
+    return this.chatSettings.get(descriptor.ref);
   }
 
   async stop(): Promise<void> {

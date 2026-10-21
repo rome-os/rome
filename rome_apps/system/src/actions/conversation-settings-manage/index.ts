@@ -19,8 +19,10 @@ interface Input {
 }
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
-  const settings = deps.conversationSettings as ChatSettingsControl | undefined;
-  if (!settings) throw new Error("conversation_settings_manage requires conversationSettings");
+  const settings = (deps.chatSettings ?? deps.conversationSettings) as
+    | ChatSettingsControl
+    | undefined;
+  if (!settings) throw new Error("conversation_settings_manage requires chatSettings");
 
   return {
     config,

@@ -72,7 +72,7 @@ async function sendStateOf(
   // the two would disagree about one condition.
   let conversationId: ChatId | null;
   try {
-    conversationId = await direct.conversationFor(account.channelUserId);
+    conversationId = await direct.chatFor(account.channelUserId);
   } catch (err) {
     if (err instanceof ChannelNotConnected) return { state: "not-connected" };
     conversationId = null;
@@ -91,7 +91,7 @@ export async function resolveSendTarget(deps: SendDeps, account: SendAccount): P
 /**
  * Whether Rome can send to each of the given accounts, positionally.
  *
- * Only `conversationFor` can reach a provider, and it is asked once per
+ * Only `chatFor` can reach a provider, and it is asked once per
  * account — cheap on the channels in play, and the reason a channel that keys
  * threads separately has to be priced before it is added to a listing read. A
  * listing must not fail because one account of one person could not be priced.

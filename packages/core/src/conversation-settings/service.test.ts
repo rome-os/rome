@@ -246,7 +246,7 @@ describe("ChatSettingsService", () => {
       clear: [],
       actor: { kind: "guardian", id: "guardian-1" },
     });
-    await new WebChatRepository(testDb!.db).ensureChannelConversation({
+    await new WebChatRepository(testDb!.db).ensureChannelChat({
       channel: "discord",
       threadId: "first-seen-topic",
       parentThreadId: "parent",
@@ -319,7 +319,7 @@ describe("ChatSettingsService", () => {
   it("lists only established direct messages and lets them own only session.reset", async () => {
     const { service, repository, changed, discord } = await setup();
     const webchat = new WebChatRepository(testDb!.db);
-    await webchat.ensureChannelConversation({
+    await webchat.ensureChannelChat({
       channel: "discord",
       threadId: "dm-1",
       threadName: "Ray",

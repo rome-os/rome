@@ -727,7 +727,7 @@ describe("People send API — delivery bookkeeping", () => {
     const connections = createTestConnections(deps.transports, (_service, talk) => ({
       ...talk,
       directMessaging: {
-        conversationFor: async () => {
+        chatFor: async () => {
           throw new Error("provider is down");
         },
       },

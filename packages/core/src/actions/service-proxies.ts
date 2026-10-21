@@ -249,19 +249,19 @@ export class ChannelsServiceProxy implements ChannelsService {
 
 export class ChatSettingsControlProxy implements ChatSettingsControl {
   list(input: ListChatSettingsInput): Promise<ChatSettingsPage> {
-    return callMain("conversationSettings.list", input);
+    return callMain("chatSettings.list", input);
   }
 
   get(ref: ChatRef): Promise<ChatSettingsSnapshot> {
-    return callMain("conversationSettings.get", { ref });
+    return callMain("chatSettings.get", { ref });
   }
 
   update(input: UpdateChatSettingsInput): Promise<ChatSettingsSnapshot> {
-    return callMain("conversationSettings.update", input);
+    return callMain("chatSettings.update", input);
   }
 
   reset(input: ResetChatSettingsInput): Promise<ChatSettingsSnapshot> {
-    return callMain("conversationSettings.reset", input);
+    return callMain("chatSettings.reset", input);
   }
 }
 

@@ -54,7 +54,7 @@ export function directoryPage<T>(
  */
 export function addressIsConversationFeature(): ChannelDirectMessaging {
   return {
-    async conversationFor(channelUserId: string) {
+    async chatFor(channelUserId: string) {
       const trimmed = channelUserId.trim();
       return trimmed === "" ? null : (trimmed as ChatId);
     },

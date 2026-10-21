@@ -290,18 +290,16 @@ describe("channelList", () => {
   });
 
   it("reaches an account directly only through a Connection that offers it", async () => {
-    const conversationFor = rs.fn(async (id: string) => id as ChatId);
+    const chatFor = rs.fn(async (id: string) => id as ChatId);
     const { registry, channels } = setup([
-      talkService("telegram", {}, { conversationFor }).descriptor,
+      talkService("telegram", {}, { chatFor }).descriptor,
       talkService("discord").descriptor,
     ]);
     const telegram = channels.find((channel) => channel.name === "telegram")!;
     const discord = channels.find((channel) => channel.name === "discord")!;
 
     // Nothing backs either channel yet: the lookup says so, as a send would.
-    await expect(telegram.send!.direct!.conversationFor("u-1")).rejects.toBeInstanceOf(
-      ChannelNotConnected,
-    );
+    await expect(telegram.send!.direct!.chatFor("u-1")).rejects.toBeInstanceOf(ChannelNotConnected);
 
     for (const service of ["telegram", "discord"]) {
       const connection = await registry.connect(service);
@@ -310,7 +308,7 @@ describe("channelList", () => {
         expiresAt: "never",
       });
     }
-    await expect(telegram.send!.direct!.conversationFor("u-1")).resolves.toBe("u-1");
+    await expect(telegram.send!.direct!.chatFor("u-1")).resolves.toBe("u-1");
     // A Connection whose talker offers no direct messaging.
     expect(discord.send!.direct).toBeNull();
   });

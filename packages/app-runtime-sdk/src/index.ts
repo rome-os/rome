@@ -1859,7 +1859,9 @@ export interface ChannelDirectMessaging {
    * key a thread separately, it opens or looks up that thread, which is a
    * provider call: callers pricing a listing should treat it as one.
    */
-  conversationFor(channelUserId: string): Promise<ChatId | null>;
+  chatFor(channelUserId: string): Promise<ChatId | null>;
+  /** @deprecated Use `chatFor`. The host no longer calls it. */
+  conversationFor?(channelUserId: string): Promise<ChatId | null>;
 }
 
 /** Sending on a channel. */
@@ -1941,6 +1943,10 @@ export interface Channel {
  */
 export interface ChannelMessageHookDeps {
   actionEngine: ActionEngineLike;
+  /** Each chat's settings. A host that predates the name passes only
+   *  `conversationSettings`, so read `chatSettings ?? conversationSettings`. */
+  chatSettings?: ChatSettingsControl;
+  /** @deprecated Use `chatSettings`, which is the same control. */
   conversationSettings: ChatSettingsControl;
   chatStop: ChatStopHandler;
   /** A live array: the host appends a channel added later, such as a second
@@ -2169,6 +2175,8 @@ export interface AppFavorCapability {
 export interface AppRuntimeRepositories {
   settings: AppSettingsRepository;
   webchatRecaps?: WebChatRecapRepository;
+  chats?: ChatRepository;
+  /** @deprecated Use `chats`, which is the same repository. */
   conversations?: ChatRepository;
   guardianProfile?: GuardianProfileRepository;
 }
@@ -2199,17 +2207,22 @@ export interface ChatRecord {
   agentName: string | null;
 }
 
+/** The chat a channel thread opens, or the one already open for it. */
+export interface EnsureChannelChatInput {
+  channel: string;
+  threadId: string;
+  parentThreadId?: string;
+  threadName?: string;
+  threadType?: "private" | "group";
+  agentName: string;
+  projectName?: string;
+  projectPath?: string;
+}
+
 export interface ChatRepository {
-  ensureChannelConversation(input: {
-    channel: string;
-    threadId: string;
-    parentThreadId?: string;
-    threadName?: string;
-    threadType?: "private" | "group";
-    agentName: string;
-    projectName?: string;
-    projectPath?: string;
-  }): Promise<ChatRecord>;
+  ensureChannelChat(input: EnsureChannelChatInput): Promise<ChatRecord>;
+  /** @deprecated Use `ensureChannelChat`, which does the same. */
+  ensureChannelConversation(input: EnsureChannelChatInput): Promise<ChatRecord>;
   addMessage(input: {
     sessionId: string;
     role: "user" | "notification";
