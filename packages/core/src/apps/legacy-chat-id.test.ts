@@ -14,6 +14,7 @@ import {
   legacyChatIdChannels,
   legacyChatIdChannelsService,
   legacyChatIdSettings,
+  legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./legacy-chat-id.js";
 
@@ -151,5 +152,12 @@ describe("chat ids for apps written for SDK 0.7", () => {
     const [forwarded] = materialize.mock.calls[0] ?? [];
     expect(forwarded).toMatchObject({ chatId: CHAT, parentChatId: "parent-1" });
     expect(legacy(forwarded).conversationId).toBeUndefined();
+  });
+
+  it("publishes a settings change a routine can filter by conversationId", () => {
+    const payload = legacyChatIdSettingsChange({ ref, fields: ["enabled"], reset: false });
+
+    expect(payload.ref.chatId).toBe(CHAT);
+    expect(legacy(payload.ref).conversationId).toBe(CHAT);
   });
 });

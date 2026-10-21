@@ -44,6 +44,7 @@ import {
   legacyChatIdChannels,
   legacyChatIdChannelsService,
   legacyChatIdSettings,
+  legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
@@ -748,7 +749,7 @@ async function main() {
       await eventService.publish({
         name: "conversation-settings.changed",
         source: "conversation-settings",
-        payload: { ref, actor, fields, reset },
+        payload: legacyChatIdSettingsChange({ ref, actor, fields, reset }),
       });
     },
   });

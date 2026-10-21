@@ -72,6 +72,13 @@ function snapshotOut(snapshot: ChatSettingsSnapshot): ChatSettingsSnapshot {
   };
 }
 
+/** A chat settings change as the event bus publishes it. Routines saved
+ *  before the rename filter on `ref.conversationId`, and the actions they run
+ *  read it from the payload. */
+export function legacyChatIdSettingsChange<T extends { ref: ChatRef }>(change: T): T {
+  return { ...change, ref: refOut(change.ref) };
+}
+
 /** The chat settings as an app gets them. */
 export function legacyChatIdSettings(control: ChatSettingsControl): ChatSettingsControl {
   return {
