@@ -28,6 +28,8 @@ const SLACK_RECONNECT_MAX_MS = 30_000;
  *  the registry rebuild the epoch with its own backoff. */
 const SLACK_RECONNECT_MAX_ATTEMPTS = 5;
 const SLACK_USER_NAME_CACHE_SIZE = 500;
+/** Recent channel messages remembered with their thread, so a reply finds it. */
+const SLACK_THREAD_ROOT_CACHE_SIZE = 1_000;
 /** How long a new connection, setup's probe included, waits for `hello`. */
 const SLACK_HELLO_TIMEOUT_MS = 10_000;
 /** How often a live connection pings Slack. A ping still unanswered at the
@@ -622,12 +624,9 @@ export function slackUserIdOf(senderId: string): string {
   return separator === -1 ? senderId : senderId.slice(separator + 1);
 }
 
-/** A thread in a Slack channel is its own conversation, addressed by the
- *  channel and the thread's first message. */
-export function slackThreadConversationId(channelId: string, threadTs: string): ConversationId {
-  return `${channelId}:${threadTs}` as ConversationId;
-}
-
+/** A chat's channel, and the thread an older thread-keyed chat id names. A
+ *  thread now lives inside its channel's chat, so new chat ids carry no
+ *  thread; the old `channel:thread` form is still read. */
 export function parseSlackConversationId(conversationId: string): {
   channelId: string;
   threadTs?: string;
@@ -715,6 +714,8 @@ export class SlackAdapter {
   private socket: SlackSocketMode | null = null;
   private readonly dedup = new InboundDedup(1_000);
   private readonly userNames = new Map<string, SlackUserName>();
+  /** Each recent channel message's thread, keyed by `channel/ts`. */
+  private readonly threadRoots = new Map<string, string>();
   /** The tail of each conversation's deliveries, so a slow name lookup never
    *  lets a later message overtake an earlier one. */
   private readonly deliveries = new Map<string, Promise<void>>();
@@ -772,7 +773,9 @@ export class SlackAdapter {
     }
     const text = message.text?.trim();
     if (!text) return { conversationId };
-    const { channelId, threadTs } = parseSlackConversationId(conversationId);
+    const parsed = parseSlackConversationId(conversationId);
+    const channelId = parsed.channelId;
+    const threadTs = parsed.threadTs ?? this.threadOf(channelId, message.replyToMessageId);
     let firstTs: string | undefined;
     for (const chunk of splitSlackText(text)) {
       const sent = await this.api.postMessage(
@@ -783,6 +786,25 @@ export class SlackAdapter {
       firstTs ??= sent.ts;
     }
     return { conversationId, ...(firstTs ? { messageId: firstTs } : {}) };
+  }
+
+  /** The thread a reply to `messageId` goes into. A message in a channel is
+   *  answered in its thread, or starts one. A direct message is answered in
+   *  place unless it was itself in a thread. */
+  private threadOf(channelId: string, messageId: string | undefined): string | undefined {
+    if (!messageId) return undefined;
+    const root = this.threadRoots.get(`${channelId}/${messageId}`);
+    if (root) return root;
+    // A message from before a restart: in a channel it starts a thread.
+    return channelId.startsWith("D") ? undefined : messageId;
+  }
+
+  private rememberThread(channelId: string, ts: string, rootTs: string): void {
+    if (this.threadRoots.size >= SLACK_THREAD_ROOT_CACHE_SIZE) {
+      const oldest = this.threadRoots.keys().next().value;
+      if (oldest !== undefined) this.threadRoots.delete(oldest);
+    }
+    this.threadRoots.set(`${channelId}/${ts}`, rootTs);
   }
 
   /** The direct-message conversation with a workspace member. */
@@ -862,6 +884,7 @@ export class SlackAdapter {
       raw: payload,
     };
     if (event.type === "message" && event.channel_type === "im") {
+      if (event.thread_ts) this.rememberThread(channel, ts, event.thread_ts);
       return {
         ...base,
         conversationId: channel as ConversationId,
@@ -871,13 +894,14 @@ export class SlackAdapter {
       };
     }
     if (event.type === "app_mention" && event.channel_type !== "im" && !channel.startsWith("D")) {
-      const rootTs = event.thread_ts ?? ts;
+      // A thread lives inside its channel's chat. The reply finds the thread
+      // from the message it answers.
+      this.rememberThread(channel, ts, event.thread_ts ?? ts);
       return {
         ...base,
-        conversationId: slackThreadConversationId(channel, rootTs),
-        parentConversationId: channel as ConversationId,
+        conversationId: channel as ConversationId,
         ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
-        thread: { kind: "topic" },
+        thread: { kind: "group" },
         addressing: "mention",
       };
     }
