@@ -6,7 +6,7 @@ import type { AppDbContext } from "@rome-os/app-runtime";
 // signed-in Telegram. A test keeps the two in step. Every other channel
 // carries the guardian's own accounts (a linked WhatsApp, a WeChat login) or
 // Rome's own traffic, and stays out of Dream.
-export const ACCOUNT_SERVICES = ["feishu", "telegram", "discord"];
+export const ACCOUNT_SERVICES = ["feishu", "telegram", "discord", "slack_bot"];
 
 /** Linkable services that are the guardian's own account, which Dream
  *  leaves alone as it does their other personal accounts. */

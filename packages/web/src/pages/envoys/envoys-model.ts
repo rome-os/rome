@@ -136,7 +136,7 @@ export function buildEnvoys(
 }
 
 /** Services an agent's own account is made on, in the order Envoys offers them. */
-const OWN_SERVICES = ["feishu", "telegram", "discord"] as const;
+const OWN_SERVICES = ["feishu", "telegram", "discord", "slack_bot"] as const;
 
 /** One platform a new account can be connected on, and how its setup starts. */
 export interface ConnectChoice {

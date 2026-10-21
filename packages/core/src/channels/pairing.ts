@@ -35,6 +35,13 @@ function pairingAccount(
     : code;
 }
 
+/** The docs page that explains pairing for a service. */
+function pairingGuidePage(service: string): string {
+  if (service === "feishu") return "lark";
+  if (service === "slack_bot") return "slack";
+  return service;
+}
+
 function pairingSuccess(
   channel: string,
   id: string,
@@ -69,7 +76,7 @@ export function createPairingAdmission(deps: {
         log.error("pairing reply failed", { connectionId, senderId: message.senderId });
       });
     };
-    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
+    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${pairingGuidePage(service)}).`;
     try {
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {

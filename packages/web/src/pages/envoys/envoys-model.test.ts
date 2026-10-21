@@ -163,6 +163,19 @@ describe("connectChoices", () => {
     expect(choice).toMatchObject({ kind: "delegate", platform: "telegram", taken: true });
   });
 
+  it("offers a Slack account on the Slack platform", () => {
+    const [choice] = connectChoices([
+      connection({
+        service: "slack_bot",
+        id: null,
+        channel: null,
+        grants: { bot: "unauthorized" },
+        severalAccounts: true,
+      }),
+    ]);
+    expect(choice).toMatchObject({ kind: "own", platform: "slack", another: true, taken: false });
+  });
+
   it("offers own accounts first and leaves out services core does not register", () => {
     const choices = connectChoices([
       placeholder("telegram_user"),

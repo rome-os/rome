@@ -154,6 +154,19 @@
           }
         }
       },
+      "slack_bot": {
+        "bot": {
+          "titleFallback": "智能体的 Slack 账号",
+          "bullets": {
+            "reply": "有人私信 {{identity}} 或在频道中提及它时自动回复",
+            "start": "收到新消息时启动任务"
+          },
+          "bulletsFallback": {
+            "reply": "有人私信这个账号或在频道中提及它时自动回复",
+            "start": "收到新消息时启动任务"
+          }
+        }
+      },
       "feishu": {
         "bot": {
           "title": "智能体的飞书账号",

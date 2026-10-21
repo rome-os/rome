@@ -11,6 +11,7 @@ export const LINKABLE_SERVICES: ReadonlySet<string> = new Set([
   "telegram",
   "discord",
   "telegram_user",
+  "slack_bot",
 ]);
 
 /** The canonical id of main, the id core stores when main is linked. Main is

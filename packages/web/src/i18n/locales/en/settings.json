@@ -154,6 +154,19 @@
           }
         }
       },
+      "slack_bot": {
+        "bot": {
+          "titleFallback": "Your agent's Slack account",
+          "bullets": {
+            "reply": "Reply when people message {{identity}} or mention it in a channel",
+            "start": "Start a task when a new message arrives"
+          },
+          "bulletsFallback": {
+            "reply": "Reply when people message this account or mention it in a channel",
+            "start": "Start a task when a new message arrives"
+          }
+        }
+      },
       "feishu": {
         "bot": {
           "title": "Your agent's Feishu account",
