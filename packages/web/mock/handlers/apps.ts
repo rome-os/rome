@@ -110,13 +110,15 @@ export const appHandlers = [
   http.patch("/api/apps/:appId", async ({ params, request }) => {
     const app = cardFor(String(params.appId));
     if (!app) return HttpResponse.json({ error: "Unknown app" }, { status: 404 });
-    const body = (await request.json()) as { enabled: boolean };
-    if (!body.enabled && !app.canToggle) {
+    // The route refuses every PATCH to an app it can't toggle (only `system`)
+    // before it reads the body, so enabling it is refused too.
+    if (!app.canToggle) {
       return HttpResponse.json(
-        { error: `app "${app.id}" cannot be disabled` },
+        { error: `SYSTEM_PROTECTED: App "${app.id}" cannot be modified` },
         { status: APP_MANAGER_ERROR_STATUS.SYSTEM_PROTECTED },
       );
     }
+    const body = (await request.json()) as { enabled: boolean };
     // Only the flag is stored. Status and the open links are derived per read,
     // so enabling an app whose phase is `failed` cannot promote it to active.
     app.isEnabled = body.enabled;
