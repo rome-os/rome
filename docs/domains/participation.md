@@ -15,6 +15,7 @@ The moment a message is judged to need the agent and the agent starts a turn. Th
 The agent's working memory of a chat: a view built from the chat's messages, not the record itself. [Chats](chats.md) keeps the record and offers it. What the agent keeps of it is its own business ([Agents](agents.md)).
 
 - There is one default view and no setting. When the agent wakes, it reads the recent messages of the place the waking message was said in: the chat itself, or the thread, which starts with the message it was opened from. A message alone rarely carries the whole context, in a group or in a direct message.
+- In the open chat the view is the open chat's messages, where each thread shows as the message it was opened from. Messages said in threads are not mixed in.
 - Whoever writes chooses the place. Mentioning the agent in a thread hands it a task with the thread as its context. Asking in the open chat gives it the chat around the question.
 - How far back "recent" reaches is the agent's own bound.
 - Beyond the default view, the agent can read more of the chat on its own judgement: further back, the chat around a thread, other threads in the chat.
