@@ -49,6 +49,23 @@ class FakeLarkChannel {
   addedReactions: Array<{ messageId: string; emojiType: string; reactionId: string }> = [];
   removedReactions: Array<{ messageId: string; reactionId: string }> = [];
   connected = false;
+  replies: unknown[] = [];
+  /** The SDK client a streamed reply writes through. */
+  rawClient = {
+    im: {
+      v1: {
+        message: {
+          reply: async (payload: unknown) => {
+            this.replies.push(payload);
+            return {
+              code: 0,
+              data: { message_id: "om_8", chat_id: "oc_chat", root_id: "om_7", thread_id: "omt_1" },
+            };
+          },
+        },
+      },
+    },
+  };
   botIdentity = { openId: "ou_bot", name: "Rome" };
   connectError: Error | null = null;
 
@@ -300,6 +317,39 @@ describe("feishu inbound delivery", () => {
       },
     ]);
     await talker.stop();
+  });
+});
+
+describe("feishu reply delivery", () => {
+  it("offers reply delivery over the channel's client, placing replies as the chat says", async () => {
+    const channel = new FakeLarkChannel();
+    const talker = makeDescriptor(channel).capabilities.talker!.build(
+      { app: validCred() },
+      {
+        connectionId: "feishu-test",
+        persist: async () => {},
+        registerIngress: () => () => {},
+      },
+    );
+
+    expect(talker.replyDelivery?.capabilities).toMatchObject({ maxPartLength: 3500, edit: true });
+    // The chat's settings put replies in a thread, so later messages join it.
+    await expect(talker.replyDelivery?.create("oc_chat", "hello", "om_7")).resolves.toEqual({
+      messageId: "om_8",
+      conversationId: "oc_chat#thread:om_7",
+    });
+    expect(channel.replies).toEqual([
+      {
+        path: { message_id: "om_7" },
+        data: {
+          msg_type: "post",
+          content: JSON.stringify({
+            zh_cn: { title: "", content: [[{ tag: "md", text: "hello" }]] },
+          }),
+          reply_in_thread: true,
+        },
+      },
+    ]);
   });
 });
 

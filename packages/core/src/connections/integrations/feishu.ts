@@ -612,6 +612,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             directMessaging: addressIsConversationFeature(),
             activity,
             directory,
+            replyDelivery: adapter.replyDelivery(),
           };
           return {
             start(deliver, fault): void {

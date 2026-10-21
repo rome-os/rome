@@ -9,6 +9,8 @@ import {
 } from "@larksuiteoapi/node-sdk";
 import { isStopCommand } from "@rome-os/app-runtime";
 import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./account-agents.js";
+import { feishuTransport } from "./delivery/transports/feishu.js";
+import type { DeliveryTransport } from "./delivery/types.js";
 import { preserveMentionOnlyText } from "./mention-only.js";
 import type { OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
@@ -216,7 +218,7 @@ export class FeishuAdapter {
     const opts = message.replyToMessageId
       ? {
           replyTo: message.replyToMessageId,
-          replyInThread: (await this.getChannelConfig(threadId)).autoThread ?? true,
+          replyInThread: await this.repliesInThread(threadId),
         }
       : undefined;
 
@@ -239,6 +241,18 @@ export class FeishuAdapter {
       });
       throw err;
     }
+  }
+
+  /** Streams replies through this adapter's client, placed as `send` places them. */
+  replyDelivery(): DeliveryTransport {
+    return feishuTransport({
+      client: this.channel.rawClient,
+      replyInThread: (chat) => this.repliesInThread(chat),
+    });
+  }
+
+  private async repliesInThread(chatId: string): Promise<boolean> {
+    return (await this.getChannelConfig(chatId)).autoThread ?? true;
   }
 
   onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
