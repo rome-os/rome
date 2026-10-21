@@ -26,6 +26,7 @@ import { createLinkedInDescriptor } from "./linkedin.js";
 import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
+import { makeSlackBotDescriptor } from "./slack-bot.js";
 import { createWechatDescriptor } from "./wechat.js";
 import { createWechatUserDescriptor } from "./wechat-user.js";
 import { makeWebchatDescriptor } from "./webchat.js";
@@ -43,6 +44,7 @@ export { makeWebchatDescriptor } from "./webchat.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
 export { createLinkedInDescriptor } from "./linkedin.js";
 export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-providers.js";
+export { makeSlackBotDescriptor, SLACK_BOT_SERVICE } from "./slack-bot.js";
 
 /**
  * The runtime dependencies the descriptor factories need, threaded from index.ts
@@ -107,6 +109,7 @@ export function registerBuiltinConnections(
     }),
   );
   registry.register(makeTelegramUserDescriptor());
+  registry.register(makeSlackBotDescriptor());
   registry.register(createWechatDescriptor());
   // The personal WeChat connection is opt-in: boot passes its runtime only when
   // config `wechatUserEnabled` is on.

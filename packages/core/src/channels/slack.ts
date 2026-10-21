@@ -1,0 +1,710 @@
+// Slack bot transport over Socket Mode. Channel contract: docs/architecture/channels.md.
+//
+// Each Slack bot is its own Slack app, created by the guardian from a
+// prefilled manifest. Rome holds the app's bot token (Web API calls) and its
+// app-level token (Socket Mode), and opens its own WebSocket to Slack, so an
+// instance needs no public events address. Events arrive as Socket Mode
+// envelopes, which Rome acknowledges before handling.
+
+import type {
+  ChannelMessage,
+  ConversationId,
+  MessageReceipt,
+  OutgoingMessage,
+} from "@rome-os/app-runtime";
+import { createLogger } from "../logger.js";
+import { InboundDedup } from "./inbound-dedup.js";
+
+const log = createLogger("slack");
+
+const SLACK_API_TIMEOUT_MS = 15_000;
+const SLACK_RATE_LIMIT_MAX_WAIT_MS = 30_000;
+/** chat.postMessage takes up to 12,000 characters of `markdown_text`. */
+const SLACK_MARKDOWN_CHUNK_LENGTH = 12_000;
+const SLACK_RECONNECT_BASE_MS = 1_000;
+const SLACK_RECONNECT_MAX_MS = 30_000;
+/** Consecutive failed reconnects before the socket reports a fault and lets
+ *  the registry rebuild the epoch with its own backoff. */
+const SLACK_RECONNECT_MAX_ATTEMPTS = 5;
+const SLACK_USER_NAME_CACHE_SIZE = 500;
+
+/** The bot scopes a Rome Slack app asks for. Rome reads direct messages and
+ *  mentions only, so it never asks to read channel history. */
+export const SLACK_BOT_SCOPES = [
+  "app_mentions:read",
+  "chat:write",
+  "im:history",
+  "im:read",
+  "im:write",
+  "users:read",
+] as const;
+
+/** The bot events a Rome Slack app subscribes to. */
+export const SLACK_BOT_EVENTS = [
+  "app_mention",
+  "message.im",
+  "app_uninstalled",
+  "tokens_revoked",
+] as const;
+
+export interface SlackBotIdentity {
+  teamId: string;
+  workspaceName?: string;
+  botUserId: string;
+  botUsername?: string;
+  appId?: string;
+}
+
+export class SlackApiError extends Error {
+  constructor(
+    readonly code: string,
+    message = `Slack API request failed: ${code}`,
+  ) {
+    super(message);
+    this.name = "SlackApiError";
+  }
+}
+
+/** True when Slack refused the token itself, rather than the request. */
+export function isSlackCredentialError(error: unknown): boolean {
+  return (
+    error instanceof SlackApiError &&
+    [
+      "account_inactive",
+      "invalid_auth",
+      "not_allowed_token_type",
+      "not_authed",
+      "token_expired",
+      "token_revoked",
+      "app_uninstalled",
+      "tokens_revoked",
+    ].includes(error.code)
+  );
+}
+
+/** The Slack Web API calls the transport makes. Injectable so tests run
+ *  without the network. */
+export interface SlackWebApi {
+  authTest(botToken: string, signal?: AbortSignal): Promise<SlackBotIdentity>;
+  /** Opens a Socket Mode connection with the app-level token and returns its
+   *  WebSocket URL. */
+  openConnection(appToken: string, signal?: AbortSignal): Promise<string>;
+  postMessage(
+    botToken: string,
+    input: { channel: string; markdown: string; threadTs?: string },
+    signal?: AbortSignal,
+  ): Promise<{ ts: string }>;
+  /** The direct-message conversation with one workspace member. */
+  openDirectMessage(botToken: string, userId: string, signal?: AbortSignal): Promise<string>;
+  userName(botToken: string, userId: string, signal?: AbortSignal): Promise<SlackUserName>;
+}
+
+export interface SlackUserName {
+  displayName?: string;
+  username?: string;
+}
+
+interface SlackApiResponse {
+  ok?: boolean;
+  error?: string;
+  [key: string]: unknown;
+}
+
+async function slackApiCall(
+  token: string,
+  method: string,
+  body: Record<string, unknown> | undefined,
+  signal?: AbortSignal,
+): Promise<SlackApiResponse> {
+  let retriedRateLimit = false;
+  for (;;) {
+    const requestSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(SLACK_API_TIMEOUT_MS)])
+      : AbortSignal.timeout(SLACK_API_TIMEOUT_MS);
+    const response = await fetch(`https://slack.com/api/${method}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify(body ?? {}),
+      signal: requestSignal,
+    });
+    if (response.status === 429 && !retriedRateLimit) {
+      await response.body?.cancel().catch(() => {});
+      retriedRateLimit = true;
+      const retryAfterSeconds = Number(response.headers.get("retry-after") ?? "1");
+      const waitMs = Math.max(
+        1_000,
+        Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1_000 : 1_000,
+      );
+      if (waitMs > SLACK_RATE_LIMIT_MAX_WAIT_MS) {
+        throw new SlackApiError("ratelimited", `Slack asked Rome to wait ${waitMs}ms.`);
+      }
+      await abortableDelay(waitMs, signal);
+      continue;
+    }
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new SlackApiError(
+        response.status === 429 ? "ratelimited" : `http_${response.status}`,
+        `Slack API returned HTTP ${response.status}`,
+      );
+    }
+    const result = (await response.json()) as SlackApiResponse;
+    if (!result.ok) throw new SlackApiError(result.error ?? "unknown_error");
+    return result;
+  }
+}
+
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  const abortError = () =>
+    signal?.reason instanceof Error ? signal.reason : new Error("Slack wait aborted.");
+  if (signal?.aborted) return Promise.reject(abortError());
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(abortError());
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+export const slackWebApi: SlackWebApi = {
+  async authTest(botToken, signal) {
+    const result = await slackApiCall(botToken, "auth.test", undefined, signal);
+    const teamId = stringField(result.team_id);
+    const botUserId = stringField(result.user_id);
+    if (!teamId || !botUserId) {
+      throw new SlackApiError("invalid_auth_test", "Slack did not return a workspace and bot id.");
+    }
+    return {
+      teamId,
+      workspaceName: stringField(result.team),
+      botUserId,
+      botUsername: stringField(result.user),
+      appId: stringField(result.app_id),
+    };
+  },
+  async openConnection(appToken, signal) {
+    const result = await slackApiCall(appToken, "apps.connections.open", undefined, signal);
+    const url = stringField(result.url);
+    if (!url) throw new SlackApiError("missing_url", "Slack did not return a Socket Mode URL.");
+    return url;
+  },
+  async postMessage(botToken, input, signal) {
+    const result = await slackApiCall(
+      botToken,
+      "chat.postMessage",
+      {
+        channel: input.channel,
+        markdown_text: input.markdown,
+        ...(input.threadTs ? { thread_ts: input.threadTs } : {}),
+      },
+      signal,
+    );
+    const ts = stringField(result.ts);
+    if (!ts) throw new SlackApiError("missing_message_id");
+    return { ts };
+  },
+  async openDirectMessage(botToken, userId, signal) {
+    const result = await slackApiCall(botToken, "conversations.open", { users: userId }, signal);
+    const channel = result.channel as { id?: unknown } | undefined;
+    const id = stringField(channel?.id);
+    if (!id) throw new SlackApiError("missing_channel", "Slack did not open a direct message.");
+    return id;
+  },
+  async userName(botToken, userId, signal) {
+    const result = await fetch(
+      `https://slack.com/api/users.info?user=${encodeURIComponent(userId)}`,
+      {
+        headers: { Authorization: `Bearer ${botToken}` },
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(SLACK_API_TIMEOUT_MS)])
+          : AbortSignal.timeout(SLACK_API_TIMEOUT_MS),
+      },
+    );
+    const body = (await result.json()) as SlackApiResponse;
+    if (!body.ok) throw new SlackApiError(body.error ?? "unknown_error");
+    const user = body.user as
+      | { name?: unknown; real_name?: unknown; profile?: { display_name?: unknown } }
+      | undefined;
+    return {
+      displayName: stringField(user?.profile?.display_name) ?? stringField(user?.real_name),
+      username: stringField(user?.name),
+    };
+  },
+};
+
+// ── Socket Mode ──────────────────────────────────────────────────────────────
+
+/** The slice of a WebSocket the Socket Mode client uses. */
+export interface SlackSocketLike {
+  send(data: string): void;
+  close(): void;
+  addEventListener(type: "open", listener: () => void): void;
+  addEventListener(type: "message", listener: (event: { data: unknown }) => void): void;
+  addEventListener(type: "close", listener: () => void): void;
+  addEventListener(type: "error", listener: (event: unknown) => void): void;
+}
+
+export type CreateSlackSocket = (url: string) => SlackSocketLike;
+
+const createWebSocket: CreateSlackSocket = (url) =>
+  new WebSocket(url) as unknown as SlackSocketLike;
+
+/** One Events API payload, as a Socket Mode `events_api` envelope carries it. */
+export interface SlackEventCallback {
+  type: "event_callback";
+  team_id: string;
+  api_app_id?: string;
+  event_id: string;
+  event: SlackEvent;
+}
+
+export interface SlackEvent {
+  type: string;
+  user?: string;
+  bot_id?: string;
+  subtype?: string;
+  team?: string;
+  user_team?: string;
+  source_team?: string;
+  tokens?: { bot?: string[]; oauth?: string[] };
+  text?: string;
+  channel?: string;
+  channel_type?: string;
+  ts?: string;
+  thread_ts?: string;
+}
+
+interface SocketEnvelope {
+  type?: string;
+  envelope_id?: string;
+  payload?: unknown;
+  reason?: string;
+}
+
+/**
+ * A Socket Mode connection that stays open. Slack rotates a connection every
+ * few hours with a `disconnect` envelope, and the client opens a fresh one.
+ * An unexpected close reconnects with backoff. Only a refused token, or
+ * reconnects that keep failing, reach `onFault`.
+ */
+export class SlackSocketMode {
+  private socket: SlackSocketLike | null = null;
+  private stopped = false;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly abort = new AbortController();
+
+  constructor(
+    private readonly config: {
+      appToken: string;
+      api: SlackWebApi;
+      createSocket?: CreateSlackSocket;
+      onEvent: (payload: SlackEventCallback) => void;
+      onFault: (cause: unknown) => void;
+    },
+  ) {}
+
+  /** Opens the first connection. Rejects when Slack refuses the token. */
+  async start(): Promise<void> {
+    await this.connect();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.abort.abort(new Error("Slack Socket Mode stopped."));
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    const socket = this.socket;
+    this.socket = null;
+    socket?.close();
+  }
+
+  private async connect(): Promise<void> {
+    const url = await this.config.api.openConnection(this.config.appToken, this.abort.signal);
+    if (this.stopped) return;
+    const socket = (this.config.createSocket ?? createWebSocket)(url);
+    this.socket = socket;
+    socket.addEventListener("message", (event) => this.onMessage(socket, event.data));
+    socket.addEventListener("close", () => this.onClose(socket));
+    socket.addEventListener("error", (event) => {
+      log.warn("slack socket error", { error: describe(event) });
+    });
+  }
+
+  private onMessage(socket: SlackSocketLike, data: unknown): void {
+    if (socket !== this.socket) return;
+    let envelope: SocketEnvelope;
+    try {
+      envelope = JSON.parse(String(data)) as SocketEnvelope;
+    } catch {
+      log.warn("slack socket sent a frame that is not JSON");
+      return;
+    }
+    if (envelope.type === "hello") {
+      this.reconnectAttempts = 0;
+      log.info("slack socket connected");
+      return;
+    }
+    if (envelope.type === "disconnect") {
+      log.info("slack socket rotating", { reason: envelope.reason });
+      this.replace(socket);
+      return;
+    }
+    // Every envelope with an id is acknowledged, or Slack resends it. Rome
+    // answers none of them with a payload.
+    if (envelope.envelope_id) socket.send(JSON.stringify({ envelope_id: envelope.envelope_id }));
+    if (envelope.type !== "events_api") return;
+    const payload = envelope.payload as SlackEventCallback | undefined;
+    if (payload?.type !== "event_callback" || !payload.event) return;
+    try {
+      this.config.onEvent(payload);
+    } catch (error) {
+      log.error("slack event handler failed", { error: describe(error) });
+    }
+  }
+
+  private onClose(socket: SlackSocketLike): void {
+    if (socket !== this.socket || this.stopped) return;
+    this.socket = null;
+    this.scheduleReconnect();
+  }
+
+  /** Opens the next connection, then closes the one Slack is retiring. */
+  private replace(old: SlackSocketLike): void {
+    this.socket = null;
+    old.close();
+    this.scheduleReconnect(0);
+  }
+
+  private scheduleReconnect(delayMs?: number): void {
+    if (this.stopped || this.reconnectTimer) return;
+    const attempt = this.reconnectAttempts++;
+    const wait =
+      delayMs ?? Math.min(SLACK_RECONNECT_BASE_MS * 2 ** attempt, SLACK_RECONNECT_MAX_MS);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect().catch((error) => {
+        if (this.stopped) return;
+        if (
+          isSlackCredentialError(error) ||
+          this.reconnectAttempts >= SLACK_RECONNECT_MAX_ATTEMPTS
+        ) {
+          this.config.onFault(error);
+          return;
+        }
+        log.warn("slack socket reconnect failed", { error: describe(error) });
+        this.scheduleReconnect();
+      });
+    }, wait);
+    this.reconnectTimer.unref?.();
+  }
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// ── Addresses and text ───────────────────────────────────────────────────────
+
+/** A Slack member's address. Slack user ids are issued per workspace, so the
+ *  address carries the workspace: one person in two workspaces is two
+ *  accounts. */
+export function slackSenderId(teamId: string, userId: string): string {
+  return `${teamId}/${userId}`;
+}
+
+/** The Slack user id inside a sender address, or the input when it carries no
+ *  workspace. */
+export function slackUserIdOf(senderId: string): string {
+  const separator = senderId.indexOf("/");
+  return separator === -1 ? senderId : senderId.slice(separator + 1);
+}
+
+/** A thread in a Slack channel is its own conversation, addressed by the
+ *  channel and the thread's first message. */
+export function slackThreadConversationId(channelId: string, threadTs: string): ConversationId {
+  return `${channelId}:${threadTs}` as ConversationId;
+}
+
+export function parseSlackConversationId(conversationId: string): {
+  channelId: string;
+  threadTs?: string;
+} {
+  const separator = conversationId.indexOf(":");
+  if (separator === -1) return { channelId: conversationId };
+  return {
+    channelId: conversationId.slice(0, separator),
+    threadTs: conversationId.slice(separator + 1),
+  };
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Slack's wire text as a person reads it: mentions, channel links and URLs
+ *  unwrapped, and the bot's own mention removed. */
+export function decodeSlackText(text: string, botUserId?: string): string {
+  const withoutBot = botUserId
+    ? text.replace(new RegExp(`<@${escapeRegex(botUserId)}(?:\\|[^>]+)?>`, "g"), "")
+    : text;
+  return withoutBot
+    .replace(
+      /<@([A-Z0-9]+)(?:\|([^>]+))?>/gi,
+      (_match, id: string, label?: string) => `@${label ?? id}`,
+    )
+    .replace(
+      /<#([A-Z0-9]+)(?:\|([^>]*))?>/gi,
+      (_match, id: string, label?: string) => `#${label || id}`,
+    )
+    .replace(/<(https?:\/\/[^|>]+)(?:\|([^>]+))?>/gi, (_match, url: string, label?: string) =>
+      label && label !== url ? `${label} (${url})` : url,
+    )
+    .replace(/&(amp|lt|gt);/g, (_entity, name: string) =>
+      name === "amp" ? "&" : name === "lt" ? "<" : ">",
+    )
+    .trim();
+}
+
+/** Splits text into chunks Slack accepts, never inside a code point. */
+export function splitSlackText(text: string, limit = SLACK_MARKDOWN_CHUNK_LENGTH): string[] {
+  const chunks: string[] = [];
+  let chunk = "";
+  for (const codePoint of text) {
+    if (chunk && chunk.length + codePoint.length > limit) {
+      chunks.push(chunk);
+      chunk = "";
+    }
+    chunk += codePoint;
+  }
+  if (chunk || chunks.length === 0) chunks.push(chunk);
+  return chunks;
+}
+
+function isExternalAuthor(payload: SlackEventCallback): boolean {
+  const event = payload.event;
+  return [event.team, event.user_team, event.source_team].some(
+    (team) => typeof team === "string" && team !== payload.team_id,
+  );
+}
+
+// ── Adapter ──────────────────────────────────────────────────────────────────
+
+export interface SlackAdapterConfig {
+  botToken: string;
+  appToken: string;
+  /** The service name the channel records carry. */
+  channel: string;
+  api?: SlackWebApi;
+  createSocket?: CreateSlackSocket;
+  /** A refused token or a transport that will not come back. */
+  onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
+}
+
+/**
+ * The Slack bot transport. Inbound events arrive as the channel's own record,
+ * a `ChannelMessage` whose `raw` is the Events API payload. Rome hears direct
+ * messages and mentions of the bot. A mention in a channel opens a thread
+ * conversation, and the reply goes into that thread.
+ */
+export class SlackAdapter {
+  private handler?: (message: ChannelMessage) => Promise<void>;
+  private identity: SlackBotIdentity | null = null;
+  private socket: SlackSocketMode | null = null;
+  private readonly dedup = new InboundDedup(1_000);
+  private readonly userNames = new Map<string, SlackUserName>();
+  private sendAbort = new AbortController();
+  private readonly api: SlackWebApi;
+
+  constructor(private readonly config: SlackAdapterConfig) {
+    this.api = config.api ?? slackWebApi;
+  }
+
+  onInbound(handler: (message: ChannelMessage) => Promise<void>): void {
+    this.handler = handler;
+  }
+
+  /** Checks the bot token, then opens Socket Mode. Rejects when either token
+   *  is refused. */
+  async start(): Promise<void> {
+    if (this.sendAbort.signal.aborted) this.sendAbort = new AbortController();
+    this.identity = await this.api.authTest(this.config.botToken, this.sendAbort.signal);
+    const socket = new SlackSocketMode({
+      appToken: this.config.appToken,
+      api: this.api,
+      createSocket: this.config.createSocket,
+      onEvent: (payload) => this.handleEvent(payload),
+      onFault: (cause) =>
+        this.config.onFault?.({
+          kind: isSlackCredentialError(cause) ? "credential" : "transport",
+          cause,
+        }),
+    });
+    this.socket = socket;
+    await socket.start();
+    log.info("slack bot started", {
+      teamId: this.identity.teamId,
+      botUserId: this.identity.botUserId,
+    });
+  }
+
+  stop(): void {
+    this.sendAbort.abort(new Error("Slack adapter stopped."));
+    this.socket?.stop();
+    this.socket = null;
+    this.identity = null;
+  }
+
+  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const omittedAttachments = message.attachments?.length ?? 0;
+    if (omittedAttachments > 0) {
+      log.warn("slack omitted outbound attachments", { attachments: omittedAttachments });
+    }
+    const text = message.text?.trim();
+    if (!text) return { conversationId };
+    const { channelId, threadTs } = parseSlackConversationId(conversationId);
+    let firstTs: string | undefined;
+    for (const chunk of splitSlackText(text)) {
+      const sent = await this.api.postMessage(
+        this.config.botToken,
+        { channel: channelId, markdown: chunk, threadTs },
+        this.sendAbort.signal,
+      );
+      firstTs ??= sent.ts;
+    }
+    return { conversationId, ...(firstTs ? { messageId: firstTs } : {}) };
+  }
+
+  /** The direct-message conversation with a workspace member. */
+  async directConversationFor(senderId: string): Promise<ConversationId | null> {
+    const userId = slackUserIdOf(senderId.trim());
+    if (!userId) return null;
+    return (await this.api.openDirectMessage(
+      this.config.botToken,
+      userId,
+      this.sendAbort.signal,
+    )) as ConversationId;
+  }
+
+  private handleEvent(payload: SlackEventCallback): void {
+    const identity = this.identity;
+    if (!identity) return;
+    if (this.dedup.checkAndRecord(payload.event_id)) return;
+    const event = payload.event;
+
+    if (event.type === "app_uninstalled") {
+      this.config.onFault?.({ kind: "credential", cause: new SlackApiError(event.type) });
+      return;
+    }
+    if (event.type === "tokens_revoked") {
+      if (event.tokens?.bot?.includes(identity.botUserId)) {
+        this.config.onFault?.({ kind: "credential", cause: new SlackApiError(event.type) });
+      }
+      return;
+    }
+
+    // Slack user ids are workspace-scoped. An author from another workspace
+    // (Slack Connect) never speaks under this workspace's address, where an id
+    // collision could inherit a local member's pairing.
+    if (isExternalAuthor(payload)) return;
+    if (event.bot_id || event.user === identity.botUserId) return;
+    if (event.subtype && event.subtype !== "file_share") return;
+    if (!event.user || !event.channel || !event.ts || typeof event.text !== "string") return;
+
+    const message = this.toChannelMessage(payload, identity);
+    if (!message) return;
+    void this.deliver(message, identity.teamId, event.user);
+  }
+
+  private toChannelMessage(
+    payload: SlackEventCallback,
+    identity: SlackBotIdentity,
+  ): ChannelMessage | null {
+    const event = payload.event;
+    const channel = event.channel!;
+    const ts = event.ts!;
+    const text = decodeSlackText(event.text!, identity.botUserId);
+    if (!text) return null;
+    const base = {
+      channel: this.config.channel,
+      direction: "inbound" as const,
+      messageId: ts,
+      senderId: slackSenderId(payload.team_id, event.user!),
+      text,
+      attachments: [],
+      timestamp: new Date(Number.parseFloat(ts) * 1_000),
+      raw: payload,
+    };
+    if (event.type === "message" && event.channel_type === "im") {
+      return {
+        ...base,
+        conversationId: channel as ConversationId,
+        ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
+        thread: { kind: "dm" },
+        addressing: "direct",
+      };
+    }
+    if (event.type === "app_mention" && event.channel_type !== "im" && !channel.startsWith("D")) {
+      const rootTs = event.thread_ts ?? ts;
+      return {
+        ...base,
+        conversationId: slackThreadConversationId(channel, rootTs),
+        parentConversationId: channel as ConversationId,
+        ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
+        thread: { kind: "topic" },
+        addressing: "mention",
+      };
+    }
+    return null;
+  }
+
+  private async deliver(message: ChannelMessage, teamId: string, userId: string): Promise<void> {
+    const name = await this.lookUpName(teamId, userId);
+    const named: ChannelMessage = {
+      ...message,
+      ...(name.displayName ? { senderDisplayName: name.displayName } : {}),
+      ...(name.username ? { senderUsername: name.username } : {}),
+    };
+    log.info("message received", {
+      conversationId: named.conversationId,
+      threadKind: named.thread?.kind,
+    });
+    try {
+      await this.handler?.(named);
+    } catch (error) {
+      log.error("message handler error", { messageId: named.messageId, error: describe(error) });
+    }
+  }
+
+  /** A member's name, best effort: a failed lookup leaves the message
+   *  unnamed rather than holding it. */
+  private async lookUpName(teamId: string, userId: string): Promise<SlackUserName> {
+    const key = slackSenderId(teamId, userId);
+    const cached = this.userNames.get(key);
+    if (cached) return cached;
+    try {
+      const name = await this.api.userName(this.config.botToken, userId, this.sendAbort.signal);
+      if (this.userNames.size >= SLACK_USER_NAME_CACHE_SIZE) {
+        const oldest = this.userNames.keys().next().value;
+        if (oldest !== undefined) this.userNames.delete(oldest);
+      }
+      this.userNames.set(key, name);
+      return name;
+    } catch (error) {
+      log.warn("slack user lookup failed", { error: describe(error) });
+      return {};
+    }
+  }
+}

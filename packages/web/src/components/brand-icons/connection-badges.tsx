@@ -127,6 +127,7 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
   // Multi-color brand marks sit on white (the paths carry their own colors).
   feishu: { Icon: FeishuIcon, badge: "border border-border bg-white" },
   slack: { Icon: SlackIcon, badge: "border border-border bg-white" },
+  slack_bot: { Icon: SlackIcon, badge: "border border-border bg-white" },
   google: { Icon: GoogleIcon, badge: "border border-border bg-white" },
   github: { Icon: GithubIcon, badge: "bg-foreground text-background" },
   webchat: {

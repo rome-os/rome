@@ -144,6 +144,10 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
     service: "email",
     defaultGrant: "inbox",
   },
+  slack_bot: {
+    service: "slack_bot",
+    defaultGrant: "bot",
+  },
   agents: {
     service: "agents",
     defaultGrant: "cloud",

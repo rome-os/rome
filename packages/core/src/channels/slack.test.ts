@@ -1,0 +1,224 @@
+import { describe, expect, it, rs } from "@rstest/core";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import {
+  SlackAdapter,
+  SlackApiError,
+  type SlackEventCallback,
+  type SlackSocketLike,
+  type SlackWebApi,
+  decodeSlackText,
+  parseSlackConversationId,
+  splitSlackText,
+} from "./slack.js";
+
+class FakeSocket implements SlackSocketLike {
+  readonly sent: string[] = [];
+  closed = false;
+  private readonly listeners = new Map<string, Array<(event: never) => void>>();
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+  close(): void {
+    this.closed = true;
+  }
+  addEventListener(type: string, listener: (event: never) => void): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+  emit(type: "message" | "close", data?: unknown): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      (listener as (event: { data: unknown }) => void)({ data: JSON.stringify(data) });
+    }
+  }
+}
+
+function fakeApi(overrides: Partial<SlackWebApi> = {}): SlackWebApi {
+  return {
+    authTest: rs.fn(async () => ({ teamId: "T1", botUserId: "UBOT", botUsername: "scout" })),
+    openConnection: rs.fn(async () => "wss://example.invalid/socket"),
+    postMessage: rs.fn(async () => ({ ts: "100.1" })),
+    openDirectMessage: rs.fn(async () => "D9"),
+    userName: rs.fn(async () => ({ displayName: "Ada", username: "ada" })),
+    ...overrides,
+  };
+}
+
+function eventsApi(envelopeId: string, event: SlackEventCallback["event"], eventId = envelopeId) {
+  return {
+    type: "events_api",
+    envelope_id: envelopeId,
+    payload: { type: "event_callback", team_id: "T1", event_id: eventId, event },
+  };
+}
+
+async function startedAdapter(api = fakeApi()) {
+  const sockets: FakeSocket[] = [];
+  const faults: Array<{ kind: string; cause: unknown }> = [];
+  const adapter = new SlackAdapter({
+    botToken: "xoxb-1",
+    appToken: "xapp-1",
+    channel: "slack_bot",
+    api,
+    createSocket: () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    },
+    onFault: (fault) => faults.push(fault),
+  });
+  const received: ChannelMessage[] = [];
+  adapter.onInbound(async (message) => {
+    received.push(message);
+  });
+  await adapter.start();
+  return { adapter, api, sockets, faults, received };
+}
+
+describe("SlackAdapter inbound", () => {
+  it("acknowledges each envelope and delivers a direct message as a DM", async () => {
+    const { sockets, received } = await startedAdapter();
+    sockets[0].emit(
+      "message",
+      eventsApi("env-1", {
+        type: "message",
+        channel_type: "im",
+        channel: "D1",
+        user: "UADA",
+        text: "hello <@UBOT>",
+        ts: "1700000000.000100",
+      }),
+    );
+    expect(sockets[0].sent).toEqual([JSON.stringify({ envelope_id: "env-1" })]);
+    await rs.waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0]).toMatchObject({
+      channel: "slack_bot",
+      direction: "inbound",
+      conversationId: "D1",
+      senderId: "T1/UADA",
+      senderDisplayName: "Ada",
+      senderUsername: "ada",
+      text: "hello",
+      thread: { kind: "dm" },
+      addressing: "direct",
+    });
+  });
+
+  it("makes a channel mention its own thread conversation", async () => {
+    const { sockets, received } = await startedAdapter();
+    sockets[0].emit(
+      "message",
+      eventsApi("env-2", {
+        type: "app_mention",
+        channel: "C1",
+        user: "UADA",
+        text: "<@UBOT> summarize this",
+        ts: "200.2",
+        thread_ts: "150.0",
+      }),
+    );
+    await rs.waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0]).toMatchObject({
+      conversationId: "C1:150.0",
+      parentConversationId: "C1",
+      thread: { kind: "topic" },
+      addressing: "mention",
+      replyTo: { messageId: "150.0" },
+      text: "summarize this",
+    });
+  });
+
+  it("drops Slack's redelivery of an event it already handled", async () => {
+    const { sockets, received } = await startedAdapter();
+    const event = {
+      type: "message",
+      channel_type: "im",
+      channel: "D1",
+      user: "UADA",
+      text: "once",
+      ts: "1.0",
+    };
+    sockets[0].emit("message", eventsApi("env-a", event, "Ev1"));
+    sockets[0].emit("message", eventsApi("env-b", event, "Ev1"));
+    await rs.waitFor(() => expect(received).toHaveLength(1));
+    expect(sockets[0].sent).toHaveLength(2);
+  });
+
+  it("ignores the bot's own messages, other bots, edits, and authors from another workspace", async () => {
+    const { sockets, received } = await startedAdapter();
+    const base = { type: "message", channel_type: "im", channel: "D1", text: "x", ts: "1.0" };
+    sockets[0].emit("message", eventsApi("e1", { ...base, user: "UBOT" }));
+    sockets[0].emit("message", eventsApi("e2", { ...base, user: "UX", bot_id: "B1" }));
+    sockets[0].emit(
+      "message",
+      eventsApi("e3", { ...base, user: "UX", subtype: "message_changed" }),
+    );
+    sockets[0].emit("message", eventsApi("e4", { ...base, user: "UX", user_team: "T2" }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(received).toHaveLength(0);
+  });
+
+  it("reports an uninstalled app as a refused credential", async () => {
+    const { sockets, faults } = await startedAdapter();
+    sockets[0].emit("message", eventsApi("e1", { type: "app_uninstalled" }));
+    expect(faults).toHaveLength(1);
+    expect(faults[0].kind).toBe("credential");
+  });
+
+  it("opens a fresh connection when Slack retires the current one", async () => {
+    const { sockets, api } = await startedAdapter();
+    sockets[0].emit("message", { type: "disconnect", reason: "refresh_requested" });
+    expect(sockets[0].closed).toBe(true);
+    await rs.waitFor(() => expect(sockets).toHaveLength(2));
+    expect(api.openConnection).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects start when Slack refuses the app-level token", async () => {
+    const api = fakeApi({
+      openConnection: rs.fn(async () => {
+        throw new SlackApiError("invalid_auth");
+      }),
+    });
+    await expect(startedAdapter(api)).rejects.toThrow(SlackApiError);
+  });
+});
+
+describe("SlackAdapter send", () => {
+  it("replies in the thread a conversation names", async () => {
+    const { adapter, api } = await startedAdapter();
+    const receipt = await adapter.send("C1:150.0" as ConversationId, { text: "**done**" });
+    expect(api.postMessage).toHaveBeenCalledWith(
+      "xoxb-1",
+      { channel: "C1", markdown: "**done**", threadTs: "150.0" },
+      expect.anything(),
+    );
+    expect(receipt).toEqual({ conversationId: "C1:150.0", messageId: "100.1" });
+  });
+
+  it("opens the direct message for a member's address", async () => {
+    const { adapter, api } = await startedAdapter();
+    await expect(adapter.directConversationFor("T1/UADA")).resolves.toBe("D9");
+    expect(api.openDirectMessage).toHaveBeenCalledWith("xoxb-1", "UADA", expect.anything());
+  });
+});
+
+describe("slack text", () => {
+  it("unwraps mentions, channels, links and entities", () => {
+    expect(
+      decodeSlackText(
+        "<@UBOT> ask <@U2|bob> in <#C1|general> about <https://x.dev|docs> &amp; more",
+        "UBOT",
+      ),
+    ).toBe("ask @bob in #general about docs (https://x.dev) & more");
+  });
+
+  it("splits long text without breaking a code point", () => {
+    const chunks = splitSlackText("ab😀cd", 3);
+    expect(chunks.join("")).toBe("ab😀cd");
+    expect(chunks.every((chunk) => chunk.length <= 3)).toBe(true);
+  });
+
+  it("reads a thread address back into channel and thread", () => {
+    expect(parseSlackConversationId("C1:150.0")).toEqual({ channelId: "C1", threadTs: "150.0" });
+    expect(parseSlackConversationId("D1")).toEqual({ channelId: "D1" });
+  });
+});

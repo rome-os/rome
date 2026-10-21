@@ -11,6 +11,7 @@
 const PLATFORM_BY_SERVICE: Readonly<Record<string, string>> = {
   telegram_user: "telegram",
   wechat_user: "wechat",
+  slack_bot: "slack",
 };
 
 /** The platform `service` belongs to. Every service not listed is its own. */

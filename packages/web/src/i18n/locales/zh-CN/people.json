@@ -37,7 +37,8 @@
     "wechat": "微信",
     "email": "邮件",
     "agents": "Agents",
-    "feishu": "飞书"
+    "feishu": "飞书",
+    "slack": "Slack"
   },
   "filters": {
     "groupLabel": "按亲密度筛选人物",
