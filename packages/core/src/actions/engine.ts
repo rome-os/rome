@@ -33,7 +33,7 @@ import {
   type ActionWorkerPayload,
   type ActionWorkerShutdown,
 } from "./worker-protocol.js";
-import type { MemoryHeadroomReader } from "./memory-headroom.js";
+import { isMemoryShort, type MemoryHeadroomReader } from "./memory-headroom.js";
 import {
   normalizeActionEvent,
   type ActionInvocationObserver,
@@ -114,15 +114,12 @@ const DEFAULT_QUEUED_ROOT_MAX_WAIT_MS = 10 * 60_000;
  * callers — agent tool calls, nested delegations, interactive turns — whose
  * caller often holds a worker of its own and cannot wait for one. */
 const RESERVED_WORKER_SLOTS = 2;
-/** A queued root starts only while the instance's available memory is at least
- * this share of its limit. One line, no latch: each start is judged against a
- * reading taken just before it, so a started root stops the next start once
- * its usage shows in a later reading, and a finished root lets the next one go.
- * Roots admitted on one reading start together. Fail-fast callers never see
- * the gate: their caller may hold a worker and cannot wait. */
-const MEMORY_HOLD_FRACTION = 0.15;
-/** How often a held queue re-reads memory. Memory can recover without any
- * worker exiting, so the queue cannot rely on slot changes alone. */
+/** How often a held queue re-reads memory. A queued root starts only while the
+ * instance is not short on memory (see isMemoryShort), judged against a reading
+ * taken just before it, so a started root stops the next start once its usage
+ * shows and a finished root lets the next one go. Memory can recover without
+ * any worker exiting, so the queue cannot rely on slot changes alone. Fail-fast
+ * callers never see the gate: their caller may hold a worker and cannot wait. */
 const QUEUE_MEMORY_RECHECK_MS = 5_000;
 /** A reading that hovers at the line crosses it on many rechecks. The gate logs
  * a crossing at most this often, so a long hold costs two lines, not hundreds. */
@@ -1389,8 +1386,7 @@ export class ActionEngine {
   private memoryAllowsAdmission(): boolean {
     const sample = this.memoryHeadroom();
     if (!sample || !(sample.limitBytes > 0)) return true;
-    const available = sample.availableBytes / sample.limitBytes;
-    const short = available < MEMORY_HOLD_FRACTION;
+    const short = isMemoryShort(sample);
     if (short !== this.memoryShort) {
       this.memoryShort = short;
       const now = this.clock.now().getTime();

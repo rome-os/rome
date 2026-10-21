@@ -57,11 +57,11 @@
       "add": "添加另一个账号",
       "addedNotShown": "账号已连接，可在连接列表中找到。",
       "newAccount": "新账号",
-      "noAgent": "无。此账号不回复。",
+      "noAgent": "无。Rome 不监听此账号。",
       "changeInEnvoys": "在外派智能体中更改",
       "agentAnswers": "负责回复此账号上的消息",
       "noAgentTitle": "无智能体",
-      "agentNone": "此账号不回复"
+      "agentNone": "Rome 不监听此账号"
     },
     "headings": {
       "connected": "这个连接让你的 agent 能",
@@ -368,7 +368,7 @@
       },
       "mainAgent": "main（默认）",
       "accountAgent": "{{agent}}（此账号的智能体）",
-      "silentAccount": "此账号关联的智能体在这里回复。",
+      "silentAccount": "此账号有智能体之前，这里的消息不会到达 Rome。",
       "silentAccountLink": "<account>在账号页面关联</account>。",
       "silentAccountOverride": "关联后，此对话选择的 {{agent}} 将生效。",
       "sessionReset": {
@@ -805,7 +805,15 @@
       "noChannels": "无活动通道",
       "apps": "应用",
       "appsHealthy": "已加载 {{count}} 个，无失败",
-      "appsUnhealthy": "已加载 {{count}} 个；失败：{{ids}}"
+      "appsUnhealthy": "已加载 {{count}} 个；失败：{{ids}}",
+      "memory": "内存",
+      "disk": "磁盘",
+      "free": "剩余 {{free}}，共 {{total}}",
+      "ok": "正常",
+      "short": "不足",
+      "low": "不足",
+      "memoryShortHint": "内存不足。排队中的任务会等到内存释放后再开始，正在运行的任务可能变慢。",
+      "diskLowHint": "磁盘即将用满。请在写入开始失败前清理空间。"
     },
     "uptimePrefix": "已运行 {{uptime}}",
     "buildPrefix": "版本 {{sha}} · 构建于 {{builtAt}}",

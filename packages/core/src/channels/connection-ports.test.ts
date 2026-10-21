@@ -382,6 +382,110 @@ describe("connection ports for a service's later channels", () => {
   });
 });
 
+describe("a channel Rome does not listen to", () => {
+  function setup(listenedAtFirst: boolean) {
+    const { db } = createTestDb();
+    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const fx = makePasteTalk();
+    registry.register(fx.descriptor);
+    let listened = listenedAtFirst;
+    const listeners: Array<(channel: string) => void> = [];
+    const admitted: string[] = [];
+    const deps: ConnectionPortsDeps = {
+      registry,
+      channelOf: serviceChannelOf,
+      admit: async (_connectionId, _service, message) => {
+        admitted.push(message.messageId);
+        return true;
+      },
+      listening: {
+        listens: (channel) => channel === "fake-telegram" && listened,
+        onChange: (listener) => listeners.push(listener),
+      },
+    };
+    const ports = connectionPorts(deps, "fake-telegram")!;
+    const heard: string[] = [];
+    ports.inbound!.subscribe(async (event) => {
+      heard.push(event.message.messageId);
+    });
+    const listen = (to: boolean, channel = "fake-telegram") => {
+      listened = to;
+      for (const listener of listeners) listener(channel);
+    };
+    const deliver = async (id: string) => {
+      fx.talkerFactory.instances.at(-1)!.state.deliver!({
+        ...said(id, "dm-1", 0),
+        channel: "fake-telegram",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    return { registry, fx, ports, heard, admitted, listen, deliver };
+  }
+
+  it("hears nothing, not even admission, until it is listened to", async () => {
+    const { registry, fx, heard, admitted, listen, deliver } = setup(false);
+    const connection = await registry.connect("fake-telegram");
+    await registry.importCredential(connection.id, "bot", fx.validCredential());
+
+    await deliver("before");
+    expect(heard).toEqual([]);
+    expect(admitted).toEqual([]);
+
+    listen(true);
+    await deliver("after");
+    expect(heard).toEqual(["after"]);
+    expect(admitted).toEqual(["after"]);
+  });
+
+  it("stops hearing when it stops being listened to, and starts again", async () => {
+    const { registry, fx, heard, listen, deliver } = setup(true);
+    const connection = await registry.connect("fake-telegram");
+    await registry.importCredential(connection.id, "bot", fx.validCredential());
+
+    await deliver("m1");
+    listen(false);
+    await deliver("m2");
+    listen(true);
+    // A second change to the same answer adds no second subscription.
+    listen(true);
+    await deliver("m3");
+
+    expect(heard).toEqual(["m1", "m3"]);
+  });
+
+  it("ignores a change to another channel", async () => {
+    const { registry, fx, heard, listen, deliver } = setup(false);
+    const connection = await registry.connect("fake-telegram");
+    await registry.importCredential(connection.id, "bot", fx.validCredential());
+
+    listen(true, "fake-telegram-2");
+    await deliver("m1");
+
+    expect(heard).toEqual([]);
+  });
+
+  it("sends whether or not it is listened to", async () => {
+    const { registry, fx, ports } = setup(false);
+    const connection = await registry.connect("fake-telegram");
+    await registry.importCredential(connection.id, "bot", fx.validCredential());
+
+    await ports.send!.send("dm-1" as ConversationId, { text: "hi" });
+
+    expect(fx.talkerFactory.instances.at(-1)!.state.sends).toHaveLength(1);
+  });
+
+  it("starts listening on a Connection that unlocks after it was listened to", async () => {
+    const { registry, fx, heard, listen, deliver } = setup(false);
+    const connection = await registry.connect("fake-telegram");
+    listen(true);
+    await registry.importCredential(connection.id, "bot", fx.validCredential());
+
+    await deliver("m1");
+
+    expect(heard).toEqual(["m1"]);
+  });
+});
+
 describe("a Connection with no channel record", () => {
   it("backs no channel, not even its service's first", async () => {
     const { db } = createTestDb();

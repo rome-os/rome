@@ -102,6 +102,11 @@ export function setupsRoutes(deps: ApiDeps): Hono {
         : c.json({ error: "Unknown connection." }, 404);
     }
     const grant = c.req.param("name");
+    // Checked before anything below touches the account, so a start for a
+    // grant with no setup changes nothing.
+    if (!registry.getDescriptor(target.service)?.auth[grant]?.setup) {
+      return c.json({ error: "No conferral setup for this grant." }, 404);
+    }
     // An account that connects again starts fresh, so the card of a
     // disconnected account offers no setup into it. Its card goes on the next
     // refresh, and the service's own Connect starts the new account.

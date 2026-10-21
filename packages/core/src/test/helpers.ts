@@ -746,6 +746,7 @@ export async function buildTestDeps(
     appStore,
     actionRegistry,
     agentLoader,
+    accountListening: { changed: () => {} },
     skillCatalog,
     appsRoot: join(appDomainRoot, "apps"),
     sessionManager,

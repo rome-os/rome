@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelRecord } from "../db/repositories/channel-records.js";
-import { answeringAgentOf, accountAgentResolver } from "./account-agents.js";
+import { AccountListening, answeringAgentOf, accountAgentResolver } from "./account-agents.js";
 
 const warn = rs.hoisted(() => rs.fn());
 const info = rs.hoisted(() => rs.fn());
@@ -106,6 +106,73 @@ describe("accountAgentResolver", () => {
     for (const name of ["webchat", "email", "agents", "whatsapp"]) {
       expect(accountAgentOf(name)).toBeUndefined();
     }
+  });
+});
+
+describe("AccountListening", () => {
+  const records = new Map<string, { service: string; agent: string | null }>();
+  const repository = {
+    byId: (id: string) => {
+      const record = records.get(id);
+      return record ? ({ id, ...record } as unknown as ChannelRecord) : null;
+    },
+  };
+
+  beforeEach(() => records.clear());
+
+  it("listens to a linkable account only while its record names an agent", () => {
+    const listening = new AccountListening(repository);
+    records.set("feishu-2", { service: "feishu", agent: "sales:agent" });
+    expect(listening.listens("feishu-2")).toBe(true);
+
+    records.set("feishu-2", { service: "feishu", agent: null });
+    expect(listening.listens("feishu-2")).toBe(false);
+
+    // An agent that is not loaded still holds the account.
+    records.set("feishu-2", { service: "feishu", agent: "gone:agent" });
+    expect(listening.listens("feishu-2")).toBe(true);
+  });
+
+  it("tells every listener of a change even when one throws", () => {
+    const listening = new AccountListening(repository);
+    const heard = rs.fn();
+    listening.onChange(() => {
+      throw new Error("port failed");
+    });
+    listening.onChange(heard);
+    warn.mockClear();
+
+    listening.changed(["feishu-2", null]);
+
+    expect(heard).toHaveBeenCalledWith("feishu-2");
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not listen to a linkable channel no record names", () => {
+    expect(new AccountListening(repository).listens("telegram")).toBe(false);
+  });
+
+  it("always listens to an account of a service that takes no agent", () => {
+    const listening = new AccountListening(repository);
+    records.set("email", { service: "email", agent: null });
+
+    for (const name of ["email", "webchat", "agents", "whatsapp"]) {
+      expect(listening.listens(name)).toBe(true);
+    }
+  });
+
+  it("tells every listener of each account a write touched", () => {
+    const listening = new AccountListening(repository);
+    const heard: string[][] = [[], []];
+    listening.onChange((channel) => heard[0]!.push(channel));
+    listening.onChange((channel) => heard[1]!.push(channel));
+
+    listening.changed(["telegram", null, "telegram_user"]);
+
+    expect(heard).toEqual([
+      ["telegram", "telegram_user"],
+      ["telegram", "telegram_user"],
+    ]);
   });
 });
 

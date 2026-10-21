@@ -6,6 +6,8 @@ import {
   type ActionResult,
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
+import { inDashboardChat } from "../../lib/chat-activity.js";
+import { extractText } from "../../lib/message-text.js";
 
 const log = createAppLogger("get_webchat_conversations");
 
@@ -15,38 +17,6 @@ interface MessageRow {
   role: string;
   content: string;
   created_at: number;
-}
-
-function extractText(rawContent: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawContent);
-  } catch {
-    return rawContent.trim();
-  }
-
-  if (typeof parsed === "string") return parsed.trim();
-
-  if (Array.isArray(parsed)) {
-    return parsed
-      .map((block: unknown) => {
-        if (typeof block === "string") return block;
-        if (typeof block === "object" && block !== null) {
-          const b = block as Record<string, unknown>;
-          if (b.type === "tool_result" || b.type === "tool_use") return "";
-          // Stored text parts carry the text in `content`; `text` is the
-          // older block shape.
-          if (b.type === "text" && typeof b.content === "string") return b.content;
-          if (typeof b.text === "string") return b.text;
-        }
-        return "";
-      })
-      .filter(Boolean)
-      .join("\n")
-      .trim();
-  }
-
-  return String(parsed).trim();
 }
 
 function formatConversations(rows: MessageRow[]): string {
@@ -126,7 +96,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.session_id = ${sessionId}
                 AND wm.created_at >= ${cutoffSeconds}
-                AND (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
+                AND ${inDashboardChat("ws")}
               ORDER BY wm.created_at ASC
             `,
           ) as MessageRow[];
@@ -137,7 +107,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               FROM rome_agent_messages wm
               JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.created_at >= ${cutoffSeconds}
-                AND (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
+                AND ${inDashboardChat("ws")}
               ORDER BY wm.session_id, wm.created_at ASC
             `,
           ) as MessageRow[];

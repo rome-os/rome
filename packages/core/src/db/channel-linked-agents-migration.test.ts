@@ -8,6 +8,7 @@ const migrationPath = (name: string) =>
   resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system", name);
 const CHANNEL_RECORDS = readFileSync(migrationPath("0080_channel_records.sql"), "utf8");
 const LINKED_AGENTS = readFileSync(migrationPath("0081_channel_linked_agents.sql"), "utf8");
+const ANY_NUMBER = readFileSync(migrationPath("0082_channels_any_number_per_platform.sql"), "utf8");
 
 function run(sqlite: Database.Database, migration: string): void {
   for (const statement of migration.split("--> statement-breakpoint")) sqlite.exec(statement);
@@ -44,5 +45,27 @@ describe("channel linked agents migration", () => {
       agents: null,
       webchat: null,
     });
+  });
+});
+
+describe("channels any number per platform migration", () => {
+  it("lets an agent other than main hold several accounts of one platform", () => {
+    const sqlite = new Database(":memory:");
+    run(sqlite, CHANNEL_RECORDS);
+    run(sqlite, LINKED_AGENTS);
+    const insert = sqlite.prepare(
+      "INSERT INTO channels (id, service, platform, connection_id, created_at, agent) VALUES (?, ?, ?, ?, 0, ?)",
+    );
+    insert.run("telegram", "telegram", "telegram", "c1", "sales:agent");
+    expect(() =>
+      insert.run("telegram_user", "telegram_user", "telegram", "c2", "sales:agent"),
+    ).toThrow(/UNIQUE/);
+
+    run(sqlite, ANY_NUMBER);
+    insert.run("telegram_user", "telegram_user", "telegram", "c2", "sales:agent");
+
+    expect(
+      sqlite.prepare("SELECT id FROM channels WHERE agent = 'sales:agent' ORDER BY id").all(),
+    ).toEqual([{ id: "telegram" }, { id: "telegram_user" }]);
   });
 });

@@ -1,6 +1,7 @@
 import type { AppCatalog } from "./catalog.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 import { parseListingId } from "./packaging/index.js";
+import { withRomeCloudReadAuth } from "./rome-cloud-read-auth.js";
 
 export interface AppStoreInstalledState {
   appId: string;
@@ -184,7 +185,9 @@ export function createAppStoreService(opts: CreateAppStoreServiceOptions = {}): 
 
       let upstream: Response;
       try {
-        upstream = await fetchImpl(url, { headers: { accept: "application/json" } });
+        upstream = await fetchImpl(url, {
+          headers: withRomeCloudReadAuth(url, { accept: "application/json" }),
+        });
       } catch (err) {
         return {
           status: 502,
@@ -252,7 +255,9 @@ export function createAppStoreService(opts: CreateAppStoreServiceOptions = {}): 
       const url = new URL(upstreamPath, fetchOrigin);
       let upstream: Response;
       try {
-        upstream = await fetchImpl(url, { headers: { accept: "application/json" } });
+        upstream = await fetchImpl(url, {
+          headers: withRomeCloudReadAuth(url, { accept: "application/json" }),
+        });
       } catch (err) {
         return {
           status: 502,

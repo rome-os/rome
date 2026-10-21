@@ -14,7 +14,6 @@ import type { OutboxMessage } from "@rome/api-types/people";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
-import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import {
   APPROVAL_EXECUTION_STATES,
   APPROVAL_STATUSES,
@@ -882,11 +881,9 @@ export const connections = sqliteTable("connections", {
 // outlives its Connection, unbacked and unlinked, so its id is never minted
 // again: a linkable service's next Connection gets a channel of its own, and
 // another service's takes the row back. `agent` is the canonical id of the
-// account's agent.
-// `platform` is stored, not derived on read, so the partial unique index can
-// hold that on one platform an agent other than main is linked to at most one
-// channel; a row keeps the platform it was minted on. Main is exempt, since
-// it answers a platform's bot and its signed-in user at once.
+// account's agent, and one agent may be the agent of any number of channels,
+// several on one platform included. `platform` is the platform the row was
+// minted on, and the row keeps it.
 export const channels = sqliteTable(
   "channels",
   {
@@ -897,14 +894,7 @@ export const channels = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     agent: text("agent"),
   },
-  (table) => [
-    uniqueIndex("channels_connection_unique").on(table.connectionId),
-    uniqueIndex("channels_platform_agent_unique")
-      .on(table.platform, table.agent)
-      .where(
-        sql`${table.agent} IS NOT NULL AND ${table.agent} <> ${sql.raw(`'${MAIN_AGENT_ID}'`)}`,
-      ),
-  ],
+  (table) => [uniqueIndex("channels_connection_unique").on(table.connectionId)],
 );
 
 // The grant ledger. Rows record outcomes only — never step/flow state

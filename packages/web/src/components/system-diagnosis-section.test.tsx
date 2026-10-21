@@ -31,7 +31,13 @@ type Diagnosis = {
   relay: { configured: boolean; depositUrlConfigured: boolean };
   channels: string[];
   apps: { total: number; failed: string[]; broken: string[] };
+  resources: {
+    memory: { limitBytes: number; availableBytes: number; short: boolean } | null;
+    disk: { totalBytes: number; freeBytes: number; low: boolean } | null;
+  };
 };
+
+const GIB = 1024 ** 3;
 
 function diagnosis(overrides: Partial<Diagnosis> = {}): Diagnosis {
   return {
@@ -46,6 +52,10 @@ function diagnosis(overrides: Partial<Diagnosis> = {}): Diagnosis {
     relay: { configured: true, depositUrlConfigured: true },
     channels: ["telegram", "webchat"],
     apps: { total: 5, failed: [], broken: [] },
+    resources: {
+      memory: { limitBytes: 4 * GIB, availableBytes: 2.6 * GIB, short: false },
+      disk: { totalBytes: 40 * GIB, freeBytes: 21 * GIB, low: false },
+    },
     ...overrides,
   };
 }
@@ -85,6 +95,40 @@ describe("SystemDiagnosisSection", () => {
     expect(screen.getByText("Relay deposit URL")).toBeTruthy();
     expect(screen.getByText("Configured")).toBeTruthy();
     expect(screen.getByText("5 loaded, none failed")).toBeTruthy();
+    expect(screen.getByText("2.6 GB of 4.0 GB free")).toBeTruthy();
+    expect(screen.getByText("21.0 GB of 40.0 GB free")).toBeTruthy();
+    expect(screen.getAllByText("OK")).toHaveLength(2);
+    expect(screen.queryByText(/Memory is short/)).toBeNull();
+  });
+
+  it("marks short memory and low disk and says what each means", async () => {
+    mockDiagnosis({
+      status: 200,
+      body: diagnosis({
+        resources: {
+          memory: { limitBytes: 4 * GIB, availableBytes: 0.5 * GIB, short: true },
+          disk: { totalBytes: 40 * GIB, freeBytes: 3 * GIB, low: true },
+        },
+      }),
+    });
+    renderSection();
+
+    expect(await screen.findByText("Short")).toBeTruthy();
+    expect(screen.getByText("Low")).toBeTruthy();
+    expect(screen.getByText(/Memory is short/)).toBeTruthy();
+    expect(screen.getByText(/Disk is nearly full/)).toBeTruthy();
+  });
+
+  it("leaves out a resource the host cannot read", async () => {
+    mockDiagnosis({
+      status: 200,
+      body: diagnosis({ resources: { memory: null, disk: null } }),
+    });
+    renderSection();
+
+    expect(await screen.findByText("Healthy")).toBeTruthy();
+    expect(screen.queryByText("Memory")).toBeNull();
+    expect(screen.queryByText("Disk")).toBeNull();
   });
 
   it("shows a degraded verdict and names the unreachable DB and failed apps", async () => {

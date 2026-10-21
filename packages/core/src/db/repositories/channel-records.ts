@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
-import { and, asc, eq, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
 import { channels } from "../schema.js";
@@ -18,13 +18,6 @@ export interface ChannelRecord {
   connectionId: string | null;
   agent: string | null;
   createdAt: Date;
-}
-
-/** What a link changed: the channel as it now stands, and the channel on the
- *  same platform the agent was taken from, if it was linked to one. */
-export interface LinkOutcome {
-  channel: ChannelRecord;
-  unlinkedFrom: string | null;
 }
 
 export class ChannelRecordNotFound extends Error {
@@ -202,15 +195,13 @@ export class ChannelRecordsRepository {
   }
 
   /**
-   * Link `agent` to channel `id`, or unlink it with null. On one platform an
-   * agent other than main is linked to at most one channel, so linking it here
-   * unlinks it from any other channel on this platform, in the same
-   * transaction. The partial unique index rejects any write that would break
-   * the rule anyway. Main may hold several channels of one platform, and is
+   * Link `agent` to channel `id`, or unlink it with null, and return the
+   * channel as it now stands. Only channel `id` changes: an agent may be the
+   * agent of any number of channels, several on one platform included. Main is
    * stored by its canonical id. Only a channel of a linkable service takes a
    * link; unlinking is always open.
    */
-  link(id: string, requested: string | null): LinkOutcome {
+  link(id: string, requested: string | null): ChannelRecord {
     const agent = requested !== null && isCoreMainAgentId(requested) ? MAIN_AGENT_ID : requested;
     return this.db.transaction((tx) => {
       const row = tx.select().from(channels).where(eq(channels.id, id)).get();
@@ -219,26 +210,8 @@ export class ChannelRecordsRepository {
         throw new ChannelNotLinkable(id, row.service);
       }
       if (agent !== null && row.connectionId === null) throw new ChannelUnbacked(id);
-      let unlinkedFrom: string | null = null;
-      if (agent !== null && agent !== MAIN_AGENT_ID) {
-        const holder = tx
-          .select({ id: channels.id })
-          .from(channels)
-          .where(
-            and(
-              eq(channels.platform, row.platform),
-              eq(channels.agent, agent),
-              ne(channels.id, id),
-            ),
-          )
-          .get();
-        if (holder) {
-          tx.update(channels).set({ agent: null }).where(eq(channels.id, holder.id)).run();
-          unlinkedFrom = holder.id;
-        }
-      }
       tx.update(channels).set({ agent }).where(eq(channels.id, id)).run();
-      return { channel: toRecord({ ...row, agent }), unlinkedFrom };
+      return toRecord({ ...row, agent });
     });
   }
 

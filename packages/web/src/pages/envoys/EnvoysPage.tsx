@@ -330,7 +330,6 @@ function AccountAgentRow({
     <div className="py-3">
       <AgentChange
         account={account}
-        envoys={data.envoys}
         agents={data.agents}
         disabled={data.agentsPending}
         onChanged={onChanged}

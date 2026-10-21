@@ -22,7 +22,14 @@ describe("channel account routes", () => {
       has: (name: string) => name in loaded,
       getCanonicalName: (name: string) => loaded[name]!,
     } as unknown as ApiDeps["agentLoader"];
-    const app = new Hono().route("/", channelAccountsRoutes({ db: testDb.db, agentLoader }));
+    const changed: Array<string | null> = [];
+    const accountListening = {
+      changed: (channels: Iterable<string | null>) => changed.push(...channels),
+    };
+    const app = new Hono().route(
+      "/",
+      channelAccountsRoutes({ db: testDb.db, agentLoader, accountListening }),
+    );
     const link = (
       id: string,
       agent: string | null,
@@ -33,7 +40,7 @@ describe("channel account routes", () => {
         headers,
         body: JSON.stringify({ agent }),
       });
-    return { records, app, link, db: testDb.db };
+    return { records, app, link, changed, db: testDb.db };
   }
 
   it("lists each account with its agent", async () => {
@@ -57,7 +64,7 @@ describe("channel account routes", () => {
     });
   });
 
-  it("links an agent and reports the account it moved from", async () => {
+  it("links an agent to a second account of a platform and keeps the first", async () => {
     const { records, link, db } = setup();
     records.claim(db, { id: "c1", service: "telegram" }, NOW);
     records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
@@ -66,11 +73,42 @@ describe("channel account routes", () => {
     const res = await link("telegram_user", "sales:agent");
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
-      account: { id: "telegram_user", agent: "sales:agent" },
-      unlinkedFrom: "telegram",
+    expect(await res.json()).toEqual({
+      account: {
+        id: "telegram_user",
+        service: "telegram_user",
+        platform: "telegram",
+        connectionId: "c2",
+        agent: "sales:agent",
+      },
     });
-    expect(records.byId("telegram")?.agent).toBeNull();
+    expect(records.byId("telegram")?.agent).toBe("sales:agent");
+  });
+
+  it("passes only the account a link touched on to the listening", async () => {
+    const { records, link, changed, db } = setup();
+    records.claim(db, { id: "c1", service: "telegram" }, NOW);
+    records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
+    await link("telegram", "sales:agent");
+    expect(changed).toEqual(["telegram"]);
+
+    changed.length = 0;
+    await link("telegram_user", "sales:agent");
+    expect(changed).toEqual(["telegram_user"]);
+    expect(records.byId("telegram")?.agent).toBe("sales:agent");
+
+    changed.length = 0;
+    await link("telegram_user", null);
+    expect(changed).toEqual(["telegram_user"]);
+  });
+
+  it("passes nothing on when a link is refused", async () => {
+    const { records, link, changed, db } = setup();
+    records.claim(db, { id: "c1", service: "agents" }, NOW);
+
+    expect((await link("agents", "sales:agent")).status).toBe(400);
+    expect((await link("nope", "sales:agent")).status).toBe(404);
+    expect(changed).toEqual([]);
   });
 
   it("stores the agent's canonical id", async () => {
@@ -89,7 +127,7 @@ describe("channel account routes", () => {
     const res = await link("feishu", null);
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ account: { agent: null }, unlinkedFrom: null });
+    expect(await res.json()).toMatchObject({ account: { agent: null } });
     expect(records.byId("feishu")?.agent).toBeNull();
   });
 
@@ -117,7 +155,6 @@ describe("channel account routes", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       account: { id: "feishu", agent: "core:main" },
-      unlinkedFrom: null,
     });
     records.link("feishu", null);
     expect((await link("feishu", "assistant")).status).toBe(200);
@@ -140,9 +177,7 @@ describe("channel account routes", () => {
     records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
     records.link("telegram_user", null);
 
-    const res = await link("telegram_user", "main");
-
-    expect(await res.json()).toMatchObject({ unlinkedFrom: null });
+    expect((await link("telegram_user", "main")).status).toBe(200);
     expect(records.byId("telegram")?.agent).toBe("core:main");
     expect(records.byId("telegram_user")?.agent).toBe("core:main");
   });

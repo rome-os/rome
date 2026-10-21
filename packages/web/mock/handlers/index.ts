@@ -1066,6 +1066,31 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
 
 export const handlers = [
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
+  // A healthy snapshot for the Advanced tab. Identity is already enrolled, so the
+  // section shows the account row rather than a reconnect prompt.
+  http.get("/api/diagnosis", () =>
+    HttpResponse.json({
+      status: "ok",
+      checkedAt: new Date().toISOString(),
+      uptimeSeconds: 3 * 86_400 + 4 * 3_600 + 12 * 60,
+      build: {
+        version: "1.1.154",
+        sha: "c2f71ed6",
+        builtAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+      },
+      upgradedSinceLastBoot: false,
+      previousVersion: null,
+      instance: { auth: "ok", accountId: "acct_mock", instanceId: "inst_mock" },
+      database: { ok: true },
+      relay: { configured: true, depositUrlConfigured: true },
+      channels: ["telegram", "webchat"],
+      apps: { total: 12, failed: [], broken: [] },
+      resources: {
+        memory: { limitBytes: 4 * 1024 ** 3, availableBytes: 2.6 * 1024 ** 3, short: false },
+        disk: { totalBytes: 40 * 1024 ** 3, freeBytes: 21 * 1024 ** 3, low: false },
+      },
+    }),
+  ),
   http.get("/api/bootstrap", () => HttpResponse.json(bootstrap)),
   http.get("/api/auth/me", () => HttpResponse.json(identity)),
   http.get("/api/chat/sessions", () => HttpResponse.json(chatSessions)),
@@ -1230,9 +1255,8 @@ export const handlers = [
     HttpResponse.json({ agents: mockAgentNames.map((name) => ({ name })) }),
   ),
   http.get("/api/connections", () => HttpResponse.json(connections)),
-  // Link an agent to an account. On one platform an agent other than main
-  // links to at most one account, so linking it here takes the link off the
-  // other one.
+  // Link an agent to an account. Only this account changes: an agent may be
+  // linked to any number of accounts, several on one platform included.
   http.put("/api/channels/accounts/:id/agent", async ({ params, request }) => {
     const id = String(params.id);
     const body = (await request.json()) as { agent: string | null };
@@ -1256,27 +1280,15 @@ export const handlers = [
         { status: 409 },
       );
     }
-    const platform = platformOf(target.service);
-    let unlinkedFrom: string | null = null;
-    // Main may answer on several accounts, so only other agents move.
-    if (agent !== null && agent !== MAIN_AGENT_ID) {
-      for (const other of connections.connections) {
-        if (other === target || other.agent !== agent) continue;
-        if (platformOf(other.service) !== platform) continue;
-        other.agent = null;
-        unlinkedFrom = other.channel ?? null;
-      }
-    }
     target.agent = agent;
     return HttpResponse.json({
       account: {
         id,
         service: target.service,
-        platform,
+        platform: platformOf(target.service),
         connectionId: target.id,
         agent,
       },
-      unlinkedFrom,
     });
   }),
   // An authorized grant is what puts Disconnect on a card, so seeding the three

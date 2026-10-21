@@ -25,6 +25,12 @@ interface DiagnosisResponse {
   relay: { configured: boolean; depositUrlConfigured: boolean };
   channels: string[];
   apps: { total: number; failed: string[]; broken: string[] };
+  /** Absent from a core that predates the readings, so the card renders without
+   * the rows rather than failing. */
+  resources?: {
+    memory: { limitBytes: number; availableBytes: number; short: boolean } | null;
+    disk: { totalBytes: number; freeBytes: number; low: boolean } | null;
+  };
 }
 
 type AuthStatus = DiagnosisResponse["instance"]["auth"];
@@ -190,6 +196,34 @@ export function SystemDiagnosisSection() {
                   </span>
                 )}
               </DiagRow>
+              {d.resources?.memory && (
+                <ResourceRow
+                  label={t("advanced.diagnosis.memory")}
+                  reading={t("advanced.diagnosis.free", {
+                    free: formatBytes(d.resources.memory.availableBytes),
+                    total: formatBytes(d.resources.memory.limitBytes),
+                  })}
+                  pressed={d.resources.memory.short}
+                  badge={t(
+                    d.resources.memory.short ? "advanced.diagnosis.short" : "advanced.diagnosis.ok",
+                  )}
+                  hint={t("advanced.diagnosis.memoryShortHint")}
+                />
+              )}
+              {d.resources?.disk && (
+                <ResourceRow
+                  label={t("advanced.diagnosis.disk")}
+                  reading={t("advanced.diagnosis.free", {
+                    free: formatBytes(d.resources.disk.freeBytes),
+                    total: formatBytes(d.resources.disk.totalBytes),
+                  })}
+                  pressed={d.resources.disk.low}
+                  badge={t(
+                    d.resources.disk.low ? "advanced.diagnosis.low" : "advanced.diagnosis.ok",
+                  )}
+                  hint={t("advanced.diagnosis.diskLowHint")}
+                />
+              )}
             </dl>
           </CardContent>
         </Card>
@@ -209,6 +243,41 @@ function DiagRow({ label, children }: { label: string; children: ReactNode }) {
 
 function Dash() {
   return <span className="text-muted-foreground">—</span>;
+}
+
+/** A memory or disk reading with its verdict. The hint, one sentence on what
+ * the pressure means and what to do, appears only while the row is not green,
+ * so a healthy page stays quiet. */
+function ResourceRow({
+  label,
+  reading,
+  pressed,
+  badge,
+  hint,
+}: {
+  label: string;
+  reading: string;
+  pressed: boolean;
+  badge: string;
+  hint: string;
+}) {
+  return (
+    <DiagRow label={label}>
+      <div className="flex flex-col items-end gap-1">
+        <div className="flex items-center gap-2">
+          <span>{reading}</span>
+          <Badge variant={pressed ? "warning" : "success"}>{badge}</Badge>
+        </div>
+        {pressed && <p className="text-aux text-warning-fg">{hint}</p>}
+      </div>
+    </DiagRow>
+  );
+}
+
+/** Whole gigabytes read better than exact bytes for a 4 GB plan or a 40 GB
+ * disk, and one decimal keeps a 0.5 GB difference visible. */
+function formatBytes(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
 function formatDate(iso: string): string {

@@ -39,8 +39,6 @@
     "delegateSwitchConfirm": "将你自己的账号 {{account}} 切换为 <agent>{{to}}</agent>？从现在起，<agent>{{to}}</agent> 会代你在个人聊天中回复别人。",
     "unlinkConfirm": "取消 <agent>{{agent}}</agent> 与 {{account}} 的关联？账号保持连接，但在重新关联智能体之前，发给它的消息无人回复。",
     "delegateUnlinkConfirm": "取消 <agent>{{agent}}</agent> 与你自己的账号 {{account}} 的关联？<agent>{{agent}}</agent> 将不再代你在个人聊天中回复。",
-    "displaces": "<agent>{{to}}</agent> 将不再通过 {{other}} 回复，因为除 main 外，每个智能体在一个平台上只通过一个账号发言。",
-    "moved": "{{agent}} 已不再通过另一个 {{platform}} 账号回复，因为同一平台上，除 main 外的智能体只通过一个账号回复。",
     "link": "关联",
     "switch": "切换智能体",
     "unlink": "取消关联",

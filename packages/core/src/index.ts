@@ -80,7 +80,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
-import { accountAgentResolver } from "./channels/account-agents.js";
+import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectionPacing } from "./channels/delivery/connection-pacing.js";
@@ -279,6 +279,9 @@ async function main() {
 
   const sessionsRepo = new SessionsRepository(db);
   const channelRecords = new ChannelRecordsRepository(db);
+  // Rome listens to an account of a linkable service only while it has an
+  // agent: each channel's inbound port reads this, and a link tells it.
+  const accountListening = new AccountListening(channelRecords);
   // The service a channel name belongs to. Whatever is keyed by service, such
   // as a descriptor, a channel policy, or a person's link, reads it.
   const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
@@ -1228,7 +1231,13 @@ async function main() {
     whatsAppAccounts,
     linkedInAccounts,
     ...(wechatUserReader ? { wechatUserReader } : {}),
-    connections: { registry: connectionRegistry, admit, channelOf, pacing: replyPacing },
+    connections: {
+      registry: connectionRegistry,
+      admit,
+      channelOf,
+      pacing: replyPacing,
+      listening: accountListening,
+    },
     connectionAccounts: {
       [AGENTS_SERVICE]: agentsAccounts(listedAgents),
     },
@@ -1317,7 +1326,14 @@ async function main() {
   // a hook that takes added channels subscribes to it.
   connectionRegistry.onUnlocked("talk", (connection) => {
     const channel = joinLaterChannel(
-      { registry: connectionRegistry, admit, channelOf, pacing: replyPacing, channels },
+      {
+        registry: connectionRegistry,
+        admit,
+        channelOf,
+        pacing: replyPacing,
+        listening: accountListening,
+        channels,
+      },
       connection,
     );
     if (!channel) return;
@@ -1567,6 +1583,7 @@ async function main() {
       appStore,
       actionRegistry,
       agentLoader,
+      accountListening,
       skillCatalog,
       ogImageStore,
       db,

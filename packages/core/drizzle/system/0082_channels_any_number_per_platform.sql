@@ -1,0 +1,1 @@
+DROP INDEX `channels_platform_agent_unique`;

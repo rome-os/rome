@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { User } from "lucide-react";
@@ -206,6 +206,14 @@ export function ChannelConnectCard({
       else void onRefresh();
     },
   });
+
+  // A finished Reconnect is dropped once the account reads healthy, so a later
+  // fault offers Reconnect again instead of the old finished view.
+  const setupStatus = setup.state?.status;
+  const { reset } = setup;
+  useEffect(() => {
+    if (slot.state === "authorized" && setupStatus === "done") reset();
+  }, [slot.state, setupStatus, reset]);
 
   async function handleDisconnect() {
     if (!slot.connectionId || !slot.grant) return;

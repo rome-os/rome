@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { Hono } from "hono";
 import { diagnosisRoutes } from "./diagnosis.js";
+import type { ResourceProbes } from "../../lib/resource-readings.js";
 import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 
 type DiagnosisDeps = Parameters<typeof diagnosisRoutes>[0];
@@ -31,9 +32,11 @@ function buildDeps(
   } as unknown as DiagnosisDeps;
 }
 
-function mount(deps: DiagnosisDeps): Hono {
-  return new Hono().route("/", diagnosisRoutes(deps));
+function mount(deps: DiagnosisDeps, probes?: ResourceProbes): Hono {
+  return new Hono().route("/", diagnosisRoutes(deps, probes));
 }
+
+const GIB = 1024 ** 3;
 
 describe("GET /diagnosis", () => {
   const ROME_CLOUD_ENV = ["PANTHEON_BASE_ORIGIN", "PANTHEON_DOMAIN"];
@@ -52,6 +55,29 @@ describe("GET /diagnosis", () => {
       if (savedRomeCloudEnv[key] === undefined) delete process.env[key];
       else process.env[key] = savedRomeCloudEnv[key];
     }
+  });
+
+  it("carries memory and disk readings, and leaves the verdict alone when they are short and low", async () => {
+    const app = mount(buildDeps(), {
+      memory: () => ({ source: "meminfo", limitBytes: 4 * GIB, availableBytes: 0.5 * GIB }),
+      disk: () => ({ path: "/data", totalBytes: 40 * GIB, freeBytes: 3 * GIB }),
+    });
+
+    const body = await (await app.request("/diagnosis")).json();
+
+    expect(body.resources).toEqual({
+      memory: { limitBytes: 4 * GIB, availableBytes: 0.5 * GIB, short: true },
+      disk: { totalBytes: 40 * GIB, freeBytes: 3 * GIB, low: true },
+    });
+    expect(body.status).toBe("ok");
+  });
+
+  it("reports null readings where the host offers none", async () => {
+    const app = mount(buildDeps(), { memory: () => null, disk: () => null });
+
+    const body = await (await app.request("/diagnosis")).json();
+
+    expect(body.resources).toEqual({ memory: null, disk: null });
   });
 
   it("reports status ok for a reachable DB, no enrolled token, and no failed apps", async () => {
