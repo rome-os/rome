@@ -70,11 +70,16 @@ export function createPairingAdmission(deps: {
     // conversation's next reply, so on a slow provider it can arrive after the
     // agent's first answer. Approval is recorded before the send, so only the
     // order of the two bot messages is at stake.
+    // Outside a direct message the reply answers the message, so it lands
+    // where the message was said, such as in its Slack thread.
+    const replyToMessageId = message.thread?.kind === "dm" ? undefined : message.messageId;
     const reply = (text: string): void => {
-      sendOn(deps.registry, connectionId, message.conversationId, text).catch(() => {
-        // Provider errors may include the rejected request body. Do not log them.
-        log.error("pairing reply failed", { connectionId, senderId: message.senderId });
-      });
+      sendOn(deps.registry, connectionId, message.conversationId, text, replyToMessageId).catch(
+        () => {
+          // Provider errors may include the rejected request body. Do not log them.
+          log.error("pairing reply failed", { connectionId, senderId: message.senderId });
+        },
+      );
     };
     const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${pairingGuidePage(service)}).`;
     try {
@@ -203,6 +208,10 @@ async function sendOn(
   connectionId: string,
   conversationId: ChatId,
   text: string,
+  replyToMessageId?: string,
 ): Promise<void> {
-  await sendThrough(registry.get(connectionId), conversationId, { text });
+  await sendThrough(registry.get(connectionId), conversationId, {
+    text,
+    ...(replyToMessageId ? { replyToMessageId } : {}),
+  });
 }

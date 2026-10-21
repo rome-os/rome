@@ -125,6 +125,15 @@ describe("channel pairing approvals", () => {
       thread: { kind: "group" },
       addressing: "mention",
     });
+    // Guidance for a request made in a group answers the request, so it stays
+    // in the request's thread.
+    await rs.waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        "connection",
+        "group",
+        expect.objectContaining({ replyToMessageId: "request" }),
+      ),
+    );
     const request = (await repo.findPending())[0];
     expect(pairingPayload(request)?.conversationId).toBeUndefined();
     const result = await repo.resolvePending(request.id, "approve", "owner");

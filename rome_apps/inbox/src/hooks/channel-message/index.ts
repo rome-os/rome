@@ -5,7 +5,6 @@ import type {
   ChatStopHandler,
   ChannelMessageHook as ChannelMessageHookInterface,
   ChannelMessageHookDeps,
-  ChatId,
   ChatSettingsControl,
   InboundEvent,
   ChannelActivitySession,
@@ -112,18 +111,14 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           service,
           senderId: message.senderId,
         });
-        await this.reply(channel, message.conversationId, chatStopReceipt(result.status));
+        await this.reply(channel, message, chatStopReceipt(result.status));
       } catch (err) {
         log.error("stop command failed", {
           service,
           messageId: message.messageId,
           error: err instanceof Error ? err.message : String(err),
         });
-        await this.reply(
-          channel,
-          message.conversationId,
-          "Stop could not be requested. Please try again.",
-        );
+        await this.reply(channel, message, "Stop could not be requested. Please try again.");
       }
       return;
     }
@@ -267,12 +262,21 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
 
   /** Answer in a conversation on the channel it arrived on, where it can send.
    *  The channel sends through the Connection backing it, which is `ref`'s. */
-  private async reply(channel: Channel, conversationId: ChatId, text: string): Promise<void> {
+  /** Answers `message` where it was said. Outside a direct message the answer
+   *  replies to it, so it stays in the message's thread. */
+  private async reply(
+    channel: Channel,
+    message: InboundEvent["message"],
+    text: string,
+  ): Promise<void> {
     if (!channel.send) {
       log.warn("cannot answer on a channel that does not send", { service: channel.name });
       return;
     }
-    await channel.send.send(conversationId, { text });
+    await channel.send.send(message.conversationId, {
+      text,
+      ...(message.thread?.kind === "dm" ? {} : { replyToMessageId: message.messageId }),
+    });
   }
 }
 
