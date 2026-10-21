@@ -6,18 +6,9 @@ type Plural = { one: string; other: string };
 /** Every string the device pages show. `{name}` placeholders are filled by `format`. */
 export interface NodeUiMessages {
   link: Record<"connecting" | NodeConsoleDaemonState, string>;
-  gateway: Record<NodeConnectionStatus, string>;
-  gatewayUp: string;
-  reconnects: Plural;
-  runningCount: string;
-  serviceStarted: string;
+  /** The Gateway connections that need attention. A healthy one shows no text. */
+  gateway: Record<Extract<NodeConnectionStatus, "retrying" | "revoked" | "superseded">, string>;
   title: string;
-  online: string;
-  onlineAtLeast: string;
-  commandsInDay: Plural;
-  checkedAgo: string;
-  checking: string;
-  checkNow: string;
   linkDevice: string;
   linkDialog: {
     title: string;
@@ -53,9 +44,8 @@ export interface NodeUiMessages {
   thisDevice: {
     label: string;
     toggle: string;
-    state: Record<"connected" | "connecting" | "offline" | "disabled", string>;
-    on: string;
-    off: string;
+    connecting: string;
+    disabled: string;
   };
   detail: {
     commandsInDay: Plural;
@@ -107,24 +97,11 @@ const en: NodeUiMessages = {
     disconnected: "The device service stopped. Reconnecting…",
   },
   gateway: {
-    online: "Gateway connected",
-    stopped: "Gateway idle",
-    connecting: "Connecting to Gateway",
     retrying: "Reconnecting to Gateway",
     revoked: "Gateway access revoked",
     superseded: "Gateway connection replaced",
   },
-  gatewayUp: "up {duration}",
-  reconnects: { one: "{count} reconnect", other: "{count} reconnects" },
-  runningCount: "{count} running",
-  serviceStarted: "Device service {version}, started {time}",
   title: "Devices",
-  online: "{online} of {total} online",
-  onlineAtLeast: "at least {online} of {total} online",
-  commandsInDay: { one: "{count} command in 24 h", other: "{count} commands in 24 h" },
-  checkedAgo: "Checked {ago} ago",
-  checking: "Checking…",
-  checkNow: "Check connections now",
   linkDevice: "Link device",
   linkDialog: {
     title: "Link a computer",
@@ -167,14 +144,8 @@ const en: NodeUiMessages = {
   thisDevice: {
     label: "This device",
     toggle: "Let Rome use this device",
-    state: {
-      connected: "Online",
-      connecting: "Connecting",
-      offline: "Not connected",
-      disabled: "Turned off",
-    },
-    on: "Your Rome can run programs on this computer as you. Turned off, it stays off after the app restarts.",
-    off: "Your Rome can't reach this computer until you turn it back on.",
+    connecting: "Connecting",
+    disabled: "Turned off",
   },
   detail: {
     commandsInDay: {
@@ -235,24 +206,11 @@ const zhCN: NodeUiMessages = {
     disconnected: "设备服务已停止。正在重新连接…",
   },
   gateway: {
-    online: "Gateway 已连接",
-    stopped: "Gateway 空闲",
-    connecting: "正在连接 Gateway",
     retrying: "正在重连 Gateway",
     revoked: "Gateway 授权已撤销",
     superseded: "Gateway 连接已被替换",
   },
-  gatewayUp: "已连接 {duration}",
-  reconnects: { one: "重连 {count} 次", other: "重连 {count} 次" },
-  runningCount: "{count} 个运行中",
-  serviceStarted: "设备服务 {version}，启动于 {time}",
   title: "设备",
-  online: "{online}/{total} 台在线",
-  onlineAtLeast: "至少 {online}/{total} 台在线",
-  commandsInDay: { one: "24 小时内 {count} 条命令", other: "24 小时内 {count} 条命令" },
-  checkedAgo: "{ago}前检查",
-  checking: "正在检查…",
-  checkNow: "立即检查连接",
   linkDevice: "关联设备",
   linkDialog: {
     title: "关联电脑",
@@ -295,14 +253,8 @@ const zhCN: NodeUiMessages = {
   thisDevice: {
     label: "本机",
     toggle: "允许 Rome 使用本机",
-    state: {
-      connected: "在线",
-      connecting: "连接中",
-      offline: "未连接",
-      disabled: "已关闭",
-    },
-    on: "你的 Rome 可以以你的身份在这台电脑上运行程序。关闭后，重启 app 也保持关闭。",
-    off: "重新打开之前，你的 Rome 无法访问这台电脑。",
+    connecting: "连接中",
+    disabled: "已关闭",
   },
   detail: {
     commandsInDay: { one: "条命令（最近 24 小时）", other: "条命令（最近 24 小时）" },

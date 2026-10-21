@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { devicesStatusSchema } from "@rome/api-types/devices";
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
-import { NodeDevices, type NodeNavigation } from "@rome-os/node-ui";
+import { NodeDeviceCard, NodeDevices, type NodeNavigation } from "@rome-os/node-ui";
 import {
   Measure,
   Section,
@@ -17,9 +17,9 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useThisDevice } from "@/hooks/use-this-device";
 import { StatusIndicator } from "@/lib/connection-status";
 import { fetchJson } from "@/lib/fetch-json";
-import { ThisDeviceCard } from "./this-device-card";
 
 export function nodeConsoleUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -71,6 +71,7 @@ export function DevicesSection() {
     connection,
   );
   const devices = data?.devices ?? [];
+  const thisDevice = useThisDevice(() => void query.refetch());
 
   if (data && !unavailable)
     return (
@@ -79,16 +80,7 @@ export function DevicesSection() {
         devices={devices}
         navigation={navigation}
         locale={i18n.language}
-        checkedAt={Date.parse(data.checkedAt)}
-        refreshing={query.isFetching}
-        onRefresh={() => void query.refetch()}
-        thisDevice={
-          <ThisDeviceCard
-            devices={devices}
-            locale={i18n.language}
-            onChange={() => void query.refetch()}
-          />
-        }
+        thisDevice={thisDevice ?? undefined}
       />
     );
 
@@ -97,7 +89,19 @@ export function DevicesSection() {
   return (
     <Measure className="space-y-6">
       {/* The Mac app's computer works without Rome's device service. */}
-      <ThisDeviceCard devices={devices} locale={i18n.language} />
+      {thisDevice && (
+        <NodeDeviceCard
+          device={
+            devices.find((device) => device.id === thisDevice.id) ?? {
+              id: thisDevice.id,
+              name: thisDevice.name,
+              platform: thisDevice.platform,
+            }
+          }
+          thisDevice={thisDevice}
+          locale={i18n.language}
+        />
+      )}
       <Section aria-labelledby="devices-title">
         <SectionHeader>
           <SectionHeading>

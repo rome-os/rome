@@ -27,7 +27,7 @@ function renderDevices(load: () => unknown, start?: () => Response | Promise<Res
     return new Response("{}", { status: 503 });
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/settings/devices"]}>
         <Routes>
@@ -36,9 +36,11 @@ function renderDevices(load: () => unknown, start?: () => Response | Promise<Res
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  /** Reads the devices again, as the 15-second poll does. */
+  return { poll: () => act(() => client.refetchQueries({ queryKey: ["node-devices"] })) };
 }
 
-it("counts connected devices, not authorized records, independently of the settings request", async () => {
+it("lists devices independently of the settings request", async () => {
   renderDevices(() => ({
     connection: "online",
     checkedAt: new Date().toISOString(),
@@ -48,11 +50,10 @@ it("counts connected devices, not authorized records, independently of the setti
       { id: "three", name: "Old computer", platform: "windows", status: "revoked" },
     ],
   }));
-  expect(await screen.findByText("1 of 2 online")).toBeTruthy();
+  expect(await screen.findByText("Linux · Not connected")).toBeTruthy();
   expect(screen.getByRole("link", { name: "Devices" }).getAttribute("href")).toBe(
     "/settings/devices",
   );
-  expect(screen.getByText("Linux · Not connected")).toBeTruthy();
   expect(screen.getByRole("link", { name: /Desktop/ }).getAttribute("href")).toBe(
     "/settings/devices/two",
   );
@@ -60,7 +61,7 @@ it("counts connected devices, not authorized records, independently of the setti
   expect(screen.queryByText("Old computer")).toBeNull();
 });
 
-it("reports a lower bound when some devices could not be checked", async () => {
+it("shows a device that could not be checked as unknown", async () => {
   renderDevices(() => ({
     connection: "online",
     checkedAt: new Date().toISOString(),
@@ -69,13 +70,12 @@ it("reports a lower bound when some devices could not be checked", async () => {
       { id: "two", name: "Desktop", platform: "linux", status: "unknown" },
     ],
   }));
-  expect(await screen.findByText("at least 1 of 2 online")).toBeTruthy();
-  expect(screen.getByText("Linux · Unknown")).toBeTruthy();
+  expect(await screen.findByText("Linux · Unknown")).toBeTruthy();
 });
 
-it("clears a previous connected count when refreshing cannot read status", async () => {
+it("drops the device list when a later read cannot reach the service", async () => {
   let failed = false;
-  renderDevices(() =>
+  const { poll } = renderDevices(() =>
     failed
       ? { connection: "unavailable", checkedAt: new Date().toISOString(), devices: [] }
       : {
@@ -84,11 +84,11 @@ it("clears a previous connected count when refreshing cannot read status", async
           devices: [{ id: "mac", name: "Mac", platform: "macos", status: "connected" }],
         },
   );
-  expect(await screen.findByText("1 of 1 online")).toBeTruthy();
+  expect(await screen.findByText("Mac")).toBeTruthy();
   failed = true;
-  await userEvent.click(screen.getByRole("button", { name: "Check connections now" }));
+  await poll();
   expect(await screen.findByRole("alert")).toBeTruthy();
-  expect(screen.queryByText(/online/)).toBeNull();
+  expect(screen.queryByText("Mac")).toBeNull();
 });
 
 it("explains missing authorization instead of reporting zero devices", async () => {
@@ -98,12 +98,11 @@ it("explains missing authorization instead of reporting zero devices", async () 
     devices: [],
   }));
   expect(await screen.findByText("Not configured")).toBeTruthy();
-  expect(screen.queryByText(/online/)).toBeNull();
 });
 
-it("clears device counts when the service stops and keeps refresh passive", async () => {
+it("drops the device list when the service stops and keeps refresh passive", async () => {
   let running = true;
-  renderDevices(() =>
+  const { poll } = renderDevices(() =>
     running
       ? {
           connection: "online",
@@ -112,32 +111,20 @@ it("clears device counts when the service stops and keeps refresh passive", asyn
         }
       : { connection: "not_running", checkedAt: new Date().toISOString(), devices: [] },
   );
-  expect(await screen.findByText("1 of 1 online")).toBeTruthy();
+  expect(await screen.findByText("Mac")).toBeTruthy();
   running = false;
-  await userEvent.click(screen.getByRole("button", { name: "Check connections now" }));
+  await poll();
   expect(await screen.findByText("Service not running")).toBeTruthy();
   expect(
     screen.getByText(
       "Start the service on this Rome instance to check linked computers. Refresh only checks status; it does not start the service.",
     ),
   ).toBeTruthy();
-  expect(screen.queryByText(/online/)).toBeNull();
   expect(screen.queryByText("Mac")).toBeNull();
   expect(screen.getByRole("button", { name: "Start service" })).toBeTruthy();
   expect(
     rs.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET"),
   ).toBe(true);
-});
-
-it("does not present zero as the connected count when every check is unknown", async () => {
-  renderDevices(() => ({
-    connection: "retrying",
-    checkedAt: new Date().toISOString(),
-    devices: [{ id: "mac", name: "Mac", platform: "macos", status: "unknown" }],
-  }));
-  expect(await screen.findByText("Mac")).toBeTruthy();
-  expect(screen.getByText("macOS · Unknown")).toBeTruthy();
-  expect(screen.queryByText(/online/)).toBeNull();
 });
 
 it("offers computer setup for an idle running service without an error", async () => {
@@ -147,7 +134,6 @@ it("offers computer setup for an idle running service without an error", async (
     devices: [],
   }));
   expect(await screen.findByText("No computers are linked to this account.")).toBeTruthy();
-  expect(screen.getByText("0 of 0 online")).toBeTruthy();
   await userEvent.click(screen.getByRole("button", { name: "Link device" }));
   expect(await screen.findByText("rome-node connect")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
@@ -211,7 +197,6 @@ it.each([
   await userEvent.click(await screen.findByRole("button", { name: "Start service" }));
   expect((await screen.findByRole("alert")).textContent).toBe(message);
   expect(start).toHaveBeenCalledTimes(1);
-  expect(screen.queryByText(/online/)).toBeNull();
 });
 
 it("localizes the service recovery and computer setup in Chinese", async () => {
@@ -299,12 +284,14 @@ describe("this device in the Mac app", () => {
     delete window.rome;
   });
 
-  it("shows this computer under its Rome Cloud name and turns it off", async () => {
+  it("flags this computer's card under its Rome Cloud name and turns it off", async () => {
     const { bridge } = installBridge();
     renderDevices(online);
     const toggle = await screen.findByRole("switch", { name: "Let Rome use this device" });
-    expect(screen.getByText("This device")).toBeTruthy();
-    expect(screen.getByText("macOS · Online")).toBeTruthy();
+    // One card: the flag sits on the account's device, not on a card of its own.
+    expect(screen.getAllByText("This device")).toHaveLength(1);
+    expect(screen.getAllByText("RayBook")).toHaveLength(1);
+    expect(screen.getByText("macOS · Connected")).toBeTruthy();
     await userEvent.click(toggle);
     expect(bridge.setEnabled).toHaveBeenCalledWith(false);
     expect(await screen.findByText("macOS · Turned off")).toBeTruthy();
@@ -313,7 +300,7 @@ describe("this device in the Mac app", () => {
   it("follows the status the app pushes", async () => {
     const { push } = installBridge();
     renderDevices(online);
-    await screen.findByText("macOS · Online");
+    await screen.findByText("macOS · Connected");
     act(() => push({ state: "offline", deviceId: "this-mac", name: "RayBook.local" }));
     expect(await screen.findByText("macOS · Not connected")).toBeTruthy();
   });

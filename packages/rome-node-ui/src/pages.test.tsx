@@ -2,9 +2,9 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { NodeDeviceActivity } from "./device-activity.js";
-import { NodeDevices } from "./devices-overview.js";
-import type { NodeActionRow, NodeStatus } from "./protocol.js";
-import type { NodeDevice, NodeNavigation } from "./types.js";
+import { NodeDeviceCard, NodeDevices } from "./devices-overview.js";
+import type { NodeActionRow, NodeConnectionStatus, NodeStatus } from "./protocol.js";
+import type { NodeDevice, NodeNavigation, NodeThisDevice } from "./types.js";
 
 const status: NodeStatus = {
   version: "0.1.3",
@@ -77,7 +77,10 @@ class FakeSocket {
 }
 
 /** Answers like a daemon holding `rows`. Without `stats`, log.stats is an unknown method. */
-function serve(rows: NodeActionRow[], { stats = true } = {}) {
+function serve(
+  rows: NodeActionRow[],
+  { stats = true, connection = "online" as NodeConnectionStatus } = {},
+) {
   FakeSocket.reply = (socket, message) => {
     const respond = (result: unknown) => socket.emit({ jsonrpc: "2.0", id: message.id, result });
     const { method, params } = message;
@@ -85,7 +88,11 @@ function serve(rows: NodeActionRow[], { stats = true } = {}) {
       socket.emit({
         jsonrpc: "2.0",
         method: "events.node",
-        params: { type: "snapshot", status, running: [] },
+        params: {
+          type: "snapshot",
+          status: { ...status, roles: { caller: { ...status.roles.caller!, connection } } },
+          running: [],
+        },
       });
       respond({ subscribed: true });
     } else if (method === "log.query") {
@@ -154,8 +161,6 @@ describe("NodeDevices", () => {
     serve([row(3, { exitCode: 1, command: "pnpm", args: ["test"] }), row(2), row(1)]);
     const nav = navigation();
     render(<NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={nav} />);
-    expect(await screen.findByText("Gateway connected")).toBeTruthy();
-    expect(screen.getByText(/1 of 2 online/)).toBeTruthy();
     const active = await screen.findByRole("region", { name: "Active devices" });
     expect(within(active).getByText("Workstation")).toBeTruthy();
     expect(within(active).getByText("33.3% failed")).toBeTruthy();
@@ -183,12 +188,136 @@ describe("NodeDevices", () => {
     expect(screen.getByText("Workstation")).toBeTruthy();
   });
 
+  it("says nothing about a healthy service and names a Gateway problem", async () => {
+    serve([]);
+    const { unmount } = render(
+      <NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={navigation()} />,
+    );
+    await screen.findByText("Workstation");
+    await waitFor(() => expect(FakeSocket.instances[0]?.sent.length).toBeGreaterThan(0));
+    expect(screen.queryByRole("status")).toBeNull();
+    unmount();
+    serve([], { connection: "retrying" });
+    render(
+      <NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={navigation()} />,
+    );
+    expect((await screen.findByRole("status")).textContent).toBe("Reconnecting to Gateway");
+  });
+
   it("opens the link instructions", async () => {
     serve([]);
     render(<NodeDevices url="ws://rome.test/ws/node" devices={[]} navigation={navigation()} />);
     await userEvent.click(screen.getByRole("button", { name: "Link device" }));
     expect(await screen.findByRole("dialog", { name: "Link a computer" })).toBeTruthy();
     expect(screen.getByText("rome-node connect")).toBeTruthy();
+  });
+});
+
+describe("this device", () => {
+  function self(fields: Partial<NodeThisDevice> = {}) {
+    return {
+      id: "dev-2",
+      name: "Laptop.local",
+      platform: "macos",
+      state: "connected",
+      onEnabledChange: rs.fn(),
+      ...fields,
+    } satisfies NodeThisDevice;
+  }
+  const more: NodeDevice[] = [
+    { id: "dev-0", name: "Build server", platform: "linux", status: "not_connected" },
+    ...devices,
+  ];
+
+  it("flags its own card, puts it first, and turns it off from there", async () => {
+    serve([]);
+    const thisDevice = self();
+    render(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={more}
+        navigation={navigation()}
+        thisDevice={thisDevice}
+      />,
+    );
+    const quiet = await screen.findByRole("region", { name: "No commands in 24 h" });
+    const cards = within(quiet).getAllByRole("link");
+    // The account's name wins over the app's, and the app's state over the account's.
+    expect(within(cards[0]!).getByText("Laptop")).toBeTruthy();
+    expect(within(cards[0]!).getByText("This device")).toBeTruthy();
+    expect(within(cards[0]!).getByText("macOS · Connected")).toBeTruthy();
+    expect(screen.getAllByText("This device")).toHaveLength(1);
+    const toggle = screen.getByRole("switch", { name: "Let Rome use this device" });
+    expect(toggle.closest("a")).toBeNull();
+    await userEvent.click(toggle);
+    expect(thisDevice.onEnabledChange).toHaveBeenCalledWith(false);
+  });
+
+  it("puts it first among active devices", async () => {
+    serve([row(3), row(2), row(1, { peer: "dev-2" })]);
+    render(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={devices}
+        navigation={navigation()}
+        thisDevice={self()}
+      />,
+    );
+    const active = await screen.findByRole("region", { name: "Active devices" });
+    await within(active).findByText("Workstation");
+    const names = within(active)
+      .getAllByRole("link", { name: /macOS|Linux/ })
+      .map((link) => link.textContent);
+    expect(names[0]).toContain("This device");
+    expect(within(active).getByRole("switch")).toBeTruthy();
+  });
+
+  it("shows a computer the account does not list yet, turned off", async () => {
+    serve([]);
+    const thisDevice = self({ id: "new-mac", name: "RayBook", state: "disabled" });
+    render(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={devices}
+        navigation={navigation()}
+        thisDevice={thisDevice}
+      />,
+    );
+    expect(await screen.findByText("RayBook")).toBeTruthy();
+    expect(screen.getByText("macOS · Turned off")).toBeTruthy();
+    const toggle = screen.getByRole("switch", { name: "Let Rome use this device" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    await userEvent.click(toggle);
+    expect(thisDevice.onEnabledChange).toHaveBeenCalledWith(true);
+  });
+
+  it("ignores the switch while a change is applied", async () => {
+    serve([]);
+    const thisDevice = self({ busy: true });
+    render(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={devices}
+        navigation={navigation()}
+        thisDevice={thisDevice}
+      />,
+    );
+    await userEvent.click(await screen.findByRole("switch"));
+    expect(thisDevice.onEnabledChange).not.toHaveBeenCalled();
+  });
+
+  it("stands alone as a card and speaks Chinese", () => {
+    render(
+      <NodeDeviceCard
+        device={{ id: "dev-2", name: "RayBook", platform: "macos" }}
+        thisDevice={self({ state: "offline" })}
+        locale="zh-CN"
+      />,
+    );
+    expect(screen.getByText("本机")).toBeTruthy();
+    expect(screen.getByText("macOS · 未连接")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "允许 Rome 使用本机" })).toBeTruthy();
+    expect(screen.queryByRole("link")).toBeNull();
   });
 });
 

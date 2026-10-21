@@ -185,7 +185,7 @@ export function LoadChart({
           );
         })}
       </div>
-      <div className="relative h-[1lh] font-mono text-aux text-muted-foreground" aria-hidden>
+      <div className="relative h-[1lh] text-aux text-muted-foreground tabular-nums" aria-hidden>
         {ticks.map((tick) => (
           <span
             key={tick.label}
