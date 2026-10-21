@@ -35,14 +35,15 @@ One of Rome's agents, such as main, sales or support, taking part in a chat. Wha
 - When an agent speaks through its own account, the agent is the participant.
 - When an agent answers from the guardian's account, the guardian is the participant and the agent answers on their behalf.
 - An agent sees every message its account receives on the platform: whatever the platform delivers to that account, mentioned or not.
-- Whether the agent answers what it sees is the chat's reply rule for that account.
+- When the agent is woken by what it sees is the chat's reply rule for that account.
 - How an agent remembers what it sees, in a chat or in its threads, is the agent's own decision and belongs to Agents. Chats describes participants and messages and says nothing about memory.
 
 ## Reply rule
 
-A setting on a chat, for each of Rome's accounts in it, saying when that account's agent answers: everything, or only when mentioned. The same account can be chatty in one group and quiet in another.
+A setting on a chat, for each of Rome's accounts in it, saying when that account's agent is woken: on every message, only when mentioned, or when it is needed. The same account can be chatty in one group and quiet in another.
 
-- It decides answering only. What the agent sees is not a setting. It is whatever the platform delivers.
+- It decides when the agent is woken, nothing more. What reaches the chat is whatever the platform delivers, and how much of it the agent reads when woken is the agent's own business ([Agents](agents.md)).
+- "When it is needed" hands the decision to a lightweight check. A mention always wakes the agent under it.
 - For a delegate on the guardian's own account, the current behaviour stays as it is.
 
 ## Message
