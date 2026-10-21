@@ -378,7 +378,7 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
             // A Slack direct message is its own conversation, opened with
             // conversations.open, so this is a provider call.
             directMessaging: {
-              async conversationFor(senderId) {
+              async chatFor(senderId) {
                 try {
                   return await adapter.directConversationFor(senderId);
                 } catch (error) {
