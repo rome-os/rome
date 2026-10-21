@@ -8,6 +8,7 @@ import {
   slackBotDisplayName,
   slackBotManifest,
   slackCreateAppUrl,
+  toSlackBotDisplay,
 } from "./slack-bot.js";
 
 function fakeApi(overrides: Partial<SlackWebApi> = {}): SlackWebApi {
@@ -82,6 +83,24 @@ describe("slack bot manifest", () => {
   it("derives a display name Slack accepts", () => {
     expect(slackBotDisplayName("Research Bot!")).toBe("research-bot");
     expect(slackBotDisplayName("!!!")).toBe("rome");
+  });
+
+  it("tells two bots in one workspace apart by name", () => {
+    const scout = toSlackBotDisplay({
+      teamId: "T1",
+      botUserId: "U1",
+      botUsername: "scout",
+      workspaceName: "Acme",
+    });
+    const scribe = toSlackBotDisplay({
+      teamId: "T1",
+      botUserId: "U2",
+      botUsername: "scribe",
+      workspaceName: "Acme",
+    });
+    expect(scout.displayName).toBe("scout (Acme)");
+    expect(scribe.displayName).toBe("scribe (Acme)");
+    expect(scout.handle).toBe("@scout");
   });
 
   it("names an account by its workspace and bot user", () => {

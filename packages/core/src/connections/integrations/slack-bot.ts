@@ -51,11 +51,16 @@ export const slackBotGrantProfileSchema = z
   .strict();
 export type SlackBotGrantProfile = z.infer<typeof slackBotGrantProfileSchema>;
 
-/** The bot's handle reads as the handle and the workspace as its name. Slack
- *  ids stay owner-side and never widen the display surface. */
+/** The bot reads as its own name with its workspace, since several bots can
+ *  share one workspace. Slack ids stay owner-side and never widen the display
+ *  surface. */
 export function toSlackBotDisplay(profile: SlackBotGrantProfile): ProfileDisplay {
+  const { botUsername, workspaceName } = profile;
   return Object.freeze({
-    displayName: profile.workspaceName,
+    displayName:
+      botUsername && workspaceName
+        ? `${botUsername} (${workspaceName})`
+        : (botUsername ?? workspaceName),
     handle: profile.botUsername ? `@${profile.botUsername}` : undefined,
     email: undefined,
     avatarUrl: undefined,
