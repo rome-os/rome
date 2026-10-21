@@ -4,6 +4,7 @@ import {
   CATALOG,
   CATALOG_BY_SLUG,
   ROME_MANAGED_CATALOG,
+  romeManagedGrantsUsable,
   type ConnectedAccount,
 } from "./connections.js";
 
@@ -179,5 +180,16 @@ describe("Rome-managed providers", () => {
   it("leaves non-managed connections with romeManaged=false", () => {
     const [view] = buildConnectionViews([account({ toolkitSlug: "gmail" })]);
     expect(view.romeManaged).toBe(false);
+  });
+});
+
+describe("romeManagedGrantsUsable", () => {
+  it("counts only an authorized grant as connected", () => {
+    expect(romeManagedGrantsUsable({ store: "authorized" })).toBe(true);
+    // A degraded grant is on file but its token is dead: the card keeps
+    // offering the reconnect.
+    expect(romeManagedGrantsUsable({ store: "degraded" })).toBe(false);
+    expect(romeManagedGrantsUsable({ store: "unauthorized" })).toBe(false);
+    expect(romeManagedGrantsUsable(undefined)).toBe(false);
   });
 });

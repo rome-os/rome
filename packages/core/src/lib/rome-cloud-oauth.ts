@@ -296,10 +296,25 @@ export async function refreshRomeCloudOAuthGrant(
     }
     throw new RenewalUnavailable(message);
   }
-  if (data?.provider !== provider || !data.tokens?.accessToken) {
-    // A 200 that isn't a refresh answer (an outage page, a truncated body) is
-    // Rome Cloud not answering properly, not a refusal of the grant.
+  // A 200 that isn't a complete refresh answer (an outage page, a truncated
+  // body, a bundle missing its refresh token or expiry) is Rome Cloud not
+  // answering properly, not a refusal of the grant. Accepting a partial bundle
+  // would replace a renewable credential with one that can never renew.
+  if (data?.provider !== provider || !isCompleteRefreshBundle(data.tokens)) {
     throw new RenewalUnavailable("Rome Cloud returned an invalid OAuth refresh payload.");
   }
   return data.tokens;
+}
+
+/** A refreshed grant must carry a new access token, a refresh token for the
+ *  next renewal, and the access token's expiry. */
+function isCompleteRefreshBundle(tokens: OAuthTokenBundle | undefined): tokens is OAuthTokenBundle {
+  const nonEmpty = (value: unknown) => typeof value === "string" && value.trim().length > 0;
+  return (
+    !!tokens &&
+    nonEmpty(tokens.accessToken) &&
+    nonEmpty(tokens.refreshToken) &&
+    nonEmpty(tokens.expiresAt) &&
+    !Number.isNaN(Date.parse(tokens.expiresAt as string))
+  );
 }

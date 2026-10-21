@@ -4,7 +4,7 @@
 // `grantProfileFromBundle`) turn a provider's OAuth bundle into the grant's
 // material and profile shapes.
 
-import type { OAuthProvider } from "../lib/oauth-providers.js";
+import { normalizeShopifyShopDomain, type OAuthProvider } from "../lib/oauth-providers.js";
 import { normalizeScopes, type OAuthTokenBundle } from "../lib/oauth-token-bundle.js";
 import {
   OAUTH_PROVIDER_GRANTS,
@@ -122,11 +122,19 @@ export function grantProfileFromBundle(
       if (raw.team?.id != null && raw.team.id !== "") candidate.teamId = raw.team.id;
       return slackGrantProfileSchema.parse(candidate);
     }
-    case "shopify":
+    case "shopify": {
       // Shopify has no store avatar, so a raw avatar never lands.
-      return shopifyGrantProfileSchema.parse(
+      const profile = shopifyGrantProfileSchema.parse(
         withScopes(pickRawKeys(account, ["subject", "displayName", "email", "login"])),
       );
+      // `login` is the store's domain: the token file's host and the proxy's
+      // pin. Without it the grant would look connected and never be usable,
+      // so the conferral fails instead.
+      if (!profile.login || normalizeShopifyShopDomain(profile.login) !== profile.login) {
+        throw new Error("Rome Cloud did not name the Shopify store's myshopify.com domain.");
+      }
+      return profile;
+    }
   }
 }
 

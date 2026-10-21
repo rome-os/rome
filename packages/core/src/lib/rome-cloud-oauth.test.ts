@@ -215,17 +215,19 @@ describe("Rome Cloud OAuth brokering", () => {
         headers: { "Content-Type": "application/json" },
       });
 
+    const complete = {
+      accessToken: "shpat_new",
+      refreshToken: "shprt_new",
+      expiresAt: "2026-10-21T07:00:00.000Z",
+    };
+
     beforeEach(() => {
       setInstanceTokenInMemory("romeinst_test-token");
     });
 
     it("posts a refresh_token grant with a timeout and returns the bundle", async () => {
-      const fetchMock = stubFetch(async () =>
-        json({ provider: "shopify", tokens: { accessToken: "shpat_new" } }, 200),
-      );
-      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).resolves.toEqual({
-        accessToken: "shpat_new",
-      });
+      const fetchMock = stubFetch(async () => json({ provider: "shopify", tokens: complete }, 200));
+      await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).resolves.toEqual(complete);
       const init = fetchMock.mock.calls[0][1];
       expect(JSON.parse(init?.body as string)).toEqual({
         grant_type: "refresh_token",
@@ -286,6 +288,21 @@ describe("Rome Cloud OAuth brokering", () => {
       await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
         RenewalUnavailable,
       );
+    });
+
+    it("keeps a refresh answer missing its refresh token, expiry, or token retryable", async () => {
+      const partials = [
+        { accessToken: "shpat_new", expiresAt: complete.expiresAt },
+        { accessToken: "shpat_new", refreshToken: "shprt_new" },
+        { ...complete, accessToken: " " },
+        { ...complete, expiresAt: "not a date" },
+      ];
+      for (const tokens of partials) {
+        stubFetch(async () => json({ provider: "shopify", tokens }, 200));
+        await expect(refreshRomeCloudOAuthGrant("shopify", "shprt_old")).rejects.toBeInstanceOf(
+          RenewalUnavailable,
+        );
+      }
     });
 
     it("reports a refusal as a plain error, so the grant needs a reconnect", async () => {

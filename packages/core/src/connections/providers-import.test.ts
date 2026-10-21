@@ -189,6 +189,16 @@ describe("grantProfileFromBundle", () => {
     });
   });
 
+  it("shopify: fails the conferral when Rome Cloud doesn't name the store's domain", () => {
+    const bundle: OAuthTokenBundle = { accessToken: "shpat_live", raw: {} };
+    expect(() => grantProfileFromBundle("shopify", bundle, { displayName: "Acme" })).toThrow(
+      /myshopify\.com/,
+    );
+    expect(() => grantProfileFromBundle("shopify", bundle, { login: "acme.example.com" })).toThrow(
+      /myshopify\.com/,
+    );
+  });
+
   it("omits empty identity fields and empty scopes — sparse but typed", () => {
     expect(grantProfileFromBundle("github", { accessToken: "gho" }, {})).toEqual({});
     expect(

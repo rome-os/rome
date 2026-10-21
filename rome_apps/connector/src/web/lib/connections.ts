@@ -143,3 +143,13 @@ export function buildConnectionViews(accounts: ConnectedAccount[]): ConnectionVi
     connector renders these as managed cards and never offers a Composio connect
     for them. */
 export const ROME_MANAGED_CATALOG: CatalogEntry[] = CATALOG.filter((e) => e.romeManaged);
+
+/**
+ * Whether a Rome-managed connection's grants can serve the agent, which is what
+ * the inline connect card waits for. Only an authorized grant counts: a degraded
+ * one is still on file (the dashboard lists it) but its token no longer works,
+ * so the card must keep offering the reconnect instead of reporting success.
+ */
+export function romeManagedGrantsUsable(grants: Record<string, string> | undefined): boolean {
+  return Object.values(grants ?? {}).some((state) => state === "authorized");
+}
