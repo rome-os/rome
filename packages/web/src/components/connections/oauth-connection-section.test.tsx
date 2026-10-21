@@ -287,6 +287,34 @@ describe("OAuthConnectionSection", () => {
     expect(screen.getByText("Enter your store's myshopify.com address.")).toBeTruthy();
   });
 
+  it("opens the hand-off on its own after the guardian submits the store form", async () => {
+    const assign = rs.fn();
+    rs.stubGlobal("location", { ...window.location, assign });
+    const asksForStore = {
+      status: "awaiting-input",
+      form: { fields: [{ name: "shop", label: "Store address", secret: false }] },
+    };
+    const handOff = { status: "awaiting-redirect", url: "https://broker/authorize?state=shop" };
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const requested = typeof input === "string" ? input : (input as Request).url;
+      const body = requested.endsWith("/input")
+        ? { accepted: true, state: handOff }
+        : requested.endsWith("/setup")
+          ? { cid: "setup-shop", reattached: false, state: asksForStore }
+          : { state: asksForStore };
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+    renderSection(githubCard("unauthorized"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.change(await screen.findByLabelText("Store address"), {
+      target: { value: "acme" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://broker/authorize?state=shop"));
+  });
+
   it("hands Connect to the system browser in the desktop shell", async () => {
     const assign = rs.fn();
     const open = rs.fn();

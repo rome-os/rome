@@ -95,6 +95,15 @@ export function OAuthConnectionSection({
     setup.start(force);
   }
 
+  // A setup that asks something before the hand-off (Shopify's store) parks at
+  // `awaiting-input`, which clears the initiation intent. Submitting the form is
+  // the guardian continuing the same connect, so re-arm it: the redirect that
+  // follows opens on its own.
+  function submitSetup(answers: Record<string, string>) {
+    initiatedRef.current = true;
+    return setup.submit(answers);
+  }
+
   const redirectUrl = setup.state?.status === "awaiting-redirect" ? setup.state.url : null;
   useEffect(() => {
     if (redirectUrl && initiatedRef.current) {
@@ -191,7 +200,7 @@ export function OAuthConnectionSection({
             state={setup.state}
             busy={setup.busy}
             error={setup.error}
-            onSubmit={setup.submit}
+            onSubmit={submitSetup}
             onCancel={setup.cancel}
             onRetry={() => beginConnect(true)}
             labels={{ continue: t("common.connect") }}
@@ -269,7 +278,7 @@ export function OAuthConnectionSection({
             state={setup.state}
             busy={setup.busy}
             error={setup.error}
-            onSubmit={setup.submit}
+            onSubmit={submitSetup}
             onCancel={setup.cancel}
             onRetry={() => beginConnect(true)}
             labels={{ continue: t("connections.oauth.reconnect") }}
