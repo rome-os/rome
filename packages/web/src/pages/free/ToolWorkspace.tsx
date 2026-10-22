@@ -18,6 +18,8 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WidgetPicker } from "./WidgetPicker";
+import { SlotContent, useSlotOutlet } from "@/components/slot";
+import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import type { ToolView, WidgetPlacement, WidgetType } from "./use-free-cells";
 
 const WIDTH_KEY = "rome:tool-chat-ratio";
@@ -143,6 +145,89 @@ export function ToolWorkspace({
     return () => observer.disconnect();
   }, []);
 
+  // In the Mac app the tabs move up into the title bar, over this panel, so the
+  // window has one row on top. The header there is as wide as the panel.
+  const inTitlebar = useSlotOutlet(TITLEBAR_END_SLOT);
+  const toolsWidth = compact ? width : Math.max(0, width - chatWidth - SEPARATOR_WIDTH);
+  // The tabs keep the `Tabs` root's context through the portal, but not its
+  // CSS group, so the list states its full height itself.
+  const header = (
+    <>
+      {sorted.length > 0 ? (
+        <TabsList
+          aria-label={t("chat.tools")}
+          className="h-full min-w-0 flex-1 justify-start overflow-x-auto p-0"
+        >
+          {sorted.map((widget) => (
+            <ToolTab
+              key={widget.id}
+              widget={widget}
+              label={label(widget)}
+              icon={icon(widget)}
+              active={widget.id === view.activeId}
+              unread={view.unreadIds.includes(widget.id)}
+              onClose={() => closeTab(widget.id)}
+            />
+          ))}
+        </TabsList>
+      ) : (
+        <span className="flex h-full flex-1 items-center px-2 text-ui text-muted-foreground">
+          {t("chat.tools")}
+        </span>
+      )}
+      {activeWidget && activeHref && (
+        // A real link, so middle-click, Cmd-click and copy-link work natively.
+        <Button asChild variant="ghost" size="icon-sm">
+          <a
+            href={activeHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={t("chat.openToolNewTab", { name: label(activeWidget) })}
+            title={t("chat.openToolNewTab", { name: label(activeWidget) })}
+            onPointerEnter={() => onOpenIntent?.(activeWidget)}
+            onPointerDown={() => onOpenIntent?.(activeWidget)}
+            onFocus={() => onOpenIntent?.(activeWidget)}
+          >
+            <ExternalLink />
+          </a>
+        </Button>
+      )}
+      {sorted.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton size="sm" label={t("chat.allTools")} icon={<ChevronDown />} />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {sorted.map((widget) => (
+              <DropdownMenuItem key={widget.id} onSelect={() => selectTool(widget.id)}>
+                {icon(widget)}
+                {label(widget)}
+                {view.unreadIds.includes(widget.id) && (
+                  <span className="ml-auto text-aux text-muted-foreground">
+                    {t("chat.toolUpdated")}
+                  </span>
+                )}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {sorted.length > 0 && (
+        <WidgetPicker onSelect={addWidget} placements={placements}>
+          <IconButton size="sm" data-coach="add-widget" label={t("chat.add")} icon={<Plus />} />
+        </WidgetPicker>
+      )}
+      <IconButton
+        size="sm"
+        className="max-md:hidden"
+        label={t("chat.collapseTools")}
+        aria-expanded={true}
+        icon={<PanelRightClose />}
+        onClick={() => setCollapsed(true)}
+      />
+    </>
+  );
+
   function changeRatio(next: number) {
     const constrained = Math.max(0.2, Math.min(0.8, next));
     setRatio(constrained);
@@ -235,80 +320,22 @@ export function ToolWorkspace({
         className="min-h-0 min-w-0 flex-1 gap-0 bg-background"
         style={{ display: open ? undefined : "none" }}
       >
-        <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
-          {sorted.length > 0 ? (
-            <TabsList
-              aria-label={t("chat.tools")}
-              className="min-w-0 flex-1 justify-start overflow-x-auto p-0 group-data-horizontal/tabs:h-full"
-            >
-              {sorted.map((widget) => (
-                <ToolTab
-                  key={widget.id}
-                  widget={widget}
-                  label={label(widget)}
-                  icon={icon(widget)}
-                  active={widget.id === view.activeId}
-                  unread={view.unreadIds.includes(widget.id)}
-                  onClose={() => closeTab(widget.id)}
-                />
-              ))}
-            </TabsList>
-          ) : (
-            <span className="flex h-full flex-1 items-center px-2 text-ui text-muted-foreground">
-              {t("chat.tools")}
-            </span>
-          )}
-          {activeWidget && activeHref && (
-            // A real link, so middle-click, Cmd-click and copy-link work natively.
-            <Button asChild variant="ghost" size="icon-sm">
-              <a
-                href={activeHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={t("chat.openToolNewTab", { name: label(activeWidget) })}
-                title={t("chat.openToolNewTab", { name: label(activeWidget) })}
-                onPointerEnter={() => onOpenIntent?.(activeWidget)}
-                onPointerDown={() => onOpenIntent?.(activeWidget)}
-                onFocus={() => onOpenIntent?.(activeWidget)}
+        {inTitlebar ? (
+          open ? (
+            <SlotContent name={TITLEBAR_END_SLOT}>
+              <div
+                className="flex h-full shrink-0 items-center gap-1 px-2"
+                style={{ width: toolsWidth }}
               >
-                <ExternalLink />
-              </a>
-            </Button>
-          )}
-          {sorted.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton size="sm" label={t("chat.allTools")} icon={<ChevronDown />} />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {sorted.map((widget) => (
-                  <DropdownMenuItem key={widget.id} onSelect={() => selectTool(widget.id)}>
-                    {icon(widget)}
-                    {label(widget)}
-                    {view.unreadIds.includes(widget.id) && (
-                      <span className="ml-auto text-aux text-muted-foreground">
-                        {t("chat.toolUpdated")}
-                      </span>
-                    )}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          {sorted.length > 0 && (
-            <WidgetPicker onSelect={addWidget} placements={placements}>
-              <IconButton size="sm" data-coach="add-widget" label={t("chat.add")} icon={<Plus />} />
-            </WidgetPicker>
-          )}
-          <IconButton
-            size="sm"
-            className="max-md:hidden"
-            label={t("chat.collapseTools")}
-            aria-expanded={true}
-            icon={<PanelRightClose />}
-            onClick={() => setCollapsed(true)}
-          />
-        </div>
+                {header}
+              </div>
+            </SlotContent>
+          ) : null
+        ) : (
+          <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
+            {header}
+          </div>
+        )}
         <div className="relative min-h-0 flex-1">
           {placements.length === 0 && (
             <EmptyState className="h-full" role="region">
