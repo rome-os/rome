@@ -600,10 +600,13 @@ export class WechatUserRuntime {
    * Press a remembered account's sign-in button, which WeChat shows after a
    * restart instead of a QR. The driver finds it by accessible name inside the
    * login window, so "Switch Account" and "Transfer files only" are never
-   * pressed. WeChat may still ask the phone to confirm. Resolves to whether it
-   * pressed; never throws, since the guardian can still sign in by hand.
+   * pressed. Only on WeChat's own desktop: on the shared one, Chrome can cover
+   * the button and take the click. WeChat may still ask the phone to confirm.
+   * Resolves to whether it pressed; never throws, since the guardian can still
+   * sign in by hand.
    */
   async pressSignIn(display: string, signal?: AbortSignal): Promise<boolean> {
+    if (!this.desktop || display !== this.desktop.display) return false;
     const opts = { env: this.clientEnv(display), timeoutMs: 15_000, ...(signal ? { signal } : {}) };
     const found = await this.run("python3", [DESKTOP_DRIVER, "sign-in-target"], opts).catch(
       () => null,

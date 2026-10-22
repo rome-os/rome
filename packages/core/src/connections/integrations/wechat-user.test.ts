@@ -542,18 +542,33 @@ describe("the WeChat personal Talker", () => {
 
   it("presses sign-in once per client process", async () => {
     const waiting = { ...READY, state: "awaiting-scan" as const };
+    // pid 42 is pressed and signs in, then waits again (say the phone signed it
+    // out): it is not pressed a second time. A new process, pid 43, is.
     const runtime = fakeRuntime({
-      statuses: [waiting, waiting, waiting, waiting, { ...waiting, pid: 43 }],
+      statuses: [waiting, READY, waiting, waiting, { ...waiting, pid: 43 }, READY],
     });
+    rs.mocked(runtime.pressSignIn).mockResolvedValue(true);
     const { talker, degradation } = buildTalker(runtime, undefined, 5);
     try {
       await rs.waitFor(() => expect(runtime.pressSignIn).toHaveBeenCalledTimes(2));
-      expect(degradation()?.reason).toContain("phone");
-      // The repeating last status is pid 43's: it is never pressed again.
+      await rs.waitFor(() => expect(degradation()).toBeNull());
       const reads = rs.mocked(runtime.status).mock.calls.length;
       await rs.waitFor(() =>
         expect(rs.mocked(runtime.status).mock.calls.length).toBeGreaterThan(reads + 2),
       );
+      expect(runtime.pressSignIn).toHaveBeenCalledTimes(2);
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("tries sign-in again on the next probe when no button was found", async () => {
+    const waiting = { ...READY, state: "awaiting-scan" as const };
+    const runtime = fakeRuntime({ statuses: [waiting, waiting, READY] });
+    rs.mocked(runtime.pressSignIn).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const { talker, degradation } = buildTalker(runtime, undefined, 5);
+    try {
+      await rs.waitFor(() => expect(degradation()).toBeNull());
       expect(runtime.pressSignIn).toHaveBeenCalledTimes(2);
     } finally {
       await talker.stop();

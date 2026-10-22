@@ -427,6 +427,7 @@ export function createWechatUserDescriptor(
           let pending: Promise<void> | null = null;
           // The client process whose sign-in button Rome pressed: once each, so a
           // phone prompt the guardian missed or declined is not sent every probe.
+          // A probe that found no button tries again on the next one.
           let signInPressedFor: number | undefined;
 
           const directory: TalkDirectory = {
@@ -496,8 +497,8 @@ export function createWechatUserDescriptor(
                     status.pid !== undefined &&
                     status.pid !== signInPressedFor
                   ) {
-                    signInPressedFor = status.pid;
                     if (await runtime.pressSignIn(status.display, epoch.signal)) {
+                      signInPressedFor = status.pid;
                       const until = Date.now() + SIGN_IN_WAIT_MS;
                       do {
                         await abortableDelay(
