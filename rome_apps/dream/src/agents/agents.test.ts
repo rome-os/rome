@@ -25,6 +25,7 @@ describe("dream agents", () => {
       "get_webchat_conversations",
       "get_account_chats",
       "get_action_logs",
+      "search_chats",
     ]);
   });
 

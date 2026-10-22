@@ -4,6 +4,9 @@ import type { FileChange } from "../../lib/changes.js";
 import { STALE_RUN_MS } from "../../lib/run-view.js";
 import { createAppDbSchema } from "../schema.js";
 
+/** Rows per INSERT: nine columns each stays under SQLite's 999-variable floor. */
+const CHANGE_BATCH = 100;
+
 export type RunKind = "dream" | "skill_review";
 /** `queued`: reserved by the page and not yet claimed by an action. */
 export type RunStatus = "queued" | "running" | "completed" | "interrupted" | "failed";
@@ -141,29 +144,33 @@ export class RunsRepository {
   addChanges(runId: string, changes: FileChange[]): void {
     if (changes.length === 0) return;
     const { runChanges } = this.tables;
-    const last = this.db
-      .select({ seq: max(runChanges.seq) })
-      .from(runChanges)
-      .where(eq(runChanges.runId, runId))
-      .get();
-    let seq = (last?.seq ?? -1) + 1;
-    const createdAt = new Date();
-    this.db
-      .insert(runChanges)
-      .values(
-        changes.map((change) => ({
-          id: crypto.randomUUID(),
-          runId,
-          seq: seq++,
-          op: change.op,
-          path: change.path,
-          content: change.content,
-          previous: change.previous,
-          truncated: change.truncated,
-          createdAt,
-        })),
-      )
-      .run();
+    this.db.transaction((tx) => {
+      const last = tx
+        .select({ seq: max(runChanges.seq) })
+        .from(runChanges)
+        .where(eq(runChanges.runId, runId))
+        .get();
+      let seq = (last?.seq ?? -1) + 1;
+      const createdAt = new Date();
+      // One INSERT per batch keeps each statement under SQLite's bound-variable limit.
+      for (let i = 0; i < changes.length; i += CHANGE_BATCH) {
+        tx.insert(runChanges)
+          .values(
+            changes.slice(i, i + CHANGE_BATCH).map((change) => ({
+              id: crypto.randomUUID(),
+              runId,
+              seq: seq++,
+              op: change.op,
+              path: change.path,
+              content: change.content,
+              previous: change.previous,
+              truncated: change.truncated,
+              createdAt,
+            })),
+          )
+          .run();
+      }
+    });
   }
 
   byId(id: string): Run | undefined {

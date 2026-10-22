@@ -19,6 +19,14 @@ export interface FileChange {
   truncated: boolean;
 }
 
+/** `.env` files can hold secrets, so only their path is recorded. `.env.example` is source. */
+const SECRET_FILE = /(?:^|\/)\.env(?!\.example$)[^/]*$/;
+export const SECRET_PLACEHOLDER = "(contents not recorded)";
+
+export function isSecretFile(path: string): boolean {
+  return SECRET_FILE.test(path);
+}
+
 /** Caps one stored change, so a full-file rewrite of a large memory file
  *  cannot bloat the run table. */
 export const MAX_CHANGE_CHARS = 20_000;
@@ -41,6 +49,19 @@ export function changesFromToolUse(tool: string, input: unknown): FileChange[] {
   const record = input as Record<string, unknown>;
   const path = str(record.file_path);
   if (!path) return [];
+  if (isSecretFile(path)) {
+    const op: ChangeOp = tool === "Write" ? "write" : "edit";
+    if (!["Write", "Edit", "MultiEdit"].includes(tool)) return [];
+    return [
+      {
+        op,
+        path,
+        content: SECRET_PLACEHOLDER,
+        previous: op === "edit" ? "" : null,
+        truncated: false,
+      },
+    ];
+  }
 
   const edit = (oldText: unknown, newText: unknown): FileChange | null => {
     const next = str(newText);

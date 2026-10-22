@@ -1,5 +1,5 @@
-import { appendFile, mkdir, readFile, rm } from "node:fs/promises";
-import { homedir } from "node:os";
+import { appendFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
   createAppLogger,
@@ -199,6 +199,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
       // and only a dream that completes installs them.
       const stopHeartbeat = keepRunAlive(runs, runId);
       let staging: string | undefined;
+      let appsCopy: string | undefined;
       try {
         const now = new Date();
         const journalPath = join(
@@ -214,6 +215,23 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         // people wrote on Rome's accounts. The memory agent reads every source
         // with file tools only. The practice agent reads the guardian's own
         // chats and the action logs, and can change apps.
+        // Snapshot the apps before either agent runs, outside staging. The
+        // memory agent's file writes are not confined, so if it changed an
+        // app, those changes are recorded and the practice agent, which could
+        // build and reinstall them, does not run.
+        let appsBefore: Awaited<ReturnType<typeof snapshotApps>>;
+        try {
+          // Created first, so a fresh carrier does not show as an app change.
+          await ensureUserSkillsCarrier(carrierDir);
+          appsCopy = await mkdtemp(join(tmpdir(), "dream-apps-"));
+          appsBefore = await snapshotApps(appsDir, appsCopy);
+        } catch (err) {
+          const error = `Could not snapshot the guardian's apps: ${err instanceof Error ? err.message : String(err)}`;
+          runs.finish(runId, { status: "failed", error });
+          log.error("dream failed to snapshot apps", { error, runId });
+          return { status: "error", error };
+        }
+
         const memoryRecorder = new RunRecorder(runs, runId);
         const memoryPrompt = [
           `Today is ${now.toISOString()}. Dream over the past ${windowHours} hours.`,
@@ -225,12 +243,23 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         const memoryStopped = await runAgent("dream", "Memory agent", memoryPrompt, memoryRecorder);
         if (memoryStopped) return memoryStopped;
 
+        const plantedChanges = await appChangesSince(appsDir, appsBefore);
+        if (plantedChanges.length > 0) {
+          runs.addChanges(runId, plantedChanges);
+          const summary = `${memoryRecorder.summary}\n\nPractice skipped: the memory agent changed ${plantedChanges.length} app file(s), which it should never do. Review them on this page.`;
+          runs.finish(runId, { status: "completed", summary });
+          log.warn("dream skipped practice, memory agent changed apps", {
+            runId,
+            files: plantedChanges.length,
+          });
+          return { status: "ok", data: { runId, windowHours, summary, practiceSkipped: true } };
+        }
+
         // Staged only now, so the staging copy does not exist while the
         // memory agent reads other people's chats and cannot plant skills or
         // notes in it.
         let before: Map<string, Buffer>;
         try {
-          await ensureUserSkillsCarrier(carrierDir);
           await removeStaleStaging(carrierDir);
           staging = await stageCarrierSkills(carrierDir);
           before = await snapshotCarrierSkills(staging);
@@ -258,7 +287,6 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           "",
           earlierPracticeNotes(runs, memoryDir, runId),
         ].join("\n");
-        const appsBefore = await snapshotApps(appsDir, join(staging, "apps-before"));
         let practiceStopped: ActionResult | null;
         try {
           practiceStopped = await runAgent(
@@ -325,6 +353,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
       } finally {
         stopHeartbeat();
         if (staging) await rm(staging, { recursive: true, force: true });
+        if (appsCopy) await rm(appsCopy, { recursive: true, force: true });
       }
     },
   };

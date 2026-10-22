@@ -543,7 +543,7 @@ describe("dream skills", () => {
   });
 
   it("appends the practice agent's notes to today's journal", async () => {
-    const memoryDir = join(dirname(carrierDir), "memory");
+    const memoryDir = mkdtempSync(join(tmpdir(), "dream-memory-"));
     const runner = skillWritingRunner([{ type: "result", content: "done" }], () => {
       const notes = /Practice notes file: (.+)$/m.exec(runner.prompts[1] ?? "")?.[1] as string;
       writeFileSync(notes, "## Practice\n- notes app: fixed the export.");
@@ -621,7 +621,7 @@ describe("dream skills", () => {
   });
 
   it("shows the practice agent its notes from earlier runs", async () => {
-    const memoryDir = join(dirname(carrierDir), "memory");
+    const memoryDir = mkdtempSync(join(tmpdir(), "dream-memory-"));
     async function dreamWithNotes(text: string): Promise<string> {
       const prompts: string[] = [];
       const run = async function* (params: { agentName: string; prompt: string }) {
@@ -652,7 +652,7 @@ describe("dream skills", () => {
   });
 
   it("stages skills only after the memory agent, and never takes its edits for practice notes", async () => {
-    const memoryDir = join(dirname(carrierDir), "memory");
+    const memoryDir = mkdtempSync(join(tmpdir(), "dream-memory-"));
     const journal = (prompt: string) => /Today's journal entry: (.+)$/m.exec(prompt)?.[1] as string;
     const prompts: string[] = [];
     let stagingDuringMemory: string[] = [];
@@ -685,6 +685,74 @@ describe("dream skills", () => {
     expect(stagingDuringMemory).toEqual([]);
     expect(prompts[3]).toContain("(None yet.)");
     expect(prompts[3]).not.toContain("relayed text");
+  });
+
+  it("skips the practice agent when the memory agent changed an app", async () => {
+    const apps = dirname(carrierDir);
+    mkdirSync(join(apps, "notes"), { recursive: true });
+    writeFileSync(join(apps, "notes/index.ts"), "clean");
+    const agents: string[] = [];
+    const run = async function* (params: { agentName: string }) {
+      agents.push(params.agentName);
+      if (params.agentName === "dream") writeFileSync(join(apps, "notes/index.ts"), "planted");
+      yield { type: "result", content: "Updated memory." };
+    };
+    const deps = makeDeps([]);
+    (deps.agentRunner as unknown as { run: unknown }).run = run;
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    expect(agents).toEqual(["dream"]);
+    const { runId, summary } = (result as { data: { runId: string; summary: string } }).data;
+    expect(summary).toContain("Practice skipped");
+    expect(createRunsRepository(appDb()).changes(runId)).toContainEqual(
+      expect.objectContaining({
+        path: join(apps, "notes/index.ts"),
+        previous: "clean",
+        content: "planted",
+      }),
+    );
+  });
+
+  it("never records the contents of a .env file the agent wrote or edited", async () => {
+    const env = join(dirname(carrierDir), "notes/.env");
+    const deps = makeDeps([
+      { type: "tool_use", id: "w", tool: "Write", input: { file_path: env, content: "KEY=one" } },
+      { type: "tool_result", toolUseId: "w", tool: "Write", output: "ok" },
+      {
+        type: "tool_use",
+        id: "e",
+        tool: "Edit",
+        input: { file_path: env, old_string: "KEY=one", new_string: "KEY=two" },
+      },
+      { type: "tool_result", toolUseId: "e", tool: "Edit", output: "ok" },
+      { type: "result", content: "done" },
+    ]);
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    const { runId } = (result as { data: { runId: string } }).data;
+    const recorded = JSON.stringify(createRunsRepository(appDb()).changes(runId));
+    expect(recorded).toContain("(contents not recorded)");
+    expect(recorded).not.toContain("KEY=");
+  });
+
+  it("records thousands of changes in one call", () => {
+    const runs = createRunsRepository(appDb());
+    const { id } = runs.reserveDream(24, "running");
+    const changes = Array.from({ length: 4000 }, (_, i) => ({
+      op: "write" as const,
+      path: `/apps/a/f${i}.ts`,
+      content: String(i),
+      previous: null,
+      truncated: false,
+    }));
+
+    runs.addChanges(id, changes);
+
+    const stored = runs.changes(id);
+    expect(stored).toHaveLength(4000);
+    expect(stored[3999]?.path).toBe("/apps/a/f3999.ts");
   });
 
   it("says which agent failed when the practice agent fails", async () => {

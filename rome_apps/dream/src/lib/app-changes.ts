@@ -11,8 +11,8 @@
 import type { Dirent } from "node:fs";
 import { constants } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
-import { basename, dirname, extname, join, relative } from "node:path";
-import { type FileChange, MAX_CHANGE_CHARS } from "./changes.js";
+import { dirname, extname, join, relative } from "node:path";
+import { type FileChange, isSecretFile, MAX_CHANGE_CHARS, SECRET_PLACEHOLDER } from "./changes.js";
 
 /** Build output, dependencies, and hidden folders (git, dream staging) are not source. Hidden files are. */
 const SKIPPED_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);
@@ -26,9 +26,6 @@ const BINARY_EXTENSIONS = new Set(
     " ",
   ),
 );
-
-/** `.env` files can hold secrets, so only their path is recorded. `.env.example` is source. */
-const SECRET_FILE = /^\.env(?!\.example$)/;
 
 export interface AppsSnapshot {
   /** Size and modification time of every source file. */
@@ -74,7 +71,7 @@ export async function snapshotApps(dir: string, copyDir: string): Promise<AppsSn
   const files = await signatures(dir);
   for (const path of files.keys()) {
     if (BINARY_EXTENSIONS.has(extname(path).slice(1).toLowerCase())) continue;
-    if (SECRET_FILE.test(basename(path))) continue;
+    if (isSecretFile(path)) continue;
     const size = Number(files.get(path)?.split(":")[0]);
     if (size > MAX_READ_BYTES) continue;
     const copy = join(copyDir, relative(dir, path));
@@ -100,11 +97,11 @@ export async function appChangesSince(dir: string, before: AppsSnapshot): Promis
   for (const [path, signature] of after) {
     const previous = before.files.get(path);
     if (previous === signature) continue;
-    if (SECRET_FILE.test(basename(path))) {
+    if (isSecretFile(path)) {
       changes.push({
         op: "write",
         path,
-        content: "(contents not recorded)",
+        content: SECRET_PLACEHOLDER,
         previous: null,
         truncated: false,
       });
