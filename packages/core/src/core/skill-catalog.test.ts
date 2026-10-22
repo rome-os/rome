@@ -2,10 +2,15 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect } from "@rstest/core";
+import type { AppCatalog } from "../apps/catalog.js";
+import { createEmptyLegacyArtifactBindings, type ArtifactId } from "../apps/artifact-id.js";
+import type { ArtifactRef } from "../apps/state.js";
+import { buildFacadeBundle } from "./mcp-facade.js";
 import {
   listCompanionFiles,
   parseSkillFrontmatter,
   parseSkillFrontmatterResult,
+  SkillCatalog,
 } from "./skill-catalog.js";
 
 describe("parseSkillFrontmatter", () => {
@@ -146,6 +151,74 @@ describe("listCompanionFiles", () => {
       expect(await listCompanionFiles(join(dir, "missing"))).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("SkillCatalog.getMcpDefinitions", () => {
+  async function writeSkill(root: string, dir: string, name: string): Promise<string> {
+    const skillDir = join(root, dir);
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), `---\nname: ${name}\ndescription: d\n---\nbody`);
+    return skillDir;
+  }
+
+  function catalogOf(refs: ArtifactRef[]): AppCatalog {
+    return {
+      listArtifacts: (kind: string) => refs.filter((ref) => ref.kind === kind),
+    } as unknown as AppCatalog;
+  }
+
+  it("carries bound bare names as legacyNames, which read_skill accepts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skill-legacy-names-"));
+    try {
+      const identity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+      const skills = new SkillCatalog(identity);
+      await skills.loadFromCatalog(
+        catalogOf([
+          {
+            formatVersion: 1,
+            kind: "skill",
+            publicName: "foo-dir",
+            aliases: [],
+            ownerType: "app",
+            ownerId: "bar",
+            absolutePath: await writeSkill(root, "foo-dir", "foo"),
+          },
+          {
+            formatVersion: 2,
+            kind: "skill",
+            publicName: "qux",
+            aliases: [],
+            ownerType: "app",
+            ownerId: "baz",
+            absolutePath: await writeSkill(root, "qux", "qux"),
+          },
+        ]),
+      );
+
+      const byName = new Map(skills.getMcpDefinitions().map((skill) => [skill.name, skill]));
+      expect(byName.get("bar:foo")?.legacyNames).toEqual(["foo", "foo-dir"]);
+      expect(byName.get("baz:qux")).not.toHaveProperty("legacyNames");
+
+      const readSkill = buildFacadeBundle({
+        getActionCatalog: () => [],
+        getSkillCatalog: () => skills.getMcpDefinitions(),
+        subagentTools: [],
+        executeAction: async () => ({}),
+        executeSubagent: async () => ({}),
+      }).skills.find((tool) => tool.name === "read_skill")!;
+      const read = await readSkill.handler({ skill_name: "foo" });
+      expect(read.isError).toBeUndefined();
+      expect(JSON.parse(read.content[0].text)).toMatchObject({ name: "bar:foo" });
+
+      // Bindings persist, so a name bound while an app was format version 1
+      // still resolves after the app moves to version 2.
+      identity.legacyBindings.skill.qux = "baz:qux" as ArtifactId;
+      const refreshed = skills.getMcpDefinitions().find((skill) => skill.name === "baz:qux");
+      expect(refreshed?.legacyNames).toEqual(["qux"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

@@ -18,6 +18,8 @@
 // The Anthropic MCP-server test (`anthropic-mcp-servers.test.ts`) is the
 // regression gate for this module.
 
+import { join } from "node:path";
+import { artifactLocalName } from "../apps/artifact-id.js";
 import { createLogger } from "../logger.js";
 import type { DeferInput } from "./defer.js";
 import type {
@@ -37,6 +39,15 @@ const MAX_SEARCH_LIMIT = 25;
 const SEARCH_LIMIT_DESCRIPTION =
   `Optional. Recommended: omit this parameter to use the default of ${DEFAULT_SEARCH_LIMIT}. ` +
   `If provided, use an integer from 1 to ${MAX_SEARCH_LIMIT}.`;
+
+/**
+ * A facade tool rejected the model's input. `runFacadeTool` returns it to the
+ * model like any other failure but logs it at warn, since the model recovers
+ * from it and Rome has nothing to fix.
+ */
+class FacadeInputError extends Error {
+  override name = "FacadeInputError";
+}
 
 export interface FacadeTextContent {
   type: "text";
@@ -335,7 +346,7 @@ function parseRegexQuery(queryText: string): RegExp | null {
     return new RegExp(trimmed.slice(1, lastSlash), flags);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid regex query: ${message}`);
+    throw new FacadeInputError(`Invalid regex query: ${message}`);
   }
 }
 
@@ -354,7 +365,7 @@ function compileSearchRegex(queryText: string): RegExp {
     return new RegExp(queryText, "i");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid regex query: ${message}`);
+    throw new FacadeInputError(`Invalid regex query: ${message}`);
   }
 }
 
@@ -419,14 +430,14 @@ function requireAction(
 ): ActionMcpDefinition {
   const action = actionCatalog.find((entry) => entry.name === actionName);
   if (!action) {
-    throw new Error(`Unknown action: ${actionName}`);
+    throw new FacadeInputError(`Unknown action: ${actionName}`);
   }
   return action;
 }
 
 function assertJsonArgs(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("execute_action.json_args must be an object");
+    throw new FacadeInputError("execute_action.json_args must be an object");
   }
   return value as Record<string, unknown>;
 }
@@ -478,20 +489,66 @@ function searchSkills(
     .map(({ skill }) => toSkillSummary(skill));
 }
 
+function findSkill(
+  skillCatalog: SkillMcpDefinition[],
+  skillName: string,
+): SkillMcpDefinition | undefined {
+  return skillCatalog.find(
+    (entry) => entry.name === skillName || entry.legacyNames?.includes(skillName),
+  );
+}
+
+// Accepts a canonical id or a bare name the legacy bindings resolve, the same
+// inputs SkillCatalog.get() accepts. On a miss it only suggests ids: picking an
+// owner for an unbound bare name would break the artifact-id contract.
 function requireSkill(skillCatalog: SkillMcpDefinition[], skillName: string): SkillMcpDefinition {
-  const skill = skillCatalog.find((entry) => entry.name === skillName);
+  const skill = findSkill(skillCatalog, skillName);
   if (!skill) {
-    throw new Error(`Unknown skill: ${skillName}`);
+    throw new FacadeInputError(
+      `Unknown skill: ${skillName}. ${skillMissHint(skillCatalog, skillName)}`,
+    );
   }
   return skill;
+}
+
+const MAX_HINT_FILE_OWNERS = 3;
+
+function skillMissHint(skillCatalog: SkillMcpDefinition[], skillName: string): string {
+  // A store app id such as @handle/slug has its own slash, so the file path
+  // starts at the first slash after the id's colon.
+  const slash = skillName.indexOf("/", skillName.indexOf(":") + 1);
+  const owner = slash > 0 ? findSkill(skillCatalog, skillName.slice(0, slash)) : undefined;
+  const file = owner ? skillName.slice(slash + 1) : skillName;
+  const fileOwners = (owner ? [owner] : skillCatalog).filter(
+    (skill) => skill.directory && skill.files?.includes(file),
+  );
+  if (fileOwners.length > 0) {
+    // A common file name such as README.md can ship with many skills, so name
+    // only the first few owners to keep the error short.
+    const shown = fileOwners.slice(0, MAX_HINT_FILE_OWNERS);
+    const more = fileOwners.length - shown.length;
+    const ids = shown.map((skill) => skill.name).join(", ") + (more > 0 ? ` and ${more} more` : "");
+    const paths = shown.map((skill) => join(skill.directory!, file)).join(" or ");
+    const noun = fileOwners.length === 1 ? "skill" : "skills";
+    return `"${file}" is a companion file of ${noun} ${ids}, not a skill. Read ${paths} with your file tools.`;
+  }
+
+  const localName = artifactLocalName(skillName);
+  const sameLocalName = skillCatalog
+    .filter((skill) => artifactLocalName(skill.name) === localName)
+    .map((skill) => skill.name);
+  if (sameLocalName.length > 0) return `Did you mean ${sameLocalName.join(", ")}?`;
+  return "Call list_skills or search_skills for canonical skill ids.";
 }
 
 function resolveSkillLookupName(args: Record<string, unknown>): string {
   const skillName = typeof args.skill_name === "string" ? args.skill_name : args.query;
   if (typeof skillName !== "string" || skillName.trim() === "") {
-    throw new Error('Missing skill name. Provide "skill_name" with the exact skill name.');
+    throw new FacadeInputError(
+      'Missing skill name. Provide "skill_name" with a canonical skill id.',
+    );
   }
-  return skillName;
+  return skillName.trim();
 }
 
 // Handler wrapper — the standard try / serialize / wrap-in-text envelope
@@ -511,7 +568,11 @@ export async function runFacadeTool(
     return { content: [{ type: "text", text: resultStr }] };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    log.error("facade tool execution failed", { tool: toolName, error: errorMsg });
+    if (err instanceof FacadeInputError) {
+      log.warn("facade tool execution failed", { tool: toolName, error: errorMsg });
+    } else {
+      log.error("facade tool execution failed", { tool: toolName, error: errorMsg });
+    }
     return {
       content: [{ type: "text", text: errorMsg }],
       isError: true,
@@ -689,8 +750,12 @@ function buildSkillFacadeTools(getSkillCatalog: () => SkillMcpDefinition[]): Fac
       inputSchema: {
         type: "object",
         properties: {
-          skill_name: { type: "string", description: "The skill name to read." },
-          query: { type: "string", description: "Alias for skill_name. Use the exact skill name." },
+          skill_name: {
+            type: "string",
+            description:
+              "Canonical skill id from list_skills or search_skills, e.g. coding:app_creation.",
+          },
+          query: { type: "string", description: "Alias for skill_name." },
         },
         additionalProperties: false,
       },
@@ -699,7 +764,7 @@ function buildSkillFacadeTools(getSkillCatalog: () => SkillMcpDefinition[]): Fac
           const skillName = resolveSkillLookupName(args);
           const skill = requireSkill(getSkillCatalog(), skillName);
           return {
-            name: skillName,
+            name: skill.name,
             content: skill.content,
             ...(skill.directory && skill.files?.length
               ? { directory: skill.directory, files: skill.files }

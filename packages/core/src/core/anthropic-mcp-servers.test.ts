@@ -30,6 +30,21 @@ rs.mock("@anthropic-ai/claude-agent-sdk", () => ({
   tool: sdkToolMock,
 }));
 
+const facadeLog = rs.hoisted(() => ({
+  debug: rs.fn(),
+  info: rs.fn(),
+  warn: rs.fn(),
+  error: rs.fn(),
+}));
+
+rs.mock("../logger.js", () => {
+  const quiet = () => ({ debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() });
+  return {
+    createLogger: (component: string) => (component === "mcp-facade" ? facadeLog : quiet()),
+    createAppLogger: () => quiet(),
+  };
+});
+
 interface BuildArgs {
   actionCatalog?: ActionMcpDefinition[];
   getActionCatalog?: () => ActionMcpDefinition[];
@@ -531,6 +546,153 @@ describe("buildAnthropicMcpServers", () => {
       (await readTool.handler({ skill_name: "plain" })).content[0].text,
     ) as Record<string, unknown>;
     expect(barePayload).toEqual({ name: "plain", content: "# Plain" });
+  });
+
+  it("read_skill resolves a bound legacy name and returns the canonical id", async () => {
+    const skill: SkillMcpDefinition = {
+      name: "bar:foo",
+      legacyNames: ["foo"],
+      description: "Foo",
+      content: "# Foo",
+      ownerType: "app",
+      ownerId: "bar",
+    };
+    build({ skillCatalog: [skill] });
+    const readTool = getSkillsServerTools().find((tool) => tool.name === "read_skill")!;
+
+    const response = await readTool.handler({ skill_name: " foo " });
+
+    expect(response.isError).toBeUndefined();
+    expect(JSON.parse(response.content[0].text)).toEqual({ name: "bar:foo", content: "# Foo" });
+  });
+
+  it("read_skill suggests canonical ids that share an unbound local name", async () => {
+    const skills: SkillMcpDefinition[] = [
+      { name: "bar:foo", description: "Foo", content: "# Foo", ownerType: "app", ownerId: "bar" },
+      { name: "baz:foo", description: "Foo", content: "# Foo", ownerType: "app", ownerId: "baz" },
+      { name: "bar:other", description: "Other", content: "#", ownerType: "app", ownerId: "bar" },
+    ];
+    build({ skillCatalog: skills });
+    const readTool = getSkillsServerTools().find((tool) => tool.name === "read_skill")!;
+
+    const bare = await readTool.handler({ skill_name: "foo" });
+    expect(bare.isError).toBe(true);
+    expect(bare.content[0].text).toBe("Unknown skill: foo. Did you mean bar:foo, baz:foo?");
+
+    const wrongNamespace = await readTool.handler({ skill_name: "qux:other" });
+    expect(wrongNamespace.content[0].text).toBe(
+      "Unknown skill: qux:other. Did you mean bar:other?",
+    );
+
+    const missing = await readTool.handler({ skill_name: "skill-creator" });
+    expect(missing.isError).toBe(true);
+    expect(missing.content[0].text).toBe(
+      "Unknown skill: skill-creator. Call list_skills or search_skills for canonical skill ids.",
+    );
+  });
+
+  it("read_skill points a companion file path at the skill directory", async () => {
+    const skill: SkillMcpDefinition = {
+      name: "bar:foo",
+      description: "Foo",
+      content: "# Foo",
+      directory: "/x/foo",
+      files: ["references/x.md"],
+      ownerType: "app",
+      ownerId: "bar",
+    };
+    build({ skillCatalog: [skill] });
+    const readTool = getSkillsServerTools().find((tool) => tool.name === "read_skill")!;
+
+    const response = await readTool.handler({ skill_name: "bar:foo/references/x.md" });
+
+    expect(response.isError).toBe(true);
+    expect(response.content[0].text).toBe(
+      'Unknown skill: bar:foo/references/x.md. "references/x.md" is a companion file of skill ' +
+        "bar:foo, not a skill. Read /x/foo/references/x.md with your file tools.",
+    );
+
+    const relative = await readTool.handler({ skill_name: "references/x.md" });
+    expect(relative.isError).toBe(true);
+    expect(relative.content[0].text).toBe(
+      'Unknown skill: references/x.md. "references/x.md" is a companion file of skill ' +
+        "bar:foo, not a skill. Read /x/foo/references/x.md with your file tools.",
+    );
+  });
+
+  it("read_skill points a companion file path of a store app skill at its directory", async () => {
+    const skill: SkillMcpDefinition = {
+      name: "@handle/bar:foo",
+      description: "Foo",
+      content: "# Foo",
+      directory: "/x/foo",
+      files: ["references/x.md"],
+      ownerType: "app",
+      ownerId: "@handle/bar",
+    };
+    build({ skillCatalog: [skill] });
+    const readTool = getSkillsServerTools().find((tool) => tool.name === "read_skill")!;
+
+    const response = await readTool.handler({ skill_name: "@handle/bar:foo/references/x.md" });
+
+    expect(response.content[0].text).toBe(
+      'Unknown skill: @handle/bar:foo/references/x.md. "references/x.md" is a companion file ' +
+        "of skill @handle/bar:foo, not a skill. Read /x/foo/references/x.md with your file tools.",
+    );
+  });
+
+  it("read_skill names at most three owners of a shared companion file", async () => {
+    const skills: SkillMcpDefinition[] = ["a", "b", "c", "d", "e"].map((id) => ({
+      name: `${id}:doc`,
+      description: "Doc",
+      content: "# Doc",
+      directory: `/x/${id}`,
+      files: ["README.md"],
+      ownerType: "app",
+      ownerId: id,
+    }));
+    build({ skillCatalog: skills });
+    const readTool = getSkillsServerTools().find((tool) => tool.name === "read_skill")!;
+
+    const response = await readTool.handler({ skill_name: "README.md" });
+
+    expect(response.content[0].text).toBe(
+      'Unknown skill: README.md. "README.md" is a companion file of skills a:doc, b:doc, c:doc ' +
+        "and 2 more, not a skill. Read /x/a/README.md or /x/b/README.md or /x/c/README.md " +
+        "with your file tools.",
+    );
+  });
+
+  it("logs model input errors at warn and Rome failures at error", async () => {
+    build({
+      skillCatalog: [
+        { name: "bar:foo", description: "Foo", content: "# Foo", ownerType: "app", ownerId: "bar" },
+      ],
+      executeAction: async () => {
+        throw new Error("database is locked");
+      },
+    });
+    const readTool = getSkillsServerTools().find((tool) => tool.name === "read_skill")!;
+    const executeTool = getActionsServerTools().find((tool) => tool.name === "execute_action")!;
+
+    await readTool.handler({ skill_name: "foo" });
+    await executeTool.handler({ action_name: "send_message", json_args: ["bad"] });
+    expect(facadeLog.error).not.toHaveBeenCalled();
+    expect(facadeLog.warn).toHaveBeenCalledWith("facade tool execution failed", {
+      tool: "read_skill",
+      error: "Unknown skill: foo. Did you mean bar:foo?",
+    });
+    expect(facadeLog.warn).toHaveBeenCalledWith("facade tool execution failed", {
+      tool: "execute_action",
+      error: "execute_action.json_args must be an object",
+    });
+
+    const failed = await executeTool.handler({ action_name: "send_message", json_args: {} });
+    expect(failed.isError).toBe(true);
+    expect(facadeLog.error).toHaveBeenCalledWith("facade tool execution failed", {
+      tool: "execute_action",
+      error: "database is locked",
+    });
   });
 
   it("getSkillCatalog: skills server is registered even when the initial catalog is empty", async () => {
