@@ -399,7 +399,7 @@ describe("ScheduleTriggerProvider", () => {
     }
   });
 
-  it("every 100,000 days: finds the next occurrence without walking each day", async () => {
+  it("every 100,000 days: stores the next run 100,000 days after the start day", async () => {
     rs.useFakeTimers({ shouldAdvanceTime: false });
     try {
       rs.setSystemTime(new Date("2026-10-30T12:00:00Z"));
