@@ -1622,33 +1622,58 @@ describe("AnthropicProvider", () => {
       expect(terminalMcpTools()).toEqual(["mcp__ask_user__ask_question"]);
     });
 
+    // The env and the handler must agree: a tool listed as terminal on a surface
+    // where ask_question asks in prose would let an empty reply through.
     it.each([
-      ["a non-interactive surface", { supportsInteractiveSurface: false }],
+      ["an interactive surface", { supportsInteractiveSurface: true }, true],
+      ["a non-interactive surface", { supportsInteractiveSurface: false }, false],
       [
         "a detached interactive surface",
         { supportsInteractiveSurface: true, interactiveSurfaceDetached: true },
+        false,
       ],
-    ])("leaves Claude Code's terminal tools unset on %s", async (_label, overrides) => {
+    ])("lists ask_question as terminal exactly when it parks on a card, on %s", async (_label, overrides, parksOnCard) => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
       const session = await provider.openSession(buildParams(overrides));
       await collectEvents(session);
       await session.close();
 
-      expect(terminalMcpTools()).toBeUndefined();
+      const { mcpServers } = queryMock.mock.calls[0]![0].options;
+      const askQuestion = mcpServers.ask_user.tools.find(
+        (tool: { name: string }) => tool.name === "ask_question",
+      );
+      const result = await askQuestion.handler(
+        { questions: [{ id: "q1", question: "Which day?", type: "text" }] },
+        {},
+      );
+      const parked = (result.content[0].text as string).includes('"pendingInteraction":true');
+      expect(parked).toBe(parksOnCard);
+      expect(terminalMcpTools()).toEqual(parksOnCard ? ["mcp__ask_user__ask_question"] : undefined);
     });
 
-    it("keeps inherited terminal tools and adds ask_question after them", async () => {
+    it("appends ask_question after cleaned inherited terminal tools", async () => {
+      const provider = new AnthropicProvider({
+        env: { PATH: "/usr/bin", CLAUDE_CODE_TERMINAL_MCP_TOOLS: " mcp__x__y,,mcp__z__w " },
+      });
+      const session = await provider.openSession(buildParams({ supportsInteractiveSurface: true }));
+      await collectEvents(session);
+      await session.close();
+
+      expect(terminalMcpTools()).toEqual(["mcp__x__y", "mcp__z__w", "mcp__ask_user__ask_question"]);
+    });
+
+    it("does not list ask_question twice when it is already inherited", async () => {
       const provider = new AnthropicProvider({
         env: {
           PATH: "/usr/bin",
-          CLAUDE_CODE_TERMINAL_MCP_TOOLS: " mcp__x__y,,mcp__ask_user__ask_question",
+          CLAUDE_CODE_TERMINAL_MCP_TOOLS: "mcp__ask_user__ask_question,mcp__x__y",
         },
       });
       const session = await provider.openSession(buildParams({ supportsInteractiveSurface: true }));
       await collectEvents(session);
       await session.close();
 
-      expect(terminalMcpTools()).toEqual(["mcp__x__y", "mcp__ask_user__ask_question"]);
+      expect(terminalMcpTools()).toEqual(["mcp__ask_user__ask_question", "mcp__x__y"]);
     });
 
     it("passes inherited terminal tools through unchanged on a non-interactive surface", async () => {

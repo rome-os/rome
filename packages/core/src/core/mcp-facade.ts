@@ -1062,6 +1062,16 @@ const ASK_QUESTION_COMPONENT_ID = "question-card";
 const ASK_QUESTION_PARK_DIRECTIVE =
   "The question card has been shown to the guardian. Their answers will arrive as the next turn's prompt — do not call any further tools or send another message until then. When you reply, describe only what this step does; do not claim a later step has already happened.";
 
+/** Whether a valid `ask_question` call parks the turn on a question card.
+ * Otherwise it relays the questions as prose. Providers that tell their
+ * runtime a park ends the response read this, so they cannot drift from the
+ * handler. */
+export function askQuestionParksOnCard(
+  params: Pick<FacadeParams, "supportsInteractiveSurface" | "interactiveSurfaceDetached">,
+): boolean {
+  return params.supportsInteractiveSurface === true && params.interactiveSurfaceDetached !== true;
+}
+
 /** Shape the `ask_question` tool input into a `pendingInteraction` payload that
  * the webchat drain renders as the host built-in question-card component
  * (render.builtin = true, appId = "core"); the guardian's answer resumes the
@@ -1257,7 +1267,7 @@ function buildInteractiveTools(
         // reply in the next turn, so a clarifying question never dead-ends.
         // Detached sessions (exact forks) advertise the card but have no
         // drain to mount it, so they take the same prose path.
-        if (!supportsInteractiveSurface || interactiveSurfaceDetached) {
+        if (!askQuestionParksOnCard({ supportsInteractiveSurface, interactiveSurfaceDetached })) {
           return {
             content: [
               {

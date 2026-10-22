@@ -50,6 +50,7 @@ import {
   isAnthropicAuthRevokedError,
 } from "./anthropic-auth-revoked.js";
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
+import { askQuestionParksOnCard } from "./mcp-facade.js";
 import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
 import { anthropicFunding } from "../usage/funding.js";
@@ -99,13 +100,13 @@ export const CLAUDE_AGENT_SDK_ENV = {
 // Names are `mcp__<server key>__<tool>` as registered by buildAnthropicMcpServers.
 const CLAUDE_TERMINAL_PARK_TOOLS = ["mcp__ask_user__ask_question"] as const;
 
-// Only a mounted interactive surface parks on the card. Elsewhere ask_question
-// tells the model to ask in prose, and the guard still catches an empty reply.
+// Where ask_question asks in prose instead of parking on a card, the guard
+// stays on and still catches an empty reply.
 function terminalMcpToolsEnv(
   inherited: string | undefined,
-  interactive: boolean,
+  parksOnCard: boolean,
 ): string | undefined {
-  if (!interactive) return inherited;
+  if (!parksOnCard) return inherited;
   const tools = new Set(
     (inherited ?? "")
       .split(",")
@@ -569,7 +570,7 @@ export class AnthropicProvider implements ModelProvider {
       ROME_CHANNEL: params.channel,
       CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpToolsEnv(
         queryContext.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS,
-        params.supportsInteractiveSurface === true && params.interactiveSurfaceDetached !== true,
+        askQuestionParksOnCard(params),
       ),
     };
     const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
