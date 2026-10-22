@@ -37,52 +37,73 @@ function str(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-interface Hunk {
+interface Region {
   before: string;
   after: string;
 }
 
 /**
- * Splits a unified diff into its hunks, each as the text before and after.
- * The diff carries no `---`/`+++` file header, only `@@` lines. A diff with
+ * Splits a unified diff into regions, one per run of changed lines, each as
+ * the text before and after with the unchanged lines around it. A hunk that
+ * changes two places with unchanged lines between them yields two regions,
+ * because the page's line diff treats only a shared start and end as
+ * context, and would show the lines between as removed and added again. The
+ * diff carries no `---`/`+++` file header, only `@@` lines, and a diff with
  * no `@@` line is one hunk.
  */
-function hunksOf(diff: string): Hunk[] {
+function regionsOf(diff: string): Region[] {
   const lines = diff.split("\n");
   if (lines.at(-1) === "") lines.pop();
-  const hunks: Array<{ before: string[]; after: string[] }> = [];
-  let current: { before: string[]; after: string[] } | null = null;
+  const regions: Region[] = [];
+  let leading: string[] = [];
+  let removed: string[] = [];
+  let added: string[] = [];
+  let trailing: string[] = [];
+  let open = false;
+
+  const close = () => {
+    if (open) {
+      regions.push({
+        before: [...leading, ...removed, ...trailing].join("\n"),
+        after: [...leading, ...added, ...trailing].join("\n"),
+      });
+    }
+    // The unchanged lines after one run lead into the next.
+    leading = trailing;
+    removed = [];
+    added = [];
+    trailing = [];
+    open = false;
+  };
+
   for (const line of lines) {
+    if (line.startsWith("\\")) continue;
     if (line.startsWith("@@")) {
-      current = { before: [], after: [] };
-      hunks.push(current);
+      close();
+      leading = [];
       continue;
     }
-    if (line.startsWith("\\")) continue;
-    if (!current) {
-      current = { before: [], after: [] };
-      hunks.push(current);
+    if (line.startsWith("-") || line.startsWith("+")) {
+      if (trailing.length > 0) close();
+      open = true;
+      (line.startsWith("-") ? removed : added).push(line.slice(1));
+      continue;
     }
-    const text = line.slice(1);
-    if (line.startsWith("-")) current.before.push(text);
-    else if (line.startsWith("+")) current.after.push(text);
-    else {
-      // A context line is prefixed with one space. An unprefixed line is a
-      // context line some diff writers emit for an empty source line.
-      const context = line.startsWith(" ") ? text : line;
-      current.before.push(context);
-      current.after.push(context);
-    }
+    // A context line is prefixed with one space. An unprefixed line is a
+    // context line some diff writers emit for an empty source line.
+    const text = line.startsWith(" ") ? line.slice(1) : line;
+    (open ? trailing : leading).push(text);
   }
-  return hunks.map((h) => ({ before: h.before.join("\n"), after: h.after.join("\n") }));
+  close();
+  return regions;
 }
 
 /**
  * The file changes in a Codex `fileChange` item. An `add` is the whole new
- * file, so it records as a write. An `update` records one edit per hunk, so
- * the page shows the same diff Codex applied; an update that also renames the
- * file records under the new path, the one that exists after the run. A
- * `delete` leaves nothing to show and records nothing.
+ * file, so it records as a write. An `update` records one edit per run of
+ * changed lines, so the page shows the same diff Codex applied; an update
+ * that also renames the file records under the new path, the one that exists
+ * after the run. A `delete` leaves nothing to show and records nothing.
  */
 function changesFromFileChange(record: Record<string, unknown>): FileChange[] {
   if (!Array.isArray(record.changes)) return [];
@@ -108,7 +129,7 @@ function changesFromFileChange(record: Record<string, unknown>): FileChange[] {
       }
       case "update": {
         const target = str(kindRecord?.move_path) || file;
-        return hunksOf(text).map(({ before, after }) => {
+        return regionsOf(text).map(({ before, after }) => {
           const content = clip(after);
           const previous = clip(before);
           return {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { MAX_CHANGE_CHARS, changesFromToolUse, classifyPath, groupByFile } from "./changes.js";
+import { lineDiff } from "../web/lib/diff.js";
 
 const MEMORY = "/home/rome/.rome/default/memory";
 
@@ -69,7 +70,7 @@ function fileChange(changes: unknown[]): Record<string, unknown> {
 }
 
 describe("changesFromToolUse on a Codex fileChange", () => {
-  it("records an update as one edit per hunk, with the text before and after", () => {
+  it("records an update as one edit per run of changed lines, with the text around it", () => {
     const changes = changesFromToolUse(
       "Edit",
       fileChange([
@@ -132,6 +133,44 @@ describe("changesFromToolUse on a Codex fileChange", () => {
       ["edit", "SKILL.md"],
       ["write", "memory-pressure.md"],
     ]);
+  });
+
+  it("splits a hunk that changes two places so unchanged lines between them stay context", () => {
+    const changes = changesFromToolUse(
+      "Edit",
+      fileChange([
+        {
+          path: "/x/a.md",
+          kind: { type: "update", move_path: null },
+          diff: "@@ -1,7 +1,7 @@\n head\n-old first\n+new first\n same\n also same\n-old second\n+new second\n tail\n",
+        },
+      ]),
+    );
+    expect(changes.map((c) => [c.previous, c.content])).toEqual([
+      ["head\nold first\nsame\nalso same", "head\nnew first\nsame\nalso same"],
+      ["same\nalso same\nold second\ntail", "same\nalso same\nnew second\ntail"],
+    ]);
+    // What the page draws from each change: the shared lines read as context.
+    const drawn = changes.map((c) => lineDiff(c.previous ?? "", c.content).map((l) => l.type));
+    expect(drawn).toEqual([
+      ["context", "removed", "added", "context", "context"],
+      ["context", "context", "removed", "added", "context"],
+    ]);
+  });
+
+  it("records nothing for a hunk with no changed lines", () => {
+    expect(
+      changesFromToolUse(
+        "Edit",
+        fileChange([
+          {
+            path: "/x/a.md",
+            kind: { type: "update", move_path: null },
+            diff: "@@ -1,2 +1,2 @@\n a\n b\n",
+          },
+        ]),
+      ),
+    ).toEqual([]);
   });
 
   it("records an update that renames the file under the new path", () => {
