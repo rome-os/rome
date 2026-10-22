@@ -83,6 +83,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -129,12 +130,16 @@ import {
 
 // ── Types ──────────────────────────────────────────────
 
+/** How a reply streams to Feishu: edited messages, or streaming cards. */
+type FeishuStreamingStyle = "message" | "card";
+
 interface SettingsData {
   "feedback.agentReportsEnabled"?: boolean;
   enableModelSelector?: boolean;
   enableFable?: boolean;
   enableImpersonation?: boolean;
   enableReplyStreaming?: boolean;
+  feishuReplyStreamingStyle?: FeishuStreamingStyle;
   showAiToolUsage?: boolean;
   tierModelMappings?: TierModelMappings;
 }
@@ -1545,7 +1550,9 @@ function ImpersonationAdvancedSection({
 
 /** Features still being tried out, each off until a guardian switches it on.
  *  Reply streaming is the first: with it off, Rome sends each reply whole. The
- *  setting is `enableReplyStreaming`, read by the host on every reply. */
+ *  setting is `enableReplyStreaming`, read by the host on every reply. While
+ *  Feishu's two streaming styles are compared, `feishuReplyStreamingStyle`
+ *  chooses one, read for each message a reply creates. */
 function ExperimentalFeaturesSection({
   settings,
   onSave,
@@ -1557,10 +1564,18 @@ function ExperimentalFeaturesSection({
 }) {
   const { t } = useTranslation("settings");
   const [replyStreaming, setReplyStreaming] = useState(settings.enableReplyStreaming ?? false);
+  const [feishuStyle, setFeishuStyle] = useState<FeishuStreamingStyle>(
+    settings.feishuReplyStreamingStyle === "card" ? "card" : "message",
+  );
 
   function toggleReplyStreaming(next: boolean) {
     setReplyStreaming(next);
     void onSave({ enableReplyStreaming: next });
+  }
+
+  function chooseFeishuStyle(next: FeishuStreamingStyle) {
+    setFeishuStyle(next);
+    void onSave({ feishuReplyStreamingStyle: next });
   }
 
   return (
@@ -1580,6 +1595,30 @@ function ExperimentalFeaturesSection({
           onChange={toggleReplyStreaming}
           disabled={saving}
         />
+        <FormRow>
+          <FormRowHeading>
+            <FormRowLabel>{t("advanced.experimental.feishuStreamingStyle.title")}</FormRowLabel>
+            <FormRowDescription>
+              {t("advanced.experimental.feishuStreamingStyle.description")}
+            </FormRowDescription>
+          </FormRowHeading>
+          <FormRowControl>
+            <SegmentedControl
+              aria-label={t("advanced.experimental.feishuStreamingStyle.title")}
+              size="sm"
+              value={feishuStyle}
+              onValueChange={chooseFeishuStyle}
+              disabled={saving || !replyStreaming}
+              options={[
+                {
+                  value: "message",
+                  label: t("advanced.experimental.feishuStreamingStyle.message"),
+                },
+                { value: "card", label: t("advanced.experimental.feishuStreamingStyle.card") },
+              ]}
+            />
+          </FormRowControl>
+        </FormRow>
       </FormRows>
     </Section>
   );
