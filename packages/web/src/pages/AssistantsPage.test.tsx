@@ -214,6 +214,30 @@ describe("AssistantsPage", () => {
     expect(screen.getByText("Oldest")).toBeTruthy();
   }, 15_000);
 
+  it("keeps the messages a new arrival pushes out of the newest page", async () => {
+    serve([assistant(DOT, "Research dot", "dot")]);
+    // A newest page two messages long, with one more before it.
+    latest[DOT] = {
+      entries: [inbound("d3", "Third", 3), inbound("d2", "Second", 2)],
+      nextCursor: "c2",
+    };
+    olderPages[DOT] = { entries: [inbound("d1", "First", 1)], nextCursor: null };
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Load older messages" }));
+    expect(await screen.findByText("First")).toBeTruthy();
+
+    // A new message pushes "Second" out of the newest page.
+    latest[DOT] = {
+      entries: [inbound("d4", "Fourth", 4), inbound("d3", "Third", 3)],
+      nextCursor: "c3",
+    };
+    expect(await screen.findByText("Fourth", {}, { timeout: 8_000 })).toBeTruthy();
+    expect(screen.getByText("Second")).toBeTruthy();
+    expect(screen.getByText("First")).toBeTruthy();
+  }, 15_000);
+
   it("gives a refused send's draft back and sends it again as a new message", async () => {
     serve([assistant(DOT, "Research dot", "dot")], { sendStates: ["failed", "unconfirmed"] });
     const user = userEvent.setup();

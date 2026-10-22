@@ -181,19 +181,24 @@ function AssistantChat({
     if (olderFrom === null) setOlderFrom(latest.data?.nextCursor ?? null);
     else void older.fetchNextPage();
   };
-  // Newest first, the two reads overlapping once new messages push the newest
-  // page past where older history began; a chat reads top-down, oldest first.
-  const entries = useMemo(() => {
-    const seen = new Set<string>();
-    return [...(latest.data?.entries ?? []), ...(older.data?.pages.flatMap((p) => p.entries) ?? [])]
-      .filter((entry) => {
-        const key = `${entry.source}:${entry.ref}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .reverse();
-  }, [latest.data, older.data]);
+  // Every message the newest page has returned stays on screen. The page is a
+  // fixed size, so a new message pushes its oldest one out, and older history
+  // began where the page ended when the guardian asked for it: without this,
+  // the messages pushed out in between would be in neither read.
+  const [kept, setKept] = useState<readonly Message[]>([]);
+  useEffect(() => {
+    if (latest.data) setKept((previous) => newestFirst([...latest.data.entries, ...previous]));
+  }, [latest.data]);
+  // A chat reads top-down, oldest first.
+  const entries = useMemo(
+    () =>
+      newestFirst([
+        ...(latest.data?.entries ?? []),
+        ...kept,
+        ...(older.data?.pages.flatMap((page) => page.entries) ?? []),
+      ]).reverse(),
+    [latest.data, kept, older.data],
+  );
 
   const [sendError, setSendError] = useState<string | null>(null);
   // The id of a send whose outcome is unknown, kept with its text. A retry of
@@ -388,6 +393,20 @@ function ChatLine({ entry, name, mark }: { entry: Message; name: string; mark: R
       </ChatBubble>
     </MessageRow>
   );
+}
+
+/** Each message once, newest first. The reads overlap, and a message read
+ *  twice keeps its first copy. */
+function newestFirst(messages: readonly Message[]): Message[] {
+  const seen = new Set<string>();
+  return messages
+    .filter((message) => {
+      const key = `${message.source}:${message.ref}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => b.timestamp - a.timestamp);
 }
 
 export default AssistantsPage;
