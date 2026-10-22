@@ -7,16 +7,11 @@ import {
   type AssistantList,
 } from "@rome/api-types/assistants";
 import { parseMessageCursor } from "@rome/api-types/message";
-import {
-  sendRefusalMessage,
-  timelinePageLimit,
-  type OutboxPage,
-  type SendRefusal,
-} from "@rome/api-types/people";
+import { sendRefusalMessage, timelinePageLimit, type SendRefusal } from "@rome/api-types/people";
 import { AGENTS_KIND } from "../../connections/integrations/agents.js";
 import { isAgentId } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
-import { discardSend, readOutbox, retrySend, sendToAccount } from "../../people/outbox.js";
+import { discardSend, sendToAccount } from "../../people/outbox.js";
 import { readPersonTimeline } from "../../people/timeline.js";
 import { personMessageStores, timelineAccounts } from "../../people/timeline-sources.js";
 import type { ApiDeps } from "../deps.js";
@@ -28,7 +23,8 @@ const log = createLogger("assistants-api");
 // the agents channel, so its history, sends and outbox are the People
 // surface's, read for that one address instead of for a person's accounts.
 // What the guardian writes goes out through the outbox, which starts no agent
-// turn, so main answers the assistant and never the guardian here.
+// turn, so main answers the assistant and never the guardian here. The page
+// shows a refused send as an error and discards it, so only discard is here.
 
 export function assistantsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
@@ -107,26 +103,8 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
         );
   });
 
-  app.get("/assistants/:agentId/outbox", async (c) => {
-    const address = addressOf(c);
-    if (!address) return unknownAssistant(c);
-
-    const [accounts] = await timelineAccounts(deps, [[address]]);
-    return c.json({
-      messages: await readOutbox(deps, personMessageStores(deps), accounts ?? []),
-    } satisfies OutboxPage);
-  });
-
-  app.post("/assistants/:agentId/outbox/:messageId/retry", async (c) => {
-    const address = addressOf(c);
-    if (!address) return unknownAssistant(c);
-
-    const message = await retrySend(deps, [address], c.req.param("messageId"));
-    return message
-      ? c.json(message, 202)
-      : c.json({ error: "No failed message to this assistant with that id" }, 404);
-  });
-
+  /** Give up on a failed send. The page discards a send the channel refused,
+   *  so a retry is a new message rather than a row left in the outbox. */
   app.delete("/assistants/:agentId/outbox/:messageId", async (c) => {
     const address = addressOf(c);
     if (!address) return unknownAssistant(c);

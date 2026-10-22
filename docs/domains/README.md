@@ -57,6 +57,8 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - The dashboard and docs say account, agent, connect, disconnect, link, switch and unlink.
 - An account has at most one link to a person, and Rome never makes one from what a sender says about itself.
 - Rome never asks a sender to pair. A sender with no link is admitted and is a stranger.
+- An assistant's chat is on one Assistants page that switches between assistants, each marked with its kind, from the moment Rome knows the assistant, and the guardian can add the page to the sidebar. Other Romes are left out.
+- What the guardian writes in an assistant's chat goes to the assistant and wakes no agent.
 
 Diffs still owed to the model, each a change of its own:
 
@@ -82,5 +84,3 @@ Diffs still owed to the model, each a change of its own:
 - The guardian can delete a person.
 - A delegate link is stored and shown as the agent of its person.
 - People's labels and docs say platform where they say channel.
-- Assistants' chats are on one Assistants page that switches between them, each marked with its kind, from the moment Rome knows the assistant, and the guardian can add the page to the sidebar. Other Romes are left out.
-- What the guardian writes in an assistant's chat goes to the assistant and wakes no agent.

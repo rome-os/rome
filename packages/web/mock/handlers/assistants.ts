@@ -6,7 +6,7 @@ import {
   type AssistantList,
 } from "@rome/api-types/assistants";
 import type { Message } from "@rome/api-types/message";
-import type { OutboxMessage, OutboxPage, TimelinePage } from "@rome/api-types/people";
+import type { OutboxMessage, TimelinePage } from "@rome/api-types/people";
 
 // Assistants: a Dot and a Muse listed by Rome Cloud. The Dot has a short chat
 // with Rome; Muse has none yet, so the empty chat and writing first are both
@@ -100,7 +100,11 @@ export const assistantHandlers = [
     );
   }),
 
-  http.get("/api/assistants/:agentId/outbox", () =>
-    HttpResponse.json({ messages: [] } satisfies OutboxPage),
+  // A mock send never fails, so there is never a refused send to discard.
+  http.delete("/api/assistants/:agentId/outbox/:messageId", () =>
+    HttpResponse.json(
+      { error: "No dismissable message to this assistant with that id" },
+      { status: 404 },
+    ),
   ),
 ];

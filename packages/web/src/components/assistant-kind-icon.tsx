@@ -44,28 +44,3 @@ export function AssistantKindMark({ kind, className }: { kind: string; className
   }
   return <Bot aria-hidden="true" className={className} />;
 }
-
-/**
- * Marks an assistant's kind in front of its name: the product's logo, named
- * for screen readers and on hover. A name can be anything its owner chose, so
- * the mark keeps the kind clear without repeating it as text.
- */
-export function AssistantKindIcon({
-  kind,
-  className = "size-3.5",
-}: {
-  kind: string;
-  className?: string;
-}) {
-  const label = useAssistantKindLabel()(kind);
-  return (
-    <span
-      role="img"
-      aria-label={label}
-      title={label}
-      className="inline-flex shrink-0 items-center text-muted-foreground"
-    >
-      <AssistantKindMark kind={kind} className={className} />
-    </span>
-  );
-}

@@ -90,8 +90,9 @@ export interface ApiDeps {
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */
   accountNames: AccountNames;
-  /** The agents Rome Cloud lists for this Rome, each an assistant with one
-   *  chat (docs/domains/chats.md#assistant). */
+  /** The agents Rome Cloud lists for this Rome. Each is an assistant with one
+   *  chat (docs/domains/chats.md#assistant), and the dashboard shows all but
+   *  other Romes. */
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
   /** Messages Rome is still trying to deliver — the People surface's

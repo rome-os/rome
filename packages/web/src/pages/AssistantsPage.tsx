@@ -27,6 +27,7 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import {
   ASSISTANT_PARAM,
+  discardAssistantSend,
   listAssistants,
   readAssistantMessages,
   sendToAssistant,
@@ -37,6 +38,9 @@ import { randomUUID } from "@/lib/random-uuid";
 /** How often the open chat is read again, so an assistant's message and main's
  *  answer appear without a reload. */
 const POLL_MS = 5_000;
+
+/** How often the list of assistants is read again. */
+const LIST_POLL_MS = 30_000;
 
 const ASSISTANTS_KEY = "assistants";
 const MESSAGES_KEY = "assistant-messages";
@@ -54,6 +58,9 @@ export function AssistantsPage() {
   const assistants = useQuery({
     queryKey: [ASSISTANTS_KEY],
     queryFn: ({ signal }) => listAssistants(signal),
+    // Keeps the switcher's last-message times and order current while a
+    // chat is open.
+    refetchInterval: LIST_POLL_MS,
   });
   // The list comes newest chat first, so with no choice made the page opens on
   // the chat that moved last.
@@ -70,7 +77,7 @@ export function AssistantsPage() {
             <div className="space-y-2 p-4" aria-hidden>
               <Skeleton className="h-8 w-48" />
             </div>
-          ) : assistants.error ? (
+          ) : assistants.error && !assistants.data ? (
             <div className="p-4">
               <Alert variant="destructive">
                 <CircleAlert aria-hidden="true" />
@@ -204,14 +211,11 @@ function AssistantChat({
               onSend={async (snapshot) => {
                 setSendError(null);
                 try {
-                  // The composer reuses its input id when the same draft is
-                  // resent, so a retry is one message, not two.
-                  const row = await sendToAssistant(
-                    agentId,
-                    snapshot.text,
-                    snapshot.inputId ?? randomUUID(),
-                  );
+                  const row = await sendToAssistant(agentId, snapshot.text, randomUUID());
                   if (row.state === "failed") {
+                    // A failed row answers its id forever, so it is discarded
+                    // and the guardian's retry goes out as a new message.
+                    void discardAssistantSend(agentId, row.id).catch(() => {});
                     throw new Error(row.error ?? t("assistantChat.sendFailed"));
                   }
                 } catch (error) {

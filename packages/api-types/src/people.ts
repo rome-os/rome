@@ -1257,16 +1257,16 @@ export interface SendMessageRequest {
   text: string;
 }
 
+/** A send's id as a client spells it: a UUID v4. */
+export const SEND_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 export function parseSendMessageRequest(
   body: unknown,
 ): { request: SendMessageRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "body must be an object" };
   const raw = body as Record<string, unknown>;
-  if (
-    raw.id !== undefined &&
-    (typeof raw.id !== "string" ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(raw.id))
-  ) {
+  if (raw.id !== undefined && (typeof raw.id !== "string" || !SEND_ID_PATTERN.test(raw.id))) {
     return { error: "id must be a UUID v4" };
   }
   const channel = typeof raw.channel === "string" ? raw.channel.trim() : "";

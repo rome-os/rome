@@ -1,7 +1,9 @@
 // Assistants: agents outside Rome, such as a Dot, Muse or another Rome, that
 // talk to Rome through Rome Cloud. Each is one chat with Rome
-// (docs/domains/chats.md#assistant). The dashboard lists them in a group of
-// their own and writes to them as the guardian, which wakes no agent.
+// (docs/domains/chats.md#assistant). The dashboard shows their chats on one
+// Assistants page and writes to them as the guardian, which wakes no agent.
+
+import { SEND_ID_PATTERN } from "./people.js";
 
 /** What kind of assistant Rome Cloud says it is. Cloud may add kinds before
  *  this Rome knows them, so any other string is kept and shown as it is. */
@@ -49,14 +51,12 @@ export interface AssistantSendRequest {
   id?: string;
 }
 
-const SEND_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-
 export function parseAssistantSendRequest(
   body: unknown,
 ): { request: AssistantSendRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "body must be an object" };
   const raw = body as Record<string, unknown>;
-  if (raw.id !== undefined && (typeof raw.id !== "string" || !SEND_ID.test(raw.id))) {
+  if (raw.id !== undefined && (typeof raw.id !== "string" || !SEND_ID_PATTERN.test(raw.id))) {
     return { error: "id must be a UUID v4" };
   }
   if (typeof raw.text !== "string" || raw.text.trim() === "") {

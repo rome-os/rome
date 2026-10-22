@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from "@rstest/core";
+import { describe, it, expect, beforeEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import type { AssistantList } from "@rome/api-types/assistants";
-import type { OutboxMessage, OutboxPage, TimelinePage } from "@rome/api-types/people";
+import type { OutboxMessage, TimelinePage } from "@rome/api-types/people";
 import { assistantsRoutes } from "./assistants.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
@@ -109,10 +109,20 @@ describe("Assistants API", () => {
     const [first] = (await list()).assistants;
     expect(first).toMatchObject({ agentId: DOT });
     expect(first!.lastMessageAt).not.toBeNull();
+  });
 
-    // Landed on the timeline, so nothing is left in flight.
-    const outbox = (await (await app.request(`/assistants/${DOT}/outbox`)).json()) as OutboxPage;
-    expect(outbox.messages).toEqual([]);
+  it("lets a refused send be discarded, so the guardian's retry is a new message", async () => {
+    rs.spyOn(deps.transports.get("agents")!, "send").mockRejectedValue(new Error("not reachable"));
+    const res = await send(DOT, { text: "Are you there?", id: crypto.randomUUID() });
+    const row = (await res.json()) as OutboxMessage;
+    expect(row).toMatchObject({ state: "failed", error: "not reachable", dismissable: true });
+
+    const discard = (agentId: string) =>
+      app.request(`/assistants/${agentId}/outbox/${row.id}`, { method: "DELETE" });
+    // Only under the assistant it was sent to.
+    expect((await discard(MUSE)).status).toBe(404);
+    expect((await discard(DOT)).status).toBe(204);
+    expect((await discard(DOT)).status).toBe(404);
   });
 
   it("refuses an address that is not an agent id", async () => {

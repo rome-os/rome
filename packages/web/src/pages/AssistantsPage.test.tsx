@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -38,9 +38,40 @@ const chats: Record<string, TimelinePage> = {
   },
 };
 
-function serve(assistants: Assistant[] | "fail") {
-  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+/** Each send the page posted, and each send id it discarded. */
+const sends: { id: string; text: string }[] = [];
+const discarded: string[] = [];
+
+function serve(assistants: Assistant[] | "fail", { refuse = false } = {}) {
+  sends.length = 0;
+  discarded.length = 0;
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
     const url = String(input);
+    if (init?.method === "POST" && url.endsWith("/messages")) {
+      const body = JSON.parse(String(init.body)) as { id: string; text: string };
+      sends.push(body);
+      return Response.json(
+        {
+          id: body.id,
+          channel: "agents",
+          channelUserId: DOT,
+          text: body.text,
+          timestamp: 3,
+          state: refuse ? "failed" : "unconfirmed",
+          ref: null,
+          error: refuse ? "not reachable" : null,
+          dismissable: refuse,
+        },
+        { status: 202 },
+      );
+    }
+    if (init?.method === "DELETE") {
+      discarded.push(url.split("/").at(-1)!);
+      return new Response(null, { status: 204 });
+    }
     if (url === "/api/assistants") {
       return assistants === "fail"
         ? new Response("{}", { status: 503 })
@@ -108,6 +139,22 @@ describe("AssistantsPage", () => {
     expect((await switcher()).textContent).toContain("Research dot");
     expect(await screen.findByText("Q3 draft?")).toBeTruthy();
     expect(screen.getByTestId("location").textContent).toBe(`?id=${DOT}`);
+  });
+
+  it("discards a refused send and gives the draft back, so sending again is a new message", async () => {
+    serve([assistant(DOT, "Research dot", "dot")], { refuse: true });
+    const user = userEvent.setup();
+    renderPage();
+
+    const box = await screen.findByPlaceholderText("Message Research dot");
+    await user.type(box, "Are you there?{Enter}");
+    expect(await screen.findByText("not reachable")).toBeTruthy();
+    await waitFor(() => expect(discarded).toEqual([sends[0]!.id]));
+    expect((box as HTMLTextAreaElement).value).toBe("Are you there?");
+
+    await user.type(box, "{Enter}");
+    await waitFor(() => expect(sends).toHaveLength(2));
+    expect(sends[1]!.id).not.toBe(sends[0]!.id);
   });
 
   it("names a kind it has no mark for, as Rome Cloud spells it", async () => {
