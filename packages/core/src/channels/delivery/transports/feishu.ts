@@ -5,6 +5,7 @@ import {
   type PartReceipt,
   type TextCodec,
 } from "../types.js";
+import type { FeishuStreamingStyle } from "../streaming-switch.js";
 import { neverConnected } from "./network.js";
 
 /** Feishu lets a message be edited this many times. */
@@ -28,13 +29,6 @@ class FeishuRefusal extends Error {
     super(message);
   }
 }
-
-/**
- * How a streamed reply shows on Feishu: `message` edits rich-text posts, which
- * Feishu lets be edited 20 times each, and `card` streams into cards, which
- * show the text as it is typed and take any number of edits.
- */
-export type FeishuStreamingStyle = "message" | "card";
 
 export interface FeishuTransportOptions {
   client: LarkChannel["rawClient"];
@@ -147,11 +141,39 @@ export function feishuTransport({
         : failure;
     }
     if (!id) throw new DeliveryFailure("unavailable", "Feishu answered without a card id");
+    const card: Card = { id, sequence: 0 };
     const content = JSON.stringify({ type: "card", data: { card_id: id } });
-    const receipt = await call(() => send(conversation, "interactive", content, replyTo));
-    cards.set(receipt.messageId, { id, sequence: 0 });
+    let receipt: PartReceipt;
+    try {
+      receipt = await call(() => send(conversation, "interactive", content, replyTo));
+    } catch (error) {
+      // The message may show the card, and the reply has no receipt to settle
+      // it with, so its cursor is ended here, as far as Feishu lets it be.
+      if ((error as DeliveryFailure).kind === "unknown")
+        void endStreaming(card, text).catch(() => {});
+      throw error;
+    }
+    cards.set(receipt.messageId, card);
     if (cards.size > KNOWN_CARDS) cards.delete(cards.keys().next().value!);
     return { ...receipt, maxEdits: Number.POSITIVE_INFINITY, streaming: true as const };
+  };
+
+  /** Ends `card`'s streaming mode, and has the chat list show `text`. */
+  const endStreaming = async (card: Card, text: string) => {
+    const sequence = ++card.sequence;
+    const config = { streaming_mode: false, summary: { content: summaryOf(text) } };
+    await call(async () =>
+      answered(
+        await client.cardkit.v1.card.settings({
+          path: { card_id: card.id },
+          data: {
+            settings: JSON.stringify({ config }),
+            sequence,
+            uuid: `s_${card.id}_${sequence}`,
+          },
+        }),
+      ),
+    );
   };
 
   return {
@@ -206,20 +228,7 @@ export function feishuTransport({
       const card = cards.get(receipt.messageId);
       if (!card) return;
       cards.delete(receipt.messageId);
-      const sequence = ++card.sequence;
-      const config = { streaming_mode: false, summary: { content: summaryOf(text) } };
-      await call(async () =>
-        answered(
-          await client.cardkit.v1.card.settings({
-            path: { card_id: card.id },
-            data: {
-              settings: JSON.stringify({ config }),
-              sequence,
-              uuid: `s_${card.id}_${sequence}`,
-            },
-          }),
-        ),
-      );
+      await endStreaming(card, text);
     },
   };
 }
@@ -243,10 +252,19 @@ function cardOf(text: string): Record<string, unknown> {
   };
 }
 
-/** `text` on one line, short enough for the chat list. */
+/** The words of the Markdown in `text` on one line, short enough for the chat
+ *  list, cut between characters rather than inside one. */
 function summaryOf(text: string): string {
-  const line = text.replace(/\s+/g, " ").trim();
-  return line.length <= SUMMARY_LENGTH ? line : `${line.slice(0, SUMMARY_LENGTH - 1)}…`;
+  const words = text
+    .replace(/^ {0,3}(`{3,}|~{3,}).*$/gm, "")
+    .replace(/^ {0,3}(#{1,6}|>|[-*+]|\d+\.) +/gm, "")
+    .replace(/[*_`~]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const characters = Array.from(words);
+  return characters.length <= SUMMARY_LENGTH
+    ? words
+    : `${characters.slice(0, SUMMARY_LENGTH - 1).join("")}…`;
 }
 
 /**

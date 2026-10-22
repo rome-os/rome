@@ -29,7 +29,7 @@ import {
 } from "@larksuiteoapi/node-sdk";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
-import type { FeishuStreamingStyle } from "../../channels/delivery/transports/feishu.js";
+import type { FeishuStreamingStyle } from "../../channels/delivery/streaming-switch.js";
 import {
   type CreateLarkChannel,
   FeishuAdapter,

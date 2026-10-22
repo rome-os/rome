@@ -1,6 +1,5 @@
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import { createLogger } from "../../logger.js";
-import type { FeishuStreamingStyle } from "./transports/feishu.js";
 
 const log = createLogger("reply-streaming");
 
@@ -39,6 +38,13 @@ export function replyStreamingSwitch(
  * `card` streams as messages.
  */
 export const FEISHU_STREAMING_STYLE_SETTING_KEY = "feishuReplyStreamingStyle";
+
+/**
+ * How a streamed reply shows on Feishu: `message` edits rich-text posts, which
+ * Feishu lets be edited 20 times each, and `card` streams into cards, which
+ * show the text as it is typed and take any number of edits.
+ */
+export type FeishuStreamingStyle = "message" | "card";
 
 /** The Feishu streaming style, read for each message a reply creates. A
  *  setting that cannot be read counts as `message`. */

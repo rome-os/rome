@@ -9,7 +9,8 @@ import {
 } from "@larksuiteoapi/node-sdk";
 import { isStopCommand } from "@rome-os/app-runtime";
 import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./account-agents.js";
-import { type FeishuStreamingStyle, feishuTransport } from "./delivery/transports/feishu.js";
+import type { FeishuStreamingStyle } from "./delivery/streaming-switch.js";
+import { feishuTransport } from "./delivery/transports/feishu.js";
 import type { DeliveryTransport } from "./delivery/types.js";
 import { preserveMentionOnlyText } from "./mention-only.js";
 import type { OutgoingMessage } from "./types.js";

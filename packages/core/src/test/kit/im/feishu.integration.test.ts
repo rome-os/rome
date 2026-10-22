@@ -3,11 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Pacer } from "../../../channels/delivery/pacer.js";
 import { ReplyDelivery } from "../../../channels/delivery/reply.js";
-import {
-  FEISHU_MAX_EDITS,
-  type FeishuStreamingStyle,
-  feishuTransport,
-} from "../../../channels/delivery/transports/feishu.js";
+import type { FeishuStreamingStyle } from "../../../channels/delivery/streaming-switch.js";
+import { FEISHU_MAX_EDITS, feishuTransport } from "../../../channels/delivery/transports/feishu.js";
 import {
   DeliveryFailure,
   type DeliveryPolicy,
@@ -309,6 +306,28 @@ describe("feishuTransport in the card style against the peer", () => {
       streaming: false,
       summary: String(FEISHU_MAX_EDITS + 5),
     });
+  });
+
+  it("shows the words of a settled card in the chat list, cut between characters", async () => {
+    const receipt = await transport.create(FEISHU_CHAT, "draft");
+    const text = `## Plan\n\n**${"a".repeat(46)}** 🙂 and more\n\n\`\`\`ts\nlet x = 1;\n\`\`\``;
+    await transport.settle!(receipt, text);
+
+    expect(peer.cardOf(receipt.messageId)?.summary).toBe(`Plan ${"a".repeat(44)}…`);
+    const short = await transport.create(FEISHU_CHAT, "draft");
+    await transport.settle!(short, `**Done** ${"b".repeat(38)} 🙂🙂🙂🙂`);
+    expect(peer.cardOf(short.messageId)?.summary).toBe(`Done ${"b".repeat(38)} 🙂🙂🙂🙂`);
+    const long = await transport.create(FEISHU_CHAT, "draft");
+    await transport.settle!(long, `${"c".repeat(48)}🙂🙂 tail`);
+    expect(peer.cardOf(long.messageId)?.summary).toBe(`${"c".repeat(48)}🙂…`);
+  });
+
+  it("ends the streaming mode of a card whose message may have been sent", async () => {
+    peer.server.once({ method: "POST", path: MESSAGES, dropAfterAccept: true });
+
+    await expect(transport.create(FEISHU_CHAT, "one")).rejects.toMatchObject({ kind: "unknown" });
+    await peer.server.waitFor(() => peer.allCards()[0]?.streaming === false);
+    expect(peer.visible().map((message) => message.text)).toEqual(["one"]);
   });
 
   it("reads the style for each new message, and writes each message in its own", async () => {
