@@ -82,5 +82,5 @@ Diffs still owed to the model, each a change of its own:
 - The guardian can delete a person.
 - A delegate link is stored and shown as the agent of its person.
 - People's labels and docs say platform where they say channel.
-- Assistants' chats are listed in the dashboard's chat list, in a group of their own with each assistant's kind, from the moment Rome knows the assistant.
+- Assistants' chats are listed in the dashboard's chat list, in a group of their own with each assistant's kind, from the moment Rome knows the assistant. Other Romes are left out.
 - What the guardian writes in an assistant's chat goes to the assistant and wakes no agent.

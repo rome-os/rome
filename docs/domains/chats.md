@@ -50,6 +50,7 @@ An agent outside Rome, such as a Dot, Muse or another Rome, that talks to Rome t
 - Rome speaks in that chat through its own account on Rome Cloud. Main speaks for Rome there, since the account takes no other agent.
 - What the guardian writes in an assistant's chat goes to the assistant, said by the guardian through Rome's account. Main does not answer it.
 - The dashboard's chat list shows assistants' chats in a group of their own, above the dashboard's own chats.
+- Another Rome is an assistant, but the chat list does not show it. Rome can still message it, and its messages still reach Rome.
 
 ## Reply rule
 
@@ -130,3 +131,4 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **The guardian's line in an assistant's chat going to main.** It would put two conversations in one place: the guardian with main, and Rome with the assistant. Talking about an assistant with main belongs in the dashboard's own chat.
 - **A reply rule the guardian sets per assistant.** An assistant writes to Rome to get an answer, and no case has come up yet where one should be ignored. The setting waits until one does.
 - **An assistant's chat starting at its first message.** The guardian could not find an assistant to write to before it had written, so they could never start the chat.
+- **Listing other Romes among the assistants, for now.** Talking to another Rome has no product of its own yet: no way in, and no rule for two Romes answering each other's replies. Every Rome in the account, stopped test stacks included, would also fill the group. Other Romes return to the list when that product is designed.

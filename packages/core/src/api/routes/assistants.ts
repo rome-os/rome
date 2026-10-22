@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import {
   compareAssistants,
+  listsAsAssistant,
   parseAssistantSendRequest,
   type Assistant,
   type AssistantList,
@@ -32,16 +33,17 @@ const log = createLogger("assistants-api");
 export function assistantsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
-  /** Every assistant Rome Cloud lists, with when its chat last moved. Empty
-   *  while Agents is not connected. An unreachable Cloud is a 503, not an
-   *  empty list, so the sidebar keeps what it last showed. */
+  /** Every assistant Rome Cloud lists, other Romes left out, with when its
+   *  chat last moved. Empty while Agents is not connected. An unreachable
+   *  Cloud is a 503, not an empty list, so the sidebar keeps what it last
+   *  showed. */
   app.get("/assistants", async (c) => {
     if (!deps.assistants.connected()) {
       return c.json({ assistants: [] } satisfies AssistantList);
     }
     let agents: Awaited<ReturnType<ApiDeps["assistants"]["list"]>>;
     try {
-      agents = await deps.assistants.list();
+      agents = (await deps.assistants.list()).filter(listsAsAssistant);
     } catch (err) {
       log.warn("Could not list assistants", {
         error: err instanceof Error ? err.message : String(err),

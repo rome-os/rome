@@ -70,6 +70,14 @@ describe("Assistants API", () => {
     ]);
   });
 
+  it("leaves other Romes out", async () => {
+    listing = Promise.resolve([
+      agent(DOT, "Research dot", "dot"),
+      agent("33333333-3333-4333-8333-333333333333", "Cloud Rome", "rome"),
+    ]);
+    expect((await list()).assistants.map((assistant) => assistant.name)).toEqual(["Research dot"]);
+  });
+
   it("lists none while Agents is not connected", async () => {
     connected = false;
     expect((await list()).assistants).toEqual([]);

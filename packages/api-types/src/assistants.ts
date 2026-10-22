@@ -7,6 +7,16 @@
  *  this Rome knows them, so any other string is kept and shown as it is. */
 export type AssistantKind = "dot" | "muse" | "rome" | (string & {});
 
+/**
+ * Whether an agent Rome Cloud lists is shown as an assistant. Another Rome is
+ * not, for now: talking to another Rome is not a feature of its own yet, and
+ * every Rome in the account, stale ones included, would fill the group
+ * (docs/domains/chats.md#assistant).
+ */
+export function listsAsAssistant(agent: { kind: string }): boolean {
+  return agent.kind !== "rome";
+}
+
 export interface Assistant {
   /** Rome Cloud's id for it, which never changes. Also its chat's address. */
   agentId: string;
