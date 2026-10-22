@@ -40,6 +40,7 @@ The sentinel is a lightweight [agent](agents.md) that triages messages from untr
 
 - All sentinel decisions are recorded in the sentinel log, which the guardian reviews from the Inbox triage view.
 - The sentinel only sees messages the [policy engine](#policies) routes to it. It is not in the path of trusted senders' messages.
+- The sentinel holds no [builtin tools](agents.md#builtin-tools) and no actions. It decides from the message, the sender's bond level, and the sender's relationship profile. Its reply goes to the sender without envoy review, so anything it could read or run would be reachable by the sender.
 
 **Not to be confused with:**
 
