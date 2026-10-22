@@ -6,10 +6,7 @@ Rome welcomes bug reports, user-experience feedback, feature ideas, and pull req
 
 Issues about user experience are as welcome as bug reports. If a flow is confusing, a screen looks rough, or a step takes longer than it should, open an issue and describe what you tried and what got in the way.
 
-Pick the template that matches the next action:
-
-- **Bug report** — something Rome already ships behaves wrong.
-- **Feature request** — a pain, a gap, or a user-experience problem where the fix is still undecided.
+File a **bug report** when something Rome already ships behaves wrong. File a **feature request** when you hit a pain, a gap, or a user-experience problem and the fix is still undecided.
 
 An automated triage process reads each new issue and applies its type, priority (`P0`–`P3`), and size labels. You do not need to label an issue yourself. The full issue rules are in [`docs/authoring/github-issues.md`](docs/authoring/github-issues.md).
 
