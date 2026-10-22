@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { Bot, Check, ChevronDown, CircleAlert } from "lucide-react";
@@ -68,6 +68,14 @@ export function AssistantsPage() {
   const assistant =
     assistants.data?.find((candidate) => candidate.agentId === chosen) ?? assistants.data?.[0];
   useDocumentTitle(assistant ? [assistant.name, t("assistants.title")] : t("assistants.title"));
+  // The chat the page opened on is written into the address, so a list that
+  // refreshes into a new order never moves the open chat, and its draft, away
+  // from the guardian. Replaces rather than pushes: it is the same view.
+  useEffect(() => {
+    if (assistant && assistant.agentId !== chosen) {
+      setParams({ [ASSISTANT_PARAM]: assistant.agentId }, { replace: true });
+    }
+  }, [assistant, chosen, setParams]);
 
   return (
     <div className="flex h-[var(--rome-mobile-content-height)] min-h-0 flex-col overflow-hidden md:h-[var(--rome-viewport-height)]">
@@ -138,12 +146,19 @@ function AssistantChat({
     getNextPageParam: (last) => last.nextCursor,
     queryFn: ({ signal, pageParam }) =>
       readAssistantMessages(agentId, pageParam as string | null, signal),
-    refetchInterval: POLL_MS,
+    // Each tick re-reads every loaded page, so polling pauses while older
+    // history is loaded; a send, or coming back to the tab, still reads it.
+    refetchInterval: (query) => ((query.state.data?.pages.length ?? 0) > 1 ? false : POLL_MS),
   });
   // Pages arrive newest first; a chat reads top-down, oldest first.
   const entries = [...(timeline.data?.pages.flatMap((page) => page.entries) ?? [])].reverse();
 
   const [sendError, setSendError] = useState<string | null>(null);
+  // The id of a send whose outcome is unknown, kept with its text. A retry of
+  // the same text reuses it, so a send the server took before its answer was
+  // lost is replayed rather than sent twice. A confirmed refusal or success,
+  // or a changed draft, starts a new id.
+  const pendingSend = useRef<{ text: string; id: string } | null>(null);
 
   return (
     <>
@@ -211,7 +226,11 @@ function AssistantChat({
               onSend={async (snapshot) => {
                 setSendError(null);
                 try {
-                  const row = await sendToAssistant(agentId, snapshot.text, randomUUID());
+                  const reuse = pendingSend.current?.text === snapshot.text;
+                  const id = reuse && pendingSend.current ? pendingSend.current.id : randomUUID();
+                  pendingSend.current = { text: snapshot.text, id };
+                  const row = await sendToAssistant(agentId, snapshot.text, id);
+                  pendingSend.current = null;
                   if (row.state === "failed") {
                     // A failed row answers its id forever, so it is discarded
                     // and the guardian's retry goes out as a new message.

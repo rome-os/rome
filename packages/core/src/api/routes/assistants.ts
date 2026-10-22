@@ -11,7 +11,7 @@ import { sendRefusalMessage, timelinePageLimit, type SendRefusal } from "@rome/a
 import { AGENTS_KIND } from "../../connections/integrations/agents.js";
 import { isAgentId } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
-import { discardSend, sendToAccount } from "../../people/outbox.js";
+import { discardSend, readOutbox, sendToAccount } from "../../people/outbox.js";
 import { readPersonTimeline } from "../../people/timeline.js";
 import { personMessageStores, timelineAccounts } from "../../people/timeline-sources.js";
 import type { ApiDeps } from "../deps.js";
@@ -31,8 +31,8 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
 
   /** Every assistant Rome Cloud lists, other Romes left out, with when its
    *  chat last moved. Empty while Agents is not connected. An unreachable
-   *  Cloud is a 503, not an empty list, so the sidebar keeps what it last
-   *  showed. */
+   *  Cloud is a 503, not an empty list, so the page keeps the list it last
+   *  read. */
   app.get("/assistants", async (c) => {
     if (!deps.assistants.connected()) {
       return c.json({ assistants: [] } satisfies AssistantList);
@@ -75,9 +75,14 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
     if (rawCursor != null && rawCursor !== "" && cursor === null) {
       return c.json({ error: "cursor is not a timeline cursor" }, 400);
     }
-    const [accounts] = await timelineAccounts(deps, [[address]]);
+    const [accounts = []] = await timelineAccounts(deps, [[address]]);
+    const stores = personMessageStores(deps);
+    // Reading the outbox is what clears a send once it is on the timeline
+    // (people/outbox.ts). The page reads the chat after every send and while
+    // it is open, so a delivered send leaves the outbox here.
+    await readOutbox(deps, stores, accounts);
     return c.json(
-      await readPersonTimeline(personMessageStores(deps), accounts ?? [], {
+      await readPersonTimeline(stores, accounts, {
         cursor,
         limit: timelinePageLimit(c.req.query("limit")),
       }),

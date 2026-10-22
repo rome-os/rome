@@ -41,10 +41,14 @@ const chats: Record<string, TimelinePage> = {
 /** Each send the page posted, and each send id it discarded. */
 const sends: { id: string; text: string }[] = [];
 const discarded: string[] = [];
+/** What GET /api/assistants answers; a test may reorder it mid-run. */
+let listed: Assistant[] | "fail" = [];
 
-function serve(assistants: Assistant[] | "fail", { refuse = false } = {}) {
+function serve(assistants: Assistant[] | "fail", { refuse = false, loseResponses = 0 } = {}) {
   sends.length = 0;
   discarded.length = 0;
+  listed = assistants;
+  let lost = 0;
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -53,6 +57,11 @@ function serve(assistants: Assistant[] | "fail", { refuse = false } = {}) {
     if (init?.method === "POST" && url.endsWith("/messages")) {
       const body = JSON.parse(String(init.body)) as { id: string; text: string };
       sends.push(body);
+      // The server took the send, but its answer never reaches the page.
+      if (lost < loseResponses) {
+        lost++;
+        throw new TypeError("Failed to fetch");
+      }
       return Response.json(
         {
           id: body.id,
@@ -73,9 +82,9 @@ function serve(assistants: Assistant[] | "fail", { refuse = false } = {}) {
       return new Response(null, { status: 204 });
     }
     if (url === "/api/assistants") {
-      return assistants === "fail"
+      return listed === "fail"
         ? new Response("{}", { status: 503 })
-        : Response.json({ assistants });
+        : Response.json({ assistants: listed });
     }
     const chat = url.match(/^\/api\/assistants\/([^/]+)\/messages/)?.[1];
     if (chat) return Response.json(chats[chat] ?? { entries: [], nextCursor: null });
@@ -89,7 +98,7 @@ function Location() {
 
 function renderPage(path = "/assistants") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const view = render(
     <ThemeProvider>
       <MemoryRouter initialEntries={[path]}>
         <QueryClientProvider client={queryClient}>
@@ -99,6 +108,7 @@ function renderPage(path = "/assistants") {
       </MemoryRouter>
     </ThemeProvider>,
   );
+  return { ...view, queryClient };
 }
 
 const switcher = () => screen.findByRole("button", { name: /^Switch assistant/ });
@@ -114,6 +124,18 @@ describe("AssistantsPage", () => {
     renderPage();
     expect((await switcher()).textContent).toContain("Muse");
     expect(await screen.findByText("Build passed")).toBeTruthy();
+  });
+
+  it("keeps the chat it opened on when the list refreshes into a new order", async () => {
+    serve([assistant(MUSE, "Muse", "muse"), assistant(DOT, "Research dot", "dot")]);
+    const { queryClient } = renderPage();
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe(`?id=${MUSE}`));
+
+    // The Dot's chat moves, so the list now leads with it.
+    listed = [assistant(DOT, "Research dot", "dot"), assistant(MUSE, "Muse", "muse")];
+    await queryClient.invalidateQueries({ queryKey: ["assistants"] });
+    expect((await switcher()).textContent).toContain("Muse");
+    expect(screen.getByTestId("location").textContent).toBe(`?id=${MUSE}`);
   });
 
   it("opens the chat the address names", async () => {
@@ -155,6 +177,20 @@ describe("AssistantsPage", () => {
     await user.type(box, "{Enter}");
     await waitFor(() => expect(sends).toHaveLength(2));
     expect(sends[1]!.id).not.toBe(sends[0]!.id);
+  });
+
+  it("sends again under the same id when the first answer was lost", async () => {
+    serve([assistant(DOT, "Research dot", "dot")], { loseResponses: 1 });
+    const user = userEvent.setup();
+    renderPage();
+
+    const box = await screen.findByPlaceholderText("Message Research dot");
+    await user.type(box, "Ship it{Enter}");
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe("Ship it"));
+    await user.type(box, "{Enter}");
+    await waitFor(() => expect(sends).toHaveLength(2));
+    // The server may have taken the first, so the retry replays it.
+    expect(sends[1]!.id).toBe(sends[0]!.id);
   });
 
   it("names a kind it has no mark for, as Rome Cloud spells it", async () => {

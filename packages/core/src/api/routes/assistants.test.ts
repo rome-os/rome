@@ -111,6 +111,15 @@ describe("Assistants API", () => {
     expect(first!.lastMessageAt).not.toBeNull();
   });
 
+  it("clears a delivered send from the outbox when the chat is read", async () => {
+    await send(DOT, { text: "Summarise today's PRs" });
+    const inFlight = () => deps.outboxRepo.forAccounts([{ channel: "agents", channelUserId: DOT }]);
+    expect(await inFlight()).toHaveLength(1);
+
+    await app.request(`/assistants/${DOT}/messages`);
+    expect(await inFlight()).toEqual([]);
+  });
+
   it("lets a refused send be discarded, so the guardian's retry is a new message", async () => {
     rs.spyOn(deps.transports.get("agents")!, "send").mockRejectedValue(new Error("not reachable"));
     const res = await send(DOT, { text: "Are you there?", id: crypto.randomUUID() });
