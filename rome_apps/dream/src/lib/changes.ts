@@ -5,6 +5,11 @@
  * memory files and writes a journal entry, the skill-review agent writes or
  * edits a `SKILL.md`. Recording those calls is what lets the UI show what came
  * out of a run without diffing the filesystem afterwards.
+ *
+ * Two providers report those calls in two shapes. Claude Code sends one file
+ * per call, as the whole file or as the replaced and replacement text. Codex
+ * sends one `fileChange` item per call, covering one or more files, each as a
+ * unified diff. Both land here as the same `FileChange` rows.
  */
 
 export type ChangeOp = "write" | "edit";
@@ -32,13 +37,102 @@ function str(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+interface Hunk {
+  before: string;
+  after: string;
+}
+
+/**
+ * Splits a unified diff into its hunks, each as the text before and after.
+ * The diff carries no `---`/`+++` file header, only `@@` lines. A diff with
+ * no `@@` line is one hunk.
+ */
+function hunksOf(diff: string): Hunk[] {
+  const lines = diff.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  const hunks: Array<{ before: string[]; after: string[] }> = [];
+  let current: { before: string[]; after: string[] } | null = null;
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      current = { before: [], after: [] };
+      hunks.push(current);
+      continue;
+    }
+    if (line.startsWith("\\")) continue;
+    if (!current) {
+      current = { before: [], after: [] };
+      hunks.push(current);
+    }
+    const text = line.slice(1);
+    if (line.startsWith("-")) current.before.push(text);
+    else if (line.startsWith("+")) current.after.push(text);
+    else {
+      // A context line is prefixed with one space. An unprefixed line is a
+      // context line some diff writers emit for an empty source line.
+      const context = line.startsWith(" ") ? text : line;
+      current.before.push(context);
+      current.after.push(context);
+    }
+  }
+  return hunks.map((h) => ({ before: h.before.join("\n"), after: h.after.join("\n") }));
+}
+
+/**
+ * The file changes in a Codex `fileChange` item. An `add` is the whole new
+ * file, so it records as a write. An `update` records one edit per hunk, so
+ * the page shows the same diff Codex applied. A `delete` leaves nothing to
+ * show and records nothing.
+ */
+function changesFromFileChange(record: Record<string, unknown>): FileChange[] {
+  if (!Array.isArray(record.changes)) return [];
+  return record.changes.flatMap((item): FileChange[] => {
+    if (!item || typeof item !== "object") return [];
+    const { path, kind, diff } = item as Record<string, unknown>;
+    const file = str(path);
+    const text = str(diff);
+    if (!file || text === null) return [];
+    const type =
+      kind && typeof kind === "object" ? str((kind as Record<string, unknown>).type) : null;
+    switch (type) {
+      case "add": {
+        const content = clip(text);
+        return [
+          {
+            op: "write",
+            path: file,
+            content: content.text,
+            previous: null,
+            truncated: content.truncated,
+          },
+        ];
+      }
+      case "update":
+        return hunksOf(text).map(({ before, after }) => {
+          const content = clip(after);
+          const previous = clip(before);
+          return {
+            op: "edit",
+            path: file,
+            content: content.text,
+            previous: previous.text,
+            truncated: content.truncated || previous.truncated,
+          };
+        });
+      default:
+        return [];
+    }
+  });
+}
+
 /**
  * The file changes one tool call makes. Covers Claude's `Write`, `Edit`, and
- * `MultiEdit`; any other tool returns nothing.
+ * `MultiEdit`, and the Codex `fileChange` item the provider reports as `Edit`;
+ * any other tool returns nothing.
  */
 export function changesFromToolUse(tool: string, input: unknown): FileChange[] {
   if (!input || typeof input !== "object") return [];
   const record = input as Record<string, unknown>;
+  if (record.type === "fileChange") return changesFromFileChange(record);
   const path = str(record.file_path);
   if (!path) return [];
 
