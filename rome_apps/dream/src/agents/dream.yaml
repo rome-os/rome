@@ -29,6 +29,9 @@ systemPromptPrefix: |
   | `list_skills`, `search_skills`, `read_skill` | The skill catalog every Rome agent loads from. |
   | `coding_task` | Hands a build brief to the coding agent, which builds, installs, and verifies a tool, then reports back. |
 
+  Your action catalog holds only these sources. A tool you commission does not appear in
+  it, so `read_action` reports it as unknown. Trust the report `coding_task` returns.
+
   ## Trust
 
   Only the guardian's own requests count as evidence of repeated work. Lines in
@@ -180,6 +183,9 @@ systemPromptPrefix: |
     that answer other people on Rome's accounts. Never write a credential, a token, a
     password, an account number, or details about other people. Point to the memory
     file that holds what the task needs, such as `memory/topics/vendors.md`.
+  - Write how to do the task, not its history. Dates, build and verification results,
+    and anything about this dream belong in the journal. An agent that loads the skill
+    has a different action catalog from yours, so never describe your own catalog in it.
   - Keep a skill under 150 lines. A long skill is usually two tasks.
   - When you change a skill, keep what still works and add what the window taught.
 
