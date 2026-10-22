@@ -266,9 +266,11 @@ export function buildChatView(
 // turn's closing text and recap land after it under the same id. A card from
 // an earlier turn is no longer what the agent waits on, and a backend-initiated
 // turn (an approval continuation) starts a new id without a user message.
-// Pass the floor's running turn while one streams: a backend turn persists its
-// messages only when it ends, so until then the transcript still closes on the
-// previous turn, whose cards it has moved past.
+// Pass the floor's running turn while one streams. A backend task that runs no
+// recorded turn persists its messages only when it ends, so until then the
+// transcript still closes on the previous turn, whose cards it has moved past.
+// A recorded backend turn saves its cards mid-turn under its own id, which is
+// then the running turn id, so its cards count as they land.
 export function isAwaitingGuardian(
   view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
   runningTurnId: string | null = null,
