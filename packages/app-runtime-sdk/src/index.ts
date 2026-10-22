@@ -1942,6 +1942,45 @@ export interface Channel {
   readonly inbound: ChannelInbound | null;
 }
 
+/** What {@link RecordChatMessageHandler} records: one inbound message, as the
+ *  hook heard it. */
+export interface RecordChatMessageInput {
+  /** The message's chat, as the inbound event addressed it. */
+  ref: ChatRef;
+  /** The name of the channel the message arrived on, as every stored row spells it. */
+  service: string;
+  /** The message, with its attachments as materialized: an attachment's
+   *  `localPath` is named in the stored text. */
+  message: ChannelMessage;
+  /** The chat's own agent choice from its settings (`core:main` for an explicit
+   *  pin to main). A chat recorded for the first time stores it, and main when
+   *  it is absent or not loaded. An existing chat keeps the agent it has. */
+  routedAgentName?: string;
+}
+
+/**
+ * - `recorded`: the message is in the chat's transcript.
+ * - `duplicate`: the chat already holds a message with this platform message
+ *   id, so nothing changed.
+ * - `blocked`: a policy blocks the sender, so nothing was recorded.
+ */
+export type RecordChatMessageStatus = "recorded" | "duplicate" | "blocked";
+
+export interface RecordChatMessageResult {
+  status: RecordChatMessageStatus;
+}
+
+/**
+ * Records a message the chat's reply rule declined, as context for the chat's
+ * next turn. It starts no turn and shows no typing. The write runs in the host
+ * process and settles once the row is stored, so a hook that awaits it keeps
+ * the chat's messages in order. Safe to retry: a redelivered message reads as
+ * `duplicate`. Rejects when the store fails.
+ */
+export type RecordChatMessageHandler = (
+  input: RecordChatMessageInput,
+) => Promise<RecordChatMessageResult>;
+
 /**
  * What the host hands a `channel-message` hook's `createHook(deps)`. A hook
  * hears inbound messages through `channels`, one subscription per channel that
@@ -1955,6 +1994,9 @@ export interface ChannelMessageHookDeps {
   /** @deprecated Use `chatSettings`, which is the same control. */
   conversationSettings: ChatSettingsControl;
   chatStop: ChatStopHandler;
+  /** Records a declined message without a turn. A host that predates it passes
+   *  none, and a hook records the message through an action instead. */
+  recordChatMessage?: RecordChatMessageHandler;
   /** A live array: the host appends a channel added later, such as a second
    *  bot, in place. Read it at each `register()` rather than keep a copy. */
   channels: readonly Channel[];

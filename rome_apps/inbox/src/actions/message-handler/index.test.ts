@@ -775,6 +775,68 @@ describe("message reply bond-level settings", () => {
   });
 });
 
+describe("a message the reply rule does not answer", () => {
+  const guardian: PersonRecord = {
+    id: "alice",
+    displayName: "Alice",
+    bondLevel: "guardian",
+    channelMappings: [{ channel: "discord", channelUserId: "alice-dc" }],
+    profilePath: null,
+  };
+  const ambient = {
+    channel: "discord",
+    channelUserId: "alice-dc",
+    threadId: "channel-1",
+    threadType: "group",
+    displayName: "Alice",
+    text: "lunch?",
+    messageId: "msg-1",
+    answer: false,
+  };
+
+  it("is recorded as a notification and runs no turn", async () => {
+    const { deps, agentRunner, sentMessages, conversations } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardian) },
+    });
+
+    const result = await createAction(actionConfig, deps).execute(ambient);
+
+    expect(result).toEqual({ status: "ok", data: { action: "not_addressed" } });
+    expect(conversations.addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "channel:discord:channel-1",
+        role: "notification",
+        platformMessageId: "msg-1",
+        senderId: "alice-dc",
+      }),
+    );
+    expect(agentRunner.calls).toEqual([]);
+    expect(sentMessages).toEqual([]);
+  });
+
+  it("reports a redelivery as a duplicate", async () => {
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardian) },
+      conversations: { addMessage: rs.fn(async () => ({ inserted: false })) },
+    });
+
+    const result = await createAction(actionConfig, deps).execute(ambient);
+
+    expect(result).toEqual({ status: "ok", data: { action: "duplicate", messageId: "msg-1" } });
+    expect(agentRunner.calls).toEqual([]);
+  });
+
+  it("is not recorded when policy blocks the sender", async () => {
+    const { deps, conversations } = createMessageHandlerDeps();
+    deps.policyEngine = { evaluate: async () => ({ action: "block" }) } as typeof deps.policyEngine;
+
+    const result = await createAction(actionConfig, deps).execute(ambient);
+
+    expect(result).toEqual({ status: "ok", data: { action: "blocked" } });
+    expect(conversations.addMessage).not.toHaveBeenCalled();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Per-channel agent routing (e.g. Discord channel bound to an app-declared
 // agent). The channel adapter resolves the override and the inbox hook passes

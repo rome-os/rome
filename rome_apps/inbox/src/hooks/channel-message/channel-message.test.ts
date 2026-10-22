@@ -9,8 +9,9 @@ import type {
   InboundEvent,
   ChannelActivity,
   ChannelInboundMedia,
+  RecordChatMessageHandler,
 } from "@rome-os/app-runtime";
-import { ChannelMessageHook, createHook, MissingChannelsError } from "./index.js";
+import { ChannelMessageHook, createHook, MissingChannelsError, replyRuleAnswers } from "./index.js";
 
 const TELEGRAM_ID = "connection:telegram";
 const WHATSAPP_ID = "connection:whatsapp";
@@ -430,6 +431,244 @@ describe("ChannelMessageHook", () => {
     expect(harness.subscribes).toHaveBeenCalledTimes(8);
   });
 
+  describe("under a reply rule", () => {
+    // A group on a service that enforces `activation.mode`, as Discord and Feishu do.
+    const ruled = (mode: "mention" | "all") =>
+      harness.get.mockImplementation(async ({ connectionId, chatId }) => {
+        const base = snapshot(connectionId, chatId);
+        return {
+          ...base,
+          supportedFields: ["enabled", "activation.mode"],
+          effective: { ...base.effective, activation: { ...base.effective.activation, mode } },
+        };
+      });
+    const activityOn = () => {
+      const begin = rs.fn(async () => ({ update: rs.fn(), finish: rs.fn() }));
+      harness.features.set(TELEGRAM_ID, { activity: { begin } });
+      return begin;
+    };
+
+    describe("on a host that records declined messages", () => {
+      const recordChatMessage = rs.fn<RecordChatMessageHandler>(async () => ({
+        status: "recorded",
+      }));
+
+      beforeEach(async () => {
+        recordChatMessage.mockReset();
+        recordChatMessage.mockResolvedValue({ status: "recorded" });
+        harness.hook.unregister();
+        harness = createHarness({ recordChatMessage });
+        await harness.hook.register();
+      });
+
+      it("records an ambient message through the host, without an action, typing or a download", async () => {
+        const begin = activityOn();
+        const materialize = rs.fn(async () => [
+          { type: "image" as const, url: "file-id", localPath: "/tmp/photo.jpg" },
+        ]);
+        harness.features.set(TELEGRAM_ID, {
+          ...harness.features.get(TELEGRAM_ID),
+          inboundMedia: { materialize },
+        });
+        harness.get.mockImplementation(async ({ connectionId, chatId }) => {
+          const base = snapshot(connectionId, chatId, { agentName: "sales:agent" });
+          return {
+            ...base,
+            supportedFields: ["enabled", "activation.mode"],
+            effective: {
+              ...base.effective,
+              activation: { ...base.effective.activation, mode: "mention" as const },
+            },
+          };
+        });
+
+        await harness.emit(
+          TELEGRAM_ID,
+          message({ addressing: "ambient", attachments: [{ type: "image", url: "file-id" }] }),
+        );
+
+        expect(recordChatMessage).toHaveBeenCalledTimes(1);
+        expect(recordChatMessage).toHaveBeenCalledWith({
+          ref: { connectionId: TELEGRAM_ID, chatId: "chat-1" },
+          service: "telegram",
+          message: expect.objectContaining({
+            messageId: "message-1",
+            senderId: "user-1",
+            attachments: [{ type: "image", url: "file-id" }],
+          }),
+          routedAgentName: "sales:agent",
+        });
+        expect(materialize).not.toHaveBeenCalled();
+        expect(harness.run).not.toHaveBeenCalled();
+        expect(begin).not.toHaveBeenCalled();
+      });
+
+      it("still answers an addressed message through message_handler", async () => {
+        ruled("mention");
+
+        await harness.emit(TELEGRAM_ID, message({ addressing: "mention" }));
+
+        expect(recordChatMessage).not.toHaveBeenCalled();
+        expect(harness.run).toHaveBeenCalledWith(
+          "message_handler",
+          expect.not.objectContaining({ answer: false }),
+          expect.anything(),
+        );
+      });
+
+      it("settles the message when the host fails to record it", async () => {
+        ruled("mention");
+        recordChatMessage.mockRejectedValueOnce(new Error("disk full"));
+
+        await expect(
+          harness.emit(TELEGRAM_ID, message({ messageId: "lost", addressing: "ambient" })),
+        ).resolves.toBeUndefined();
+        await harness.emit(TELEGRAM_ID, message({ messageId: "next", addressing: "mention" }));
+
+        expect(harness.run).toHaveBeenCalledTimes(1);
+        expect(harness.run.mock.calls[0]?.[1]).toMatchObject({ messageId: "next" });
+      });
+
+      it("holds the conversation until the host stores a declined message", async () => {
+        ruled("mention");
+        let stored!: () => void;
+        recordChatMessage.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              stored = () => resolve({ status: "recorded" });
+            }),
+        );
+
+        const chatter = harness.emit(
+          TELEGRAM_ID,
+          message({ messageId: "chatter", addressing: "ambient" }),
+        );
+        const asked = harness.emit(
+          TELEGRAM_ID,
+          message({ messageId: "asked", addressing: "mention" }),
+        );
+        await rs.waitFor(() => expect(recordChatMessage).toHaveBeenCalledTimes(1));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(harness.run).not.toHaveBeenCalled();
+        stored();
+        await Promise.all([chatter, asked]);
+        expect(harness.run).toHaveBeenCalledTimes(1);
+        expect(harness.run.mock.calls[0]?.[1]).toMatchObject({ messageId: "asked" });
+      });
+
+      it("hears a /stop behind chatter once the chatter is stored", async () => {
+        ruled("mention");
+        let stored!: () => void;
+        recordChatMessage.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              stored = () => resolve({ status: "recorded" });
+            }),
+        );
+
+        const chatter = harness.emit(
+          TELEGRAM_ID,
+          message({ messageId: "chatter", addressing: "ambient" }),
+        );
+        const stop = harness.emit(
+          TELEGRAM_ID,
+          message({ messageId: "stop", text: "/stop", addressing: "mention" }),
+        );
+        await rs.waitFor(() => expect(recordChatMessage).toHaveBeenCalledTimes(1));
+        expect(harness.stop).not.toHaveBeenCalled();
+
+        stored();
+        await Promise.all([chatter, stop]);
+        expect(harness.stop).toHaveBeenCalledTimes(1);
+        expect(harness.run).not.toHaveBeenCalled();
+      });
+    });
+
+    it("records an ambient message through message_handler on a host without the recorder", async () => {
+      ruled("mention");
+      const begin = activityOn();
+
+      await harness.emit(TELEGRAM_ID, message({ addressing: "ambient" }));
+
+      expect(harness.run).toHaveBeenCalledWith(
+        "message_handler",
+        expect.objectContaining({ messageId: "message-1", answer: false }),
+        expect.anything(),
+      );
+      expect(begin).not.toHaveBeenCalled();
+    });
+
+    it("downloads a declined message's files on a host without the recorder", async () => {
+      ruled("mention");
+      const materialize = rs.fn(async () => [
+        { type: "image" as const, url: "file-id", localPath: "/tmp/photo.jpg" },
+      ]);
+      harness.features.set(TELEGRAM_ID, { inboundMedia: { materialize } });
+
+      await harness.emit(
+        TELEGRAM_ID,
+        message({ addressing: "ambient", attachments: [{ type: "image", url: "file-id" }] }),
+      );
+
+      expect(harness.run).toHaveBeenCalledWith(
+        "message_handler",
+        expect.objectContaining({
+          answer: false,
+          attachments: [{ type: "image", url: "file-id", localPath: "/tmp/photo.jpg" }],
+        }),
+        expect.anything(),
+      );
+    });
+
+    it.each([
+      ["an ambient message under every message", "all", "ambient"],
+      ["a mention under mentions only", "mention", "mention"],
+    ] as const)("answers %s", async (_name, mode, addressing) => {
+      ruled(mode);
+      const begin = activityOn();
+
+      await harness.emit(TELEGRAM_ID, message({ addressing }));
+
+      expect(harness.run.mock.calls[0]?.[1]).not.toHaveProperty("answer");
+      await rs.waitFor(() => expect(begin).toHaveBeenCalledTimes(1));
+    });
+
+    it("holds the conversation until a declined message is stored", async () => {
+      ruled("mention");
+      let stored!: () => void;
+      harness.run.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            stored = () => resolve({ status: "ok" as const });
+          }),
+      );
+
+      const chatter = harness.emit(
+        TELEGRAM_ID,
+        message({ messageId: "chatter", addressing: "ambient" }),
+      );
+      const asked = harness.emit(
+        TELEGRAM_ID,
+        message({ messageId: "asked", addressing: "mention" }),
+      );
+      await rs.waitFor(() => expect(harness.run).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(harness.run).toHaveBeenCalledTimes(1);
+      stored();
+      await Promise.all([chatter, asked]);
+      expect(harness.run).toHaveBeenCalledTimes(2);
+      expect(harness.run.mock.calls[1]?.[1]).toMatchObject({ messageId: "asked" });
+    });
+
+    it("answers an ambient message on a service that does not enforce the rule", async () => {
+      await harness.emit(TELEGRAM_ID, message({ addressing: "ambient" }));
+
+      expect(harness.run.mock.calls[0]?.[1]).not.toHaveProperty("answer");
+    });
+  });
+
   describe("on accounts that take an agent", () => {
     // feishu-2 takes a link, and telegram stands for a channel that takes none.
     let linked: string | null;
@@ -542,5 +781,37 @@ describe("ChannelMessageHook", () => {
         chatStop: async () => ({ status: "idle" }),
       } as unknown as Parameters<typeof createHook>[0]),
     ).toThrow(MissingChannelsError);
+  });
+});
+
+describe("replyRuleAnswers", () => {
+  const settings = (supportedFields: string[], mode: "mention" | "all") =>
+    ({
+      ...snapshot(TELEGRAM_ID, "chat-1" as ChatId),
+      supportedFields,
+      effective: {
+        ...snapshot(TELEGRAM_ID, "chat-1" as ChatId).effective,
+        activation: { mode, botMessages: "ignore", whenOthersMentioned: "ignore" },
+      },
+    }) as Parameters<typeof replyRuleAnswers>[0];
+
+  it("declines only an ambient message where mentions-only is enforced", () => {
+    const enforced = settings(["activation.mode"], "mention");
+    expect(replyRuleAnswers(enforced, message({ addressing: "ambient" }))).toBe(false);
+    expect(replyRuleAnswers(enforced, message({ addressing: undefined }))).toBe(false);
+    for (const addressing of ["direct", "mention", "reply", "bot_thread"] as const) {
+      expect(replyRuleAnswers(enforced, message({ addressing }))).toBe(true);
+    }
+  });
+
+  it("reads a dm with no addressing as direct", () => {
+    const enforced = settings(["activation.mode"], "mention");
+    expect(replyRuleAnswers(enforced, message({ thread: { kind: "dm" } }))).toBe(true);
+  });
+
+  it("answers everything under every message, or where the rule is not enforced", () => {
+    const ambient = message({ addressing: "ambient" });
+    expect(replyRuleAnswers(settings(["activation.mode"], "all"), ambient)).toBe(true);
+    expect(replyRuleAnswers(settings(["session.reset"], "mention"), ambient)).toBe(true);
   });
 });

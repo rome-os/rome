@@ -374,7 +374,21 @@ describe("FeishuAdapter", () => {
     }
   });
 
-  it("drops an unaddressed group message without waiting on the name lookup", async () => {
+  it("drops a message in a disabled group without waiting on the name lookup", async () => {
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        chatSettings: makeChatSettings({ enabled: false }).control,
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    adapter.onInbound(async (msg) => {
+      captured.push(msg);
+    });
+    await adapter.start();
     channel.chatInfo = () => new Promise(() => {});
     await channel.emit({ chatType: "group", mentionedBot: false });
 
@@ -445,9 +459,10 @@ describe("FeishuAdapter", () => {
     expect(captured).toHaveLength(0);
   });
 
-  it("ignores group messages that do not mention the bot by default", async () => {
-    await channel.emit({ chatType: "group", mentionedBot: false });
-    expect(captured).toHaveLength(0);
+  it("delivers a group message that does not mention the bot as ambient", async () => {
+    await channel.emit({ chatType: "group", mentionedBot: false, content: "lunch?" });
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({ text: "lunch?", addressing: "ambient" });
   });
 
   it("sends a group settings card for guardian settings requests", async () => {

@@ -173,6 +173,40 @@ describe("channel pairing approvals", () => {
   });
 
   it.each([
+    "discord",
+    "feishu",
+  ] as const)("%s ignores an ambient group message from a stranger that looks like a pairing code", async (channel) => {
+    seedConnection(channel);
+    const send = rs.fn<Send>(async (_connection, chatId) => ({
+      messageId: "sent",
+      chatId,
+    }));
+    const admit = createPairingAdmission({
+      talkGrants,
+      approvalsRepo: repo,
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
+      registry: registryOf(send),
+    });
+
+    const admitted = await admit("connection", channel, {
+      channel,
+      direction: "inbound",
+      senderId: channel === "feishu" ? "ou_123" : "123",
+      chatId: "group" as ChatId,
+      messageId: "chatter",
+      text: "RP-1234ABCD",
+      attachments: [],
+      timestamp: new Date(),
+      thread: { kind: "group" },
+      addressing: "ambient",
+    });
+
+    expect(admitted).toBe(false);
+    expect(await repo.findPending()).toEqual([]);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ["telegram", "123", "Alice [Smith]", "[@Alice \\[Smith\\]](tg://user?id=123) (`123`)"],
     ["discord", "123", "@everyone", "<@123> (`123`)"],
     [

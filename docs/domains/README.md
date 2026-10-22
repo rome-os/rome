@@ -49,6 +49,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - An agent can be linked to any number of accounts, several on one platform included, and an account has one agent in storage.
 - Feishu and Lark are two platforms.
 - The dashboard and docs say account, agent, connect, disconnect, link, switch and unlink.
+- Feishu and Discord deliver group messages whether or not they mention the account, and the reply rule is applied after delivery. A message the rule does not wake the agent for is still recorded in the chat.
 
 Diffs still owed to the model, each a change of its own:
 
@@ -58,7 +59,7 @@ Diffs still owed to the model, each a change of its own:
 - One group is one chat across all of Rome's accounts in it.
 - A Feishu person is one account across all of Rome's Feishu accounts, by the tenant-wide id.
 - The participants of a chat are the platform's member list.
-- Adapters deliver every message, and the reply rule is applied after delivery.
+- Discord still drops other bots' messages, and messages that mention someone else, before delivery.
 - A thread's messages are the parent chat's, marked by thread.
 - A disconnected account's record is deleted, with the chats it alone was in. A chat another of Rome's accounts is in keeps its whole history.
 - The reply rule takes the value "when it is needed", backed by the lightweight check.

@@ -7,8 +7,11 @@ import type {
   ChannelMessageHookDeps,
   ChatId,
   ChatSettingsControl,
+  ChatSettingsSnapshot,
   InboundEvent,
   ChannelActivitySession,
+  MessageAddressing,
+  RecordChatMessageHandler,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("channel-message-hook");
@@ -24,6 +27,25 @@ const AGENTS_CHANNEL = "agents";
  */
 export const SLOW_TURN_MS = 10 * 60_000;
 
+function addressingOf(message: InboundEvent["message"]): MessageAddressing {
+  return message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
+}
+
+/**
+ * Whether the conversation's reply rule (`activation.mode`) lets Rome answer
+ * the message. It decides answering only: a message it declines is still
+ * recorded. A conversation whose service does not enforce the rule answers
+ * every message.
+ */
+export function replyRuleAnswers(
+  snapshot: Pick<ChatSettingsSnapshot, "supportedFields" | "effective">,
+  message: InboundEvent["message"],
+): boolean {
+  if (!snapshot.supportedFields.includes("activation.mode")) return true;
+  if (snapshot.effective.activation.mode === "all") return true;
+  return addressingOf(message) !== "ambient";
+}
+
 export class ChannelMessageHook implements ChannelMessageHookInterface {
   /** Unsubscribe functions by channel name, one per channel this hook holds. */
   private readonly subscriptions = new Map<string, () => void>();
@@ -37,6 +59,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       slowTurnMs?: number;
       log?: Pick<typeof log, "warn">;
       accountAgentOf?: ChannelMessageHookDeps["accountAgentOf"];
+      recordChatMessage?: RecordChatMessageHandler;
     } = {},
   ) {}
 
@@ -97,9 +120,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     // A program sends on `agents`, not a person, so `/stop` there is text for
     // the model, and `message_handler` decides whether Rome answers it.
     if (service !== AGENTS_CHANNEL && isStopCommand(message.text)) {
-      const addressing =
-        message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
-      if (addressing === "ambient") {
+      if (addressingOf(message) === "ambient") {
         log.debug("ignoring group stop command not directed at the bot", {
           service,
           messageId: message.messageId,
@@ -148,20 +169,43 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       return;
     }
 
-    let attachments = message.attachments;
-    // Through the channel's Connection, which is `ref`'s.
-    const inboundMedia = channel.inbound?.media ?? null;
-    if (inboundMedia && attachments.length > 0) {
-      try {
-        attachments = await inboundMedia.materialize(message);
-      } catch (err) {
-        log.error("failed to materialize incoming attachments", {
-          service,
-          messageId: message.messageId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+    if (!replyRuleAnswers(snapshot, message)) {
+      // Recorded so the agent sees it, without a turn or a typing indicator.
+      // Awaited, so the channel holds the conversation until it is stored: the
+      // next message waits behind it, and a burst stays in the channel's
+      // bounded buffer. Its files are not downloaded and no action worker is
+      // taken, so a `/stop` behind it waits only for the host's store.
+      const record = this.options.recordChatMessage;
+      if (record) {
+        try {
+          await record({ ref, service, message, routedAgentName });
+        } catch (err) {
+          log.error("failed to record a declined message", {
+            service,
+            messageId: message.messageId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
       }
+      // A host that predates `recordChatMessage` stores it through
+      // `message_handler`, with its files downloaded as before.
+      await this.runTurn(
+        message,
+        service,
+        connectionId,
+        await this.materialize(channel, message),
+        Promise.resolve(null),
+        {
+          routedAgentName,
+          accountAgentName: accountAgent,
+          answer: false,
+        },
+      );
+      return;
     }
+
+    const attachments = await this.materialize(channel, message);
 
     const activity = Promise.resolve()
       .then(
@@ -190,13 +234,37 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     });
   }
 
+  /** The message's files saved to disk through the channel's Connection,
+   *  which is the event's, or as they arrived when saving fails. */
+  private async materialize(
+    channel: Channel,
+    message: InboundEvent["message"],
+  ): Promise<InboundEvent["message"]["attachments"]> {
+    const inboundMedia = channel.inbound?.media ?? null;
+    if (!inboundMedia || message.attachments.length === 0) return message.attachments;
+    try {
+      return await inboundMedia.materialize(message);
+    } catch (err) {
+      log.error("failed to materialize incoming attachments", {
+        service: channel.name,
+        messageId: message.messageId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return message.attachments;
+    }
+  }
+
   private async runTurn(
     message: InboundEvent["message"],
     service: string,
     connectionId: string,
     attachments: InboundEvent["message"]["attachments"],
     activity: Promise<ChannelActivitySession | null>,
-    agents: { routedAgentName: string | undefined; accountAgentName: string | undefined },
+    route: {
+      routedAgentName: string | undefined;
+      accountAgentName: string | undefined;
+      answer?: false;
+    },
   ): Promise<void> {
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
     const slow = setTimeout(() => {
@@ -224,7 +292,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           attachments,
           messageId: message.messageId,
           replyTo: message.replyTo,
-          ...agents,
+          ...route,
         },
         {
           initiator: `connection:${connectionId}`,
@@ -291,6 +359,9 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
     deps.chatSettings ?? deps.conversationSettings,
     deps.chatStop,
     deps.channels,
-    { accountAgentOf: deps.accountAgentOf ?? deps.linkedAgentOf },
+    {
+      accountAgentOf: deps.accountAgentOf ?? deps.linkedAgentOf,
+      recordChatMessage: deps.recordChatMessage,
+    },
   );
 }

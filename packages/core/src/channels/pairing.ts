@@ -77,9 +77,13 @@ export function createPairingAdmission(deps: {
       });
     };
     const guidance = `🔗 Pair ${pairingAccount(connectionKind, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${pairingGuidePage(connectionKind)}).`;
+    const directed =
+      message.thread?.kind === "dm" ||
+      ["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient");
     try {
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {
+          if (!directed) return false;
           const request = deps.approvalsRepo.requestAuthorizedPairing(
             {
               channel: pairingChannel,
@@ -126,11 +130,7 @@ export function createPairingAdmission(deps: {
         message.senderId,
       );
       if (person && person.id !== STRANGER_PERSON_ID) return true;
-      if (
-        message.thread?.kind !== "dm" &&
-        !["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient")
-      )
-        return false;
+      if (!directed) return false;
       const request = deps.approvalsRepo.requestAuthorizedPairing(
         {
           channel: pairingChannel,

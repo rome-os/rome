@@ -845,20 +845,8 @@ export class DiscordAdapter {
         return;
       }
 
-      // ── Layer 5: Mention check ────────────────────────────────────────────
-      // Threads the bot itself started (e.g. auto-thread replies) are treated
-      // as ongoing conversations and skip the mention requirement. Threads
-      // created by other users still need an @mention or a reply-to-bot.
-      const requireMention = cfg.requireMention ?? true;
-      if (requireMention && addressing === "ambient") {
-        log.debug("ignoring guild message not directed at bot", {
-          from: message.author.id,
-          channelId: message.channelId,
-          isThread,
-        });
-        return;
-      }
-
+      // The reply rule (`activation.mode`) is applied after delivery, so an
+      // ambient message still reaches Rome to be recorded.
       await this.dispatchMessage(message, isDm, isThread, addressing);
     });
 

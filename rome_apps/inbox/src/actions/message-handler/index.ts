@@ -744,10 +744,9 @@ export function createMessageHandlerAction(
             : undefined;
         const replyTo = parseMessageReplyReference(args.replyTo);
         const replyToPlatformMessageId = replyTo?.messageId;
-        const replyToLevels =
-          (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
-        if (!canReplyToBondLevel(bondLevel, replyToLevels)) {
-          const stored = await conversations.addMessage({
+        // A notification row is context for the conversation's next turn and starts none.
+        const recordUnanswered = () =>
+          conversations.addMessage({
             sessionId: conversation.id,
             role: "notification",
             content: messageContent,
@@ -757,6 +756,21 @@ export function createMessageHandlerAction(
             replyToPlatformMessageId,
             createdAt,
           });
+        if (args.answer === false) {
+          const stored = await recordUnanswered();
+          if (!stored.inserted) {
+            return { status: "ok", data: { action: "duplicate", messageId: platformMessageId } };
+          }
+          log.debug("message recorded without an answer by the reply rule", {
+            channel,
+            channelUserId,
+          });
+          return { status: "ok", data: { action: "not_addressed" } };
+        }
+        const replyToLevels =
+          (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
+        if (!canReplyToBondLevel(bondLevel, replyToLevels)) {
+          const stored = await recordUnanswered();
           if (!stored.inserted) {
             return { status: "ok", data: { action: "duplicate", messageId: platformMessageId } };
           }

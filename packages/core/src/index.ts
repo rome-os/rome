@@ -47,7 +47,7 @@ import {
   legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
-import type { ChatStopHandler } from "@rome-os/app-runtime";
+import type { ChannelMessageHookDeps, ChatStopHandler } from "@rome-os/app-runtime";
 
 const log = createLogger("startup");
 
@@ -88,6 +88,7 @@ import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
 import { domainOf, domainOfGrants } from "./channels/platform.js";
+import { createChatMessageRecorder } from "./channels/record-chat-message.js";
 import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
@@ -1271,21 +1272,29 @@ async function main() {
   // inbound message it handles is traced and logged once.
   const hookChannels = legacyChatIdChannels(withInboundSpans(channels, "channel-message"));
   const hookChatStop = legacyChatIdStop(chatStop);
+  const hookDeps: ChannelMessageHookDeps = {
+    actionEngine,
+    chatSettings: appChatSettings,
+    conversationSettings: appChatSettings,
+    chatStop: hookChatStop,
+    recordChatMessage: createChatMessageRecorder({
+      findPerson: (channel, channelUserId) =>
+        personMappingRepo.findByChannelUser(channel, channelUserId),
+      evaluatePolicy: (context) => policyEngine.evaluate(context),
+      chats: webchatRepo,
+      hasAgent: (name) => agentLoader.has(name),
+    }),
+    channels: hookChannels,
+    accountAgentOf,
+    linkedAgentOf: accountAgentOf,
+  };
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
     .listArtifacts("hook")
     .find((artifact) => artifact.publicName === "channel-message");
   if (messageHandlerRegistered) {
     try {
-      const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, {
-        actionEngine,
-        chatSettings: appChatSettings,
-        conversationSettings: appChatSettings,
-        chatStop: hookChatStop,
-        channels: hookChannels,
-        accountAgentOf,
-        linkedAgentOf: accountAgentOf,
-      });
+      const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, hookDeps);
       if (loadedHook) {
         messageHook = loadedHook;
       } else {
@@ -1319,15 +1328,7 @@ async function main() {
   const reloadChannelMessageHook = messageHandlerRegistered
     ? createChannelMessageHookReloader({
         catalog: appCatalog,
-        deps: {
-          actionEngine,
-          chatSettings: appChatSettings,
-          conversationSettings: appChatSettings,
-          chatStop: hookChatStop,
-          channels: hookChannels,
-          accountAgentOf,
-          linkedAgentOf: accountAgentOf,
-        },
+        deps: hookDeps,
         getCurrent: () => messageHook,
         setCurrent: (hook) => {
           messageHook = hook;

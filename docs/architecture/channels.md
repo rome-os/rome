@@ -132,7 +132,7 @@ An unknown Telegram, Discord, or Feishu account creates one expiring [approval](
 - Codes are absent from approval history and logs. Guidance and failed verification logs are best-effort telemetry, not the durable approval record.
 - Provider-owned pairing, including WhatsApp device linking, retains its provider-specific proof of control.
 
-Pairing admission creates requests for private messages, messages directed at Rome's account (mentions, replies, or threads it started), and code attempts. Ambient group messages and Telegram channel identities create no pairing requests. Existing account mappings retain their normal routing.
+Pairing admission creates requests for private messages and for messages directed at Rome's account (mentions, replies, or threads it started), code attempts included. Ambient group messages, code attempts among them, and Telegram channel identities create no pairing requests. Existing account mappings retain their normal routing.
 
 Each connection permits at most 20 pending pairing requests and 100 new requests in a rolling 24-hour window. Repeated messages can still reuse an existing request at either limit. Deleting a connection or revoking a Talk grant supersedes its pending requests and invalidates their codes. Revoking an unrelated grant preserves pending requests. A guardian rejection retains its original cooldown.
 

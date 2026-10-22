@@ -6,9 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId, MessageAddressing } from "@rome-os/app-runtime";
 import { DiscordAdapter } from "./discord.js";
 
-// The gateway filters run before dispatchMessage. These tests call it directly
-// with a discord.js-shaped message, so they pin the record the transport emits
-// for one message that already passed them.
+// The gateway filters run before dispatchMessage. The inbound-message tests
+// call it directly with a discord.js-shaped message, so they pin the record the
+// transport emits for one message that already passed them. The gateway-filter
+// tests drive the `messageCreate` handler itself.
 
 const BOT = { id: "bot-1", displayName: "Rome" };
 
@@ -156,6 +157,70 @@ describe("DiscordAdapter inbound messages", () => {
 
     expect(captured[0].thread).toStrictEqual({ kind: "group", name: "general" });
     expect(captured[0]).not.toHaveProperty("parentChatId");
+  });
+});
+
+describe("DiscordAdapter gateway filters", () => {
+  function gateway(): {
+    captured: ChannelMessage[];
+    receive(message: Message): Promise<void>;
+  } {
+    const handlers = new Map<string, (message: Message) => Promise<void>>();
+    const adapter = new DiscordAdapter({ botToken: "test-token" });
+    Object.assign(adapter, {
+      client: {
+        user: BOT,
+        on: (event: string, handler: (message: Message) => Promise<void>) =>
+          handlers.set(event, handler),
+        login: async () => "test-token",
+      },
+    });
+    const captured: ChannelMessage[] = [];
+    adapter.onInbound(async (msg) => {
+      captured.push(msg);
+    });
+    return {
+      captured,
+      async receive(message) {
+        await adapter.start();
+        await handlers.get("messageCreate")!(message);
+      },
+    };
+  }
+
+  function guildMessage(content: string, mentioned: string[] = []): Message {
+    return {
+      id: "msg-3",
+      channelId: "channel-1",
+      content,
+      createdAt: new Date("2026-05-10T00:00:00Z"),
+      type: MessageType.Default,
+      system: false,
+      reference: null,
+      author: { id: "user-1", username: "alice", displayName: "Alice", bot: false },
+      member: { displayName: "Alice Smith" },
+      guild: { name: "Guild", members: { me: { displayName: "Rome" } } },
+      channel: { type: ChannelType.GuildText, name: "general", isThread: () => false },
+      mentions: { users: new Map(mentioned.map((id) => [id, { id }])) },
+      attachments: new Map(),
+    } as unknown as Message;
+  }
+
+  it("delivers a guild message not directed at the bot as ambient", async () => {
+    const { captured, receive } = gateway();
+
+    await receive(guildMessage("lunch?"));
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({ text: "lunch?", addressing: "ambient" });
+  });
+
+  it("still drops a guild message that mentions someone else but not the bot", async () => {
+    const { captured, receive } = gateway();
+
+    await receive(guildMessage("<@user-2> lunch?", ["user-2"]));
+
+    expect(captured).toHaveLength(0);
   });
 });
 

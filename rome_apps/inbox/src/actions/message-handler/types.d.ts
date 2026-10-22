@@ -81,6 +81,10 @@ export interface MessageHandlerInput {
    *  conversation never stores it. When that agent is not loaded, nothing
    *  answers. Absent on an account that takes no agent. */
   accountAgentName?: string;
+  /** `false` when the conversation's reply rule declines to answer: the
+   *  message is recorded in the conversation and no turn runs. Absent means
+   *  answer. */
+  answer?: false;
   /** @deprecated The name `accountAgentName` had in actions queued before it.
    *  Read only when `accountAgentName` is absent. */
   linkedAgentName?: string;
@@ -96,7 +100,8 @@ export interface MessageHandlerOutput {
     | "pending_approval"
     | "rejected_by_envoy"
     | "sentinel_replied"
-    | "sentinel_ignored";
+    | "sentinel_ignored"
+    | "not_addressed";
   /** Agent response text, if one was generated. */
   response?: string;
   /** Reason for the action taken (e.g. block or rejection reason). */
