@@ -1,8 +1,6 @@
 import {
-  useEffect,
   useLayoutEffect,
   useRef,
-  useState,
   type CSSProperties,
   type MouseEvent,
   type PointerEvent,
@@ -12,17 +10,18 @@ import { romeApi } from "@/lib/rome-api";
 
 // Below this the gesture is a click. A trackpad tap routinely moves a pixel or two.
 const DRAG_THRESHOLD_PX = 4;
-// Transparent gutter between the icon and the window edge, so no border is
-// clipped by it.
+// Transparent gutter between the icon and the window edge, so the outline,
+// which grows past the logo's box, is not clipped by it.
 const WINDOW_GUTTER_PX = 4;
 
-// A white disc, so the black mark reads on any wallpaper. The logo's inner
-// panel is filled with --background, so the disc has to say what that is.
-const LOGO_DISC_STYLE = {
-  background: "#fff",
+const OUTLINE_FILTER_ID = "pill-outline";
+// A black mark with a white outline, so it reads on any wallpaper: the black
+// on light ones, the outline on dark ones. The logo's inner panel is filled
+// with --background, so the page has to say what that is.
+const LOGO_STYLE = {
   color: "#111",
   "--background": "#fff",
-  border: "1px solid rgba(0, 0, 0, 0.15)",
+  filter: `url(#${OUTLINE_FILTER_ID})`,
 } as CSSProperties;
 
 interface Gesture {
@@ -32,18 +31,11 @@ interface Gesture {
 }
 
 export function PillPage() {
-  const [name, setName] = useState("Rome");
   const iconRef = useRef<HTMLDivElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
 
-  useEffect(() => {
-    const off = romeApi.on("pill:name", (next) => setName(next));
-    romeApi.pill.ready();
-    return off;
-  }, []);
-
-  // The window is sized to the icon and its name, because a transparent window
-  // still swallows clicks over its empty area.
+  // The window is sized to the icon, because a transparent window still
+  // swallows clicks over its empty area.
   useLayoutEffect(() => {
     const el = iconRef.current;
     if (!el) return;
@@ -51,7 +43,7 @@ export function PillPage() {
       el.offsetWidth + WINDOW_GUTTER_PX * 2,
       el.offsetHeight + WINDOW_GUTTER_PX * 2,
     );
-  }, [name]);
+  }, []);
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>): void => {
     // Ctrl-click is a right-click on macOS and arrives as button 0.
@@ -106,8 +98,8 @@ export function PillPage() {
     <div
       ref={iconRef}
       role="button"
-      aria-label={`Open ${name}`}
-      className="fixed flex w-max cursor-default select-none flex-col items-center gap-1"
+      aria-label="Open Rome"
+      className="fixed flex cursor-default select-none"
       style={{ left: WINDOW_GUTTER_PX, top: WINDOW_GUTTER_PX }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -115,18 +107,20 @@ export function PillPage() {
       onPointerCancel={onPointerCancel}
       onContextMenu={onContextMenu}
     >
-      <span
-        className="flex size-12 shrink-0 items-center justify-center rounded-full"
-        style={LOGO_DISC_STYLE}
-      >
-        <RomeLogo className="size-7" />
-      </span>
-      {/* Dark in either appearance: the name sits on the user's wallpaper, not on
-          a Rome surface, so the theme's own background says nothing about what
-          is behind it. */}
-      <span className="dark flex h-5 max-w-40 items-center rounded-full border border-border bg-card px-2 text-xs font-medium text-card-foreground">
-        <span className="truncate">{name}</span>
-      </span>
+      {/* The outline dilates the mark's own shape, so it follows every edge at
+          one width. */}
+      <svg width="0" height="0" className="absolute" aria-hidden="true">
+        <filter id={OUTLINE_FILTER_ID} x="-10%" y="-10%" width="120%" height="120%">
+          <feMorphology in="SourceAlpha" operator="dilate" radius="3" result="spread" />
+          <feFlood floodColor="#fff" />
+          <feComposite in2="spread" operator="in" />
+          <feMerge>
+            <feMergeNode />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </svg>
+      <RomeLogo className="size-10 overflow-visible" style={LOGO_STYLE} />
     </div>
   );
 }

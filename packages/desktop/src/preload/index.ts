@@ -69,7 +69,6 @@ const api = {
   // One-way on purpose: the pill never needs an answer, and the main process
   // owns all window geometry — the page only reports gestures.
   pill: {
-    ready: (): void => ipcRenderer.send("pill:ready"),
     setSize: (width: number, height: number): void =>
       ipcRenderer.send("pill:setSize", width, height),
     click: (): void => ipcRenderer.send("pill:click"),
@@ -85,7 +84,6 @@ const api = {
       "updater:status",
       "runtime:status",
       "rome-image:status",
-      "pill:name",
       "device:status",
     ];
     if (validChannels.includes(channel)) {
