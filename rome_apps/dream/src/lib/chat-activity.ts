@@ -21,6 +21,23 @@ export function inDashboardChat(session: string): SQL {
 }
 
 /**
+ * A chat only the guardian wrote in, over the `rome_sessions` row named
+ * `session`. A chat a visitor owns, or one with any request a visitor or an
+ * anonymous viewer sent, is left out whole, so Dream never takes someone
+ * else's request for the guardian's. Rows from before owners and actors were
+ * recorded have neither, and count as the guardian's.
+ */
+export function guardianOnlyChat(session: string): SQL {
+  const s = sql.raw(session);
+  return sql`(coalesce(${s}.owner_key, 'guardian') = 'guardian'
+    AND NOT EXISTS (
+      SELECT 1 FROM rome_agent_messages other
+      WHERE other.session_id = ${s}.id AND other.role = 'user'
+        AND coalesce(json_extract(other.actor, '$.kind'), 'guardian') <> 'guardian'
+    ))`;
+}
+
+/**
  * A channel session on one of Rome's accounts, over `rome_sessions s` and
  * `channels c` LEFT JOINed on `c.id = s.source_channel`. A session whose
  * channel record is gone is judged by its channel id, which names the

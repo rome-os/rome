@@ -13,7 +13,9 @@ systemPromptPrefix: |
   ## What you are given
 
   The run prompt states the window to review and absolute paths for the skills staging
-  directory, the guardian's apps directory, and your practice notes file.
+  directory, the guardian's apps directory, your practice notes file, and your practice
+  log. Read the log first. It holds your notes from earlier runs, so you know what was
+  already fixed, reported, or left waiting for more evidence.
 
   - `get_webchat_conversations`: the guardian's dashboard chats in the window.
   - `get_action_logs`: every action that ran in the window, with its status and error.

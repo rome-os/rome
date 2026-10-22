@@ -468,7 +468,7 @@ describe("dream", () => {
     await createAction(actionConfig, deps).execute({});
 
     const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
-    expect(run).toMatchObject({ status: "failed", error: "Model timeout" });
+    expect(run).toMatchObject({ status: "failed", error: "Memory agent failed: Model timeout" });
     expect(run?.finishedAt).toBeInstanceOf(Date);
   });
 });
@@ -560,10 +560,13 @@ describe("dream skills", () => {
   });
 
   it("records the app files the practice agent changed without file tools", async () => {
-    mkdirSync(join(dirname(carrierDir), "notes/src"), { recursive: true });
-    writeFileSync(join(dirname(carrierDir), "notes/src/old.ts"), "old");
-    const runner = skillWritingRunner([{ type: "result", content: "Fixed notes." }], (apps) => {
+    const apps = dirname(carrierDir);
+    mkdirSync(join(apps, "notes/src"), { recursive: true });
+    writeFileSync(join(apps, "notes/src/old.ts"), "old");
+    writeFileSync(join(apps, "notes/src/same.ts"), "same");
+    const runner = skillWritingRunner([{ type: "result", content: "Fixed notes." }], () => {
       writeFileSync(join(apps, "notes/src/fix.ts"), "export const fixed = true;");
+      writeFileSync(join(apps, "notes/src/old.ts"), "new");
       mkdirSync(join(apps, "notes/node_modules/dep"), { recursive: true });
       writeFileSync(join(apps, "notes/node_modules/dep/index.js"), "dep");
     });
@@ -573,9 +576,69 @@ describe("dream skills", () => {
 
     const { runId } = (result as { data: { runId: string } }).data;
     const changes = createRunsRepository(appDb()).changes(runId);
-    expect(changes.map((c) => [c.path, c.content])).toEqual([
-      [join(dirname(carrierDir), "notes/src/fix.ts"), "export const fixed = true;"],
-    ]);
+    const byPath = (path: string) => changes.find((c) => c.path === join(apps, path));
+    expect(byPath("notes/src/fix.ts")).toMatchObject({
+      op: "write",
+      content: "export const fixed = true;",
+    });
+    // A modified file shows as a diff against its text before the run.
+    expect(byPath("notes/src/old.ts")).toMatchObject({
+      op: "edit",
+      previous: "old",
+      content: "new",
+    });
+    expect(changes).toHaveLength(2);
+  });
+
+  it("keeps the practice agent's notes from earlier runs in its log", async () => {
+    const memoryDir = join(dirname(carrierDir), "memory");
+    async function dreamWithNotes(text: string): Promise<string> {
+      const prompts: string[] = [];
+      const run = async function* (params: { agentName: string; prompt: string }) {
+        prompts.push(params.prompt);
+        if (params.agentName === "dream-practice") {
+          const notes = /Practice notes file: (.+)$/m.exec(params.prompt)?.[1] as string;
+          writeFileSync(notes, text);
+        }
+        yield { type: "result", content: "done" };
+      };
+      const deps = makeDeps([]);
+      deps.memoryDir = memoryDir;
+      (deps.agentRunner as unknown as { run: unknown }).run = run;
+      await createAction(actionConfig, deps).execute({});
+      return (
+        /Practice log \(your notes from earlier runs\): (.+)$/m.exec(prompts[1] ?? "")?.[1] ?? ""
+      );
+    }
+
+    await dreamWithNotes("## Practice\n- reported the export bug");
+    const log = await dreamWithNotes("## Practice\n- fixed the date picker");
+
+    const text = readFileSync(log, "utf8");
+    expect(text).toContain("- reported the export bug");
+    expect(text).toContain("- fixed the date picker");
+  });
+
+  it("says which agent failed when the practice agent fails", async () => {
+    const runner = skillWritingRunner([{ type: "error", error: "Bash denied" }]);
+    // Only the practice agent fails: the memory agent plays errors too, so
+    // give it a runner of its own.
+    const run = async function* (params: { agentName: string; prompt: string }) {
+      if (params.agentName === "dream") {
+        yield { type: "result", content: "Updated memory." };
+        return;
+      }
+      yield* runner.run(params);
+    };
+    const deps = makeDeps([]);
+    (deps.agentRunner as unknown as { run: unknown }).run = run;
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    expect(result).toMatchObject({
+      status: "error",
+      error: "Practice agent (after memory was updated) failed: Bash denied",
+    });
   });
 
   it("installs the skills a completed dream saved, then drops the staging copy", async () => {

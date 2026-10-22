@@ -8,7 +8,7 @@ import {
   type ActionResult,
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
-import { inDashboardChat } from "../../lib/chat-activity.js";
+import { guardianOnlyChat, inDashboardChat } from "../../lib/chat-activity.js";
 import { extractText } from "../../lib/message-text.js";
 
 const log = createAppLogger("search_chats");
@@ -119,7 +119,11 @@ function formatHit(chat: ChatHit, wordCount: number, now: number): string {
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
   const { connection } = deps.appContext.db;
 
-  /** The opening request of every chat in the period, most recently active first. */
+  /**
+   * The opening request of every chat active in the period, most recently
+   * active first. A chat resumed in the period opens with its first request
+   * ever, which can predate the period.
+   */
   function listOpenings(cutoff: number, days: number, limit: number): ActionResult {
     const rows = connection.all(sql`
       SELECT session_id, session_name, content, created_at FROM (
@@ -129,17 +133,18 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         FROM rome_agent_messages m
         JOIN rome_sessions s ON s.id = m.session_id
         WHERE m.role = 'user'
-          AND m.created_at >= ${cutoff}
           AND ${inDashboardChat("s")}
+          AND ${guardianOnlyChat("s")}
       )
-      WHERE n = 1
+      WHERE n = 1 AND last_at >= ${cutoff}
       ORDER BY last_at DESC
     `) as RequestRow[];
+    const now = Math.floor(Date.now() / 1000);
     const lines = rows
       .slice(0, limit)
       .map(
         (row) =>
-          `- ${isoDate(row.created_at)} **${row.session_name}** (\`${row.session_id}\`): ${clip(extractText(row.content), CHARS_PER_OPENING)}`,
+          `- ${isoDate(row.created_at)} **${row.session_name}** (open: \`{ "sessionId": ${JSON.stringify(row.session_id)}, "windowHours": ${Math.ceil((now - row.created_at) / 3600) + 1} }\`): ${clip(extractText(row.content), CHARS_PER_OPENING)}`,
       );
     log.info("listed chat openings", { days, chats: rows.length });
     const header = `## Opening request of each dashboard chat, last ${days} days`;
@@ -150,7 +155,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         returned: lines.length,
         content:
           lines.length > 0
-            ? `${header}\n\nMost recently active first. Open one with get_webchat_conversations { "sessionId": "<id>", "windowHours": ${days * 24} }.\n\n${lines.join("\n")}`
+            ? `${header}\n\nMost recently active first. Open one by passing its arguments to get_webchat_conversations.\n\n${lines.join("\n")}`
             : `${header}\n\n(No chat with a guardian request in the period.)`,
       },
     };
@@ -165,6 +170,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       WHERE m.role = 'user'
         AND m.created_at >= ${cutoff}
         AND ${inDashboardChat("s")}
+        AND ${guardianOnlyChat("s")}
         AND (${sql.join(
           words.map((word) => sql`lower(m.content) LIKE ${likePattern(word)} ESCAPE '\\'`),
           sql` OR `,

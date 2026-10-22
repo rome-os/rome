@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -37,10 +37,20 @@ function profileMemoryDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(homedir(), ".rome", env.ROME_PROFILE || "default", "memory");
 }
 
-/** Appends the practice agent's notes to the journal, and records it on the run. */
-async function appendPracticeNotes(
+/** Earlier runs' practice notes the practice agent sees. */
+const PRACTICE_LOG_RUNS = 10;
+const PRACTICE_LOG_HEADING = "# Practice run ";
+
+/**
+ * Appends the practice agent's notes to the journal, recorded on the run, and
+ * to the practice log, the agent's own record of earlier runs. The log holds
+ * only what the practice agent wrote, so reading it crosses no trust line.
+ */
+async function savePracticeNotes(
   notesPath: string,
   journalPath: string,
+  logPath: string,
+  now: Date,
   runs: ReturnType<typeof createRunsRepository>,
   runId: string,
 ): Promise<void> {
@@ -52,6 +62,14 @@ async function appendPracticeNotes(
   runs.addChanges(runId, [
     { op: "edit", path: journalPath, content: text, previous: "", truncated: false },
   ]);
+
+  const earlier = (await readFile(logPath, "utf8").catch(() => ""))
+    .split(PRACTICE_LOG_HEADING)
+    .filter((entry) => entry.trim())
+    .slice(-(PRACTICE_LOG_RUNS - 1));
+  const entries = [...earlier, `${now.toISOString()}\n\n${notes}\n\n`];
+  await mkdir(dirname(logPath), { recursive: true });
+  await writeFile(logPath, entries.map((entry) => PRACTICE_LOG_HEADING + entry).join(""));
 }
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<DreamDeps>): Action {
@@ -123,6 +141,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
       /** Runs one agent into the run record. Null when it completed. */
       async function runAgent(
         agentName: string,
+        label: string,
         prompt: string,
         recorder: RunRecorder,
       ): Promise<ActionResult | null> {
@@ -139,10 +158,11 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         }
         const outcome = recorder.outcome();
         if (outcome.status === "completed") return null;
-        runs.finish(runId, outcome);
+        const error = `${label} failed: ${recorder.error}`;
+        runs.finish(runId, outcome.status === "failed" ? { status: "failed", error } : outcome);
         if (recorder.error !== null) {
           log.error("dream agent failed", { agentName, error: recorder.error });
-          return { status: "error", error: `Dream agent failed: ${recorder.error}` };
+          return { status: "error", error };
         }
         return { status: "ok", data: { runId, windowHours, summary: recorder.summary } };
       }
@@ -186,7 +206,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           `- Memory directory: ${memoryDir}`,
           `- Today's journal entry: ${journalPath}`,
         ].join("\n");
-        const memoryStopped = await runAgent("dream", memoryPrompt, memoryRecorder);
+        const memoryStopped = await runAgent("dream", "Memory agent", memoryPrompt, memoryRecorder);
         if (memoryStopped) return memoryStopped;
 
         const practiceRecorder = new RunRecorder(runs, runId);
@@ -194,6 +214,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         // just wrote those from other people's chats. Its notes go to a file
         // of its own, which the action appends to the journal.
         const notesPath = join(staging, "practice.md");
+        const logPath = join(appsDir, ".dream-practice", "log.md");
         const practicePrompt = [
           `Today is ${now.toISOString()}. Practice over the past ${windowHours} hours.`,
           "",
@@ -201,11 +222,17 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           `- Skills staging directory: ${join(staging, "skills")}`,
           `- Guardian's apps directory: ${appsDir}`,
           `- Practice notes file: ${notesPath}`,
+          `- Practice log (your notes from earlier runs): ${logPath}`,
         ].join("\n");
-        const appsBefore = await snapshotApps(appsDir);
+        const appsBefore = await snapshotApps(appsDir, join(staging, "apps-before"));
         let practiceStopped: ActionResult | null;
         try {
-          practiceStopped = await runAgent("dream-practice", practicePrompt, practiceRecorder);
+          practiceStopped = await runAgent(
+            "dream-practice",
+            "Practice agent (after memory was updated)",
+            practicePrompt,
+            practiceRecorder,
+          );
         } finally {
           // App changes are live once made, so record them even from a run
           // that failed, for the guardian to review.
@@ -213,7 +240,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
             runId,
             await appChangesSince(appsDir, appsBefore, practiceRecorder.paths),
           );
-          await appendPracticeNotes(notesPath, journalPath, runs, runId);
+          await savePracticeNotes(notesPath, journalPath, logPath, now, runs, runId);
         }
         if (practiceStopped) return practiceStopped;
         const agentSummary = [memoryRecorder.summary, practiceRecorder.summary]

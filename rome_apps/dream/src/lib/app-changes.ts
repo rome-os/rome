@@ -5,85 +5,134 @@
  * The agent can change an app with Bash or through the coding agent, and
  * neither shows up as a file-tool call, so the run recorder cannot see those
  * edits. Diffing the source tree records them on the run, where the guardian
- * can review them later.
+ * can review them later. A copy of each source file taken before the run
+ * lets a modified file show as a diff rather than as its whole new text.
  */
-import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import type { Dirent } from "node:fs";
+import { constants } from "node:fs";
+import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { dirname, extname, join, relative } from "node:path";
 import { type FileChange, MAX_CHANGE_CHARS } from "./changes.js";
 
 /** Build output, dependencies, and hidden folders (git, dream staging) are not source. */
 const SKIPPED_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);
 /** Bounds one walk, so a huge apps directory cannot stall a dream. */
 const MAX_FILES = 50_000;
-/** Larger files are recorded by path only. */
+/** Larger files are recorded by path only, and not copied. */
 const MAX_READ_BYTES = 1_000_000;
+/** Media and archives are never shown as text, so they are not copied. */
+const BINARY_EXTENSIONS = new Set(
+  "png jpg jpeg gif webp avif ico bmp svgz mp3 mp4 m4a wav ogg mov webm zip gz tgz pdf woff woff2 ttf otf sqlite db".split(
+    " ",
+  ),
+);
 
-export type AppsSnapshot = Map<string, string>;
+export interface AppsSnapshot {
+  /** Size and modification time of every source file. */
+  files: Map<string, string>;
+  /** Where the pre-run copies live, mirroring the apps directory. */
+  copyDir: string;
+}
 
-/** Size and modification time of every source file under `dir`. */
-export async function snapshotApps(dir: string): Promise<AppsSnapshot> {
-  const files: AppsSnapshot = new Map();
-  async function walk(current: string): Promise<void> {
-    let entries: import("node:fs").Dirent[];
+async function walk(dir: string, visit: (path: string) => Promise<void>): Promise<void> {
+  let count = 0;
+  async function into(current: string): Promise<void> {
+    let entries: Dirent[];
     try {
       entries = await readdir(current, { withFileTypes: true });
     } catch {
       return;
     }
     for (const entry of entries) {
-      if (files.size >= MAX_FILES) return;
+      if (count >= MAX_FILES) return;
       if (entry.name.startsWith(".")) continue;
       const path = join(current, entry.name);
       if (entry.isDirectory()) {
-        if (!SKIPPED_DIRS.has(entry.name)) await walk(path);
+        if (!SKIPPED_DIRS.has(entry.name)) await into(path);
       } else if (entry.isFile()) {
-        try {
-          const info = await stat(path);
-          files.set(path, `${info.size}:${info.mtimeMs}`);
-        } catch {
-          // Removed mid-walk.
-        }
+        count++;
+        await visit(path);
       }
     }
   }
-  await walk(dir);
+  await into(dir);
+}
+
+async function signatures(dir: string): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  await walk(dir, async (path) => {
+    const info = await stat(path).catch(() => null);
+    if (info) files.set(path, `${info.size}:${info.mtimeMs}`);
+  });
   return files;
 }
 
-/** Files added or modified since `before`, as writes of their new content. */
+/** Records every source file under `dir`, and copies the readable ones into `copyDir`. */
+export async function snapshotApps(dir: string, copyDir: string): Promise<AppsSnapshot> {
+  const files = await signatures(dir);
+  for (const path of files.keys()) {
+    if (BINARY_EXTENSIONS.has(extname(path).slice(1).toLowerCase())) continue;
+    const size = Number(files.get(path)?.split(":")[0]);
+    if (size > MAX_READ_BYTES) continue;
+    const copy = join(copyDir, relative(dir, path));
+    try {
+      await mkdir(dirname(copy), { recursive: true });
+      // A clone where the filesystem supports it, a plain copy otherwise.
+      await copyFile(path, copy, constants.COPYFILE_FICLONE);
+    } catch {
+      // Removed mid-walk, or unreadable: it shows as a whole-file write.
+    }
+  }
+  return { files, copyDir };
+}
+
+/** Files added or modified since `before`: edits with their old text when a copy exists. */
 export async function appChangesSince(
   dir: string,
   before: AppsSnapshot,
   alreadyRecorded: ReadonlySet<string>,
 ): Promise<FileChange[]> {
-  const after = await snapshotApps(dir);
+  const after = await signatures(dir);
   const changes: FileChange[] = [];
   for (const [path, signature] of after) {
-    if (before.get(path) === signature || alreadyRecorded.has(path)) continue;
-    changes.push(await asWrite(path));
+    const previous = before.files.get(path);
+    if (previous === signature || alreadyRecorded.has(path)) continue;
+    const next = await readText(path);
+    const old =
+      previous === undefined ? null : await readText(join(before.copyDir, relative(dir, path)));
+    if (next.text !== null && old?.text != null) {
+      if (next.text === old.text) continue;
+      changes.push({
+        op: "edit",
+        path,
+        content: next.text.slice(0, MAX_CHANGE_CHARS),
+        previous: old.text.slice(0, MAX_CHANGE_CHARS),
+        truncated: next.truncated || old.truncated,
+      });
+    } else {
+      changes.push({
+        op: "write",
+        path,
+        content: next.text?.slice(0, MAX_CHANGE_CHARS) ?? next.note,
+        previous: null,
+        truncated: next.truncated,
+      });
+    }
   }
   return changes;
 }
 
-async function asWrite(path: string): Promise<FileChange> {
+async function readText(
+  path: string,
+): Promise<{ text: string | null; note: string; truncated: boolean }> {
   try {
     const info = await stat(path);
-    if (info.size > MAX_READ_BYTES) {
-      return { op: "write", path, content: "", previous: null, truncated: true };
-    }
+    if (info.size > MAX_READ_BYTES) return { text: null, note: "", truncated: true };
     const buffer = await readFile(path);
-    if (buffer.includes(0)) {
-      return { op: "write", path, content: "(binary file)", previous: null, truncated: false };
-    }
+    if (buffer.includes(0)) return { text: null, note: "(binary file)", truncated: false };
     const text = buffer.toString("utf8");
-    return {
-      op: "write",
-      path,
-      content: text.slice(0, MAX_CHANGE_CHARS),
-      previous: null,
-      truncated: text.length > MAX_CHANGE_CHARS,
-    };
+    return { text, note: "", truncated: text.length > MAX_CHANGE_CHARS };
   } catch {
-    return { op: "write", path, content: "", previous: null, truncated: true };
+    return { text: null, note: "", truncated: true };
   }
 }

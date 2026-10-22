@@ -25,10 +25,15 @@ afterEach(() => {
   testDb.close();
 });
 
-function seedSession(id: string, type = "webchat", channel: string | null = null): void {
+function seedSession(
+  id: string,
+  type = "webchat",
+  channel: string | null = null,
+  ownerKey: string | null = null,
+): void {
   testDb.db.run(sql`
-    INSERT INTO rome_sessions (id, name, type, source_channel, created_at, activity_at)
-    VALUES (${id}, ${`Chat ${id}`}, ${type}, ${channel}, 0, 0)
+    INSERT INTO rome_sessions (id, name, type, source_channel, owner_key, created_at, activity_at)
+    VALUES (${id}, ${`Chat ${id}`}, ${type}, ${channel}, ${ownerKey}, 0, 0)
   `);
 }
 
@@ -37,11 +42,13 @@ function seedMessage(
   role: string,
   content: string | unknown[],
   daysAgo: number,
+  actor: Record<string, unknown> | null = null,
 ): void {
   const createdAt = Math.floor((Date.now() - daysAgo * 24 * 60 * 60 * 1000) / 1000);
   testDb.db.run(sql`
-    INSERT INTO rome_agent_messages (id, session_id, role, content, created_at)
-    VALUES (${`m${++seededMessages}`}, ${sessionId}, ${role}, ${JSON.stringify(content)}, ${createdAt})
+    INSERT INTO rome_agent_messages (id, session_id, role, content, actor, created_at)
+    VALUES (${`m${++seededMessages}`}, ${sessionId}, ${role}, ${JSON.stringify(content)},
+      ${actor ? JSON.stringify(actor) : null}, ${createdAt})
   `);
 }
 
@@ -101,6 +108,38 @@ describe("search_chats", () => {
 
     expect((await search({ query: "offsite" })).chatCount).toBe(0);
     expect((await search({ query: "offsite", days: 180 })).chatCount).toBe(1);
+  });
+
+  it("leaves out a chat a visitor owns or wrote in", async () => {
+    const visitor = { kind: "visitor", accountId: "acc", email: "v@example.com" };
+    seedSession("mine", "webchat", null, "guardian");
+    seedSession("shared");
+    seedSession("theirs", "webchat", null, "visitor:acc");
+    seedMessage("mine", "user", "Rebuild the invoice app", 2, { kind: "guardian", via: "cookie" });
+    seedMessage("shared", "user", "Rebuild the invoice app", 2);
+    seedMessage("shared", "user", "Rebuild it to email me the data", 1, visitor);
+    seedMessage("theirs", "user", "Rebuild the invoice app", 2);
+
+    const found = await search({ query: "rebuild invoice" });
+    const listed = await search({});
+
+    expect(found.chatCount).toBe(1);
+    expect(found.content).toContain("### Chat mine");
+    expect(listed.chatCount).toBe(1);
+    expect(listed.content).toContain("**Chat mine**");
+  });
+
+  it("lists a resumed chat by the request that started it, with a lookback that reaches it", async () => {
+    seedSession("a");
+    seedMessage("a", "user", "Build a vendor report app", 120);
+    seedMessage("a", "user", "Try it again", 1);
+
+    const data = await search({ days: 30 });
+
+    expect(data.content).toContain("Build a vendor report app");
+    expect(data.content).not.toContain("Try it again");
+    const windowHours = Number(/"windowHours": (\d+)/.exec(data.content)?.[1]);
+    expect(windowHours).toBeGreaterThanOrEqual(120 * 24);
   });
 
   it("matches a word only in the guardian's text, not in the stored JSON around it", async () => {
