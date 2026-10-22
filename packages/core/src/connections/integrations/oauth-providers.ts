@@ -260,7 +260,7 @@ const SHOPIFY_STORE_FORM = {
   instructions:
     "Enter the store your own Shopify app connects to, like acme.myshopify.com, or paste the store's admin address.",
   fields: [{ name: "shop", label: "Store address", secret: false }],
-  note: "Rome Cloud connects through the Shopify app saved on your account, or Rome OS when none is saved. Shopify asks you to approve it next.",
+  note: "Only for a Shopify app you saved in Rome Cloud. To connect Rome OS, use Connect in Shopify instead.",
 } as const;
 
 /**
