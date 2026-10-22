@@ -495,7 +495,7 @@ describe("dream skills", () => {
     return { deps, runAction };
   }
 
-  it("gives the agent its window, memory directory, staging directory, and journal path", async () => {
+  it("gives the agent its window, memory, staging, apps, and journal paths", async () => {
     const runner = skillWritingRunner([{ type: "result", content: "done" }]);
     const { deps } = withRunner(runner);
 
@@ -505,6 +505,7 @@ describe("dream skills", () => {
     expect(prompt).toContain("windowHours: 6");
     expect(prompt).toContain("Memory directory: /p/memory");
     expect(prompt).toMatch(/Skills staging directory: .*\.dream-skill-review-.*\/skills$/m);
+    expect(prompt).toContain(`Guardian's apps directory: ${dirname(carrierDir)}`);
     expect(prompt).toMatch(/Today's journal entry: \/p\/memory\/journal\/\d{4}\/\d{2}\/\d{2}\.md/);
   });
 

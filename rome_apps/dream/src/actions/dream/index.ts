@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   createAppLogger,
   type Action,
@@ -134,6 +134,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           `- Window: pass windowHours: ${windowHours} to get_webchat_conversations, get_account_chats, and get_action_logs.`,
           `- Memory directory: ${memoryDir}`,
           `- Skills staging directory: ${join(staging, "skills")}`,
+          `- Guardian's apps directory: ${dirname(carrierDir)}`,
           `- Today's journal entry: ${journalPath}`,
         ].join("\n");
 
