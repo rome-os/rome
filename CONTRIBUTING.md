@@ -18,8 +18,8 @@ Follow [`DEVELOPMENT.md`](DEVELOPMENT.md). It covers the prerequisites (OrbStack
 
 Prefer the simple, straightforward solution. A complicated solution to a low-impact problem is usually the wrong solution. Before you write code, and again before you open a pull request, check the change against these questions:
 
-- **Is this the right problem?** Confirm what is actually broken or missing, and for whom, before you choose a fix.
-- **Is this the right solution?** Make sure the fix addresses the cause, not only one symptom of it.
+- **Is this the right problem?** State it in one sentence: "When _who_ does _what_, _this bad outcome_ happens, because _cause_." If you cannot name who hits it, the impact is unknown. If the cause is a guess, investigate first. If the sentence names your fix, it restates a solution, not a problem.
+- **Is this the right solution?** Fix the cause, at the layer where it starts. Be wary of fixes that often hide a symptom instead: swallowing an error, adding a retry, raising a timeout, or patching each place the symptom appears instead of its source.
 - **Is there a simpler alternative?** Always look for one. If you keep the more complex option, say why in the pull request.
 - **What is the impact?** Weigh how many users the change helps, and how much, against the code and risk it adds.
 - **Does it cover the main cases?** Handle the cases that real users hit. Do not add machinery for rare edge cases unless they put correctness, security, or data at risk.
