@@ -11,10 +11,10 @@
 import type { Dirent } from "node:fs";
 import { constants } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
-import { dirname, extname, join, relative } from "node:path";
+import { basename, dirname, extname, join, relative } from "node:path";
 import { type FileChange, MAX_CHANGE_CHARS } from "./changes.js";
 
-/** Build output, dependencies, and hidden folders (git, dream staging) are not source. */
+/** Build output, dependencies, and hidden folders (git, dream staging) are not source. Hidden files are. */
 const SKIPPED_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);
 /** Bounds one walk, so a huge apps directory cannot stall a dream. */
 const MAX_FILES = 50_000;
@@ -26,6 +26,9 @@ const BINARY_EXTENSIONS = new Set(
     " ",
   ),
 );
+
+/** `.env` files can hold secrets, so only their path is recorded. `.env.example` is source. */
+const SECRET_FILE = /^\.env(?!\.example$)/;
 
 export interface AppsSnapshot {
   /** Size and modification time of every source file. */
@@ -45,10 +48,9 @@ async function walk(dir: string, visit: (path: string) => Promise<void>): Promis
     }
     for (const entry of entries) {
       if (count >= MAX_FILES) return;
-      if (entry.name.startsWith(".")) continue;
       const path = join(current, entry.name);
       if (entry.isDirectory()) {
-        if (!SKIPPED_DIRS.has(entry.name)) await into(path);
+        if (!entry.name.startsWith(".") && !SKIPPED_DIRS.has(entry.name)) await into(path);
       } else if (entry.isFile()) {
         count++;
         await visit(path);
@@ -72,6 +74,7 @@ export async function snapshotApps(dir: string, copyDir: string): Promise<AppsSn
   const files = await signatures(dir);
   for (const path of files.keys()) {
     if (BINARY_EXTENSIONS.has(extname(path).slice(1).toLowerCase())) continue;
+    if (SECRET_FILE.test(basename(path))) continue;
     const size = Number(files.get(path)?.split(":")[0]);
     if (size > MAX_READ_BYTES) continue;
     const copy = join(copyDir, relative(dir, path));
@@ -97,6 +100,16 @@ export async function appChangesSince(dir: string, before: AppsSnapshot): Promis
   for (const [path, signature] of after) {
     const previous = before.files.get(path);
     if (previous === signature) continue;
+    if (SECRET_FILE.test(basename(path))) {
+      changes.push({
+        op: "write",
+        path,
+        content: "(contents not recorded)",
+        previous: null,
+        truncated: false,
+      });
+      continue;
+    }
     const next = await readText(path);
     const old =
       previous === undefined ? null : await readText(join(before.copyDir, relative(dir, path)));

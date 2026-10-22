@@ -586,6 +586,10 @@ describe("dream skills", () => {
       [...editEvents, { type: "result", content: "Fixed notes." }],
       () => {
         writeFileSync(join(apps, "notes/src/fix.ts"), "export const fixed = true;");
+        writeFileSync(join(apps, "notes/.gitignore"), "dist\n");
+        writeFileSync(join(apps, "notes/.env"), "API_KEY=secret");
+        mkdirSync(join(apps, "notes/.git"), { recursive: true });
+        writeFileSync(join(apps, "notes/.git/HEAD"), "ref");
         writeFileSync(join(apps, "notes/src/old.ts"), "new");
         mkdirSync(join(apps, "notes/node_modules/dep"), { recursive: true });
         writeFileSync(join(apps, "notes/node_modules/dep/index.js"), "dep");
@@ -609,7 +613,11 @@ describe("dream skills", () => {
       previous: "old",
       content: "new",
     });
-    expect(changes.filter((c) => c.path.startsWith(join(apps, "notes")))).toHaveLength(3);
+    // Hidden files are source; a .env is recorded without its contents; .git is skipped.
+    expect(byPath("notes/.gitignore")).toMatchObject({ op: "write", content: "dist\n" });
+    expect(byPath("notes/.env")).toMatchObject({ content: "(contents not recorded)" });
+    expect(JSON.stringify(changes)).not.toContain("API_KEY");
+    expect(changes.filter((c) => c.path.startsWith(join(apps, "notes")))).toHaveLength(5);
   });
 
   it("shows the practice agent its notes from earlier runs", async () => {
