@@ -8,7 +8,7 @@ A place where people and agents talk: a group, a direct message, the chat built 
 
 - A group is named by the platform's own id for it, so one group is one chat however many of Rome's accounts are in it.
 - A direct message is named by its two ends, the other account and the one of Rome's accounts it writes to, so a colleague writing to Sales and to Support is two chats, whatever id the platform gives the two.
-- A chat starts existing in Rome when its first message reaches Rome through one of Rome's accounts.
+- A chat starts existing in Rome when its first message reaches Rome through one of Rome's accounts. A chat with an [assistant](#assistant) is the exception: it starts when Rome first knows the assistant, before any message.
 - A chat's history belongs to the chat. It goes when the last of Rome's accounts leaves the chat, not before.
 - A chat may have threads inside it.
 
@@ -40,6 +40,17 @@ One of Rome's agents, such as main, sales or support, taking part in a chat. Wha
 - When the agent is woken by what it sees is the chat's reply rule for that account.
 - How an agent remembers what it sees, in a chat or in its threads, is the agent's own decision and belongs to Agents. Chats describes participants and messages and says nothing about memory.
 
+## Assistant
+
+An agent outside Rome, such as a Dot, Muse or another Rome, that talks to Rome through Rome Cloud. It is a participant with an account on Rome Cloud, not one of Rome's agents.
+
+- Two assistants are the same assistant when Rome Cloud gives them the same id. A renamed assistant is the same assistant.
+- An assistant has a kind, such as Dot, Muse or Rome, and the product shows it beside the name.
+- An assistant and Rome talk in one direct message, so each assistant is one chat. It starts when Rome first knows the assistant, so the guardian can write first.
+- Rome speaks in that chat through its own account on Rome Cloud. Main speaks for Rome there, since the account takes no other agent.
+- What the guardian writes in an assistant's chat goes to the assistant, said by the guardian through Rome's account. Main does not answer it.
+- The dashboard's chat list shows assistants' chats in a group of their own, above the dashboard's own chats.
+
 ## Reply rule
 
 A setting on a chat, for each of Rome's accounts in it, saying when that account's agent is woken: on every message, only when mentioned, or when it is needed. The same account can be chatty in one group and quiet in another.
@@ -47,6 +58,7 @@ A setting on a chat, for each of Rome's accounts in it, saying when that account
 - It decides when the agent is woken, nothing more. What reaches the chat is whatever the platform delivers, and how much of it the agent reads when woken is the agent's own business ([Agents](agents.md)).
 - "When it is needed" hands the decision to a lightweight check. A mention always wakes the agent under it. What a wake is and what follows it is in [Participation](participation.md#wake).
 - For a delegate on the guardian's own account, the current behaviour stays as it is.
+- A chat with an assistant has one reply rule, every message, and the guardian cannot change it.
 
 ## Message
 
@@ -69,7 +81,7 @@ Something shown in a chat that people can look at or act on: a question with cho
 
 ## Platform
 
-Somewhere chats live: Feishu, Lark, Discord, Telegram, email, Rome's own dashboard.
+Somewhere chats live: Feishu, Lark, Discord, Telegram, email, Rome's own dashboard, Rome Cloud.
 
 - Two platforms are the same when one account can log in to both. Feishu and Lark are different platforms. A Telegram bot and a signed-in Telegram user are one platform.
 - An agent may have any number of own accounts on one platform.
@@ -113,3 +125,8 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **A thread as a chat of its own.** People do not think of a thread as a chat. It is a side conversation inside one, seen by everyone in it. Letting the thread model decide the agent's memory boundary went with it. Memory is the agent's own decision.
 - **"Bot" and "linked agent" as names.** A person's identity and an agent's identity on a platform are the same kind of thing, and one name per thing is the writing rule. Unlink stays: it is the verb for taking an agent off an account.
 - **"Conversation" as the canonical word.** The guardian says chat. Conversation is kept as an alias until the rename lands.
+- **"Agent" for a Dot or Muse.** Agent means one of Rome's own agents, which the guardian defines and runs. A Dot or Muse runs elsewhere and answers to someone else's rules, so one word for both would need context to tell them apart.
+- **Assistants' chats mixed into the dashboard's own chats.** The guardian talks to Rome in one and watches Rome talk to another agent in the other. Mixed together, a chat with Muse reads as a chat with Rome.
+- **The guardian's line in an assistant's chat going to main.** It would put two conversations in one place: the guardian with main, and Rome with the assistant. Talking about an assistant with main belongs in the dashboard's own chat.
+- **A reply rule the guardian sets per assistant.** An assistant writes to Rome to get an answer, and no case has come up yet where one should be ignored. The setting waits until one does.
+- **An assistant's chat starting at its first message.** The guardian could not find an assistant to write to before it had written, so they could never start the chat.
