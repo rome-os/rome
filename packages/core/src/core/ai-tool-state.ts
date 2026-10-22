@@ -180,6 +180,33 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     codex: { quotaExhausted: false, solAccess: false, lunaAccess: false },
     claude: { quotaExhausted: false },
   };
+  // The hourly probe and every failed run re-confirm an exhausted provider, so
+  // only a change from the last logged state is logged.
+  const loggedQuotaExhausted: Record<AIToolProviderId, boolean> = {
+    openai: false,
+    anthropic: false,
+  };
+  const logQuotaChange = (provider: AIToolProviderId, source: string): void => {
+    const target = provider === "openai" ? value.codex : value.claude;
+    const exhausted = readProviderState(target, Date.now()).quotaExhausted;
+    if (exhausted === loggedQuotaExhausted[provider]) return;
+    loggedQuotaExhausted[provider] = exhausted;
+    if (exhausted) {
+      log.warn("model provider usage limit reached", {
+        provider,
+        source,
+        until: target.quotaExhaustedUntil,
+        fiveHourUsedPercent: target.usage?.fiveHour?.usedPercent,
+        sevenDayUsedPercent: target.usage?.sevenDay?.usedPercent,
+      });
+    } else {
+      // A stored flag that reads as false has outlived its end time.
+      log.info("model provider usage limit cleared", {
+        provider,
+        source: target.quotaExhausted ? "end time passed" : source,
+      });
+    }
+  };
   const notifyCodexLoginChanged = (previous: boolean | undefined): boolean => {
     if (previous === value.codex.loggedIn) return false;
     options.onCodexLoginChanged?.();
@@ -234,6 +261,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     if (existing) return existing;
 
     const pending = refreshProvider(provider).finally(() => {
+      logQuotaChange(provider, "usage check");
       if (refreshesInFlight.get(provider) === pending) {
         refreshesInFlight.delete(provider);
       }
@@ -297,11 +325,15 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         target.quotaExhausted = true;
         return true;
       };
+      const applyAndLog = (): void => {
+        if (applyRuntimeSignal()) logQuotaChange(provider, "failed run");
+      };
       if (!applyRuntimeSignal()) return;
+      logQuotaChange(provider, "failed run");
 
       // Keep this newer runtime signal after any older probe settles.
       const olderRefresh = refreshesInFlight.get(provider);
-      if (olderRefresh) void olderRefresh.then(applyRuntimeSignal, applyRuntimeSignal);
+      if (olderRefresh) void olderRefresh.then(applyAndLog, applyAndLog);
     },
     close() {
       if (timer) clearInterval(timer);
