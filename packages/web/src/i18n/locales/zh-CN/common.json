@@ -293,12 +293,8 @@
     "loadOlder": "加载更早的消息",
     "loading": "加载中…",
     "empty": "还没有和 {{name}} 的消息。",
-    "messagesLabel": "与 {{name}} 的消息",
-    "rome": "Rome",
     "noText": "无文本",
     "placeholder": "发消息给 {{name}}",
-    "composerLabel": "发给 {{name}} 的消息",
-    "send": "发送",
     "sendFailed": "未发送"
   }
 }

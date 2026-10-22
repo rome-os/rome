@@ -951,10 +951,6 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
           </div>
         </div>
         <div className="px-3 pt-2 pb-3">
-          <AssistantChats
-            collapsed={collapsedGroups.has("section:assistants")}
-            onToggle={() => toggleGroup("section:assistants")}
-          />
           {hasPinned ? (
             <section
               aria-labelledby="recent-chats-pinned-heading"
@@ -991,6 +987,10 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               )}
             </section>
           ) : null}
+          <AssistantChats
+            collapsed={collapsedGroups.has("section:assistants")}
+            onToggle={() => toggleGroup("section:assistants")}
+          />
           {phase === "loading" ? (
             <div className="space-y-1 px-2 py-2" aria-hidden>
               <Skeleton className="h-8 w-full" />

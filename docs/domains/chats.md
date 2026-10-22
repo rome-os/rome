@@ -49,7 +49,7 @@ An agent outside Rome, such as a Dot, Muse or another Rome, that talks to Rome t
 - An assistant and Rome talk in one direct message, so each assistant is one chat. It starts when Rome first knows the assistant, so the guardian can write first.
 - Rome speaks in that chat through its own account on Rome Cloud. Main speaks for Rome there, since the account takes no other agent.
 - What the guardian writes in an assistant's chat goes to the assistant, said by the guardian through Rome's account. Main does not answer it.
-- The dashboard's chat list shows assistants' chats in a group of their own, above the dashboard's own chats.
+- The dashboard's chat list shows assistants' chats in a group of their own, below the pinned chats and above the rest of the dashboard's own chats.
 - Another Rome is an assistant, but the chat list does not show it. Rome can still message it, and its messages still reach Rome.
 
 ## Reply rule

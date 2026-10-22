@@ -163,6 +163,12 @@ export interface ChatComposerProps {
   // composer owns the box so the pre-send chip row can sit *outside* it; each
   // mount passes its own box look (the floating composer adds backdrop-blur).
   boxClassName?: string;
+  // A box for plain text only, for a chat whose other end is not one of Rome's
+  // agents (an assistant's chat): no attachments, reasoning effort,
+  // impersonation, workspace chips or `/` skills, none of which reach it.
+  textOnly?: boolean;
+  // Replaces the default placeholder.
+  placeholder?: string;
   // Called when the user submits. The composer clears text immediately but
   // keeps uploading attachments visible until this promise settles. If it
   // rejects, the submitted inputs remain available for a retry.
@@ -206,6 +212,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     streamError,
     designingInteraction = null,
     boxClassName,
+    textOnly = false,
+    placeholder,
     onSend,
   },
   ref,
@@ -615,13 +623,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      const files = extractFilesFromClipboard(event.clipboardData);
+      const files = textOnly ? [] : extractFilesFromClipboard(event.clipboardData);
       if (files.length > 0) {
         event.preventDefault();
         addPendingFiles(files);
       }
     },
-    [addPendingFiles],
+    [addPendingFiles, textOnly],
   );
 
   const runSend = useCallback(async () => {
@@ -776,7 +784,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       const token = value.slice(1, cursor);
       const slashCount = token.split("/").length - 1;
       const slashShapeAllowed = slashCount === 0 || (token.startsWith("@") && slashCount === 1);
-      if (value.startsWith("/") && cursor >= 1 && !/\s/.test(token) && slashShapeAllowed) {
+      if (
+        !textOnly &&
+        value.startsWith("/") &&
+        cursor >= 1 &&
+        !/\s/.test(token) &&
+        slashShapeAllowed
+      ) {
         setSlashQuery(token);
         setSlashMenuOpen(true);
         return;
@@ -786,7 +800,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setSlashQuery("");
       }
     },
-    [slashMenuOpen],
+    [slashMenuOpen, textOnly],
   );
 
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -1067,7 +1081,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             onRemove={uploadInFlight ? undefined : () => setDraftSkill(null)}
           />
         )}
-        <WorkspaceContextChips />
+        {textOnly ? null : <WorkspaceContextChips />}
       </div>
       <div data-chat-composer-box className={cn("@container/composer relative z-10", boxClassName)}>
         {composerError && (
@@ -1132,9 +1146,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                         onKeyDown={handleKeyDown}
                         onPaste={handlePaste}
                         placeholder={
-                          pendingUploads.length > 0
+                          placeholder ??
+                          (pendingUploads.length > 0
                             ? t("composer.placeholderWithUploads")
-                            : t("composer.placeholderDefault")
+                            : t("composer.placeholderDefault"))
                         }
                         rows={1}
                         className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
@@ -1210,7 +1225,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 onClose={() => setPendingConnectPath(null)}
               />
             ) : null}
-            {impersonationEnabled && (
+            {impersonationEnabled && !textOnly && (
               <ImpersonationMenu
                 disabled={uploadInFlight}
                 open={impersonationMenuOpen}
@@ -1227,18 +1242,20 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 guardianLabel={guardianLabel}
               />
             )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploadInFlight}
-              aria-label={t("composer.uploadFiles")}
-              title={t("composer.uploadFiles")}
-              className="touch-target"
-            >
-              <Paperclip aria-hidden />
-            </Button>
+            {textOnly ? null : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadInFlight}
+                aria-label={t("composer.uploadFiles")}
+                title={t("composer.uploadFiles")}
+                className="touch-target"
+              >
+                <Paperclip aria-hidden />
+              </Button>
+            )}
             {showModelSelector && modelSelectorEnabled && (
               <ModelSelectorMenu
                 open={modelMenuOpen}
@@ -1248,13 +1265,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 disabled={uploadInFlight}
               />
             )}
-            <ReasoningEffortMenu
-              open={reasoningMenuOpen}
-              onOpenChange={setReasoningMenuOpen}
-              value={reasoningEffort}
-              onChange={(next) => void updateReasoningEffort(next)}
-              disabled={uploadInFlight}
-            />
+            {textOnly ? null : (
+              <ReasoningEffortMenu
+                open={reasoningMenuOpen}
+                onOpenChange={setReasoningMenuOpen}
+                value={reasoningEffort}
+                onChange={(next) => void updateReasoningEffort(next)}
+                disabled={uploadInFlight}
+              />
+            )}
           </div>
           {/* Stop sits just left of Send. */}
           <div className="flex items-center gap-2 self-end [grid-area:send]">

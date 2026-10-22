@@ -113,6 +113,27 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
 // The people the composer offers to speak as. The listing is the curated
 // people read (`GET /api/people`); the guardian is dropped because speaking as
 // the guardian is what the composer already does by default.
+describe("text-only composer", () => {
+  afterEach(() => {
+    cleanup();
+    rs.restoreAllMocks();
+  });
+
+  it("offers text and Send only, under the placeholder it is given", async () => {
+    const onSend = rs.fn();
+    renderComposer({ textOnly: true, placeholder: "Message Muse", onSend });
+
+    const box = await screen.findByPlaceholderText("Message Muse");
+    expect(screen.queryByRole("button", { name: "Upload files" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reasoning effort" })).toBeNull();
+
+    // A leading slash is text here, not a skill.
+    await userEvent.type(box, "/status please{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(onSend.mock.calls[0]![0].text).toBe("/status please");
+  });
+});
+
 describe("composer mention list", () => {
   const GUARDIAN = person("mock-guardian", "Mock Guardian", "guardian");
   const RAY = person("ray-oster", "Ray Oster", "inner-circle");

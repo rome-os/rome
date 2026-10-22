@@ -293,12 +293,8 @@
     "loadOlder": "Load older messages",
     "loading": "Loading…",
     "empty": "No messages with {{name}} yet.",
-    "messagesLabel": "Messages with {{name}}",
-    "rome": "Rome",
     "noText": "No text",
     "placeholder": "Message {{name}}",
-    "composerLabel": "Message to {{name}}",
-    "send": "Send",
     "sendFailed": "Not sent"
   }
 }
