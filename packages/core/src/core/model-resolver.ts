@@ -174,6 +174,16 @@ function configuredTierModel(
   return typeof model === "string" && model.trim() ? model.trim() : null;
 }
 
+// Agents, apps, and logs see only the message, not the reason field, so the
+// message itself names the cause and when a usage limit ends.
+function unavailableCause(provider: ModelProvider, availability: ProviderState): string {
+  if (availability.loggedIn === false) return `${provider.displayName} is not signed in`;
+  const until = availability.quotaExhaustedUntil;
+  return until
+    ? `${provider.displayName} has reached its usage limit until ${until}`
+    : `${provider.displayName} has reached its usage limit`;
+}
+
 function providerState(state: AIToolStateValue, providerId: ProviderId): ProviderState | null {
   if (providerId === "openai") return state.codex;
   if (providerId === "anthropic") return state.claude;
@@ -199,7 +209,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     const providerId = provider.id as AIToolProviderId;
     refreshAfterFailure(providerId);
     throw new ModelResolutionError(
-      `Selected model provider is unavailable: ${provider.displayName}`,
+      `Selected model provider is unavailable: ${unavailableCause(provider, availability)}`,
       {
         code: "model_provider_unavailable",
         provider: providerId,
