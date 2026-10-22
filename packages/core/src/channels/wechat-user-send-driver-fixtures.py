@@ -26,6 +26,9 @@ class FakeNode:
         self.client, self.role, self.name = client, role, name
         self.kids, self.editable = list(kids), editable
         self.shown, self.value, self.current = True, "", False
+        self.box = (0, 0, 0, 0)  # screen x, y, width, height
+
+    def extents(self): return self.box
 
     def states(self):
         c = self.client
@@ -168,6 +171,14 @@ class FakeDesktop:
         assert name in d.KEYS, name
         self.events.append(name)
         self.client.key(name)
+
+
+class FakeLoginDesktop:
+    """The X side of the login window: only its position."""
+    def __init__(self, window=(500, 210)):
+        self.window = window
+
+    def login_window(self): return self.window
 
 
 class FakeStore:
@@ -686,6 +697,75 @@ class SendTests(unittest.TestCase):
         self.assertIsNone(send(client, desk, store, clock, press_return=False))
         self.assertEqual((client.sent, client.all_inputs()["File Transfer"]), ([], ""))
         self.assertEqual(desk.events, ["Down", "Up", "Return"])  # the Return opens the chat only
+
+
+class SignInTests(unittest.TestCase):
+    def login(self, *names):
+        """The login window at (500, 210): a hidden Back button, then `names` stacked
+        from y=500, each 160×36."""
+        client, _, _, _ = rig()
+        back = FakeNode(client, "push button", "Back")
+        back.shown = False
+        buttons = [FakeNode(client, "push button", n) for n in names]
+        for i, b in enumerate(buttons):
+            b.box = (560, 500 + 40 * i, 160, 36)
+        client.app.kids = [FakeNode(client, "frame", "Weixin", [FakeNode(client, "tool bar", kids=[back]), *buttons])]
+        return client, buttons
+
+    def refused(self, client, window=(500, 210)):
+        with self.assertRaises(d.Failure) as caught:
+            d.sign_in_target(client.app, FakeLoginDesktop(window))
+        return caught.exception.code
+
+    def test_it_finds_the_middle_of_the_sign_in_button(self):
+        client, _ = self.login("Switch Account", "Enter Weixin", "Transfer files only")
+        self.assertEqual(d.sign_in_target(client.app, FakeLoginDesktop()), (640, 558))
+
+    def test_no_other_button_is_a_target(self):
+        for names in (("Switch Account", "Transfer files only"), ()):
+            client, _ = self.login(*names)
+            self.assertEqual(self.refused(client), "not-found", names)
+
+    def test_two_sign_in_buttons_are_no_target(self):
+        client, _ = self.login("Enter Weixin", "Log In")
+        self.assertEqual(self.refused(client), "not-found")
+
+    def test_a_hidden_sign_in_button_is_no_target(self):
+        client, buttons = self.login("Enter Weixin")
+        buttons[0].shown = False
+        self.assertEqual(self.refused(client), "not-found")
+
+    def test_the_target_lies_inside_the_login_window(self):
+        client, buttons = self.login("Log In")
+        for box in ((100, 100, 160, 36), (560, 500, 0, 0)):
+            buttons[0].box = box
+            self.assertEqual(self.refused(client), "not-ready", box)
+
+    def test_there_is_no_target_without_one_login_window(self):
+        client, _ = self.login("Enter Weixin")
+        self.assertEqual(self.refused(client, window=None), "not-found")
+
+    def test_the_login_window_is_found_by_its_size(self):
+        tree = ('     0x1a "Weixin": ("wechat" "wechat")  1280x800+0+0  +0+0\n'
+                '        0x2b "{}": ("wechat" "wechat")  280x380+0+0  +500+210\n')
+        desk = d.Desktop()
+        for title in ("Weixin", "微信"):
+            desk._run = lambda *a, t=title: subprocess.CompletedProcess(a, 0, tree.format(t), "")
+            self.assertEqual(desk.login_window(), (500, 210), title)
+        desk._run = lambda *a: subprocess.CompletedProcess(a, 0, tree.splitlines()[0], "")
+        self.assertIsNone(desk.login_window())
+
+    def test_main_answers_the_target_as_json(self):
+        client, _ = self.login("Enter Weixin")
+        for app, answer in ((client.app, {"ok": True, "x": 640, "y": 518}),
+                            (LookupError("gone"), {"ok": False, "code": "not-ready", "typed": False,
+                                                   "reason": "LookupError: gone"})):
+            out = io.StringIO()
+            source = {"side_effect": app} if isinstance(app, Exception) else {"return_value": app}
+            with patch.object(d, "wechat_app", **source), patch.object(d, "Desktop", FakeLoginDesktop), \
+                    patch.object(sys, "argv", ["driver", "sign-in-target"]), redirect_stdout(out):
+                d.main()
+            self.assertEqual(json.loads(out.getvalue()), answer)
 
 
 class ReadinessTests(unittest.TestCase):
