@@ -281,7 +281,6 @@
   },
   "assistants": {
     "title": "Assistants",
-    "unknownName": "Assistant",
     "kind": {
       "dot": "Dot",
       "muse": "Muse",
@@ -292,7 +291,8 @@
       "body": "Connect a Dot or Muse under Settings → Agents in Rome Cloud. It shows up here once this Rome's Agents connection is on."
     },
     "noMessages": "No messages yet",
-    "loadFailed": "Failed to load assistants"
+    "loadFailed": "Failed to load assistants",
+    "switch": "Switch assistant, now {{name}}"
   },
   "assistantChat": {
     "description": "Main answers {{name}}'s messages as Rome. What you write here goes to {{name}}.",

@@ -6,8 +6,12 @@ import { fetchJson } from "@/lib/fetch-json";
 // each one chat (docs/domains/chats.md#assistant). The server reads their
 // history and sends through the same timeline and outbox as People.
 
-export function assistantPath(agentId: string): string {
-  return `/assistants/${encodeURIComponent(agentId)}`;
+/** The search parameter on `/assistants` naming the open chat. */
+export const ASSISTANT_PARAM = "id";
+
+/** The API path of one assistant's chat. */
+function apiPath(agentId: string): string {
+  return `/api/assistants/${encodeURIComponent(agentId)}`;
 }
 
 export async function listAssistants(signal?: AbortSignal): Promise<Assistant[]> {
@@ -24,7 +28,7 @@ export function readAssistantMessages(
   signal?: AbortSignal,
 ): Promise<TimelinePage> {
   const search = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-  return fetchJson<TimelinePage>(`/api${assistantPath(agentId)}/messages${search}`, {
+  return fetchJson<TimelinePage>(`${apiPath(agentId)}/messages${search}`, {
     signal,
     fallback: "Could not load messages",
   });
@@ -33,7 +37,7 @@ export function readAssistantMessages(
 /** Write to the assistant as the guardian. Resolves to the outbox row, whose
  *  `state` says whether the channel took it. */
 export function sendToAssistant(agentId: string, text: string, id: string): Promise<OutboxMessage> {
-  return fetchJson<OutboxMessage>(`/api${assistantPath(agentId)}/messages`, {
+  return fetchJson<OutboxMessage>(`${apiPath(agentId)}/messages`, {
     method: "POST",
     json: { text, id },
     fallback: "Could not send",

@@ -281,7 +281,6 @@
   },
   "assistants": {
     "title": "助手",
-    "unknownName": "助手",
     "kind": {
       "dot": "Dot",
       "muse": "Muse",
@@ -292,7 +291,8 @@
       "body": "在 Rome Cloud 的 Settings → Agents 里连接 Dot 或 Muse。打开这个 Rome 的 Agents 连接后，它会出现在这里。"
     },
     "noMessages": "还没有消息",
-    "loadFailed": "助手加载失败"
+    "loadFailed": "助手加载失败",
+    "switch": "切换助手，当前是 {{name}}"
   },
   "assistantChat": {
     "description": "{{name}} 发来的消息由 main 以 Rome 的身份回复。你在这里写的内容会发给 {{name}}。",
