@@ -1,0 +1,28 @@
+name: Feature request
+description: A pain, a gap, or a user-experience problem where the fix is still undecided.
+title: "<area>: <the pain, in present tense>"
+labels: [feature-request]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        User-experience feedback belongs here too: a confusing flow, a rough screen, or a step that takes too long. Automated triage adds the priority and size labels. The full rules are in [docs/authoring/github-issues-feature-request.md](https://github.com/rome-os/rome/blob/main/docs/authoring/github-issues-feature-request.md).
+  - type: textarea
+    id: situation
+    attributes:
+      label: Situation
+      description: What is going on today, in plain words. Name no file or function here.
+    validations:
+      required: true
+  - type: textarea
+    id: pain
+    attributes:
+      label: Pain
+      description: What the gap costs and who pays it — the workaround you use, the time lost, or the thing you cannot do. Link examples where you can.
+    validations:
+      required: true
+  - type: textarea
+    id: directions
+    attributes:
+      label: Possible directions
+      description: Optional. Ideas for a fix, each with its main tradeoff. The issue does not need to pick one.

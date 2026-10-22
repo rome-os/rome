@@ -1,0 +1,52 @@
+# Contributing to Rome
+
+Rome welcomes bug reports, user-experience feedback, feature ideas, and pull requests. Rome is released under the [MIT License](LICENSE), and every contribution is accepted under the same license.
+
+## Open an issue
+
+Issues about user experience are as welcome as bug reports. If a flow is confusing, a screen looks rough, or a step takes longer than it should, open an issue and describe what you tried and what got in the way.
+
+Pick the template that matches the next action:
+
+- **Bug report** — something Rome already ships behaves wrong.
+- **Feature request** — a pain, a gap, or a user-experience problem where the fix is still undecided.
+
+An automated triage process reads each new issue and applies its type, priority (`P0`–`P3`), and size labels. You do not need to label an issue yourself. The full issue rules are in [`docs/authoring/github-issues.md`](docs/authoring/github-issues.md).
+
+## Set up a development environment
+
+Follow [`DEVELOPMENT.md`](DEVELOPMENT.md). It covers the prerequisites (OrbStack or Docker, Nix, and direnv), the first-time setup, and `pnpm dev:all`, the single command that starts Rome locally.
+
+## Make a change
+
+[`CLAUDE.md`](CLAUDE.md) is the working playbook for people and coding agents alike. It lists the repo layout, the patterns to follow, and the known traps. The points that matter most:
+
+- If you name a chat, thread, account, agent, or connection in code, UI copy, or docs, use the words in [`docs/domains/`](docs/domains/README.md).
+- If you build or edit an app under `rome_apps/`, read [`rome_apps/CLAUDE.md`](rome_apps/CLAUDE.md) first.
+- If you write docs or PR text, follow [`docs/authoring/WRITING.md`](docs/authoring/WRITING.md).
+
+Verify a change before you open a pull request:
+
+1. Run `pnpm typecheck` on the host.
+2. Run `pnpm test:unit`.
+3. Run `pnpm dev:all` and confirm that the rome container logs `Rome started`.
+4. If the change touches the UI, exercise the feature in the browser.
+
+## Open a pull request
+
+The full rules are in [`docs/authoring/prs.md`](docs/authoring/prs.md). In short:
+
+- The title is a [Conventional Commit](https://www.conventionalcommits.org/), such as `fix(web): keep the composer visible on phones`. Check it with `scripts/check-pr-title.sh "<title>"`. Squash-and-merge uses the title as the commit on `main`, and the release flow reads it.
+- The description opens with the problem, not with the list of changed files.
+- The test plan lists the behaviors you verified, each with its observable outcome.
+- A change to what the dashboard or an app shows includes phone (390×844) and desktop (1280×900) screenshots.
+
+## Code review
+
+Every pull request goes through an automated code review. The reviewers post a verdict and inline findings, and each finding carries a priority from `P0` (most severe) to `P3` (least severe).
+
+- Fix every `P0` and `P1` finding before merge.
+- Aim for approval from every reviewer. If a `P2` or `P3` finding is a nitpick, push back in a reply that explains why the change is not worth it.
+- CI must pass before merge.
+
+A maintainer merges the pull request once the review and CI are settled.

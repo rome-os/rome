@@ -1,0 +1,43 @@
+name: Bug report
+description: Something Rome already ships behaves wrong.
+title: "<area>: <the symptom, in present tense>"
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Name the area in the title, such as `web`, `connector`, or `desktop`. Automated triage adds the priority and size labels. The full rules are in [docs/authoring/github-issues-bug-report.md](https://github.com/rome-os/rome/blob/main/docs/authoring/github-issues-bug-report.md).
+  - type: textarea
+    id: situation
+    attributes:
+      label: Situation
+      description: What you were doing and what you expected, in plain words. Name no file or function here.
+    validations:
+      required: true
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Symptom
+      description: What happened instead. Paste the exact error text, and add a screenshot if it shows the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Numbered steps from a clean start.
+      placeholder: |
+        1. Open the dashboard.
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Rome version or commit, how you run Rome (self-hosted, Rome Cloud, desktop app), browser, and operating system.
+  - type: textarea
+    id: investigation
+    attributes:
+      label: Initial triage and suspected root cause
+      description: Optional. What you ruled in or out, and how confident you are in any cause you suspect.
