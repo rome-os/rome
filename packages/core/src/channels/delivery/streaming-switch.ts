@@ -1,5 +1,6 @@
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import { createLogger } from "../../logger.js";
+import type { FeishuStreamingStyle } from "./transports/feishu.js";
 
 const log = createLogger("reply-streaming");
 
@@ -28,6 +29,32 @@ export function replyStreamingSwitch(
         error: error instanceof Error ? error.message : String(error),
       });
       return false;
+    }
+  };
+}
+
+/**
+ * The guardian setting that chooses how a reply streams to Feishu, beside the
+ * reply streaming switch, while the two styles are compared. Any value but
+ * `card` streams as messages.
+ */
+export const FEISHU_STREAMING_STYLE_SETTING_KEY = "feishuReplyStreamingStyle";
+
+/** The Feishu streaming style, read for each message a reply creates. A
+ *  setting that cannot be read counts as `message`. */
+export function feishuStreamingStyle(
+  settings: Pick<SettingsRepository, "get">,
+): () => Promise<FeishuStreamingStyle> {
+  return async () => {
+    try {
+      return (await settings.get(FEISHU_STREAMING_STYLE_SETTING_KEY)) === "card"
+        ? "card"
+        : "message";
+    } catch (error) {
+      log.warn("Feishu streaming style unreadable, streaming as messages", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return "message";
     }
   };
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
-import { ENABLE_REPLY_STREAMING_SETTING_KEY, replyStreamingSwitch } from "./streaming-switch.js";
+import {
+  ENABLE_REPLY_STREAMING_SETTING_KEY,
+  FEISHU_STREAMING_STYLE_SETTING_KEY,
+  feishuStreamingStyle,
+  replyStreamingSwitch,
+} from "./streaming-switch.js";
 
 const settingsWith = (value: unknown) => ({
   get: async <T = unknown>(key: string): Promise<T | null> =>
@@ -34,5 +39,28 @@ describe("replyStreamingSwitch", () => {
       },
     });
     expect(await streaming()).toBe(false);
+  });
+});
+
+describe("feishuStreamingStyle", () => {
+  const styleWith = (value: unknown) =>
+    feishuStreamingStyle({
+      get: async <T = unknown>(key: string): Promise<T | null> =>
+        key === FEISHU_STREAMING_STYLE_SETTING_KEY ? (value as T) : null,
+    });
+
+  it("streams as cards only when the setting says card", async () => {
+    expect(await styleWith("card")()).toBe("card");
+    for (const value of [null, "message", "Card", true, {}])
+      expect(await styleWith(value)()).toBe("message");
+  });
+
+  it("streams as messages when the setting cannot be read", async () => {
+    const style = feishuStreamingStyle({
+      get: async () => {
+        throw new Error("database is locked");
+      },
+    });
+    expect(await style()).toBe("message");
   });
 });

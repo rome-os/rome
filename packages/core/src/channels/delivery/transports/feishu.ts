@@ -29,34 +29,130 @@ class FeishuRefusal extends Error {
   }
 }
 
+/**
+ * How a streamed reply shows on Feishu: `message` edits rich-text posts, which
+ * Feishu lets be edited 20 times each, and `card` streams into cards, which
+ * show the text as it is typed and take any number of edits.
+ */
+export type FeishuStreamingStyle = "message" | "card";
+
 export interface FeishuTransportOptions {
   client: LarkChannel["rawClient"];
   /** Whether a reply to a message in `chat` opens a thread there, as the chat's
    *  settings say. A whole reply is placed the same way. */
   replyInThread(chat: string): Promise<boolean>;
+  /** The style of a new message, read for each one. `message` when absent. */
+  style?(): Promise<FeishuStreamingStyle>;
 }
 
+/** A card a reply streams into: its id, and the last sequence number written
+ *  to it, which Feishu requires to grow with every write. */
+interface Card {
+  id: string;
+  sequence: number;
+}
+
+/** The streaming cards whose message id this transport knows, the oldest
+ *  forgotten first. A reply settles each card it creates, which forgets it. */
+const KNOWN_CARDS = 1000;
+/** The card element a reply's text streams into. */
+const CARD_ELEMENT = "content";
+/** The most of a card's text that shows in the chat list once it is settled. */
+const SUMMARY_LENGTH = 50;
+
 /**
- * Reply delivery over Feishu's message API. Each message is a rich-text post
- * holding one Markdown element, which is what the SDK's `send` makes of a
- * whole reply, so a streamed reply looks the same. The writes go to the API
- * directly: the SDK's `send` repeats a failed create on its own and falls back
- * to plain text, which would hide what happened from the reply.
+ * Reply delivery over Feishu's message API. The writes go to the API directly:
+ * the SDK's `send` repeats a failed create on its own and falls back to plain
+ * text, which would hide what happened from the reply.
  *
- * Feishu lets a message be edited 20 times. The capabilities say so, and
- * Feishu's refusal of one more is `unsupported`.
+ * Each message takes the style that `style` names when it is created, and is
+ * written in that style to its end. A `message` is a rich-text post holding
+ * one Markdown element, which is what the SDK's `send` makes of a whole
+ * reply, so a streamed reply looks the same. Feishu lets a post be edited 20
+ * times. The capabilities say so, and Feishu's refusal of one more is
+ * `unsupported`. A `card` is a CardKit card in streaming mode holding one
+ * Markdown element, as the SDK's own streaming makes it. Its receipt lifts the
+ * edit cap and asks for a settle, which ends streaming mode.
  */
 export function feishuTransport({
   client,
   replyInThread,
+  style,
 }: FeishuTransportOptions): DeliveryTransport {
-  const reply = async (to: string, content: string, inThread: boolean) =>
-    answered(
-      await client.im.v1.message.reply({
-        path: { message_id: to },
-        data: { msg_type: "post", content, reply_in_thread: inThread },
+  const cards = new Map<string, Card>();
+
+  /** Sends `content` as a new message of `type` to `conversation`, placed as a
+   *  whole reply would be. */
+  const send = async (
+    conversation: string,
+    type: "post" | "interactive",
+    content: string,
+    replyTo?: string,
+  ): Promise<PartReceipt> => {
+    const { chat, root } = placeOf(conversation);
+    // A message that answers the user's goes where the chat's settings put
+    // replies. Later messages of the reply follow the first into its thread.
+    const target = replyTo ?? root;
+    if (target) {
+      let inThread = root !== undefined;
+      if (!inThread) {
+        try {
+          inThread = await replyInThread(chat);
+        } catch (error) {
+          throw new DeliveryFailure("unavailable", messageOf(error));
+        }
+      }
+      try {
+        return receiptOf(
+          chat,
+          answered(
+            await client.im.v1.message.reply({
+              path: { message_id: target },
+              data: { msg_type: type, content, reply_in_thread: inThread },
+            }),
+          ),
+        );
+      } catch (error) {
+        // The user can recall or delete the message while a long run
+        // streams. The reply is still worth sending, without the link to it.
+        if (!REPLY_TARGET_GONE.has(codeOf(error) ?? 0)) throw error;
+      }
+    }
+    const created = answered(
+      await client.im.v1.message.create({
+        params: { receive_id_type: receiveIdTypeOf(chat) },
+        data: { receive_id: chat, msg_type: type, content },
       }),
     );
+    return receiptOf(chat, created);
+  };
+
+  const createCard = async (conversation: string, text: string, replyTo?: string) => {
+    let id: string | undefined;
+    try {
+      id = await call(async () => {
+        const made = answered(
+          await client.cardkit.v1.card.create({
+            data: { type: "card_json", data: JSON.stringify(cardOf(text)) },
+          }),
+        );
+        return made.data?.card_id;
+      });
+    } catch (error) {
+      // A card no message shows is not seen, so a create that failed here
+      // may be made again, whatever became of the card.
+      const failure = error as DeliveryFailure;
+      throw failure.kind === "unknown"
+        ? new DeliveryFailure("unavailable", failure.message)
+        : failure;
+    }
+    if (!id) throw new DeliveryFailure("unavailable", "Feishu answered without a card id");
+    const content = JSON.stringify({ type: "card", data: { card_id: id } });
+    const receipt = await call(() => send(conversation, "interactive", content, replyTo));
+    cards.set(receipt.messageId, { id, sequence: 0 });
+    if (cards.size > KNOWN_CARDS) cards.delete(cards.keys().next().value!);
+    return { ...receipt, maxEdits: Number.POSITIVE_INFINITY, streaming: true as const };
+  };
 
   return {
     capabilities: {
@@ -69,49 +165,88 @@ export function feishuTransport({
       budget: { burst: 50, refillMs: 60, conversationSpacingMs: 200 },
     },
     codec: feishuMarkdown,
-    create: (conversation, text, replyTo) =>
-      call(async () => {
-        const { chat, root } = placeOf(conversation);
-        const content = postOf(text);
-        // A message that answers the user's goes where the chat's settings put
-        // replies. Later messages of the reply follow the first into its thread.
-        const target = replyTo ?? root;
-        if (target) {
-          let inThread = root !== undefined;
-          if (!inThread) {
-            try {
-              inThread = await replyInThread(chat);
-            } catch (error) {
-              throw new DeliveryFailure("unavailable", messageOf(error));
-            }
-          }
-          try {
-            return receiptOf(chat, await reply(target, content, inThread));
-          } catch (error) {
-            // The user can recall or delete the message while a long run
-            // streams. The reply is still worth sending, without the link to it.
-            if (!REPLY_TARGET_GONE.has(codeOf(error) ?? 0)) throw error;
-          }
-        }
-        const created = answered(
-          await client.im.v1.message.create({
-            params: { receive_id_type: receiveIdTypeOf(chat) },
-            data: { receive_id: chat, msg_type: "post", content },
-          }),
-        );
-        return receiptOf(chat, created);
-      }),
+    create: async (conversation, text, replyTo) => {
+      let chosen: FeishuStreamingStyle = "message";
+      try {
+        chosen = (await style?.()) ?? "message";
+      } catch (error) {
+        throw new DeliveryFailure("unavailable", messageOf(error));
+      }
+      if (chosen === "card") return createCard(conversation, text, replyTo);
+      return call(() => send(conversation, "post", postOf(text), replyTo));
+    },
     edit: async (receipt, text) => {
+      const card = cards.get(receipt.messageId);
+      // A card is written through its id, which a transport made for a new
+      // credential knows nothing of. The card keeps what it shows.
+      if (!card && receipt.streaming)
+        throw new DeliveryFailure("unsupported", "the card's id is no longer known");
+      if (!card) {
+        await call(async () =>
+          answered(
+            await client.im.v1.message.update({
+              path: { message_id: receipt.messageId },
+              data: { msg_type: "post", content: postOf(text) },
+            }),
+          ),
+        );
+        return;
+      }
+      const sequence = ++card.sequence;
       await call(async () =>
         answered(
-          await client.im.v1.message.update({
-            path: { message_id: receipt.messageId },
-            data: { msg_type: "post", content: postOf(text) },
+          await client.cardkit.v1.cardElement.content({
+            path: { card_id: card.id, element_id: CARD_ELEMENT },
+            data: { content: text, sequence, uuid: `c_${card.id}_${sequence}` },
+          }),
+        ),
+      );
+    },
+    settle: async (receipt, text) => {
+      const card = cards.get(receipt.messageId);
+      if (!card) return;
+      cards.delete(receipt.messageId);
+      const sequence = ++card.sequence;
+      const config = { streaming_mode: false, summary: { content: summaryOf(text) } };
+      await call(async () =>
+        answered(
+          await client.cardkit.v1.card.settings({
+            path: { card_id: card.id },
+            data: {
+              settings: JSON.stringify({ config }),
+              sequence,
+              uuid: `s_${card.id}_${sequence}`,
+            },
           }),
         ),
       );
     },
   };
+}
+
+/** A card in streaming mode that shows `text` as Markdown, as the SDK's own
+ *  streaming builds one. It shows the text as it is typed until it is settled. */
+function cardOf(text: string): Record<string, unknown> {
+  return {
+    schema: "2.0",
+    config: {
+      streaming_mode: true,
+      streaming_config: {
+        print_frequency_ms: { default: 70 },
+        print_step: { default: 1 },
+        // A write shows at once what the card had yet to type, so the card
+        // never falls behind the reply.
+        print_strategy: "fast",
+      },
+    },
+    body: { elements: [{ tag: "markdown", element_id: CARD_ELEMENT, content: text }] },
+  };
+}
+
+/** `text` on one line, short enough for the chat list. */
+function summaryOf(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length <= SUMMARY_LENGTH ? line : `${line.slice(0, SUMMARY_LENGTH - 1)}…`;
 }
 
 /**
@@ -121,6 +256,8 @@ export function feishuTransport({
  * shrink to one. Fenced code is left alone. A preview is rendered the same way.
  * The measure counts UTF-16 code units, as the SDK's split does, and one more
  * for each H5 heading, so an H6 heading brought down to H5 measures as before.
+ *
+ * A card shows the same rendering.
  *
  * Code that runs past the end of a message is closed there and opened again
  * at the start of the next, as the SDK's split does, so each message shows it
@@ -251,7 +388,7 @@ function receiveIdTypeOf(to: string): "chat_id" | "open_id" | "union_id" | "emai
 }
 
 /** The answer, or Feishu's refusal when it answered 200 with a nonzero code. */
-function answered(answer: Answer): Answer {
+function answered<T extends Pick<Answer, "code" | "msg">>(answer: T): T {
   if (answer.code !== undefined && answer.code !== 0)
     throw new FeishuRefusal(answer.code, answer.msg ?? `Feishu refused with code ${answer.code}`);
   return answer;
@@ -274,6 +411,9 @@ const UNAUTHORIZED = new Set([10003, 99991661, 99991663, 99991664, 99991668, 999
  *  window is over (which an administrator sets), it is in an encrypted group,
  *  or its type cannot be edited. */
 const WONT_EDIT = new Set([230054, 230072, 230073, 230074, 230075]);
+/** A card's streaming mode is over, which Feishu ends ten minutes after it
+ *  began, so its text can no longer stream. */
+const STREAMING_OVER = new Set([200850, 300309]);
 /** The message a reply answers is recalled or deleted. */
 const REPLY_TARGET_GONE = new Set([230011, 230110]);
 
@@ -306,7 +446,8 @@ function classify(error: unknown): DeliveryFailure {
     return new DeliveryFailure("rate-limited", message, retryAfterMs(error));
   if (code !== undefined && UNAUTHORIZED.has(code))
     return new DeliveryFailure("unauthorized", message);
-  if (code !== undefined && WONT_EDIT.has(code)) return new DeliveryFailure("unsupported", message);
+  if (code !== undefined && (WONT_EDIT.has(code) || STREAMING_OVER.has(code)))
+    return new DeliveryFailure("unsupported", message);
   // The SDK mints a token before the write, and throws this when Feishu refuses
   // the app's credential. The write was never sent.
   if (/^failed to get tenant_access_token\b/.test(message))

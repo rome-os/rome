@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Pacer } from "../../../channels/delivery/pacer.js";
 import { ReplyDelivery } from "../../../channels/delivery/reply.js";
-import { FEISHU_MAX_EDITS, feishuTransport } from "../../../channels/delivery/transports/feishu.js";
+import {
+  FEISHU_MAX_EDITS,
+  type FeishuStreamingStyle,
+  feishuTransport,
+} from "../../../channels/delivery/transports/feishu.js";
 import {
   DeliveryFailure,
   type DeliveryPolicy,
@@ -264,6 +268,109 @@ describe("feishuTransport against the peer", () => {
   });
 });
 
+describe("feishuTransport in the card style against the peer", () => {
+  let peer: FeishuPeer;
+  let style: FeishuStreamingStyle;
+  let transport: DeliveryTransport;
+
+  beforeEach(async () => {
+    peer = await FeishuPeer.start();
+    style = "card";
+    transport = feishuTransport({
+      client: peer.createClient(),
+      replyInThread: async () => true,
+      style: async () => style,
+    });
+  });
+
+  afterEach(async () => {
+    await peer.close();
+    peer.server.assertClean();
+  });
+
+  it("streams a card past a post's edit cap, and ends its streaming mode when settled", async () => {
+    const user = peer.userMessage("hello");
+
+    const receipt = await transport.create(FEISHU_CHAT, "0", user.id);
+    for (let edit = 1; edit <= FEISHU_MAX_EDITS + 5; edit += 1)
+      await transport.edit!(receipt, String(edit));
+    expect(peer.cardOf(receipt.messageId)).toMatchObject({ streaming: true });
+    await transport.settle!(receipt, String(FEISHU_MAX_EDITS + 5));
+
+    expect(receipt).toMatchObject({ maxEdits: Number.POSITIVE_INFINITY, streaming: true });
+    expect(receipt.chatId).toBe(`${FEISHU_CHAT}#thread:${user.id}`);
+    expect(peer.visible().at(-1)).toMatchObject({
+      id: receipt.messageId,
+      text: String(FEISHU_MAX_EDITS + 5),
+      replyTo: user.id,
+      edits: FEISHU_MAX_EDITS + 5,
+    });
+    expect(peer.cardOf(receipt.messageId)).toMatchObject({
+      streaming: false,
+      summary: String(FEISHU_MAX_EDITS + 5),
+    });
+  });
+
+  it("reads the style for each new message, and writes each message in its own", async () => {
+    style = "message";
+    const post = await transport.create(FEISHU_CHAT, "one");
+    style = "card";
+    const card = await transport.create(post.chatId, "two");
+    await transport.edit!(post, "one more");
+    await transport.edit!(card, "two more");
+
+    expect(post).not.toHaveProperty("streaming");
+    expect(peer.cardOf(post.messageId)).toBeUndefined();
+    expect(peer.cardOf(card.messageId)).toMatchObject({ text: "two more" });
+    expect(peer.visible().map((message) => message.text)).toEqual(["one more", "two more"]);
+  });
+
+  it("names a card create unavailable when the card was not made, since nothing shows it", async () => {
+    peer.server.once({
+      method: "POST",
+      path: "/open-apis/cardkit/v1/cards",
+      respond: { status: 503, body: "Service Unavailable" },
+    });
+
+    await expect(transport.create(FEISHU_CHAT, "one")).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+    expect(peer.visible()).toEqual([]);
+  });
+
+  it("names a write to a card whose streaming mode ended unsupported", async () => {
+    const receipt = await transport.create(FEISHU_CHAT, "one");
+    peer.endStreaming(receipt.messageId);
+
+    await expect(transport.edit!(receipt, "one two")).rejects.toMatchObject({
+      kind: "unsupported",
+    });
+    expect(peer.visible().map((message) => message.text)).toEqual(["one"]);
+  });
+
+  it("names a write to a card another transport made unsupported", async () => {
+    const receipt = await transport.create(FEISHU_CHAT, "one");
+    const renewed = feishuTransport({
+      client: peer.createClient(),
+      replyInThread: async () => true,
+    });
+
+    await expect(renewed.edit!(receipt, "one two")).rejects.toMatchObject({ kind: "unsupported" });
+    expect(peer.visible().map((message) => message.text)).toEqual(["one"]);
+  });
+
+  it("names a create unavailable when the style cannot be read", async () => {
+    const unread = feishuTransport({
+      client: peer.createClient(),
+      replyInThread: async () => true,
+      style: () => Promise.reject(new Error("settings are locked")),
+    });
+
+    await expect(unread.create(FEISHU_CHAT, "one")).rejects.toMatchObject({ kind: "unavailable" });
+    expect(peer.allCards()).toEqual([]);
+  });
+});
+
 describe("a reply streamed to Feishu", () => {
   let peer: FeishuPeer;
 
@@ -421,6 +528,100 @@ describe("a reply streamed to Feishu", () => {
     // The comments stay comments, not headings brought down to H4.
     expect(messages.join("\n")).not.toContain("#### step");
     expect(messages.at(-1)).toMatch(/\n```\n\nThat is all\.$/);
+  });
+
+  it("streams a long answer into cards, and settles every card", async () => {
+    const transport = feishuTransport({
+      client: peer.createClient(),
+      replyInThread: async () => true,
+      style: async () => "card",
+    });
+    const user = peer.userMessage("tell me a story");
+    const delivery = deliver(
+      transport,
+      { mode: "edit", editIntervalMs: 20, blockWaitMs: 30, maxPendingChars: 100_000 },
+      user.id,
+    );
+
+    delivery.accept({ type: "text", content: COMMENTARY, blockId: "c", turnPhase: "commentary" });
+    for (const chunk of chunks(STORY, 400)) {
+      delivery.accept({ type: "text_delta", content: chunk, blockId: "a" });
+      await sleep(2);
+    }
+    delivery.accept({ type: "text", content: STORY, blockId: "a", turnPhase: "final" });
+    const outcome = await delivery.finish();
+
+    expect(outcome.status).toBe("delivered");
+    const messages = romeMessages();
+    expect(messages.length).toBeGreaterThanOrEqual(4);
+    expect(messages.map((message) => peer.cardOf(message.id)?.streaming)).toEqual(
+      messages.map(() => false),
+    );
+    const failed = checkDelivery({
+      source: COMMENTARY + STORY,
+      outcome,
+      peer,
+      conversation: FEISHU_CHAT,
+      maxPartLength: transport.capabilities.maxPartLength,
+    }).filter((check) => !check.ok);
+    expect(failed).toEqual([]);
+  });
+
+  it("edits one card past a post's edit cap instead of starting a new message", async () => {
+    const transport = feishuTransport({
+      client: peer.createClient(),
+      replyInThread: async () => true,
+      style: async () => "card",
+    });
+    const delivery = deliver(transport, {
+      mode: "edit",
+      editIntervalMs: 0,
+      blockWaitMs: 0,
+      maxPendingChars: 100_000,
+    });
+    const words = Array.from({ length: FEISHU_MAX_EDITS + 5 }, (_, i) => `word${i + 1} `);
+    const edits = () =>
+      peer.server.exchanges.filter((e) => e.request.method === "PUT" && e.accepted).length;
+
+    delivery.accept({ type: "text_delta", content: words[0]!, blockId: "a" });
+    await peer.server.waitFor(() => romeMessages().length === 1);
+    for (let i = 1; i < words.length; i += 1) {
+      delivery.accept({ type: "text_delta", content: words[i]!, blockId: "a" });
+      await peer.server.waitFor(() => edits() >= i);
+    }
+    const text = words.join("");
+    delivery.accept({ type: "text", content: text, blockId: "a", turnPhase: "final" });
+    const outcome = await delivery.finish();
+
+    expect(outcome.status).toBe("delivered");
+    expect(romeMessages().map(({ text, edits }) => ({ text, edits }))).toEqual([
+      { text: text.trim(), edits: words.length - 1 },
+    ]);
+    expect(peer.cardOf(romeMessages()[0]!.id)).toMatchObject({ streaming: false });
+  });
+
+  it("ends the streaming mode of the card a stopped reply shows", async () => {
+    const transport = feishuTransport({
+      client: peer.createClient(),
+      replyInThread: async () => true,
+      style: async () => "card",
+    });
+    const delivery = deliver(transport, {
+      mode: "edit",
+      editIntervalMs: 60_000,
+      blockWaitMs: 0,
+      maxPendingChars: 100_000,
+    });
+
+    delivery.accept({ type: "text_delta", content: "Once upon a time", blockId: "a" });
+    await peer.server.waitFor(() => romeMessages().length === 1);
+    delivery.accept({ type: "text_delta", content: " there was", blockId: "a" });
+    const outcome = await delivery.stop();
+    const [card] = romeMessages();
+    await peer.server.waitFor(() => peer.cardOf(card!.id)?.streaming === false);
+
+    expect(outcome.status).toBe("stopped");
+    expect(romeMessages().map((message) => message.text)).toEqual(["Once upon a time"]);
   });
 });
 
