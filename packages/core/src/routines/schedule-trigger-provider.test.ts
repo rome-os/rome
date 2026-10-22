@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import type { Cron } from "croner";
 import {
-  isDailyOccurrence,
+  daysToOccurrence,
+  localDayNumber,
   nextDateForLocalTime,
   ScheduleTriggerProvider,
 } from "./schedule-trigger-provider.js";
@@ -269,6 +270,82 @@ describe("ScheduleTriggerProvider", () => {
     }
   });
 
+  async function everyDaysRoutine(rrule: string, localTime: string): Promise<Routine> {
+    const id = await repo.create({
+      name: "every-n-days",
+      trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime, rrule },
+      actionName: "noop",
+      args: {},
+      enabled: true,
+    });
+    const row = await repo.findById(id);
+    return buildRoutine({
+      id,
+      trigger: row!.trigger as Trigger,
+      createdAt: new Date("2026-10-29T12:00:00Z"),
+    });
+  }
+
+  it("every two days: a fire that throws does not fire again on the off day", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-10-30T23:59:00Z"));
+      const routine = await everyDaysRoutine("FREQ=DAILY;INTERVAL=2", "00:00");
+      const fire = rs.fn(async () => {});
+      fire.mockRejectedValueOnce(new Error("disk I/O error"));
+      await provider.activate(routine, fire);
+
+      rs.setSystemTime(new Date("2026-10-31T00:00:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        "2026-11-02T00:00:00.000Z",
+      );
+
+      rs.setSystemTime(new Date("2026-11-01T00:00:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+
+      rs.setSystemTime(new Date("2026-11-02T00:00:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(2);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every 100,000 days: finds the next occurrence without walking each day", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+      const routine = await everyDaysRoutine("FREQ=DAILY;INTERVAL=100000", "09:00");
+      await provider.activate(routine, async () => {});
+      const expected = new Date(Date.UTC(2026, 9, 29 + 100_000, 9));
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        expected.toISOString(),
+      );
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every N days past croner's year cap: never fires", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+      const routine = await everyDaysRoutine("FREQ=DAILY;INTERVAL=400000", "09:00");
+      const fire = rs.fn(async () => {});
+      await provider.activate(routine, fire);
+      expect((await repo.findById(routine.id))!.nextRunAt).toBeFalsy();
+
+      rs.setSystemTime(new Date("2026-10-31T09:00:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).not.toHaveBeenCalled();
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   it("dated one-off: fires at the specified date+time, consumes, drops job", async () => {
     // activate() schedules a single Cron(Date,...) fire; manual trigger() invokes the callback, which records the fire
     // and marks the routine consumed.
@@ -468,27 +545,35 @@ describe("nextDateForLocalTime", () => {
   });
 });
 
-describe("isDailyOccurrence", () => {
+describe("daysToOccurrence", () => {
+  const tz = "America/New_York";
+  const ahead = (at: string, anchor: string, interval: number, zone = "UTC") =>
+    daysToOccurrence(
+      localDayNumber(new Date(at), zone),
+      localDayNumber(new Date(anchor), zone),
+      interval,
+    );
+
   it("keeps every-other-day parity across the November DST change", () => {
-    const anchor = new Date("2026-10-30T13:00:00Z"); // Oct 30, 09:00 EDT
-    const tz = "America/New_York";
+    const anchor = "2026-10-30T13:00:00Z"; // Oct 30, 09:00 EDT
     // Nov 1 is the fall-back day; Nov 3 09:00 is EST.
-    expect(isDailyOccurrence(new Date("2026-11-01T13:00:00Z"), anchor, tz, 2)).toBe(true);
-    expect(isDailyOccurrence(new Date("2026-11-02T14:00:00Z"), anchor, tz, 2)).toBe(false);
-    expect(isDailyOccurrence(new Date("2026-11-03T14:00:00Z"), anchor, tz, 2)).toBe(true);
+    expect(ahead("2026-11-01T13:00:00Z", anchor, 2, tz)).toBe(0);
+    expect(ahead("2026-11-02T14:00:00Z", anchor, 2, tz)).toBe(1);
+    expect(ahead("2026-11-03T14:00:00Z", anchor, 2, tz)).toBe(0);
   });
 
   it("counts a leap day", () => {
-    const anchor = new Date("2028-02-27T09:00:00Z");
-    expect(isDailyOccurrence(new Date("2028-02-29T09:00:00Z"), anchor, "UTC", 2)).toBe(true);
-    expect(isDailyOccurrence(new Date("2028-03-01T09:00:00Z"), anchor, "UTC", 2)).toBe(false);
-    expect(isDailyOccurrence(new Date("2028-03-02T09:00:00Z"), anchor, "UTC", 3)).toBe(false);
-    expect(isDailyOccurrence(new Date("2028-03-01T09:00:00Z"), anchor, "UTC", 3)).toBe(true);
+    const anchor = "2028-02-27T09:00:00Z";
+    expect(ahead("2028-02-29T09:00:00Z", anchor, 2)).toBe(0);
+    expect(ahead("2028-03-01T09:00:00Z", anchor, 2)).toBe(1);
+    expect(ahead("2028-03-02T09:00:00Z", anchor, 3)).toBe(2);
+    expect(ahead("2028-03-01T09:00:00Z", anchor, 3)).toBe(0);
   });
 
   it("treats days before the anchor by the same spacing", () => {
-    const anchor = new Date("2026-10-29T12:00:00Z");
-    expect(isDailyOccurrence(new Date("2026-10-27T00:00:00Z"), anchor, "UTC", 2)).toBe(true);
-    expect(isDailyOccurrence(new Date("2026-10-28T00:00:00Z"), anchor, "UTC", 2)).toBe(false);
+    const anchor = "2026-10-29T12:00:00Z";
+    expect(ahead("2026-10-27T00:00:00Z", anchor, 2)).toBe(0);
+    expect(ahead("2026-10-28T00:00:00Z", anchor, 2)).toBe(1);
+    expect(ahead("2026-10-28T00:00:00Z", anchor, 5)).toBe(1);
   });
 });

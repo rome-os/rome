@@ -81,31 +81,47 @@ export class ScheduleTriggerProvider implements TriggerProvider {
         const cronPattern = this.rruleToCron(trigger.rrule, trigger.localTime);
         const everyDays = dailyInterval(trigger.rrule);
         // Every N days counts from the creation date's calendar day in the
-        // resolved zone, since trigger edits keep createdAt. The cron pattern
-        // wakes daily, and `expected` gates off the other days.
+        // resolved zone, because createdAt is the one instant a routine keeps
+        // for life. The cron pattern wakes daily, and `expected` gates off the
+        // other days.
+        const anchorDay = localDayNumber(routine.createdAt, tzid);
         const nextOccurrence = (): Date | null => {
           if (everyDays === 1) return job.nextRun();
-          // The cap stays well above the interval, so a day croner does not
-          // match (such as a DST gap) cannot end the search early.
+          // Each pass jumps to the start of the next occurrence day, or steps
+          // one wake when that day is tomorrow. A pass misses the target only
+          // around a DST gap: it lands the day before when local midnight
+          // falls in the gap, and the next step fixes it, or the day after
+          // when croner skips the gap day, and the next jump fixes it. Croner
+          // returns null past its year cap, and so does this.
           let candidate = job.nextRun();
-          for (let i = 0; candidate && i < 2 * everyDays + 2; i++) {
-            if (isDailyOccurrence(candidate, routine.createdAt, tzid, everyDays)) return candidate;
-            candidate = job.nextRun(candidate);
+          for (let i = 0; candidate && i < 6; i++) {
+            const day = localDayNumber(candidate, tzid);
+            const ahead = daysToOccurrence(day, anchorDay, everyDays);
+            if (ahead === 0) return candidate;
+            candidate = job.nextRun(ahead === 1 ? candidate : startOfLocalDay(day + ahead, tzid));
           }
           return null;
         };
         // The gate compares against the stored occurrence, not today's date.
         // Croner delivers a fire late when the host slept past it, and that
-        // fire still counts as its occurrence on the next calendar day.
+        // fire still counts as its occurrence on the next calendar day. With
+        // no occurrence left to compute, an interval schedule never fires.
         let expected: Date | null = null;
         const job = withoutSessionActor(
           () =>
             new Cron(cronPattern, { timezone: tzid }, async () => {
               try {
-                const due = everyDays === 1 || !expected || Date.now() >= expected.getTime();
-                if (due) await fire({ scheduledTime: new Date().toISOString() });
+                const due =
+                  everyDays === 1 || (expected !== null && Date.now() >= expected.getTime());
+                // Advanced before the fire, so a fire that throws or is still
+                // running at the next wake cannot leave the gate on a past
+                // occurrence.
                 expected = nextOccurrence();
-                await this.routinesRepo.updateNextRun(routine.id, expected);
+                try {
+                  if (due) await fire({ scheduledTime: new Date().toISOString() });
+                } finally {
+                  await this.routinesRepo.updateNextRun(routine.id, expected);
+                }
               } catch (err) {
                 log.error("recurring schedule trigger failed", {
                   routineId: routine.id,
@@ -286,18 +302,25 @@ function dailyInterval(rrule: string): number {
   return interval > 1 ? interval : 1;
 }
 
-/** Whether `at` falls on a day of an every-`interval`-days schedule counted
- * from `anchor`'s day. Both are read as calendar dates in `tzid`, so a DST
- * change never moves an occurrence onto a neighboring day. Days before the
- * anchor follow the same spacing. */
-export function isDailyOccurrence(at: Date, anchor: Date, tzid: string, interval: number): boolean {
-  const diff = dayNumber(calendarDate(at, tzid)) - dayNumber(calendarDate(anchor, tzid));
-  return ((diff % interval) + interval) % interval === 0;
+/** Days from local day number `day` forward to the next day of an
+ * every-`interval`-days schedule counted from `anchorDay`, or 0 when `day` is
+ * one. Days before the anchor follow the same spacing. */
+export function daysToOccurrence(day: number, anchorDay: number, interval: number): number {
+  return (((anchorDay - day) % interval) + interval) % interval;
 }
 
-function dayNumber(date: string): number {
-  const [year, month, day] = date.split("-").map(Number);
+/** The calendar date of `at` in `tzid`, as days since 1970-01-01. A DST
+ * change never moves an instant onto a neighboring day number. */
+export function localDayNumber(at: Date, tzid: string): number {
+  const [year, month, day] = calendarDate(at, tzid).split("-").map(Number);
   return Date.UTC(year, month - 1, day) / 86_400_000;
+}
+
+/** An instant just before local midnight that opens day number `day` in
+ * `tzid`, for croner's strictly-after `nextRun(prev)`. */
+function startOfLocalDay(day: number, tzid: string): Date {
+  const date = new Date(day * 86_400_000).toISOString().slice(0, 10);
+  return new Date(parseDateAndLocalTime(date, "00:00", tzid).getTime() - 1_000);
 }
 
 /** The "YYYY-MM-DD" calendar date of `at` in `tzid`. */
