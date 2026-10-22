@@ -272,10 +272,14 @@ function AssistantChat({
               boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
               onSend={async (snapshot) => {
                 setSendError(null);
+                // Only a retry takes over an earlier id, and it takes it away,
+                // so a second message with the same text sent while one is in
+                // flight goes out as its own message.
+                const earlier = pendingSend.current;
+                pendingSend.current = null;
+                const id = earlier?.text === snapshot.text ? earlier.id : randomUUID();
+                let settled = false;
                 try {
-                  const reuse = pendingSend.current?.text === snapshot.text;
-                  const id = reuse && pendingSend.current ? pendingSend.current.id : randomUUID();
-                  pendingSend.current = { text: snapshot.text, id };
                   let row = await sendToAssistant(agentId, snapshot.text, id);
                   // A replay of a send still on its way answers "sending".
                   // Asking again under the same id reads where it stands, until
@@ -286,13 +290,15 @@ function AssistantChat({
                   }
                   // Still unknown: the draft comes back with its id kept.
                   if (row.state === "sending") throw new Error(t("assistantChat.stillSending"));
-                  pendingSend.current = null;
+                  settled = true;
                   // The server has already discarded a refused send, and its
                   // id replays the refusal, so the retry is a new message.
                   if (row.state === "failed") {
                     throw new Error(row.error ?? t("assistantChat.sendFailed"));
                   }
                 } catch (error) {
+                  // The server may have taken it: the retry asks under this id.
+                  if (!settled) pendingSend.current = { text: snapshot.text, id };
                   setSendError(error instanceof Error ? error.message : String(error));
                   // Rejecting gives the draft back to the composer.
                   throw error;

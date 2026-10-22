@@ -46,10 +46,16 @@ interface ServeOptions {
   sendStates?: OutboxState[];
   /** How many sends the server takes without its answer reaching the page. */
   loseResponses?: number;
+  /** Hold the first send's answer until the test releases it. */
+  holdFirstResponse?: boolean;
 }
 
+/** Releases a held answer. */
+let releaseHeld: (() => void) | null = null;
+
 function serve(assistants: Assistant[] | "fail", options: ServeOptions = {}) {
-  const { sendStates = ["unconfirmed"], loseResponses = 0 } = options;
+  const { sendStates = ["unconfirmed"], loseResponses = 0, holdFirstResponse = false } = options;
+  releaseHeld = null;
   listed = assistants;
   latest = {
     [DOT]: { entries: [inbound("d1", "Q3 draft?", 1)], nextCursor: null },
@@ -67,6 +73,11 @@ function serve(assistants: Assistant[] | "fail", options: ServeOptions = {}) {
     if (init?.method === "POST" && url.endsWith("/messages")) {
       const body = JSON.parse(String(init.body)) as { id: string; text: string };
       sends.push(body);
+      if (holdFirstResponse && sends.length === 1) {
+        await new Promise<void>((resolve) => {
+          releaseHeld = resolve;
+        });
+      }
       if (lost < loseResponses) {
         lost++;
         throw new TypeError("Failed to fetch");
@@ -266,6 +277,20 @@ describe("AssistantsPage", () => {
     await waitFor(() => expect(sends).toHaveLength(2));
     // The server may have taken the first, so the retry replays it.
     expect(sends[1]!.id).toBe(sends[0]!.id);
+  });
+
+  it("sends the same text twice as two messages when the first is still in flight", async () => {
+    serve([assistant(DOT, "Research dot", "dot")], { holdFirstResponse: true });
+    const user = userEvent.setup();
+    renderPage();
+
+    const box = await screen.findByPlaceholderText("Message Research dot");
+    await user.type(box, "ok{Enter}");
+    await waitFor(() => expect(sends).toHaveLength(1));
+    await user.type(box, "ok{Enter}");
+    await waitFor(() => expect(sends).toHaveLength(2));
+    expect(sends[1]!.id).not.toBe(sends[0]!.id);
+    releaseHeld?.();
   });
 
   it("follows a replayed send still on its way until the channel answers", async () => {
