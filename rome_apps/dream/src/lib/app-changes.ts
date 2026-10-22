@@ -87,9 +87,10 @@ export async function snapshotApps(dir: string, copyDir: string): Promise<AppsSn
 }
 
 /**
- * Files added or modified since `before`: edits with their old text when a
- * copy exists. This is the authoritative record of a run's app changes: a file
- * the agent also touched with `Edit` shows its final state here too.
+ * Files added, modified, or deleted since `before`: edits with their old text
+ * when a copy exists, and a deletion as an edit to empty. This is the
+ * authoritative record of a run's app changes: a file the agent also touched
+ * with `Edit` shows its final state here too.
  */
 export async function appChangesSince(dir: string, before: AppsSnapshot): Promise<FileChange[]> {
   const after = await signatures(dir);
@@ -128,6 +129,22 @@ export async function appChangesSince(dir: string, before: AppsSnapshot): Promis
         truncated: next.truncated,
       });
     }
+  }
+  // A walk cut short at MAX_FILES would make unvisited files look deleted.
+  if (before.files.size >= MAX_FILES || after.size >= MAX_FILES) return changes;
+  for (const path of before.files.keys()) {
+    if (after.has(path)) continue;
+    const old = isSecretFile(path)
+      ? null
+      : await readText(join(before.copyDir, relative(dir, path)));
+    // A non-null previous text: an edit with none marks practice notes.
+    changes.push({
+      op: "edit",
+      path,
+      content: "",
+      previous: old?.text?.slice(0, MAX_CHANGE_CHARS) ?? "(deleted; contents not recorded)",
+      truncated: old?.truncated ?? false,
+    });
   }
   return changes;
 }

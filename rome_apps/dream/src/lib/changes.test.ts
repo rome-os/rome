@@ -54,6 +54,14 @@ describe("changesFromToolUse", () => {
 });
 
 describe("classifyPath", () => {
+  it("keeps an app's own memory folder out of the guardian's memory", () => {
+    expect(classifyPath("/p/projects/apps/notes/src/memory/store.ts")).toMatchObject({
+      area: "other",
+      memoryFile: null,
+    });
+    expect(classifyPath(`${MEMORY}/topics/x.md`)).toMatchObject({ area: "memory" });
+  });
+
   it("recognizes the daily journal", () => {
     expect(classifyPath(`${MEMORY}/journal/2026/10/06.md`)).toMatchObject({
       area: "journal",

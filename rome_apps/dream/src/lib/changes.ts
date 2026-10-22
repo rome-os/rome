@@ -144,6 +144,7 @@ export interface ClassifiedPath {
 }
 
 const MEMORY_RE = /^(?:.*?\/)?memory\/(.+)$/;
+const APP_SOURCE_RE = /(?:^|\/)(?:projects\/apps|apps\/installed|rome_apps)\/[^/]+\//;
 const JOURNAL_RE = /^journal\/\d{4}\/\d{2}\/\d{2}\.md$/;
 const SKILL_RE = /(?:^|\/)skills\/([^/]+)\/SKILL\.md$/i;
 /** Where a skill's app lives: the repo seed, an installed artifact, or a
@@ -167,7 +168,8 @@ export function classifyPath(path: string): ClassifiedPath {
     };
   }
 
-  const memory = MEMORY_RE.exec(path);
+  // An app's own `memory/` folder is app source, not the guardian's memory.
+  const memory = APP_SOURCE_RE.test(path) ? null : MEMORY_RE.exec(path);
   if (memory?.[1]) {
     const memoryFile = memory[1];
     return {

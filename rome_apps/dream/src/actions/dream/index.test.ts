@@ -606,6 +606,7 @@ describe("dream skills", () => {
     mkdirSync(join(apps, "notes/src"), { recursive: true });
     writeFileSync(join(apps, "notes/src/old.ts"), "old");
     writeFileSync(join(apps, "notes/src/same.ts"), "same");
+    writeFileSync(join(apps, "notes/src/gone.ts"), "removed by the agent");
     // An Edit, then a Bash write the recorder does not see, to the same file.
     const editEvents = [
       {
@@ -620,6 +621,7 @@ describe("dream skills", () => {
       [...editEvents, { type: "result", content: "Fixed notes." }],
       () => {
         writeFileSync(join(apps, "notes/src/fix.ts"), "export const fixed = true;");
+        rmSync(join(apps, "notes/src/gone.ts"));
         writeFileSync(join(apps, "notes/.gitignore"), "dist\n");
         writeFileSync(join(apps, "notes/.env"), "API_KEY=secret");
         mkdirSync(join(apps, "notes/.git"), { recursive: true });
@@ -651,8 +653,14 @@ describe("dream skills", () => {
     expect(byPath("notes/.gitignore")).toMatchObject({ op: "write", content: "dist\n" });
     expect(byPath("notes/.env")).toMatchObject({ content: "(contents not recorded)" });
     expect(JSON.stringify(changes)).not.toContain("API_KEY");
+    // A deleted file shows as an edit to empty, against its text before the run.
+    expect(byPath("notes/src/gone.ts")).toMatchObject({
+      op: "edit",
+      previous: "removed by the agent",
+      content: "",
+    });
     // One record per changed file: the Edit the recorder saw is not stored twice.
-    expect(changes.filter((c) => c.path.startsWith(join(apps, "notes")))).toHaveLength(4);
+    expect(changes.filter((c) => c.path.startsWith(join(apps, "notes")))).toHaveLength(5);
   });
 
   it("shows the practice agent its notes from earlier runs", async () => {
