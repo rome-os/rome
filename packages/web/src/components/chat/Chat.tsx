@@ -1,3 +1,4 @@
+import type { DraftDeviceFolder } from "@/lib/device-folder";
 import {
   useCallback,
   useEffect,
@@ -281,6 +282,7 @@ export interface ChatProps {
   centerDraftComposer?: boolean;
   /** Draft seeds for the composer, read when it mounts. */
   initialProjectName?: string;
+  initialDeviceFolder?: DraftDeviceFolder;
   initialAgentMention?: AgentMention | null;
   /** Receives the composer's handle, for a host that seeds or focuses the draft. */
   composerRef?: RefObject<ChatComposerHandle | null>;
@@ -301,6 +303,7 @@ export function Chat({
   emptyState,
   centerDraftComposer = false,
   initialProjectName,
+  initialDeviceFolder,
   initialAgentMention,
   composerRef: hostComposerRef,
   navbarSlot,
@@ -2081,6 +2084,7 @@ export function Chat({
                       showProjectSelector={!mainSessionId}
                       showModelSelector={!mainSessionId}
                       initialProjectName={initialProjectName}
+                      initialDeviceFolder={initialDeviceFolder}
                       initialAgentMention={initialAgentMention}
                       isStreaming={displayedStreaming}
                       onStop={() => void stopMessage()}

@@ -5,7 +5,9 @@ import {
   Check,
   Ellipsis,
   Folder,
+  Cloud,
   FolderOpen,
+  Laptop,
   Pencil,
   Pin,
   PinOff,
@@ -30,6 +32,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { deleteSession, listSessions, renameSession, type SessionScope } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import type { ChatSession } from "@/lib/chat-types";
+import { deviceFolderName, pathSegments } from "@/lib/device-folder";
 import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
@@ -149,6 +152,8 @@ interface SessionGroup {
   items: ChatSession[];
   latest: number;
   projectPath: string;
+  /** Set for a group of chats that work in one folder on a device. */
+  deviceFolder?: NonNullable<ChatSession["deviceFolder"]>;
 }
 
 const GROUP_MODE_STORAGE_KEY = "rome-recent-chats-group-mode";
@@ -222,7 +227,21 @@ function isDefaultProjectChat(session: ChatSession): boolean {
   );
 }
 
+/** The pin key of a device-folder group. The `device:` prefix and the device id keep it apart from project paths. */
+function deviceFolderKey(folder: NonNullable<ChatSession["deviceFolder"]>): string {
+  return `device:${folder.deviceId}:${folder.path}`;
+}
+
+/** What groups a chat in the sidebar, and what its group is pinned by. */
+function groupKeyForSession(session: ChatSession): string {
+  return session.deviceFolder
+    ? deviceFolderKey(session.deviceFolder)
+    : projectPathForSession(session);
+}
+
+/** A device-folder chat belongs to no project: its group is its folder. */
 function projectPathForSession(session: ChatSession): string {
+  if (session.deviceFolder) return "";
   return isDefaultProjectChat(session) ? DEFAULT_PROJECT_NAME : session.projectPath || "";
 }
 
@@ -395,41 +414,82 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
   );
 
   const pinnedProjects = useMemo(() => {
-    const namesByPath = new Map<string, string>();
-    const sessionsByPath = new Map<string, ChatSession[]>();
+    const groups = new Map<
+      string,
+      { name: string; deviceFolder?: SessionGroup["deviceFolder"]; items: ChatSession[] }
+    >();
     for (const session of sessions) {
-      const projectPath = projectPathForSession(session);
-      if (!projectPath) continue;
-      if (!namesByPath.has(projectPath)) {
-        namesByPath.set(projectPath, session.projectName || projectNameFromPath(projectPath));
-      }
-      if (session.pinnedAt) continue;
-      const projectSessions = sessionsByPath.get(projectPath) ?? [];
-      projectSessions.push(session);
-      sessionsByPath.set(projectPath, projectSessions);
+      const key = groupKeyForSession(session);
+      if (!key) continue;
+      const group = groups.get(key) ?? {
+        name: session.deviceFolder
+          ? deviceFolderName(session.deviceFolder.path)
+          : session.projectName || projectNameFromPath(key),
+        deviceFolder: session.deviceFolder ?? undefined,
+        items: [],
+      };
+      if (!session.pinnedAt) group.items.push(session);
+      groups.set(key, group);
     }
-    return Array.from(pinnedProjectPaths).map((projectPath) => ({
-      projectPath,
-      name: namesByPath.get(projectPath) ?? projectNameFromPath(projectPath),
-      items: (sessionsByPath.get(projectPath) ?? []).sort(
-        (a, b) => sessionActivityTime(b) - sessionActivityTime(a),
-      ),
-    }));
+    return Array.from(pinnedProjectPaths).flatMap((pinKey) => {
+      const group = groups.get(pinKey);
+      // A pinned folder with no chat left has nothing to name its device by.
+      if (!group && pinKey.startsWith("device:")) return [];
+      return [
+        {
+          pinKey,
+          projectPath: group?.deviceFolder ? "" : pinKey,
+          name: group?.name ?? projectNameFromPath(pinKey),
+          deviceFolder: group?.deviceFolder,
+          items: (group?.items ?? []).sort(
+            (a, b) => sessionActivityTime(b) - sessionActivityTime(a),
+          ),
+        },
+      ];
+    });
   }, [pinnedProjectPaths, sessions]);
+
+  // Projects mark their location only once some chat lives on a device;
+  // until then the list stays as it was.
+  const hasDeviceFolders = useMemo(
+    () => sessions.some((session) => Boolean(session.deviceFolder)),
+    [sessions],
+  );
 
   const regularSessions = useMemo(
     () =>
       sessions
         .filter(
-          (session) => !session.pinnedAt && !pinnedProjectPaths.has(projectPathForSession(session)),
+          (session) => !session.pinnedAt && !pinnedProjectPaths.has(groupKeyForSession(session)),
         )
         .sort((a, b) => sessionActivityTime(b) - sessionActivityTime(a)),
     [pinnedProjectPaths, sessions],
   );
 
   const projectGroups = useMemo<SessionGroup[]>(() => {
-    const buckets = new Map<string, { label: string; items: ChatSession[]; projectPath: string }>();
+    const buckets = new Map<
+      string,
+      {
+        label: string;
+        items: ChatSession[];
+        projectPath: string;
+        deviceFolder?: SessionGroup["deviceFolder"];
+      }
+    >();
     for (const session of regularSessions) {
+      const folder = session.deviceFolder;
+      if (folder) {
+        const rawKey = deviceFolderKey(folder);
+        const bucket = buckets.get(rawKey) ?? {
+          label: deviceFolderName(folder.path),
+          items: [],
+          projectPath: "",
+          deviceFolder: folder,
+        };
+        bucket.items.push(session);
+        buckets.set(rawKey, bucket);
+        continue;
+      }
       const projectPath = projectPathForSession(session);
       const rawKey = projectPath || session.projectName || "";
       if (!rawKey) continue;
@@ -443,12 +503,13 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
       buckets.set(rawKey, bucket);
     }
     return Array.from(buckets.entries())
-      .map(([rawKey, { label, items, projectPath }]) => ({
+      .map(([rawKey, { label, items, projectPath, deviceFolder }]) => ({
         key: `project:${rawKey}`,
         label,
         items,
         latest: sessionActivityTime(items[0]),
         projectPath,
+        deviceFolder,
       }))
       .sort((a, b) => b.latest - a.latest);
   }, [regularSessions]);
@@ -760,13 +821,17 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
     items,
     projectPath,
     pinned,
+    deviceFolder,
   }: {
     key: string;
     label: string;
     items: ChatSession[];
     projectPath: string;
     pinned: boolean;
+    deviceFolder?: SessionGroup["deviceFolder"];
   }) => {
+    // Projects pin by path, device folders by their folder key.
+    const pinKey = deviceFolder ? deviceFolderKey(deviceFolder) : projectPath;
     const collapsed = collapsedGroups.has(key);
     const visibleCount = visibleGroupCounts[key] ?? PROJECT_DEFAULT_VISIBLE;
     const visibleItems = items.slice(0, visibleCount);
@@ -779,20 +844,91 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
           <FolderOpen className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
         )}
         <span className="truncate">{label}</span>
+        {/* Where the group works: another computer, or Rome Cloud once any
+            chat lives on a device. Only the icon opens the tooltip: on the
+            whole row it would cover the row's New chat button. */}
+        {deviceFolder ? (
+          <Tooltip disableHoverableContent>
+            <TooltipTrigger asChild>
+              <span
+                data-location-icon="device"
+                className="-ml-1 flex shrink-0 text-subtle-foreground"
+              >
+                <Laptop className="h-3.5 w-3.5" aria-hidden />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <span className="flex flex-col py-0.5">
+                <span className="whitespace-nowrap">{deviceFolder.deviceName}</span>
+                <span className="text-background/70">
+                  {/* A long path wraps only between its segments. */}
+                  {pathSegments(deviceFolder.path).map((segment) => (
+                    <span key={segment.key}>
+                      {segment.text}
+                      <wbr />
+                    </span>
+                  ))}
+                </span>
+              </span>
+            </TooltipContent>
+          </Tooltip>
+        ) : hasDeviceFolders ? (
+          <Tooltip disableHoverableContent>
+            <TooltipTrigger asChild>
+              <span
+                data-location-icon="rome"
+                className="-ml-1 flex shrink-0 text-subtle-foreground"
+              >
+                <Cloud className="h-3.5 w-3.5" aria-hidden />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="right">{t("recentChats.romeCloud")}</TooltipContent>
+          </Tooltip>
+        ) : null}
       </>
+    );
+    const groupButton = (
+      <button
+        type="button"
+        onClick={() => toggleGroup(key)}
+        aria-expanded={!collapsed}
+        aria-label={
+          deviceFolder
+            ? t("recentChats.folderOnDevice", { folder: label, device: deviceFolder.deviceName })
+            : undefined
+        }
+        title={deviceFolder ? undefined : label}
+        className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-8 border border-transparent pl-2 pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+      >
+        {projectLabel}
+      </button>
     );
     return (
       <div key={key} className="mb-1" data-pinned-project-row={pinned || undefined}>
         <div className="group/project flex h-8 items-center min-h-[var(--control-min-h)] gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
-          <button
-            type="button"
-            onClick={() => toggleGroup(key)}
-            aria-expanded={!collapsed}
-            title={label}
-            className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-8 border border-transparent pl-2 pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
-          >
-            {projectLabel}
-          </button>
+          {groupButton}
+          {deviceFolder ? (
+            <button
+              type="button"
+              onClick={() =>
+                navigate("/chat", {
+                  state: {
+                    deviceFolder: {
+                      deviceId: deviceFolder.deviceId,
+                      deviceName: deviceFolder.deviceName,
+                      path: deviceFolder.path,
+                      home: null,
+                    },
+                  },
+                })
+              }
+              aria-label={t("recentChats.newChatInFolder")}
+              title={t("recentChats.newChatInFolder")}
+              className="touch-show shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+            >
+              <Pencil2Icon className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          ) : null}
           {projectPath ? (
             <button
               type="button"
@@ -808,7 +944,7 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
               <Pencil2Icon className="h-3.5 w-3.5" aria-hidden />
             </button>
           ) : null}
-          {projectPath ? (
+          {pinKey ? (
             <span className="relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -822,7 +958,7 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="bottom" align="end">
-                  <DropdownMenuItem onSelect={() => togglePinnedProject(projectPath)}>
+                  <DropdownMenuItem onSelect={() => togglePinnedProject(pinKey)}>
                     {pinned ? (
                       <PinOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
                     ) : (
@@ -987,13 +1123,14 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
               {pinnedCollapsed ? null : (
                 <div className="space-y-1">
                   {pinnedChats.map((session) => renderChatRow(session))}
-                  {pinnedProjects.map(({ projectPath, name, items }) =>
+                  {pinnedProjects.map(({ pinKey, projectPath, name, items, deviceFolder }) =>
                     renderProjectGroup({
-                      key: `pinned-project:${projectPath}`,
+                      key: `pinned-project:${pinKey}`,
                       label: name,
                       items,
                       projectPath,
                       pinned: true,
+                      deviceFolder,
                     }),
                   )}
                 </div>
@@ -1044,13 +1181,14 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
                   </h2>
                 ) : null}
                 <div className="space-y-1">
-                  {projectGroups.map(({ key, label, items, projectPath }) =>
+                  {projectGroups.map(({ key, label, items, projectPath, deviceFolder }) =>
                     renderProjectGroup({
                       key,
                       label,
                       items,
                       projectPath,
                       pinned: false,
+                      deviceFolder,
                     }),
                   )}
                 </div>

@@ -1,3 +1,4 @@
+import type { DraftDeviceFolder } from "@/lib/device-folder";
 import { useCallback, useRef } from "react";
 import { ChatComponent, type SessionMessage } from "@/components/chat/ChatComponent";
 import { useSlotOutlet } from "@/components/slot";
@@ -29,6 +30,7 @@ interface ChatWidgetProps {
   sessionId?: string;
   onSessionChosen: (sessionId: string) => void;
   initialProjectName?: string;
+  initialDeviceFolder?: DraftDeviceFolder;
   initialAgentMention?: AgentMention | null;
   initialDraftText?: string;
   initialSkillName?: string;
@@ -38,6 +40,7 @@ export function ChatWidget({
   sessionId,
   onSessionChosen,
   initialProjectName,
+  initialDeviceFolder,
   initialAgentMention,
   initialDraftText,
   initialSkillName,
@@ -113,6 +116,7 @@ export function ChatWidget({
       onSessionCreated={onSessionChosen}
       onSessionMessage={handleSessionMessage}
       initialProjectName={initialProjectName}
+      initialDeviceFolder={initialDeviceFolder}
       initialAgentMention={initialAgentMention}
       initialDraftText={initialDraftText}
       initialSkillName={initialSkillName}

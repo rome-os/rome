@@ -740,6 +740,16 @@ const chatSessions: ChatSession[] = [
   { ...session("mock-chat-2", "Draft launch email", "website-redesign"), unread: true },
   { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true },
   { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
+  // A chat that works in a folder on another computer groups under that folder.
+  {
+    ...session("mock-chat-device-folder", "Fix the flaky e2e test"),
+    deviceFolder: {
+      deviceId: "mac",
+      deviceName: "MacBook Pro",
+      platform: "macos",
+      path: "/Users/ray/code/rome",
+    },
+  },
 ];
 
 const messageText = (message: ChatMessage): string =>

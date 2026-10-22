@@ -1,3 +1,4 @@
+import type { DraftDeviceFolder } from "@/lib/device-folder";
 import {
   Chrome,
   FolderKanban,
@@ -172,6 +173,7 @@ export function FreeGrid() {
   const urlSessionId = params["*"]?.split("/")[0] || undefined;
   const locState = location.state as {
     projectPath?: string;
+    deviceFolder?: DraftDeviceFolder;
     agentMention?: AgentMention;
     agentName?: string;
     draft?: string;
@@ -179,6 +181,7 @@ export function FreeGrid() {
     widgets?: WidgetSeed[];
   } | null;
   const initialProjectName = locState?.projectPath?.trim() || undefined;
+  const initialDeviceFolder = locState?.deviceFolder;
   const initialAgentMention = useMemo<AgentMention | null>(() => {
     if (locState?.agentMention) return locState.agentMention;
     const agentName = locState?.agentName?.trim();
@@ -368,6 +371,7 @@ export function FreeGrid() {
               sessionId={chatSessionId}
               onSessionChosen={handleSessionChosen}
               initialProjectName={initialProjectName}
+              initialDeviceFolder={initialDeviceFolder}
               initialAgentMention={initialAgentMention}
               initialDraftText={initialDraftText}
               initialSkillName={initialSkillName}

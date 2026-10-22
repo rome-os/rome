@@ -1804,6 +1804,27 @@ describe("Webchat API", () => {
       expect(withDefault.status).toBe(200);
     });
 
+    it("lists chats with their device folder", async () => {
+      mockDevices(async () => ({ ok: true, folder }));
+      const app = createWebchatRuntime(deps).routes;
+      await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceFolder: { deviceId: "mac-1", path: "/x" } }),
+      });
+      const list = (await (await app.request("/chat/sessions")).json()) as {
+        deviceFolder: unknown;
+      }[];
+      expect(list.map((session) => session.deviceFolder)).toEqual([
+        {
+          deviceId: "mac-1",
+          deviceName: "macbook",
+          platform: "macos",
+          path: "/Users/ray/code/foo",
+        },
+      ]);
+    });
+
     it("returns null for chats without a device folder", async () => {
       const app = createWebchatRuntime(deps).routes;
       const res = await app.request("/chat/sessions", {

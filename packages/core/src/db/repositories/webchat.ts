@@ -302,6 +302,8 @@ const sessionSelectFields = {
   largeModelSelection: romeSessions.largeModelSelection,
   projectName: romeSessions.projectName,
   projectPath: romeSessions.projectPath,
+  // The sidebar groups a device-folder chat under its folder, not its project.
+  deviceFolder: romeSessions.deviceFolder,
   agentName: romeSessions.agentName,
   archivedAt: romeSessions.archivedAt,
   pinnedAt: romeSessions.pinnedAt,

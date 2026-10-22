@@ -1,5 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
-import { childPath, deviceFolderLabel, tildePath } from "./device-folder";
+import {
+  childPath,
+  deviceFolderLabel,
+  deviceFolderName,
+  pathSegments,
+  tildePath,
+} from "./device-folder";
 
 describe("device folder paths", () => {
   it("shortens the home folder to ~ on POSIX and Windows", () => {
@@ -21,6 +27,10 @@ describe("device folder paths", () => {
         home: "/Users/ray",
       }),
     ).toBe("macbook:~/code/foo");
+    // A folder group in the sidebar opens a draft without the device's home.
+    expect(
+      deviceFolderLabel({ deviceId: "mac", deviceName: "macbook", path: "/srv/app", home: null }),
+    ).toBe("macbook:app");
   });
 
   it("joins a child without doubling the separator at a root", () => {
@@ -28,5 +38,26 @@ describe("device folder paths", () => {
     expect(childPath("/Users", "ray")).toBe("/Users/ray");
     expect(childPath("C:\\", "Work")).toBe("C:\\Work");
     expect(childPath("C:\\Work", "rome")).toBe("C:\\Work\\rome");
+  });
+
+  it("names a folder by its last segment", () => {
+    expect(deviceFolderName("/home/ubuntu/device-folder")).toBe("device-folder");
+    expect(deviceFolderName("/home/ubuntu/device-folder/")).toBe("device-folder");
+    expect(deviceFolderName("C:\\Work\\rome")).toBe("rome");
+    expect(deviceFolderName("/")).toBe("/");
+  });
+
+  it("cuts a path after each separator so it wraps between segments", () => {
+    expect(pathSegments("/home/ubuntu/app").map((segment) => segment.text)).toEqual([
+      "/",
+      "home/",
+      "ubuntu/",
+      "app",
+    ]);
+    expect(pathSegments("C:\\Work\\rome").map((segment) => segment.key)).toEqual([
+      "C:\\",
+      "C:\\Work\\",
+      "C:\\Work\\rome",
+    ]);
   });
 });

@@ -818,6 +818,21 @@ describe("New chat draft", () => {
     expect(onSend.mock.calls[0][0]).toMatchObject({ projectPath: "default", deviceFolder });
   });
 
+  it("opens on the device folder a sidebar folder group passes in", async () => {
+    saveNewChatDraft({ ...empty, text: "run tests", projectPath: "research" });
+    const deviceFolder = { deviceId: "mac", deviceName: "macbook", path: "/w", home: null };
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({
+      persistNewChatDraft: true,
+      showProjectSelector: true,
+      onSend,
+      initialDeviceFolder: deviceFolder,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0]).toMatchObject({ projectPath: "default", deviceFolder });
+  });
+
   it("drops a saved device folder when the composer opens with a project", async () => {
     const deviceFolder = { deviceId: "mac", deviceName: "macbook", path: "/w", home: null };
     saveNewChatDraft({ ...empty, text: "run tests", deviceFolder });
