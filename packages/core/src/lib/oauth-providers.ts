@@ -31,7 +31,12 @@ export const OAUTH_PROVIDER_DESCRIPTORS: Record<OAuthProvider, OAuthProviderDesc
   },
 };
 
-/** The client id of Rome OS, the public Shopify app Rome Cloud brokers stores through. */
+/**
+ * The client id of Rome OS, the public Shopify app Rome Cloud brokers stores through.
+ * Its App URL is production Rome Cloud, so an instance whose `PANTHEON_BASE_ORIGIN`
+ * points elsewhere still installs through production, and replacing the app needs
+ * a Rome release.
+ */
 export const SHOPIFY_ROME_OS_CLIENT_ID = "c7248430857716e104a01db512ed40ed";
 
 /**
