@@ -25,7 +25,7 @@ import {
   webchatTurnFeedback,
   webchatWorkspaceLayouts,
 } from "../schema.js";
-import type { DrizzleDb } from "../index.js";
+import type { DrizzleDb, DrizzleTx } from "../index.js";
 import {
   channelChatId,
   isWebchatChat,
@@ -44,6 +44,7 @@ import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
 import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
+import { deleteDashboardChatRecords, recordChatMessage } from "./chat-record.js";
 
 export interface StoredTurnFeedback {
   rating: TurnFeedbackRating;
@@ -623,6 +624,27 @@ function isVisibleChatRole(role: string): boolean {
   return role === "user" || role === "assistant" || role === "notification";
 }
 
+/** Append a dashboard chat's visible row to the chat record. A platform
+ *  conversation's rows are its agent's transcript and are recorded where the
+ *  platform message is stored instead. */
+function recordDashboardMessage(
+  tx: DrizzleTx,
+  id: string,
+  sessionId: string,
+  role: string,
+  content: string,
+  createdAt: Date,
+): void {
+  recordChatMessage(tx, {
+    sessionId,
+    platformMessageId: id,
+    direction: role === "assistant" ? "from_rome" : "to_rome",
+    parts: content,
+    saidAt: createdAt,
+    dashboardOnly: true,
+  });
+}
+
 function advanceSessionActivitySet(createdAt: Date) {
   const timestamp = Math.floor(createdAt.getTime() / 1000);
   return {
@@ -859,6 +881,7 @@ export class WebChatRepository {
           .where(inArray(webchatWorkspaceLayouts.sessionId, chunk))
           .run();
         tx.delete(sharedChats).where(inArray(sharedChats.sessionId, chunk)).run();
+        deleteDashboardChatRecords(tx, chunk);
         tx.delete(romeSessions).where(inArray(romeSessions.id, chunk)).run();
       }
 
@@ -1071,6 +1094,16 @@ export class WebChatRepository {
       // A platform message id we already stored is a redelivery, not new
       // activity — leave the session's timestamp where it is.
       if (rows.length === 0) return { inserted: false };
+      recordChatMessage(tx, {
+        sessionId: input.sessionId,
+        platformMessageId: input.platformMessageId,
+        direction: "to_rome",
+        parts: input.content,
+        senderId: input.senderId,
+        senderName: input.senderName,
+        replyToPlatformMessageId: input.replyToPlatformMessageId,
+        saidAt: createdAt,
+      });
       tx.update(romeSessions)
         .set(advanceSessionActivitySet(createdAt))
         .where(eq(romeSessions.id, input.sessionId))
@@ -1126,6 +1159,19 @@ export class WebChatRepository {
     // author routine cards, so a forged one never reaches the transcript.
     input = { ...input, content: stripHostOnlyPartsFromContent(input.content) };
     if (input.platformMessageId) {
+      const platformMessageId = input.platformMessageId;
+      this.db.transaction((tx) =>
+        recordChatMessage(tx, {
+          sessionId: input.sessionId,
+          platformMessageId,
+          direction: "from_rome",
+          parts: input.content,
+          senderId: input.senderId,
+          senderName: input.senderName,
+          replyToPlatformMessageId: input.replyToPlatformMessageId,
+          saidAt: new Date(),
+        }),
+      );
       const delivered = await this.db
         .select({ id: romeAgentMessages.id })
         .from(romeAgentMessages)
@@ -1433,6 +1479,7 @@ export class WebChatRepository {
       // strand live, unrevokable links once the source chat is gone. Deleting
       // the chat must take its public copies with it.
       tx.delete(sharedChats).where(eq(sharedChats.sessionId, id)).run();
+      deleteDashboardChatRecords(tx, [id]);
       tx.delete(romeSessions).where(eq(romeSessions.id, id)).run();
     });
   }
@@ -1797,11 +1844,22 @@ export class WebChatRepository {
         .onConflictDoNothing()
         .returning({ id: romeAgentMessages.id })
         .all();
-      if (inserted.length)
+      if (inserted.length) {
         tx.update(romeSessions)
           .set(advanceSessionActivitySet(createdAt))
           .where(eq(romeSessions.id, sessionId))
           .run();
+        // The message is said whatever becomes of the turn it queues.
+        recordChatMessage(tx, {
+          sessionId,
+          platformMessageId: id,
+          direction: "to_rome",
+          parts: content,
+          senderId: actor?.kind === "guardian" ? actor.userId : null,
+          saidAt: createdAt,
+          dashboardOnly: true,
+        });
+      }
       return inserted.length > 0;
     });
   }
@@ -1989,6 +2047,7 @@ export class WebChatRepository {
           .set(advanceSessionActivitySet(createdAt))
           .where(eq(romeSessions.id, sessionId))
           .run();
+        recordDashboardMessage(tx, id, sessionId, role, content, createdAt);
       }
     });
   }
@@ -2038,6 +2097,7 @@ export class WebChatRepository {
           .set(advanceSessionActivitySet(createdAt))
           .where(eq(romeSessions.id, sessionId))
           .run();
+        recordDashboardMessage(tx, id, sessionId, role, JSON.stringify(parts), createdAt);
       }
       return rows[0];
     });

@@ -917,3 +917,79 @@ export const connectionGrants = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.custody, table.name] })],
 );
+
+// The chat record: what was said in each chat, kept apart from the agents'
+// turns and traces (docs/domains/chats.md). Every platform writes to it,
+// the dashboard chat included. Messages are append-only: a message is
+// written once and never changed, and the record goes only with its whole chat.
+//
+// A group is one chat however many of Rome's accounts are in it, so its id is
+// the platform and the platform's id for it. A direct message is named by its
+// two ends, so its id also carries the Rome account (`rome_channel`).
+export const chats = sqliteTable("chats", {
+  id: text("id").primaryKey(),
+  platform: text("platform").notNull(),
+  platformChatId: text("platform_chat_id").notNull(),
+  kind: text("kind", { enum: ["dm", "group", "dashboard"] }).notNull(),
+  romeChannel: text("rome_channel"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+// Which of Rome's accounts (channels) have carried a message of the chat.
+export const chatAccounts = sqliteTable(
+  "chat_accounts",
+  {
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    channel: text("channel").notNull(),
+    firstSeenAt: integer("first_seen_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.chatId, table.channel] })],
+);
+
+// A thread is known by its chat and the platform's id for it. It starts
+// existing when the first message said in it is recorded.
+export const chatThreads = sqliteTable(
+  "chat_threads",
+  {
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    platformThreadId: text("platform_thread_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.chatId, table.platformThreadId] })],
+);
+
+// One thing said in a chat. `parts` keeps the message parts as the chat
+// surfaces exchange them today. `platformThreadId` is null for a message said
+// in the open chat.
+export const chatMessages = sqliteTable(
+  "chat_messages",
+  {
+    id: text("id").primaryKey(),
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    platformThreadId: text("platform_thread_id"),
+    platformMessageId: text("platform_message_id").notNull(),
+    direction: text("direction", { enum: ["to_rome", "from_rome"] }).notNull(),
+    channel: text("channel"),
+    senderId: text("sender_id"),
+    senderName: text("sender_name"),
+    agentName: text("agent_name"),
+    parts: text("parts").notNull(),
+    replyToPlatformMessageId: text("reply_to_platform_message_id"),
+    saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_chat_messages_platform_message").on(table.chatId, table.platformMessageId),
+    index("idx_chat_messages_chat_said_at").on(table.chatId, table.saidAt),
+    index("idx_chat_messages_thread_said_at").on(
+      table.chatId,
+      table.platformThreadId,
+      table.saidAt,
+    ),
+  ],
+);
