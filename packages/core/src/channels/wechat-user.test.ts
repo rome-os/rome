@@ -684,7 +684,8 @@ describe("WechatUserRuntime.pressSignIn", () => {
     expect(calls[0]![0]).toBe("python3");
     expect(calls[0]![1]).toMatch(/wechat-user-send-driver\.py$/);
     expect(calls[0]![2]).toBe("sign-in-target");
-    expect(calls[1]).toEqual(["xdotool", "mousemove", "--sync", "640", "518", "click", "1"]);
+    // No --sync, which hangs when the pointer is already there.
+    expect(calls[1]).toEqual(["xdotool", "mousemove", "640", "518", "click", "1"]);
   });
 
   it("clicks nothing when the driver finds no button", async () => {

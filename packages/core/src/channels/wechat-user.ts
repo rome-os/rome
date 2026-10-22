@@ -626,9 +626,12 @@ export class WechatUserRuntime {
       return false;
     }
     const { x, y } = target.data;
+    // No --sync: it waits for motion, and a pointer already at (x, y), as a
+    // press before the last restart leaves it, never moves, so it would hang.
+    // X applies the move before the click either way.
     const pressed = await this.run(
       "xdotool",
-      ["mousemove", "--sync", String(x), String(y), "click", "1"],
+      ["mousemove", String(x), String(y), "click", "1"],
       opts,
     ).catch(() => null);
     if (pressed?.code !== 0) {
