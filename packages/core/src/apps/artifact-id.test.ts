@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import {
   isCoreMainAgentId,
   claimLegacyArtifactName,
+  claimLegacyArtifactNames,
   createEmptyLegacyArtifactBindings,
   formatArtifactId,
   isCanonicalArtifactId,
@@ -38,6 +39,19 @@ describe("artifact IDs", () => {
       conflict: id,
     });
     expect(bindings.action.foo).toBe(id);
+  });
+
+  it("claims the free bare names and reports only the held one", () => {
+    const bindings = createEmptyLegacyArtifactBindings();
+    const holder = formatArtifactId("app-a", "app_a_run");
+    bindings.action.run = holder;
+    const id = formatArtifactId("app-b", "app_b_run");
+
+    expect(claimLegacyArtifactNames(bindings, "action", ["app_b_run", "run", "go"], id)).toEqual({
+      claimed: true,
+      conflicts: [{ legacyName: "run", artifactId: holder }],
+    });
+    expect(bindings.action).toEqual({ run: holder, app_b_run: id, go: id });
   });
 
   it("does not guess an owner for an unknown bare name", () => {
