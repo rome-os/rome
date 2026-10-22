@@ -55,7 +55,7 @@ The full rules are in [`docs/authoring/prs.md`](docs/authoring/prs.md). In short
 
 Every pull request goes through an automated code review. The reviewers post a verdict and inline findings, and each finding carries a priority from `P0` (most severe) to `P3` (least severe).
 
-- Fix every `P0` and `P1` finding before merge.
+- Fix every `P0` and `P1` finding before merge, unless you show in a reply that it is wrong or outside this PR. If it is a real defect that already existed, file an issue for it.
 - Aim for approval from every reviewer. If a `P2` or `P3` finding is a nitpick, push back in a reply that explains why the change is not worth it.
 - CI must pass before merge.
 
