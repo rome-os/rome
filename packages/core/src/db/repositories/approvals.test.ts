@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb, identityConnectionKindOf } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { ApprovalsRepository } from "./approvals.js";
-import { PersonMappingRepository } from "./person-mapping.js";
 import { approvals } from "../schema.js";
 
 describe("ApprovalsRepository", () => {
@@ -10,10 +9,7 @@ describe("ApprovalsRepository", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new ApprovalsRepository(
-      testDb.db,
-      new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-    );
+    repo = new ApprovalsRepository(testDb.db);
   });
 
   afterEach(() => {

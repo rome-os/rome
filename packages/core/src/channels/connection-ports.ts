@@ -44,7 +44,7 @@ const reportedUnrecorded = new Set<string>();
 
 export interface ConnectionPortsDeps {
   registry: Pick<ConnectionRegistry, "find" | "getDescriptor" | "onUnlocked" | "registeredKinds">;
-  /** The channel's admission (pairing), run before a subscriber hears a
+  /** The channel's admission, run before a subscriber hears a
    *  message, which is what gives these ports rule R1. Absent, every message
    *  is admitted. */
   admit?: Admission;
@@ -106,7 +106,7 @@ export interface ConnectionPorts {
  * the registry's lifetime, while `deps.listening` listens to the channel, and
  * admission runs once per message for each subscription. So build one set per
  * registry and channel, as `channelList` does: a second set would run
- * admission (pairing replies included) twice.
+ * admission twice.
  */
 export function connectionPorts(
   deps: ConnectionPortsDeps,
@@ -450,8 +450,8 @@ function connectionInbound(backing: Backing): ChannelInbound {
 
   const listens = (): boolean => deps.listening?.listens(channel) ?? true;
 
-  // Admission runs whether or not anyone subscribes yet: pairing answers a
-  // pairing code even before the inbox hears the channel. A channel that is
+  // Admission runs whether or not anyone subscribes yet: the Agents channel
+  // links an agent to the guardian even before the inbox hears it. A channel that is
   // not listened to hears nothing, so not even admission runs: its talker
   // stays up for sending, and what it delivers reaches no handler.
   const attach = (connection: Connection): void => {

@@ -1,4 +1,3 @@
-import type { PairingNotifier } from "../channels/pairing.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
@@ -75,9 +74,6 @@ export interface ApiConfig {
  * exception is `appsRoot`, a genuine config override rather than a service.
  */
 export interface ApiDeps {
-  /** Tells a paired account that the guardian resolved its request, on the
-   *  Connection the request arrived through (channels/pairing.ts). */
-  notifyPairingResolution: PairingNotifier;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
   chatSettings: ChatSettingsControl;

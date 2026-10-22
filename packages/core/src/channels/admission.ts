@@ -1,6 +1,6 @@
 /**
  * Admission: whether a channel's subscribers may hear a message that arrived
- * on one of its Connections (pairing, for the channels that pair). It runs
+ * on one of its Connections. It runs
  * once per message, before any subscriber hears it, which is what gives the
  * inbound port rule R1.
  */
@@ -18,8 +18,8 @@ export type Admission = (
   message: ChannelMessage,
 ) => Promise<boolean>;
 
-/** How long one admission may hold its conversation. Pairing admission is a
- *  few database reads, so fifteen seconds means the database is stuck. */
+/** How long one admission may hold its conversation. Admission is a few
+ *  database reads, so fifteen seconds means the database is stuck. */
 export const ADMISSION_TIMEOUT_MS = 15_000;
 
 export interface OrderedAdmissionOptions {
@@ -34,8 +34,7 @@ export interface OrderedAdmissionOptions {
  * conversation, and an admitted message is handed on before the next
  * admission begins, so subscribers hear a conversation in arrival order. An
  * admission therefore holds up its conversation's next message for as long as
- * it runs; pairing admission waits only on its reads and sends its replies in
- * the background. An admission that runs past the timeout fails closed: the
+ * it runs, so it waits only on its reads. An admission that runs past the timeout fails closed: the
  * message is not admitted, and the next one proceeds in order.
  */
 export class OrderedAdmission {

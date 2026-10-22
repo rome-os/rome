@@ -1,4 +1,3 @@
-import { pairingPayload } from "@rome/api-types/approvals";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
@@ -25,15 +24,6 @@ async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "r
   }
 
   const approval = resolveResult.approval;
-  if (pairingPayload(approval)?.resolution === "account_linked") {
-    return c.json(
-      { error: "This account is already linked. Pairing was not approved.", approval },
-      409,
-    );
-  }
-  void deps.notifyPairingResolution(approval).catch(() => {
-    log.warn("pairing notification failed", { approvalId });
-  });
   if (action === "approve" && approval.type === "action_execution") {
     approvalHandler.onApproved(approvalId).catch((err) => {
       log.error("approval execution failed", {
@@ -92,12 +82,6 @@ export function approvalsRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "Guardian authentication required" }, 403);
     await next();
   });
-  app.get("/approvals/:id/code", async (c) => {
-    c.header("Cache-Control", "no-store");
-    const code = await deps.approvalsRepo.pairingCode(c.req.param("id"));
-    return c.json({ code });
-  });
-
   app.get("/approvals", async (c) => {
     const status = c.req.query("status");
     const offset = Number(c.req.query("pairingHistoryOffset") ?? "0");

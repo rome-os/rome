@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
-import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ActionEngine } from "./engine.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { hashArgs } from "./replay.js";
@@ -58,10 +57,7 @@ describe("Approval flow integration", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    approvalsRepo = new ApprovalsRepository(
-      testDb.db,
-      new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-    );
+    approvalsRepo = new ApprovalsRepository(testDb.db);
     journalRepo = new ExecutionJournalRepository(testDb.db);
     executionsRepo = new ActionExecutionsRepository(testDb.db);
   });

@@ -131,7 +131,7 @@ async function seedPersonsBaseline(db: DrizzleDb) {
 }
 
 async function seedApprovalsBaseline(db: DrizzleDb) {
-  const repo = new ApprovalsRepository(db, new PersonMappingRepository(db, identity));
+  const repo = new ApprovalsRepository(db);
 
   const pendingId = await repo.create({
     type: "action_execution",

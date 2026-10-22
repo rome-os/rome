@@ -30,10 +30,7 @@ describe("addPersonMapping", () => {
   it("creates person record (approved=false)", async () => {
     const result = await addPersonMapping(baseInput, {
       personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      approvalsRepo: new ApprovalsRepository(
-        testDb.db,
-        new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      ),
+      approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
     const personRepo = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
@@ -47,10 +44,7 @@ describe("addPersonMapping", () => {
   it("creates channel mapping", async () => {
     const result = await addPersonMapping(baseInput, {
       personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      approvalsRepo: new ApprovalsRepository(
-        testDb.db,
-        new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      ),
+      approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
     const personRepo = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
@@ -66,16 +60,10 @@ describe("addPersonMapping", () => {
   it("creates approval request", async () => {
     const result = await addPersonMapping(baseInput, {
       personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      approvalsRepo: new ApprovalsRepository(
-        testDb.db,
-        new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      ),
+      approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
-    const approvalRepo = new ApprovalsRepository(
-      testDb.db,
-      new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-    );
+    const approvalRepo = new ApprovalsRepository(testDb.db);
     const approval = await approvalRepo.findById(result.approvalId);
     expect(approval).not.toBeNull();
     expect(approval!.type).toBe("person_mapping");
@@ -87,10 +75,7 @@ describe("addPersonMapping", () => {
     // Create a person first
     await addPersonMapping(baseInput, {
       personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      approvalsRepo: new ApprovalsRepository(
-        testDb.db,
-        new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      ),
+      approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
     // Trying to add the same display name should throw
@@ -99,10 +84,7 @@ describe("addPersonMapping", () => {
         { ...baseInput, channelUserId: "alice-456" },
         {
           personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-          approvalsRepo: new ApprovalsRepository(
-            testDb.db,
-            new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-          ),
+          approvalsRepo: new ApprovalsRepository(testDb.db),
         },
       ),
     ).rejects.toThrow('Person with display name "Alice" already exists');
@@ -112,10 +94,7 @@ describe("addPersonMapping", () => {
     // Create person first
     const result = await addPersonMapping(baseInput, {
       personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      approvalsRepo: new ApprovalsRepository(
-        testDb.db,
-        new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      ),
+      approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
     // Add another channel mapping to the same person directly via repo
@@ -136,10 +115,7 @@ describe("addPersonMapping", () => {
   it("returns personId and approvalId", async () => {
     const result = await addPersonMapping(baseInput, {
       personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      approvalsRepo: new ApprovalsRepository(
-        testDb.db,
-        new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-      ),
+      approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
     expect(result).toHaveProperty("personId");

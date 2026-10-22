@@ -2,7 +2,7 @@ import { eq, and, sql, ne, like, inArray, exists, notExists } from "drizzle-orm"
 import { v4 as uuid } from "uuid";
 import { persons, channelMappings } from "../schema.js";
 import type { ConnectionKindOfChannel } from "./channel-records.js";
-import type { DrizzleDb, DrizzleTx, SqliteExec } from "../index.js";
+import type { DrizzleDb, SqliteExec } from "../index.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import {
   generatePersonSlug,
@@ -130,10 +130,10 @@ export class PersonMappingRepository {
 
   /**
    * The person `channelUserId` on `channel` is linked to. A later channel of a
-   * connection kind reads the connection kind's links, which is where pairing
-   * writes them: People keys an account by connection kind. Telegram and Discord give a
-   * person one id across bots. Feishu's open_id is issued per app, so a sender
-   * on a second Feishu bot pairs once there.
+   * connection kind reads the connection kind's links: People keys an account
+   * by connection kind. Telegram and Discord give a person one id across bots.
+   * Feishu's open_id is issued per app, so a sender on a second Feishu bot is
+   * linked once there.
    */
   async findByChannelUser(channel: string, channelUserId: string) {
     channel = this.connectionKindOf(channel);
@@ -411,28 +411,6 @@ export class PersonMappingRepository {
     }>,
   ) {
     await this.db.update(persons).set(data).where(eq(persons.id, id));
-  }
-
-  /** Enlist an unclaimed account in a caller's transaction without transferring a holder. */
-  writeGuardianPairing(
-    exec: DrizzleTx,
-    channel: string,
-    channelUserId: string,
-    displayName: string,
-  ): boolean {
-    channel = this.connectionKindOf(channel);
-    const holder = exec
-      .select()
-      .from(channelMappings)
-      .where(
-        and(eq(channelMappings.channel, channel), eq(channelMappings.channelUserId, channelUserId)),
-      )
-      .get();
-    if (holder && holder.personId !== STRANGER_PERSON_ID) return false;
-    const guardian = exec.select().from(persons).where(eq(persons.bondLevel, "guardian")).get();
-    if (!guardian) throw new Error("Guardian person is unavailable");
-    this.writeChannelMapping(exec, guardian.id, channel, channelUserId, displayName);
-    return true;
   }
 
   /** Write helper for {@link addChannelMapping}, taking an executor so it runs

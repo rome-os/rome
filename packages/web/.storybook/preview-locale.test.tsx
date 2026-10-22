@@ -1,9 +1,9 @@
 // @rstest-environment jsdom
-import { afterEach, expect, test, rs } from "@rstest/core";
+import { afterEach, expect, test } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import i18n, { SUPPORTED_LANGUAGES } from "../src/i18n";
-import { PairingCodeSection } from "../src/components/pairing/pairing-views";
+import { PairingRequestCard } from "../src/components/pairing/pairing-views";
 import { storyLocale } from "./locale";
 import { Locale } from "./preview";
 
@@ -14,30 +14,31 @@ afterEach(async () => {
   document.documentElement.removeAttribute("dir");
 });
 
-test("locale updates existing components without resetting an expanded code section", async () => {
+test("locale updates existing components without remounting them", async () => {
   const user = userEvent.setup();
-  const onCopy = rs.fn();
   const content = (
-    <PairingCodeSection
-      channel="Telegram"
-      accountName="Alex"
-      state={{ kind: "ready", code: "RP-12AB34CD", copied: false }}
-      onCopy={onCopy}
-      onRetry={() => undefined}
-    />
+    <details>
+      <summary>Request</summary>
+      <PairingRequestCard
+        name="Alex"
+        accountId="123"
+        channel="Telegram"
+        createdAt="2026-09-10T10:00:00.000Z"
+        expiresAt={Date.UTC(2026, 8, 10, 10, 10)}
+        status="approved"
+      />
+    </details>
   );
   const view = render(<Locale locale="en">{content}</Locale>);
-  await user.click(screen.getByText("Pair with a verification code"));
+  await user.click(screen.getByText("Request"));
   expect(view.container.querySelector("details")?.open).toBe(true);
   view.rerender(<Locale locale="zh-CN">{content}</Locale>);
-  const copy = await screen.findByRole("button", { name: "复制" });
+  await screen.findByText("已批准");
   expect(view.container.querySelector("details")?.open).toBe(true);
   expect(document.documentElement.lang).toBe("zh-CN");
   expect(document.documentElement.dir).toBe("ltr");
-  await user.click(copy);
-  expect(onCopy).toHaveBeenCalledTimes(1);
   view.rerender(<Locale locale="en">{content}</Locale>);
-  await screen.findByRole("button", { name: "Copy" });
+  await screen.findByText("Approved");
   expect(view.container.querySelector("details")?.open).toBe(true);
 });
 

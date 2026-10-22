@@ -7,7 +7,6 @@ import {
   SectionDescription,
 } from "@rome-os/ui/page";
 import { ListCollection } from "@rome-os/ui/layout-list";
-import { PairingApprovals } from "./PairingApproval";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleAlert, RefreshCw, Unplug } from "lucide-react";
@@ -86,7 +85,6 @@ export function ConnectionsSection({
 
   return (
     <Measure className="space-y-6">
-      <PairingApprovals />
       <Section>
         <SectionHeader>
           <SectionHeading>

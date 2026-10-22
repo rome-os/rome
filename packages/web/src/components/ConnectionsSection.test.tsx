@@ -180,12 +180,11 @@ describe("ConnectionsSection — list of rows", () => {
     expect(emailRow.querySelector("svg.lucide-mail")).toBeTruthy();
   });
 
-  it("opens services in dialogs and links to pairing history and app keys", () => {
+  it("opens services in dialogs and links to app keys", () => {
     renderSection([...minimalConnections(), oauth("github")]);
 
     const links = screen.queryAllByRole("link");
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "/activity",
       "/settings/connections/app-keys",
     ]);
     expect(screen.getByRole("button", { name: "Open GitHub" })).toBeTruthy();

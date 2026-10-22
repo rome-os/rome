@@ -179,14 +179,14 @@ describe("a channel's Connection across epochs", () => {
       expiresAt: "never",
     });
 
-    // Pairing answers a pairing code before the inbox hears the channel.
+    // Admission runs before the inbox hears the channel.
     deliver?.({
       channel: "telegram",
       direction: "inbound",
       messageId: "code",
       chatId: "dm" as ChatId,
       senderId: "stranger",
-      text: "PAIR-123",
+      text: "hello",
       attachments: [],
       timestamp: new Date(0),
     });

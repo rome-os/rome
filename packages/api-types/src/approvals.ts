@@ -31,10 +31,12 @@ export const APPROVAL_EXECUTION_STATES = [
   "failed",
 ] as const;
 
-export const PAIRING_CHANNELS = ["telegram", "discord", "feishu", "slack_bot"] as const;
+const PAIRING_CHANNELS = ["telegram", "discord", "feishu", "slack_bot"] as const;
 export const PAIRING_HISTORY_PAGE_SIZE = 100;
 
-export const pairingPayloadSchema = z.object({
+/** A pairing request Rome stored before it stopped asking senders to pair
+ *  (docs/domains/people.md#stranger). Read only to show them as history. */
+const pairingPayloadSchema = z.object({
   action: z.literal("channel_pairing"),
   channel: z.enum(PAIRING_CHANNELS),
   connectionId: z.string().min(1),

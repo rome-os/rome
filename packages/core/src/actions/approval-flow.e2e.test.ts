@@ -16,7 +16,6 @@ import { ActionRegistryImpl } from "./registry.js";
 import { ApprovalHandler } from "./approval-handler.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import {
@@ -24,7 +23,6 @@ import {
   buildTestDeps,
   FakeTransport,
   createMockAgentRunner,
-  identityConnectionKindOf,
 } from "../test/helpers.js";
 import { buildApp } from "../api/index.js";
 import { COOKIE_NAME, createSession } from "../lib/auth.js";
@@ -69,10 +67,7 @@ function makeAction(
 
 function buildHarness() {
   const testDb = createTestDb();
-  const approvalsRepo = new ApprovalsRepository(
-    testDb.db,
-    new PersonMappingRepository(testDb.db, identityConnectionKindOf),
-  );
+  const approvalsRepo = new ApprovalsRepository(testDb.db);
   const journalRepo = new ExecutionJournalRepository(testDb.db);
   const executionsRepo = new ActionExecutionsRepository(testDb.db);
 

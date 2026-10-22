@@ -20,7 +20,6 @@ import {
   makeZeroGrantTalk,
 } from "../../connections/test-fixtures.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
-import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { domainOf } from "../../channels/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
@@ -56,10 +55,6 @@ function makeApp(
     "/",
     connectionsRoutes({
       db,
-      approvalsRepo: new ApprovalsRepository(
-        db,
-        new PersonMappingRepository(db, identityConnectionKindOf),
-      ),
       connectionRegistry: registry,
       personMappingRepo,
       ...overrides,
@@ -710,7 +705,6 @@ describe("guardian links across Connections of one service", () => {
     });
     const app = makeApp(registry, personMappingRepo, {
       db,
-      approvalsRepo: new ApprovalsRepository(db, personMappingRepo),
     });
     const del = (path: string) => app.request(path, { method: "DELETE", headers: SAME_ORIGIN });
     return { registry, personMappingRepo, first, second, del };
@@ -756,7 +750,6 @@ describe("guardian links across Connections of one service", () => {
     });
     const app = makeApp(registry, personMappingRepo, {
       db,
-      approvalsRepo: new ApprovalsRepository(db, personMappingRepo),
     });
 
     const removed = await app.request(`/connections/${first.id}`, {
@@ -785,14 +778,14 @@ describe("guardian links across Connections of one service", () => {
   });
 });
 
-describe("connection pairing teardown", () => {
+describe("connection guardian-link teardown", () => {
   it.each([
     "connection",
     "talk",
     "unrelated",
     "rollback",
     "talk-rollback",
-  ])("%s teardown preserves only requests that still have Talk authorization", async (teardown) => {
+  ])("%s teardown removes the guardian link only when Talk goes, in one transaction", async (teardown) => {
     const { db, close } = createTestDb();
     openDbs.push(close);
     const ledger = new DrizzleGrantLedger(db);
@@ -809,25 +802,7 @@ describe("connection pairing teardown", () => {
       bondLevel: "guardian",
       channelMappings: [{ channel: "discord", channelUserId: "paired" }],
     });
-    const approvalsRepo = new ApprovalsRepository(
-      db,
-      new PersonMappingRepository(db, identityConnectionKindOf),
-      () => Buffer.alloc(32, 1),
-    );
-    const input = {
-      connectionId: conn.id,
-      channel: "discord" as const,
-      channelUserId: "requester",
-      displayName: "Requester",
-    };
-    const request = approvalsRepo.requestPairing(input)!;
-    const code = (await approvalsRepo.pairingCode(request.approval.id))!;
-    const other = approvalsRepo.requestPairing({
-      ...input,
-      connectionId: "other",
-      channelUserId: "other",
-    })!;
-    const app = makeApp(registry, personMappingRepo, { db, approvalsRepo });
+    const app = makeApp(registry, personMappingRepo, { db });
     if (teardown.endsWith("rollback")) {
       rs.spyOn(personMappingRepo, "writeDeleteGuardianChannelMappings").mockImplementation(() => {
         throw new Error("cleanup failed");
@@ -848,29 +823,13 @@ describe("connection pairing teardown", () => {
       expect((await ledger.getGrant(conn.id, "bot"))?.credential).toBeDefined();
       expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(0);
       expect(await personMappingRepo.findByChannelUser("discord", "paired")).not.toBeNull();
-      expect((await approvalsRepo.findById(request.approval.id))?.status).toBe("pending");
       return;
     }
     expect(response.status).toBe(200);
-    expect((await approvalsRepo.findById(other.approval.id))?.status).toBe("pending");
     if (teardown === "unrelated") {
-      expect(approvalsRepo.verifyPairing({ ...input, code }).outcome).toBe("resolved");
+      expect(await personMappingRepo.findByChannelUser("discord", "paired")).not.toBeNull();
       return;
     }
-    expect((await approvalsRepo.findById(request.approval.id))?.payload).toMatchObject({
-      resolution: "superseded",
-    });
-    expect(await approvalsRepo.pairingCode(request.approval.id)).toBeNull();
-    expect(
-      (await approvalsRepo.resolvePending(request.approval.id, "approve", "guardian")).outcome,
-    ).toBe("already_resolved");
-    expect(approvalsRepo.verifyPairing({ ...input, code }).outcome).toBe("invalid_code");
-    expect(await personMappingRepo.findByChannelUser("discord", "requester")).toBeNull();
     expect(await personMappingRepo.findByChannelUser("discord", "paired")).toBeNull();
-    const reconnected = teardown === "connection" ? await registry.connect("discord") : conn;
-    await registry.importCredential(reconnected.id, "bot", fixture.botCredential());
-    const fresh = approvalsRepo.requestPairing({ ...input, connectionId: reconnected.id });
-    expect(fresh?.approval.id).toBeDefined();
-    expect(fresh?.approval.id).not.toBe(request.approval.id);
   });
 });

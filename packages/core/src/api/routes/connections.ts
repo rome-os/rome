@@ -321,7 +321,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     });
   });
 
-  /** Enlist pairing and mapping cleanup in connection deletion or Talk-grant
+  /** Enlist mapping cleanup in connection deletion or Talk-grant
    *  revocation. Unrelated grants have no cleanup participant. */
   const guardianMappingTeardown = (
     registry: ConnectionRegistry,
@@ -331,7 +331,6 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const talker = registry.getDescriptor(conn.connectionKind)?.capabilities.talker;
     if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return undefined;
     return (tx) => {
-      deps.approvalsRepo.supersedePairings(conn.id, tx);
       // Guardian links are keyed by connection kind, so they stay while another
       // Connection of the connection kind still has every Talk grant conferred: the
       // guardian can still reach Rome through that bot. A degraded grant

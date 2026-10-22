@@ -1,5 +1,4 @@
 import { createNodeDevicesService } from "./lib/node-devices.js";
-import { createPairingAdmission, notifyPairingResolution } from "./channels/pairing.js";
 import type { Admission } from "./channels/admission.js";
 import { createAgentsGuardianLink } from "./channels/agents-guardian.js";
 import { dirname, join } from "node:path";
@@ -306,7 +305,7 @@ async function main() {
   // The WeChat app on its own desktop, opened from /desktop/wechat. It drives
   // the same client, and needs no connection.
   const wechatApp = wechatUserRuntime ? new WechatApp(wechatUserRuntime) : null;
-  const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
+  const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
 
@@ -381,23 +380,18 @@ async function main() {
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
   const channelOf = recordedChannelOf(channelRecords, talks);
-  const pairingAdmission = createPairingAdmission({
-    approvalsRepo,
-    personMappingRepo,
-    talkGrants: (connectionKind) =>
-      connectionRegistry.getDescriptor(connectionKind)?.capabilities.talker?.needs ?? [],
-    registry: connectionRegistry,
-  });
   const linkAgentToGuardian = createAgentsGuardianLink({
     personMappingRepo,
     settingsRepo,
     channel: AGENTS_KIND,
   });
-  const admit: Admission = async (connectionId, connectionKind, message) => {
+  // Every sender is admitted: Rome never asks a sender to pair
+  // (docs/domains/people.md#stranger).
+  const admit: Admission = async (_connectionId, connectionKind, message) => {
     // Before the inbox resolves the sender, so the first message already
     // reads as the guardian's.
     if (connectionKind === AGENTS_KIND) await linkAgentToGuardian(message);
-    return pairingAdmission(connectionId, connectionKind, message);
+    return true;
   };
   // How app actions — here and, over RPC, in workers — send and read on
   // channels by name. The channel list is built further down, and the connection kind
@@ -1578,7 +1572,6 @@ async function main() {
         }
       },
       nodeDevices,
-      notifyPairingResolution: (approval) => notifyPairingResolution(connectionRegistry, approval),
       channelsService,
       chatSettings,
       actionEngine,

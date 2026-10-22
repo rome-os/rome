@@ -660,7 +660,7 @@ export function createMessageHandlerAction(
 
         // Only a link resolves a sender (docs/concepts/people.md#link). The
         // display name is whatever the sender typed, so an unlinked account
-        // stays a stranger until the guardian links or pairs it, even when
+        // stays a stranger until the guardian links it, even when
         // its name matches the guardian's or a known person's.
         const person = (personOverride ??
           (await deps.personMappingRepo.findByChannelUser(
