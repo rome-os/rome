@@ -185,7 +185,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         } catch (err) {
           runs.finish(runId, {
             status: "failed",
-            error: err instanceof Error ? err.message : String(err),
+            error: `${label} failed: ${err instanceof Error ? err.message : String(err)}`,
           });
           throw err;
         }

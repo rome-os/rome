@@ -13,9 +13,9 @@ function agent(file: string): { tools: string[]; actions: string[] } {
 // Chats on Rome's accounts are other people's words and can carry a prompt
 // injection. The tool and action lists are what core enforces (it ignores
 // permissionMode), so the agent that reads those chats can only work with
-// memory, and the agent that runs code never reads them directly. The
-// practice agent's other inputs can still relay other people's words, which
-// its prompt covers.
+// memory. The agent that runs code is not given them: no reader for them, and
+// no memory path. With Bash it could still reach them on disk, so that half
+// rests on its inputs and prompt, not on enforcement.
 describe("dream agents", () => {
   it("keeps the agent that reads Rome's account chats to file tools", () => {
     const memory = agent("dream.yaml");
