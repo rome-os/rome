@@ -99,12 +99,4 @@ export const assistantHandlers = [
       { status: 202 },
     );
   }),
-
-  // A mock send never fails, so there is never a refused send to discard.
-  http.delete("/api/assistants/:agentId/outbox/:messageId", () =>
-    HttpResponse.json(
-      { error: "No dismissable message to this assistant with that id" },
-      { status: 404 },
-    ),
-  ),
 ];

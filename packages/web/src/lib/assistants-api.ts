@@ -34,15 +34,6 @@ export function readAssistantMessages(
   });
 }
 
-/** Give up on a send the channel refused, so it does not stay in the
- *  outbox; the guardian's retry is then a new message. */
-export function discardAssistantSend(agentId: string, sendId: string): Promise<void> {
-  return fetchJson<void>(`${apiPath(agentId)}/outbox/${encodeURIComponent(sendId)}`, {
-    method: "DELETE",
-    fallback: "Could not discard the message",
-  });
-}
-
 /** Write to the assistant as the guardian. Resolves to the outbox row, whose
  *  `state` says whether the channel took it. */
 export function sendToAssistant(agentId: string, text: string, id: string): Promise<OutboxMessage> {

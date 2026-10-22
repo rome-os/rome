@@ -292,7 +292,12 @@
     },
     "noMessages": "还没有消息",
     "loadFailed": "助手加载失败",
-    "switch": "切换助手，当前是 {{name}}"
+    "switch": "切换助手，当前是 {{name}}",
+    "notFound": {
+      "title": "这个助手不可用",
+      "body": "Rome Cloud 没有为这个 Rome 列出它，链接可能已经过期。",
+      "openLatest": "打开最近的对话"
+    }
   },
   "assistantChat": {
     "description": "{{name}} 发来的消息由 main 以 Rome 的身份回复。你在这里写的内容会发给 {{name}}。",
@@ -302,6 +307,7 @@
     "empty": "还没有和 {{name}} 的消息。",
     "noText": "无文本",
     "placeholder": "发消息给 {{name}}",
-    "sendFailed": "未发送"
+    "sendFailed": "未发送",
+    "stillSending": "仍在发送中"
   }
 }

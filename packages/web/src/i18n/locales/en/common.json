@@ -292,7 +292,12 @@
     },
     "noMessages": "No messages yet",
     "loadFailed": "Failed to load assistants",
-    "switch": "Switch assistant, now {{name}}"
+    "switch": "Switch assistant, now {{name}}",
+    "notFound": {
+      "title": "This assistant isn't available",
+      "body": "Rome Cloud doesn't list it for this Rome, so the link may be out of date.",
+      "openLatest": "Open the latest chat"
+    }
   },
   "assistantChat": {
     "description": "Main answers {{name}}'s messages as Rome. What you write here goes to {{name}}.",
@@ -302,6 +307,7 @@
     "empty": "No messages with {{name}} yet.",
     "noText": "No text",
     "placeholder": "Message {{name}}",
-    "sendFailed": "Not sent"
+    "sendFailed": "Not sent",
+    "stillSending": "Still sending"
   }
 }

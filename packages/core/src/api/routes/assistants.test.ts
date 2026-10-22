@@ -120,18 +120,24 @@ describe("Assistants API", () => {
     expect(await inFlight()).toEqual([]);
   });
 
-  it("lets a refused send be discarded, so the guardian's retry is a new message", async () => {
+  it("discards a refused send, so the guardian's retry is a new message", async () => {
     rs.spyOn(deps.transports.get("agents")!, "send").mockRejectedValue(new Error("not reachable"));
-    const res = await send(DOT, { text: "Are you there?", id: crypto.randomUUID() });
-    const row = (await res.json()) as OutboxMessage;
-    expect(row).toMatchObject({ state: "failed", error: "not reachable", dismissable: true });
+    const id = crypto.randomUUID();
+    const res = await send(DOT, { text: "Are you there?", id });
+    expect((await res.json()) as OutboxMessage).toMatchObject({
+      state: "failed",
+      error: "not reachable",
+    });
+    expect(await deps.outboxRepo.forAccounts([{ channel: "agents", channelUserId: DOT }])).toEqual(
+      [],
+    );
 
-    const discard = (agentId: string) =>
-      app.request(`/assistants/${agentId}/outbox/${row.id}`, { method: "DELETE" });
-    // Only under the assistant it was sent to.
-    expect((await discard(MUSE)).status).toBe(404);
-    expect((await discard(DOT)).status).toBe(204);
-    expect((await discard(DOT)).status).toBe(404);
+    // The same id replays the refusal rather than sending again.
+    const replay = (await (
+      await send(DOT, { text: "Are you there?", id })
+    ).json()) as OutboxMessage;
+    expect(replay.state).toBe("failed");
+    expect(deps.transports.get("agents")!.send).toHaveBeenCalledOnce();
   });
 
   it("refuses an address that is not an agent id", async () => {

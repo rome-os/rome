@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { Bot, Check, ChevronDown, CircleAlert } from "lucide-react";
@@ -27,7 +27,6 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import {
   ASSISTANT_PARAM,
-  discardAssistantSend,
   listAssistants,
   readAssistantMessages,
   sendToAssistant,
@@ -38,6 +37,11 @@ import { randomUUID } from "@/lib/random-uuid";
 /** How often the open chat is read again, so an assistant's message and main's
  *  answer appear without a reload. */
 const POLL_MS = 5_000;
+
+/** How a replayed send still on its way is followed: how many more times it
+ *  is asked about, and how long apart. */
+const SENDING_CHECKS = 10;
+const SENDING_CHECK_MS = 1_000;
 
 /** How often the list of assistants is read again. */
 const LIST_POLL_MS = 30_000;
@@ -63,16 +67,19 @@ export function AssistantsPage() {
     refetchInterval: LIST_POLL_MS,
   });
   // The list comes newest chat first, so with no choice made the page opens on
-  // the chat that moved last.
+  // the chat that moved last. A choice that names nobody listed opens nothing
+  // else: a link must never put the guardian in another assistant's chat.
   const chosen = params.get(ASSISTANT_PARAM);
   const assistant =
-    assistants.data?.find((candidate) => candidate.agentId === chosen) ?? assistants.data?.[0];
+    chosen === null
+      ? assistants.data?.[0]
+      : assistants.data?.find((candidate) => candidate.agentId === chosen);
   useDocumentTitle(assistant ? [assistant.name, t("assistants.title")] : t("assistants.title"));
   // The chat the page opened on is written into the address, so a list that
   // refreshes into a new order never moves the open chat, and its draft, away
   // from the guardian. Replaces rather than pushes: it is the same view.
   useEffect(() => {
-    if (assistant && assistant.agentId !== chosen) {
+    if (chosen === null && assistant) {
       setParams({ [ASSISTANT_PARAM]: assistant.agentId }, { replace: true });
     }
   }, [assistant, chosen, setParams]);
@@ -91,6 +98,19 @@ export function AssistantsPage() {
                 <CircleAlert aria-hidden="true" />
                 <AlertDescription>{t("assistants.loadFailed")}</AlertDescription>
               </Alert>
+            </div>
+          ) : !assistant && chosen !== null && assistants.data.length > 0 ? (
+            <div className="flex flex-1 items-center justify-center p-4">
+              <EmptyState className="max-w-md">
+                <EmptyStateIcon>
+                  <Bot aria-hidden />
+                </EmptyStateIcon>
+                <EmptyStateTitle>{t("assistants.notFound.title")}</EmptyStateTitle>
+                <p className="text-ui text-muted-foreground">{t("assistants.notFound.body")}</p>
+                <Button type="button" variant="outline" size="sm" onClick={() => setParams({})}>
+                  {t("assistants.notFound.openLatest")}
+                </Button>
+              </EmptyState>
             </div>
           ) : !assistant ? (
             <div className="flex flex-1 items-center justify-center p-4">
@@ -140,18 +160,40 @@ function AssistantChat({
   const { agentId, name } = assistant;
   const mark = <AssistantKindMark kind={assistant.kind} className="h-1/2 w-1/2" />;
 
-  const timeline = useInfiniteQuery<TimelinePage>({
-    queryKey: [MESSAGES_KEY, agentId],
-    initialPageParam: null as string | null,
-    getNextPageParam: (last) => last.nextCursor,
-    queryFn: ({ signal, pageParam }) =>
-      readAssistantMessages(agentId, pageParam as string | null, signal),
-    // Each tick re-reads every loaded page, so polling pauses while older
-    // history is loaded; a send, or coming back to the tab, still reads it.
-    refetchInterval: (query) => ((query.state.data?.pages.length ?? 0) > 1 ? false : POLL_MS),
+  // The newest page polls on its own; older history is read once, from where
+  // the newest page ended when the guardian asked for it. Polling the pages
+  // together would re-read all of history on every tick.
+  const latest = useQuery<TimelinePage>({
+    queryKey: [MESSAGES_KEY, agentId, "latest"],
+    queryFn: ({ signal }) => readAssistantMessages(agentId, null, signal),
+    refetchInterval: POLL_MS,
   });
-  // Pages arrive newest first; a chat reads top-down, oldest first.
-  const entries = [...(timeline.data?.pages.flatMap((page) => page.entries) ?? [])].reverse();
+  const [olderFrom, setOlderFrom] = useState<string | null>(null);
+  const older = useInfiniteQuery<TimelinePage>({
+    queryKey: [MESSAGES_KEY, agentId, "older", olderFrom],
+    enabled: olderFrom !== null,
+    initialPageParam: olderFrom,
+    getNextPageParam: (last) => last.nextCursor,
+    queryFn: ({ signal, pageParam }) => readAssistantMessages(agentId, pageParam as string, signal),
+  });
+  const hasOlder = olderFrom === null ? Boolean(latest.data?.nextCursor) : older.hasNextPage;
+  const loadOlder = () => {
+    if (olderFrom === null) setOlderFrom(latest.data?.nextCursor ?? null);
+    else void older.fetchNextPage();
+  };
+  // Newest first, the two reads overlapping once new messages push the newest
+  // page past where older history began; a chat reads top-down, oldest first.
+  const entries = useMemo(() => {
+    const seen = new Set<string>();
+    return [...(latest.data?.entries ?? []), ...(older.data?.pages.flatMap((p) => p.entries) ?? [])]
+      .filter((entry) => {
+        const key = `${entry.source}:${entry.ref}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .reverse();
+  }, [latest.data, older.data]);
 
   const [sendError, setSendError] = useState<string | null>(null);
   // The id of a send whose outcome is unknown, kept with its text. A retry of
@@ -172,14 +214,14 @@ function AssistantChat({
       >
         <div className="flex-1">
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 pt-4 md:px-6">
-            {timeline.hasNextPage && (
+            {hasOlder && (
               <div className="mb-4 flex justify-center">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={timeline.isFetchingNextPage}
-                  onClick={() => void timeline.fetchNextPage()}
+                  disabled={older.isFetching}
+                  onClick={loadOlder}
                 >
                   {t("assistantChat.loadOlder")}
                 </Button>
@@ -190,13 +232,13 @@ function AssistantChat({
                 ? t("assistantChat.description", { name })
                 : t("assistantChat.otherAccount", { account: assistant.account, name })}
             </p>
-            {timeline.isPending ? (
+            {latest.isPending ? (
               <p className="py-8 text-center text-aux text-muted-foreground">
                 {t("assistantChat.loading")}
               </p>
-            ) : timeline.error ? (
+            ) : latest.error && !latest.data ? (
               <p role="alert" className="py-8 text-center text-aux text-destructive">
-                {timeline.error.message}
+                {latest.error.message}
               </p>
             ) : entries.length === 0 ? (
               <p className="py-8 text-center text-aux text-subtle-foreground">
@@ -229,12 +271,20 @@ function AssistantChat({
                   const reuse = pendingSend.current?.text === snapshot.text;
                   const id = reuse && pendingSend.current ? pendingSend.current.id : randomUUID();
                   pendingSend.current = { text: snapshot.text, id };
-                  const row = await sendToAssistant(agentId, snapshot.text, id);
+                  let row = await sendToAssistant(agentId, snapshot.text, id);
+                  // A replay of a send still on its way answers "sending".
+                  // Asking again under the same id reads where it stands, until
+                  // the channel has taken it or refused it.
+                  for (let check = 0; row.state === "sending" && check < SENDING_CHECKS; check++) {
+                    await new Promise((resolve) => setTimeout(resolve, SENDING_CHECK_MS));
+                    row = await sendToAssistant(agentId, snapshot.text, id);
+                  }
+                  // Still unknown: the draft comes back with its id kept.
+                  if (row.state === "sending") throw new Error(t("assistantChat.stillSending"));
                   pendingSend.current = null;
+                  // The server has already discarded a refused send, and its
+                  // id replays the refusal, so the retry is a new message.
                   if (row.state === "failed") {
-                    // A failed row answers its id forever, so it is discarded
-                    // and the guardian's retry goes out as a new message.
-                    void discardAssistantSend(agentId, row.id).catch(() => {});
                     throw new Error(row.error ?? t("assistantChat.sendFailed"));
                   }
                 } catch (error) {
@@ -324,11 +374,13 @@ function ChatLine({ entry, name, mark }: { entry: Message; name: string; mark: R
       </div>
     );
   }
-  const sender = entry.sender?.name ?? name;
+  // The assistant's name as listed now. The channel froze a label with its
+  // kind ("Research dot (dot)") into each message, which the header and the
+  // mark already say.
   return (
     <MessageRow
-      avatar={<AgentAvatar label={sender} mark={mark} />}
-      name={sender}
+      avatar={<AgentAvatar label={name} mark={mark} />}
+      name={name}
       subtitle={<span className="text-aux text-subtle-foreground">{time}</span>}
     >
       <ChatBubble tone="received">

@@ -23,8 +23,7 @@ const log = createLogger("assistants-api");
 // the agents channel, so its history, sends and outbox are the People
 // surface's, read for that one address instead of for a person's accounts.
 // What the guardian writes goes out through the outbox, which starts no agent
-// turn, so main answers the assistant and never the guardian here. The page
-// shows a refused send as an error and discards it, so only discard is here.
+// turn, so main answers the assistant and never the guardian here.
 
 export function assistantsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
@@ -90,7 +89,11 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
   });
 
   /** Write to the assistant as the guardian. 202, as on the People surface:
-   *  the channel taking a message is not the message arriving. */
+   *  the channel taking a message is not the message arriving. A send the
+   *  channel refused is answered as failed and discarded at once: this page
+   *  shows the error and sends a retry as a new message, so the row would
+   *  only linger in the outbox. Its answer stays on record, so the same id
+   *  replays the refusal. */
   app.post("/assistants/:agentId/messages", async (c) => {
     const address = addressOf(c);
     if (!address) return unknownAssistant(c);
@@ -100,24 +103,15 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
 
     const result = await sendToAccount(deps, address, parsed.request.text, parsed.request.id);
     if (!result.ok && "error" in result) return c.json({ error: result.error }, 409);
+    if (result.ok && result.message.state === "failed") {
+      await discardSend(deps, [address], result.message.id);
+    }
     return result.ok
       ? c.json(result.message, 202)
       : c.json(
           { error: sendRefusalMessage(result.send), send: result.send } satisfies SendRefusal,
           409,
         );
-  });
-
-  /** Give up on a failed send. The page discards a send the channel refused,
-   *  so a retry is a new message rather than a row left in the outbox. */
-  app.delete("/assistants/:agentId/outbox/:messageId", async (c) => {
-    const address = addressOf(c);
-    if (!address) return unknownAssistant(c);
-
-    const discarded = await discardSend(deps, [address], c.req.param("messageId"));
-    return discarded
-      ? c.body(null, 204)
-      : c.json({ error: "No dismissable message to this assistant with that id" }, 404);
   });
 
   return app;
