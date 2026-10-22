@@ -1609,19 +1609,6 @@ describe("AnthropicProvider", () => {
       return queryMock.mock.calls[0]![0].options.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS?.split(",");
     }
 
-    it("marks the registered ask_question tool terminal on an interactive surface", async () => {
-      const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
-      const session = await provider.openSession(buildParams({ supportsInteractiveSurface: true }));
-      await collectEvents(session);
-      await session.close();
-
-      // Claude Code matches tool_use names, which are mcp__<server key>__<tool name>.
-      const { mcpServers } = queryMock.mock.calls[0]![0].options;
-      const askUserTools = mcpServers.ask_user.tools.map((tool: { name: string }) => tool.name);
-      expect(askUserTools).toContain("ask_question");
-      expect(terminalMcpTools()).toEqual(["mcp__ask_user__ask_question"]);
-    });
-
     // The env and the handler must agree: a tool listed as terminal on a surface
     // where ask_question asks in prose would let an empty reply through.
     it.each([
@@ -1638,6 +1625,8 @@ describe("AnthropicProvider", () => {
       await collectEvents(session);
       await session.close();
 
+      // Claude Code matches tool_use names, which are mcp__<server key>__<tool name>,
+      // so the handler is looked up under the same server key and tool name.
       const { mcpServers } = queryMock.mock.calls[0]![0].options;
       const askQuestion = mcpServers.ask_user.tools.find(
         (tool: { name: string }) => tool.name === "ask_question",
