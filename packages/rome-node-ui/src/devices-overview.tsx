@@ -43,6 +43,8 @@ export interface NodeDevicesProps {
   locale?: string;
   /** The computer the host page runs on. Its card comes first in its group and has a switch. */
   thisDevice?: NodeThisDevice;
+  /** True while the host reads `devices`. */
+  loading?: boolean;
 }
 
 interface Context {
@@ -187,12 +189,17 @@ function LatestCommands({
 }) {
   const filters = useMemo(() => ({ peer: device.id }), [device.id]);
   const { rows, loading } = useActions(socket, filters, 3, 3);
-  if (!rows.length)
+  // Blank rows of the same height hold the card's size until the commands arrive.
+  if (!rows.length && loading)
     return (
-      <p className="px-4 py-3 text-aux text-muted-foreground">
-        {loading ? " " : m.card.noCommands}
-      </p>
+      <ul className="py-1" aria-hidden>
+        {[0, 1, 2].map((index) => (
+          <li key={index} className="h-8" />
+        ))}
+      </ul>
     );
+  if (!rows.length)
+    return <p className="px-4 py-3 text-aux text-muted-foreground">{m.card.noCommands}</p>;
   return (
     <ul className="py-1">
       {rows.map((row) => (
@@ -330,13 +337,22 @@ export function NodeDeviceCard({ device, thisDevice, navigation, locale }: NodeD
  * card. Each card links to the device's activity page through `navigation`.
  * Needs `@rome-os/node-ui/styles.css` in the host's Tailwind build.
  */
-export function NodeDevices({ url, devices, navigation, locale, thisDevice }: NodeDevicesProps) {
+export function NodeDevices({
+  url,
+  devices,
+  navigation,
+  locale,
+  thisDevice,
+  loading = false,
+}: NodeDevicesProps) {
   const m = messagesFor(locale);
   const socket = useNodeSocket(url);
   const now = useNow(5000);
   const since = windowStart(now);
   const query = useMemo(() => ({ since, bucketMs: BUCKET_MS }), [since]);
-  const { stats, supported } = useStats(socket, query);
+  const { stats, supported, settled } = useStats(socket, query);
+  // The cards wait for the devices and their counts, so the page draws its groups once.
+  const ready = !loading && settled;
   const byPeer = useMemo(() => (stats ? statsByPeer(stats) : new Map()), [stats]);
   const [showRevoked, setShowRevoked] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -369,7 +385,11 @@ export function NodeDevices({ url, devices, navigation, locale, thisDevice }: No
   const quiet = current.filter((device) => !statsOf(device)?.counts.all).sort(selfFirst);
 
   return (
-    <Section aria-labelledby="node-devices-title" className="@container gap-6">
+    <Section
+      aria-labelledby="node-devices-title"
+      aria-busy={!ready || undefined}
+      className="@container gap-6"
+    >
       <SectionHeader>
         <SectionHeading>
           <SectionTitle id="node-devices-title" className="text-title">
@@ -385,11 +405,15 @@ export function NodeDevices({ url, devices, navigation, locale, thisDevice }: No
         </SectionActions>
       </SectionHeader>
 
-      {!supported && <p className="text-aux text-muted-foreground">{m.statsUnavailable}</p>}
+      {ready && !supported && (
+        <p className="text-aux text-muted-foreground">{m.statsUnavailable}</p>
+      )}
 
-      {listed.length === 0 && <p className="text-ui text-muted-foreground">{m.noDevices}</p>}
+      {ready && listed.length === 0 && (
+        <p className="text-ui text-muted-foreground">{m.noDevices}</p>
+      )}
 
-      {active.length > 0 && (
+      {ready && active.length > 0 && (
         <section
           aria-label={m.activeDevices}
           className="grid gap-4 @2xl:grid-cols-2 @6xl:grid-cols-3"
@@ -407,7 +431,7 @@ export function NodeDevices({ url, devices, navigation, locale, thisDevice }: No
         </section>
       )}
 
-      {quiet.length > 0 && (
+      {ready && quiet.length > 0 && (
         <section aria-labelledby="node-devices-quiet" className="flex flex-col gap-3">
           <h3 id="node-devices-quiet" className="text-aux font-medium text-muted-foreground">
             {supported ? m.quietDevices : m.title}
@@ -426,7 +450,7 @@ export function NodeDevices({ url, devices, navigation, locale, thisDevice }: No
         </section>
       )}
 
-      {revoked.length > 0 && (
+      {ready && revoked.length > 0 && (
         <section className="flex flex-col gap-3">
           <Button
             variant="ghost"

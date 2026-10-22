@@ -915,9 +915,7 @@
   },
   "devices": {
     "title": "设备",
-    "description": "Rome 账户关联的设备。每 15 秒刷新一次连接检查。",
-    "refresh": "刷新",
-    "loading": "正在检查设备连接…",
+    "description": "Rome 账户关联的设备。",
     "loadFailed": "设备加载失败",
     "connectionLabel": "Rome 连接",
     "connection": {
@@ -933,8 +931,8 @@
       "incompatible": "需要重启"
     },
     "help": {
-      "not_running": "启动此 Rome 实例上的服务后，即可检查已关联的电脑。刷新只检查状态，不会启动服务。",
-      "unavailable": "暂时无法获取设备状态，请刷新重试。",
+      "not_running": "启动此 Rome 实例上的服务后，即可检查已关联的电脑。",
+      "unavailable": "暂时无法获取设备状态，页面会自动重试。",
       "not_configured": "尚未配置设备访问。将此 Rome 实例关联到 Rome Cloud 后即可准备访问。",
       "incompatible": "在 Rome 实例上先运行 rome-node daemon stop，再运行 rome-node daemon start。这会重启共享服务，并中断正在进行的设备请求。"
     },

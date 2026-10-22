@@ -204,6 +204,63 @@ describe("NodeDevices", () => {
     expect((await screen.findByRole("status")).textContent).toBe("Reconnecting to Gateway");
   });
 
+  it("draws the device groups once, after the counts arrive", async () => {
+    serve([row(2), row(1)]);
+    const answer = FakeSocket.reply;
+    const held: Array<() => void> = [];
+    FakeSocket.reply = (socket, message) => {
+      if (message.method === "log.stats" || message.method === "log.query")
+        held.push(() => answer(socket, message));
+      else answer(socket, message);
+    };
+    render(
+      <NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={navigation()} />,
+    );
+    await waitFor(() => expect(held).toHaveLength(1));
+    expect(screen.queryByText("Workstation")).toBeNull();
+    expect(screen.queryByText("No commands in 24 h")).toBeNull();
+    act(() => held.shift()!());
+    const active = await screen.findByRole("region", { name: "Active devices" });
+    expect(screen.getByText("Laptop")).toBeTruthy();
+    // Blank rows hold the latest commands' place until they arrive.
+    await waitFor(() => expect(held).toHaveLength(1));
+    expect(active.querySelectorAll("ul[aria-hidden] > li")).toHaveLength(3);
+    act(() => held.shift()!());
+    expect(await within(active).findAllByText("git status")).toHaveLength(2);
+    expect(active.querySelector("ul[aria-hidden]")).toBeNull();
+  });
+
+  it("lists the devices when the socket closes before any counts", async () => {
+    FakeSocket.reply = () => {};
+    rs.stubGlobal(
+      "WebSocket",
+      class extends FakeSocket {
+        constructor(url: string) {
+          super(url);
+          queueMicrotask(() => this.close());
+        }
+      },
+    );
+    render(
+      <NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={navigation()} />,
+    );
+    expect(await screen.findByText("Workstation")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Active devices" })).toBeNull();
+  });
+
+  it("waits for the host's devices", async () => {
+    serve([]);
+    const { rerender } = render(
+      <NodeDevices url="ws://rome.test/ws/node" devices={[]} navigation={navigation()} loading />,
+    );
+    await waitFor(() => expect(FakeSocket.instances[0]?.sent.length).toBeGreaterThan(1));
+    expect(screen.queryByText("No computers are linked to this account.")).toBeNull();
+    rerender(
+      <NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={navigation()} />,
+    );
+    expect(await screen.findByText("Workstation")).toBeTruthy();
+  });
+
   it("opens the link instructions", async () => {
     serve([]);
     render(<NodeDevices url="ws://rome.test/ws/node" devices={[]} navigation={navigation()} />);

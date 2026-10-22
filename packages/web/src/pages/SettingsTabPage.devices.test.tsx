@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -21,7 +21,7 @@ function renderDevices(load: () => unknown, start?: () => Response | Promise<Res
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (String(input) === "/api/devices/start" && init?.method === "POST" && start) return start();
     if (String(input) === "/api/devices")
-      return new Response(JSON.stringify(load()), {
+      return new Response(JSON.stringify(await load()), {
         headers: { "Content-Type": "application/json" },
       });
     return new Response("{}", { status: 503 });
@@ -37,7 +37,7 @@ function renderDevices(load: () => unknown, start?: () => Response | Promise<Res
     </QueryClientProvider>,
   );
   /** Reads the devices again, as the 15-second poll does. */
-  return { poll: () => act(() => client.refetchQueries({ queryKey: ["node-devices"] })) };
+  return { client, poll: () => act(() => client.refetchQueries({ queryKey: ["node-devices"] })) };
 }
 
 it("lists devices independently of the settings request", async () => {
@@ -91,6 +91,35 @@ it("drops the device list when a later read cannot reach the service", async () 
   expect(screen.queryByText("Mac")).toBeNull();
 });
 
+it("holds the devices page in place while the first read is pending", async () => {
+  renderDevices(() => new Promise(() => {}));
+  expect(await screen.findByRole("button", { name: "Link device" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Devices" })).toBeTruthy();
+  // The service-recovery page waits for an answer that says the service needs it.
+  expect(screen.queryByRole("heading", { name: "Connect a computer" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+});
+
+it("keeps the listed devices when a later read fails", async () => {
+  let failed = false;
+  const { client, poll } = renderDevices(() => {
+    if (failed) throw new Error("offline");
+    return {
+      connection: "online",
+      checkedAt: new Date().toISOString(),
+      devices: [{ id: "mac", name: "Mac", platform: "macos", status: "connected" }],
+    };
+  });
+  expect(await screen.findByText("Mac")).toBeTruthy();
+  failed = true;
+  await poll();
+  await waitFor(() => expect(client.getQueryState(["node-devices"])?.status).toBe("error"));
+  // Let the page render the failed read before checking it.
+  await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  expect(screen.getByText("Mac")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 it("explains missing authorization instead of reporting zero devices", async () => {
   renderDevices(() => ({
     connection: "not_configured",
@@ -100,7 +129,7 @@ it("explains missing authorization instead of reporting zero devices", async () 
   expect(await screen.findByText("Not configured")).toBeTruthy();
 });
 
-it("drops the device list when the service stops and keeps refresh passive", async () => {
+it("drops the device list when the service stops and does not start it on its own", async () => {
   let running = true;
   const { poll } = renderDevices(() =>
     running
@@ -116,9 +145,7 @@ it("drops the device list when the service stops and keeps refresh passive", asy
   await poll();
   expect(await screen.findByText("Service not running")).toBeTruthy();
   expect(
-    screen.getByText(
-      "Start the service on this Rome instance to check linked computers. Refresh only checks status; it does not start the service.",
-    ),
+    screen.getByText("Start the service on this Rome instance to check linked computers."),
   ).toBeTruthy();
   expect(screen.queryByText("Mac")).toBeNull();
   expect(screen.getByRole("button", { name: "Start service" })).toBeTruthy();
@@ -162,7 +189,6 @@ it("starts only on explicit click and refreshes server truth after success", asy
   );
   const button = await screen.findByRole("button", { name: "Start service" });
   expect(screen.getByRole("heading", { name: "Connect a computer" })).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
   expect(start).not.toHaveBeenCalled();
   await userEvent.click(button);
   const pending = await screen.findByRole("button", { name: "Starting…" });
