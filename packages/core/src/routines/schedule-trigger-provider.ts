@@ -79,7 +79,8 @@ export class ScheduleTriggerProvider implements TriggerProvider {
         // one must recur.
         if (!trigger.rrule) throw new Error("schedule trigger has neither date nor rrule");
         const cronPattern = this.rruleToCron(trigger.rrule, trigger.localTime);
-        const everyDays = dailyInterval(trigger.rrule);
+        const rule = parseRrule(trigger.rrule);
+        const everyDays = rule.freq === "DAILY" && rule.interval > 1 ? rule.interval : 1;
         // Every N days counts from the creation date's calendar day in the
         // resolved zone, because createdAt is the one instant a routine keeps
         // for life. The cron pattern wakes daily, and `expected` gates off the
@@ -87,18 +88,16 @@ export class ScheduleTriggerProvider implements TriggerProvider {
         const anchorDay = localDayNumber(routine.createdAt, tzid);
         const nextOccurrence = (): Date | null => {
           if (everyDays === 1) return job.nextRun();
-          // Each pass jumps to the start of the next occurrence day, or steps
-          // one wake when that day is tomorrow. A pass misses the target only
-          // around a DST gap: it lands the day before when local midnight
-          // falls in the gap, and the next step fixes it, or the day after
-          // when croner skips the gap day, and the next jump fixes it. Croner
-          // returns null past its year cap, and so does this.
+          // Each pass jumps to a few hours before the next occurrence day, or
+          // steps one wake when that day is tomorrow. A jump can land on the
+          // day before, and the next step fixes it. Croner returns null past
+          // its year cap, and so does this.
           let candidate = job.nextRun();
           for (let i = 0; candidate && i < 6; i++) {
-            const day = localDayNumber(candidate, tzid);
+            const day = wakeDay(candidate, trigger.localTime, tzid);
             const ahead = daysToOccurrence(day, anchorDay, everyDays);
             if (ahead === 0) return candidate;
-            candidate = job.nextRun(ahead === 1 ? candidate : startOfLocalDay(day + ahead, tzid));
+            candidate = job.nextRun(ahead === 1 ? candidate : beforeLocalDay(day + ahead, tzid));
           }
           return null;
         };
@@ -184,13 +183,7 @@ export class ScheduleTriggerProvider implements TriggerProvider {
 
   private rruleToCron(rrule: string, localTime: string): string {
     const [hour, minute] = localTime.split(":").map(Number);
-    const upper = rrule.toUpperCase();
-
-    const freqMatch = upper.match(/FREQ=(MINUTELY|HOURLY|DAILY|WEEKLY|MONTHLY|YEARLY)/);
-    const freq = freqMatch?.[1] ?? "DAILY";
-
-    const intervalMatch = upper.match(/INTERVAL=(\d+)/);
-    const interval = intervalMatch ? parseInt(intervalMatch[1], 10) : 1;
+    const { upper, freq, interval } = parseRrule(rrule);
 
     const byDayMatch = upper.match(/BYDAY=([A-Z,]+)/);
 
@@ -293,13 +286,14 @@ export function nextDateForLocalTime(localTime: string, tzid: string, now = new 
   return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
 }
 
-/** The INTERVAL of a FREQ=DAILY rule, or 1 for any other rule. */
-function dailyInterval(rrule: string): number {
+/** The upper-cased rule with its FREQ (DAILY when absent) and INTERVAL (1
+ * when absent). */
+function parseRrule(rrule: string): { upper: string; freq: string; interval: number } {
   const upper = rrule.toUpperCase();
   const freq = upper.match(/FREQ=(MINUTELY|HOURLY|DAILY|WEEKLY|MONTHLY|YEARLY)/)?.[1] ?? "DAILY";
-  if (freq !== "DAILY") return 1;
-  const interval = Number(upper.match(/INTERVAL=(\d+)/)?.[1] ?? 1);
-  return interval > 1 ? interval : 1;
+  const intervalMatch = upper.match(/INTERVAL=(\d+)/);
+  const interval = intervalMatch ? parseInt(intervalMatch[1], 10) : 1;
+  return { upper, freq, interval };
 }
 
 /** Days from local day number `day` forward to the next day of an
@@ -316,11 +310,35 @@ export function localDayNumber(at: Date, tzid: string): number {
   return Date.UTC(year, month - 1, day) / 86_400_000;
 }
 
-/** An instant just before local midnight that opens day number `day` in
- * `tzid`, for croner's strictly-after `nextRun(prev)`. */
-function startOfLocalDay(day: number, tzid: string): Date {
+// parseDateAndLocalTime reads the zone offset at the wrong instant on some DST
+// change days, so its midnight can be up to the DST delta late. This margin
+// exceeds any DST delta and stays well under a day.
+const DAY_START_MARGIN_MS = 3 * 3_600_000;
+
+/** The local day number a daily wake at `localTime` belongs to. Croner moves
+ * a wake that falls in a DST gap forward by the gap, which can carry a late
+ * evening wake past midnight, so a wake that reads earlier than `localTime`
+ * belongs to the day before. */
+function wakeDay(at: Date, localTime: string, tzid: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tzid,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(at);
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)?.value);
+  const [hour, minute] = localTime.split(":").map(Number);
+  // Intl can emit "24" for midnight, as in parseDateAndLocalTime.
+  const wokeAt = (read("hour") % 24) * 60 + read("minute");
+  return localDayNumber(at, tzid) - (wokeAt < hour * 60 + minute ? 1 : 0);
+}
+
+/** An instant a few hours before the local midnight that opens day number
+ * `day` in `tzid`, for croner's strictly-after `nextRun(prev)`. */
+function beforeLocalDay(day: number, tzid: string): Date {
   const date = new Date(day * 86_400_000).toISOString().slice(0, 10);
-  return new Date(parseDateAndLocalTime(date, "00:00", tzid).getTime() - 1_000);
+  return new Date(parseDateAndLocalTime(date, "00:00", tzid).getTime() - DAY_START_MARGIN_MS);
 }
 
 /** The "YYYY-MM-DD" calendar date of `at` in `tzid`. */

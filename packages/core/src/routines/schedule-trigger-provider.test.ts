@@ -270,20 +270,21 @@ describe("ScheduleTriggerProvider", () => {
     }
   });
 
-  async function everyDaysRoutine(rrule: string, localTime: string): Promise<Routine> {
+  async function everyDaysRoutine(
+    rrule: string,
+    localTime: string,
+    tzid = "UTC",
+    createdAt = new Date("2026-10-29T12:00:00Z"),
+  ): Promise<Routine> {
     const id = await repo.create({
       name: "every-n-days",
-      trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime, rrule },
+      trigger: { type: "schedule", tzid, tzMode: "fixed", localTime, rrule },
       actionName: "noop",
       args: {},
       enabled: true,
     });
     const row = await repo.findById(id);
-    return buildRoutine({
-      id,
-      trigger: row!.trigger as Trigger,
-      createdAt: new Date("2026-10-29T12:00:00Z"),
-    });
+    return buildRoutine({ id, trigger: row!.trigger as Trigger, createdAt });
   }
 
   it("every two days: a fire that throws does not fire again on the off day", async () => {
@@ -309,6 +310,90 @@ describe("ScheduleTriggerProvider", () => {
       rs.setSystemTime(new Date("2026-11-02T00:00:01Z"));
       await jobFor(provider, routine.id).trigger();
       expect(fire).toHaveBeenCalledTimes(2);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every two days: a fire still running at the next wake does not fire on the off day", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-10-30T23:59:00Z"));
+      const routine = await everyDaysRoutine("FREQ=DAILY;INTERVAL=2", "00:00");
+      let finish = () => {};
+      const fire = rs.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await provider.activate(routine, fire);
+
+      rs.setSystemTime(new Date("2026-10-31T00:00:01Z"));
+      const running = jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+
+      rs.setSystemTime(new Date("2026-11-01T00:00:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+
+      finish();
+      await running;
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        "2026-11-02T00:00:00.000Z",
+      );
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every three days: keeps an occurrence on a fall-back day east of UTC", async () => {
+    // Sydney falls back at 03:00 on 2027-04-04, and Apr 4 is an occurrence
+    // (456 days after Jan 3 2026). A jump that lands after 00:30 that day
+    // would skip to Apr 7.
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2027-03-31T13:31:00Z")); // Apr 1, 00:31 AEDT
+      const routine = await everyDaysRoutine(
+        "FREQ=DAILY;INTERVAL=3",
+        "00:30",
+        "Australia/Sydney",
+        new Date("2026-01-03T01:00:00Z"),
+      );
+      await provider.activate(routine, async () => {});
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        "2027-04-03T13:30:00.000Z",
+      );
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every three days: counts a wake moved past midnight by a DST gap on the day it was due", async () => {
+    // Nuuk springs forward at 23:00 on 2026-03-28, an occurrence, so croner
+    // moves its 23:30 wake to 00:30 on Mar 29. Read by the day it lands on,
+    // that wake looks like an off day and Mar 28 would be dropped.
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-03-26T01:31:00Z")); // Mar 25, 23:31 local
+      const routine = await everyDaysRoutine(
+        "FREQ=DAILY;INTERVAL=3",
+        "23:30",
+        "America/Godthab",
+        new Date("2026-01-03T12:00:00Z"),
+      );
+      const fire = rs.fn(async () => {});
+      await provider.activate(routine, fire);
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        "2026-03-29T01:30:00.000Z",
+      );
+
+      rs.setSystemTime(new Date("2026-03-29T01:30:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        "2026-04-01T00:30:00.000Z",
+      );
     } finally {
       rs.useRealTimers();
     }
