@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { createAction as createEdit } from "../actions/edit-memory-file/index.js";
+import { createAction as createList } from "../actions/list-memory-files/index.js";
+import { createAction as createRead } from "../actions/read-memory-file/index.js";
 import { createAction as createWrite } from "../actions/write-memory-file/index.js";
 import type { MemoryFileDeps } from "../actions/write-memory-file/index.js";
 import { changesFromToolUse } from "./changes.js";
@@ -43,7 +45,11 @@ describe("memory file actions", () => {
       await write.execute({ path: join(memory, "topics/a.md"), content: "one two" }),
     ).toMatchObject({ status: "ok" });
     expect(
-      await edit.execute({ path: "topics/a.md", old_string: "two", new_string: "three" }),
+      await edit.execute({
+        path: join(memory, "topics/a.md"),
+        old_string: "two",
+        new_string: "three",
+      }),
     ).toMatchObject({ status: "ok" });
     expect(readFileSync(join(memory, "topics/a.md"), "utf8")).toBe("one three");
   });
@@ -52,11 +58,21 @@ describe("memory file actions", () => {
     const write = createWrite(config, deps());
     symlinkSync(outside, join(memory, "link"));
 
-    for (const path of [join(outside, ".git/config"), "../apps/x.ts", join(memory, "link/x.ts")]) {
+    // A dangling link to a file outside memory.
+    symlinkSync(join(outside, "dangling.md"), join(memory, "dangling.md"));
+    for (const path of [
+      join(outside, "x.ts"),
+      "topics/a.md",
+      join(memory, "../apps/x.ts"),
+      join(memory, "link/x.ts"),
+      join(memory, "dangling.md"),
+      join(memory, ".git/config"),
+    ]) {
       const result = await write.execute({ path, content: "planted" });
       expect(result.status).toBe("error");
     }
     expect(() => readFileSync(join(outside, "x.ts"))).toThrow();
+    expect(() => readFileSync(join(outside, "dangling.md"))).toThrow();
   });
 
   it("refuses an edit whose text is missing or not unique", async () => {
@@ -69,6 +85,22 @@ describe("memory file actions", () => {
     expect(
       (await edit.execute({ path: "MEMORY.md", old_string: "z", new_string: "b" })).status,
     ).toBe("error");
+  });
+
+  it("lists and reads memory, and nothing outside it", async () => {
+    writeFileSync(join(memory, "MEMORY.md"), "index");
+    mkdirSync(join(memory, ".git"));
+    writeFileSync(join(memory, ".git/config"), "[core]");
+    const list = createList({ ...config, name: "list_memory_files" }, deps());
+    const read = createRead({ ...config, name: "read_memory_file" }, deps());
+
+    const listed = (await list.execute({})) as { data: { files: string } };
+    expect(listed.data.files).toBe(join(memory, "MEMORY.md"));
+    expect(await read.execute({ path: join(memory, "MEMORY.md") })).toMatchObject({
+      data: { content: "index" },
+    });
+    expect((await read.execute({ path: join(outside, "x") })).status).toBe("error");
+    expect((await list.execute({ path: outside })).status).toBe("error");
   });
 
   it("records the actions' calls as the file changes they make", () => {

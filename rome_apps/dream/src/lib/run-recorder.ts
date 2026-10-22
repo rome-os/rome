@@ -6,6 +6,20 @@ import { HEARTBEAT_MS } from "./run-view.js";
 type RunOutcome = Parameters<RunsRepository["finish"]>[1];
 
 /**
+ * An action that fails returns `{ status: "error" }` as an ordinary tool
+ * result, without the error flag, so its output has to be read.
+ */
+function reportsActionError(output: unknown): boolean {
+  const text = typeof output === "string" ? output : null;
+  if (!text?.trimStart().startsWith("{")) return false;
+  try {
+    return (JSON.parse(text) as { status?: unknown }).status === "error";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Watches an agent's event stream and records each file change once its tool
  * call succeeds. A failed `Edit` changed nothing, so a change is held until its
  * `tool_result` arrives and dropped if that result is an error or never comes.
@@ -55,7 +69,7 @@ export class RunRecorder {
       const changes = this.pending.get(event.toolUseId);
       if (!changes) return;
       this.pending.delete(event.toolUseId);
-      if (event.isError) return;
+      if (event.isError || reportsActionError(event.output)) return;
       this.repo.addChanges(this.runId, changes);
     }
   }

@@ -218,6 +218,40 @@ describe("dream", () => {
     ]);
   });
 
+  it("records the memory actions that succeeded, not the ones they refused", async () => {
+    const call = (id: string, name: string, args: Record<string, unknown>) => ({
+      type: "tool_use",
+      id,
+      tool: "execute_action",
+      input: { action_name: name, json_args: args },
+    });
+    const deps = makeDeps([
+      call("ok", "write_memory_file", { path: "/p/memory/topics/a.md", content: "fact" }),
+      { type: "tool_result", toolUseId: "ok", tool: "execute_action", output: '{"status":"ok"}' },
+      call("no", "edit_memory_file", {
+        path: "/p/memory/MEMORY.md",
+        old_string: "x",
+        new_string: "y",
+      }),
+      {
+        type: "tool_result",
+        toolUseId: "no",
+        tool: "execute_action",
+        output: '{"status":"error","error":"old_string was not found"}',
+      },
+      { type: "result", content: "done" },
+    ]);
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    const { runId } = (result as { data: { runId: string } }).data;
+    expect(
+      createRunsRepository(appDb())
+        .changes(runId)
+        .map((c) => c.path),
+    ).toEqual(["/p/memory/topics/a.md"]);
+  });
+
   it("reports into a run the page already created", async () => {
     const runs = createRunsRepository(appDb());
     const { id: runId } = runs.reserveDream(24, "queued");

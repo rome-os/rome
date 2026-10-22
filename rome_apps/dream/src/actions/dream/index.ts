@@ -62,6 +62,9 @@ async function installedSkillChanges(
 /** The OS temp folders that hold a dream's pre-run copy of the apps. */
 const APP_SNAPSHOT_PREFIX = "dream-apps-";
 
+/** One run's notes are a few lines; a cap keeps ten of them small in a prompt. */
+const MAX_NOTES_CHARS = 4_000;
+
 /** How many earlier runs' practice notes the practice agent sees. */
 const EARLIER_PRACTICE_RUNS = 10;
 
@@ -75,7 +78,9 @@ async function savePracticeNotes(
   runs: ReturnType<typeof createRunsRepository>,
   runId: string,
 ): Promise<void> {
-  const notes = (await readFile(notesPath, "utf8").catch(() => "")).trim();
+  const notes = (await readFile(notesPath, "utf8").catch(() => ""))
+    .trim()
+    .slice(0, MAX_NOTES_CHARS);
   if (!notes) return;
   const text = `\n\n${notes}\n`;
   await mkdir(dirname(journalPath), { recursive: true });

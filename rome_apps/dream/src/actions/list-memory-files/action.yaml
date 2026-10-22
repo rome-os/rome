@@ -1,0 +1,9 @@
+name: list_memory_files
+type: custom
+description: List the files in the guardian's memory directory, or in one folder of it, as absolute paths. Refuses any path outside it.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only
+visibility: explicit

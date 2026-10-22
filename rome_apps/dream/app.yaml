@@ -31,6 +31,8 @@ actions:
   - actions/get-account-chats
   - actions/get-action-logs
   - actions/search-chats
+  - actions/list-memory-files
+  - actions/read-memory-file
   - actions/write-memory-file
   - actions/edit-memory-file
 
