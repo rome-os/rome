@@ -4084,6 +4084,33 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("prepends <device_folder> on every turn, subagents included", async () => {
+      const withFolder = {
+        ...webchatThreadContext,
+        deviceFolder: { deviceId: "mac-1", deviceName: "macbook", platform: "macos", path: "/w" },
+      };
+      for (const isSubagent of [false, true]) {
+        const manager = createAgentSessionManager(
+          managerDeps(createTestModelResolver({ providers: [alwaysResultProvider()] })),
+          { keepAliveAcrossTurns: true, isSubagent },
+        );
+        const session = await manager.acquire(
+          { agentName: "test-main", channelThreadKey: `webchat:tc-folder-${isSubagent}` },
+          { threadContext: withFolder, workingDir: projectWorkingDir },
+        );
+        for (const prompt of ["First", "Second"]) {
+          const userPrompt = initUserPrompt(
+            await collectMessages(
+              session.sendTurn({ prompt }, { threadContext: withFolder }).events,
+            ),
+          );
+          expect(userPrompt).toContain('Work in folder "/w" on Rome node device "macbook"');
+          expect(userPrompt.indexOf("<device_folder>")).toBeLessThan(userPrompt.indexOf(prompt));
+        }
+        await manager.shutdown();
+      }
+    });
+
     it("skips stored-message context for a channel whose surface needs none", async () => {
       const webchatRepo = new WebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({

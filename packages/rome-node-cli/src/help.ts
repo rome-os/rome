@@ -116,7 +116,7 @@ The result includes name, platform, and actions. Platform-specific commands and
 paths must match the target computer, which may differ from the caller.
 
 Example result:
-  {"type":"response","ok":true,"result":{"name":"My computer","platform":"macos","actions":["system.info","exec"]}}
+  {"type":"response","ok":true,"result":{"name":"My computer","platform":"macos","actions":["system.info","exec","fs.list"]}}
 
 Failures return {"type":"response","ok":false,"error":{"code":"...","message":"..."}}.
 The local exit status is 0 on success or 1 on failure.
@@ -131,16 +131,25 @@ Use an ID from rome-node device. Run device describe first to discover actions.
 Computer actions:
   system.info  No arguments. Returns name, platform, and actions.
   exec         Run a program on the target computer.
+  fs.list      List one folder. Read-only. Older targets return unsupported_action.
 
 exec arguments:
   command      Required nonempty executable name or path.
   args         Optional array of string arguments (default: []).
   cwd          Optional working directory on the target (default: executor cwd).
 
+fs.list arguments:
+  path         Optional folder (default: the target user's home). Relative paths
+               start at home. ~ is not expanded.
+  Result: {path, parent, entries: [{name, type}], truncated}. path is the real
+  path; parent is null at the root; type is dir, file, symlink, or other.
+  At most 1000 entries, folders first.
+
 Programs receive no stdin unless --input is given. No shell is added automatically.
 Invoke a shell explicitly for pipelines, redirection, or shell builtins.
 Examples below use POSIX caller-shell quoting:
   rome-node device run <device-id> system.info
+  rome-node device run <device-id> fs.list --args '{"path":"/workspace"}'
   rome-node device run <device-id> exec --args '{"command":"git","args":["status"],"cwd":"/workspace"}'
   rome-node device run <device-id> exec --args '{"command":"cat","args":["/workspace/README.md"]}'
   rome-node device run <device-id> exec --args '{"command":"sh","args":["-c","ls /workspace | head"]}'

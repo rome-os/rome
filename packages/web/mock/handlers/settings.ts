@@ -1,4 +1,4 @@
-import type { DevicesStatus } from "@rome/api-types/devices";
+import type { DeviceFilesResponse, DevicesStatus } from "@rome/api-types/devices";
 import { validateCustomAnthropicEnv } from "@rome/api-types/anthropic-compatible-env";
 import {
   listAnthropicCompatibleProviderSummaries,
@@ -273,7 +273,46 @@ const favorPacks: FavorRechargePackView[] = [
   { id: "pack-5000", favors: 5000, displayPrice: "$45" },
 ];
 
+// Folders the chat folder picker browses on the mock MacBook. Keys are real paths.
+const macHome = "/Users/ray";
+const macFolders: Record<string, string[]> = {
+  "/": ["Applications", "Library", "System", "Users"],
+  "/Users": ["Shared", "ray"],
+  [macHome]: ["Desktop", "Documents", "Downloads", "code", "notes"],
+  [`${macHome}/code`]: ["rome", "rspack", "midscene", "dotfiles"],
+  [`${macHome}/code/rome`]: ["docs", "packages", "rome_apps", "scripts"],
+};
+
+function macFiles(path: string | null): DeviceFilesResponse | null {
+  const real = path ? path.replace(/(.)\/+$/, "$1") : macHome;
+  const folders = macFolders[real] ?? (real.startsWith(`${macHome}/`) ? [] : null);
+  if (!folders) return null;
+  const parent = real === "/" ? null : real.slice(0, real.lastIndexOf("/")) || "/";
+  return {
+    path: real,
+    parent,
+    entries: [
+      ...folders.map((name) => ({ name, type: "dir" as const })),
+      ...(real === macHome ? [{ name: ".zshrc", type: "file" as const }] : []),
+    ],
+    truncated: false,
+  };
+}
+
 export const settingsHandlers = [
+  http.get("/api/devices/:deviceId/files", async ({ params, request }) => {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (params.deviceId === "linux") {
+      return HttpResponse.json({ error: "upgrade_required" }, { status: 409 });
+    }
+    if (params.deviceId !== "mac") {
+      return HttpResponse.json({ error: "offline" }, { status: 503 });
+    }
+    const folder = macFiles(new URL(request.url).searchParams.get("path"));
+    return folder
+      ? HttpResponse.json(folder)
+      : HttpResponse.json({ error: "not_found" }, { status: 404 });
+  }),
   http.post("/api/devices/start", () => new HttpResponse(null, { status: 204 })),
   http.get("/api/devices", () =>
     HttpResponse.json({

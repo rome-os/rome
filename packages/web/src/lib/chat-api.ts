@@ -1,3 +1,4 @@
+import type { DeviceFilesResponse, DevicesStatus } from "@rome/api-types/devices";
 import type {
   AgentCatalogGroup,
   ApprovalRecord,
@@ -288,6 +289,8 @@ export interface CreateSessionInput {
   // gets the guardian's stored preference.
   reasoningEffort?: ReasoningEffort;
   agentName?: string;
+  /** Folder on a rome-node device the chat works in. Core checks it before saving. */
+  deviceFolder?: { deviceId: string; path: string };
 }
 
 export async function listChatAgents(): Promise<AgentCatalogGroup[]> {
@@ -309,6 +312,28 @@ export async function createSession(input: CreateSessionInput): Promise<ChatSess
     body: JSON.stringify(input),
   });
   return jsonOrThrow<ChatSession>(res);
+}
+
+export async function listDevices(): Promise<DevicesStatus> {
+  const res = await fetch("/api/devices", { credentials: "include" });
+  return jsonOrThrow<DevicesStatus>(res);
+}
+
+/**
+ * Lists one folder on a device; no path means the device user's home. A
+ * failure throws `ChatApiError` whose message is a `DeviceFilesErrorCode`.
+ */
+export async function listDeviceFiles(
+  deviceId: string,
+  path?: string,
+  signal?: AbortSignal,
+): Promise<DeviceFilesResponse> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/files${query}`, {
+    credentials: "include",
+    signal,
+  });
+  return jsonOrThrow<DeviceFilesResponse>(res);
 }
 
 export async function updateSessionProject(

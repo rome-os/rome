@@ -10,6 +10,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
+import type { DeviceFolder } from "@rome/api-types/devices";
 import type { OutboxMessage } from "@rome/api-types/people";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
@@ -489,6 +490,9 @@ export const romeSessions = sqliteTable(
     largeModelSelection: text("large_model_selection"),
     projectName: text("project_name").notNull().default(DEFAULT_WEBCHAT_PROJECT_NAME),
     projectPath: text("project_path"),
+    // Folder on a rome-node device the chat works in, set only when the chat
+    // is created. NULL for every chat without one and every other session type.
+    deviceFolder: text("device_folder", { mode: "json" }).$type<DeviceFolder>(),
     // Agent the session is bound to. NULL means the default "main" agent.
     // Locked on first turn so the session can't switch agents mid-thread.
     agentName: text("agent_name"),

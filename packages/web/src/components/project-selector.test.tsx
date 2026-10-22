@@ -1,4 +1,5 @@
 // @rstest-environment jsdom
+import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -182,5 +183,196 @@ describe("project selector create form", () => {
     // Routing the field through `Input` is what keeps its typography on the
     // roster; a hand-rolled field drifts to whatever size the page picked.
     expect(renderCreateForm().className).toContain("text-ui");
+  });
+});
+
+describe("project selector devices", () => {
+  const folders: Record<
+    string,
+    { parent: string | null; entries: { name: string; type: string }[] }
+  > = {
+    "/Users/ray": {
+      parent: "/Users",
+      entries: [
+        { name: "code", type: "dir" },
+        { name: "link", type: "symlink" },
+        { name: ".zshrc", type: "file" },
+      ],
+    },
+    "/Users/ray/code": { parent: "/Users/ray", entries: [{ name: "rome", type: "dir" }] },
+    "/Users": { parent: "/", entries: [{ name: "ray", type: "dir" }] },
+  };
+
+  const defaultDevices = [
+    { id: "pc", name: "Windows PC", platform: "windows", status: "not_connected" },
+    { id: "mac", name: "macbook", platform: "macos", status: "connected" },
+    { id: "old", name: "old-linux", platform: "linux", status: "connected" },
+    { id: "gone", name: "Revoked", platform: "linux", status: "revoked" },
+  ];
+
+  function stubDevices(
+    files: (deviceId: string, path: string | null) => Response,
+    devices: unknown[] = defaultDevices,
+  ) {
+    return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://rome.test");
+      if (url.pathname === "/api/devices") {
+        return Response.json({
+          connection: "online",
+          checkedAt: new Date().toISOString(),
+          devices,
+        });
+      }
+      const match = url.pathname.match(/^\/api\/devices\/([^/]+)\/files$/);
+      if (match) return files(match[1], url.searchParams.get("path"));
+      return Response.json({ error: "unexpected" }, { status: 500 });
+    }) as typeof fetch);
+  }
+
+  const macFiles = (deviceId: string, path: string | null) => {
+    if (deviceId === "old") return Response.json({ error: "upgrade_required" }, { status: 409 });
+    const real = path ?? "/Users/ray";
+    return Response.json({ path: real, ...folders[real], truncated: false });
+  };
+
+  function Harness(
+    props: Partial<ReturnType<typeof baseProps>> & {
+      onPickDeviceFolder: (folder: unknown) => void;
+      deviceFolder?: Parameters<typeof ProjectSelector>[0]["deviceFolder"];
+    },
+  ) {
+    const [searchQuery, setSearchQuery] = useState("");
+    return (
+      <ProjectSelector
+        {...baseProps()}
+        {...props}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+      />
+    );
+  }
+
+  afterEach(() => rs.restoreAllMocks());
+
+  it("keeps the single project list when only Rome Cloud is available", async () => {
+    const fetchSpy = stubDevices(macFiles, [
+      { id: "gone", name: "Revoked", platform: "linux", status: "revoked" },
+    ]);
+    render(<Harness onPickDeviceFolder={rs.fn()} />);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(await screen.findByRole("option", { name: /alpha/ })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /Rome Cloud/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  });
+
+  it("opens on Rome Cloud and the devices, then Rome Cloud lists the projects", async () => {
+    stubDevices(macFiles);
+    const user = userEvent.setup();
+    render(<Harness onPickDeviceFolder={rs.fn()} />);
+
+    const rome = await screen.findByRole("option", { name: /Rome Cloud/ });
+    expect(rome.textContent).toContain("general");
+    expect(screen.queryByRole("option", { name: /alpha/ })).toBeNull();
+    await user.click(rome);
+    expect(await screen.findByRole("option", { name: /alpha/ })).toBeTruthy();
+    expect(screen.getByText("Create project")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(await screen.findByRole("option", { name: /Rome Cloud/ })).toBeTruthy();
+  });
+
+  it("lists devices on the first level and disables offline ones with the reason", async () => {
+    stubDevices(macFiles);
+    render(<Harness onPickDeviceFolder={rs.fn()} />);
+
+    const mac = await screen.findByRole("option", { name: /macbook/ });
+    expect(mac.getAttribute("aria-disabled")).not.toBe("true");
+    const pc = screen.getByRole("option", { name: /Windows PC/ });
+    // Offline devices sort after the connected ones.
+    expect(screen.getAllByRole("option").at(-1)).toBe(pc);
+    expect(pc.getAttribute("aria-disabled")).toBe("true");
+    expect(pc.textContent).toContain("Offline");
+    expect(screen.queryByRole("option", { name: /Revoked/ })).toBeNull();
+  });
+
+  it("browses folders, goes up, and picks the current folder with its home", async () => {
+    const fetchSpy = stubDevices(macFiles);
+    const onPickDeviceFolder = rs.fn();
+    const user = userEvent.setup();
+    render(<Harness onPickDeviceFolder={onPickDeviceFolder} />);
+
+    await user.click(await screen.findByRole("option", { name: /macbook/ }));
+    // Folders and symlinks only; files are not workspaces.
+    expect(await screen.findByRole("option", { name: "code" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "link" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: ".zshrc" })).toBeNull();
+    expect(screen.getByRole("option", { name: /^~(?!\/)/ })).toBeTruthy();
+
+    await user.click(screen.getByRole("option", { name: "code" }));
+    expect(await screen.findByRole("option", { name: "rome" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /^~\/code/ })).toBeTruthy();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/devices/mac/files?path=%2FUsers%2Fray%2Fcode",
+      expect.anything(),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Use this folder" }));
+    expect(onPickDeviceFolder).toHaveBeenCalledWith({
+      deviceId: "mac",
+      deviceName: "macbook",
+      path: "/Users/ray/code",
+      home: "/Users/ray",
+    });
+  });
+
+  it("filters the current folder with the search box and returns to the first level", async () => {
+    stubDevices(macFiles);
+    const user = userEvent.setup();
+    render(<Harness onPickDeviceFolder={rs.fn()} />);
+
+    await user.click(await screen.findByRole("option", { name: /macbook/ }));
+    await screen.findByRole("option", { name: "code" });
+    await user.type(screen.getByPlaceholderText("Search this folder…"), "li");
+    expect(screen.queryByRole("option", { name: "code" })).toBeNull();
+    expect(screen.getByRole("option", { name: "link" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(await screen.findByRole("option", { name: /Rome Cloud/ })).toBeTruthy();
+    expect(screen.getByPlaceholderText("Search Rome Cloud and devices…")).toBeTruthy();
+  });
+
+  it("disables a device that needs a rome-node update after it answers", async () => {
+    stubDevices(macFiles);
+    const user = userEvent.setup();
+    render(<Harness onPickDeviceFolder={rs.fn()} />);
+
+    await user.click(await screen.findByRole("option", { name: /old-linux/ }));
+    expect(
+      await screen.findByText("Update rome-node on this device to browse its folders."),
+    ).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Use this folder" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    const old = await screen.findByRole("option", { name: /old-linux/ });
+    await waitFor(() => expect(old.textContent).toContain("Update rome-node"));
+    expect(old.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("shows the picked folder on the trigger and marks its device", async () => {
+    stubDevices(macFiles);
+    render(
+      <Harness
+        onPickDeviceFolder={rs.fn()}
+        deviceFolder={{
+          deviceId: "mac",
+          deviceName: "macbook",
+          path: "/Users/ray/code",
+          home: "/Users/ray",
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Project" }).textContent).toContain("macbook:~/code");
+    const mac = await screen.findByRole("option", { name: /macbook/ });
+    expect(mac.textContent).toContain("~/code");
   });
 });

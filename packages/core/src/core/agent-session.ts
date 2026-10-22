@@ -17,6 +17,7 @@ import type { SessionsRepository } from "../db/repositories/sessions.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
   buildInteractiveSurfaceGuidanceSection,
+  buildDeviceFolderBlock,
   buildThreadContextBlock,
   type PromptBuilder,
 } from "./prompt-builder.js";
@@ -3484,6 +3485,11 @@ class AgentSessionImpl implements AgentSession {
               };
         pendingConversationMessageIds = storedContext.pendingNotificationIds;
         userPrompt = prependConversationContext(userPrompt, conversationContext);
+      }
+      // Every turn, subagents included: the folder is where the work happens.
+      const deviceFolderBlock = buildDeviceFolderBlock(tc);
+      if (deviceFolderBlock) {
+        userPrompt = `${deviceFolderBlock}\n\n${userPrompt}`;
       }
       if (!this.isSubagent && this.isNewSession && !this.threadContextInjected && tc) {
         this.threadContextInjected = true;

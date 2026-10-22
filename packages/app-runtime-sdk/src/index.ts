@@ -1186,6 +1186,17 @@ export interface ThreadContext {
   projectName?: string;
   projectPath?: string;
   /**
+   * Folder on a connected rome-node device that a chat works in. The agent
+   * still runs on Rome; it reaches the folder with `rome-node device run`.
+   * `deviceName` and `platform` are a snapshot from when the chat was created.
+   */
+  deviceFolder?: {
+    deviceId: string;
+    deviceName: string;
+    platform: string | null;
+    path: string;
+  };
+  /**
    * Bond level of the message sender, when known. Lets turn-level logic tell the
    * guardian apart from other trusted senders (inner-circle, acquaintance) who
    * reach the same `<channel>:<thread>` trusted path.

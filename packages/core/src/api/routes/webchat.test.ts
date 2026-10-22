@@ -1664,6 +1664,129 @@ describe("Webchat API", () => {
     });
   });
 
+  describe("device folder", () => {
+    const folder = {
+      path: "/Users/ray/code/foo",
+      parent: "/Users/ray/code",
+      entries: [],
+      truncated: false,
+    };
+    const mockDevices = (listFiles: TestDeps["nodeDevices"]["listFiles"]) => {
+      deps.nodeDevices = {
+        ...deps.nodeDevices,
+        listFiles: rs.fn(listFiles),
+        getStatus: async () => ({
+          connection: "online",
+          checkedAt: new Date().toISOString(),
+          devices: [{ id: "mac-1", name: "macbook", platform: "macos", status: "connected" }],
+        }),
+      };
+      return deps.nodeDevices.listFiles;
+    };
+
+    it("stores the real path with a device snapshot and passes it to every turn", async () => {
+      const listFiles = mockDevices(async () => ({ ok: true, folder }));
+      let acquiredInit: AgentSessionInit | undefined;
+      let sentOptions: SendTurnOptions | undefined;
+      deps.agentSessionManager = fakeSessionManager(async (_key, init) => {
+        acquiredInit = init;
+        return {
+          key: { agentName: "main", channelThreadKey: "webchat:test" },
+          sessionId: "agent-session",
+          status: "idle",
+          sendTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+            sentOptions = options;
+            return {
+              turnId: "turn-1",
+              events: (async function* () {
+                yield { type: "result", content: "" };
+              })(),
+              turnContext: otelContext.active(),
+            };
+          },
+          subscribe: () => () => undefined,
+          onStatusChange: () => () => undefined,
+          interrupt: async () => undefined,
+          close: async () => undefined,
+        } satisfies FakeSession;
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const expected = {
+        deviceId: "mac-1",
+        deviceName: "macbook",
+        platform: "macos",
+        path: "/Users/ray/code/foo",
+      };
+
+      const res = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceFolder: { deviceId: "mac-1", path: "~/code/foo" } }),
+      });
+      expect(res.status).toBe(200);
+      const session = (await res.json()) as {
+        id: string;
+        deviceFolder: unknown;
+        projectPath: string;
+      };
+      expect(listFiles).toHaveBeenCalledWith("mac-1", "~/code/foo");
+      expect(session.deviceFolder).toEqual(expected);
+      expect(session.projectPath).toBe("default");
+      expect((await deps.webchatRepo.getSession(session.id))?.deviceFolder).toEqual(expected);
+
+      const sendRes = await app.request(`/chat/sessions/${session.id}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "hello" }),
+      });
+      expect(sendRes.status).toBe(200);
+      expect(acquiredInit?.workingDir).toBe(join(projectsRoot, "default"));
+      expect(acquiredInit?.threadContext?.deviceFolder).toEqual(expected);
+      expect(sentOptions?.threadContext?.deviceFolder).toEqual(expected);
+    });
+
+    it("creates no session when the device cannot list the folder", async () => {
+      mockDevices(async () => ({ ok: false, code: "offline" }));
+      const app = createWebchatRuntime(deps).routes;
+      const res = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceFolder: { deviceId: "mac-1", path: "/gone" } }),
+      });
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toEqual({ error: "offline" });
+      expect(await (await app.request("/chat/sessions")).json()).toEqual([]);
+    });
+
+    it("rejects a device folder without a device or a path", async () => {
+      const listFiles = mockDevices(async () => ({ ok: true, folder }));
+      const app = createWebchatRuntime(deps).routes;
+      for (const deviceFolder of [
+        { deviceId: "mac-1" },
+        { path: "/x" },
+        { deviceId: 1, path: "/x" },
+      ]) {
+        const res = await app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deviceFolder }),
+        });
+        expect(res.status).toBe(400);
+      }
+      expect(listFiles).not.toHaveBeenCalled();
+    });
+
+    it("returns null for chats without a device folder", async () => {
+      const app = createWebchatRuntime(deps).routes;
+      const res = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Plain" }),
+      });
+      await expect(res.json()).resolves.toMatchObject({ deviceFolder: null });
+    });
+  });
+
   it("accepts a logged-out provider as a persisted failed turn", async () => {
     deps.agentSessionManager = {
       acquire: rs.fn(async () => {

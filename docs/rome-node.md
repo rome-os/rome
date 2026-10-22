@@ -75,6 +75,35 @@ not checked within that budget remain unknown. Gateway connection setup has its
 own existing wait limits. No history, remote actions with side effects, or new
 Gateway presence protocol is involved.
 
+## Chat device folders
+
+A new chat can work in a folder on a connected device instead of in a Rome
+project. The composer's project selector lists the devices below the projects.
+Selecting a device browses its folders with `fs.list`, through
+`GET /api/devices/:deviceId/files?path=`. A chat holds a project or a device
+folder, never both.
+
+Rome sets the folder only when it creates the chat. `POST /api/chat/sessions`
+takes `deviceFolder: { deviceId, path }`, lists the path once to check it, and
+stores the real path with the device name and platform at that moment. The
+session response returns `deviceFolder`, or `null`.
+
+The agent still runs on Rome, in `projects/default`. Every user message of the
+chat starts with a `<device_folder>` block that names the folder and the device,
+and tells the agent to run programs there with `rome-node device run <id> exec`
+and `cwd` set to the folder. The block repeats on every turn so that it stays in
+context after compaction. Subagents and side chats get it from the turn's thread
+context.
+
+Limits:
+
+- The agent reaches the folder only through `exec`, so only agents with Bash can
+  use it. The caller waits 60 seconds at most, and a local timeout does not cancel
+  the remote program. Output is not streamed.
+- The folder is the default `cwd` for the agent's commands, not a sandbox. `exec`
+  runs as the device's OS user.
+- Only webchat sessions store a device folder.
+
 ## Local client protocol
 
 Clients connect to `ws://127.0.0.1:<port>/rpc` using the private credential from
@@ -461,6 +490,23 @@ Examples for Windows:
 {"command":"powershell.exe","args":["-NoProfile","-Command","Get-Content -Raw -LiteralPath 'C:\\Work\\README.md'"]}
 {"command":"powershell.exe","args":["-NoProfile","-Command","Set-Content -LiteralPath 'C:\\Work\\example.txt' -Value 'Hello'"]}
 ```
+
+`device run <id> fs.list --args '{"path":"/workspace"}'` lists one folder without
+starting a program. `path` is optional: no path means the device user's home folder,
+and a relative path starts there. `~` is not expanded. The result is:
+
+```json
+{"path":"/workspace","parent":"/","entries":[{"name":"src","type":"dir"}],"truncated":false}
+```
+
+`path` is the folder's real path, with symlinks resolved. `parent` is `null` at the
+filesystem root. Each entry has a `type` of `dir`, `file`, `symlink`, or `other`.
+A symlink is reported as `symlink` and is not followed. Folders come first, then
+symlinks, files, and others, each sorted by name. A reply carries at most 1000
+entries and sets `truncated` when the folder holds more. Failures use the codes
+`not_found`, `not_a_directory`, `permission_denied`, and `invalid_args`. A device
+on an older version answers `unsupported_action`. Check `system.info` `actions`
+for `fs.list` before relying on it.
 
 A text-mode exec result has `exitCode`, `signal`, `stdout`, `stderr`, and
 `truncated: { stdout: false, stderr: false }`. Text mode decodes output as UTF-8,

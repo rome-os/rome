@@ -206,6 +206,27 @@ export function buildThreadContextBlock(
 }
 
 /**
+ * Render the chat's device folder as a `<device_folder>` block. Unlike
+ * `<thread_context>`, AgentSession prepends it to EVERY user message, so the
+ * agent still knows where to work after context compaction drops the first
+ * message. Returns null when the chat has no device folder.
+ */
+export function buildDeviceFolderBlock(
+  threadContext: ThreadContext | undefined | null,
+): string | null {
+  const folder = threadContext?.deviceFolder;
+  if (!folder) return null;
+  const device = [folder.deviceId, folder.platform].filter(Boolean).join(", ");
+  return [
+    "<device_folder>",
+    `Work in folder "${xmlEscape(folder.path)}" on Rome node device "${xmlEscape(folder.deviceName)}" (id ${xmlEscape(device)}).` +
+      " Your local working directory is NOT this folder.",
+    `Run programs there with \`rome-node device run ${xmlEscape(folder.deviceId)} exec\` and cwd set to that folder.`,
+    "</device_folder>",
+  ].join("\n");
+}
+
+/**
  * The project's path relative to the webchat projects root — the same value
  * webchat already shows (e.g. `default`) and that the `/projects/...` web route
  * keys off. Returns null when `workingDir` is not a clean subpath of the root

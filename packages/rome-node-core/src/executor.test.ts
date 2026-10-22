@@ -1,9 +1,18 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { createExecutor, redactBytes } from "./executor.js";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join, parse } from "node:path";
+import { createExecutor, FS_LIST_LIMIT, redactBytes } from "./executor.js";
 import { decodeMeta, encodeMeta, FRAME_TYPE, MAX_FRAME_BYTES, type Frame } from "./frame.js";
 import type { OutboundEnvelope } from "./protocol.js";
 
@@ -137,7 +146,7 @@ describe("computer actions over binary frames", () => {
       ok: true,
       result: {
         name: "Test computer",
-        actions: ["system.info", "exec"],
+        actions: ["system.info", "exec", "fs.list"],
         frameVersion: 1,
         transferVersion: 1,
       },
@@ -323,7 +332,7 @@ describe("computer actions", () => {
   it("reports actual platform and rejects unsupported actions", async () => {
     expect((await execute("system.info")).payload).toMatchObject({
       ok: true,
-      result: { name: "Test computer", actions: ["system.info", "exec"] },
+      result: { name: "Test computer", actions: ["system.info", "exec", "fs.list"] },
     });
     expect((await execute("fs.read")).payload).toMatchObject({
       ok: false,
@@ -430,5 +439,96 @@ describe("computer actions", () => {
     executor.disconnect();
     await pending;
     expect(replies).toEqual([]);
+  });
+});
+
+describe("fs.list", () => {
+  async function folder() {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "rome node fs 空格-")));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    return dir;
+  }
+  const list = async (args?: unknown) => (await execute("fs.list", args)).payload;
+
+  it("lists the home folder when no path is given", async () => {
+    const home = await realpath(homedir());
+    expect(await list()).toMatchObject({ ok: true, result: { path: home } });
+    expect(await list({})).toMatchObject({ ok: true, result: { path: home } });
+  });
+
+  it("returns typed entries, folders first, and the parent", async () => {
+    const dir = await folder();
+    await mkdir(join(dir, "b-folder"));
+    await mkdir(join(dir, "z-folder"));
+    await writeFile(join(dir, "a.txt"), "a");
+    await symlink(join(dir, "z-folder"), join(dir, "link"));
+    expect(await list({ path: dir })).toEqual({
+      type: "response",
+      ok: true,
+      result: {
+        path: dir,
+        parent: join(dir, ".."),
+        entries: [
+          { name: "b-folder", type: "dir" },
+          { name: "z-folder", type: "dir" },
+          { name: "link", type: "symlink" },
+          { name: "a.txt", type: "file" },
+        ],
+        truncated: false,
+      },
+    });
+  });
+
+  it("resolves a symlinked folder to its real path", async () => {
+    const dir = await folder();
+    await mkdir(join(dir, "target"));
+    await symlink(join(dir, "target"), join(dir, "link"));
+    expect(await list({ path: join(dir, "link") })).toMatchObject({
+      ok: true,
+      result: { path: join(dir, "target"), parent: dir, entries: [] },
+    });
+  });
+
+  it("reports a missing path and a path that is not a folder", async () => {
+    const dir = await folder();
+    await writeFile(join(dir, "file"), "x");
+    expect(await list({ path: join(dir, "missing") })).toMatchObject({
+      ok: false,
+      error: { code: "not_found" },
+    });
+    expect(await list({ path: join(dir, "file") })).toMatchObject({
+      ok: false,
+      error: { code: "not_a_directory" },
+    });
+  });
+
+  it("has no parent at the filesystem root", async () => {
+    const root = parse(tmpdir()).root;
+    expect(await list({ path: root })).toMatchObject({
+      ok: true,
+      result: { path: root, parent: null },
+    });
+  });
+
+  it("caps the entries and keeps folders inside the cap", async () => {
+    const dir = await folder();
+    await Promise.all(
+      Array.from({ length: FS_LIST_LIMIT + 1 }, (_, n) => writeFile(join(dir, `f${n}`), "")),
+    );
+    await mkdir(join(dir, "zz-folder"));
+    const reply = await list({ path: dir });
+    expect(reply).toMatchObject({ ok: true, result: { truncated: true } });
+    const entries = (reply as { result: { entries: { name: string }[] } }).result.entries;
+    expect(entries).toHaveLength(FS_LIST_LIMIT);
+    expect(entries[0]).toEqual({ name: "zz-folder", type: "dir" });
+  });
+
+  it("rejects invalid arguments in text and binary mode", async () => {
+    for (const args of [{ path: "" }, { path: 1 }, { path: "a\0b" }, "path"])
+      expect(await list(args)).toMatchObject({ ok: false, error: { code: "invalid_args" } });
+    const dir = await folder();
+    const { response, body } = await executeFrame("fs.list", { path: dir });
+    expect(response).toMatchObject({ ok: true, result: { path: dir, entries: [] } });
+    expect(body.byteLength).toBe(0);
   });
 });

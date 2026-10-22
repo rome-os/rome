@@ -367,6 +367,35 @@
       "loadFailed": "Failed to load projects.",
       "updateFailed": "Failed to update project.",
       "createFailed": "Failed to create project."
+    },
+    "devices": {
+      "listLabel": "Folders",
+      "searchPlaceholder": "Search this folder…",
+      "loading": "Loading folder…",
+      "empty": "No folders here.",
+      "noMatchesQuery": "No folders match “{{query}}”.",
+      "truncated": "Showing the first 1,000 items.",
+      "up": "Up one level",
+      "useFolder": "Use this folder",
+      "reasons": {
+        "offline": "Offline",
+        "upgrade_required": "Update rome-node"
+      },
+      "errors": {
+        "offline": "The device is offline.",
+        "upgrade_required": "Update rome-node on this device to browse its folders.",
+        "not_found": "This folder no longer exists.",
+        "not_a_directory": "This path is not a folder.",
+        "permission_denied": "The device's user cannot read this folder.",
+        "unavailable": "Could not read this folder."
+      }
+    },
+    "locations": {
+      "rome": "Rome Cloud",
+      "listLabel": "Locations",
+      "searchPlaceholder": "Search Rome Cloud and devices…",
+      "noMatchesQuery": "Nothing matches “{{query}}”.",
+      "back": "Back"
     }
   },
   "stream": {

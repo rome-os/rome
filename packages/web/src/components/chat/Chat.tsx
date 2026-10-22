@@ -1392,13 +1392,21 @@ export function Chat({
             largeModelSelection: snapshot.largeModelSelection,
             reasoningEffort: snapshot.reasoningEffort,
             agentName: snapshot.agentMention?.agentName,
+            deviceFolder: snapshot.deviceFolder
+              ? { deviceId: snapshot.deviceFolder.deviceId, path: snapshot.deviceFolder.path }
+              : undefined,
           });
           sendingSessionId = created.id;
           controls.onSessionCreated?.();
         } catch (error) {
           setStreamError(
             error instanceof ChatApiError && error.message
-              ? error.message
+              ? snapshot.deviceFolder && error.status === 409
+                ? // Core answers a folder it could not check with a DeviceFilesErrorCode.
+                  t(`project.devices.errors.${error.message}`, {
+                    defaultValue: t("project.devices.errors.unavailable"),
+                  })
+                : error.message
               : t("stream.errors.createChatFallback"),
           );
           throw error;

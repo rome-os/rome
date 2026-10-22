@@ -1,3 +1,4 @@
+import type { DeviceFolder } from "@rome/api-types/devices";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -891,6 +892,8 @@ export class WebChatRepository {
     // JSON handback contract for a 'webchat_handoff' session (see schema comment).
     handoffSpec: string | null = null,
     ownership: { ownerKey?: string | null; inheritOwnerFrom?: string } = {},
+    // Set only here: a chat's device folder never changes after creation.
+    deviceFolder: DeviceFolder | null = null,
   ) {
     const now = new Date();
     if (projectPath?.trim()) {
@@ -907,6 +910,7 @@ export class WebChatRepository {
       personaId: personaId ?? null,
       projectName,
       projectPath,
+      deviceFolder,
       largeModelSelection: largeModelSelection ?? null,
       agentName,
       type: storedSessionType(type),

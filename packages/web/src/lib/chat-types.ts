@@ -1,3 +1,4 @@
+import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import type { TraceErrorEvent, TraceEventDto, TraceSummary } from "@rome/api-types/trace-segments";
 import type {
@@ -28,6 +29,8 @@ export interface ChatSession {
   reasoningEffort?: string | null;
   projectName: string;
   projectPath?: string | null;
+  /** Folder on a rome-node device the chat works in, set when the chat was created. */
+  deviceFolder?: DeviceFolder | null;
   agentName?: string | null;
   /** ISO timestamp when the chat was archived (soft-hidden), or null. */
   archivedAt?: string | null;

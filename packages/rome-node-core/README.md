@@ -203,7 +203,7 @@ where `expiresIn` is in seconds. It returns a `DeviceSession` after approval and
 rejects on denial, expiry, cancellation, or a terminal error. It opens no browser
 or callback listener. The callback receives neither the device code nor the access token.
 
-The host exposes `system.info` and `exec`, in text envelopes and in binary frames.
+The host exposes `system.info`, `exec`, and the read-only `fs.list`, in text envelopes and in binary frames.
 It also accepts the internal file transfers that `copy()` uses. Programs run as the application's OS
 user. Connection loss terminates direct child processes on a best-effort basis.
 A local caller timeout does not cancel remote execution.
