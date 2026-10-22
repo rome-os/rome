@@ -30,6 +30,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import { SlotContent } from "@/components/slot";
 import "react-medium-image-zoom/dist/styles.css";
 import { cn } from "@/lib/utils";
 import { usePresentationMode } from "@/lib/presentation-mode";
@@ -283,6 +284,11 @@ export interface ChatProps {
   initialAgentMention?: AgentMention | null;
   /** Receives the composer's handle, for a host that seeds or focuses the draft. */
   composerRef?: RefObject<ChatComposerHandle | null>;
+  /**
+   * A slot to draw the chat's bar into instead of a row above the transcript.
+   * The Mac app passes its title bar's, so the window has one row on top.
+   */
+  navbarSlot?: string;
 }
 
 export function Chat({
@@ -297,6 +303,7 @@ export function Chat({
   initialProjectName,
   initialAgentMention,
   composerRef: hostComposerRef,
+  navbarSlot,
 }: ChatProps) {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
@@ -1794,6 +1801,89 @@ export function Chat({
 
   const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
 
+  const navbar = (
+    <>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {untitledEmptyChat ? null : (
+          <>
+            <AgentAvatar
+              iconUrl={pinnedAgentMention?.iconUrl}
+              label={pinnedAgentMention?.appLabel}
+              size="sm"
+              className="shrink-0"
+            />
+            <span className="truncate text-ui text-foreground">
+              {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
+            </span>
+            <SessionModelLabel model={model} reasoningEffort={reasoningEffort} />
+            {sessionName?.trim() && pinnedAgentMention && (
+              <span className="shrink-0 truncate text-aux text-muted-foreground">
+                {pinnedAgentMention.appLabel}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+      {mainSessionId && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton
+              size="sm"
+              label={t("navbar.more")}
+              icon={<MoreHorizontal />}
+              className="text-muted-foreground hover:text-foreground"
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => void handlePin()}>
+              {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+              {pinnedAt ? t("navbar.unpin") : t("navbar.pin")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => enterShareMode()}>
+              <Share2 className="size-4" />
+              {t("share.title", "Share chat")}
+            </DropdownMenuItem>
+            {isArchived ? (
+              <DropdownMenuItem onSelect={() => void handleUnarchive()}>
+                <ArchiveRestore className="size-4" />
+                {t("navbar.unarchive")}
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onSelect={() => void handleArchive()}>
+                <Archive className="size-4" />
+                {t("navbar.archive")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
+              <Trash2 className="size-4" />
+              {t("navbar.delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {toolView.collapsed && (
+        <IconButton
+          size="sm"
+          data-coach="add-widget"
+          aria-expanded={false}
+          onClick={() => setToolsCollapsed(false)}
+          label={t("chat.expandTools", { ns: "common" })}
+          icon={
+            <span className="relative">
+              <PanelRightOpen />
+              {toolView.unreadIds.length > 0 && (
+                <span
+                  className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
+                  aria-label={t("chat.toolUpdated", { ns: "common" })}
+                />
+              )}
+            </span>
+          }
+        />
+      )}
+    </>
+  );
+
   return (
     <TooltipProvider delayDuration={150}>
       {sessionEventIds.map((sid) => (
@@ -1834,89 +1924,13 @@ export function Chat({
               says it already, so the bar keeps only its height and controls
               and the page does not move when the first message starts the
               session. */}
-          <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              {untitledEmptyChat ? null : (
-                <>
-                  <AgentAvatar
-                    iconUrl={pinnedAgentMention?.iconUrl}
-                    label={pinnedAgentMention?.appLabel}
-                    size="sm"
-                    className="shrink-0"
-                  />
-                  <span className="truncate text-ui text-foreground">
-                    {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
-                  </span>
-                  <SessionModelLabel model={model} reasoningEffort={reasoningEffort} />
-                  {sessionName?.trim() && pinnedAgentMention && (
-                    <span className="shrink-0 truncate text-aux text-muted-foreground">
-                      {pinnedAgentMention.appLabel}
-                    </span>
-                  )}
-                </>
-              )}
+          {navbarSlot ? (
+            <SlotContent name={navbarSlot}>{navbar}</SlotContent>
+          ) : (
+            <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
+              {navbar}
             </div>
-            {mainSessionId && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <IconButton
-                    size="sm"
-                    label={t("navbar.more")}
-                    icon={<MoreHorizontal />}
-                    className="text-muted-foreground hover:text-foreground"
-                  />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => void handlePin()}>
-                    {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-                    {pinnedAt ? t("navbar.unpin") : t("navbar.pin")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => enterShareMode()}>
-                    <Share2 className="size-4" />
-                    {t("share.title", "Share chat")}
-                  </DropdownMenuItem>
-                  {isArchived ? (
-                    <DropdownMenuItem onSelect={() => void handleUnarchive()}>
-                      <ArchiveRestore className="size-4" />
-                      {t("navbar.unarchive")}
-                    </DropdownMenuItem>
-                  ) : (
-                    <DropdownMenuItem onSelect={() => void handleArchive()}>
-                      <Archive className="size-4" />
-                      {t("navbar.archive")}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onSelect={() => setDeleteConfirmOpen(true)}
-                  >
-                    <Trash2 className="size-4" />
-                    {t("navbar.delete")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            {toolView.collapsed && (
-              <IconButton
-                size="sm"
-                data-coach="add-widget"
-                aria-expanded={false}
-                onClick={() => setToolsCollapsed(false)}
-                label={t("chat.expandTools", { ns: "common" })}
-                icon={
-                  <span className="relative">
-                    <PanelRightOpen />
-                    {toolView.unreadIds.length > 0 && (
-                      <span
-                        className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
-                        aria-label={t("chat.toolUpdated", { ns: "common" })}
-                      />
-                    )}
-                  </span>
-                }
-              />
-            )}
-          </div>
+          )}
           {/* The message scroller — the ONLY scrolling node in the chat. It is
               bounded by the /chat viewport shell, so message reflow (mermaid,
               late media) stays inside here and never resizes the document or

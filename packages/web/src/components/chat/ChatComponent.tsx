@@ -42,6 +42,8 @@ export interface ChatComponentProps {
   // Pre-pins a skill chip on the draft composer without sending —
   // the structured counterpart of initialDraftText, seeded by the Skills app.
   initialSkillName?: string;
+  /** Passed to `Chat`: the slot to draw the chat's bar into. */
+  navbarSlot?: string;
 }
 
 export function ChatComponent({
@@ -53,6 +55,7 @@ export function ChatComponent({
   initialAgentMention,
   initialDraftText,
   initialSkillName,
+  navbarSlot,
 }: ChatComponentProps) {
   const { i18n } = useTranslation("chat");
 
@@ -233,6 +236,7 @@ export function ChatComponent({
         initialProjectName={initialProjectName}
         initialAgentMention={initialAgentMention}
         composerRef={composerRef}
+        navbarSlot={navbarSlot}
         centerDraftComposer={greetingOnlyHome}
         emptyState={
           <ChatEmptyState

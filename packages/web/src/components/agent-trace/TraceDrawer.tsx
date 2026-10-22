@@ -42,13 +42,13 @@ function traceDrawerOpenPlacementClass(hasApps: boolean): string {
     // A widget already owns the surface beside chat. Keep it visible and cover
     // the actual desktop chat column, regardless of how wide that column may
     // become. Mobile keeps the base full-chat overlay below its header.
-    return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 md:left-[var(--rome-chat-left,0px)] md:right-auto md:top-0 md:w-[var(--rome-chat-col)]";
+    return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 md:left-[var(--rome-chat-left,0px)] md:right-auto md:top-[var(--rome-chat-top,0px)] md:w-[var(--rome-chat-col)]";
   }
 
   // With no widgets, width alone chooses the presentation: a narrow chat is
   // covered from its real left edge through the viewport's right edge, while a
   // wide chat keeps 480px for a docked inspector.
-  return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 @max-5xl/chat:md:left-[var(--rome-chat-left,0px)] @max-5xl/chat:md:right-0 @max-5xl/chat:md:top-0 @max-5xl/chat:md:w-auto @5xl/chat:left-auto @5xl/chat:right-0 @5xl/chat:top-0 @5xl/chat:w-[480px] @5xl/chat:border-l @5xl/chat:border-border";
+  return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 @max-5xl/chat:md:left-[var(--rome-chat-left,0px)] @max-5xl/chat:md:right-0 @max-5xl/chat:md:top-[var(--rome-chat-top,0px)] @max-5xl/chat:md:w-auto @5xl/chat:left-auto @5xl/chat:right-0 @5xl/chat:top-[var(--rome-chat-top,0px)] @5xl/chat:w-[480px] @5xl/chat:border-l @5xl/chat:border-border";
 }
 
 export function traceDrawerContentInsetClass(open: boolean, hasApps: boolean): string {

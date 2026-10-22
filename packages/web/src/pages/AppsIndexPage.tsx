@@ -25,6 +25,7 @@ import { AppRemixDialog } from "@/components/app-remix-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AppStoreSheet } from "@/components/AppStoreSheet";
+import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TileIcon } from "@/components/app-tile-icon";
 import { getHostAppRoute } from "@/lib/auth-routing";
 import { isCarrierApp } from "@/lib/chat-helpers";
@@ -46,6 +47,7 @@ import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { useSidebarPins } from "@/hooks/use-sidebar-pins";
 import { isRequiredBuiltinPin } from "@/shell/AppGrid";
 import { APP_NAV } from "@/shell/builtin-nav";
+import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 
 function isInFlight(phase: AppViewState): boolean {
   return phase === "installing" || phase === "uninstalling";
@@ -503,6 +505,25 @@ export default function AppsIndexPage() {
         : builtinPages.length +
           (launcherApps ?? []).filter((app) => app.origin === "builtin").length;
   const updatesCount = lifecycle.upgradeTargets.length;
+  // In the Mac app the header moves into the title bar, so the window has one
+  // row on top and the launcher starts right under it.
+  const inTitlebar = useSlotOutlet(TITLEBAR_SLOT);
+  const headerActions = (
+    <>
+      <Button
+        type="button"
+        size="sm"
+        onClick={lifecycle.upgradeAll}
+        disabled={updatesCount === 0 || menusDisabled}
+      >
+        <Download data-icon="inline-start" className="h-3.5 w-3.5" aria-hidden />
+        {lifecycle.bulkUpgradePending ? t("installed.updateAllUpdating") : t("installed.updateAll")}
+      </Button>
+      <Button type="button" variant="ghost" size="sm" onClick={() => setStoreOpen(true)}>
+        {t("header.appStore")}
+      </Button>
+    </>
+  );
 
   return (
     // One tooltip provider for the whole grid: the delay keeps a sweep across
@@ -516,27 +537,19 @@ export default function AppsIndexPage() {
           the header keeps the default `start` alignment rather than the `end`
           a lone view switch takes. */}
       <Page>
-        <PageHeader>
-          <PageHeading>
-            <PageTitle>{t("header.title")}</PageTitle>
-          </PageHeading>
-          <PageActions>
-            <Button
-              type="button"
-              size="sm"
-              onClick={lifecycle.upgradeAll}
-              disabled={updatesCount === 0 || menusDisabled}
-            >
-              <Download data-icon="inline-start" className="h-3.5 w-3.5" aria-hidden />
-              {lifecycle.bulkUpgradePending
-                ? t("installed.updateAllUpdating")
-                : t("installed.updateAll")}
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setStoreOpen(true)}>
-              {t("header.appStore")}
-            </Button>
-          </PageActions>
-        </PageHeader>
+        {inTitlebar ? (
+          <SlotContent name={TITLEBAR_SLOT}>
+            <h1 className="min-w-0 flex-1 truncate text-ui text-foreground">{t("header.title")}</h1>
+            <div className="flex shrink-0 items-center gap-2">{headerActions}</div>
+          </SlotContent>
+        ) : (
+          <PageHeader>
+            <PageHeading>
+              <PageTitle>{t("header.title")}</PageTitle>
+            </PageHeading>
+            <PageActions>{headerActions}</PageActions>
+          </PageHeader>
+        )}
 
         {/* Search is the only control that narrows the launcher, so it leads the
             row alone — one filter does not earn the Filter control the toolbar

@@ -4,6 +4,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import i18n from "@/i18n";
+import { SlotOutlet, SlotProvider } from "@/components/slot";
+import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { ToolWorkspace } from "./ToolWorkspace";
 import type { ToolView, WidgetPlacement } from "./use-free-cells";
 
@@ -166,5 +168,36 @@ describe("ToolWorkspace", () => {
 
     rerender(workspace({ activeId: "b", collapsed: false, unreadIds: [] }));
     expect(screen.queryByRole("link", { name: /in new tab/ })).toBeNull();
+  });
+});
+
+describe("ToolWorkspace in the Mac app's title bar", () => {
+  function inTitlebar(view: ToolView) {
+    return (
+      <SlotProvider>
+        <div data-testid="titlebar-end">
+          <SlotOutlet name={TITLEBAR_END_SLOT} />
+        </div>
+        {workspace(view)}
+      </SlotProvider>
+    );
+  }
+
+  it("moves the tabs up over the panel, as wide as the panel", () => {
+    render(inTitlebar({ activeId: "a", collapsed: false, unreadIds: [] }));
+
+    const end = screen.getByTestId("titlebar-end");
+    expect(end.querySelector('[role="tablist"]')).not.toBeNull();
+    const header = end.firstElementChild?.firstElementChild as HTMLElement;
+    const chat = screen.getByTestId("workspace-chat");
+    // The separator is the one pixel between the chat and the panel.
+    expect(Number.parseFloat(header.style.width) + Number.parseFloat(chat.style.width) + 1).toBe(
+      viewportWidth,
+    );
+  });
+
+  it("leaves the title bar when the panel is collapsed", () => {
+    render(inTitlebar({ activeId: "a", collapsed: true, unreadIds: [] }));
+    expect(screen.getByTestId("titlebar-end").querySelector('[role="tablist"]')).toBeNull();
   });
 });

@@ -19,6 +19,10 @@
     "collapseSidebarShortcut": "Collapse sidebar ({{shortcut}})",
     "expandSidebar": "Expand sidebar",
     "expandSidebarShortcut": "Expand sidebar ({{shortcut}})",
+    "back": "Back",
+    "backShortcut": "Back ({{shortcut}})",
+    "forward": "Forward",
+    "forwardShortcut": "Forward ({{shortcut}})",
     "more": "More actions"
   },
   "sidebar": {

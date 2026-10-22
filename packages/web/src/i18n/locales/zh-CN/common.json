@@ -19,6 +19,10 @@
     "collapseSidebarShortcut": "收起侧边栏（{{shortcut}}）",
     "expandSidebar": "展开侧边栏",
     "expandSidebarShortcut": "展开侧边栏（{{shortcut}}）",
+    "back": "后退",
+    "backShortcut": "后退（{{shortcut}}）",
+    "forward": "前进",
+    "forwardShortcut": "前进（{{shortcut}}）",
     "more": "更多操作"
   },
   "sidebar": {

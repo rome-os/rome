@@ -7,6 +7,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InstalledAppCard, SpecSource } from "@rome/api-types/apps";
 import { toast } from "sonner";
 import i18n from "@/i18n";
+import { SlotOutlet, SlotProvider } from "@/components/slot";
+import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 import AppsIndexPage from "./AppsIndexPage";
 
 // Lifecycle failures surface as toasts (the launcher tiles have no room for
@@ -1076,5 +1078,31 @@ describe("AppsIndexPage ghost tiles", () => {
     expect(screen.getByText("Weather")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "New app" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Browse store" })).toBeNull();
+  });
+});
+
+describe("AppsIndexPage in the Mac app's title bar", () => {
+  it("moves its title and actions into the title bar instead of a header row", async () => {
+    mockBackend({ installed: [installedCard({ id: "weather", displayName: "Weather" })] });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SlotProvider>
+          <div data-testid="titlebar">
+            <SlotOutlet name={TITLEBAR_SLOT} />
+          </div>
+          <MemoryRouter>
+            <AppsIndexPage />
+          </MemoryRouter>
+        </SlotProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Weather");
+    const bar = within(screen.getByTestId("titlebar"));
+    expect(bar.getByRole("heading", { level: 1, name: "Apps" })).toBeTruthy();
+    expect(bar.getByRole("button", { name: "App store" })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(document.querySelector('[data-slot="page-header"]')).toBeNull();
   });
 });
