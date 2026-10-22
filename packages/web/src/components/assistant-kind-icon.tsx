@@ -1,7 +1,7 @@
+import { Bot } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ChatGPTIcon, META_LOGO_SRC } from "@/components/brand-icons/ai-tool-icons";
 import { RomeLogo } from "@/components/logo";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 /** The name for an assistant's kind. A kind this dashboard does not know yet is
@@ -21,16 +21,11 @@ const META_MASK = {
   maskRepeat: "no-repeat",
 } as const;
 
-/** Whether this dashboard has a mark for the kind. */
-function hasMark(kind: string): boolean {
-  return kind === "dot" || kind === "muse" || kind === "rome";
-}
-
 /**
  * The product's logo for an assistant's kind, in the current text color. The
  * same marks Rome Cloud's Settings draws, from the files this dashboard
  * already ships: ChatGPT for a Dot, Meta's for Muse, which has no mark of its
- * own, and Rome's. Null for a kind with no mark.
+ * own, and Rome's. A kind this dashboard has no mark for gets a generic one.
  */
 export function AssistantKindMark({ kind, className }: { kind: string; className?: string }) {
   if (kind === "dot")
@@ -47,14 +42,13 @@ export function AssistantKindMark({ kind, className }: { kind: string; className
       />
     );
   }
-  return null;
+  return <Bot aria-hidden="true" className={className} />;
 }
 
 /**
- * Marks an assistant's kind beside its name: the product's logo, named for
- * screen readers and on hover. A name can be anything its owner chose, so the
- * mark keeps the kind clear without repeating it as text. A kind with no mark
- * is shown as its name instead.
+ * Marks an assistant's kind in front of its name: the product's logo, named
+ * for screen readers and on hover. A name can be anything its owner chose, so
+ * the mark keeps the kind clear without repeating it as text.
  */
 export function AssistantKindIcon({
   kind,
@@ -64,13 +58,6 @@ export function AssistantKindIcon({
   className?: string;
 }) {
   const label = useAssistantKindLabel()(kind);
-  if (!hasMark(kind)) {
-    return (
-      <Badge variant="muted" className="shrink-0">
-        {label}
-      </Badge>
-    );
-  }
   return (
     <span
       role="img"

@@ -16,7 +16,7 @@ import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { listAssistants, readAssistantMessages, sendToAssistant } from "@/lib/assistants-api";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { randomUUID } from "@/lib/random-uuid";
-import { AssistantKindIcon, AssistantKindMark } from "@/components/assistant-kind-icon";
+import { AssistantKindMark, useAssistantKindLabel } from "@/components/assistant-kind-icon";
 
 /** How often the open chat is read again, so an assistant's message and main's
  *  answer appear without a reload. */
@@ -37,6 +37,7 @@ export function AssistantChatPage() {
   const { agentId = "" } = useParams<{ agentId: string }>();
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
+  const kindLabel = useAssistantKindLabel();
   const { scrollRef, contentRef } = useStickToBottom();
 
   const assistants = useQuery({
@@ -72,7 +73,7 @@ export function AssistantChatPage() {
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <AgentAvatar label={name} size="sm" mark={mark} className="shrink-0" />
               <span className="truncate text-ui text-foreground">{name}</span>
-              {assistant ? <AssistantKindIcon kind={assistant.kind} /> : null}
+              {assistant ? <span className="sr-only">{kindLabel(assistant.kind)}</span> : null}
             </div>
           </div>
 

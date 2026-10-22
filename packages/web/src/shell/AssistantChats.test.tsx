@@ -59,7 +59,7 @@ describe("AssistantChats", () => {
   it("names a kind it has no mark for, as Rome Cloud spells it", async () => {
     serve([assistant(DOT, "Grok", "grok")]);
     renderGroup();
-    expect(await screen.findByText("grok")).toBeTruthy();
+    expect(await screen.findByRole("img", { name: "grok" })).toBeTruthy();
   });
 
   it("renders nothing without assistants, or when the list cannot be read", async () => {
