@@ -76,6 +76,33 @@ function githubCard(
   return card;
 }
 
+const SHOPIFY_INSTALL_URL =
+  "https://admin.shopify.com/oauth/install?client_id=c7248430857716e104a01db512ed40ed";
+
+/** A Shopify card whose connect hint is Shopify's install link, as core sends it. */
+function shopifyCard(
+  state: GrantState,
+  { display = null }: { display?: GrantDisplay | null } = {},
+): ConnectionCard {
+  const connection: ApiConnection = {
+    id: "conn-shopify",
+    connectionKind: "shopify",
+    label: "Shopify",
+    grants: { store: state },
+    display: { store: display },
+    capabilities: {
+      talk: { state: "unsupported" },
+      act: { state: "unsupported" },
+      watch: { state: "unsupported" },
+    },
+    connect: { url: SHOPIFY_INSTALL_URL, available: true, unavailableReason: null },
+    setups: {},
+  };
+  const card = buildConnectionCards([connection]).find((entry) => entry.service === "shopify");
+  if (!card) throw new Error("no shopify card");
+  return card;
+}
+
 function renderSection(
   card: ConnectionCard,
   {
@@ -259,8 +286,45 @@ describe("OAuthConnectionSection", () => {
     expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ force: true });
   });
 
-  it("shows the store form when Reconnect starts with a question (Shopify)", async () => {
-    rs.spyOn(globalThis, "fetch").mockImplementation(
+  it("connects Shopify through Shopify's install link in a new tab, never asking for the store", () => {
+    const fetchMock = rs.spyOn(globalThis, "fetch");
+    renderSection(shopifyCard("unauthorized"));
+
+    const link = screen.getByRole("link", { name: "Connect in Shopify" });
+    expect(link.getAttribute("href")).toBe(SHOPIFY_INSTALL_URL);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(
+      screen.getByText("Shopify opens in a new tab, where you pick the store and approve Rome OS."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+    expect(screen.queryByLabelText("Store address")).toBeNull();
+
+    fireEvent.click(link);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reconnects Shopify through the same install link", () => {
+    const fetchMock = rs.spyOn(globalThis, "fetch");
+    renderSection(
+      shopifyCard("degraded", {
+        display: {
+          displayName: "Acme Goods",
+          handle: "acme.myshopify.com",
+          email: null,
+          avatarUrl: null,
+        },
+      }),
+    );
+
+    const link = screen.getByRole("link", { name: "Reconnect" });
+    expect(link.getAttribute("href")).toBe(SHOPIFY_INSTALL_URL);
+    expect(link.getAttribute("target")).toBe("_blank");
+    fireEvent.click(link);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("asks for the store only when the guardian reconnects through their own Shopify app", async () => {
+    const fetchMock = rs.spyOn(globalThis, "fetch").mockImplementation(
       async () =>
         new Response(
           JSON.stringify({
@@ -269,7 +333,7 @@ describe("OAuthConnectionSection", () => {
             state: {
               status: "awaiting-input",
               form: {
-                instructions: "Enter your store's myshopify.com address.",
+                instructions: "Enter the store your own Shopify app connects to.",
                 fields: [{ name: "shop", label: "Store address", secret: false }],
               },
             },
@@ -278,16 +342,20 @@ describe("OAuthConnectionSection", () => {
         ),
     );
     renderSection(
-      githubCard("degraded", {
+      shopifyCard("degraded", {
         display: { displayName: "Acme Goods", handle: null, email: null, avatarUrl: null },
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use your own Shopify app" }));
     expect(await screen.findByLabelText("Store address")).toBeTruthy();
-    expect(screen.getByText("Enter your store's myshopify.com address.")).toBeTruthy();
+    expect(screen.getByText("Enter the store your own Shopify app connects to.")).toBeTruthy();
+    const call = fetchMock.mock.calls.find(
+      ([url]) => url === "/api/connections/conn-shopify/grants/store/setup",
+    );
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ force: true });
   });
 
-  it("opens the hand-off on its own after the guardian submits the store form", async () => {
+  it("opens the hand-off on its own after the guardian submits the own-app store form", async () => {
     const assign = rs.fn();
     rs.stubGlobal("location", { ...window.location, assign });
     const asksForStore = {
@@ -304,9 +372,9 @@ describe("OAuthConnectionSection", () => {
           : { state: asksForStore };
       return new Response(JSON.stringify(body), { status: 200 });
     });
-    renderSection(githubCard("unauthorized"));
+    renderSection(shopifyCard("unauthorized"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use your own Shopify app" }));
     fireEvent.change(await screen.findByLabelText("Store address"), {
       target: { value: "acme" },
     });

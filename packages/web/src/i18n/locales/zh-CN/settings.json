@@ -75,7 +75,12 @@
       "accessExpired": "访问已过期 — 重新连接以继续使用",
       "reconnect": "重新连接",
       "reconnecting": "正在重新连接账户…",
-      "resumePending": "你已开始连接 {{label}} 但尚未完成。请在 {{label}} 上继续，或取消。"
+      "resumePending": "你已开始连接 {{label}} 但尚未完成。请在 {{label}} 上继续，或取消。",
+      "shopify": {
+        "connect": "在 Shopify 中连接",
+        "ownApp": "使用你自己的 Shopify 应用",
+        "installNote": "Shopify 会在新标签页中打开，你在那里选择店铺并授权 Rome OS。"
+      }
     },
     "composio": {
       "unavailable": "此主机上无法使用 Composio。"

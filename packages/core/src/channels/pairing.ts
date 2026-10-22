@@ -70,8 +70,11 @@ export function createPairingAdmission(deps: {
     // conversation's next reply, so on a slow provider it can arrive after the
     // agent's first answer. Approval is recorded before the send, so only the
     // order of the two bot messages is at stake.
+    // Outside a direct message the reply answers the message, so it lands
+    // where the message was said, such as in its Slack thread.
+    const replyToMessageId = message.thread?.kind === "dm" ? undefined : message.messageId;
     const reply = (text: string): void => {
-      sendOn(deps.registry, connectionId, message.chatId, text).catch(() => {
+      sendOn(deps.registry, connectionId, message.chatId, text, replyToMessageId).catch(() => {
         // Provider errors may include the rejected request body. Do not log them.
         log.error("pairing reply failed", { connectionId, senderId: message.senderId });
       });
@@ -206,6 +209,10 @@ async function sendOn(
   connectionId: string,
   chatId: ChatId,
   text: string,
+  replyToMessageId?: string,
 ): Promise<void> {
-  await sendThrough(registry.get(connectionId), chatId, { text });
+  await sendThrough(registry.get(connectionId), chatId, {
+    text,
+    ...(replyToMessageId ? { replyToMessageId } : {}),
+  });
 }

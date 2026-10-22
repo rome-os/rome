@@ -31,6 +31,22 @@ export const OAUTH_PROVIDER_DESCRIPTORS: Record<OAuthProvider, OAuthProviderDesc
   },
 };
 
+/**
+ * The client id of Rome OS, the public Shopify app Rome Cloud brokers stores through.
+ * Its App URL is production Rome Cloud, so an instance whose `PANTHEON_BASE_ORIGIN`
+ * points elsewhere still installs through production, and replacing the app needs
+ * a Rome release.
+ */
+export const SHOPIFY_ROME_OS_CLIENT_ID = "c7248430857716e104a01db512ed40ed";
+
+/**
+ * Shopify's install link for Rome OS. Shopify asks the merchant which store and
+ * for their approval, then opens Rome OS's App URL on Rome Cloud, which brokers
+ * the grant back to the merchant's Rome. Connect and reconnect both use it, so
+ * Rome never asks the merchant to type their store.
+ */
+export const SHOPIFY_INSTALL_URL = `https://admin.shopify.com/oauth/install?client_id=${SHOPIFY_ROME_OS_CLIENT_ID}`;
+
 // A store's permanent `.myshopify.com` domain, per Shopify's own validation.
 const SHOPIFY_SHOP_DOMAIN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
 

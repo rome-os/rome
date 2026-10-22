@@ -255,18 +255,24 @@ export interface OAuthProviderSetupDeps {
   refresh?: (refreshToken: string) => Promise<Credential>;
 }
 
-/** The form that asks which store to connect, for Shopify. */
+/** The form that asks which store to connect, for a guardian's own Shopify app. */
 const SHOPIFY_STORE_FORM = {
   instructions:
-    "Paste your Shopify admin address (admin.shopify.com/store/…) or enter your store's myshopify.com address.",
+    "Enter the store your own Shopify app connects to, like acme.myshopify.com, or paste the store's admin address.",
   fields: [{ name: "shop", label: "Store address", secret: false }],
-  note: "Rome connects with the Rome OS app. Shopify asks you to approve it next.",
+  note: "Only for a Shopify app you saved in Rome Cloud. To connect Rome OS, use Connect in Shopify instead.",
 } as const;
 
 /**
  * Ask the guardian which Shopify store to connect, re-asking until the answer is
  * a `.myshopify.com` store. Shopify authorizes per store, so Rome Cloud needs the
  * store before it can send the guardian to Shopify's consent screen.
+ *
+ * Only a guardian's own Shopify app needs this. Rome OS connects through
+ * `SHOPIFY_INSTALL_URL`, where Shopify asks which store, because Shopify's App
+ * Store rules forbid a public app from asking the merchant to type it. An own
+ * app has no install link Rome knows, and Rome Cloud picks the own app only when
+ * the guardian saved one there, which this instance cannot see.
  */
 async function promptShopifyStore(interact: Parameters<SetupFn>[0]): Promise<string> {
   let error: string | undefined;

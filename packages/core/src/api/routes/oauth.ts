@@ -8,6 +8,7 @@ import {
   isEnabledOAuthProvider,
   normalizeShopifyShopDomain,
   OAUTH_PROVIDER_DESCRIPTORS,
+  SHOPIFY_INSTALL_URL,
 } from "../../lib/oauth-providers.js";
 import {
   createRomeCloudOAuthStartRedirect,
@@ -17,7 +18,7 @@ import {
 import { importProviderBundle } from "../../connections/providers-import.js";
 import type { ApiDeps } from "../deps.js";
 
-/** Where Shopify connects when no store is named: its Settings card asks for one. */
+/** The Shopify card, where a signed-out browser finishes a Shopify-initiated install. */
 const SHOPIFY_SETTINGS_PATH = "/settings/connections/shopify";
 
 export function oauthRoutes(deps: ApiDeps): Hono {
@@ -53,12 +54,12 @@ export function oauthRoutes(deps: ApiDeps): Hono {
     }
     // Shopify authorizes per store. Rome Cloud's Shopify install page names the
     // store here once Shopify has installed the app. A link without a valid
-    // store opens the Settings card, which asks for one.
+    // store goes to Shopify's install link, where Shopify asks which store.
     let shop: string | undefined;
     if (provider === "shopify") {
       const shopDomain = normalizeShopifyShopDomain(c.req.query("shop"));
       if (!shopDomain) {
-        return c.redirect(SHOPIFY_SETTINGS_PATH, 303);
+        return c.redirect(SHOPIFY_INSTALL_URL, 303);
       }
       // `/api/oauth/*` is public so the sign-in providers can start here, and a
       // redeem with no session signs the browser in. Connecting a store is the
@@ -90,10 +91,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "Unsupported provider." }, 404);
     }
     if (provider === "shopify") {
-      return c.json(
-        { error: `Connect Shopify from ${SHOPIFY_SETTINGS_PATH}, which asks for the store.` },
-        400,
-      );
+      return c.json({ error: `Connect Shopify from Shopify: ${SHOPIFY_INSTALL_URL}` }, 400);
     }
 
     try {

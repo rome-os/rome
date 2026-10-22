@@ -617,12 +617,25 @@ export function slackUserIdOf(senderId: string): string {
   return separator === -1 ? senderId : senderId.slice(separator + 1);
 }
 
-/** A thread in a Slack channel is its own conversation, addressed by the
- *  channel and the thread's first message. */
-export function slackThreadChatId(channelId: string, threadTs: string): ChatId {
-  return `${channelId}:${threadTs}` as ChatId;
+/** A message's id. One said in a thread carries its thread, as
+ *  `thread:message`, so a reply to it finds the thread without asking Slack. */
+export function slackMessageId(ts: string, threadTs?: string): string {
+  return threadTs && threadTs !== ts ? `${threadTs}:${ts}` : ts;
 }
 
+/** The thread a reply to `messageId` goes into. A message in a thread is
+ *  answered in that thread, and one at the top of a channel starts a thread
+ *  under it. A direct message outside a thread is answered in place. */
+export function replyThreadOf(channelId: string, messageId?: string): string | undefined {
+  if (!messageId) return undefined;
+  const separator = messageId.indexOf(":");
+  if (separator !== -1) return messageId.slice(0, separator);
+  return channelId.startsWith("D") ? undefined : messageId;
+}
+
+/** A chat's channel, and the thread an older thread-keyed chat id names. A
+ *  thread lives inside its channel's chat, so a chat id carries no thread; the
+ *  older `channel:thread` form is still read. */
 export function parseSlackChatId(chatId: string): {
   channelId: string;
   threadTs?: string;
@@ -767,7 +780,9 @@ export class SlackAdapter {
     }
     const text = message.text?.trim();
     if (!text) return { chatId };
-    const { channelId, threadTs } = parseSlackChatId(chatId);
+    const parsed = parseSlackChatId(chatId);
+    const channelId = parsed.channelId;
+    const threadTs = parsed.threadTs ?? replyThreadOf(channelId, message.replyToMessageId);
     let firstTs: string | undefined;
     for (const chunk of splitSlackText(text)) {
       const sent = await this.api.postMessage(
@@ -777,7 +792,10 @@ export class SlackAdapter {
       );
       firstTs ??= sent.ts;
     }
-    return { chatId, ...(firstTs ? { messageId: firstTs } : {}) };
+    return {
+      chatId,
+      ...(firstTs ? { messageId: slackMessageId(firstTs, threadTs) } : {}),
+    };
   }
 
   /** The direct-message conversation with a workspace member. */
@@ -849,7 +867,7 @@ export class SlackAdapter {
     const base = {
       channel: this.config.channel,
       direction: "inbound" as const,
-      messageId: ts,
+      messageId: slackMessageId(ts, event.thread_ts),
       senderId: slackSenderId(payload.team_id, event.user!),
       text,
       attachments: [],
@@ -866,13 +884,13 @@ export class SlackAdapter {
       };
     }
     if (event.type === "app_mention" && event.channel_type !== "im" && !channel.startsWith("D")) {
-      const rootTs = event.thread_ts ?? ts;
+      // A thread lives inside its channel's chat. The reply finds the thread
+      // from the id of the message it answers.
       return {
         ...base,
-        chatId: slackThreadChatId(channel, rootTs),
-        parentChatId: channel as ChatId,
+        chatId: channel as ChatId,
         ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
-        thread: { kind: "topic" },
+        thread: { kind: "group" },
         addressing: "mention",
       };
     }

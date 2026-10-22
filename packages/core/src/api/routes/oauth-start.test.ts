@@ -33,6 +33,7 @@ import { oauthPendingAttempts } from "../../db/schema.js";
 import { createTestDb } from "../../test/helpers.js";
 import { COOKIE_NAME, createGuardianSession } from "../../lib/auth.js";
 import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
+import { SHOPIFY_INSTALL_URL } from "../../lib/oauth-providers.js";
 import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
@@ -114,21 +115,26 @@ describe("GET /oauth/shopify/start", () => {
     expect(await db.select().from(oauthPendingAttempts)).toHaveLength(0);
   });
 
-  it("sends an invalid store to the Shopify card without starting a connect", async () => {
+  it("sends an invalid store to Shopify's install link without starting a connect", async () => {
     for (const shop of ["evil.example.com", "acme.myshopify.com.evil.example", "-acme"]) {
       const res = await start(`?shop=${encodeURIComponent(shop)}`, { signedIn: true });
 
       expect(res.status).toBe(303);
-      expect(res.headers.get("location")).toBe("/settings/connections/shopify");
+      expect(res.headers.get("location")).toBe(SHOPIFY_INSTALL_URL);
     }
     expect(await db.select().from(oauthPendingAttempts)).toHaveLength(0);
   });
 
-  it("sends a start with no store to the Shopify card, which asks for one", async () => {
-    const res = await start("", { signedIn: true });
+  it("sends a start with no store to Shopify's install link, where Shopify asks for one", async () => {
+    for (const signedIn of [true, false]) {
+      const res = await start("", { signedIn });
 
-    expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/settings/connections/shopify");
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe(
+        "https://admin.shopify.com/oauth/install?client_id=c7248430857716e104a01db512ed40ed",
+      );
+    }
+    expect(await db.select().from(oauthPendingAttempts)).toHaveLength(0);
   });
 
   it("still refuses a POST start for Shopify", async () => {
@@ -139,9 +145,7 @@ describe("GET /oauth/shopify/start", () => {
     });
 
     expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toMatch(
-      /settings\/connections\/shopify/,
-    );
+    expect(((await res.json()) as { error: string }).error).toContain(SHOPIFY_INSTALL_URL);
   });
 
   it("redeems a route-started connect into the Shopify grant and lands on the Shopify card", async () => {
