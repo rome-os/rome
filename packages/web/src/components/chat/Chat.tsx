@@ -1198,6 +1198,11 @@ export function Chat({
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
         startSessionStream(reattachSessionId, target.turnId);
+        // A backend turn already listed under its agent turn id hides its saved
+        // trace from the first render, before the replayed `turn_id` arrives.
+        if (target.agentTurnId) {
+          adoptSessionAgentTurn(reattachSessionId, target.turnId, target.agentTurnId);
+        }
         setStreamError(null);
         // Not cancelled with this effect: followTurn ends with its turn (or
         // on unmount), and the entry it holds keeps this poll from doubling up.
@@ -1218,7 +1223,13 @@ export function Chat({
       cancelled = true;
       if (pollTimer) clearTimeout(pollTimer);
     };
-  }, [floorSessionId, followTurn, streamReconnectRevision, startSessionStream]);
+  }, [
+    floorSessionId,
+    followTurn,
+    streamReconnectRevision,
+    startSessionStream,
+    adoptSessionAgentTurn,
+  ]);
 
   // Shared lifecycle for "post a turn → attach SSE → consume" so both the
   // composer send and the inline app-component submit go through the same
@@ -1601,8 +1612,8 @@ export function Chat({
   const displayedStreaming = isActiveSessionStreaming;
 
   // The grouped speaker rows. Memoized so a streaming turn never rebuilds the
-  // transcript — runningTurnId/isStreaming only change at turn boundaries, and
-  // once more when a backend turn names its agent turn.
+  // transcript. runningTurnId and isStreaming change only at turn boundaries,
+  // and once more when a backend turn names its agent turn.
   const rows = useMemo(
     () =>
       buildRows(displayMessages, identityBySession, mainIdentity, {

@@ -917,6 +917,63 @@ describe("Chat turn stream lifecycle", () => {
     }
   });
 
+  it("hides a backend turn's saved trace on reattach when the listing names the turn", async () => {
+    // A reload mid-turn finds the turn in the listing, which already carries the
+    // agent's turn id. The stream sends nothing here, so only the listing can
+    // name the turn.
+    const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
+    const traceMessage = (id: string, turnId: string) => ({
+      id,
+      sessionId: "session-1",
+      turnId,
+      role: "trace" as const,
+      content: "[]",
+      createdAt: "2026-10-22T00:00:00.000Z",
+      traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+    });
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      traceMessage("trace-old", "turn-old"),
+      traceMessage("trace-real", "turn-real"),
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      {
+        turnId: "backend:wake",
+        agentTurnId: "turn-real",
+        streamId: "stream-wake",
+        startedAt: "",
+        status: "running",
+      },
+    ]);
+    rs.mocked(openTurnStream).mockImplementation((_turnId, signal) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener(
+            "abort",
+            () => controller.error(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        },
+      });
+      return Promise.resolve(new Response(body));
+    });
+    try {
+      renderChat(<Chat sessionId="session-1" />);
+      await waitFor(() =>
+        expect(openTurnStream).toHaveBeenCalledWith("backend:wake", expect.any(Object)),
+      );
+      await waitFor(() =>
+        expect(screen.getAllByTestId("trace-row").map((row) => row.dataset.rowKey)).toEqual([
+          "trace-old",
+        ]),
+      );
+      expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+    } finally {
+      rs.mocked(listSessionMessages).mockResolvedValue([]);
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
+    }
+  });
+
   it("keeps a background turn's replayed trace and widgets from retargeting the host", async () => {
     rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
     const encoder = new TextEncoder();
