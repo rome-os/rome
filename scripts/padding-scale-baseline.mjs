@@ -10,7 +10,6 @@
  */
 export const BASELINE = {
   "packages/web/src/components/docx-preview-pane.tsx": ["padding: 1rem"],
-  "packages/web/src/globals.css": ["padding-top: 2.5rem"],
   "packages/web/src/pages/dev/StyleGuidePage.tsx": [
     "padding: 12px",
     "padding: 16px",
