@@ -80,8 +80,10 @@ async function savePracticeNotes(
   const text = `\n\n${notes}\n`;
   await mkdir(dirname(journalPath), { recursive: true });
   await appendFile(journalPath, text);
+  // An edit with no previous text marks these as practice notes: an agent's
+  // Edit always records the text it replaced, even when that is empty.
   runs.addChanges(runId, [
-    { op: "edit", path: journalPath, content: text, previous: "", truncated: false },
+    { op: "edit", path: journalPath, content: text, previous: null, truncated: false },
   ]);
 }
 
@@ -89,8 +91,9 @@ async function savePracticeNotes(
 function earlierPracticeNotes(
   runs: ReturnType<typeof createRunsRepository>,
   memoryDir: string,
+  runId: string,
 ): string {
-  const notes = runs.practiceNotes(memoryDir, EARLIER_PRACTICE_RUNS);
+  const notes = runs.practiceNotes(memoryDir, EARLIER_PRACTICE_RUNS, runId);
   if (notes.length === 0) return "(None yet.)";
   return notes
     .map(({ startedAt, content }) => `### Run of ${startedAt.toISOString()}\n\n${content.trim()}`)
@@ -197,19 +200,6 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
       const stopHeartbeat = keepRunAlive(runs, runId);
       let staging: string | undefined;
       try {
-        let before: Map<string, Buffer>;
-        try {
-          await ensureUserSkillsCarrier(carrierDir);
-          await removeStaleStaging(carrierDir);
-          staging = await stageCarrierSkills(carrierDir);
-          before = await snapshotCarrierSkills(staging);
-        } catch (err) {
-          const error = `Could not stage the user-skills carrier: ${err instanceof Error ? err.message : String(err)}`;
-          runs.finish(runId, { status: "failed", error });
-          log.error("dream failed to stage skills", { error, runId });
-          return { status: "error", error };
-        }
-
         const now = new Date();
         const journalPath = join(
           memoryDir,
@@ -235,7 +225,23 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         const memoryStopped = await runAgent("dream", "Memory agent", memoryPrompt, memoryRecorder);
         if (memoryStopped) return memoryStopped;
 
-        const practiceRecorder = new RunRecorder(runs, runId);
+        // Staged only now, so the staging copy does not exist while the
+        // memory agent reads other people's chats and cannot plant skills or
+        // notes in it.
+        let before: Map<string, Buffer>;
+        try {
+          await ensureUserSkillsCarrier(carrierDir);
+          await removeStaleStaging(carrierDir);
+          staging = await stageCarrierSkills(carrierDir);
+          before = await snapshotCarrierSkills(staging);
+        } catch (err) {
+          const error = `Could not stage the user-skills carrier: ${err instanceof Error ? err.message : String(err)}`;
+          runs.finish(runId, { status: "failed", error });
+          log.error("dream failed to stage skills", { error, runId });
+          return { status: "error", error };
+        }
+
+        const practiceRecorder = new RunRecorder(runs, runId, staging);
         // The practice agent gets no memory or journal path: the memory agent
         // just wrote those from other people's chats. Its notes go to a file
         // of its own, which the action appends to the journal.
@@ -250,7 +256,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           "",
           "## Your notes from earlier runs",
           "",
-          earlierPracticeNotes(runs, memoryDir),
+          earlierPracticeNotes(runs, memoryDir, runId),
         ].join("\n");
         const appsBefore = await snapshotApps(appsDir, join(staging, "apps-before"));
         let practiceStopped: ActionResult | null;

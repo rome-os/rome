@@ -20,9 +20,14 @@ export class RunRecorder {
   error: string | null = null;
   private interrupted = false;
 
+  /**
+   * @param ignoredDir Changes under it are not recorded: the action records
+   *   the authoritative version of what the agent writes there.
+   */
   constructor(
     private readonly repo: RunsRepository,
     private readonly runId: string,
+    private readonly ignoredDir?: string,
   ) {}
 
   observe(event: AgentEvent): void {
@@ -39,7 +44,10 @@ export class RunRecorder {
       return;
     }
     if (event.type === "tool_use") {
-      const changes = changesFromToolUse(event.tool, event.input);
+      const ignored = this.ignoredDir ? `${this.ignoredDir}/` : null;
+      const changes = changesFromToolUse(event.tool, event.input).filter(
+        (change) => !ignored || !change.path.startsWith(ignored),
+      );
       if (changes.length > 0) this.pending.set(event.id, changes);
       return;
     }

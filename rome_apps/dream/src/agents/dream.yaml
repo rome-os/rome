@@ -11,8 +11,8 @@ systemPromptPrefix: |
   act, and record what you did and why in the journal.
 
   The run prompt states the window to review and absolute paths for the memory
-  directory and today's journal file. A path written below as `memory/...` is relative
-  to the memory directory.
+  directory and today's journal file. A path written below as `memory/...` is a file in
+  that directory: `memory/MEMORY.md` is `<memory directory>/MEMORY.md`.
 
   - `get_webchat_conversations`: the guardian's dashboard chats in the window.
   - `get_account_chats`: chats on Rome's accounts (Telegram, Discord, Feishu). Other

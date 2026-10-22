@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, max, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, max, ne, sql } from "drizzle-orm";
 import type { AppDbContext, DrizzleDb } from "@rome-os/app-runtime";
 import type { FileChange } from "../../lib/changes.js";
 import { STALE_RUN_MS } from "../../lib/run-view.js";
@@ -211,11 +211,15 @@ export class RunsRepository {
   }
 
   /**
-   * The practice notes the last `limit` dreams appended to their journal under
-   * `memoryDir`, oldest first. The action records each as an edit with no
-   * previous text, which no agent's Edit produces.
+   * The practice notes the last `limit` dreams before `runId` appended to their
+   * journal under `memoryDir`, oldest first. The action records each as an
+   * edit with a null previous text, which no agent's Edit produces.
    */
-  practiceNotes(memoryDir: string, limit: number): Array<{ startedAt: Date; content: string }> {
+  practiceNotes(
+    memoryDir: string,
+    limit: number,
+    runId: string,
+  ): Array<{ startedAt: Date; content: string }> {
     const { runs, runChanges } = this.tables;
     const rows = this.db
       .select({ startedAt: runs.startedAt, content: runChanges.content })
@@ -224,8 +228,9 @@ export class RunsRepository {
       .where(
         and(
           eq(runs.kind, "dream"),
+          ne(runs.id, runId),
           eq(runChanges.op, "edit"),
-          eq(runChanges.previous, ""),
+          isNull(runChanges.previous),
           sql`substr(${runChanges.path}, 1, ${memoryDir.length + 9}) = ${`${memoryDir}/journal/`}`,
         ),
       )

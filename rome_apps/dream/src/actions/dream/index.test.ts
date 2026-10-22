@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -633,6 +641,42 @@ describe("dream skills", () => {
       third.indexOf("- reported the export bug"),
     );
     expect(third).not.toContain("- nothing new");
+  });
+
+  it("stages skills only after the memory agent, and never takes its edits for practice notes", async () => {
+    const memoryDir = join(dirname(carrierDir), "memory");
+    const journal = (prompt: string) => /Today's journal entry: (.+)$/m.exec(prompt)?.[1] as string;
+    const prompts: string[] = [];
+    let stagingDuringMemory: string[] = [];
+    const run = async function* (params: { agentName: string; prompt: string }) {
+      prompts.push(params.prompt);
+      if (params.agentName === "dream") {
+        stagingDuringMemory = readdirSync(dirname(carrierDir)).filter((name) =>
+          name.startsWith(".dream-skill-review-"),
+        );
+        // An Edit of an empty journal records an empty previous text.
+        mkdirSync(dirname(journal(params.prompt)), { recursive: true });
+        writeFileSync(journal(params.prompt), "");
+        yield {
+          type: "tool_use",
+          id: "e1",
+          tool: "Edit",
+          input: { file_path: journal(params.prompt), old_string: "", new_string: "relayed text" },
+        };
+        yield { type: "tool_result", toolUseId: "e1", tool: "Edit", output: "ok" };
+      }
+      yield { type: "result", content: "done" };
+    };
+    for (let i = 0; i < 2; i++) {
+      const deps = makeDeps([]);
+      deps.memoryDir = memoryDir;
+      (deps.agentRunner as unknown as { run: unknown }).run = run;
+      await createAction(actionConfig, deps).execute({});
+    }
+
+    expect(stagingDuringMemory).toEqual([]);
+    expect(prompts[3]).toContain("(None yet.)");
+    expect(prompts[3]).not.toContain("relayed text");
   });
 
   it("says which agent failed when the practice agent fails", async () => {
