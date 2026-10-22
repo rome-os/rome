@@ -37,6 +37,17 @@ function actorLabel(raw: string | null): string | null {
   }
 }
 
+/** Started by a visitor or an anonymous viewer rather than the guardian or Rome. */
+function byOutsider(raw: string | null): boolean {
+  if (!raw) return false;
+  try {
+    const { kind } = JSON.parse(raw) as { kind?: string };
+    return kind === "visitor" || kind === "anonymous";
+  } catch {
+    return true;
+  }
+}
+
 function formatActionLogs(rows: ActionExecutionRow[]): string {
   if (rows.length === 0) {
     return "(No action executions found in the requested window.)";
@@ -74,7 +85,11 @@ function formatActionLogs(rows: ActionExecutionRow[]): string {
     for (const errRow of errors) {
       const time = new Date(errRow.started_at * 1000).toISOString();
       const who = actorLabel(errRow.actor);
-      lines.push(`- **[${time}] ERROR${who ? ` (by ${who})` : ""}:** ${errRow.error}`);
+      // A visitor's or an anonymous viewer's failure can echo what they typed,
+      // and Dream's practice agent reads these logs with Bash, so only the
+      // failure itself is shown.
+      const text = byOutsider(errRow.actor) ? "(error text hidden)" : errRow.error;
+      lines.push(`- **[${time}] ERROR${who ? ` (by ${who})` : ""}:** ${text}`);
     }
 
     lines.push("");

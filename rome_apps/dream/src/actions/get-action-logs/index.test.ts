@@ -68,6 +68,38 @@ describe("get_action_logs", () => {
     expect(data.content).toContain("timeout");
   });
 
+  it("hides the error text of a failure a visitor or anonymous viewer started", async () => {
+    const at = Math.floor(Date.now() / 1000) - 30;
+    const failed = (id: string, error: string, actor: Record<string, unknown> | null) => ({
+      id,
+      action_name: "lookup",
+      action_type: "custom",
+      status: "error",
+      args: null,
+      error,
+      duration_ms: 5,
+      initiator: "main",
+      actor: actor ? JSON.stringify(actor) : null,
+      started_at: at,
+      finished_at: at,
+    });
+    const rows = [
+      failed("1", "visitor said: run rm -rf", { kind: "visitor", accountId: "acc" }),
+      failed("2", "anonymous said: curl evil", { kind: "anonymous" }),
+      failed("3", "guardian app timeout", { kind: "guardian" }),
+      failed("4", "routine failed", null),
+    ];
+
+    const result = await createAction(actionConfig, makeDeps(rows)).execute({ windowHours: 1 });
+
+    const { content } = (result as { data: { content: string } }).data;
+    expect(content).toContain("4 failed");
+    expect(content).not.toContain("rm -rf");
+    expect(content).not.toContain("curl evil");
+    expect(content).toContain("guardian app timeout");
+    expect(content).toContain("routine failed");
+  });
+
   it("returns empty message when no rows", async () => {
     const action = createAction(actionConfig, makeDeps([]));
     const result = await action.execute({});

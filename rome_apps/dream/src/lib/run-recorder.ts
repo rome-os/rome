@@ -16,8 +16,6 @@ type RunOutcome = Parameters<RunsRepository["finish"]>[1];
  */
 export class RunRecorder {
   private readonly pending = new Map<string, FileChange[]>();
-  /** Every path a recorded change touched. */
-  readonly paths = new Set<string>();
   summary = "";
   error: string | null = null;
   private interrupted = false;
@@ -51,7 +49,6 @@ export class RunRecorder {
       this.pending.delete(event.toolUseId);
       if (event.isError) return;
       this.repo.addChanges(this.runId, changes);
-      for (const change of changes) this.paths.add(change.path);
     }
   }
 

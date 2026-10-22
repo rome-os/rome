@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   createAppLogger,
   type Action,
@@ -13,6 +13,7 @@ import { createRunsRepository } from "../../db/repositories/runs.js";
 import { hasChatSince } from "../../lib/chat-activity.js";
 import { DREAM_WINDOW_HOURS } from "../../lib/dream-routine.js";
 import { appChangesSince, snapshotApps } from "../../lib/app-changes.js";
+import { type FileChange, MAX_CHANGE_CHARS } from "../../lib/changes.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 import {
   ensureUserSkillsCarrier,
@@ -35,6 +36,29 @@ export interface DreamDeps {
 /** Core's profile memory directory (`getProfileMemoryDir`), which an app cannot import. */
 function profileMemoryDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(homedir(), ".rome", env.ROME_PROFILE || "default", "memory");
+}
+
+/** The installed skills a dream added or changed, as writes or as edits of their old text. */
+async function installedSkillChanges(
+  carrierDir: string,
+  installed: string[],
+  before: Map<string, Buffer>,
+): Promise<FileChange[]> {
+  const changes: FileChange[] = [];
+  for (const entry of installed) {
+    const path = join(carrierDir, entry, "SKILL.md");
+    const content = await readFile(path, "utf8").catch(() => null);
+    if (content === null) continue;
+    const previous = before.get(basename(entry))?.toString("utf8") ?? null;
+    changes.push({
+      op: previous === null ? "write" : "edit",
+      path,
+      content: content.slice(0, MAX_CHANGE_CHARS),
+      previous: previous?.slice(0, MAX_CHANGE_CHARS) ?? null,
+      truncated: content.length > MAX_CHANGE_CHARS || (previous?.length ?? 0) > MAX_CHANGE_CHARS,
+    });
+  }
+  return changes;
 }
 
 /** Earlier runs' practice notes the practice agent sees. */
@@ -236,10 +260,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         } finally {
           // App changes are live once made, so record them even from a run
           // that failed, for the guardian to review.
-          runs.addChanges(
-            runId,
-            await appChangesSince(appsDir, appsBefore, practiceRecorder.paths),
-          );
+          runs.addChanges(runId, await appChangesSince(appsDir, appsBefore));
           await savePracticeNotes(notesPath, journalPath, logPath, now, runs, runId);
         }
         if (practiceStopped) return practiceStopped;
@@ -265,6 +286,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
             },
             (err) => log.warn("user-skills commit failed", { error: String(err) }),
           );
+          // However the agent wrote them, the installed skills are what the
+          // guardian reviews, against what they said before this dream.
+          runs.addChanges(runId, await installedSkillChanges(carrierDir, installed, before));
         } catch (err) {
           skillsError = `Skills not saved: user-skills install failed, changes rolled back: ${err instanceof Error ? err.message : String(err)}`;
           log.error("user-skills install failed", { error: skillsError, runId });

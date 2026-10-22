@@ -86,17 +86,17 @@ export async function snapshotApps(dir: string, copyDir: string): Promise<AppsSn
   return { files, copyDir };
 }
 
-/** Files added or modified since `before`: edits with their old text when a copy exists. */
-export async function appChangesSince(
-  dir: string,
-  before: AppsSnapshot,
-  alreadyRecorded: ReadonlySet<string>,
-): Promise<FileChange[]> {
+/**
+ * Files added or modified since `before`: edits with their old text when a
+ * copy exists. This is the authoritative record of a run's app changes: a file
+ * the agent also touched with `Edit` shows its final state here too.
+ */
+export async function appChangesSince(dir: string, before: AppsSnapshot): Promise<FileChange[]> {
   const after = await signatures(dir);
   const changes: FileChange[] = [];
   for (const [path, signature] of after) {
     const previous = before.files.get(path);
-    if (previous === signature || alreadyRecorded.has(path)) continue;
+    if (previous === signature) continue;
     const next = await readText(path);
     const old =
       previous === undefined ? null : await readText(join(before.copyDir, relative(dir, path)));

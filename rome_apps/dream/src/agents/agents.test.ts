@@ -10,9 +10,10 @@ function agent(file: string): { tools: string[]; actions: string[]; permissionMo
   return parse(readFileSync(join(here, file), "utf8"));
 }
 
-// Text other people wrote on Rome's accounts can carry a prompt injection, so
-// the agent that reads it holds file tools only, and the agent that can run
-// code never reads it.
+// Chats on Rome's accounts are other people's words and can carry a prompt
+// injection, so the agent that reads them holds file tools only, and the agent
+// that can run code never reads them directly. Its other inputs can still relay
+// other people's words, which its prompt covers.
 describe("dream agents", () => {
   it("keeps the agent that reads Rome's account chats to file tools", () => {
     const memory = agent("dream.yaml");

@@ -564,19 +564,33 @@ describe("dream skills", () => {
     mkdirSync(join(apps, "notes/src"), { recursive: true });
     writeFileSync(join(apps, "notes/src/old.ts"), "old");
     writeFileSync(join(apps, "notes/src/same.ts"), "same");
-    const runner = skillWritingRunner([{ type: "result", content: "Fixed notes." }], () => {
-      writeFileSync(join(apps, "notes/src/fix.ts"), "export const fixed = true;");
-      writeFileSync(join(apps, "notes/src/old.ts"), "new");
-      mkdirSync(join(apps, "notes/node_modules/dep"), { recursive: true });
-      writeFileSync(join(apps, "notes/node_modules/dep/index.js"), "dep");
-    });
+    // An Edit the recorder sees, then a Bash write it does not see, to the same file.
+    const editEvents = [
+      {
+        type: "tool_use",
+        id: "e1",
+        tool: "Edit",
+        input: { file_path: join(apps, "notes/src/old.ts"), old_string: "old", new_string: "mid" },
+      },
+      { type: "tool_result", toolUseId: "e1", tool: "Edit", output: "ok" },
+    ];
+    const runner = skillWritingRunner(
+      [...editEvents, { type: "result", content: "Fixed notes." }],
+      () => {
+        writeFileSync(join(apps, "notes/src/fix.ts"), "export const fixed = true;");
+        writeFileSync(join(apps, "notes/src/old.ts"), "new");
+        mkdirSync(join(apps, "notes/node_modules/dep"), { recursive: true });
+        writeFileSync(join(apps, "notes/node_modules/dep/index.js"), "dep");
+      },
+    );
     const { deps } = withRunner(runner);
 
     const result = await createAction(actionConfig, deps).execute({});
 
     const { runId } = (result as { data: { runId: string } }).data;
     const changes = createRunsRepository(appDb()).changes(runId);
-    const byPath = (path: string) => changes.find((c) => c.path === join(apps, path));
+    // The last change to a file is its final state on disk.
+    const byPath = (path: string) => changes.findLast((c) => c.path === join(apps, path));
     expect(byPath("notes/src/fix.ts")).toMatchObject({
       op: "write",
       content: "export const fixed = true;",
@@ -587,7 +601,7 @@ describe("dream skills", () => {
       previous: "old",
       content: "new",
     });
-    expect(changes).toHaveLength(2);
+    expect(changes.filter((c) => c.path.startsWith(join(apps, "notes")))).toHaveLength(3);
   });
 
   it("keeps the practice agent's notes from earlier runs in its log", async () => {
@@ -659,6 +673,15 @@ describe("dream skills", () => {
     });
     const staging = /Skills staging directory: (.+)$/m.exec(runner.prompts[1] ?? "")?.[1] ?? "";
     expect(existsSync(dirname(staging))).toBe(false);
+    // The skill was written without a file tool, and still shows on the run.
+    const { runId } = (result as { data: { runId: string } }).data;
+    expect(createRunsRepository(appDb()).changes(runId)).toContainEqual(
+      expect.objectContaining({
+        op: "write",
+        path: join(carrierDir, "skills/rename-invoices/SKILL.md"),
+        content: SKILL,
+      }),
+    );
   });
 
   it("installs nothing from a dream that failed", async () => {
