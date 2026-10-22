@@ -3,6 +3,7 @@ import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { FakeClock } from "../../test/kit/clock.js";
 import { Outlasted, Pacer } from "./pacer.js";
 import { type DeliveryEvent, ReplyDelivery } from "./reply.js";
+import { feishuMarkdown } from "./transports/feishu.js";
 import {
   type DeliveryCapabilities,
   DeliveryFailure,
@@ -473,6 +474,35 @@ describe("ReplyDelivery", () => {
       );
     });
 
+    it("keeps a closing fence that shows nothing in the source of the message before it", async () => {
+      platform = new (class extends MemoryPlatform {
+        override readonly codec = feishuMarkdown;
+      })({ maxPartLength: 100, maxEditsPerMessage: 1, edit: true, budget: OPEN_BUDGET });
+      const delivery = reply();
+      const code = "```\nabc\ndef\n```";
+      for (const piece of ["```\nabc\n", "def\n"]) {
+        delivery.accept(delta(piece, "a"));
+        await advance(1000);
+      }
+      // The message spent its last edit before the closing fence arrived.
+      expect(platform.messages).toHaveLength(1);
+      delivery.accept(delta("```", "a"));
+      delivery.accept(text(code, "a"));
+      await advance(1000);
+      delivery.accept(text("After.", "b"));
+      const finished = delivery.finish();
+      await advance(1000);
+      const outcome = await finished;
+
+      expect(platform.shown).toEqual(["```\nabc\ndef\n```", "After."]);
+      expect(
+        outcome.parts
+          .filter((part) => part.block === 0)
+          .map((part) => part.source)
+          .join(""),
+      ).toBe(code);
+    });
+
     it("lets a message's receipt lift the platform's edit cap", async () => {
       platform = new (class extends MemoryPlatform {
         override async create(conversation: string, text: string, replyTo?: string) {
@@ -609,6 +639,34 @@ describe("ReplyDelivery", () => {
 
       expect(settling.settled).toEqual([{ id: "m1", text: "Looking it up." }]);
       expect(events.filter(({ write }) => write === "settle")).toHaveLength(1);
+    });
+
+    it("reports a reply delivered when its settle waits out the account's queue", async () => {
+      const pacer = new Pacer(OPEN_BUDGET, clock);
+      const delivery = new ReplyDelivery({
+        transport: settling,
+        pacer,
+        policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+        conversation: "c1",
+        clock,
+        observe: (event) => events.push(event),
+      });
+      // Another conversation's rate limit pauses the account as the last write lands.
+      const create = settling.create.bind(settling);
+      settling.create = async (...args) => {
+        const receipt = await create(...args);
+        pacer.pause(120_000, "rate-limited");
+        return receipt;
+      };
+      delivery.accept(text("The answer is 42."));
+      const finished = delivery.finish();
+      await advance(70_000);
+      const outcome = await finished;
+
+      expect(platform.shown).toEqual(["The answer is 42."]);
+      expect(outcome.status).toBe("delivered");
+      expect(outcome.failure).toBeUndefined();
+      expect(settling.settled).toEqual([]);
     });
 
     it("does not settle a message whose create is unknown", async () => {

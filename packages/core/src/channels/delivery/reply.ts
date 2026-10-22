@@ -33,8 +33,10 @@ interface DeliveredPart {
   block: number;
   /** The text the platform shows, as far as Rome knows. */
   text: string;
-  /** The source text behind `text`. A block's parts join into the source the
-   *  user was shown, where their renderings may not join into one text. */
+  /** The source text behind `text`, with any source after it that a split
+   *  passed over because nothing in it shows. A block's parts join into the
+   *  source the user was shown, where their renderings may not join into one
+   *  text. */
   source: string;
   receipt?: PartReceipt;
   /**
@@ -427,6 +429,7 @@ export class ReplyDelivery {
       return;
     }
     this.writing = true;
+    const settling = plan.write === "settle" ? plan.part : undefined;
     // A write waits in the account's queue behind whatever pauses it. A pause
     // that came from elsewhere is not this reply's to wait out for an hour.
     const queued = new AbortController();
@@ -468,6 +471,15 @@ export class ReplyDelivery {
         // The reply failed already, and this is the write it dropped or one
         // that failed after it. The reply's failure stays what it was.
         if (this.failure) return;
+        // A settle that never ran leaves the message showing its final text,
+        // so it changes nothing the reply reports, and it is not tried again.
+        if (settling) {
+          settling.finished = true;
+          log.warn("a message could not be settled", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return;
+        }
         if (error instanceof QueueWaitExceeded) {
           // A rate limit's pause in effect while the write waited, even one over
           // by now, is a limit the caller can wait out. With none, an earlier
@@ -976,12 +988,33 @@ export class ReplyDelivery {
     })();
   }
 
+  /**
+   * The source a split passed over right after a message because nothing in
+   * it shows, such as a closing fence the message already closed. It belongs
+   * to that message's source, so a block's sources join into its text.
+   */
+  private passedOverAfter(block: number, index: number): string {
+    const state = this.blocks[block]!;
+    const part = state.parts[index]!;
+    const end = part.start + part.sentSource.length;
+    if (part.unknown || part.uncertain || part.diverged || end !== part.end) return "";
+    const next = state.parts[index + 1]?.start ?? state.skipped;
+    if (next === undefined || next <= end) return "";
+    const text = this.assembler.blocks[block]?.text ?? "";
+    const gap = text.slice(end, next);
+    try {
+      return this.codecAt(text.slice(0, end)).render(gap, true).trim() ? "" : gap;
+    } catch {
+      return "";
+    }
+  }
+
   private outcome(): ReplyOutcome {
     const parts: DeliveredPart[] = this.blocks.flatMap((state, block) =>
-      state.parts.map((part) => ({
+      state.parts.map((part, index) => ({
         block,
         text: part.sent,
-        source: part.sentSource,
+        source: part.sentSource + this.passedOverAfter(block, index),
         ...(part.receipt ? { receipt: part.receipt } : {}),
         state: part.unknown ? "unknown" : part.settled ? "settled" : "open",
         ...(part.diverged ? { diverged: true as const } : {}),

@@ -20,7 +20,8 @@ import { makePasteTalk } from "../connections/test-fixtures.js";
 import { createTestDb, kindChannelOf } from "../test/helpers.js";
 import { systemClock } from "../lib/clock.js";
 import { ConnectionPacing } from "./delivery/connection-pacing.js";
-import { plainText } from "./delivery/types.js";
+import { ReplyDelivery } from "./delivery/reply.js";
+import { type PartReceipt, plainText } from "./delivery/types.js";
 
 // A channel with no store answers `query` through its Connection's history.
 // That history reads a window rounded out to whole hours, as the adapters do,
@@ -525,6 +526,8 @@ describe("reply streaming ports", () => {
    */
   function portsFor({ pacing, streams = true }: { pacing?: ConnectionPacing; streams?: boolean }) {
     const sent: string[] = [];
+    /** The messages the talker was asked to settle, with their text. */
+    const settled: string[] = [];
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     const live = { talker: true };
@@ -540,7 +543,10 @@ describe("reply streaming ports", () => {
             replyDelivery: {
               capabilities: { maxPartLength: 10, edit: false, budget },
               codec: plainText,
-              create: async () => ({ messageId: "m1", chatId: "chat-1" }),
+              create: async () => ({ messageId: "m1", chatId: "chat-1", streaming: true as const }),
+              settle: async (receipt: PartReceipt, text: string) => {
+                settled.push(`${receipt.messageId} ${text}`);
+              },
             },
           }
         : {}),
@@ -561,7 +567,7 @@ describe("reply streaming ports", () => {
       channelOf: (each: { service: string }) => each.service,
       ...(pacing ? { pacing } : {}),
     } as unknown as ConnectionPortsDeps;
-    return { send: connectionPorts(deps, "telegram")!.send!, sent, release, live };
+    return { send: connectionPorts(deps, "telegram")!.send!, sent, settled, release, live };
   }
 
   const pacingWith = (on: boolean) => new ConnectionPacing(systemClock, async () => on);
@@ -604,10 +610,27 @@ describe("reply streaming ports", () => {
     await expect(replies.transport.create("chat-1", "hi")).resolves.toEqual({
       messageId: "m1",
       chatId: "chat-1",
+      streaming: true,
     });
     live.talker = false;
     await expect(replies.transport.create("chat-1", "hi")).rejects.toMatchObject({
       kind: "unauthorized",
     });
+  });
+
+  it("settles a streamed reply's message through the live talker", async () => {
+    const { send, settled } = portsFor({ pacing: pacingWith(true) });
+    const replies = send.replies!;
+    const delivery = new ReplyDelivery({
+      transport: replies.transport,
+      pacer: replies.pacer,
+      policy: { mode: "blocks", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 100 },
+      conversation: "chat-1",
+      clock: systemClock,
+    });
+    delivery.accept({ type: "text", content: "hi there" });
+
+    expect((await delivery.finish()).status).toBe("delivered");
+    expect(settled).toEqual(["m1 hi there"]);
   });
 });
