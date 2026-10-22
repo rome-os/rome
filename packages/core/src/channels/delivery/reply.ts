@@ -21,7 +21,7 @@ const log = createLogger("reply-delivery");
 export interface DeliveryEvent {
   /** Epoch milliseconds when the write finished. */
   at: number;
-  write: "create" | "edit";
+  write: "create" | "edit" | "settle";
   block: number;
   part: number;
   text: string;
@@ -111,6 +111,8 @@ interface Part {
    *  it, so it counts as shown, though `sentSource` is what was acknowledged. */
   attempted?: string;
   diverged?: true;
+  /** The transport was asked to settle the message. */
+  finished?: true;
   lastWriteAt: number;
 }
 
@@ -142,6 +144,7 @@ type Plan =
       source: string;
       settle: boolean;
     }
+  | { write: "settle"; block: number; part: Part }
   | { waitUntil: number }
   | null;
 
@@ -235,6 +238,12 @@ class WriteTimedOut extends DeliveryFailure {
  *   write to it cannot overtake it.
  * - After `stop()`, nothing new is written. A write already running finishes
  *   and is reported, and a create whose result is unknown stays `unknown`.
+ * - A message whose receipt says `streaming` is settled through the
+ *   transport once. It is settled when its block is complete and its last write
+ *   is done, before `finish()` resolves. When the reply stops or fails, what
+ *   is left is settled after `stop()` or `finish()` resolves, in the account's
+ *   queue, and that is the one write made after a stop. A settle that fails
+ *   changes nothing the reply reports.
  *
  * The run's events go to `accept()`. `finish()` closes the reply once the run
  * ends and resolves when every write has finished.
@@ -333,8 +342,13 @@ export class ReplyDelivery {
   }
 
   private editsLeft(part: Part): number {
-    const max = this.options.transport.capabilities.maxEditsPerMessage;
+    const max = part.receipt?.maxEdits ?? this.options.transport.capabilities.maxEditsPerMessage;
     return max === undefined ? Number.POSITIVE_INFINITY : max - part.edits;
+  }
+
+  /** Whether `part`'s message is one the transport should still settle. */
+  private unfinished(part: Part): boolean {
+    return part.receipt?.streaming === true && !part.finished;
   }
 
   /**
@@ -402,7 +416,10 @@ export class ReplyDelivery {
     this.timer = undefined;
     const plan = this.failure || this.abort.signal.aborted ? null : this.planSafely(this.now());
     if (plan === null) {
-      if (this.closed) for (const done of this.idle.splice(0)) done();
+      if (this.closed) {
+        this.settleRest();
+        for (const done of this.idle.splice(0)) done();
+      }
       return;
     }
     if ("waitUntil" in plan) {
@@ -678,6 +695,12 @@ export class ReplyDelivery {
           settle: true,
         };
       }
+
+      // The block is complete and every message of it has had its last write.
+      if (complete && this.options.transport.settle) {
+        const part = state.parts.find((part) => this.unfinished(part));
+        if (part) return { write: "settle", block: index, part };
+      }
     }
     return null;
   }
@@ -710,27 +733,24 @@ export class ReplyDelivery {
     if (visible(covered, state.skipped)) state.skipped = undefined;
   }
 
+  private report(event: Omit<DeliveryEvent, "at">): void {
+    try {
+      this.options.observe?.({ at: this.now(), ...event });
+    } catch (error) {
+      // An observer is a diagnostic. It cannot change what a write did.
+      log.warn("delivery observer threw", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private async write(plan: Exclude<Plan, null | { waitUntil: number }>): Promise<void> {
-    const { transport, observe } = this.options;
+    if (plan.write === "settle") return this.finishMessage(plan.block, plan.part);
+    const { transport } = this.options;
     const state = this.blocks[plan.block]!;
     const rendered = this.codecAt(plan.before).render(plan.source, plan.settle);
-    const report = (result: DeliveryEvent["result"], part: number) => {
-      try {
-        observe?.({
-          at: this.now(),
-          write: plan.write,
-          block: plan.block,
-          part,
-          text: rendered,
-          result,
-        });
-      } catch (error) {
-        // An observer is a diagnostic. It cannot change what a write did.
-        log.warn("delivery observer threw", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    };
+    const report = (result: DeliveryEvent["result"], part: number) =>
+      this.report({ write: plan.write, block: plan.block, part, text: rendered, result });
 
     if (plan.write === "create") {
       // The text this part takes stops waiting, and what follows it waits afresh.
@@ -884,6 +904,76 @@ export class ReplyDelivery {
   private settlePart(part: Part, end: number): void {
     part.end = end;
     part.settled = true;
+  }
+
+  /** Asks the transport to settle `part`'s message, once. What the message
+   *  shows is final whatever the answer, so a failure only pauses the account
+   *  when the platform asks it to. */
+  private async finishMessage(block: number, part: Part): Promise<void> {
+    part.finished = true;
+    const report = (result: DeliveryEvent["result"]) =>
+      this.report({
+        write: "settle",
+        block,
+        part: this.blocks[block]!.parts.indexOf(part),
+        text: part.sent,
+        result,
+      });
+    try {
+      await this.answered(this.options.transport.settle!(part.receipt!, part.sent));
+      report("accepted");
+    } catch (error) {
+      const failure = asDeliveryFailure(error);
+      report(failure.kind);
+      log.warn("a message could not be settled", { kind: failure.kind, error: failure.message });
+      if (failure.kind === "rate-limited")
+        this.options.pacer.pause(
+          Math.max(failure.retryAfterMs ?? 0, MIN_RATE_LIMIT_WAIT_MS),
+          "rate-limited",
+        );
+    }
+  }
+
+  /**
+   * Settles, in the account's queue, every message a stopped or failed reply
+   * left unsettled. It runs after the reply resolved, so a stop is not held by
+   * a full queue, and each write gives up as one of the reply's would.
+   */
+  private settleRest(): void {
+    if (!this.options.transport.settle) return;
+    const left = this.blocks.flatMap((state, block) =>
+      state.parts.filter((part) => this.unfinished(part)).map((part) => ({ block, part })),
+    );
+    if (left.length === 0) return;
+    for (const { part } of left) part.finished = true;
+    void (async () => {
+      for (const { block, part } of left) {
+        const queued = new AbortController();
+        const queueTimer = this.options.clock.setTimeout(
+          () => queued.abort(new QueueWaitExceeded()),
+          QUEUE_WAIT_MS,
+        );
+        try {
+          await this.options.pacer.run(
+            this.paceKey,
+            async () => {
+              this.options.clock.clearTimeout(queueTimer);
+              await this.finishMessage(block, part);
+              const late = this.outlasting;
+              this.outlasting = undefined;
+              return late ? new Outlasted(late) : undefined;
+            },
+            queued.signal,
+          );
+        } catch (error) {
+          log.warn("a message could not be settled", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          this.options.clock.clearTimeout(queueTimer);
+        }
+      }
+    })();
   }
 
   private outcome(): ReplyOutcome {

@@ -25,7 +25,7 @@ export interface DeliveryCapabilities {
   edit: boolean;
   /** The most edits one message accepts, when the platform limits them. An
    *  edit counts once it is accepted or its result is unknown. Zero delivers
-   *  `edit` as `blocks`. */
+   *  `edit` as `blocks`. A receipt's `maxEdits` overrides it for its message. */
   maxEditsPerMessage?: number;
   /** How fast one account may write. Every write the account makes, ordinary
    *  sends included, shares it. This is the one authority: whoever wires the
@@ -114,6 +114,13 @@ export interface PartReceipt {
   /** Where the message landed, which can differ from where it was sent (a
    *  thread the platform opened). */
   chatId: string;
+  /** The most edits this message accepts, where it differs from the
+   *  platform's `maxEditsPerMessage`, as when a platform has more than one
+   *  kind of message. `Infinity` for no limit. */
+  maxEdits?: number;
+  /** The platform shows the message as still being written, as a card with a
+   *  typing cursor, until the transport settles it. */
+  streaming?: true;
 }
 
 /** The platform's write operations, as a transport implements them. Every
@@ -125,6 +132,16 @@ export interface DeliveryTransport {
   /** Present when `capabilities.edit`. Replacing text with the text already
    *  there succeeds. */
   edit?(receipt: PartReceipt, text: string): Promise<void>;
+  /**
+   * Present when a platform marks a message as finished, such as a card that
+   * shows a typing cursor until then. A reply calls it once for each message
+   * whose receipt says `streaming`, with the text the message shows, after
+   * the message's last write: when the message's block is complete, or when
+   * the reply stops or fails. It is the one write a reply makes after a stop.
+   * What the message shows is final either way, so a failure changes nothing
+   * the reply reports.
+   */
+  settle?(receipt: PartReceipt, text: string): Promise<void>;
 }
 
 /**

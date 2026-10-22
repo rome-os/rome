@@ -472,6 +472,158 @@ describe("ReplyDelivery", () => {
         ["unsupported"],
       );
     });
+
+    it("lets a message's receipt lift the platform's edit cap", async () => {
+      platform = new (class extends MemoryPlatform {
+        override async create(conversation: string, text: string, replyTo?: string) {
+          return { ...(await super.create(conversation, text, replyTo)), maxEdits: Infinity };
+        }
+      })({ maxPartLength: 100, maxEditsPerMessage: 2, edit: true, budget: OPEN_BUDGET });
+      const delivery = reply();
+      await stream(delivery, "one two three four five ", 1000);
+      const finished = delivery.finish();
+      await advance(1000);
+
+      expect((await finished).status).toBe("delivered");
+      expect(platform.messages.map((message) => message.history)).toEqual([
+        ["one ", "one two ", "one two three ", "one two three four ", "one two three four five "],
+      ]);
+    });
+  });
+
+  describe("settling messages", () => {
+    /** A platform that marks a message finished, as a streaming card does. */
+    class SettlingPlatform extends MemoryPlatform {
+      readonly settled: Array<{ id: string; text: string }> = [];
+      settleFailure?: DeliveryFailure;
+      /** Whether a new message shows as still being written. */
+      streaming = true;
+      override async create(conversation: string, text: string, replyTo?: string) {
+        const receipt = await super.create(conversation, text, replyTo);
+        return this.streaming ? { ...receipt, streaming: true as const } : receipt;
+      }
+      async settle(receipt: PartReceipt, text: string): Promise<void> {
+        if (this.settleFailure) throw this.settleFailure;
+        this.settled.push({ id: receipt.messageId, text });
+      }
+    }
+    let settling: SettlingPlatform;
+
+    beforeEach(() => {
+      settling = new SettlingPlatform();
+      platform = settling;
+    });
+
+    it("settles each message once, after its last write, as soon as its block is complete", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      await stream(delivery, "Looking it up.", 10, "c");
+      delivery.accept(text("Looking it up.", "c"));
+      await advance(0);
+      // The commentary is complete while the answer still streams.
+      await stream(delivery, "The answer", 10, "a");
+      expect(settling.settled).toEqual([{ id: "m1", text: "Looking it up." }]);
+
+      await stream(delivery, " is 42.", 10, "a");
+      delivery.accept(text("The answer is 42.", "a"));
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(settling.settled).toEqual([
+        { id: "m1", text: "Looking it up." },
+        { id: "m2", text: "The answer is 42." },
+      ]);
+      const writes = events.map(({ write, block }) => `${write} ${block}`);
+      expect(writes.filter((write) => write.startsWith("settle"))).toEqual([
+        "settle 0",
+        "settle 1",
+      ]);
+      // A message's settle follows its block's last write.
+      expect(writes.lastIndexOf("settle 1")).toBe(writes.length - 1);
+      expect(writes.indexOf("settle 0")).toBeGreaterThan(writes.lastIndexOf("edit 0"));
+    });
+
+    it("settles every message of a block split across several", async () => {
+      const delivery = reply();
+      const source = "one two three four five six seven eight nine ten eleven twelve";
+      await stream(delivery, source, 600);
+      delivery.accept(text(source));
+      const finished = delivery.finish();
+      await advance(10_000);
+      await finished;
+
+      expect(settling.settled.map(({ id }) => id)).toEqual(platform.messages.map(({ id }) => id));
+      expect(settling.settled.map(({ text }) => text)).toEqual(platform.shown);
+    });
+
+    it("settles what a stopped reply shows after the stop returns, and writes nothing else", async () => {
+      const delivery = reply({ editIntervalMs: 1000 });
+      delivery.accept(delta("Hello"));
+      await advance(0);
+      delivery.accept(delta(" more text"));
+      const outcome = await delivery.stop();
+      await advance(5000);
+
+      expect(outcome.status).toBe("stopped");
+      expect(platform.shown).toEqual(["Hello"]);
+      expect(settling.settled).toEqual([{ id: "m1", text: "Hello" }]);
+      expect(events.map(({ write }) => write)).toEqual(["create", "settle"]);
+    });
+
+    it("settles what a failed reply shows", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      await advance(0);
+      platform.failures.push({ write: "edit", failure: new DeliveryFailure("rejected", "no") });
+      delivery.accept(delta(" there"));
+      const outcome = await delivery.finish();
+      await advance(0);
+
+      expect(outcome.status).toBe("partial");
+      expect(settling.settled).toEqual([{ id: "m1", text: "Hello" }]);
+    });
+
+    it("reports a reply delivered when settling a message fails", async () => {
+      settling.settleFailure = new DeliveryFailure("rejected", "streaming already closed");
+      const delivery = reply({ editIntervalMs: 0 });
+      await stream(delivery, "The answer is 42.", 10);
+      delivery.accept(text("The answer is 42."));
+      const outcome = await delivery.finish();
+      await advance(0);
+
+      expect(outcome).toMatchObject({ status: "delivered" });
+      expect(outcome.failure).toBeUndefined();
+      expect(events.filter(({ write }) => write === "settle").map(({ result }) => result)).toEqual([
+        "rejected",
+      ]);
+    });
+
+    it("settles only the messages whose receipt says they are still streaming", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      await stream(delivery, "Looking it up.", 10, "c");
+      delivery.accept(text("Looking it up.", "c"));
+      await advance(0);
+      settling.streaming = false;
+      await stream(delivery, "The answer is 42.", 10, "a");
+      delivery.accept(text("The answer is 42.", "a"));
+      await delivery.finish();
+
+      expect(settling.settled).toEqual([{ id: "m1", text: "Looking it up." }]);
+      expect(events.filter(({ write }) => write === "settle")).toHaveLength(1);
+    });
+
+    it("does not settle a message whose create is unknown", async () => {
+      platform.failures.push({
+        write: "create",
+        failure: new DeliveryFailure("unknown", "the answer was lost"),
+      });
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      const outcome = await delivery.finish();
+      await advance(0);
+
+      expect(outcome.status).toBe("unknown");
+      expect(settling.settled).toEqual([]);
+    });
   });
 
   describe("codec context", () => {
