@@ -585,8 +585,9 @@ export function Chat({
   // Only the floor session streams (every shallower caller is suspended).
   const floorSessionStream = streamingSessions.get(floorSessionId) ?? null;
   const currentSnapshot = floorSessionStream?.snapshot ?? null;
-  // The stream key addresses the follower and Stop. The transcript matches the
-  // turn by its running turn id, which differs for a backend task.
+  // The `turnId` the stream was opened under addresses the follower and Stop.
+  // The transcript matches the turn by its runningTurnId, which differs for a
+  // backend task.
   const floorStreamTurnId = floorSessionStream?.turnId ?? null;
   const runningTurnId = runningTurnIdOf(floorSessionStream);
   const isActiveSessionStreaming = !!floorSessionStream;
@@ -1020,8 +1021,9 @@ export function Chat({
             continue;
           }
           if (evt.event === "turn_id") {
-            // A backend task names the agent turn it runs. The entry keeps its
-            // stream key; the transcript matches the turn by this id.
+            // A backend task names the agent turn it runs. The entry keeps the
+            // `turnId` its stream was opened under; the transcript matches the
+            // turn by this id.
             try {
               const { turnId: agentTurnId } = JSON.parse(evt.data) as { turnId?: string };
               if (agentTurnId) adoptSessionAgentTurn(sessionId, turnId, agentTurnId);

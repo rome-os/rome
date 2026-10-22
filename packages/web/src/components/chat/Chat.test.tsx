@@ -899,8 +899,9 @@ describe("Chat turn stream lifecycle", () => {
       );
       expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
 
-      // Stop still names the stream key, which the listing keeps reporting, so
-      // the accepted interrupt does not force-release the running turn.
+      // Stop still names the `turnId` the stream was opened under, which the
+      // listing keeps reporting, so the accepted interrupt does not
+      // force-release the running turn.
       rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 202 }));
       rs.useFakeTimers();
       fireEvent.click(screen.getByTestId("stop-button"));

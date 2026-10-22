@@ -114,7 +114,7 @@ describe("streaming-sessions state", () => {
     expect(state.get("A")?.assistantText).toBe("current block");
   });
 
-  it("names the running turn by its agent turn id while keeping the stream key", () => {
+  it("names the running turn by its agent turn id while keeping the stream's turnId", () => {
     let state: StreamingSessionMap = startStream(new Map(), "A", "backend:wake");
     state = updateSnapshot(state, "A", "backend:wake", snapshotFor("live"));
     expect(runningTurnIdOf(state.get("A"))).toBe("backend:wake");
@@ -123,7 +123,7 @@ describe("streaming-sessions state", () => {
     expect(state.get("A")?.turnId).toBe("backend:wake");
     expect(segmentIdAt(state, "A")).toBe("live");
     expect(runningTurnIdOf(state.get("A"))).toBe("turn-real");
-    // Updates and the end still go through the stream key.
+    // Updates and the end still go through the turnId the stream was opened under.
     state = updateSnapshot(state, "A", "backend:wake", snapshotFor("next"));
     expect(segmentIdAt(state, "A")).toBe("next");
     expect(endStream(state, "A", "backend:wake").has("A")).toBe(false);

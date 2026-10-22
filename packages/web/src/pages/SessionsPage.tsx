@@ -1431,8 +1431,9 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         invocationCounts: {},
       };
       let text = "";
-      // The stream is opened by its key; the transcript knows a backend turn
-      // by its agent turn id, which the stream may report after attaching.
+      // The stream is opened under `active.turnId`; the transcript knows a
+      // backend turn by its `agentTurnId`, which the listing may already carry
+      // or the stream may report after attaching.
       let runningTurnId = active.agentTurnId ?? active.turnId;
       const publish = () => {
         if (!cancelled) {

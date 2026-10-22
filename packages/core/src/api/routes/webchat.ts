@@ -632,9 +632,10 @@ interface ActiveWebchatStream {
   streamId: string;
   sessionId: string;
   /**
-   * The stream's key: the turnId allocated by `AgentSession.sendTurn` for a
-   * user turn, or a synthetic `backend:` id for a backend task. Used as the
-   * URL key for `/turns/:turnId/stream` and `/turns/:turnId/interrupt`.
+   * The turnId the stream was opened under: the one allocated by
+   * `AgentSession.sendTurn` for a user turn, or a synthetic `backend:` id for
+   * a backend task. Used in the URL for `/turns/:turnId/stream` and
+   * `/turns/:turnId/interrupt`.
    */
   turnId: string;
   /**

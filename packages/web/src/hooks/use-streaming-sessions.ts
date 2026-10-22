@@ -5,8 +5,8 @@ export type SessionStreamState = {
   /** The id the stream was opened under. Keys its follower, controller and Stop. */
   turnId: string;
   /**
-   * The agent's own turn id, when the server streams the turn under a
-   * different key (a backend task's synthetic `backend:` id). The turn's saved
+   * The agent's own turn id, when it differs from the `turnId` the stream was
+   * opened under (a backend task's synthetic `backend:` id). The turn's saved
    * trace and reply carry this id.
    */
   agentTurnId?: string;

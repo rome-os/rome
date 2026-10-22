@@ -422,8 +422,8 @@ describe("SessionsPage live fork details", () => {
   });
 
   it("hides a backend turn's saved trace behind its live row once the stream names the turn", async () => {
-    // A defer wake-up streams under a synthetic `backend:` key but saves its
-    // trace under the agent's own turn id.
+    // A defer wake-up streams under a synthetic `backend:` turnId but saves
+    // its trace under the agent's own turn id.
     rs.mocked(listRomeSessionMessages).mockResolvedValue([
       {
         id: "trace-real",
@@ -463,6 +463,47 @@ describe("SessionsPage live fork details", () => {
     });
 
     await waitFor(() => expect(screen.getByTestId("session-messages").dataset.traceRows).toBe(""));
+  });
+
+  it("hides a backend turn's saved trace from the first render when the listing names the turn", async () => {
+    // The listing already reports `agentTurnId`, so the stream need not send
+    // a `turn_id` event before the live row carries the saved trace.
+    rs.mocked(listRomeSessionMessages).mockResolvedValue([
+      {
+        id: "trace-real",
+        sessionId: FORK_SESSION.id,
+        turnId: "turn-real",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-07-12T00:00:00.000Z",
+        traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+      },
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      {
+        turnId: "backend:wake",
+        agentTurnId: "turn-real",
+        streamId: "stream-wake",
+        startedAt: "",
+        status: "running",
+      },
+    ]);
+    rs.mocked(openTurnStream).mockImplementation(async () => {
+      const body = new ReadableStream<Uint8Array>({ start() {} });
+      return new Response(body);
+    });
+
+    renderDetail();
+
+    await waitFor(() =>
+      expect(openTurnStream).toHaveBeenCalledWith("backend:wake", expect.any(AbortSignal)),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("session-messages").dataset.streaming).toBe("true"),
+    );
+    await waitFor(() => expect(listRomeSessionMessages).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.getByTestId("session-messages").dataset.traceRows).toBe("");
   });
 
   it("refreshes messages when a turn finishes during initial attachment", async () => {
