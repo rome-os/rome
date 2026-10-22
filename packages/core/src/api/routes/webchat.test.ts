@@ -1675,10 +1675,12 @@ describe("Webchat API", () => {
       deps.nodeDevices = {
         ...deps.nodeDevices,
         listFiles: rs.fn(listFiles),
-        getStatus: async () => ({
-          connection: "online",
-          checkedAt: new Date().toISOString(),
-          devices: [{ id: "mac-1", name: "macbook", platform: "macos", status: "connected" }],
+        listDevices: async () => ({
+          devices: [{ id: "mac-1", name: "macbook", platform: "macos" }],
+        }),
+        // Creating a chat must not probe every device.
+        getStatus: rs.fn(async () => {
+          throw new Error("getStatus probes every device");
         }),
       };
       return deps.nodeDevices.listFiles;
@@ -1733,6 +1735,7 @@ describe("Webchat API", () => {
       expect(session.deviceFolder).toEqual(expected);
       expect(session.projectPath).toBe("default");
       expect((await deps.webchatRepo.getSession(session.id))?.deviceFolder).toEqual(expected);
+      expect(deps.nodeDevices.getStatus).not.toHaveBeenCalled();
 
       const sendRes = await app.request(`/chat/sessions/${session.id}/turns`, {
         method: "POST",
@@ -1774,6 +1777,31 @@ describe("Webchat API", () => {
         expect(res.status).toBe(400);
       }
       expect(listFiles).not.toHaveBeenCalled();
+    });
+
+    it("rejects a device folder together with a project", async () => {
+      const listFiles = mockDevices(async () => ({ ok: true, folder }));
+      const app = createWebchatRuntime(deps).routes;
+      const res = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectPath: "alpha",
+          deviceFolder: { deviceId: "mac-1", path: "/x" },
+        }),
+      });
+      expect(res.status).toBe(400);
+      expect(listFiles).not.toHaveBeenCalled();
+      expect(await (await app.request("/chat/sessions")).json()).toEqual([]);
+      const withDefault = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectPath: "default",
+          deviceFolder: { deviceId: "mac-1", path: "/x" },
+        }),
+      });
+      expect(withDefault.status).toBe(200);
     });
 
     it("returns null for chats without a device folder", async () => {
@@ -3051,6 +3079,37 @@ describe("Webchat API", () => {
       const child = await deps.webchatRepo.getSession(childSessionId as string);
       expect(child?.type).toBe("webchat_handoff");
       expect(child?.agentName).toBe("workflow-studio:workflow-planner");
+    });
+
+    it("gives the handoff child the parent chat's device folder", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(handoffEvents("tu-folder-child"));
+      const app = createWebchatRuntime(deps).routes;
+      const folder = { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" };
+      await deps.webchatRepo.createSession(
+        "folder-parent",
+        "Folder chat",
+        undefined,
+        "default",
+        null,
+        "default",
+        null,
+        "webchat",
+        null,
+        {},
+        folder,
+      );
+
+      await app.request("/chat/sessions/folder-parent/turns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "design a workflow" }),
+      });
+
+      const card = await findCard("folder-parent", "tu-folder-child");
+      const child = await deps.webchatRepo.getSession(card?.childSessionId as string);
+      expect(child?.type).toBe("webchat_handoff");
+      expect(child?.deviceFolder).toEqual(folder);
     });
 
     it("inherits handoff ownership without branch lineage and accepts its first send with a model selection", async () => {

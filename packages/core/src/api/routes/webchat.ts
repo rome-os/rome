@@ -2188,14 +2188,28 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (typeof deviceId !== "string" || !deviceId || typeof path !== "string" || !path) {
         return c.json({ error: "deviceFolder requires deviceId and path" }, 400);
       }
+      // A chat works in a project or a device folder, never both.
+      let requestedProject: string;
+      try {
+        requestedProject = normalizeSelectedWebchatProjectPath(
+          body.projectPath ?? body.projectName,
+        );
+      } catch {
+        requestedProject = "";
+      }
+      if (requestedProject !== DEFAULT_WEBCHAT_PROJECT_NAME) {
+        return c.json({ error: "A chat cannot have both a project and a device folder" }, 400);
+      }
       // Store the real path the device reports, plus a name and platform snapshot,
       // so the prompt names the folder even while the device is offline.
-      const [listing, status] = await Promise.all([
+      // The listing is the only request to the device; the name and platform
+      // come from Cloud's list, which probes nothing.
+      const [listing, list] = await Promise.all([
         deps.nodeDevices.listFiles(deviceId, path),
-        deps.nodeDevices.getStatus(),
+        deps.nodeDevices.listDevices(),
       ]);
       if (!listing.ok) return c.json({ error: listing.code }, 409);
-      const device = status.devices.find((item) => item.id === deviceId);
+      const device = list?.devices.find((item) => item.id === deviceId);
       deviceFolder = {
         deviceId,
         deviceName: device?.name ?? deviceId,
@@ -3716,6 +3730,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                         // backend restart) re-derives its submit_output tool.
                         suspension.handback ? JSON.stringify(suspension.handback) : null,
                         { inheritOwnerFrom: sessionId },
+                        // The specialist keeps working in the parent chat's folder.
+                        session.deviceFolder ?? null,
                       );
                     } catch (err) {
                       log.warn("failed to mint handoff child session", {

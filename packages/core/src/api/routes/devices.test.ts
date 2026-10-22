@@ -7,6 +7,7 @@ it("returns device checks without credentials or caching at the HTTP edge", asyn
   const nodeDevices = createNodeDevicesService(() => ({
     disconnect() {},
     run: rs.fn(),
+    listDevices: rs.fn(),
     getDevicesStatus: async () => ({
       connection: "online",
       checkedAt: new Date().toISOString(),
@@ -30,6 +31,7 @@ describe("device status failures", () => {
     const service = createNodeDevicesService(() => ({
       disconnect() {},
       run: rs.fn(),
+      listDevices: rs.fn(),
       getDevicesStatus: async () => null,
     }));
     const response = await devicesRoutes({ nodeDevices: service }).request("/devices");
@@ -46,6 +48,7 @@ describe("device status failures", () => {
     const nodeDevices = createNodeDevicesService(() => ({
       disconnect() {},
       run: rs.fn(),
+      listDevices: rs.fn(),
       getDevicesStatus: async () => {
         throw error;
       },
@@ -64,7 +67,12 @@ describe("device status failures", () => {
         checkedAt: new Date().toISOString(),
         devices: [],
       });
-    const createClient = rs.fn(() => ({ disconnect, getDevicesStatus, run: rs.fn() }));
+    const createClient = rs.fn(() => ({
+      disconnect,
+      getDevicesStatus,
+      run: rs.fn(),
+      listDevices: rs.fn(),
+    }));
     const service = createNodeDevicesService(createClient);
     expect((await service.getStatus()).connection).toBe("incompatible");
     expect((await service.getStatus()).connection).toBe("stopped");
@@ -79,7 +87,7 @@ describe("explicit device service startup", () => {
     const start = rs.fn(async () => {});
     const getDevicesStatus = rs.fn(async () => null);
     const service = createNodeDevicesService(
-      () => ({ disconnect() {}, run: rs.fn(), getDevicesStatus }),
+      () => ({ disconnect() {}, run: rs.fn(), listDevices: rs.fn(), getDevicesStatus }),
       start,
     );
     const app = devicesRoutes({ nodeDevices: service });
@@ -105,7 +113,12 @@ describe("explicit device service startup", () => {
       throw error;
     });
     const service = createNodeDevicesService(
-      () => ({ disconnect() {}, run: rs.fn(), getDevicesStatus: async () => null }),
+      () => ({
+        disconnect() {},
+        run: rs.fn(),
+        listDevices: rs.fn(),
+        getDevicesStatus: async () => null,
+      }),
       start,
     );
     const response = await devicesRoutes({ nodeDevices: service }).request("/devices/start", {
@@ -135,6 +148,7 @@ describe("device folder listing", () => {
     const service = createNodeDevicesService(() => ({
       disconnect() {},
       getDevicesStatus: async () => null,
+      listDevices: rs.fn(),
       run,
     }));
     const app = devicesRoutes({ nodeDevices: service });
@@ -159,6 +173,7 @@ describe("device folder listing", () => {
     const service = createNodeDevicesService(() => ({
       disconnect() {},
       getDevicesStatus: async () => null,
+      listDevices: rs.fn(),
       run: async () => ({
         type: "response" as const,
         ok: false as const,
@@ -175,6 +190,7 @@ describe("device folder listing", () => {
     const malformed = createNodeDevicesService(() => ({
       disconnect() {},
       getDevicesStatus: async () => null,
+      listDevices: rs.fn(),
       run: async () => ({ type: "response" as const, ok: true as const, result: { path: 1 } }),
     }));
     expect(await malformed.listFiles("mac")).toEqual({ ok: false, code: "unavailable" });
@@ -182,11 +198,56 @@ describe("device folder listing", () => {
     const failing = createNodeDevicesService(() => ({
       disconnect() {},
       getDevicesStatus: async () => null,
+      listDevices: rs.fn(),
       run: async () => {
         throw new CallerConfigurationError("not_configured", "secret");
       },
     }));
     expect(await failing.listFiles("mac")).toEqual({ ok: false, code: "unavailable" });
     failing.close();
+  });
+});
+
+describe("device list for the folder picker", () => {
+  it("reads Cloud's list without probing any device", async () => {
+    const getDevicesStatus = rs.fn();
+    const service = createNodeDevicesService(() => ({
+      disconnect() {},
+      getDevicesStatus,
+      run: rs.fn(),
+      listDevices: async () => ({
+        items: [
+          { id: "mac", device_name: "macbook", platform: "macos", token: "secret" },
+          { id: "pc", platform: 3 },
+          { id: "gone", device_name: "Old", platform: "linux", revoked_at: "2026-10-01T00:00:00Z" },
+        ],
+      }),
+    }));
+    const response = await devicesRoutes({ nodeDevices: service }).request("/devices/list");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      devices: [
+        { id: "mac", name: "macbook", platform: "macos" },
+        { id: "pc", name: "pc", platform: null },
+      ],
+    });
+    expect(getDevicesStatus).not.toHaveBeenCalled();
+    service.close();
+  });
+
+  it("answers 503 when the caller cannot reach the list", async () => {
+    const service = createNodeDevicesService(() => ({
+      disconnect() {},
+      getDevicesStatus: rs.fn(),
+      run: rs.fn(),
+      listDevices: async () => {
+        throw new CallerConfigurationError("not_configured", "secret");
+      },
+    }));
+    const response = await devicesRoutes({ nodeDevices: service }).request("/devices/list");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "unavailable" });
+    service.close();
   });
 });

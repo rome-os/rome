@@ -78,22 +78,28 @@ Gateway presence protocol is involved.
 ## Chat device folders
 
 A new chat can work in a folder on a connected device instead of in a Rome
-project. The composer's project selector lists the devices below the projects.
-Selecting a device browses its folders with `fs.list`, through
-`GET /api/devices/:deviceId/files?path=`. A chat holds a project or a device
-folder, never both.
+project. With at least one authorized device, the composer's project selector
+opens on two levels: first Rome Cloud and each device, then Rome Cloud's
+projects or that device's folders. The device list comes from
+`GET /api/devices/list`, which reads Cloud's list and sends nothing to any
+device, so it shows no online status. Opening a device lists its folders with
+`fs.list`, through `GET /api/devices/:deviceId/files?path=`. That request is the
+only probe: an offline device, or one that needs an update, is marked then.
+A chat holds a project or a device folder, never both, and
+`POST /api/chat/sessions` rejects a request that names both.
 
 Rome sets the folder only when it creates the chat. `POST /api/chat/sessions`
 takes `deviceFolder: { deviceId, path }`, lists the path once to check it, and
-stores the real path with the device name and platform at that moment. The
+stores the real path with the device name and platform from Cloud's list. The
 session response returns `deviceFolder`, or `null`.
 
 The agent still runs on Rome, in `projects/default`. Every user message of the
 chat starts with a `<device_folder>` block that names the folder and the device,
 and tells the agent to run programs there with `rome-node device run <id> exec`
 and `cwd` set to the folder. The block repeats on every turn so that it stays in
-context after compaction. Subagents and side chats get it from the turn's thread
-context.
+context after compaction. Subagents get it from the turn's thread context. A
+side chat and a handoff conversation copy the folder into their own session, and
+a deferred continuation reads it from its chat, so their later turns keep it.
 
 Limits:
 
@@ -102,7 +108,8 @@ Limits:
   the remote program. Output is not streamed.
 - The folder is the default `cwd` for the agent's commands, not a sandbox. `exec`
   runs as the device's OS user.
-- Only webchat sessions store a device folder.
+- Only webchat chats, their side chats, and their handoff conversations store a
+  device folder.
 
 ## Local client protocol
 

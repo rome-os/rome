@@ -25,6 +25,15 @@ export const devicesStatusSchema = z.object({
 });
 export type DevicesStatus = z.infer<typeof devicesStatusSchema>;
 
+/**
+ * The devices the caller is authorized for, read from Cloud's list. It sends
+ * nothing to the devices, so it says nothing about who is online.
+ */
+export const deviceListSchema = z.object({
+  devices: z.array(z.object({ id: z.string(), name: z.string(), platform: z.string().nullable() })),
+});
+export type DeviceList = z.infer<typeof deviceListSchema>;
+
 /** One folder on a device, as `fs.list` reports it. */
 export const deviceFilesResponseSchema = z.object({
   /** Real path, symlinks resolved. */

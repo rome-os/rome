@@ -128,6 +128,41 @@ describe("backend turn delivery", () => {
     });
   });
 
+  it("resumes a webchat continuation with the chat's device folder", async () => {
+    const agentRunner = createMockAgentRunner([[{ type: "result", content: "" }]]);
+    const folder = { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" };
+    const resolveDeviceFolder = rs.fn(async () => folder);
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: () =>
+        ({
+          name: "webchat",
+          send: { send: rs.fn(), direct: null, activity: null },
+        }) as unknown as Channel,
+      resolveDeviceFolder,
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (_sessionId, task) => {
+        await task({ emit: async () => {} });
+      },
+    });
+
+    await runner.runAndDeliver({
+      agentName: "main",
+      sessionId: "agent-session-1",
+      channel: "webchat",
+      threadId: "chat-1",
+      prompt: "⏰ Time's up: check deployment",
+    });
+
+    expect(resolveDeviceFolder).toHaveBeenCalledWith("webchat", "chat-1");
+    expect(agentRunner.calls[0].threadContext).toMatchObject({
+      channel: "webchat",
+      threadId: "chat-1",
+      deviceFolder: folder,
+    });
+  });
+
   it("refuses to deliver on a channel that cannot send", async () => {
     const agentRunner = createMockAgentRunner([[{ type: "result", content: "Done." }]]);
     const runner = createBackendTurnRunner({

@@ -204,10 +204,9 @@ describe("project selector devices", () => {
   };
 
   const defaultDevices = [
-    { id: "pc", name: "Windows PC", platform: "windows", status: "not_connected" },
-    { id: "mac", name: "macbook", platform: "macos", status: "connected" },
-    { id: "old", name: "old-linux", platform: "linux", status: "connected" },
-    { id: "gone", name: "Revoked", platform: "linux", status: "revoked" },
+    { id: "mac", name: "macbook", platform: "macos" },
+    { id: "old", name: "old-linux", platform: "linux" },
+    { id: "pc", name: "Windows PC", platform: "windows" },
   ];
 
   function stubDevices(
@@ -216,13 +215,7 @@ describe("project selector devices", () => {
   ) {
     return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://rome.test");
-      if (url.pathname === "/api/devices") {
-        return Response.json({
-          connection: "online",
-          checkedAt: new Date().toISOString(),
-          devices,
-        });
-      }
+      if (url.pathname === "/api/devices/list") return Response.json({ devices });
       const match = url.pathname.match(/^\/api\/devices\/([^/]+)\/files$/);
       if (match) return files(match[1], url.searchParams.get("path"));
       return Response.json({ error: "unexpected" }, { status: 500 });
@@ -231,6 +224,7 @@ describe("project selector devices", () => {
 
   const macFiles = (deviceId: string, path: string | null) => {
     if (deviceId === "old") return Response.json({ error: "upgrade_required" }, { status: 409 });
+    if (deviceId === "pc") return Response.json({ error: "offline" }, { status: 503 });
     const real = path ?? "/Users/ray";
     return Response.json({ path: real, ...folders[real], truncated: false });
   };
@@ -255,14 +249,14 @@ describe("project selector devices", () => {
   afterEach(() => rs.restoreAllMocks());
 
   it("keeps the single project list when only Rome Cloud is available", async () => {
-    const fetchSpy = stubDevices(macFiles, [
-      { id: "gone", name: "Revoked", platform: "linux", status: "revoked" },
-    ]);
+    const fetchSpy = stubDevices(macFiles, []);
     render(<Harness onPickDeviceFolder={rs.fn()} />);
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     expect(await screen.findByRole("option", { name: /alpha/ })).toBeTruthy();
     expect(screen.queryByRole("option", { name: /Rome Cloud/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    // Only the probe-free list is read; no device is asked anything.
+    expect(fetchSpy.mock.calls.map(([input]) => String(input))).toEqual(["/api/devices/list"]);
   });
 
   it("opens on Rome Cloud and the devices, then Rome Cloud lists the projects", async () => {
@@ -280,18 +274,24 @@ describe("project selector devices", () => {
     expect(await screen.findByRole("option", { name: /Rome Cloud/ })).toBeTruthy();
   });
 
-  it("lists devices on the first level and disables offline ones with the reason", async () => {
-    stubDevices(macFiles);
+  it("probes a device only when it is opened, then disables it if offline", async () => {
+    const fetchSpy = stubDevices(macFiles);
+    const user = userEvent.setup();
     render(<Harness onPickDeviceFolder={rs.fn()} />);
 
-    const mac = await screen.findByRole("option", { name: /macbook/ });
-    expect(mac.getAttribute("aria-disabled")).not.toBe("true");
-    const pc = screen.getByRole("option", { name: /Windows PC/ });
-    // Offline devices sort after the connected ones.
-    expect(screen.getAllByRole("option").at(-1)).toBe(pc);
-    expect(pc.getAttribute("aria-disabled")).toBe("true");
-    expect(pc.textContent).toContain("Offline");
-    expect(screen.queryByRole("option", { name: /Revoked/ })).toBeNull();
+    // Every device starts openable: the list carries no online status.
+    const pc = await screen.findByRole("option", { name: /Windows PC/ });
+    expect(pc.getAttribute("aria-disabled")).not.toBe("true");
+    const urls = () => fetchSpy.mock.calls.map(([input]) => String(input));
+    expect(urls().some((url) => url.includes("/files"))).toBe(false);
+
+    await user.click(pc);
+    expect(await screen.findByText("The device is offline.")).toBeTruthy();
+    expect(urls().filter((url) => url.includes("/files"))).toEqual(["/api/devices/pc/files"]);
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    const offline = await screen.findByRole("option", { name: /Windows PC/ });
+    expect(offline.getAttribute("aria-disabled")).toBe("true");
+    expect(offline.textContent).toContain("Offline");
   });
 
   it("browses folders, goes up, and picks the current folder with its home", async () => {

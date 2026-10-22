@@ -303,8 +303,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const [draftProjectName, setDraftProjectName] = useState(
     () => initialProjectName?.trim() || storedDraft?.projectPath || DEFAULT_PROJECT_NAME,
   );
-  const [draftDeviceFolder, setDraftDeviceFolder] = useState<DraftDeviceFolder | null>(
-    () => storedDraft?.deviceFolder ?? null,
+  // A project and a device folder exclude each other: a project the composer
+  // opens with wins over a folder left in the saved draft.
+  const [draftDeviceFolder, setDraftDeviceFolder] = useState<DraftDeviceFolder | null>(() =>
+    initialProjectName?.trim() ? null : (storedDraft?.deviceFolder ?? null),
   );
   const [projectCatalog, setProjectCatalog] = useState<ProjectCatalog | null>(null);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -371,7 +373,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const textareaFocusedAtPressRef = useRef(false);
 
   useEffect(() => {
-    if (initialProjectName) setDraftProjectName(initialProjectName.trim());
+    if (!initialProjectName) return;
+    setDraftProjectName(initialProjectName.trim());
+    setDraftDeviceFolder(null);
   }, [initialProjectName]);
   useEffect(() => {
     if (initialAgentMention && !agentMentionLocked) setDraftAgentMention(initialAgentMention);

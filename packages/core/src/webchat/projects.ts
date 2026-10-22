@@ -1,3 +1,4 @@
+import type { DeviceFolder } from "@rome/api-types/devices";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { getProjectsRoot } from "../paths.js";
@@ -198,4 +199,14 @@ export async function resolveWebchatContinuationWorkingDir(
     session.projectPath ?? session.projectName,
   );
   return resolveWebchatProjectPath(projectPath, rootPath);
+}
+
+/** The device folder of the webchat chat a continuation resumes, if it has one. */
+export async function resolveWebchatContinuationDeviceFolder(
+  channel: string,
+  threadId: string,
+  webchatRepo: { getSession(id: string): Promise<{ deviceFolder?: DeviceFolder | null } | null> },
+): Promise<DeviceFolder | undefined> {
+  if (channel !== "webchat" || !threadId) return undefined;
+  return (await webchatRepo.getSession(threadId))?.deviceFolder ?? undefined;
 }

@@ -172,7 +172,10 @@ import { PolicyEngine } from "./core/policy-engine.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
 import type { EmailAdapter, EmailSettings } from "./channels/email.js";
-import { resolveWebchatContinuationWorkingDir } from "./webchat/projects.js";
+import {
+  resolveWebchatContinuationDeviceFolder,
+  resolveWebchatContinuationWorkingDir,
+} from "./webchat/projects.js";
 import { SkillCatalog } from "./core/skill-catalog.js";
 import { createActiveSubagentRegistry } from "./core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry.js";
@@ -929,6 +932,8 @@ async function main() {
     // no backend turn runs before boot completes.
     channel: (name) => channels.find((channel) => channel.name === name) ?? null,
     resolveWorkingDir: resolveContinuationWorkingDir,
+    resolveDeviceFolder: (channel, threadId) =>
+      resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
   });
 

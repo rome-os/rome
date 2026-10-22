@@ -1,4 +1,4 @@
-import type { DeviceFilesResponse, DevicesStatus } from "@rome/api-types/devices";
+import type { DeviceFilesResponse, DeviceList } from "@rome/api-types/devices";
 import type {
   AgentCatalogGroup,
   ApprovalRecord,
@@ -314,9 +314,10 @@ export async function createSession(input: CreateSessionInput): Promise<ChatSess
   return jsonOrThrow<ChatSession>(res);
 }
 
-export async function listDevices(): Promise<DevicesStatus> {
-  const res = await fetch("/api/devices", { credentials: "include" });
-  return jsonOrThrow<DevicesStatus>(res);
+/** Authorized devices from Cloud's list. Probes no device, so it carries no online status. */
+export async function listDevices(): Promise<DeviceList> {
+  const res = await fetch("/api/devices/list", { credentials: "include" });
+  return jsonOrThrow<DeviceList>(res);
 }
 
 /**

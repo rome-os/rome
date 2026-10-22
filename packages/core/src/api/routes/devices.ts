@@ -18,6 +18,13 @@ export function devicesRoutes(deps: Pick<ApiDeps, "nodeDevices">): Hono {
     c.header("Cache-Control", "no-store");
     return c.json(await deps.nodeDevices.getStatus());
   });
+  // The chat folder picker's device list. Probes nothing: a device is probed
+  // only when the guardian opens it.
+  app.get("/devices/list", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const list = await deps.nodeDevices.listDevices();
+    return list ? c.json(list) : c.json({ error: "unavailable" }, 503);
+  });
   // Backs the chat folder picker. Each call is one read-only fs.list on the device.
   app.get("/devices/:deviceId/files", async (c) => {
     c.header("Cache-Control", "no-store");

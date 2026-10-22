@@ -250,6 +250,8 @@ export interface EnsureRomeSessionInput {
   agentName: string | null;
   projectName?: string;
   projectPath?: string | null;
+  /** A side chat keeps the folder of the chat it branched from. */
+  deviceFolder?: DeviceFolder | null;
   sourceChannel?: string | null;
   sourceThreadId?: string | null;
   sourceThreadName?: string | null;
@@ -940,6 +942,7 @@ export class WebChatRepository {
         personaId: null,
         projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
         projectPath: input.projectPath ?? null,
+        deviceFolder: input.deviceFolder ?? null,
         largeModelSelection: null,
         agentName: input.agentName,
         type: storedSessionType(input.type),

@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   DeviceFilesErrorCode,
   DeviceFilesResponse,
-  DevicesStatus,
+  DeviceList,
 } from "@rome/api-types/devices";
 import { ChatApiError, listDeviceFiles, listDevices } from "@/lib/chat-api";
 
-export type PickerDevice = DevicesStatus["devices"][number];
+export type PickerDevice = DeviceList["devices"][number];
 
 export interface DeviceBrowse {
   device: PickerDevice;
@@ -27,8 +27,9 @@ function errorCode(error: unknown): DeviceFilesErrorCode {
 }
 
 /**
- * Device list and folder browsing for the project selector. Folders load one
- * `fs.list` at a time, and a newer request discards the answer of an older one.
+ * Device list and folder browsing for the project selector. The list probes
+ * no device: opening one is its probe. Folders load one `fs.list` at a time,
+ * and a newer request discards the answer of an older one.
  */
 export function useDeviceFolderBrowser(enabled: boolean, menuOpen: boolean) {
   const [devices, setDevices] = useState<PickerDevice[]>([]);
@@ -54,14 +55,8 @@ export function useDeviceFolderBrowser(enabled: boolean, menuOpen: boolean) {
     let live = true;
     if (menuOpen) setDeviceErrorById({});
     listDevices()
-      .then((status) => {
-        if (!live) return;
-        // Connected devices first: an account collects many offline ones.
-        const usable = status.devices.filter((device) => device.status !== "revoked");
-        setDevices([
-          ...usable.filter((device) => device.status === "connected"),
-          ...usable.filter((device) => device.status !== "connected"),
-        ]);
+      .then((list) => {
+        if (live) setDevices(list.devices);
       })
       .catch(() => {
         if (live) setDevices([]);

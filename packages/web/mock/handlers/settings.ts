@@ -1,4 +1,4 @@
-import type { DeviceFilesResponse, DevicesStatus } from "@rome/api-types/devices";
+import type { DeviceFilesResponse, DeviceList, DevicesStatus } from "@rome/api-types/devices";
 import { validateCustomAnthropicEnv } from "@rome/api-types/anthropic-compatible-env";
 import {
   listAnthropicCompatibleProviderSummaries,
@@ -300,6 +300,17 @@ function macFiles(path: string | null): DeviceFilesResponse | null {
 }
 
 export const settingsHandlers = [
+  // Same devices as `/api/devices` below, without status: the picker probes none.
+  http.get("/api/devices/list", () =>
+    HttpResponse.json({
+      devices: [
+        { id: "mac", name: "MacBook Pro", platform: "macos" },
+        { id: "linux", name: "Development workstation", platform: "linux" },
+        { id: "windows", name: "Windows PC", platform: "windows" },
+        { id: "build", name: "Build server", platform: "linux" },
+      ],
+    } satisfies DeviceList),
+  ),
   http.get("/api/devices/:deviceId/files", async ({ params, request }) => {
     await new Promise((resolve) => setTimeout(resolve, 250));
     if (params.deviceId === "linux") {

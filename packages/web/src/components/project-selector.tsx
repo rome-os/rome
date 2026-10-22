@@ -632,7 +632,8 @@ function LocationList({
             </CommandItem>
           ) : null}
           {visibleDevices.map((device) => {
-            const reason = device.status === "connected" ? deviceErrorById[device.id] : "offline";
+            // Known only after the device was opened: the list probes nothing.
+            const reason = deviceErrorById[device.id];
             const selected = deviceFolder?.deviceId === device.id;
             return (
               <CommandItem

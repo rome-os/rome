@@ -135,7 +135,7 @@ export interface ApiDeps {
   feedback: FeedbackRelay;
   nodeDevices: Pick<
     ReturnType<typeof createNodeDevicesService>,
-    "getStatus" | "start" | "listFiles"
+    "getStatus" | "start" | "listFiles" | "listDevices"
   >;
   provisionNodeCaller?: () => Promise<void>;
   /** Connects the Rome Cloud email inbox unless an email connection exists.

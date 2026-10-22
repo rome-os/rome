@@ -8,6 +8,7 @@ import {
 import {
   deviceFilesResponseSchema,
   devicesStatusSchema,
+  type DeviceList,
   type DeviceFilesErrorCode,
   type DeviceFilesResponse,
   type DevicesStatus,
@@ -30,7 +31,7 @@ function filesErrorCode(code: string): DeviceFilesErrorCode {
 export function createNodeDevicesService(
   createClient: () => Pick<
     ReturnType<typeof createNodeClient>,
-    "getDevicesStatus" | "run" | "disconnect"
+    "getDevicesStatus" | "listDevices" | "run" | "disconnect"
   > = () => createNodeClient(nodeConfigFromEnvironment(process.env)),
   // Discovery is refused until the spawned daemon listens. A real failure rejects.
   start: () => Promise<unknown> = () =>
@@ -63,6 +64,31 @@ export function createNodeDevicesService(
           checkedAt: new Date().toISOString(),
           devices: [],
         };
+      }
+    },
+    /**
+     * Authorized, unrevoked devices from Cloud's list. Unlike getStatus it sends
+     * no probe to any device. Null when the caller cannot reach the list.
+     */
+    async listDevices(): Promise<DeviceList | null> {
+      try {
+        client ??= createClient();
+        const list = await client.listDevices();
+        return {
+          devices: list.items
+            .filter((item) => !item.revoked_at)
+            .map((item) => ({
+              id: item.id,
+              name: typeof item.device_name === "string" ? item.device_name : item.id,
+              platform: typeof item.platform === "string" ? item.platform : null,
+            })),
+        };
+      } catch (error) {
+        if (error instanceof DaemonVersionError) {
+          client?.disconnect();
+          client = undefined;
+        }
+        return null;
       }
     },
     /** Lists one folder on a device through its read-only `fs.list` action. */

@@ -438,6 +438,7 @@ describe("AgentRunner", () => {
             romeSessionId: "parent-chat",
             threadName: "Fixing the build",
             threadType: "private",
+            deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
           },
           parentTurnId: "parent-turn-1",
           label: "recap",
@@ -456,6 +457,8 @@ describe("AgentRunner", () => {
         triggerName: "recap",
         sourceChannel: "webchat",
         sourceThreadId: "parent-chat",
+        // Follow-up turns of the side chat rebuild their context from this row.
+        deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
       });
 
       const transcript = await repo.getMessages("fork-session");
