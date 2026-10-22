@@ -55,14 +55,14 @@ One thing a participant said or did in a chat.
 - Every message goes one way: to Rome or from Rome.
 - A message is made of text, attachments and [widgets](#widget).
 - Every message reads as plain text, so any person on any platform, and any agent, can follow the chat. A widget brings its own plain-text line.
-- Pressing or filling in a widget is a message of its own, from whoever did it, in the place the widget is in. Without it, someone reading the chat later could not tell what was chosen.
+- Acting on a widget is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.
 - A delegate's reply is recorded as said by the agent on the guardian's behalf, under the guardian's account.
 
 ## Widget
 
 Something shown in a chat that people can look at or act on: a question with choices, an approval request, a map from an app.
 
-- Widgets come from one shared catalog. Each kind has a name, what it holds, and how it reads as plain text. Rome's own question and approval are kinds in it, beside the kinds apps add.
+- Widgets come from one shared catalog. Each kind has a name, what it holds, what people can do with it (answer, approve or deny, pick), and how each of those reads as plain text. Rome's own question and approval are kinds in it, beside the kinds apps add.
 - Each platform draws the kinds it can as its own cards, and sends the plain-text line for the rest. Feishu draws a question as a card. Email sends it as text.
 - A widget's live state belongs to what it is about. An approval request shows as approved because the approval is.
 - An agent shows a widget by calling a tool.
