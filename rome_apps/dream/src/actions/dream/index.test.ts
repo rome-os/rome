@@ -529,7 +529,34 @@ describe("dream skills", () => {
     expect(practice).not.toContain("get_account_chats");
     expect(practice).toMatch(/Skills staging directory: .*\.dream-skill-review-.*\/skills$/m);
     expect(practice).toContain(`Guardian's apps directory: ${dirname(carrierDir)}`);
-    expect(practice).toMatch(journal);
+    // The memory agent wrote memory and the journal from other people's chats.
+    expect(practice).not.toContain("/p/memory");
+    expect(practice).toMatch(/Practice notes file: .*\.dream-skill-review-.*\/practice\.md$/m);
+  });
+
+  it("appends the practice agent's notes to today's journal", async () => {
+    const memoryDir = join(dirname(carrierDir), "memory");
+    const runner = skillWritingRunner([{ type: "result", content: "done" }], () => {
+      const notes = /Practice notes file: (.+)$/m.exec(runner.prompts[1] ?? "")?.[1] as string;
+      writeFileSync(notes, "## Practice\n- notes app: fixed the export.");
+    });
+    const { deps } = withRunner(runner);
+    deps.memoryDir = memoryDir;
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    const journalPath = /Today's journal entry: (.+)$/m.exec(
+      runner.prompts[0] ?? "",
+    )?.[1] as string;
+    expect(readFileSync(journalPath, "utf8")).toContain(
+      "## Practice\n- notes app: fixed the export.",
+    );
+    const { runId } = (result as { data: { runId: string } }).data;
+    expect(
+      createRunsRepository(appDb())
+        .changes(runId)
+        .map((c) => c.path),
+    ).toContain(journalPath);
   });
 
   it("records the app files the practice agent changed without file tools", async () => {

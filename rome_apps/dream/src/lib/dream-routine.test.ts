@@ -37,7 +37,7 @@ describe("ensureDreamRoutine", () => {
         rrule: "FREQ=DAILY;INTERVAL=3",
       },
       actionName: "dream",
-      args: { windowHours: 74 },
+      args: {},
     });
   });
 

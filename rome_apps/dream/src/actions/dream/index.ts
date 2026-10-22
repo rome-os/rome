@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -35,6 +35,23 @@ export interface DreamDeps {
 /** Core's profile memory directory (`getProfileMemoryDir`), which an app cannot import. */
 function profileMemoryDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(homedir(), ".rome", env.ROME_PROFILE || "default", "memory");
+}
+
+/** Appends the practice agent's notes to the journal, and records it on the run. */
+async function appendPracticeNotes(
+  notesPath: string,
+  journalPath: string,
+  runs: ReturnType<typeof createRunsRepository>,
+  runId: string,
+): Promise<void> {
+  const notes = (await readFile(notesPath, "utf8").catch(() => "")).trim();
+  if (!notes) return;
+  const text = `\n\n${notes}\n`;
+  await mkdir(dirname(journalPath), { recursive: true });
+  await appendFile(journalPath, text);
+  runs.addChanges(runId, [
+    { op: "edit", path: journalPath, content: text, previous: "", truncated: false },
+  ]);
 }
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<DreamDeps>): Action {
@@ -173,14 +190,17 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         if (memoryStopped) return memoryStopped;
 
         const practiceRecorder = new RunRecorder(runs, runId);
+        // The practice agent gets no memory or journal path: the memory agent
+        // just wrote those from other people's chats. Its notes go to a file
+        // of its own, which the action appends to the journal.
+        const notesPath = join(staging, "practice.md");
         const practicePrompt = [
           `Today is ${now.toISOString()}. Practice over the past ${windowHours} hours.`,
           "",
           `- Window: pass windowHours: ${windowHours} to get_webchat_conversations and get_action_logs.`,
-          `- Memory directory: ${memoryDir}`,
           `- Skills staging directory: ${join(staging, "skills")}`,
           `- Guardian's apps directory: ${appsDir}`,
-          `- Today's journal entry: ${journalPath}`,
+          `- Practice notes file: ${notesPath}`,
         ].join("\n");
         const appsBefore = await snapshotApps(appsDir);
         let practiceStopped: ActionResult | null;
@@ -193,6 +213,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
             runId,
             await appChangesSince(appsDir, appsBefore, practiceRecorder.paths),
           );
+          await appendPracticeNotes(notesPath, journalPath, runs, runId);
         }
         if (practiceStopped) return practiceStopped;
         const agentSummary = [memoryRecorder.summary, practiceRecorder.summary]

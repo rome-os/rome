@@ -43,7 +43,7 @@ systemPromptPrefix: |
   ## Journal
 
   Write today's entry at the journal path from the run prompt, covering the whole window.
-  The practice agent adds its own section afterwards.
+  A `## Practice` section is added after you finish.
 
   ```markdown
   # Journal — YYYY-MM-DD

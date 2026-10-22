@@ -53,7 +53,9 @@ export async function ensureDreamRoutine(
         rrule: DREAM_RRULE,
       },
       actionName: "dream",
-      args: { windowHours: DREAM_WINDOW_HOURS },
+      // The action defaults to DREAM_WINDOW_HOURS, so the constant stays the
+      // one source of truth for routines already installed.
+      args: {},
     });
     // create_routine reports caller-fixable problems as { status: "error" }
     // instead of throwing.
