@@ -109,6 +109,10 @@ export function createGuardianLinkAdmission(deps: {
     // A Telegram channel posts under the channel's own negative id, which is no
     // person's account.
     if (connectionKind === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
+    // The email adapter namespaces mail that failed SPF, DKIM or DMARC, whose
+    // From anyone can forge. It proves no account, so the code stays unused and
+    // no reply goes to an address the sender may not own.
+    if (message.senderId.startsWith("unauthenticated:")) return false;
     if (!deps.codes.redeem(message.text!)) {
       reply("That code was not accepted. Open People in Rome to get a new one.");
       return false;

@@ -220,3 +220,44 @@ describe("DiscordAdapter.saveIncomingAttachments", () => {
     ).resolves.toBe(attachments);
   });
 });
+
+describe("DiscordAdapter gateway filters", () => {
+  it("passes a link code said in a guild channel to admission without a mention, so it is voided", async () => {
+    const handlers = new Map<string, (message: Message) => Promise<void>>();
+    const adapter = new DiscordAdapter({ botToken: "test-token" });
+    Object.assign(adapter, {
+      client: {
+        user: BOT,
+        on: (event: string, handler: (message: Message) => Promise<void>) =>
+          handlers.set(event, handler),
+        login: async () => "test-token",
+      },
+    });
+    const captured: ChannelMessage[] = [];
+    adapter.onInbound(async (msg) => {
+      captured.push(msg);
+    });
+    await adapter.start();
+    const guildMessage = (id: string, content: string) =>
+      ({
+        id,
+        channelId: "channel-1",
+        content,
+        createdAt: new Date("2026-05-10T00:00:00Z"),
+        type: MessageType.Default,
+        reference: null,
+        author: { id: "user-1", username: "alice", displayName: "Alice" },
+        member: { displayName: "Alice Smith" },
+        guild: { members: { me: { displayName: "Rome" } } },
+        channel: { type: ChannelType.GuildText, name: "general", isThread: () => false },
+        mentions: { users: new Map() },
+        attachments: new Map(),
+      }) as unknown as Message;
+
+    await handlers.get("messageCreate")!(guildMessage("msg-1", "ROME-7KQ2M9XA"));
+    await handlers.get("messageCreate")!(guildMessage("msg-2", "hi"));
+
+    expect(captured.map((m) => m.text)).toStrictEqual(["ROME-7KQ2M9XA"]);
+    expect(captured[0].thread?.kind).toBe("group");
+  });
+});

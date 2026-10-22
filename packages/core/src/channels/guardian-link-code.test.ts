@@ -1,10 +1,14 @@
+import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { SettingsRepository } from "../db/repositories/settings.js";
+import type { MailProvider } from "../lib/rome-cloud-mail.js";
 import { createTestDb, identityConnectionKindOf, type TestDb } from "../test/helpers.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { persons } from "../db/schema.js";
+import { EmailAdapter } from "./email.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./guardian-link-code.js";
 
 function message(text: string, overrides: Partial<ChannelMessage> = {}): ChannelMessage {
@@ -107,6 +111,47 @@ describe("guardian link admission", () => {
       false,
     );
     expect((await repo.findByChannelUser("telegram", "456"))?.id).toBe("li");
+  });
+
+  it("leaves the code unused when it comes in mail that failed authentication", async () => {
+    const { code } = codes.issue();
+    const inbound: ChannelMessage[] = [];
+    const mail = new EmailAdapter({
+      provider: {
+        getMessage: async () => {
+          throw new Error("body unavailable");
+        },
+      } as unknown as MailProvider,
+      settingsRepo: {} as unknown as SettingsRepository,
+      personMappingRepo: repo,
+      config: { address: "slug@mail.romeos.cc", inboundSecret: "secret" },
+    });
+    mail.onInbound(async (m) => {
+      inbound.push(m);
+    });
+    const raw = JSON.stringify({
+      type: "message.received",
+      provider: "agentmail",
+      mailboxAddress: "slug@mail.romeos.cc",
+      id: "evt_1",
+      providerMessageId: "msg_1",
+      threadId: "t1",
+      from: [{ name: "Owner", email: "owner@example.com" }],
+      to: [{ email: "slug@mail.romeos.cc" }],
+      subject: "code",
+      preview: code,
+      receivedAt: new Date(0).toISOString(),
+      hasAttachment: false,
+      attachments: [],
+      authentication: { authenticated: false, spam: false, blocked: false },
+      labels: ["received", "unread", "unauthenticated"],
+    });
+    await mail.ingestInbound(raw, createHmac("sha256", "secret").update(raw).digest("hex"));
+
+    expect(await admit("mail", "email", inbound[0])).toBe(false);
+    expect(await repo.findByChannelUser("email", inbound[0].senderId)).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+    expect(codes.redeem(code)).toBe(true);
   });
 
   it("voids a code said in a group without linking anyone", async () => {
