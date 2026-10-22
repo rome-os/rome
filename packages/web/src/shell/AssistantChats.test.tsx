@@ -42,19 +42,21 @@ describe("AssistantChats", () => {
     rs.restoreAllMocks();
   });
 
-  it("lists each assistant with its kind, linking to its chat", async () => {
+  it("lists each assistant with its kind's mark, linking to its chat", async () => {
     serve([assistant(MUSE, "Muse", "muse"), assistant(DOT, "Research dot", "dot")]);
     renderGroup(`/assistants/${DOT}`);
 
     const section = await screen.findByRole("region", { name: "Assistants" });
     const rows = within(section).getAllByRole("link");
-    expect(rows.map((row) => row.textContent)).toEqual(["MuseMuse", "Research dotDot"]);
+    expect(rows.map((row) => row.textContent)).toEqual(["Muse", "Research dot"]);
+    expect(within(rows[1]!).getByRole("img", { name: "Dot" })).toBeTruthy();
+    expect(within(rows[0]!).getByRole("img", { name: "Muse" })).toBeTruthy();
     expect(rows[1]!.getAttribute("href")).toBe(`/assistants/${DOT}`);
     expect(rows[1]!.getAttribute("aria-current")).toBe("page");
     expect(rows[0]!.getAttribute("aria-current")).toBeNull();
   });
 
-  it("shows a kind it does not know as Rome Cloud spells it", async () => {
+  it("names a kind it has no mark for, as Rome Cloud spells it", async () => {
     serve([assistant(DOT, "Grok", "grok")]);
     renderGroup();
     expect(await screen.findByText("grok")).toBeTruthy();

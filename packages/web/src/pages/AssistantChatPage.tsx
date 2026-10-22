@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -10,14 +10,13 @@ import { ChatComposer } from "@/components/chat/ChatComposer";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { MessageRow } from "@/components/chat/MessageRow";
 import { TextBlock } from "@/components/chat/entries/TextBlock";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { listAssistants, readAssistantMessages, sendToAssistant } from "@/lib/assistants-api";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { randomUUID } from "@/lib/random-uuid";
-import { useAssistantKindLabel } from "@/shell/AssistantChats";
+import { AssistantKindIcon, AssistantKindMark } from "@/components/assistant-kind-icon";
 
 /** How often the open chat is read again, so an assistant's message and main's
  *  answer appear without a reload. */
@@ -37,7 +36,6 @@ const MESSAGES_KEY = "assistant-messages";
 export function AssistantChatPage() {
   const { agentId = "" } = useParams<{ agentId: string }>();
   const { t } = useTranslation("common");
-  const kindLabel = useAssistantKindLabel();
   const queryClient = useQueryClient();
   const { scrollRef, contentRef } = useStickToBottom();
 
@@ -47,6 +45,9 @@ export function AssistantChatPage() {
   });
   const assistant = assistants.data?.find((candidate) => candidate.agentId === agentId);
   const name = assistant?.name ?? t("assistants.unknownName");
+  const mark = assistant ? (
+    <AssistantKindMark kind={assistant.kind} className="h-1/2 w-1/2" />
+  ) : undefined;
   useDocumentTitle(assistant ? [assistant.name, t("assistants.title")] : null);
 
   const timeline = useInfiniteQuery<TimelinePage>({
@@ -69,13 +70,9 @@ export function AssistantChatPage() {
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="z-20 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <AgentAvatar label={name} size="sm" className="shrink-0" />
+              <AgentAvatar label={name} size="sm" mark={mark} className="shrink-0" />
               <span className="truncate text-ui text-foreground">{name}</span>
-              {assistant ? (
-                <Badge variant="muted" className="shrink-0">
-                  {kindLabel(assistant.kind)}
-                </Badge>
-              ) : null}
+              {assistant ? <AssistantKindIcon kind={assistant.kind} /> : null}
             </div>
           </div>
 
@@ -117,7 +114,12 @@ export function AssistantChatPage() {
                   </p>
                 ) : (
                   entries.map((entry) => (
-                    <ChatLine key={`${entry.source}:${entry.ref}`} entry={entry} name={name} />
+                    <ChatLine
+                      key={`${entry.source}:${entry.ref}`}
+                      entry={entry}
+                      name={name}
+                      mark={mark}
+                    />
                   ))
                 )}
               </div>
@@ -165,7 +167,7 @@ export function AssistantChatPage() {
 
 /** A line Rome said sits on the right like the guardian's own message; the
  *  assistant's sits on the left under its name, like an agent's. */
-function ChatLine({ entry, name }: { entry: Message; name: string }) {
+function ChatLine({ entry, name, mark }: { entry: Message; name: string; mark: ReactNode }) {
   const { t } = useTranslation("common");
   const body = entry.body ?? t("assistantChat.noText");
   const time = formatMessageTimestamp(new Date(entry.timestamp * 1000).toISOString());
@@ -181,7 +183,7 @@ function ChatLine({ entry, name }: { entry: Message; name: string }) {
   const sender = entry.sender?.name ?? name;
   return (
     <MessageRow
-      avatar={<AgentAvatar label={sender} />}
+      avatar={<AgentAvatar label={sender} mark={mark} />}
       name={sender}
       subtitle={<span className="text-aux text-subtle-foreground">{time}</span>}
     >

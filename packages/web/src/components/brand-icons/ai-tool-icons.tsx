@@ -250,6 +250,9 @@ export type ModelProviderBrand =
   | { kind: "image"; src: string }
   | { kind: "generic" };
 
+/** Meta's logo, also drawn for Muse, a Meta product with no mark of its own. */
+export const META_LOGO_SRC = "/provider-logos/meta.svg";
+
 const PROVIDER_LOGOS: Record<string, string> = {
   minimax: "/provider-logos/minimax.svg",
   "minimax-intl": "/provider-logos/minimax.svg",
@@ -258,7 +261,7 @@ const PROVIDER_LOGOS: Record<string, string> = {
   kimi: "/provider-logos/moonshotai.svg",
   moonshot: "/provider-logos/moonshotai.svg",
   deepseek: "/provider-logos/deepseek.svg",
-  meta: "/provider-logos/meta.svg",
+  meta: META_LOGO_SRC,
 };
 
 export function resolveModelProviderBrand({

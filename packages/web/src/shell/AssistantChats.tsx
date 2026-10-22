@@ -3,19 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import type { Assistant } from "@rome/api-types/assistants";
-import { Badge } from "@/components/ui/badge";
+import { AssistantKindIcon } from "@/components/assistant-kind-icon";
 import { assistantPath, listAssistants } from "@/lib/assistants-api";
 
 /** How often the list is read again, so a new assistant or a new message
  *  reorders the group without a reload. */
 const REFRESH_MS = 30_000;
-
-/** The name for an assistant's kind. A kind this dashboard does not know yet is
- *  shown as Rome Cloud spells it. */
-export function useAssistantKindLabel(): (kind: string) => string {
-  const { t } = useTranslation("common");
-  return (kind) => t(`assistants.kind.${kind}`, { defaultValue: kind });
-}
 
 /**
  * The sidebar's Assistants group: one row per assistant, above the dashboard's
@@ -31,7 +24,6 @@ export function AssistantChats({
   onToggle: () => void;
 }) {
   const { t } = useTranslation("common");
-  const kindLabel = useAssistantKindLabel();
   const location = useLocation();
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const request = useRef(0);
@@ -96,9 +88,7 @@ export function AssistantChats({
                 }`}
               >
                 <span className="min-w-0 flex-1 truncate">{assistant.name}</span>
-                <Badge variant="muted" className="shrink-0">
-                  {kindLabel(assistant.kind)}
-                </Badge>
+                <AssistantKindIcon kind={assistant.kind} />
               </Link>
             );
           })}
