@@ -10,11 +10,10 @@ import type {
 } from "@rome-os/rome-web-components/news-item/schema";
 import type { ChatComposerHandle } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
-import { emitSessionsChanged, usePinSession, useSessionsChanged } from "@/lib/session-events";
-import { listSessions } from "@/lib/chat-api";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { useSettings } from "@/hooks/use-settings";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
-import type { AgentMention, ChatSession } from "@/lib/chat-types";
+import type { AgentMention } from "@/lib/chat-types";
 
 export type { SessionMessage };
 
@@ -149,10 +148,7 @@ export function ChatComponent({
     () => getQuickEntries(cloudQuickEntryDefinitions, i18n.language),
     [cloudQuickEntryDefinitions, i18n.language],
   );
-  const [homeSessions, setHomeSessions] = useState<ChatSession[]>([]);
-  const [sessionsSettled, setSessionsSettled] = useState(false);
   const [newsSettled, setNewsSettled] = useState(!romeNewsConfig.enabled);
-  const setSessionPinned = usePinSession();
 
   useEffect(() => {
     if (sessionId || !romeNewsConfig.enabled) return;
@@ -176,66 +172,19 @@ export function ChatComponent({
     };
   }, [sessionId]);
 
-  const loadHomeData = useCallback(async () => {
-    if (sessionId) return;
-    try {
-      setHomeSessions(await listSessions());
-    } catch {
-      // Keep the empty state usable when recent chats cannot be loaded.
-    } finally {
-      setSessionsSettled(true);
-    }
-  }, [sessionId]);
-
-  useEffect(() => {
-    void loadHomeData();
-  }, [loadHomeData]);
-
-  useSessionsChanged(() => {
-    void loadHomeData();
-  });
-
-  const pinnedChats = useMemo(
-    () =>
-      homeSessions
-        .filter((session) => session.pinnedAt)
-        .sort((a, b) => new Date(b.pinnedAt ?? 0).getTime() - new Date(a.pinnedAt ?? 0).getTime())
-        .map((session) => ({
-          id: session.id,
-          name: session.name,
-          projectName: session.projectName || session.projectPath || "",
-        })),
-    [homeSessions],
-  );
-
   // Center the greeting with the composer when the home has nothing else to
-  // show. Until the home data settles, keep the last known layout.
-  const homeSettled = sessionsSettled && newsSettled;
-  const loadedGreetingOnly = pinnedChats.length === 0 && quickEntries.length === 0;
+  // show. Until Rome News settles, keep the last known layout.
+  const loadedGreetingOnly = quickEntries.length === 0;
   const [rememberedGreetingOnly] = useState(readGreetingOnlyHome);
-  const greetingOnlyHome = homeSettled ? loadedGreetingOnly : rememberedGreetingOnly;
+  const greetingOnlyHome = newsSettled ? loadedGreetingOnly : rememberedGreetingOnly;
   useEffect(() => {
-    if (!homeSettled) return;
+    if (!newsSettled) return;
     try {
       window.localStorage.setItem(GREETING_ONLY_HOME_KEY, String(loadedGreetingOnly));
     } catch {
       // Storage can be unavailable; the layout then just starts centered.
     }
-  }, [homeSettled, loadedGreetingOnly]);
-
-  const handleUnpinChat = useCallback(
-    async (id: string) => {
-      try {
-        await setSessionPinned(id, false);
-        setHomeSessions((sessions) =>
-          sessions.map((session) => (session.id === id ? { ...session, pinnedAt: null } : session)),
-        );
-      } catch {
-        // Keep the server-backed pin visible when the mutation fails.
-      }
-    },
-    [setSessionPinned],
-  );
+  }, [newsSettled, loadedGreetingOnly]);
 
   // Full URL the App Store sheet embeds when an app-store quick entry is picked;
   // null keeps the sheet closed.
@@ -288,9 +237,6 @@ export function ChatComponent({
         emptyState={
           <ChatEmptyState
             guardianName={guardianName}
-            pinnedChats={pinnedChats}
-            onOpenPinnedChat={(id) => navigate(`/chat/${id}`)}
-            onUnpinChat={(id) => void handleUnpinChat(id)}
             quickEntries={quickEntries}
             onActivateQuickEntry={handleActivateQuickEntry}
             hugComposer={greetingOnlyHome}

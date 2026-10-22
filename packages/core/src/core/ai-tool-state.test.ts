@@ -1,4 +1,10 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+
+const logs = rs.hoisted(() => ({ warn: rs.fn(), info: rs.fn() }));
+rs.mock("../logger.js", () => ({
+  createLogger: () => ({ debug: rs.fn(), info: logs.info, warn: logs.warn, error: rs.fn() }),
+}));
+
 import { createAIToolState, type AIToolStateProbes } from "./ai-tool-state.js";
 import type { AIToolUsageStatus } from "../lib/provider-usage.js";
 
@@ -836,5 +842,148 @@ describe("AIToolState", () => {
     expect(state.get().claude.quotaExhausted).toBe(false);
     state.close();
     rs.useRealTimers();
+  });
+  describe("quota change logging", () => {
+    const now = Date.parse("2026-10-21T10:00:00.000Z");
+    const HOUR = 60 * 60 * 1000;
+
+    beforeEach(() => {
+      logs.warn.mockClear();
+      logs.info.mockClear();
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+    });
+
+    afterEach(() => {
+      rs.useRealTimers();
+    });
+
+    function codexWithUsage(usedPercent: () => number) {
+      return createAIToolState({
+        probes: probes({
+          codexUsage: async () => ({
+            checkedAt: new Date(now).toISOString(),
+            source: "test",
+            fiveHour: { usedPercent: usedPercent(), resetsAt: new Date(now + HOUR).toISOString() },
+          }),
+        }),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+    }
+
+    it("logs a usage check that finds the limit once, then its recovery once", async () => {
+      let usedPercent = 100;
+      const state = codexWithUsage(() => usedPercent);
+
+      await state.refresh("openai");
+      await state.refresh("openai");
+      expect(logs.warn).toHaveBeenCalledTimes(1);
+      expect(logs.warn).toHaveBeenCalledWith("model provider usage limit reached", {
+        provider: "openai",
+        source: "usage check",
+        until: new Date(now + HOUR).toISOString(),
+        fiveHourUsedPercent: 100,
+        sevenDayUsedPercent: undefined,
+      });
+
+      usedPercent = 40;
+      await state.refresh("openai");
+      await state.refresh("openai");
+      expect(logs.info).toHaveBeenCalledTimes(1);
+      expect(logs.info).toHaveBeenCalledWith("model provider usage limit cleared", {
+        provider: "openai",
+        source: "usage check",
+      });
+    });
+
+    it("logs the first failed run that hits the limit and not the ones after it", () => {
+      const state = createAIToolState({
+        probes: probes(),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+
+      state.markQuotaExhausted("openai");
+      state.markQuotaExhausted("openai");
+
+      expect(logs.warn).toHaveBeenCalledTimes(1);
+      expect(logs.warn).toHaveBeenCalledWith(
+        "model provider usage limit reached",
+        expect.objectContaining({ provider: "openai", source: "failed run" }),
+      );
+    });
+
+    it("attributes a recovery to the end time when no usage check confirmed it", async () => {
+      let usageFails = false;
+      const state = codexWithUsage(() => {
+        if (usageFails) throw new Error("usage endpoint throttled");
+        return 100;
+      });
+      await state.refresh("openai");
+      expect(logs.warn).toHaveBeenCalledTimes(1);
+
+      // A failed usage check keeps the stored flag, so only the end time can
+      // have cleared the limit.
+      usageFails = true;
+      rs.setSystemTime(now + HOUR);
+      await state.refresh("openai");
+      expect(logs.info).toHaveBeenCalledWith("model provider usage limit cleared", {
+        provider: "openai",
+        source: "end time passed",
+      });
+    });
+
+    it("logs a limit that ends and is hit again as cleared, then reached", () => {
+      const state = createAIToolState({
+        probes: probes(),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+      state.markQuotaExhausted("openai");
+      const until = state.get().codex.quotaExhaustedUntil;
+
+      rs.setSystemTime(Date.parse(until ?? "") + 1);
+      expect(state.get().codex.quotaExhausted).toBe(false);
+      expect(logs.info).toHaveBeenCalledWith("model provider usage limit cleared", {
+        provider: "openai",
+        source: "end time passed",
+      });
+
+      state.markQuotaExhausted("openai");
+      expect(logs.warn).toHaveBeenCalledTimes(2);
+      expect(logs.info).toHaveBeenCalledTimes(1);
+    });
+
+    it("logs one warning for a failed run during a usage check that finds capacity", async () => {
+      let releaseUsage!: () => void;
+      const usageGate = new Promise<void>((resolve) => {
+        releaseUsage = resolve;
+      });
+      const state = createAIToolState({
+        probes: probes({
+          codexUsage: async () => {
+            await usageGate;
+            return {
+              checkedAt: new Date(now).toISOString(),
+              source: "test",
+              fiveHour: { usedPercent: 50 },
+            };
+          },
+        }),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+
+      const refresh = state.refresh("openai");
+      state.markQuotaExhausted("openai");
+      releaseUsage();
+      await refresh;
+      await Promise.resolve();
+
+      expect(state.get().codex.quotaExhausted).toBe(true);
+      expect(logs.warn).toHaveBeenCalledTimes(1);
+      expect(logs.info).not.toHaveBeenCalled();
+    });
   });
 });

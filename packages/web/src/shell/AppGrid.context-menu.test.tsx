@@ -61,12 +61,12 @@ function LocationProbe() {
   );
 }
 
-function renderSidebar(collapsed: boolean, initialPath = "/apps") {
+function renderSidebar(initialPath = "/apps") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialPath]}>
-        <AppGrid collapsed={collapsed} />
+        <AppGrid />
         <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -101,12 +101,9 @@ afterEach(() => {
   apps[0].projectPath = "recipe-box";
 });
 
-describe.each([
-  ["expanded sidebar", false],
-  ["collapsed rail", true],
-] as const)("pinned app context menu in the %s", (_name, collapsed) => {
+describe("pinned app context menu in the rail", () => {
   it("offers new-tab, chat-with-app, details, and unpin actions", async () => {
-    renderSidebar(collapsed);
+    renderSidebar();
 
     fireEvent.contextMenu(await findPinnedAppLink());
 
@@ -120,7 +117,7 @@ describe.each([
 });
 
 it("opens a pinned app in a new tab, since a plain click already opens it here", async () => {
-  renderSidebar(false);
+  renderSidebar();
 
   fireEvent.contextMenu(await findPinnedAppLink());
 
@@ -138,7 +135,7 @@ it("keeps a plain Open on a touch device, where the mobile app's WebView has no 
     addEventListener: () => {},
     removeEventListener: () => {},
   }));
-  renderSidebar(false);
+  renderSidebar();
 
   fireEvent.contextMenu(await findPinnedAppLink());
 
@@ -150,7 +147,7 @@ it("keeps a plain Open on a touch device, where the mobile app's WebView has no 
 
 it("keeps a plain Open in the Mac app, where a new tab lands in a browser with no Rome session", async () => {
   window.rome = {};
-  renderSidebar(false);
+  renderSidebar();
 
   fireEvent.contextMenu(await findPinnedAppLink());
 
@@ -162,7 +159,7 @@ it("keeps a plain Open in the Mac app, where a new tab lands in a browser with n
 
 it("opens a pinned app beside a new chat in its source folder from another page", async () => {
   const user = userEvent.setup();
-  renderSidebar(false, "/projects");
+  renderSidebar("/projects");
 
   fireEvent.contextMenu(await findPinnedAppLink());
   await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
@@ -178,7 +175,7 @@ it("opens a pinned app beside a new chat in its source folder from another page"
 
 it("starts an unsent new chat in the app's source folder", async () => {
   const user = userEvent.setup();
-  renderSidebar(false, "/chat");
+  renderSidebar("/chat");
 
   fireEvent.contextMenu(await findPinnedAppLink());
   await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
@@ -196,7 +193,7 @@ it("leaves the folder to the chat for an app without a source folder", async () 
   apps[0].projectPath = null;
   localStorage.setItem("rome-sidebar-apps", JSON.stringify(apps));
   const user = userEvent.setup();
-  renderSidebar(false, "/projects");
+  renderSidebar("/projects");
 
   fireEvent.contextMenu(await findPinnedAppLink());
   await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
@@ -212,7 +209,7 @@ it("leaves the folder to the chat for an app without a source folder", async () 
 
 it("keeps the active chat and its folder when chatting with a pinned app", async () => {
   const user = userEvent.setup();
-  renderSidebar(false, "/chat/session-1?hideSidebar=1");
+  renderSidebar("/chat/session-1?hideSidebar=1");
 
   fireEvent.contextMenu(await findPinnedAppLink());
   await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
@@ -228,7 +225,7 @@ it("keeps the active chat and its folder when chatting with a pinned app", async
 
 it("opens a pinned app's details page from its context menu", async () => {
   const user = userEvent.setup();
-  renderSidebar(false);
+  renderSidebar();
 
   fireEvent.contextMenu(await findPinnedAppLink());
   await user.click(await screen.findByRole("menuitem", { name: "View details" }));
@@ -240,7 +237,7 @@ it("opens a pinned app's details page from its context menu", async () => {
 
 it("unpins the app from its context menu", async () => {
   const user = userEvent.setup();
-  renderSidebar(false);
+  renderSidebar();
 
   fireEvent.contextMenu(await findPinnedAppLink());
   await user.click(await screen.findByRole("menuitem", { name: "Unpin from sidebar" }));
@@ -281,11 +278,8 @@ describe("pinned built-in page context menu", () => {
     return link as HTMLAnchorElement;
   }
 
-  it.each([
-    ["expanded sidebar", false],
-    ["collapsed rail", true],
-  ] as const)("offers new-tab and unpin, like an app row, in the %s", async (_name, collapsed) => {
-    renderSidebar(collapsed);
+  it("offers new-tab and unpin, like an app tile", async () => {
+    renderSidebar();
 
     fireEvent.contextMenu(await findBuiltinLink("/people"));
 
@@ -302,7 +296,7 @@ describe("pinned built-in page context menu", () => {
 
   it("unpins the page from its context menu and keeps the app pin", async () => {
     const user = userEvent.setup();
-    renderSidebar(false);
+    renderSidebar();
 
     fireEvent.contextMenu(await findBuiltinLink("/people"));
     await user.click(await screen.findByRole("menuitem", { name: "Unpin from sidebar" }));
@@ -313,10 +307,13 @@ describe("pinned built-in page context menu", () => {
     expect(stored).toContainEqual({ type: "app", id: "recipe-box" });
   });
 
-  it("offers no unpin on a required pin", async () => {
-    renderSidebar(false, "/projects");
+  it.each([
+    ["Chat", "/chat"],
+    ["Projects", "/projects"],
+  ])("offers no unpin on the required %s pin", async (_name, href) => {
+    renderSidebar("/memory");
 
-    fireEvent.contextMenu(await findBuiltinLink("/chat"));
+    fireEvent.contextMenu(await findBuiltinLink(href));
 
     const menu = await screen.findByRole("menu");
     expect(
@@ -328,7 +325,7 @@ describe("pinned built-in page context menu", () => {
 
   it("opens no menu on a required pin where there are no tabs, since Open would only repeat a click", async () => {
     window.rome = {};
-    renderSidebar(false, "/projects");
+    renderSidebar("/projects");
 
     fireEvent.contextMenu(await findBuiltinLink("/chat"));
 
@@ -343,11 +340,11 @@ describe("pinned built-in page context menu", () => {
   ] as const)("offers only unpin on the App Store row %s", async (_name, inDesktopApp) => {
     if (inDesktopApp) window.rome = {};
     localStorage.setItem(STORAGE_KEY, JSON.stringify([{ type: "builtin", id: "store" }]));
-    renderSidebar(false);
+    renderSidebar();
 
     let trigger: Element | null = null;
     await waitFor(() => {
-      trigger = document.querySelector('nav [title="App Store"]');
+      trigger = document.querySelector('nav [aria-label="App Store"]');
       expect(trigger).toBeTruthy();
     });
     expect((trigger as unknown as Element).tagName).toBe(inDesktopApp ? "BUTTON" : "A");
@@ -359,5 +356,29 @@ describe("pinned built-in page context menu", () => {
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
     ).toEqual(["Unpin from sidebar"]);
+  });
+});
+
+describe("rail search", () => {
+  it("leads the rail, ahead of Apps, and opens search", async () => {
+    const onSearch = rs.fn();
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/apps"]}>
+          <AppGrid onSearch={onSearch} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const search = screen.getByRole("button", { name: "Search pages, apps, and chats" });
+    const apps = document.querySelector('nav a[href="/apps"]') as Element;
+    expect(Boolean(search.compareDocumentPosition(apps) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
+      true,
+    );
+
+    await user.click(search);
+    expect(onSearch).toHaveBeenCalledOnce();
   });
 });

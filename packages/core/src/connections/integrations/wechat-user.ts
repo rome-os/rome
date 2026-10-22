@@ -63,6 +63,9 @@ const QR_POLL_INTERVAL_MS = 3_000;
 /** Liveness cadence for a live epoch. A personal account is read on demand, so
  *  this only needs to notice a dead session before the guardian does. */
 const SESSION_PROBE_INTERVAL_MS = 5 * 60_000;
+/** How long a probe waits for WeChat to sign in after Rome pressed its button. A
+ *  phone confirmation after this is noticed by the next probe. */
+const SIGN_IN_WAIT_MS = 60_000;
 
 // ── Grant profile ─────────────────────────────────────────────────────────
 
@@ -422,6 +425,10 @@ export function createWechatUserDescriptor(
           let probe: ReturnType<typeof setTimeout> | null = null;
           let controller: AbortController | null = null;
           let pending: Promise<void> | null = null;
+          // The client process whose sign-in button Rome pressed: once each, so a
+          // phone prompt the guardian missed or declined is not sent every probe.
+          // A probe that found no button tries again on the next one.
+          let signInPressedFor: number | undefined;
 
           const directory: TalkDirectory = {
             async listConversations(input) {
@@ -479,6 +486,28 @@ export function createWechatUserDescriptor(
                     // The desktop outlives any one process on it; restart a part
                     // that died, so the guardian can still reach the client.
                     await runtime.repairDesktop(epoch.signal);
+                    if (epoch.signal.aborted) return;
+                  }
+                  // After a restart a remembered account waits at its sign-in
+                  // button. Press it; a sign-in that completes clears the
+                  // degradation below, so the guardian hears nothing.
+                  if (
+                    status.state === "awaiting-scan" &&
+                    status.loggedIn &&
+                    status.pid !== undefined &&
+                    status.pid !== signInPressedFor
+                  ) {
+                    if (await runtime.pressSignIn(status.display, epoch.signal)) {
+                      signInPressedFor = status.pid;
+                      const until = Date.now() + SIGN_IN_WAIT_MS;
+                      do {
+                        await abortableDelay(
+                          deps.pollIntervalMs ?? STATUS_POLL_INTERVAL_MS,
+                          epoch.signal,
+                        );
+                        status = await runtime.status();
+                      } while (status.state === "awaiting-scan" && Date.now() < until);
+                    }
                     if (epoch.signal.aborted) return;
                   }
                   if (!status.running) {

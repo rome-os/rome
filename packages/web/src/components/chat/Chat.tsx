@@ -1792,6 +1792,8 @@ export function Chat({
     setTraceDrawerTarget(null);
   }, [mainSessionId]);
 
+  const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
+
   return (
     <TooltipProvider delayDuration={150}>
       {sessionEventIds.map((sid) => (
@@ -1827,22 +1829,31 @@ export function Chat({
             </div>
           )}
 
-          <div className="z-20 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
+          {/* No rule under the bar: the chat canvas runs up to the top. A new
+              chat with no app has nothing to name yet, since the welcome below
+              says it already, so the bar keeps only its height and controls
+              and the page does not move when the first message starts the
+              session. */}
+          <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <AgentAvatar
-                iconUrl={pinnedAgentMention?.iconUrl}
-                label={pinnedAgentMention?.appLabel}
-                size="sm"
-                className="shrink-0"
-              />
-              <span className="truncate text-ui text-foreground">
-                {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
-              </span>
-              <SessionModelLabel model={model} reasoningEffort={reasoningEffort} />
-              {sessionName?.trim() && pinnedAgentMention && (
-                <span className="shrink-0 truncate text-aux text-muted-foreground">
-                  {pinnedAgentMention.appLabel}
-                </span>
+              {untitledEmptyChat ? null : (
+                <>
+                  <AgentAvatar
+                    iconUrl={pinnedAgentMention?.iconUrl}
+                    label={pinnedAgentMention?.appLabel}
+                    size="sm"
+                    className="shrink-0"
+                  />
+                  <span className="truncate text-ui text-foreground">
+                    {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
+                  </span>
+                  <SessionModelLabel model={model} reasoningEffort={reasoningEffort} />
+                  {sessionName?.trim() && pinnedAgentMention && (
+                    <span className="shrink-0 truncate text-aux text-muted-foreground">
+                      {pinnedAgentMention.appLabel}
+                    </span>
+                  )}
+                </>
               )}
             </div>
             {mainSessionId && (

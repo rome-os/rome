@@ -12,6 +12,7 @@ import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./a
 import { feishuTransport } from "./delivery/transports/feishu.js";
 import type { DeliveryTransport } from "./delivery/types.js";
 import { preserveMentionOnlyText } from "./mention-only.js";
+import { isLinkCodeMessage } from "./guardian-link-code.js";
 import type { OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -296,7 +297,9 @@ export class FeishuAdapter {
     // Only a delivered message waits on the name; a dropped one starts the lookup.
     const chatName = threadType === "group" ? this.observeGroup(m.chatId) : undefined;
 
-    if (threadType === "group") {
+    // A link code said in a group must void the code, so it skips the group
+    // filters. Admission voids it and keeps it from every agent.
+    if (threadType === "group" && !isLinkCodeMessage(text)) {
       const configRequest = isSettingsRequest(text);
       if (configRequest && m.mentionedBot) {
         await this.sendGroupConfigCard(m.chatId, m.messageId, m.senderId);

@@ -387,8 +387,6 @@
     "greetingFallback": "欢迎,",
     "headline": "我们从哪里开始?",
     "pinnedChats": "置顶对话",
-    "unpin": "取消置顶",
-    "unpinChat": "取消置顶 {{name}}",
     "romeNews": "Rome 动态",
     "startWithPrompt": "试试这些提示"
   },

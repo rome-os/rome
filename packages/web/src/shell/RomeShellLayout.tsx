@@ -13,8 +13,10 @@ import { APP_NAV } from "./builtin-nav";
 import { ChatSearchDialog } from "./ChatSearchDialog";
 import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
+import { useChatPeek } from "./use-chat-peek";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { saveSetting } from "@/lib/chat-api";
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSettings } from "@/hooks/use-settings";
@@ -47,7 +49,6 @@ export function RomeShellLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
-  const [appGridControlsHost, setAppGridControlsHost] = useState<HTMLDivElement | null>(null);
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const isDesktop = useDesktop();
   // The fallback title for whatever the shell is showing. A routed page that
@@ -56,11 +57,18 @@ export function RomeShellLayout() {
   // what each route is called, so the title has no list of its own to drift from.
   const route = routeTitle(location.pathname, APP_NAV);
   useDocumentTitle(route === null ? null : [route.detail, t(route.key)], "route");
-  // The rail is a desktop arrangement: below `md` the sidebar is a slide-over
-  // that should always open at full width, so a collapse saved on desktop
-  // must not shrink the mobile drawer.
-  const railMode = collapsed && isDesktop;
+  // The sidebar has two columns: the rail of Rome's surfaces and pinned apps,
+  // always there, and the chat list, which belongs to Chat alone. Collapsing
+  // hides the chat list. That is a desktop arrangement: below `md` the sidebar
+  // is a slide-over, so a collapse saved on desktop must not empty the drawer.
+  const onChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
+  const showChats = onChat && !(collapsed && isDesktop);
   const sidebarShortcut = sidebarShortcutForPlatform();
+  // The collapsed list can be peeked at by hover, so only where there is one.
+  const coarsePointer = useCoarsePointer();
+  const canPeek = onChat && !showChats && isDesktop && !coarsePointer && !hideSidebar;
+  const peekRef = useRef<HTMLDivElement>(null);
+  const chatPeek = useChatPeek(canPeek, location.pathname, peekRef);
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -191,89 +199,120 @@ export function RomeShellLayout() {
         {!hideSidebar ? (
           <aside
             ref={sidebarRef}
-            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[translate,width] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
-              railMode ? "md:w-16" : ""
-            } ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
+            className={`fixed inset-y-0 left-0 z-40 flex shrink-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border pb-safe pt-safe transition-[translate] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
+              sidebarOpen ? "translate-x-0" : "-translate-x-full"
+            }`}
           >
-            {railMode ? (
+            {/* The edge line is drawn over the last pixel, not added as a
+                border: a border would make the sidebar a pixel wider than the
+                4rem or 20rem the page is pushed by. */}
+            {/* The rail never carries a border of its own: one would take a pixel
+                from its width while the chat list shows, and shift every
+                centered tile by half of it as the list opens and closes. */}
+            <div className="flex w-16 shrink-0 flex-col">
               <div data-app-titlebar="header" className="flex shrink-0 justify-center pb-4 pt-5">
-                {/* The logo doubles as the expand control: hover or keyboard
-                    focus crossfades it into the panel glyph so the rail spends
-                    one tile, not two, on chrome. Home stays reachable through
-                    the wordmark once the sidebar is expanded. */}
-                <IconButton
-                  size="md"
-                  label={t("nav.expandSidebar")}
-                  title={t("nav.expandSidebarShortcut", { shortcut: sidebarShortcut })}
-                  onClick={toggleCollapsed}
-                  className="group relative"
-                  icon={
+                {/* A fixed slot, so swapping the logo link for the 32px expand
+                    button does not move every tile below it. */}
+                <div className="flex size-10 items-center justify-center">
+                  {onChat && !showChats ? (
+                    // With the chat list collapsed, the logo doubles as the
+                    // control that brings it back: hover or keyboard focus
+                    // crossfades it into the panel glyph.
+                    <IconButton
+                      size="md"
+                      label={t("nav.expandSidebar")}
+                      title={t("nav.expandSidebarShortcut", { shortcut: sidebarShortcut })}
+                      onClick={toggleCollapsed}
+                      className="group relative"
+                      icon={
+                        <>
+                          <img
+                            src="/icon.svg"
+                            alt=""
+                            aria-hidden
+                            className="h-5 w-5 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0"
+                          />
+                          <PanelLeftOpen
+                            aria-hidden
+                            className="absolute inset-0 m-auto size-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                          />
+                        </>
+                      }
+                    />
+                  ) : (
+                    <Link
+                      to="/"
+                      aria-label={t("appName")}
+                      title={t("appName")}
+                      className="flex size-10 items-center justify-center rounded-8 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+                    >
+                      <img src="/icon.svg" alt="" aria-hidden className="h-5 w-5" />
+                    </Link>
+                  )}
+                </div>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto scrollbar-idle-hidden">
+                <AppGrid
+                  onSearch={() => setChatSearchOpen(true)}
+                  chatPeek={canPeek ? chatPeek.tile : undefined}
+                />
+              </div>
+              <div className="flex shrink-0 items-center justify-center py-3">
+                <ProfileMenu />
+              </div>
+            </div>
+            {showChats ? (
+              <div className="flex w-64 min-w-0 flex-col border-l border-border-subtle">
+                <RecentChats
+                  headerControls={
                     <>
-                      <img
-                        src="/icon.svg"
-                        alt=""
-                        aria-hidden
-                        className="h-5 w-5 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0"
+                      <IconButton
+                        size="sm"
+                        label={t("nav.collapseSidebar")}
+                        title={t("nav.collapseSidebarShortcut", { shortcut: sidebarShortcut })}
+                        icon={<PanelLeftClose aria-hidden />}
+                        onClick={toggleCollapsed}
+                        className="hidden text-subtle-foreground hover:text-foreground md:inline-flex"
                       />
-                      <PanelLeftOpen
-                        aria-hidden
-                        className="absolute inset-0 m-auto size-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                      <IconButton
+                        size="sm"
+                        label={t("nav.closeSidebar")}
+                        icon={<Cross1Icon aria-hidden />}
+                        onClick={() => setSidebarOpen(false)}
+                        className="text-subtle-foreground hover:text-foreground md:hidden"
                       />
                     </>
                   }
                 />
               </div>
-            ) : (
+            ) : null}
+            {/* The collapsed chat list, shown over the page rather than beside
+                it, so a glance does not reflow the chat. */}
+            {chatPeek.open ? (
               <div
-                data-app-titlebar="header"
-                className="flex shrink-0 items-center justify-between px-5 pb-4 pt-5"
+                ref={peekRef}
+                data-chat-peek
+                className="absolute inset-y-0 left-16 flex w-64 min-w-0 flex-col border-x border-border bg-background shadow-10"
               >
-                <Link
-                  to="/"
-                  className="text-title text-foreground flex min-h-[var(--control-min-h)] items-center"
-                >
-                  {t("appName")}
-                </Link>
-                <div className="flex items-center gap-1">
-                  <div ref={setAppGridControlsHost} />
-                  <IconButton
-                    size="md"
-                    label={t("nav.collapseSidebar")}
-                    title={t("nav.collapseSidebarShortcut", { shortcut: sidebarShortcut })}
-                    icon={<PanelLeftClose aria-hidden />}
-                    onClick={toggleCollapsed}
-                    className="hidden text-subtle-foreground hover:text-foreground md:inline-flex"
-                  />
-                  <IconButton
-                    size="md"
-                    label={t("nav.closeSidebar")}
-                    icon={<Cross1Icon aria-hidden />}
-                    onClick={() => setSidebarOpen(false)}
-                    className="text-subtle-foreground hover:text-foreground md:hidden"
-                  />
-                </div>
+                <RecentChats
+                  headerControls={
+                    <IconButton
+                      size="sm"
+                      label={t("nav.expandSidebar")}
+                      title={t("nav.expandSidebarShortcut", { shortcut: sidebarShortcut })}
+                      icon={<PanelLeftOpen aria-hidden />}
+                      onClick={toggleCollapsed}
+                      className="text-subtle-foreground hover:text-foreground"
+                    />
+                  }
+                />
               </div>
-            )}
-            <div className="min-h-0 flex-1 overflow-y-auto scrollbar-idle-hidden">
-              {railMode ? (
-                <AppGrid collapsed onSearch={() => setChatSearchOpen(true)} />
-              ) : (
-                <>
-                  <AppGrid headerControlsHost={appGridControlsHost} />
-                  <RecentChats onSearch={() => setChatSearchOpen(true)} />
-                </>
-              )}
-            </div>
-            <div
-              className={`flex shrink-0 items-center py-3 ${railMode ? "justify-center" : "px-4"}`}
-            >
-              <ProfileMenu />
-            </div>
+            ) : null}
           </aside>
         ) : null}
         <ChatSearchDialog open={chatSearchOpen} onOpenChange={setChatSearchOpen} />
         {/* The in-flow sidebar pushes routed content right by its own width on
-            desktop — 16rem expanded, 4rem as the collapsed rail — and with
+            desktop — 20rem with the chat list, 4rem for the rail alone — and with
             ?hideSidebar=1 there's no sidebar and content starts at the viewport
             edge. Publish that left offset so a `fixed` child like the trace
             drawer can align to the chat column. The public share tree has no
@@ -281,11 +320,15 @@ export function RomeShellLayout() {
         <main
           ref={pageRef}
           className={`flex min-w-0 flex-1 flex-col bg-background max-md:transition-[translate] max-md:duration-200 max-md:ease-out motion-reduce:transition-none ${
-            sidebarOpen && !hideSidebar ? "max-md:translate-x-64" : ""
+            sidebarOpen && !hideSidebar
+              ? showChats
+                ? "max-md:translate-x-80"
+                : "max-md:translate-x-16"
+              : ""
           }`}
           style={
             {
-              "--rome-chat-left": hideSidebar ? "0px" : railMode ? "4rem" : "16rem",
+              "--rome-chat-left": hideSidebar ? "0px" : showChats ? "20rem" : "4rem",
             } as CSSProperties
           }
         >

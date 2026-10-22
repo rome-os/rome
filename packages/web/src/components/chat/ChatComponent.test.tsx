@@ -160,8 +160,8 @@ function renderChatComponent(
     newsFeed?: unknown;
     createSession?: () => Response | Promise<Response>;
     postTurn?: () => Response;
-    // Holds the session list back until it resolves.
-    sessionsGate?: Promise<void>;
+    // Holds the Rome News feed back until it resolves.
+    newsGate?: Promise<void>;
   },
   initialEntry: string | { pathname: string; state: Record<string, unknown> } = "/chat",
 ) {
@@ -189,7 +189,6 @@ function renderChatComponent(
       return homeData?.createSession?.() ?? Response.json({ id: "new-session" });
     }
     if (url === "/api/chat/sessions") {
-      await homeData?.sessionsGate;
       return Response.json(homeData?.sessions ?? []);
     }
     if (/\/api\/chat\/sessions\/[^/]+\/messages$/.test(url)) {
@@ -208,6 +207,7 @@ function renderChatComponent(
       });
     }
     if (url.endsWith("/api/rome-news")) {
+      await homeData?.newsGate;
       return homeData?.newsFeed === undefined
         ? Response.json({}, { status: 404 })
         : Response.json(homeData.newsFeed);
@@ -315,6 +315,21 @@ describe("ChatComponent missing sessions", () => {
 });
 
 describe("ChatComponent empty home", () => {
+  const pinnedSession = {
+    id: "session-pinned",
+    name: "Pinned planning chat",
+    personaId: null,
+    projectName: "",
+    projectPath: "",
+    agentName: null,
+    archivedAt: null,
+    pinnedAt: "2026-07-24T12:00:00.000Z",
+    createdAt: "2026-07-24T10:00:00.000Z",
+    activityAt: "2026-07-24T12:00:00.000Z",
+    lastSeenActivityAt: null,
+    unread: false,
+    messageCount: 2,
+  };
   it("focuses the draft composer so typing works without a click", async () => {
     const user = userEvent.setup();
     renderChatComponent();
@@ -342,106 +357,14 @@ describe("ChatComponent empty home", () => {
     expect(document.activeElement).not.toBe(composer);
   });
 
-  it("shows scrollable pinned chats and Rome News", async () => {
+  it("shows Rome News but not pinned chats, which live in the sidebar", async () => {
     romeNewsConfig.enabled = true;
-    const user = userEvent.setup();
-    const homeData = {
-      sessions: [
-        {
-          id: "session-pinned",
-          name: "Pinned planning chat",
-          personaId: null,
-          projectName: "alpha",
-          projectPath: "alpha",
-          agentName: null,
-          archivedAt: null,
-          pinnedAt: "2026-07-24T12:00:00.000Z",
-          createdAt: "2026-07-24T10:00:00.000Z",
-          activityAt: "2026-07-24T12:00:00.000Z",
-          lastSeenActivityAt: null,
-          unread: false,
-          messageCount: 2,
-        },
-        {
-          id: "session-pinned-2",
-          name: "Pinned launch chat",
-          personaId: null,
-          projectName: "",
-          projectPath: "",
-          agentName: null,
-          archivedAt: null,
-          pinnedAt: "2026-07-24T11:00:00.000Z",
-          createdAt: "2026-07-24T09:00:00.000Z",
-          activityAt: "2026-07-24T11:00:00.000Z",
-          lastSeenActivityAt: null,
-          unread: false,
-          messageCount: 1,
-        },
-      ],
-      projects: [
-        {
-          name: "alpha",
-          displayName: "Alpha project",
-          projectPath: "alpha",
-          path: "/projects/alpha",
-        },
-      ],
-      newsFeed: testNewsFeed,
-    };
-
-    const { fetchSpy } = renderChatComponent({}, homeData);
+    renderChatComponent({}, { sessions: [pinnedSession], projects: [], newsFeed: testNewsFeed });
 
     expect(await screen.findByText("Hi Ada,")).toBeTruthy();
-    expect(await screen.findByText("Pinned planning chat")).toBeTruthy();
-    expect(screen.getByText("Pinned launch chat")).toBeTruthy();
-    expect(screen.queryByText("Pinned projects")).toBeNull();
-    expect(screen.queryByText("Alpha project")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Pinned chats" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Rome News" })).toBeTruthy();
-
-    const pinnedRail = document.querySelector('[data-horizontal-scroll="pinned-chats"]');
-    expect(pinnedRail?.children).toHaveLength(2);
-    expect(screen.queryByText("Ideas and shortcuts")).toBeNull();
-
-    if (!(pinnedRail instanceof HTMLElement)) throw new Error("Pinned chat rail was not rendered");
-    Object.defineProperty(pinnedRail, "clientWidth", { configurable: true, value: 300 });
-    Object.defineProperty(pinnedRail, "scrollWidth", { configurable: true, value: 800 });
-
-    fireEvent.scroll(pinnedRail);
-    expect(pinnedRail.dataset.scrollLeft).toBe("false");
-    expect(pinnedRail.dataset.scrollRight).toBe("true");
-    expect(pinnedRail.style.getPropertyValue("--scroll-fade-mask")).toBe(
-      "linear-gradient(to right, black 0, black calc(100% - 24px), transparent 100%)",
-    );
-
-    pinnedRail.scrollLeft = 200;
-    fireEvent.scroll(pinnedRail);
-    expect(pinnedRail.dataset.scrollLeft).toBe("true");
-    expect(pinnedRail.dataset.scrollRight).toBe("true");
-    expect(pinnedRail.style.getPropertyValue("--scroll-fade-mask")).toBe(
-      "linear-gradient(to right, transparent 0, black 24px, black calc(100% - 24px), transparent 100%)",
-    );
-
-    pinnedRail.scrollLeft = 500;
-    fireEvent.scroll(pinnedRail);
-    expect(pinnedRail.dataset.scrollLeft).toBe("true");
-    expect(pinnedRail.dataset.scrollRight).toBe("false");
-    expect(pinnedRail.style.getPropertyValue("--scroll-fade-mask")).toBe(
-      "linear-gradient(to right, transparent 0, black 24px, black 100%)",
-    );
-    expect(pinnedRail.parentElement?.querySelector("[data-scroll-edge]")).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "Unpin Pinned planning chat" }));
-    await waitFor(() =>
-      expect(
-        fetchSpy.mock.calls.some(
-          ([url, init]) =>
-            String(url) === "/api/chat/sessions/session-pinned/pin" &&
-            init?.method === "PATCH" &&
-            String(init.body).includes('"pinned":false'),
-        ),
-      ).toBe(true),
-    );
+    expect(await screen.findByRole("heading", { name: "Rome News" })).toBeTruthy();
+    expect(screen.queryByText("Pinned planning chat")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Pinned chats" })).toBeNull();
   });
 
   it("uses the complete Rome Cloud feed and resolves locale in the browser", async () => {
@@ -498,21 +421,6 @@ describe("ChatComponent empty home", () => {
     );
   });
 
-  const pinnedSession = {
-    id: "session-pinned",
-    name: "Pinned planning chat",
-    personaId: null,
-    projectName: "",
-    projectPath: "",
-    agentName: null,
-    archivedAt: null,
-    pinnedAt: "2026-07-24T12:00:00.000Z",
-    createdAt: "2026-07-24T10:00:00.000Z",
-    activityAt: "2026-07-24T12:00:00.000Z",
-    lastSeenActivityAt: null,
-    unread: false,
-    messageCount: 2,
-  };
   const centerSpacer = () => document.querySelector("[data-draft-center-spacer]");
 
   it("centers the composer with a greeting-only home and remembers it", async () => {
@@ -523,27 +431,37 @@ describe("ChatComponent empty home", () => {
     await waitFor(() => expect(localStorage.getItem(GREETING_ONLY_HOME_KEY)).toBe("true"));
   });
 
-  it("docks the composer beside pinned chats and remembers it", async () => {
+  it("keeps the composer centered with only pinned chats, and remembers it", async () => {
     renderChatComponent({}, { sessions: [pinnedSession], projects: [] });
 
-    expect(await screen.findByText("Pinned planning chat")).toBeTruthy();
+    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
+    expect(centerSpacer()).toBeTruthy();
+    await waitFor(() => expect(localStorage.getItem(GREETING_ONLY_HOME_KEY)).toBe("true"));
+  });
+
+  it("docks the composer beside Rome News and remembers it", async () => {
+    romeNewsConfig.enabled = true;
+    renderChatComponent({}, { sessions: [], projects: [], newsFeed: testNewsFeed });
+
+    expect(await screen.findByText("Cloud announcement")).toBeTruthy();
     expect(centerSpacer()).toBeNull();
     await waitFor(() => expect(localStorage.getItem(GREETING_ONLY_HOME_KEY)).toBe("false"));
   });
 
-  it("keeps the remembered docked layout while the sessions load", async () => {
+  it("keeps the remembered docked layout while Rome News loads", async () => {
+    romeNewsConfig.enabled = true;
     localStorage.setItem(GREETING_ONLY_HOME_KEY, "false");
-    let releaseSessions = () => {};
-    const sessionsGate = new Promise<void>((resolve) => {
-      releaseSessions = resolve;
+    let releaseNews = () => {};
+    const newsGate = new Promise<void>((resolve) => {
+      releaseNews = resolve;
     });
-    renderChatComponent({}, { sessions: [pinnedSession], projects: [], sessionsGate });
+    renderChatComponent({}, { sessions: [], projects: [], newsFeed: testNewsFeed, newsGate });
 
     expect(await screen.findByText("Hi Ada,")).toBeTruthy();
     expect(centerSpacer()).toBeNull();
 
-    releaseSessions();
-    expect(await screen.findByText("Pinned planning chat")).toBeTruthy();
+    releaseNews();
+    expect(await screen.findByText("Cloud announcement")).toBeTruthy();
     expect(centerSpacer()).toBeNull();
   });
 

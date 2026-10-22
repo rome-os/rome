@@ -203,18 +203,21 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       agentNames: new AgentNamesProxy(),
     },
   );
+  // The main process warns about these once per change in the failures. Every
+  // worker process reloads the same apps, so a warn here would repeat it per
+  // worker.
   if (agentLoader.getRegistryLoadFailures().length > 0) {
-    log.warn("some app agents failed to load", {
+    log.debug("some app agents failed to load", {
       failures: agentLoader.getRegistryLoadFailures(),
     });
   }
   if (skillCatalog.getRegistryLoadFailures().length > 0) {
-    log.warn("some app skills failed to load", {
+    log.debug("some app skills failed to load", {
       failures: skillCatalog.getRegistryLoadFailures(),
     });
   }
   if (actionLoader.getRegistryLoadFailures().length > 0) {
-    log.warn("some app action configs failed to load", {
+    log.debug("some app action configs failed to load", {
       failures: actionLoader.getRegistryLoadFailures(),
     });
   }

@@ -1146,6 +1146,15 @@ export const handlers = [
       unread: found.unread,
     });
   }),
+  // Pin or unpin a chat from its row menu. Kept in memory, so the chat moves
+  // into the Pinned section and stays there until the page reloads.
+  http.patch("/api/chat/sessions/:sessionId/pin", async ({ params, request }) => {
+    const found = chatSessions.find((s) => s.id === params.sessionId);
+    if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const { pinned } = (await request.json()) as { pinned: boolean };
+    found.pinnedAt = pinned ? new Date().toISOString() : null;
+    return HttpResponse.json(found);
+  }),
   // Thumbs on an assistant turn. Each row hydrates lazily as it scrolls into
   // view, so this only became reachable once sessions had a transcript. Kept in
   // memory rather than always-null so a click actually sticks for the session.

@@ -64,6 +64,7 @@ function fakeRuntime(opts: {
     ensureDesktop: rs.fn(async () => ":100"),
     ensureAccessibility: rs.fn(async () => {}),
     repairDesktop: rs.fn(async () => {}),
+    pressSignIn: rs.fn(async (_display: string, _signal?: AbortSignal) => false),
     captureLoginQr: rs.fn(async () => opts.qr ?? null),
     captures: 0,
     holdCapture: rs.fn(function (this: { captures: number }) {
@@ -386,7 +387,7 @@ describe("the WeChat personal Talker", () => {
     fault: (err: StreamFault) => void = () => {},
     probeIntervalMs = 60_000,
   ) {
-    const descriptor = createWechatUserDescriptor({ runtime, probeIntervalMs });
+    const descriptor = createWechatUserDescriptor({ runtime, probeIntervalMs, pollIntervalMs: 1 });
     const kit = {
       connectionId: "conn-wechat-user",
       persist: async () => {},
@@ -518,6 +519,57 @@ describe("the WeChat personal Talker", () => {
       await rs.waitFor(() => expect(degradation()?.reason).toContain("phone"));
       expect(runtime.start).not.toHaveBeenCalled();
       expect(fault).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("presses a remembered account's sign-in and stays silent once it signs in", async () => {
+    const runtime = fakeRuntime({ statuses: [{ ...READY, state: "awaiting-scan" }, READY] });
+    rs.mocked(runtime.pressSignIn).mockResolvedValue(true);
+    const fault = rs.fn();
+    const { talker, degradation } = buildTalker(runtime, fault);
+    try {
+      await rs.waitFor(() => expect(runtime.status).toHaveBeenCalledTimes(2));
+      expect(runtime.pressSignIn).toHaveBeenCalledTimes(1);
+      expect(rs.mocked(runtime.pressSignIn).mock.calls[0]![0]).toBe(":100");
+      expect(degradation()).toBeNull();
+      expect(fault).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("presses sign-in once per client process", async () => {
+    const waiting = { ...READY, state: "awaiting-scan" as const };
+    // pid 42 is pressed and signs in, then waits again (say the phone signed it
+    // out): it is not pressed a second time. A new process, pid 43, is.
+    const runtime = fakeRuntime({
+      statuses: [waiting, READY, waiting, waiting, { ...waiting, pid: 43 }, READY],
+    });
+    rs.mocked(runtime.pressSignIn).mockResolvedValue(true);
+    const { talker, degradation } = buildTalker(runtime, undefined, 5);
+    try {
+      await rs.waitFor(() => expect(runtime.pressSignIn).toHaveBeenCalledTimes(2));
+      await rs.waitFor(() => expect(degradation()).toBeNull());
+      const reads = rs.mocked(runtime.status).mock.calls.length;
+      await rs.waitFor(() =>
+        expect(rs.mocked(runtime.status).mock.calls.length).toBeGreaterThan(reads + 2),
+      );
+      expect(runtime.pressSignIn).toHaveBeenCalledTimes(2);
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("tries sign-in again on the next probe when no button was found", async () => {
+    const waiting = { ...READY, state: "awaiting-scan" as const };
+    const runtime = fakeRuntime({ statuses: [waiting, waiting, READY] });
+    rs.mocked(runtime.pressSignIn).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const { talker, degradation } = buildTalker(runtime, undefined, 5);
+    try {
+      await rs.waitFor(() => expect(degradation()).toBeNull());
+      expect(runtime.pressSignIn).toHaveBeenCalledTimes(2);
     } finally {
       await talker.stop();
     }

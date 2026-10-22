@@ -121,3 +121,55 @@ describe("ActionRegistryImpl", () => {
     ).toEqual(["public_tool", "internal_tool"]);
   });
 });
+
+describe("ActionRegistryImpl.validateArgs", () => {
+  function promptAction(name: string): Action {
+    return {
+      ...callableAction(name),
+      inputSchema: {
+        type: "object",
+        properties: { prompt: { type: "string", minLength: 1, pattern: "\\S" } },
+        required: ["prompt"],
+      },
+    };
+  }
+
+  it("rejects args that fail the action's input schema", () => {
+    const registry = new ActionRegistryImpl();
+    registry.register(promptAction("coding_task"));
+
+    expect(registry.validateArgs("coding_task", {})).toMatch(
+      /args do not satisfy the input schema for action "coding_task": .*prompt/,
+    );
+    expect(registry.validateArgs("coding_task", { prompt: "  " })).toMatch(/pattern/);
+    expect(registry.validateArgs("coding_task", { prompt: "fix the test" })).toBeNull();
+  });
+
+  it("checks a legacy bare name against the canonical action's schema", () => {
+    const identity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+    claimLegacyArtifactName(
+      identity.legacyBindings,
+      "action",
+      "coding_task",
+      formatArtifactId("coding", "coding_task"),
+    );
+    const registry = new ActionRegistryImpl(identity);
+    registry.register(promptAction("coding_task"), {
+      kind: "action",
+      ownerType: "app",
+      ownerId: "coding",
+      publicName: "coding_task",
+      aliases: [],
+      sourcePath: "/coding/actions/coding_task",
+    });
+
+    expect(registry.validateArgs("coding_task", {})).toMatch(
+      /input schema for action "coding:coding_task"/,
+    );
+    expect(registry.validateArgs("coding_task", { prompt: "fix the test" })).toBeNull();
+  });
+
+  it("returns null for an unknown action, which has() reports", () => {
+    expect(new ActionRegistryImpl().validateArgs("missing", {})).toBeNull();
+  });
+});

@@ -674,6 +674,44 @@ describe("WechatUserRuntime display", () => {
   });
 });
 
+describe("WechatUserRuntime.pressSignIn", () => {
+  const desktop = { display: ":100", vncPort: 5901, novncPort: 6081 };
+
+  it("clicks where the driver found the sign-in button", async () => {
+    const { run, calls } = scriptedRun({ python3: () => ok('{"ok": true, "x": 640, "y": 518}') });
+    const runtime = new WechatUserRuntime({ home: await tempHome(), run, desktop });
+    expect(await runtime.pressSignIn(":100")).toBe(true);
+    expect(calls[0]![0]).toBe("python3");
+    expect(calls[0]![1]).toMatch(/wechat-user-send-driver\.py$/);
+    expect(calls[0]![2]).toBe("sign-in-target");
+    // No --sync, which hangs when the pointer is already there.
+    expect(calls[1]).toEqual(["xdotool", "mousemove", "640", "518", "click", "1"]);
+  });
+
+  it("clicks nothing when the driver finds no button", async () => {
+    for (const stdout of [
+      '{"ok": false, "code": "not-found", "typed": false, "reason": "x"}',
+      "",
+    ]) {
+      const { run, calls } = scriptedRun({ python3: () => ok(stdout) });
+      const runtime = new WechatUserRuntime({ home: await tempHome(), run, desktop });
+      expect(await runtime.pressSignIn(":100")).toBe(false);
+      expect(calls.map(([file]) => file)).toEqual(["python3"]);
+    }
+  });
+
+  it("never clicks on the shared desktop, where Chrome can cover the button", async () => {
+    const { run, calls } = scriptedRun({ python3: () => ok('{"ok": true, "x": 640, "y": 518}') });
+    for (const runtime of [
+      new WechatUserRuntime({ home: await tempHome(), run, desktop }),
+      new WechatUserRuntime({ home: await tempHome(), run, desktop: null }),
+    ]) {
+      expect(await runtime.pressSignIn(":99")).toBe(false);
+    }
+    expect(calls).toEqual([]);
+  });
+});
+
 describe("WechatUserRuntime.captureLoginQr", () => {
   it("screenshots the login window as a PNG data URL", async () => {
     const tree = '  0x1000007 "Weixin": ("wechat" "wechat")  280x380+0+0  +500+210\n';

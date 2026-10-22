@@ -183,5 +183,14 @@
   "transfer": {
     "title": "Move this account?",
     "description": "{{account}} resolves to {{owner}} today. Moving it re-attributes every message on it, and {{owner}} keeps whatever else they hold."
+  },
+  "linkCode": {
+    "open": "Link my account",
+    "title": "Link your account",
+    "description": "Send this code from your own account, in a direct message, to any of Rome's accounts. The account you send it from is linked to you. The code works once.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "expires": "Valid until {{time}}. Opening this again shows a new code.",
+    "failed": "Failed to get a code"
   }
 }

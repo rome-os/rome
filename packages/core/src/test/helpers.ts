@@ -52,6 +52,7 @@ import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { OutboxRepository } from "../db/repositories/outbox.js";
@@ -718,6 +719,7 @@ export async function buildTestDeps(
     db,
     sessionsRepo,
     personMappingRepo,
+    guardianLinkCodes: new GuardianLinkCodes(),
     outboxRepo,
     whatsAppStoreRepo,
     whatsAppAccounts,

@@ -42,6 +42,7 @@ A routine is a durable binding from a trigger to an [action](actions.md): when t
 **Contracts:**
 
 - Every fire is recorded as a routine run linked to its action execution, so a routine's history is inspectable.
+- Creating a routine fails when its stored arguments do not satisfy the bound action's input schema, so no routine is saved with arguments that fail on every fire.
 - A routine with an active run (executing, or parked awaiting [guardian approval](messaging.md#approvals)) cannot be deleted out from under it. The active-run check and the delete are atomic.
 - A run still executing when Rome stops is recorded as an error at the next start, so it does not block a delete. A run awaiting approval stays active.
 - An app-managed routine can only be deleted by the managing app, never by a user.

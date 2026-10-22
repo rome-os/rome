@@ -15,6 +15,10 @@ export function createCodingTaskAction(config: ActionConfig, deps: CodingTaskDep
       properties: {
         prompt: {
           type: "string",
+          // Matches the blank-prompt rejection in execute, so a routine with a
+          // blank prompt is rejected when it is created.
+          minLength: 1,
+          pattern: "\\S",
           description: "The coding task to hand off to the coding agent",
         },
         sessionId: {

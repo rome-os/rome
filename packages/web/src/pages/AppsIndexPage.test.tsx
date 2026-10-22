@@ -37,6 +37,7 @@ rs.mock("@/shell/builtin-nav", () => ({
     { id: "apps", href: "/apps", labelKey: "nav.apps", Icon: () => null },
     { id: "chat", href: "/chat", labelKey: "nav.chat", Icon: () => null },
     { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: () => null },
+    { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: () => null },
   ],
 }));
 rs.mock("@/shell/AppGrid", () => ({
@@ -46,12 +47,14 @@ rs.mock("@/shell/AppGrid", () => ({
     { type: "builtin" as const, id: "projects" },
   ],
   STORAGE_KEY: "rome-sidebar-pins",
+  isRequiredBuiltinPin: (id: string) => ["apps", "chat", "projects"].includes(id),
   normalizeSidebarPins: (
     pins: Array<{ type: "builtin" | "app"; id: string }>,
   ): Array<{ type: "builtin" | "app"; id: string }> => {
     const required = [
       { type: "builtin" as const, id: "apps" },
       { type: "builtin" as const, id: "chat" },
+      { type: "builtin" as const, id: "projects" },
     ];
     const requiredIds = new Set(required.map((pin) => pin.id));
     return [
@@ -806,19 +809,28 @@ describe("AppsIndexPage tile interactions", () => {
   });
 
   it("toggles a built-in surface's sidebar pin from its tile menu", async () => {
-    // Projects starts pinned (it's in DEFAULT_SIDEBAR_PINS), so the menu
-    // offers Unpin; activating it drops the entry from the stored pins.
+    // Memory starts unpinned, so the menu offers Pin; activating it adds the
+    // entry to the stored pins after the fixed three.
     const user = userEvent.setup();
     mockBackend({ installed: [] });
 
     renderPage();
 
-    await user.click(await screen.findByLabelText("More actions for Projects"));
-    await user.click(await screen.findByRole("menuitem", { name: "Unpin from sidebar" }));
+    await user.click(await screen.findByLabelText("More actions for Memory"));
+    await user.click(await screen.findByRole("menuitem", { name: "Pin to sidebar" }));
 
     const stored = JSON.parse(localStorage.getItem("rome-sidebar-pins") ?? "[]");
-    expect(stored).not.toContainEqual({ type: "builtin", id: "projects" });
-    expect(stored).toContainEqual({ type: "builtin", id: "apps" });
+    expect(stored.at(-1)).toEqual({ type: "builtin", id: "memory" });
+    expect(stored).toContainEqual({ type: "builtin", id: "projects" });
+  });
+
+  it("offers no actions menu on Projects, which the sidebar always shows", async () => {
+    mockBackend({ installed: [] });
+
+    renderPage();
+
+    expect(await screen.findByLabelText("Projects")).toBeTruthy();
+    expect(screen.queryByLabelText("More actions for Projects")).toBeNull();
   });
 });
 
@@ -1018,7 +1030,7 @@ describe("AppsIndexPage ghost tiles", () => {
     expect(within(mySection).queryByText("0")).toBeNull();
     expect(within(storeSection).queryByText("0")).toBeNull();
     const builtinSection = screen.getByRole("region", { name: "Built-in apps" });
-    expect(within(builtinSection).getByText("1")).toBeTruthy();
+    expect(within(builtinSection).getByText("2")).toBeTruthy();
   });
 
   it("seeds a chat draft from the New app ghost tile", async () => {

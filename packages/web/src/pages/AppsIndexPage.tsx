@@ -44,6 +44,7 @@ import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { useSidebarPins } from "@/hooks/use-sidebar-pins";
+import { isRequiredBuiltinPin } from "@/shell/AppGrid";
 import { APP_NAV } from "@/shell/builtin-nav";
 
 function isInFlight(phase: AppViewState): boolean {
@@ -70,6 +71,7 @@ interface AppTileProps {
   ariaLabel: string;
   clickTarget: ClickTarget;
   menuLabel: string;
+  /** Null for a tile with no actions, which then shows no kebab at all. */
   menu: ReactNode;
   menuDisabled?: boolean;
   icon: ReactNode;
@@ -103,7 +105,7 @@ function AppTile({
   const nameRef = useRef<HTMLSpanElement>(null);
 
   const longPress = useLongPressMenu({
-    canOpen: !menuDisabled && !menuOpen,
+    canOpen: menu !== null && !menuDisabled && !menuOpen,
     onOpen: () => setMenuOpen(true),
   });
 
@@ -176,43 +178,45 @@ function AppTile({
           link (a sibling, so a swallowed tap never reaches it). pointer-events
           rather than visibility so the trigger inside can still re-enable
           itself on focus/open. */}
-      <div className="absolute -right-1 -top-1 z-20 pointer-coarse:pointer-events-none">
-        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <IconButton
-              size="sm"
-              label={menuLabel}
-              icon={<Ellipsis aria-hidden />}
-              disabled={menuDisabled}
+      {menu === null ? null : (
+        <div className="absolute -right-1 -top-1 z-20 pointer-coarse:pointer-events-none">
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <IconButton
+                size="sm"
+                label={menuLabel}
+                icon={<Ellipsis aria-hidden />}
+                disabled={menuDisabled}
+                onClick={stopTileClick}
+                className={cn(
+                  "h-7 w-7 rounded-8 bg-surface text-subtle-foreground shadow-1 ring-1 ring-border hover:text-foreground",
+                  // Hidden at rest, revealed on tile hover / keyboard focus /
+                  // while open.
+                  "opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
+                  // Coarse pointers: transparent and tap-inert, NOT visibility/
+                  // display-hidden — the button must stay focusable and in the
+                  // a11y tree (long-press is pointer-only and some menu items
+                  // have no other path from the tile), stray taps near the icon
+                  // must fall through to the tile, and the long-press menu
+                  // anchors to this button's rect, which display:none would
+                  // collapse. Tile keyboard focus restores tappability along
+                  // with visibility for touch devices with keyboards.
+                  "pointer-coarse:pointer-events-none pointer-coarse:group-focus-within:pointer-events-auto pointer-coarse:data-[state=open]:pointer-events-auto",
+                )}
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="bottom"
+              align="end"
+              className="w-56"
               onClick={stopTileClick}
-              className={cn(
-                "h-7 w-7 rounded-8 bg-surface text-subtle-foreground shadow-1 ring-1 ring-border hover:text-foreground",
-                // Hidden at rest, revealed on tile hover / keyboard focus /
-                // while open.
-                "opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
-                // Coarse pointers: transparent and tap-inert, NOT visibility/
-                // display-hidden — the button must stay focusable and in the
-                // a11y tree (long-press is pointer-only and some menu items
-                // have no other path from the tile), stray taps near the icon
-                // must fall through to the tile, and the long-press menu
-                // anchors to this button's rect, which display:none would
-                // collapse. Tile keyboard focus restores tappability along
-                // with visibility for touch devices with keyboards.
-                "pointer-coarse:pointer-events-none pointer-coarse:group-focus-within:pointer-events-auto pointer-coarse:data-[state=open]:pointer-events-auto",
-              )}
-            />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            side="bottom"
-            align="end"
-            className="w-56"
-            onClick={stopTileClick}
-            {...longPress.menuContentProps}
-          >
-            {menu}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+              {...longPress.menuContentProps}
+            >
+              {menu}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
     </div>
   );
 }
@@ -360,13 +364,15 @@ export default function AppsIndexPage() {
         }
         menuLabel={t("installed.moreActionsAria", { name: label })}
         menu={
-          <DropdownMenuItem
-            onClick={() => togglePin("builtin", entry.id)}
-            className="text-foreground"
-          >
-            <Pin className="h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
-            {pinned ? t("installed.unpin") : t("installed.pin")}
-          </DropdownMenuItem>
+          isRequiredBuiltinPin(entry.id) ? null : (
+            <DropdownMenuItem
+              onClick={() => togglePin("builtin", entry.id)}
+              className="text-foreground"
+            >
+              <Pin className="h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
+              {pinned ? t("installed.unpin") : t("installed.pin")}
+            </DropdownMenuItem>
+          )
         }
         icon={<TileIcon size="lg" kind="builtin" displayName={label} BuiltinIcon={entry.Icon} />}
         name={label}

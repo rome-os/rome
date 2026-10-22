@@ -74,6 +74,10 @@ const RoutineIdParams = z.object({ routineId: z.string().min(1) });
 const NotifySendParams = z.object({ body: z.string().optional() }).strict();
 
 const ActionHasParams = z.object({ actionName: z.string().min(1) });
+const ActionValidateArgsParams = z.object({
+  actionName: z.string().min(1),
+  args: z.record(z.string(), z.unknown()),
+});
 const AgentHasAgentParams = z.object({ name: z.string().min(1) });
 const AgentHasActionParams = z.object({
   agentName: z.string().min(1),
@@ -206,6 +210,10 @@ export interface WorkerRpcServices {
    * main registry whether an action is actually registered there. */
   hasRegisteredAction: (name: string) => boolean;
   isExplicitAction: (name: string) => boolean;
+  /** Checks args against the main registry's input schema for the action, the
+   * one worker-local lazy stubs lack. Returns an error message, or null when
+   * the args fit, the action declares no schema, or the action is unknown. */
+  validateActionArgs: (name: string, args: Record<string, unknown>) => string | null;
   /** Capability check bridged to the worker-side `RpcAgentRunner.hasAction`:
    * does the named agent's allow-list resolve the named action? Mirrors the
    * agent session's own gate so the inbox channel-control cue can match what
@@ -262,6 +270,7 @@ export class WorkerRpcServer {
         "channels.email.ingestInbound": (params) => this.handleEmailIngestInbound(params),
         "actions.has": (params) => this.handleActionsHas(params),
         "actions.isExplicit": (params) => this.handleActionsIsExplicit(params),
+        "actions.validateArgs": (params) => this.handleActionsValidateArgs(params),
         "agent.hasAgent": (params) => this.handleAgentHasAgent(params),
         "agent.hasAction": (params) => this.handleAgentHasAction(params),
         "routines.schedule": (params) => this.handleRoutinesSchedule(params),
@@ -422,6 +431,16 @@ export class WorkerRpcServer {
   private handleActionsIsExplicit(params: unknown): { explicit: boolean } {
     const { actionName } = parseParams("actions.isExplicit", ActionHasParams, params);
     return { explicit: this.services.isExplicitAction(actionName) };
+  }
+
+  /** Input-schema check for the worker-side create_routine args gate. */
+  private handleActionsValidateArgs(params: unknown): { error: string | null } {
+    const { actionName, args } = parseParams(
+      "actions.validateArgs",
+      ActionValidateArgsParams,
+      params,
+    );
+    return { error: this.services.validateActionArgs(actionName, args) };
   }
 
   /**

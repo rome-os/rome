@@ -787,9 +787,9 @@ async function activateRoutineDraft(
     return fallback("you are not permitted to create routines directly");
   }
 
-  // create_routine checks only that the target exists; run the same args check
-  // the card's "Turn it on" gets, so an auto-enabled routine can't be saved
-  // with args that fail on every fire.
+  // create_routine runs the same args check. This copy runs in-process against
+  // the session's registry, so a draft with bad args is rejected without
+  // starting a create_routine execution that would only record a failure.
   const argsError = deps.validateArgs(draft.actionName, draft.args);
   if (argsError) {
     return text(
@@ -1396,6 +1396,7 @@ function buildInteractiveTools(
         args: {
           type: "object",
           description: "A single argument object for the action. Not an array.",
+          additionalProperties: true,
         },
         activate: {
           type: "boolean",

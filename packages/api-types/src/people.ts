@@ -1081,6 +1081,18 @@ export function parseUpdatePersonRequest(
 }
 
 /**
+ * `POST /api/people/link-code`: a code the guardian sends, in a direct message
+ * from their own account, to any of Rome's accounts on any platform. Redeeming
+ * it links that account to the guardian.
+ * One code is outstanding at a time and it is used once.
+ */
+export interface LinkCodeResponse {
+  code: string;
+  /** Epoch milliseconds. */
+  expiresAt: number;
+}
+
+/**
  * `POST /api/people/:id/accounts` — the link verb.
  *
  * Compare-and-swap on the account's current owner: linking an unlinked or

@@ -387,8 +387,6 @@
     "greetingFallback": "Welcome,",
     "headline": "What should we create?",
     "pinnedChats": "Pinned chats",
-    "unpin": "Unpin",
-    "unpinChat": "Unpin {{name}}",
     "romeNews": "Rome News",
     "startWithPrompt": "Start with a prompt"
   },

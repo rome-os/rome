@@ -95,10 +95,10 @@ function mockSessions(sessions: MockSession[]) {
   return spy;
 }
 
-function renderRecentChats(initialEntry = "/chat", onSearch = () => {}, live?: LiveEventsClient) {
+function renderRecentChats(initialEntry = "/chat", live?: LiveEventsClient) {
   const routed = (
     <MemoryRouter initialEntries={[initialEntry]}>
-      <RecentChats onSearch={onSearch} />
+      <RecentChats />
       <LocationProbe />
     </MemoryRouter>
   );
@@ -196,23 +196,25 @@ describe("RecentChats", () => {
     expect(screen.getByText("No chats yet")).toBeTruthy();
   });
 
-  it("keeps search and list settings visible together", async () => {
+  it("starts a new chat from the row at the top of the list", async () => {
     mockSessions([]);
-    const onSearch = rs.fn();
     const user = userEvent.setup();
 
-    renderRecentChats("/chat", onSearch);
+    renderRecentChats("/chat/session-1");
 
     await screen.findByText("No chats yet");
-    const searchButton = screen.getByRole("button", { name: "Search pages, apps, and chats" });
-    expect(searchButton).toBeTruthy();
-    expect(searchButton.getAttribute("title")).toMatch(
-      /^Search pages, apps, and chats \((⌘K|Ctrl K)\)$/,
-    );
-    expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
+    await user.click(screen.getByRole("link", { name: "New chat", exact: true }));
+    expect(screen.getByTestId("location-path").textContent).toBe("/chat");
+  });
 
-    await user.click(searchButton);
-    expect(onSearch).toHaveBeenCalledOnce();
+  it("leaves search to the rail and keeps the list settings in its header", async () => {
+    mockSessions([]);
+
+    renderRecentChats("/chat");
+
+    await screen.findByText("No chats yet");
+    expect(screen.queryByRole("button", { name: "Search pages, apps, and chats" })).toBeNull();
+    expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
   });
 
   it("offers a retry instead of claiming the guardian has no chats when the fetch fails", async () => {
@@ -448,7 +450,7 @@ describe("RecentChats", () => {
 
     it("spins on start, refetches on stop, and starts over from the list after a reconnect", async () => {
       const fetchSpy = mockSessions([live]);
-      renderRecentChats("/chat", () => {}, fakeSocketLiveEventsClient());
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
       await screen.findByText("Live chat");
       let socket!: FakeWebSocket;
       act(() => {

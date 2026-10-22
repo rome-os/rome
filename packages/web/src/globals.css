@@ -720,8 +720,9 @@ html.is-electron.platform-darwin [data-app-titlebar="header"] {
    using `min-h-dvh` don't end up 32px taller than the viewport and gain
    a phantom scroll. Spanning the sidebar's 256px overlaps the sidebar
    header's drag region, which is fine — drag ∪ drag is still drag.
-   Underlying buttons stay clickable via the global no-drag rule above.
-   Hidden in pure web. */
+   The global no-drag rule above only lets a press on a button reach the
+   page. `z-index: -1` keeps the strip under all page content, so the page
+   then hits the button rather than the strip. Hidden in pure web. */
 [data-app-titlebar="strip"] {
   display: none;
 }
@@ -732,7 +733,7 @@ html.is-electron [data-app-titlebar="strip"] {
   left: 0;
   right: 0;
   height: 2rem;
-  z-index: 1;
+  z-index: -1;
 }
 
 /* Set for ~900ms on the question a timeline dot jumped to. Every user bubble

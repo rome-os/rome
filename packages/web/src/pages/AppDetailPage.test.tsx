@@ -367,6 +367,37 @@ describe("AppDetailPage", () => {
     );
   });
 
+  it("offers no chat for an agent that failed to load", async () => {
+    mockBackend({
+      installed: [
+        installedCard({
+          id: "weather",
+          displayName: "Weather",
+          capabilityDetails: {
+            agents: [
+              { name: "forecaster", description: "Predicts weather." },
+              {
+                name: "broken",
+                description: "Never loads.",
+                loadError: "outputSchema must set additionalProperties: false",
+              },
+            ],
+            actions: [],
+            skills: [],
+            hooks: [],
+          },
+        }),
+      ],
+    });
+
+    renderPage("weather");
+
+    const agents = await screen.findByRole("region", { name: "Agents" });
+    expect(within(agents).getByText("Failed to load")).toBeTruthy();
+    expect(within(agents).getByLabelText("Chat with forecaster")).toBeTruthy();
+    expect(within(agents).queryByLabelText("Chat with broken")).toBeNull();
+  });
+
   it("shows a not-found message for an app id that is not installed", async () => {
     mockBackend({ installed: [installedCard({ id: "weather", displayName: "Weather" })] });
 

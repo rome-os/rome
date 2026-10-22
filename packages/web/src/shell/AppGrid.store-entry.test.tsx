@@ -46,25 +46,20 @@ function asDesktopApp() {
   window.rome = {};
 }
 
-function renderSidebar(collapsed: boolean) {
+function renderSidebar() {
   return render(
     <MemoryRouter>
-      <AppGrid collapsed={collapsed} />
+      <AppGrid />
     </MemoryRouter>,
   );
 }
 
-const LAYOUTS: [string, boolean][] = [
-  ["expanded sidebar", false],
-  ["collapsed rail", true],
-];
-
-describe.each(LAYOUTS)("App Store entry in the %s", (_name, collapsed) => {
+describe("App Store entry in the rail", () => {
   // The Electron shell hands every new-window request to the system browser, so
   // an anchor here means Safari — outside the user's Rome session.
   it("opens the embedded sheet inside the Mac app", async () => {
     asDesktopApp();
-    renderSidebar(collapsed);
+    renderSidebar();
 
     expect(screen.queryByRole("link", { name: "App Store" })).toBeNull();
     expect(screen.queryByTitle("App store")).toBeNull();
@@ -77,7 +72,7 @@ describe.each(LAYOUTS)("App Store entry in the %s", (_name, collapsed) => {
 
   // A browser has tabs, and a new tab is the better answer there. Unchanged.
   it("stays an external link in a browser", () => {
-    renderSidebar(collapsed);
+    renderSidebar();
 
     const link = screen.getByRole("link", { name: "App Store" });
     expect(link.getAttribute("target")).toBe("_blank");

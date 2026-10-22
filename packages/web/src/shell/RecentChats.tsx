@@ -9,10 +9,9 @@ import {
   Pencil,
   Pin,
   PinOff,
-  Search,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
@@ -31,10 +30,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { deleteSession, listSessions, renameSession, type SessionScope } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import type { ChatSession } from "@/lib/chat-types";
-import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
+import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
 import {
   emitSessionsChanged,
   useArchiveSession,
@@ -279,10 +278,12 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
 }
 
 export interface RecentChatsProps {
-  onSearch: () => void;
+  /** Extra buttons after the list's own, such as the shell's collapse control. */
+  headerControls?: ReactNode;
 }
 
-export function RecentChats({ onSearch }: RecentChatsProps) {
+// The sidebar's second column: the header stays put while the list scrolls.
+export function RecentChats({ headerControls }: RecentChatsProps) {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
@@ -303,7 +304,6 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renamingRef = useRef(false);
   const activeSessionId = activeSessionFromPath(location.pathname);
-  const searchShortcut = chatSearchShortcutForPlatform();
 
   // The newest running state the status stream has reported per chat. A list
   // response can be older than an event that arrived while it was in flight,
@@ -859,18 +859,13 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     // Radix's default grace window would otherwise pop each name instantly
     // once one has opened, strobing the list as the pointer runs down it.
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
-      <div className="flex flex-col">
-        <div className="flex items-center justify-between px-5 pt-4">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div
+          data-app-titlebar="header"
+          className="flex shrink-0 items-center justify-between pb-2 pl-5 pr-3 pt-5"
+        >
           <span className="text-section text-foreground">{t("recentChats.title")}</span>
           <div className="flex items-center gap-1">
-            <IconButton
-              size="sm"
-              label={t("recentChats.search")}
-              title={t("recentChats.searchShortcut", { shortcut: searchShortcut })}
-              onClick={onSearch}
-              icon={<Search aria-hidden />}
-              className="text-subtle-foreground hover:text-foreground"
-            />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton
@@ -947,9 +942,27 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 })}
               </DropdownMenuContent>
             </DropdownMenu>
+            {headerControls}
           </div>
         </div>
-        <div className="px-3 pt-2 pb-3">
+        {/* Starts a fresh chat. It stays above the scrolling list, so it is
+            reachable however long the list grows. */}
+        <div className="shrink-0 px-3 pb-1">
+          <Link
+            to="/chat"
+            className={`${LINK_CLASS} ${location.pathname === "/chat" ? ACTIVE_CLASS : IDLE_CLASS}`}
+          >
+            <span
+              className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+              data-motion="chat"
+              aria-hidden
+            >
+              <Pencil2Icon className="h-4 w-4 shrink-0" aria-hidden />
+            </span>
+            <span className="flex-1 truncate">{t("recentChats.newChat")}</span>
+          </Link>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2 scrollbar-idle-hidden">
           {hasPinned ? (
             <section
               aria-labelledby="recent-chats-pinned-heading"

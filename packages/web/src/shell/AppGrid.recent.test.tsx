@@ -55,12 +55,12 @@ const fetchMock = rs.fn(
   },
 );
 
-function renderSidebar(collapsed = false) {
+function renderSidebar() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/chat"]}>
-        <AppGrid collapsed={collapsed} />
+        <AppGrid />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -87,150 +87,77 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe("Recent zone, expanded sidebar", () => {
-  it("renders nothing, not even a label, when no app qualifies", async () => {
-    seed([fixture("old", "Old App")], { old: daysAgo(20) });
-    renderSidebar();
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/apps", expect.anything()));
-    expect(screen.queryByRole("navigation", { name: "Recent apps" })).toBeNull();
-    expect(screen.queryByText("Recent")).toBeNull();
-  });
-
-  it("lists recent unpinned apps newest first and marks the never-opened one", async () => {
+describe("Recent apps on the rail", () => {
+  it("lists recent unpinned apps newest first, below a divider, without system apps", async () => {
     seed(
       [
         fixture("a", "Alpha"),
         fixture("b", "Bravo", { installedAt: minutesAgo(1) }),
         fixture("sys", "System Thing", { origin: "builtin", installedAt: minutesAgo(1) }),
+        fixture("user-skills", "User Skills", { installedAt: minutesAgo(1) }),
       ],
       { a: minutesAgo(30) },
     );
     renderSidebar();
 
-    const zone = await screen.findByRole("navigation", { name: "Recent apps" });
-    expect(
-      within(zone)
-        .getAllByRole("link")
-        .map((link) => link.textContent),
-    ).toEqual(["Bravo", "Alpha"]);
-    expect(within(zone).getAllByRole("img", { name: "Not opened on this device" })).toHaveLength(1);
-    expect(screen.queryByText("System Thing")).toBeNull();
-  });
-
-  it("leaves the user-skills carrier out even when it was just installed", async () => {
-    seed(
-      [
-        fixture("a", "Alpha", { installedAt: minutesAgo(1) }),
-        fixture("user-skills", "User Skills", { installedAt: minutesAgo(1) }),
-      ],
-      {},
-    );
-    renderSidebar();
-
-    const zone = await screen.findByRole("navigation", { name: "Recent apps" });
+    await screen.findByRole("link", { name: "Alpha" });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/apps", expect.anything()));
-    expect(within(zone).getByText("Alpha")).toBeTruthy();
-    expect(screen.queryByText("User Skills")).toBeNull();
+    const nav = screen.getByRole("navigation");
+    const labels = within(nav)
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("aria-label"));
+    expect(labels.slice(-2)).toEqual(["Bravo", "Alpha"]);
+    expect(labels).not.toContain("System Thing");
+    expect(labels).not.toContain("User Skills");
+    const bravo = screen.getByRole("link", { name: "Bravo" });
+    expect(bravo.previousElementSibling?.getAttribute("data-orientation")).toBe("horizontal");
   });
 
-  it("shows three, reveals the rest on Show more, and forgets that on remount", async () => {
-    seed(
-      [
-        fixture("a", "Alpha"),
-        fixture("b", "Bravo"),
-        fixture("c", "Charlie"),
-        fixture("d", "Delta"),
-      ],
-      { a: minutesAgo(1), b: minutesAgo(2), c: minutesAgo(3), d: minutesAgo(4) },
-    );
-    const user = userEvent.setup();
-    const first = renderSidebar();
-
-    const zone = await screen.findByRole("navigation", { name: "Recent apps" });
-    expect(within(zone).getAllByRole("link")).toHaveLength(3);
-    expect(within(zone).queryByText("Delta")).toBeNull();
-
-    const toggle = within(zone).getByRole("button", { name: "Show more" });
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    await user.click(toggle);
-    expect(within(zone).getAllByRole("link")).toHaveLength(4);
-    expect(within(zone).getByRole("button", { name: "Show less" })).toBeTruthy();
-
-    first.unmount();
-    renderSidebar();
-    const again = await screen.findByRole("navigation", { name: "Recent apps" });
-    expect(within(again).getAllByRole("link")).toHaveLength(3);
-  });
-
-  it("has no Show more with exactly three recent apps", async () => {
-    seed([fixture("a", "Alpha"), fixture("b", "Bravo"), fixture("c", "Charlie")], {
+  it("leaves a pinned app out of Recent, and Pin from the menu moves it to the pins", async () => {
+    seed([fixture("a", "Alpha"), fixture("b", "Bravo")], {
       a: minutesAgo(1),
       b: minutesAgo(2),
-      c: minutesAgo(3),
     });
-    renderSidebar();
-
-    const zone = await screen.findByRole("navigation", { name: "Recent apps" });
-    expect(within(zone).queryByRole("button", { name: "Show more" })).toBeNull();
-  });
-
-  it("pins from the row button: the app moves to the pinned list and leaves Recent", async () => {
-    seed([fixture("a", "Alpha")], { a: minutesAgo(1) });
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { type: "builtin", id: "apps" },
+        { type: "app", id: "b" },
+      ]),
+    );
     const user = userEvent.setup();
     renderSidebar();
 
-    const zone = await screen.findByRole("navigation", { name: "Recent apps" });
-    await user.click(within(zone).getByRole("button", { name: "Pin to sidebar" }));
-
-    await waitFor(() =>
-      expect(screen.queryByRole("navigation", { name: "Recent apps" })).toBeNull(),
-    );
-    expect(document.querySelector('a[href="/apps/a"]')).toBeTruthy();
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]")).toContainEqual({
-      type: "app",
-      id: "a",
-    });
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/settings",
-        expect.objectContaining({ method: "PUT", body: expect.stringContaining('"sidebarPins"') }),
-      ),
-    );
-  });
-
-  it("offers Pin, not Unpin, in a recent app's context menu", async () => {
-    seed([fixture("a", "Alpha")], { a: minutesAgo(1) });
-    renderSidebar();
-
-    const zone = await screen.findByRole("navigation", { name: "Recent apps" });
-    fireEvent.contextMenu(within(zone).getByRole("link", { name: "Alpha" }));
-
+    fireEvent.contextMenu(await screen.findByRole("link", { name: "Alpha" }));
     const menu = await screen.findByRole("menu");
     expect(
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
     ).toEqual(["Open in new tab", "Chat with app", "View details", "Pin to sidebar"]);
+    await user.click(within(menu).getByRole("menuitem", { name: "Pin to sidebar" }));
+
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]")).toContainEqual({
+      type: "app",
+      id: "a",
+    });
+    // Both apps are pins now, so Recent and its divider are gone and only the
+    // divider between Rome's surfaces and the pins is left.
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-orientation="horizontal"]')).toHaveLength(1),
+    );
+    expect(screen.getAllByRole("link", { name: "Alpha" })).toHaveLength(1);
   });
 
-  it("keeps Edit mode's Add list complete and without a New badge", async () => {
-    seed([fixture("old", "Old App"), fixture("b", "Bravo", { installedAt: minutesAgo(1) })], {
-      old: daysAgo(40),
-    });
+  it("names a recent app in a tooltip on hover", async () => {
+    seed([fixture("a", "Alpha")], { a: minutesAgo(1) });
     const user = userEvent.setup();
     renderSidebar();
 
-    await user.click(await screen.findByRole("button", { name: "Edit" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
-
-    expect(await screen.findByText("Old App")).toBeTruthy();
-    expect(screen.getByText("Bravo")).toBeTruthy();
-    expect(screen.queryByText("New")).toBeNull();
+    await user.hover(await screen.findByRole("link", { name: "Alpha" }));
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Alpha");
   });
-});
 
-describe("Recent zone, collapsed rail", () => {
   it("shows three tiles and puts the rest behind a More button", async () => {
     seed(
       [
@@ -242,7 +169,7 @@ describe("Recent zone, collapsed rail", () => {
       { a: minutesAgo(1), b: minutesAgo(2), c: minutesAgo(3), d: minutesAgo(4) },
     );
     const user = userEvent.setup();
-    renderSidebar(true);
+    renderSidebar();
 
     await screen.findByRole("link", { name: "Alpha" });
     expect(screen.getByRole("link", { name: "Bravo" })).toBeTruthy();
@@ -269,7 +196,7 @@ describe("Recent zone, collapsed rail", () => {
       { a: minutesAgo(1), b: minutesAgo(2), c: minutesAgo(3), d: minutesAgo(4) },
     );
     const user = userEvent.setup();
-    renderSidebar(true);
+    renderSidebar();
 
     await user.click(await screen.findByRole("button", { name: "More recent apps" }));
     const more = await screen.findByRole("menu");
@@ -292,20 +219,20 @@ describe("Recent zone, collapsed rail", () => {
 
   it("has no More button with three or fewer, and no tiles at all with none", async () => {
     seed([fixture("a", "Alpha")], { a: minutesAgo(1) });
-    const first = renderSidebar(true);
+    const first = renderSidebar();
     await screen.findByRole("link", { name: "Alpha" });
     expect(screen.queryByRole("button", { name: "More recent apps" })).toBeNull();
     first.unmount();
 
     seed([fixture("old", "Old App")], { old: daysAgo(20) });
-    renderSidebar(true);
+    renderSidebar();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/apps", expect.anything()));
     expect(screen.queryByRole("link", { name: "Old App" })).toBeNull();
   });
 
   it("marks a never-opened app on its tile", async () => {
     seed([fixture("b", "Bravo", { installedAt: minutesAgo(1) })], {});
-    renderSidebar(true);
+    renderSidebar();
 
     await screen.findByRole("link", { name: "Bravo" });
     expect(screen.getByRole("img", { name: "Not opened on this device" })).toBeTruthy();

@@ -91,10 +91,10 @@ export class RoutineEngineProxy implements RoutineEngine {
 }
 
 /**
- * Worker-side action existence checker backed by the main process's eager
- * ActionRegistry. The worker registry may contain lazy stubs whose modules have
- * not loaded yet, so validation paths should not treat local stub presence as
- * executable truth.
+ * Worker-side action existence and args checker backed by the main process's
+ * eager ActionRegistry. The worker registry may contain lazy stubs whose modules
+ * have not loaded yet, so validation paths should not treat local stub presence
+ * or a stub's missing input schema as executable truth.
  */
 export class ActionRegistryProxy {
   async has(actionName: string): Promise<boolean> {
@@ -105,6 +105,15 @@ export class ActionRegistryProxy {
   async isExplicit(actionName: string): Promise<boolean> {
     const result = await callMain<{ explicit: boolean }>("actions.isExplicit", { actionName });
     return result.explicit;
+  }
+
+  /** Returns an error message when args fail the action's input schema, else null. */
+  async validateArgs(actionName: string, args: Record<string, unknown>): Promise<string | null> {
+    const result = await callMain<{ error: string | null }>("actions.validateArgs", {
+      actionName,
+      args,
+    });
+    return result.error;
   }
 }
 

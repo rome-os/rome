@@ -51,8 +51,9 @@ const geometry = (page: Page) =>
       Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth,
   }));
 
-const OPEN = { sidebarLeft: 0, pageLeft: 256, overflowX: 0 };
-const SHUT = { sidebarLeft: -256, pageLeft: 0, overflowX: 0 };
+// Off Chat the sidebar is the rail alone, `w-16`.
+const OPEN = { sidebarLeft: 0, pageLeft: 64, overflowX: 0 };
+const SHUT = { sidebarLeft: -64, pageLeft: 0, overflowX: 0 };
 
 test("a swipe right opens the sidebar and pushes the page", async ({ page }) => {
   const cdp = await open(page);
@@ -91,7 +92,7 @@ test("a mostly vertical drag scrolls and leaves it shut", async ({ page }) => {
 
 test("a short, slow drag snaps back shut", async ({ page }) => {
   const cdp = await open(page);
-  await swipe(cdp, [150, 420], 200);
+  await swipe(cdp, [150, 420], 165);
   await page.waitForTimeout(400);
   expect(await geometry(page)).toEqual(SHUT);
 });

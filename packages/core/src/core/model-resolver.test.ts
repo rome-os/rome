@@ -554,9 +554,36 @@ describe("ModelResolver", () => {
         codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
       }).getModelProvider({ tier: "small", providerId: "openai" }),
     ).rejects.toMatchObject({
+      message: "Selected model provider is unavailable: Codex is not signed in",
       code: "model_provider_unavailable",
       provider: "openai",
       reason: "not_logged_in",
+    });
+  });
+
+  it("names the usage limit and when it ends for a pinned provider", async () => {
+    // Summoned agents and apps receive only the message, so the cause has to
+    // survive without the structured reason.
+    const codexState = {
+      loggedIn: true,
+      quotaExhausted: true,
+      solAccess: true,
+      lunaAccess: true,
+    };
+    await expect(
+      resolver({
+        codex: { ...codexState, quotaExhaustedUntil: "2026-10-21T14:59:00.000Z" },
+      }).getModelProvider({ tier: "large", providerId: "openai" }),
+    ).rejects.toMatchObject({
+      message:
+        "Selected model provider is unavailable: Codex has reached its usage limit until 2026-10-21T14:59:00.000Z",
+      reason: "quota_exhausted",
+    });
+    await expect(
+      resolver({ codex: codexState }).getModelProvider({ tier: "large", providerId: "openai" }),
+    ).rejects.toMatchObject({
+      message: "Selected model provider is unavailable: Codex has reached its usage limit",
+      reason: "quota_exhausted",
     });
   });
 

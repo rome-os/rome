@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { zstdDecompressSync } from "node:zlib";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { DESKTOP_SCRIPT, type DesktopSlot, desktopSlot, startDesktopArgs } from "../desktops.js";
 import { createLogger } from "../logger.js";
@@ -38,6 +39,15 @@ export const WECHAT_CANONICAL_PREFIX = "/opt/wechat";
 
 /** The image's AT-SPI bus launcher (Debian `at-spi2-core`). */
 export const ACCESSIBILITY_LAUNCHER = "/usr/libexec/at-spi-bus-launcher";
+
+/** The desktop driver, a sibling asset (scripts/copy-build-assets.mjs). It also
+ *  locates the sign-in button, by reading the accessibility tree only. */
+const DESKTOP_DRIVER = fileURLToPath(new URL("./wechat-user-send-driver.py", import.meta.url));
+const signInTargetSchema = z.object({
+  ok: z.literal(true),
+  x: z.number().int(),
+  y: z.number().int(),
+});
 
 /**
  * Starts accessibility on the client's private session bus: $1 is the launcher.
@@ -584,6 +594,52 @@ export class WechatUserRuntime {
     const encoded = shot?.stdout.trim();
     if (!shot || shot.code !== 0 || !encoded) return null;
     return `data:image/png;base64,${encoded}`;
+  }
+
+  /**
+   * Press a remembered account's sign-in button, which WeChat shows after a
+   * restart instead of a QR. The driver finds it by accessible name inside the
+   * login window, so "Switch Account" and "Transfer files only" are never
+   * pressed. Only on WeChat's own desktop: on the shared one, Chrome can cover
+   * the button and take the click. WeChat may still ask the phone to confirm.
+   * Resolves to whether it pressed; never throws, since the guardian can still
+   * sign in by hand.
+   */
+  async pressSignIn(display: string, signal?: AbortSignal): Promise<boolean> {
+    if (!this.desktop || display !== this.desktop.display) return false;
+    const opts = { env: this.clientEnv(display), timeoutMs: 15_000, ...(signal ? { signal } : {}) };
+    const found = await this.run("python3", [DESKTOP_DRIVER, "sign-in-target"], opts).catch(
+      () => null,
+    );
+    let answer: unknown = null;
+    try {
+      answer = JSON.parse(found?.stdout ?? "");
+    } catch {
+      // No JSON is no target.
+    }
+    const target = signInTargetSchema.safeParse(answer);
+    if (!target.success) {
+      log.info("wechat_user.sign_in_not_found", {
+        reason:
+          (answer as { reason?: unknown } | null)?.reason ?? found?.stderr.trim().slice(0, 300),
+      });
+      return false;
+    }
+    const { x, y } = target.data;
+    // No --sync: it waits for motion, and a pointer already at (x, y), as a
+    // press before the last restart leaves it, never moves, so it would hang.
+    // X applies the move before the click either way.
+    const pressed = await this.run(
+      "xdotool",
+      ["mousemove", String(x), String(y), "click", "1"],
+      opts,
+    ).catch(() => null);
+    if (pressed?.code !== 0) {
+      log.warn("wechat_user.sign_in_press_failed", { stderr: pressed?.stderr.trim() });
+      return false;
+    }
+    log.info("wechat_user.sign_in_pressed", { display });
+    return true;
   }
 
   private async hasLoginWindow(display: string): Promise<boolean> {

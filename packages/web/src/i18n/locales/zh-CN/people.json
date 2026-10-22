@@ -183,5 +183,14 @@
   "transfer": {
     "title": "移动这个账号？",
     "description": "{{account}} 目前解析到 {{owner}}。移动后其上的所有消息都会重新归属，{{owner}} 仍保留其余账号。"
+  },
+  "linkCode": {
+    "open": "关联我的账号",
+    "title": "关联你的账号",
+    "description": "用你自己的账号，把这个代码私聊发送给 Rome 的任意一个账号。发送代码的账号会关联到你。代码只能使用一次。",
+    "copy": "复制",
+    "copied": "已复制",
+    "expires": "有效期至 {{time}}。再次打开会生成新的代码。",
+    "failed": "无法获取代码"
   }
 }

@@ -35,7 +35,7 @@ A participant's identity on a platform, as [Account](chats.md#account) in Chats 
 - The guardian **links** an account to a person, **moves** it to another, **unlinks** it, **dismisses** it, and **restores** a dismissed one to a stranger.
 - Dismissing makes no person. The guardian sometimes does not know who a stranger is, and a person for every stranger is too much work.
 - An account linked to the guardian is one of theirs. The guardian's signed-in accounts, such as their own Telegram, WhatsApp, LinkedIn, WeChat or email, are theirs the moment they connect them, with no further step.
-- On a platform where Rome's account is an agent's own, Rome cannot tell which of the platform's users is the guardian. The guardian links their account to themselves like any other. A code Rome shows them, sent to the agent's account from their phone, is a shortcut for finding it.
+- Where the platform does not say which account is the guardian's, the guardian links their account to themselves like any other. A code Rome shows them, sent in a direct message to any of Rome's accounts, is a shortcut for finding it. It works the same on every platform.
 
 ## Link
 

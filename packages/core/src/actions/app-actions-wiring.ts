@@ -246,9 +246,12 @@ export function registerLazyAppActions(
   return { loaded };
 }
 
+const appActionsLog = createLogger("app-actions");
+
 /**
  * Must subscribe after `actionLoaderSubscriber` so the loader's record map is
- * already up-to-date when we instantiate.
+ * already up-to-date when we instantiate. Warns with the event's app actions
+ * that failed to initialize, which stay unregistered.
  */
 export function createAppActionsSubscriber(
   actionLoader: ActionLoader,
@@ -256,14 +259,23 @@ export function createAppActionsSubscriber(
   catalog: AppCatalog,
   deps: Record<string, unknown>,
   services: AppActionServices,
+  log: Pick<Logger, "warn"> = appActionsLog,
 ): SubscriberHandler {
   return async function appActionsSubscriber(event: CatalogEvent) {
     actionRegistry.unregisterOwnedBy("app", event.appId);
     if (event.change === "removed") return;
     if (!isResolvedApp(event.current)) return;
-    await registerAppActions(actionLoader, actionRegistry, catalog, deps, services, {
-      onlyAppId: event.appId,
-    });
+    const { failed } = await registerAppActions(
+      actionLoader,
+      actionRegistry,
+      catalog,
+      deps,
+      services,
+      { onlyAppId: event.appId },
+    );
+    if (failed.length > 0) {
+      log.warn("some app actions failed to initialize", { appId: event.appId, failed });
+    }
   };
 }
 

@@ -53,10 +53,13 @@ async function openComposer(page: Page) {
 // Rects come back fractional, so rows compare to the nearest pixel.
 const sameRow = (a: Rect, b: Rect) => Math.abs(a.center - b.center) < 1;
 
+// 820px is a tablet held upright. It lays out as desktop, so the sidebar's
+// rail and chat column take 20rem of it and leave the composer under 28rem.
 for (const { width, height } of [
   { width: 320, height: 800 },
   { width: 390, height: 844 },
   { width: 440, height: 956 },
+  { width: 820, height: 1180 },
 ]) {
   test.describe(`${width}px touch`, () => {
     test.use({ viewport: { width, height }, hasTouch: true });
@@ -95,10 +98,7 @@ for (const { width, height } of [
   });
 }
 
-for (const { width, height, hasTouch } of [
-  { width: 820, height: 1180, hasTouch: true },
-  { width: 1280, height: 900, hasTouch: false },
-]) {
+for (const { width, height, hasTouch } of [{ width: 1280, height: 900, hasTouch: false }]) {
   test.describe(`${width}px ${hasTouch ? "touch" : "pointer"}`, () => {
     test.use({ viewport: { width, height }, hasTouch });
 

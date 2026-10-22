@@ -284,6 +284,17 @@ describe("FeishuAdapter", () => {
     expect(captured[0].addressing).toBe("mention");
   });
 
+  it("passes a link code said in a group to admission without a mention, so it is voided", async () => {
+    await channel.emit({ chatType: "group", mentionedBot: false, content: "ROME-7KQ2M9XA" });
+    await channel.emit({
+      chatType: "group",
+      mentionedBot: false,
+      content: "hi",
+      messageId: "om_456",
+    });
+    expect(captured.map((m) => m.text)).toStrictEqual(["ROME-7KQ2M9XA"]);
+  });
+
   it("lists an observed group under its Feishu name, fetched once per chat", async () => {
     await channel.emit({ chatType: "group", mentionedBot: true });
     await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });

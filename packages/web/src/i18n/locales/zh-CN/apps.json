@@ -183,7 +183,7 @@
     "unpin": "从侧边栏移除",
     "pinNoUi": "App 不含 UI",
     "viewDetails": "查看详情",
-    "skillLoadFailed": "加载失败",
+    "artifactLoadFailed": "加载失败",
     "chatWithAgentTitle": "与 {{agent}} 对话",
     "chatWithAgentAria": "与 {{agent}} 对话",
     "noCapabilities": "未声明{{label}}。",

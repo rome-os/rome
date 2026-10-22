@@ -57,6 +57,7 @@ import {
 } from "@rome/api-types/discord-broker";
 import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./account-agents.js";
 import { preserveMentionOnlyText } from "./mention-only.js";
+import { isLinkCodeMessage } from "./guardian-link-code.js";
 
 interface DiscordRestMessage {
   id: string;
@@ -769,6 +770,13 @@ export class DiscordAdapter {
         message.channel.type === ChannelType.DM || message.channel.type === ChannelType.GroupDM;
 
       const isThread = isThreadType(message.channel.type);
+
+      // A link code said in a guild channel must void the code, so it skips
+      // the filters below. Admission voids it and keeps it from every agent.
+      if (!isDm && isLinkCodeMessage(message.content)) {
+        await this.dispatchMessage(message, isDm, isThread, "ambient");
+        return;
+      }
 
       const cfg = this.legacyConfig(await this.settingsForMessage(message));
       const botId = this.client.user?.id;
