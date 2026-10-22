@@ -62,13 +62,37 @@ export async function readShopifyOAuthToken(): Promise<ShopifyOAuthToken | null>
   return { accessToken, shop };
 }
 
+/** The GraphQL Admin API endpoint of a store: `/admin/api/<version>/graphql.json`,
+ *  where the version is a release like `2026-10` or `unstable`. */
+const SHOPIFY_GRAPHQL_ADMIN_PATH = /^\/admin\/api\/(?:\d{4}-\d{2}|unstable)\/graphql\.json$/;
+
 /**
- * Proxy a raw HTTP request straight to the store's Admin API, authenticating
+ * Why a call may not go to the store's Admin API, or null when it may. Shopify
+ * requires a new public app to use the GraphQL Admin API only, so the one
+ * endpoint allowed is the store's GraphQL endpoint, called with POST. Run it on
+ * an endpoint already pinned to the token's store.
+ */
+export function shopifyGraphqlOnlyRejection(endpoint: string, method: string): string | null {
+  // URL parsing resolves dot segments, so `/admin/api/2026-10/../products.json`
+  // is checked as the path it reaches.
+  const { pathname } = new URL(endpoint);
+  if (!SHOPIFY_GRAPHQL_ADMIN_PATH.test(pathname)) {
+    return `Shopify calls go only to the GraphQL Admin API, POST /admin/api/<version>/graphql.json, not ${pathname}`;
+  }
+  if (method !== "POST") {
+    return `Shopify's GraphQL Admin API takes POST, not ${method}`;
+  }
+  return null;
+}
+
+/**
+ * Proxy a GraphQL request straight to the store's Admin API, authenticating
  * with the store's Rome Cloud-brokered token in `X-Shopify-Access-Token`.
  * Returns the upstream response verbatim (`status`/`data`/`headers`) so the
  * caller maps a non-2xx to a fail-closed action error; a thrown error is a
- * transport failure. The caller has already pinned `endpoint` to the token's own
- * store, so the token never reaches another host.
+ * transport failure or an endpoint {@link shopifyGraphqlOnlyRejection} refuses,
+ * which throws before the token is used. The caller has already pinned
+ * `endpoint` to the token's own store, so the token never reaches another host.
  */
 export async function shopifyProxyCall(params: {
   token: ShopifyOAuthToken;
@@ -78,6 +102,8 @@ export async function shopifyProxyCall(params: {
   query?: Record<string, string | number>;
   headers?: Record<string, string>;
 }): Promise<ProxiedResponse> {
+  const rejection = shopifyGraphqlOnlyRejection(params.endpoint, params.method);
+  if (rejection) throw new Error(rejection);
   const url = new URL(params.endpoint);
   for (const [name, value] of Object.entries(params.query ?? {})) {
     url.searchParams.set(name, String(value));

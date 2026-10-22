@@ -12,6 +12,7 @@ import { githubProxyCall, readGithubOAuthToken } from "../../api/github-proxy.js
 import {
   readShopifyOAuthToken,
   shopifyGraphqlError,
+  shopifyGraphqlOnlyRejection,
   shopifyProxyCall,
   type ShopifyOAuthToken,
 } from "../../api/shopify-proxy.js";
@@ -190,7 +191,8 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
 
       // Shopify is brokered by Rome's own integration (Rome Cloud OAuth), not
       // Composio. A store's token opens only that store, so beyond the
-      // myshopify.com allowlist the endpoint must be the connected store itself.
+      // myshopify.com allowlist the endpoint must be the connected store itself,
+      // and only its GraphQL Admin API endpoint.
       if (shopifyToken) {
         const endpointHost = new URL(endpoint).hostname.toLowerCase();
         if (endpointHost !== shopifyToken.shop) {
@@ -198,6 +200,10 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
             status: "error",
             error: `Refusing to proxy: the connected Shopify store is ${shopifyToken.shop}, not ${endpointHost}. Omit "host" to call the connected store.`,
           };
+        }
+        const notGraphql = shopifyGraphqlOnlyRejection(endpoint, method);
+        if (notGraphql) {
+          return { status: "error", error: `Refusing to proxy: ${notGraphql}.` };
         }
         try {
           const res = await shopifyProxyCall({

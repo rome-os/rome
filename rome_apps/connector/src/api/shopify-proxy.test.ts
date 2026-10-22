@@ -4,7 +4,12 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { readShopifyOAuthToken, shopifyGraphqlError, shopifyProxyCall } from "./shopify-proxy.js";
+import {
+  readShopifyOAuthToken,
+  shopifyGraphqlError,
+  shopifyGraphqlOnlyRejection,
+  shopifyProxyCall,
+} from "./shopify-proxy.js";
 
 describe("readShopifyOAuthToken", () => {
   let tempDir: string;
@@ -45,9 +50,59 @@ describe("readShopifyOAuthToken", () => {
   });
 });
 
+describe("shopifyGraphqlOnlyRejection", () => {
+  const store = "https://acme.myshopify.com";
+
+  it("allows a POST to the store's GraphQL Admin API endpoint", () => {
+    expect(shopifyGraphqlOnlyRejection(`${store}/admin/api/2026-10/graphql.json`, "POST")).toBe(
+      null,
+    );
+    expect(shopifyGraphqlOnlyRejection(`${store}/admin/api/unstable/graphql.json`, "POST")).toBe(
+      null,
+    );
+  });
+
+  it("refuses REST Admin API paths and paths that only resolve elsewhere", () => {
+    for (const path of [
+      "/admin/api/2026-10/products.json",
+      "/admin/api/2026-10/orders/1.json",
+      "/admin/products.json",
+      "/admin/api/2026-10/graphql.json/extra",
+      "/admin/api/2026-10/../2026-10/products.json",
+      "/admin/api/2026-10/%2e%2e/products.json",
+      "/api/2026-10/graphql.json",
+      "/admin/api/latest/graphql.json",
+    ]) {
+      expect(shopifyGraphqlOnlyRejection(`${store}${path}`, "POST")).toMatch(/GraphQL Admin API/);
+    }
+  });
+
+  it("refuses any method but POST on the GraphQL endpoint", () => {
+    for (const method of ["GET", "PUT", "DELETE", "PATCH", "HEAD"]) {
+      expect(
+        shopifyGraphqlOnlyRejection(`${store}/admin/api/2026-10/graphql.json`, method),
+      ).toMatch(/POST/);
+    }
+  });
+});
+
 describe("shopifyProxyCall", () => {
   afterEach(() => {
     rs.unstubAllGlobals();
+  });
+
+  it("throws on a REST Admin API endpoint before any request carries the token", async () => {
+    const fetchMock = rs.fn();
+    rs.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      shopifyProxyCall({
+        token: { accessToken: "shpat_x", shop: "acme.myshopify.com" },
+        endpoint: "https://acme.myshopify.com/admin/api/2026-10/products.json",
+        method: "GET",
+      }),
+    ).rejects.toThrow(/GraphQL Admin API/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("sends the token in X-Shopify-Access-Token and never a caller's Authorization", async () => {
@@ -111,7 +166,8 @@ describe("shopifyProxyCall redirects", () => {
     const res = await shopifyProxyCall({
       token: { accessToken: "shpat_secret", shop: "acme.myshopify.com" },
       endpoint: `${store}/admin/api/2026-10/graphql.json`,
-      method: "GET",
+      method: "POST",
+      body: { query: "{ shop { name } }" },
     });
 
     expect(res.status).toBe(302);

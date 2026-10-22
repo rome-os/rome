@@ -36,10 +36,12 @@ describe("Rome Cloud OAuth brokering", () => {
       expect(link.connectUrl).toBe("/api/oauth/github/start");
     });
 
-    it("sends Shopify to its Settings card, which asks for the store first", () => {
+    it("sends Shopify to Shopify's install link, which asks for the store", () => {
       const link = createRomeCloudOAuthStartUrl("shopify");
       expect(link.available).toBe(true);
-      expect(link.connectUrl).toBe("/settings/connections/shopify");
+      expect(link.connectUrl).toBe(
+        "https://admin.shopify.com/oauth/install?client_id=c7248430857716e104a01db512ed40ed",
+      );
     });
 
     it("is unavailable when Rome Cloud is not configured", () => {

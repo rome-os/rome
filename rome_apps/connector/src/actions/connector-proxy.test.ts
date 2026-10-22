@@ -573,6 +573,25 @@ describe("connector_proxy when Composio rejects the call", () => {
     expect(shopifyProxyCall).not.toHaveBeenCalled();
   });
 
+  it("refuses a Shopify REST Admin API call before sending the token", async () => {
+    for (const [path, method] of [
+      ["/admin/api/2026-10/products.json", "GET"],
+      ["/admin/api/2026-10/products/1.json", "PUT"],
+      ["/admin/api/2026-10/graphql.json", "GET"],
+    ] as const) {
+      readShopifyOAuthToken.mockResolvedValueOnce({
+        accessToken: "shpat_live",
+        shop: "acme.myshopify.com",
+      });
+      const result = await run({ toolkit: "shopify", path, method });
+      expect(result.status).toBe("error");
+      if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+      expect(result.error).toMatch(/^Refusing to proxy: /);
+      expect(result.error).toMatch(/GraphQL Admin API/);
+    }
+    expect(shopifyProxyCall).not.toHaveBeenCalled();
+  });
+
   it("fails closed when Shopify returns GraphQL errors inside a 200", async () => {
     readShopifyOAuthToken.mockResolvedValueOnce({
       accessToken: "shpat_live",

@@ -436,10 +436,14 @@ describe("ConnectionDetailPage — several accounts", () => {
 describe("ConnectionDetailPage — Shopify install return", () => {
   function shopify(): ApiConnection {
     return connection({
-      service: "shopify",
+      connectionKind: "shopify",
       grants: { store: "unauthorized" },
       display: { store: null },
-      connect: { url: "/settings/connections/shopify", available: true, unavailableReason: null },
+      connect: {
+        url: "https://admin.shopify.com/oauth/install?client_id=c7248430857716e104a01db512ed40ed",
+        available: true,
+        unavailableReason: null,
+      },
     });
   }
 

@@ -5,7 +5,7 @@ import { oauthPendingAttempts } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
 import { getInstanceToken } from "./instance-identity.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "./rome-cloud-origin.js";
-import { isOAuthProvider, type OAuthProvider } from "./oauth-providers.js";
+import { isOAuthProvider, SHOPIFY_INSTALL_URL, type OAuthProvider } from "./oauth-providers.js";
 import type { OAuthTokenBundle } from "./oauth-token-bundle.js";
 
 // RFC 8693 token-exchange grant. The brokering STS at Rome Cloud's
@@ -61,12 +61,12 @@ export function createRomeCloudOAuthStartUrl(provider: OAuthProvider): RomeCloud
   // Available whenever Rome Cloud is reachable. The connect link is the instance's
   // own start route as a same-origin relative path — the browser resolves it
   // against the dashboard origin, which is exactly where that route lives. No
-  // request needed. Shopify authorizes per store, and a bare link can't ask which
-  // store, so its link opens the Settings card, whose setup asks first.
+  // request needed. Shopify authorizes per store and Shopify's App Store rules
+  // forbid asking the merchant to type it, so its link is Shopify's install
+  // link, where Shopify asks which store.
   return {
     provider,
-    connectUrl:
-      provider === "shopify" ? `/settings/connections/${provider}` : `/api/oauth/${provider}/start`,
+    connectUrl: provider === "shopify" ? SHOPIFY_INSTALL_URL : `/api/oauth/${provider}/start`,
     available: true,
     unavailableReason: null,
   };

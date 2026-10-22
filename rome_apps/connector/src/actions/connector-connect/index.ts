@@ -53,7 +53,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           // The unified connect card selects the Rome-managed (Rome Cloud OAuth)
           // adapter from the toolkit prop — same componentId the Composio branch
           // renders below, so there's one card for both brokers. Shopify's card
-          // opens its Settings card, which asks for the store first.
+          // opens Shopify's install link, where Shopify asks which store.
           return {
             status: "pending_interaction",
             interaction: {

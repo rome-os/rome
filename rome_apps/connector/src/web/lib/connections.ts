@@ -181,10 +181,11 @@ export function connectedRomeManagedSlugs(
 }
 
 /**
- * Whether a connect link is a page of Rome's own dashboard (Shopify's Settings
- * card) rather than an OAuth start. A dashboard page needs the guardian's Rome
- * session, so it opens in the current window: the desktop app hands a new
- * window to the system browser, which isn't signed in to Rome.
+ * Whether a connect link is a page of Rome's own dashboard rather than an OAuth
+ * start or a provider's own page. A host that links Shopify to its Settings
+ * card sends one. A dashboard page needs the guardian's Rome session, so it
+ * opens in the current window: the desktop app hands a new window to the
+ * system browser, which isn't signed in to Rome.
  */
 export function isRomeSettingsLink(url: string): boolean {
   return url.startsWith("/settings/");

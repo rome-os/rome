@@ -54,6 +54,12 @@ function openAuthorizeUrl(url: string): void {
  *   with optional account detail, Disconnect + Reconnect.
  * - Degraded → the connected layout with an attention-toned "Access expired"
  *   subtitle and Reconnect promoted to the primary action.
+ *
+ * Shopify's connect hint is Shopify's install link, so its Connect and Reconnect
+ * open that link in a new tab instead of starting the setup. Shopify asks which
+ * store there, and the connection lands through Rome Cloud while this card
+ * refetches. The setup, which asks for the store, runs only for a guardian's own
+ * Shopify app.
  */
 export function OAuthConnectionSection({
   card,
@@ -72,6 +78,7 @@ export function OAuthConnectionSection({
   const [disconnecting, setDisconnecting] = useState(false);
 
   const label = card.label;
+  const shopifyInstallUrl = card.service === "shopify" ? (card.connect?.url ?? null) : null;
 
   // The setup addresses the connection by id, or by the bare service name when
   // the guardian has never connected (the terminal conferral mints the row).
@@ -205,6 +212,23 @@ export function OAuthConnectionSection({
             onRetry={() => beginConnect(true)}
             labels={{ continue: t("common.connect") }}
           />
+        ) : shopifyInstallUrl ? (
+          <div>
+            {setup.error && <p className="mb-2 text-ui text-destructive-fg">{setup.error}</p>}
+            <div className="flex flex-wrap gap-2">
+              <Button asChild>
+                <a href={shopifyInstallUrl} target="_blank" rel="noopener noreferrer">
+                  {t("connections.oauth.shopify.connect")}
+                </a>
+              </Button>
+              <Button variant="ghost" disabled={setup.busy} onClick={() => beginConnect()}>
+                {t("connections.oauth.shopify.ownApp")}
+              </Button>
+            </div>
+            <p className="mt-2 text-ui text-muted-foreground">
+              {t("connections.oauth.shopify.installNote")}
+            </p>
+          </div>
         ) : (
           <div>
             {setup.error && <p className="mb-2 text-ui text-destructive-fg">{setup.error}</p>}
@@ -283,6 +307,27 @@ export function OAuthConnectionSection({
             onRetry={() => beginConnect(true)}
             labels={{ continue: t("connections.oauth.reconnect") }}
           />
+        ) : shopifyInstallUrl && !pendingRedirectControls ? (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant={expired ? "default" : "outline"} size="sm">
+                <a href={shopifyInstallUrl} target="_blank" rel="noopener noreferrer">
+                  {t("connections.oauth.reconnect")}
+                </a>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={setup.busy}
+                onClick={() => beginConnect(true)}
+              >
+                {t("connections.oauth.shopify.ownApp")}
+              </Button>
+            </div>
+            <p className="text-ui text-muted-foreground">
+              {t("connections.oauth.shopify.installNote")}
+            </p>
+          </>
         ) : (
           (pendingRedirectControls ?? (
             <Button

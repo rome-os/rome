@@ -75,7 +75,12 @@
       "accessExpired": "Access expired — reconnect to keep it working",
       "reconnect": "Reconnect",
       "reconnecting": "Reconnecting account…",
-      "resumePending": "You started connecting {{label}} but didn't finish. Continue on {{label}}, or cancel."
+      "resumePending": "You started connecting {{label}} but didn't finish. Continue on {{label}}, or cancel.",
+      "shopify": {
+        "connect": "Connect in Shopify",
+        "ownApp": "Use your own Shopify app",
+        "installNote": "Shopify opens in a new tab, where you pick the store and approve Rome OS."
+      }
     },
     "composio": {
       "unavailable": "Composio is not available on this host."
