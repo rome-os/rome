@@ -16,7 +16,7 @@ import {
   type OutboxMessage,
 } from "@rome/api-types/people";
 import { createLogger } from "../logger.js";
-import type { AccountMessages, MessageAccount } from "../channels/messages.js";
+import { heldOn, type AccountMessages, type MessageAccount } from "../channels/messages.js";
 import { channelChatId } from "../db/repositories/webchat.js";
 import { conversationPlatformMessageId } from "../db/repositories/webchat.js";
 import type { OutboxAccount, OutboxRepository, OutboxRow } from "../db/repositories/outbox.js";
@@ -75,7 +75,8 @@ export interface OutboxDeps extends SendDeps {
 export type SendResult =
   | { ok: true; message: OutboxMessage }
   | { ok: false; send: RefusedState }
-  | { ok: false; error: string };
+  | { ok: false; error: string }
+  | { ok: false; invalid: string };
 
 /**
  * Send to one account, and answer with the outbox row it became.
@@ -91,16 +92,23 @@ export async function sendToAccount(
   account: { channel: string; channelUserId: string },
   text: string,
   id?: string,
+  from?: string,
+  senders?: readonly string[],
 ): Promise<SendResult> {
   const replay = (message: OutboxMessage): SendResult =>
-    matchesSendRequest(message, { ...account, text })
+    matchesSendRequest(message, { ...account, text, ...(from === undefined ? {} : { from }) })
       ? { ok: true, message }
       : { ok: false, error: "That send id belongs to a different message" };
   if (id) {
     const existing = await deps.outboxRepo.findSend(id);
     if (existing) return replay(existing);
   }
-  const resolution = await resolveSendTarget(deps, account);
+  // Checked for a new send only, after the replay above: the account a
+  // recorded send named may since be gone.
+  if (from !== undefined && senders !== undefined && !senders.includes(from)) {
+    return { ok: false, invalid: "Rome holds no account by that id that can send to this account" };
+  }
+  const resolution = await resolveSendTarget(deps, account, from);
   if (!resolution.ok) return { ok: false, send: resolution.send };
 
   const input = {
@@ -108,6 +116,7 @@ export async function sendToAccount(
     channelUserId: account.channelUserId,
     chatId: resolution.target.chatId,
     text,
+    from: resolution.target.channel,
   };
   const claimed = id ? await deps.outboxRepo.openOnce({ ...input, id }) : null;
   if (claimed && !claimed.created) return replay(claimed.message);
@@ -153,7 +162,7 @@ async function attempt(
   // provider's own copy still lands and clears the row; on an unmirrored one
   // the row stays, visibly, which is the outbox doing its job.
   try {
-    await record(deps, row, receipt.messageId);
+    await record(deps, row, target.channel, receipt.messageId);
   } catch (error) {
     log.warn("outbound message delivered but recording failed", {
       outboxId: row.id,
@@ -188,7 +197,8 @@ export async function retrySend(
   if (!(await heldBy(deps, accounts, id))) return null;
   const row = await deps.outboxRepo.reopen(id);
   if (row === null) return null;
-  const resolution = await resolveSendTarget(deps, row);
+  // From the account it went out from the first time, and no other.
+  const resolution = await resolveSendTarget(deps, row, sentFrom(row));
   if (!resolution.ok) {
     const error = `cannot send on ${row.channel}: ${resolution.send}`;
     await deps.outboxRepo.refused(row.id, error);
@@ -228,9 +238,16 @@ async function heldBy(
   );
 }
 
-async function record(deps: OutboxDeps, row: OutboxRow, messageId: string | null): Promise<void> {
+/** Written under the channel that sent, the one the row's link reaches, so
+ *  the line joins the conversation Rome holds there. */
+async function record(
+  deps: OutboxDeps,
+  row: OutboxRow,
+  channel: string,
+  messageId: string | null,
+): Promise<void> {
   const conversation = await deps.webchatRepo.ensureChannelChat({
-    channel: row.channel,
+    channel,
     threadId: row.chatId,
   });
   await deps.webchatRepo.recordOutboundConversationMessage({
@@ -283,17 +300,36 @@ export async function readOutbox(
   const awaiting = rows.filter((row) => row.state === "unconfirmed");
   if (awaiting.length === 0) return rows.map((row) => wire(row, now));
 
-  const { entries } = await readPersonTimeline(stores, accounts, { limit: LANDING_WINDOW });
-  const arrived = new Set(entries.map((entry) => entry.ref));
+  // Each row is looked for under the account it went out from and nowhere
+  // else, so a message another of Rome's accounts holds under the same
+  // provider id cannot clear it. Rows that landed on one account share one
+  // read of it.
+  const reads = new Map<string, Promise<Set<string>>>();
+  const refsOn = (account: MessageAccount): Promise<Set<string>> => {
+    const key = JSON.stringify([account.channel, account.storedUnder, account.addresses]);
+    let read = reads.get(key);
+    if (read === undefined) {
+      read = readPersonTimeline(stores, [account], { limit: LANDING_WINDOW }).then(
+        ({ entries }) => new Set(entries.map((entry) => entry.ref)),
+      );
+      reads.set(key, read);
+    }
+    return read;
+  };
+  const arrived = await Promise.all(
+    awaiting.map(async (row) => {
+      const account = landingAccount(accounts, row);
+      const refs = await refsOn(account);
+      return refsFor(row, account).some((ref) => refs.has(ref));
+    }),
+  );
 
   // A row the channel accepted but never named cannot be recognized when it
   // arrives, so waiting on it is waiting forever. Clearing it is the lesser
   // wrong, and the requirement that makes it unreachable is stated on
   // `ChannelDirectMessaging`.
   const landed = awaiting.filter(
-    (row) =>
-      row.providerMessageId === null ||
-      refsFor(row, addressesOf(accounts, row)).some((ref) => arrived.has(ref)),
+    (row, index) => row.providerMessageId === null || arrived[index] === true,
   );
   await Promise.all(landed.map((row) => deps.outboxRepo.remove(row.id)));
 
@@ -317,28 +353,43 @@ export async function readOutbox(
  * the other. Predicting only the address we sent to left the row waiting on a
  * ref that would never appear, which is a send accepted and then stuck.
  *
+ * The transcript form names the channel the send went out on, which
+ * `landingAccount` reads the account under.
+ *
  * All of them need the provider's id, so a channel offering `directMessaging`
  * has to return one from `send` — see the note there. A send accepted without
  * one cannot be tracked, and the row is cleared rather than left waiting on an
  * answer that will never come.
  */
-function refsFor(row: OutboxRow, addresses: readonly string[]): string[] {
+function refsFor(row: OutboxRow, account: MessageAccount): string[] {
   const messageId = row.providerMessageId;
   if (messageId === null) return [];
-  const sessionId = channelChatId(row.channel, row.chatId);
-  return [
+  const refs = [
     `${row.chatId}:${messageId}`,
-    ...new Set(addresses.map((address) => `${address}:${messageId}`)),
-    `agent:${conversationPlatformMessageId(sessionId, messageId)}`,
+    ...new Set(account.addresses.map((address) => `${address}:${messageId}`)),
   ];
+  const channel = heldOn(account);
+  if (channel !== null) {
+    const sessionId = channelChatId(channel, row.chatId);
+    refs.push(`agent:${conversationPlatformMessageId(sessionId, messageId)}`);
+  }
+  return refs;
 }
 
-/** Every address the channel folds onto this row's account, the row's own
- *  included. Falls back to that one alone for a channel that folds nothing. */
-function addressesOf(accounts: readonly MessageAccount[], row: OutboxRow): readonly string[] {
+/** The channel of the account a row went out from. A row written before that
+ *  was recorded went out from the channel its link names exactly, since People
+ *  then reached no other. */
+function sentFrom(row: OutboxRow): string {
+  return row.from ?? row.channel;
+}
+
+/** This row's account, with every address the channel folds onto it, the
+ *  row's own included, read under the channel the row went out from. Falls
+ *  back to the row's own address for a channel that folds nothing. */
+function landingAccount(accounts: readonly MessageAccount[], row: OutboxRow): MessageAccount {
   const account = accounts.find(
     (candidate) =>
       candidate.channel === row.channel && candidate.addresses.includes(row.channelUserId),
-  );
-  return account?.addresses ?? [row.channelUserId];
+  ) ?? { channel: row.channel, addresses: [row.channelUserId] };
+  return { ...account, storedUnder: sentFrom(row) };
 }

@@ -293,6 +293,8 @@ async function main() {
   // as a descriptor, a channel policy, or a person's link, reads it.
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
   const personMappingRepo = new PersonMappingRepository(db, connectionKindOfChannel);
+  const channelOfLink = (link: string) => channelRecords.channelOfLink(link);
+  const sendersOfLink = (link: string) => channelRecords.sendersOfLink(link);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -1603,6 +1605,8 @@ async function main() {
       guardianLinkCodes,
       outboxRepo,
       channels,
+      channelOfLink,
+      sendersOfLink,
       accountNames,
       webchatRepo,
       webhookInvocationsRepo,

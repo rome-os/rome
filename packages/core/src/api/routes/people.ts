@@ -194,12 +194,21 @@ export function peopleRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "That account is not linked to this person" }, 400);
     }
 
+    // The account the message goes out from has to be one of Rome's accounts
+    // of the link's connection kind that can send to this account. Rome never
+    // substitutes another for it. `sendToAccount` checks it for a new send.
+    // TODO(people-send-from dashboard PR): require `from` once the dashboard
+    // sends it. Until then a send without it goes out from the kind's only
+    // account, and is refused while Rome holds several.
     const result = await sendToAccount(
       deps,
       parsed.request,
       parsed.request.text,
       parsed.request.id,
+      parsed.request.from,
+      deps.sendersOfLink(parsed.request.channel),
     );
+    if (!result.ok && "invalid" in result) return c.json({ error: result.invalid }, 400);
     if (!result.ok && "error" in result) return c.json({ error: result.error }, 409);
     return result.ok
       ? c.json(result.message, 202)

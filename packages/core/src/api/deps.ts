@@ -7,6 +7,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { OutboxRepository } from "../db/repositories/outbox.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { Channels } from "../channels/channel.js";
+import type { ChannelOfLink, SendersOfLink } from "../db/repositories/channel-records.js";
 import type { AccountNames } from "../channels/account-names.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
@@ -88,6 +89,12 @@ export interface ApiDeps {
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route
    *  reads either store directly. */
   channels: Channels;
+  /** The one channel a person's link reaches, or null when Rome holds several
+   *  accounts of the service it names. */
+  channelOfLink: ChannelOfLink;
+  /** Rome's accounts a send to a person's link may name as the one it goes
+   *  out from. */
+  sendersOfLink: SendersOfLink;
   /** What each platform calls an account, over every address book Rome mirrors
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */

@@ -790,6 +790,14 @@ export interface LinkedAccount {
    * heard from without inventing the answer.
    */
   latestAt: number | null;
+  /**
+   * The ids of Rome's own accounts a send to this account may name as
+   * `SendMessageRequest.from`: each connected account of the link's service,
+   * or the one account a link naming an account's own id reaches. A service no
+   * account record names answers its own name. Absent from a core that
+   * predates it.
+   */
+  from?: string[];
 }
 
 /**
@@ -1267,6 +1275,13 @@ export interface SendMessageRequest {
   channel: string;
   channelUserId: string;
   text: string;
+  /**
+   * The id of Rome's account the message goes out from, one of the person's
+   * account's `LinkedAccount.from`. Rome never substitutes another account
+   * for it. Absent, the send goes out from the service's only account and is
+   * refused while the service has several.
+   */
+  from?: string;
 }
 
 export function parseSendMessageRequest(
@@ -1284,6 +1299,10 @@ export function parseSendMessageRequest(
   const channel = typeof raw.channel === "string" ? raw.channel.trim() : "";
   const channelUserId = typeof raw.channelUserId === "string" ? raw.channelUserId.trim() : "";
   const text = typeof raw.text === "string" ? raw.text.trim() : "";
+  const from = typeof raw.from === "string" ? raw.from.trim() : "";
+  if (raw.from !== undefined && (!from || !isChannelIdentifier(from))) {
+    return { error: "from must name one of Rome's accounts" };
+  }
   if (!channel) return { error: "channel is required" };
   if (!isChannelIdentifier(channel)) return { error: "channel must not contain ':'" };
   if (!channelUserId) return { error: "channelUserId is required" };
@@ -1297,16 +1316,19 @@ export function parseSendMessageRequest(
       channel,
       channelUserId,
       text,
+      ...(raw.from === undefined ? {} : { from }),
     },
   };
 }
 
-/** A repeated send id may only refer to its original account and text. */
+/** A repeated send id may only refer to its original account and text, and,
+ *  when the request names the account it goes out from, that account. */
 export function matchesSendRequest(message: OutboxMessage, request: SendMessageRequest): boolean {
   return (
     message.channel === request.channel &&
     message.channelUserId === request.channelUserId &&
-    message.text === request.text
+    message.text === request.text &&
+    (request.from === undefined || message.from === request.from)
   );
 }
 
@@ -1364,6 +1386,10 @@ export interface OutboxMessage {
   /** Why the channel refused, for a `failed` row. Provider text, shown as
    *  detail beneath copy the dashboard owns. */
   error: string | null;
+  /** The id of Rome's account the message went out from. Null for a row
+   *  written before Rome recorded it, and absent from a core that predates
+   *  it. */
+  from?: string | null;
   /** Whether `DELETE /api/people/:id/outbox/:messageId` would take this row
    *  when it was read. The server answers it from inputs it does not send, so
    *  a client offers Discard from this and does not re-derive it. Always

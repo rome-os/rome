@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type {
   LinkedAccount,
   OutboxMessage,
@@ -20,7 +20,15 @@ import {
 } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 import { OutboxRepository } from "../../db/repositories/outbox.js";
-import { outboundSendReceipts } from "../../db/schema.js";
+import {
+  channels as channelRows,
+  outboundSendReceipts,
+  romeAgentMessages,
+  romeSessions,
+} from "../../db/schema.js";
+import { channelList } from "../../channels/channel-list.js";
+import { channelChatId } from "../../db/session-kind.js";
+import { conversationPlatformMessageId } from "../../db/repositories/webchat.js";
 import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
 
 // Sending to a person, and the outbox a send lives in until it arrives.
@@ -742,5 +750,322 @@ describe("People send API — delivery bookkeeping", () => {
 
     expect(res.status).toBe(409);
     expect((await res.json()) as SendRefusal).toMatchObject({ send: "no-conversation" });
+  });
+});
+
+// A first account connected into an empty database with an opaque channel id.
+// People keys the link by the service, and the account's conversation lives
+// under the opaque id, so both the send and the timeline have to reach across.
+describe("People on an account whose channel id is opaque", () => {
+  const OPAQUE = "0b5c6d1e-9a8f-4c3b-8e2d-7f6a5b4c3d2e";
+  const ADA = "tg-ada";
+  let testDb: TestDb;
+  let deps: TestDeps;
+  let app: Hono;
+  let personId: string;
+
+  beforeEach(async () => {
+    testDb = createTestDb();
+    const base = await buildTestDeps(testDb.db);
+    testDb.db
+      .insert(channelRows)
+      .values({
+        id: OPAQUE,
+        connectionKind: "telegram",
+        platform: "telegram",
+        connectionId: "test:telegram",
+        createdAt: new Date(0),
+      })
+      .run();
+    deps = {
+      ...base,
+      channels: channelList({
+        db: base.db,
+        whatsAppAccounts: base.whatsAppAccounts,
+        linkedInAccounts: base.linkedInAccounts,
+        connections: {
+          registry: base.connections,
+          channelOf: (connection) =>
+            connection.connectionKind === "telegram" ? OPAQUE : connection.connectionKind,
+        },
+        laterChannels: [{ name: OPAQUE, connectionKind: "telegram" }],
+      }),
+    };
+    app = new Hono().route("/", peopleRoutes(deps));
+
+    personId = await deps.personMappingRepo.create({
+      displayName: "Ada",
+      bondLevel: "acquaintance",
+      approved: true,
+      channelMappings: [{ channel: OPAQUE, channelUserId: ADA }],
+    });
+
+    // What Ada said to that account, as Rome's transcript holds it.
+    const sessionId = channelChatId(OPAQUE, ADA);
+    testDb.db
+      .insert(romeSessions)
+      .values({
+        id: sessionId,
+        name: sessionId,
+        type: "channel",
+        sourceChannel: OPAQUE,
+        sourceThreadId: ADA,
+        sourceThreadType: "private",
+        createdAt: new Date(0),
+        activityAt: new Date(0),
+      })
+      .run();
+    testDb.db
+      .insert(romeAgentMessages)
+      .values({
+        id: "m-ada",
+        sessionId,
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: "hello from Ada" }]),
+        senderId: ADA,
+        createdAt: new Date(1_000_000),
+      })
+      .run();
+  });
+
+  const person = async (): Promise<PersonResource> =>
+    (await (await app.request(`/people/${personId}`)).json()) as PersonResource;
+
+  const timeline = async (): Promise<TimelinePage> =>
+    (await (await app.request(`/people/${personId}/messages`)).json()) as TimelinePage;
+
+  it("links the account under its connection kind and reads it as sendable", async () => {
+    expect((await person()).accounts).toMatchObject([
+      { channel: "telegram", channelUserId: ADA, send: "yes" },
+    ]);
+  });
+
+  it("shows the account's conversation on the person's timeline", async () => {
+    const entries = (await timeline()).entries;
+    expect(entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
+    // Named by the link's key, which is the account's channel on the wire, so
+    // a client's per-account view of the timeline holds it.
+    expect(entries[0]?.source).toBe("telegram");
+  });
+
+  it("sends on the opaque account and sees the message land in its conversation", async () => {
+    const res = await app.request(`/people/${personId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "telegram", channelUserId: ADA, text: "hi Ada" }),
+    });
+
+    expect(res.status).toBe(202);
+    expect(deps.transports.get("telegram")?.sentMessages).toEqual([
+      { chatId: ADA, message: { text: "hi Ada" } },
+    ]);
+    // Rome's line joins the conversation the account already holds, rather
+    // than one under the service's name.
+    const entries = (await timeline()).entries;
+    expect(entries.map((entry) => [entry.body, entry.source])).toEqual([
+      ["hi Ada", "telegram"],
+      ["hello from Ada", "telegram"],
+    ]);
+    const held = testDb.db
+      .select({ sessionId: romeAgentMessages.sessionId })
+      .from(romeAgentMessages)
+      .all();
+    expect(held.map((row) => row.sessionId)).toEqual([
+      channelChatId(OPAQUE, ADA),
+      channelChatId(OPAQUE, ADA),
+    ]);
+    const outboxRes = await app.request(`/people/${personId}/outbox`);
+    expect(((await outboxRes.json()) as OutboxPage).messages).toEqual([]);
+  });
+
+  // Rome never picks among a service's accounts: with a second one connected,
+  // the link reaches neither, for sending or for history.
+  it("reaches none of two accounts of one connection kind", async () => {
+    testDb.db
+      .insert(channelRows)
+      .values({
+        id: "tg-second",
+        connectionKind: "telegram",
+        platform: "telegram",
+        connectionId: "test:telegram-second",
+        createdAt: new Date(0),
+      })
+      .run();
+
+    expect((await person()).accounts).toMatchObject([
+      { channel: "telegram", channelUserId: ADA, send: "not-connected" },
+    ]);
+    const res = await app.request(`/people/${personId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "telegram", channelUserId: ADA, text: "hi Ada" }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()) as SendRefusal).toMatchObject({ send: "not-connected" });
+    expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
+    expect((await timeline()).entries).toEqual([]);
+  });
+
+  describe("naming the account a send goes out from", () => {
+    const post = (body: Record<string, unknown>) =>
+      app.request(`/people/${personId}/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ channel: "telegram", channelUserId: ADA, ...body }),
+      });
+
+    /** A second Telegram account, connected after the first. */
+    const connectSecond = () =>
+      testDb.db
+        .insert(channelRows)
+        .values({
+          id: "tg-second",
+          connectionKind: "telegram",
+          platform: "telegram",
+          connectionId: "test:telegram-second",
+          createdAt: new Date(60_000),
+        })
+        .run();
+
+    it("lists the accounts a send may go out from on the person read", async () => {
+      expect((await person()).accounts[0]?.from).toEqual([OPAQUE]);
+      connectSecond();
+      expect((await person()).accounts[0]?.from).toEqual([OPAQUE, "tg-second"]);
+    });
+
+    it("sends from the account it names, and the outbox row records it", async () => {
+      const res = await post({ text: "from the opaque account", from: OPAQUE });
+
+      expect(res.status).toBe(202);
+      const message = (await res.json()) as OutboxMessage;
+      expect(message.from).toBe(OPAQUE);
+      expect((await deps.outboxRepo.find(message.id))?.from).toBe(OPAQUE);
+      expect(deps.transports.get("telegram")?.sentMessages).toEqual([
+        { chatId: ADA, message: { text: "from the opaque account" } },
+      ]);
+    });
+
+    it("refuses an account of another connection kind, or one Rome does not hold", async () => {
+      for (const from of ["webchat", "telegram", "tg-unknown"]) {
+        const res = await post({ text: "hello", from });
+        expect(res.status).toBe(400);
+      }
+      expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
+    });
+
+    it("sends from a named account of two, and refuses a send that names none", async () => {
+      connectSecond();
+
+      expect((await post({ text: "which one?" })).status).toBe(409);
+      const res = await post({ text: "from the first", from: OPAQUE });
+      expect(res.status).toBe(202);
+      expect(((await res.json()) as OutboxMessage).from).toBe(OPAQUE);
+      expect(deps.transports.get("telegram")?.sentMessages).toEqual([
+        { chatId: ADA, message: { text: "from the first" } },
+      ]);
+    });
+
+    it("replays a recorded send after the account it went out from is removed", async () => {
+      const body = {
+        id: "5d0c4b1e-2f3a-4e5b-9c6d-7e8f9a0b1c2d",
+        text: "from the opaque account",
+        from: OPAQUE,
+      };
+      const first = await post(body);
+      expect(first.status).toBe(202);
+      const sent = (await first.json()) as OutboxMessage;
+
+      testDb.db
+        .update(channelRows)
+        .set({ connectionId: null })
+        .where(eq(channelRows.id, OPAQUE))
+        .run();
+      const again = await post(body);
+      expect(again.status).toBe(202);
+      expect(((await again.json()) as OutboxMessage).id).toBe(sent.id);
+      expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
+    });
+
+    // The link reaches the opaque account alone now, but the row went out from
+    // another one, so a retry may not move it there.
+    it("retries only from the account the row went out from", async () => {
+      const row = await deps.outboxRepo.open({
+        channel: "telegram",
+        channelUserId: ADA,
+        chatId: ADA,
+        text: "from a removed account",
+        from: "tg-second",
+      });
+      await deps.outboxRepo.refused(row.id, "provider down");
+
+      const retried = await app.request(`/people/${personId}/outbox/${row.id}/retry`, {
+        method: "POST",
+      });
+      expect(retried.status).toBe(202);
+      expect((await retried.json()) as OutboxMessage).toMatchObject({
+        state: "failed",
+        from: "tg-second",
+      });
+      expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
+    });
+
+    // A row from before the sending account was recorded went out from the
+    // channel its link names. The service-named account is gone and an opaque
+    // one replaced it, so a retry is refused rather than moved.
+    it("retries a row from before the sender was recorded only from its own channel", async () => {
+      const row = await deps.outboxRepo.open({
+        channel: "telegram",
+        channelUserId: ADA,
+        chatId: ADA,
+        text: "from the old account",
+      });
+      await deps.outboxRepo.refused(row.id, "provider down");
+
+      const retried = await app.request(`/people/${personId}/outbox/${row.id}/retry`, {
+        method: "POST",
+      });
+      expect(retried.status).toBe(202);
+      expect(((await retried.json()) as OutboxMessage).state).toBe("failed");
+      expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
+    });
+
+    // Two of Rome's accounts may hand out the same provider message id. A row
+    // lands only on a message stored under the account it went out from.
+    it("confirms a row only against the account it went out from", async () => {
+      connectSecond();
+      const sessionId = channelChatId(OPAQUE, ADA);
+      const sentFrom = async (from: string, providerMessageId: string) => {
+        const row = await deps.outboxRepo.open({
+          channel: "telegram",
+          channelUserId: ADA,
+          chatId: ADA,
+          text: `sent from ${from}`,
+          from,
+        });
+        await deps.outboxRepo.accepted(row.id, providerMessageId);
+        return row.id;
+      };
+      const elsewhere = await sentFrom("tg-second", "pm-shared");
+      const here = await sentFrom(OPAQUE, "pm-here");
+      // What the opaque account holds: a message under each provider id.
+      for (const providerMessageId of ["pm-shared", "pm-here"]) {
+        testDb.db
+          .insert(romeAgentMessages)
+          .values({
+            id: conversationPlatformMessageId(sessionId, providerMessageId),
+            sessionId,
+            role: "notification",
+            content: JSON.stringify([{ type: "text", content: providerMessageId }]),
+            senderId: "rome",
+            createdAt: new Date(),
+          })
+          .run();
+      }
+
+      const outboxRes = await app.request(`/people/${personId}/outbox`);
+      const ids = ((await outboxRes.json()) as OutboxPage).messages.map((message) => message.id);
+      expect(ids).toEqual([elsewhere]);
+      expect(ids).not.toContain(here);
+    });
   });
 });

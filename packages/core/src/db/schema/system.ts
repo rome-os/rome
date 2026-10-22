@@ -182,6 +182,10 @@ export const outboundMessages = sqliteTable(
      *  carries, which is how the read knows the row has landed. */
     providerMessageId: text("provider_message_id"),
     error: text("error"),
+    /** The channel id of Rome's account the message goes out from. A retry
+     *  sends from it again, and the row lands only on a message stored under
+     *  it. Null on a row written before it was recorded. */
+    from: text("from_channel"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },

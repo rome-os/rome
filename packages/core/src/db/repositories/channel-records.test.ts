@@ -126,6 +126,89 @@ describe("ChannelRecordsRepository", () => {
     expect(records.connectionKindOf("webchat")).toBe("webchat");
   });
 
+  it("reaches a service's one account from a link, and none of several", () => {
+    const db = repository() && testDb!.db;
+    // Rows are written here around the repository, so each read is a fresh
+    // repository's, with nothing cached from before the write.
+    const records = {
+      channelOfLink: (link: string) => new ChannelRecordsRepository(db).channelOfLink(link),
+      vacate: (connectionId: string) => new ChannelRecordsRepository(db).vacate(db, connectionId),
+    };
+    // Nothing recorded: a link reaches the channel it names, as it always has.
+    expect(records.channelOfLink("telegram")).toBe("telegram");
+    expect(records.channelOfLink("whatsapp")).toBe("whatsapp");
+
+    const opaque = (id: string, connectionId: string) =>
+      db
+        .insert(channels)
+        .values({
+          id,
+          connectionKind: "telegram",
+          platform: "telegram",
+          connectionId,
+          createdAt: NOW,
+        })
+        .run();
+
+    // A first account connected with an opaque id.
+    opaque("tg-opaque", "c1");
+    expect(records.channelOfLink("telegram")).toBe("tg-opaque");
+    expect(records.channelOfLink("tg-opaque")).toBe("tg-opaque");
+
+    // A second account: Rome never picks between them.
+    opaque("tg-second", "c2");
+    expect(records.channelOfLink("telegram")).toBeNull();
+    // A link naming one account's own id still reaches it.
+    expect(records.channelOfLink("tg-second")).toBe("tg-second");
+
+    // A removed account is not an account.
+    records.vacate("c1");
+    expect(records.channelOfLink("telegram")).toBe("tg-second");
+  });
+
+  it("answers a link again once an account connects, with no stale answer cached", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW);
+    expect(records.channelOfLink("telegram")).toBe("telegram");
+    expect(records.channelOfLink("telegram")).toBe("telegram");
+
+    records.claim(db, { id: "c2", connectionKind: "telegram" }, NOW);
+    expect(records.channelOfLink("telegram")).toBeNull();
+
+    records.vacate(db, "c2");
+    expect(records.channelOfLink("telegram")).toBe("telegram");
+  });
+
+  it("lists the accounts a send to a link may go out from", () => {
+    const records = repository();
+    const db = testDb!.db;
+    // Nothing recorded: the link's own channel, as a send without `from` reaches.
+    expect(records.sendersOfLink("whatsapp")).toEqual(["whatsapp"]);
+
+    const first = records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW).id;
+    const later = new Date(NOW.getTime() + 60_000);
+    const second = records.claim(db, { id: "c2", connectionKind: "telegram" }, later).id;
+    expect(records.sendersOfLink("telegram")).toEqual([first, second]);
+    // A link naming one account's own id lists that account alone.
+    expect(records.sendersOfLink(second)).toEqual([second]);
+
+    // A removed account sends nothing.
+    records.vacate(db, "c2");
+    expect(records.sendersOfLink("telegram")).toEqual([first]);
+    expect(records.sendersOfLink(second)).toEqual([]);
+  });
+
+  it("reaches the service's own channel from a link while it is the only account", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW);
+    expect(records.channelOfLink("telegram")).toBe("telegram");
+
+    records.claim(db, { id: "c2", connectionKind: "telegram" }, NOW);
+    expect(records.channelOfLink("telegram")).toBeNull();
+  });
+
   it("keeps a Connection's channel name current across claims and releases", () => {
     const records = repository();
     const db = testDb!.db;
