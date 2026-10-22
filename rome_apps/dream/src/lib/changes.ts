@@ -80,8 +80,9 @@ function hunksOf(diff: string): Hunk[] {
 /**
  * The file changes in a Codex `fileChange` item. An `add` is the whole new
  * file, so it records as a write. An `update` records one edit per hunk, so
- * the page shows the same diff Codex applied. A `delete` leaves nothing to
- * show and records nothing.
+ * the page shows the same diff Codex applied; an update that also renames the
+ * file records under the new path, the one that exists after the run. A
+ * `delete` leaves nothing to show and records nothing.
  */
 function changesFromFileChange(record: Record<string, unknown>): FileChange[] {
   if (!Array.isArray(record.changes)) return [];
@@ -91,9 +92,8 @@ function changesFromFileChange(record: Record<string, unknown>): FileChange[] {
     const file = str(path);
     const text = str(diff);
     if (!file || text === null) return [];
-    const type =
-      kind && typeof kind === "object" ? str((kind as Record<string, unknown>).type) : null;
-    switch (type) {
+    const kindRecord = kind && typeof kind === "object" ? (kind as Record<string, unknown>) : null;
+    switch (kindRecord ? str(kindRecord.type) : null) {
       case "add": {
         const content = clip(text);
         return [
@@ -106,18 +106,20 @@ function changesFromFileChange(record: Record<string, unknown>): FileChange[] {
           },
         ];
       }
-      case "update":
+      case "update": {
+        const target = str(kindRecord?.move_path) || file;
         return hunksOf(text).map(({ before, after }) => {
           const content = clip(after);
           const previous = clip(before);
           return {
             op: "edit",
-            path: file,
+            path: target,
             content: content.text,
             previous: previous.text,
             truncated: content.truncated || previous.truncated,
           };
         });
+      }
       default:
         return [];
     }

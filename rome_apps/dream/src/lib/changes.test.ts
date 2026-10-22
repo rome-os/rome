@@ -134,6 +134,20 @@ describe("changesFromToolUse on a Codex fileChange", () => {
     ]);
   });
 
+  it("records an update that renames the file under the new path", () => {
+    const [change] = changesFromToolUse(
+      "Edit",
+      fileChange([
+        {
+          path: `${SKILL}/references/old.md`,
+          kind: { type: "update", move_path: `${SKILL}/references/new.md` },
+          diff: "@@ -1 +1 @@\n-a\n+b\n",
+        },
+      ]),
+    );
+    expect(change).toMatchObject({ op: "edit", path: `${SKILL}/references/new.md` });
+  });
+
   it("reads a diff with no hunk header as one hunk, and skips the no-newline marker", () => {
     const [change] = changesFromToolUse(
       "Edit",
