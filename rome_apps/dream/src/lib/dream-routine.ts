@@ -3,8 +3,9 @@ import type { RomeAppContext, Routine } from "@rome-os/app-runtime";
 export const DREAM_ROUTINE_NAME = "dream";
 /** The name the routine had while it ran every day. */
 export const LEGACY_DREAM_ROUTINE_NAME = "daily-dream";
-/** Hours of history one dream reviews: one interval, so no chat falls between two dreams. */
-export const DREAM_WINDOW_HOURS = 72;
+/** Hours of history one dream reviews: one 72-hour interval plus two, so the extra
+ *  hour of a fall-back DST change still leaves no chat between two dreams. */
+export const DREAM_WINDOW_HOURS = 74;
 const REVIEW_LOCAL_TIME = "03:00";
 const REVIEW_TZID = "UTC";
 // The scheduler runs this as day-of-month */3 (1, 4, 7, ...), so the gap across

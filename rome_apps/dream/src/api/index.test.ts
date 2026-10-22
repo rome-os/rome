@@ -165,7 +165,7 @@ describe("dream API", () => {
     expect(res.status).toBe(202);
     expect(createRunsRepository(appDb()).byId(runId)).toMatchObject({
       status: "queued",
-      windowHours: 72,
+      windowHours: 74,
     });
     expect(runAction).toHaveBeenCalledWith("dream:dream", { runId }, { detached: true });
   });

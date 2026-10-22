@@ -85,8 +85,11 @@ function makeDeps(
   return {
     carrierDir,
     memoryDir: "/p/memory",
+    // The memory agent plays the scripted events; the practice agent after it
+    // finishes without changing anything.
     agentRunner: {
-      async *run() {
+      async *run({ agentName }: { agentName: string }) {
+        if (agentName !== "dream") return;
         for (const msg of agentMessages) {
           yield msg;
         }
@@ -113,7 +116,7 @@ describe("dream", () => {
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const data = result.data as { summary: string; windowHours: number };
     expect(data.summary).toBe("Journal entry written.");
-    expect(data.windowHours).toBe(72);
+    expect(data.windowHours).toBe(74);
   });
 
   it("returns failure when agent emits an error", async () => {
@@ -419,7 +422,7 @@ describe("dream", () => {
   it("runs a reserved dream once when two invocations carry its runId", async () => {
     const runs = createRunsRepository(appDb());
     const { id: runId } = runs.reserveDream(24, "queued");
-    const run = rs.fn(async function* () {
+    const run = rs.fn(async function* (_input: { agentName: string }) {
       yield { type: "result", content: "done" };
     });
     const deps = makeDeps([]);
@@ -428,7 +431,7 @@ describe("dream", () => {
 
     const results = await Promise.all([action.execute({ runId }), action.execute({ runId })]);
 
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls.map(([input]) => input.agentName)).toEqual(["dream", "dream-practice"]);
     expect(
       results.filter((r) => r.status === "ok" && (r.data as { skipped?: boolean }).skipped),
     ).toHaveLength(1);
@@ -473,17 +476,31 @@ describe("dream", () => {
 describe("dream skills", () => {
   const SKILL = "---\nname: rename-invoices\ndescription: Rename invoice PDFs\n---\n\n## Steps\n";
 
-  /** An agent that writes `rename-invoices` into the staging dir its prompt names. */
-  function skillWritingRunner(events: Array<Record<string, unknown>>) {
+  /**
+   * A memory agent that finishes quietly, then a practice agent that writes
+   * `rename-invoices` into the staging dir its prompt names and plays `events`.
+   * `events` also ends the memory agent when it is an error.
+   */
+  function skillWritingRunner(
+    events: Array<Record<string, unknown>>,
+    practice?: (appsDir: string) => void,
+  ) {
     const prompts: string[] = [];
-    const run = async function* (params: { prompt: string }) {
+    const agents: string[] = [];
+    const run = async function* (params: { agentName: string; prompt: string }) {
       prompts.push(params.prompt);
+      agents.push(params.agentName);
+      if (params.agentName === "dream") {
+        for (const event of events) if (event.type === "error") yield event;
+        return;
+      }
       const staging = /Skills staging directory: (.+)$/m.exec(params.prompt)?.[1] as string;
       mkdirSync(join(staging, "rename-invoices"), { recursive: true });
       writeFileSync(join(staging, "rename-invoices", "SKILL.md"), SKILL);
+      practice?.(/Guardian's apps directory: (.+)$/m.exec(params.prompt)?.[1] as string);
       for (const event of events) yield event;
     };
-    return { run, prompts };
+    return { run, prompts, agents };
   }
 
   function withRunner(
@@ -495,18 +512,43 @@ describe("dream skills", () => {
     return { deps, runAction };
   }
 
-  it("gives the agent its window, memory, staging, apps, and journal paths", async () => {
+  it("runs the memory agent, then the practice agent, each with its paths", async () => {
     const runner = skillWritingRunner([{ type: "result", content: "done" }]);
     const { deps } = withRunner(runner);
 
     await createAction(actionConfig, deps).execute({ windowHours: 6 });
 
-    const prompt = runner.prompts[0] ?? "";
-    expect(prompt).toContain("windowHours: 6");
-    expect(prompt).toContain("Memory directory: /p/memory");
-    expect(prompt).toMatch(/Skills staging directory: .*\.dream-skill-review-.*\/skills$/m);
-    expect(prompt).toContain(`Guardian's apps directory: ${dirname(carrierDir)}`);
-    expect(prompt).toMatch(/Today's journal entry: \/p\/memory\/journal\/\d{4}\/\d{2}\/\d{2}\.md/);
+    expect(runner.agents).toEqual(["dream", "dream-practice"]);
+    const journal = /Today's journal entry: \/p\/memory\/journal\/\d{4}\/\d{2}\/\d{2}\.md/;
+    const [memory = "", practice = ""] = runner.prompts;
+    expect(memory).toContain("windowHours: 6 to get_webchat_conversations, get_account_chats,");
+    expect(memory).toContain("Memory directory: /p/memory");
+    expect(memory).toMatch(journal);
+    expect(memory).not.toContain("apps directory");
+    expect(practice).toContain("windowHours: 6 to get_webchat_conversations and get_action_logs");
+    expect(practice).not.toContain("get_account_chats");
+    expect(practice).toMatch(/Skills staging directory: .*\.dream-skill-review-.*\/skills$/m);
+    expect(practice).toContain(`Guardian's apps directory: ${dirname(carrierDir)}`);
+    expect(practice).toMatch(journal);
+  });
+
+  it("records the app files the practice agent changed without file tools", async () => {
+    mkdirSync(join(dirname(carrierDir), "notes/src"), { recursive: true });
+    writeFileSync(join(dirname(carrierDir), "notes/src/old.ts"), "old");
+    const runner = skillWritingRunner([{ type: "result", content: "Fixed notes." }], (apps) => {
+      writeFileSync(join(apps, "notes/src/fix.ts"), "export const fixed = true;");
+      mkdirSync(join(apps, "notes/node_modules/dep"), { recursive: true });
+      writeFileSync(join(apps, "notes/node_modules/dep/index.js"), "dep");
+    });
+    const { deps } = withRunner(runner);
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    const { runId } = (result as { data: { runId: string } }).data;
+    const changes = createRunsRepository(appDb()).changes(runId);
+    expect(changes.map((c) => [c.path, c.content])).toEqual([
+      [join(dirname(carrierDir), "notes/src/fix.ts"), "export const fixed = true;"],
+    ]);
   });
 
   it("installs the skills a completed dream saved, then drops the staging copy", async () => {
@@ -525,7 +567,7 @@ describe("dream skills", () => {
       op: "install",
       source: { mode: "source", path: carrierDir },
     });
-    const staging = /Skills staging directory: (.+)$/m.exec(runner.prompts[0] ?? "")?.[1] ?? "";
+    const staging = /Skills staging directory: (.+)$/m.exec(runner.prompts[1] ?? "")?.[1] ?? "";
     expect(existsSync(dirname(staging))).toBe(false);
   });
 

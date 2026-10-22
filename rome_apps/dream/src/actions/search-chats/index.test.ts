@@ -69,6 +69,18 @@ describe("search_chats", () => {
     expect(data.content).toContain('get_webchat_conversations { "sessionId": "b"');
   });
 
+  it("opens a matched chat from its first message, not from its first match", async () => {
+    seedSession("a");
+    seedMessage("a", "user", "Set up the weekly vendor report", 40);
+    seedMessage("a", "assistant", "Done.", 40);
+    seedMessage("a", "user", "The invoice totals are wrong again", 3);
+
+    const data = await search({ query: "invoice totals" });
+
+    const windowHours = Number(/"windowHours": (\d+)/.exec(data.content)?.[1]);
+    expect(windowHours).toBeGreaterThanOrEqual(40 * 24);
+  });
+
   it("searches only what the guardian asked in the dashboard's chats", async () => {
     seedSession("dash");
     seedSession("telegram", "channel", "telegram");

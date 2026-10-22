@@ -12,6 +12,7 @@ import {
 import { createRunsRepository } from "../../db/repositories/runs.js";
 import { hasChatSince } from "../../lib/chat-activity.js";
 import { DREAM_WINDOW_HOURS } from "../../lib/dream-routine.js";
+import { appChangesSince, snapshotApps } from "../../lib/app-changes.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 import {
   ensureUserSkillsCarrier,
@@ -99,12 +100,38 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         };
       }
       const runId = reservation.id;
-      const recorder = new RunRecorder(runs, runId);
 
       log.info("dream started", { windowHours, runId });
 
-      // The agent saves skills into a private copy of the carrier, and only a
-      // dream that completes installs them.
+      /** Runs one agent into the run record. Null when it completed. */
+      async function runAgent(
+        agentName: string,
+        prompt: string,
+        recorder: RunRecorder,
+      ): Promise<ActionResult | null> {
+        try {
+          for await (const msg of agentRunner.run({ agentName, prompt })) {
+            recorder.observe(msg);
+          }
+        } catch (err) {
+          runs.finish(runId, {
+            status: "failed",
+            error: err instanceof Error ? err.message : String(err),
+          });
+          throw err;
+        }
+        const outcome = recorder.outcome();
+        if (outcome.status === "completed") return null;
+        runs.finish(runId, outcome);
+        if (recorder.error !== null) {
+          log.error("dream agent failed", { agentName, error: recorder.error });
+          return { status: "error", error: `Dream agent failed: ${recorder.error}` };
+        }
+        return { status: "ok", data: { runId, windowHours, summary: recorder.summary } };
+      }
+
+      // The practice agent saves skills into a private copy of the carrier,
+      // and only a dream that completes installs them.
       const stopHeartbeat = keepRunAlive(runs, runId);
       let staging: string | undefined;
       try {
@@ -128,37 +155,49 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           String(now.getUTCMonth() + 1).padStart(2, "0"),
           `${String(now.getUTCDate()).padStart(2, "0")}.md`,
         );
-        const prompt = [
+        const appsDir = dirname(carrierDir);
+
+        // Two agents, so the one that can run code never reads what other
+        // people wrote on Rome's accounts. The memory agent reads every source
+        // with file tools only. The practice agent reads the guardian's own
+        // chats and the action logs, and can change apps.
+        const memoryRecorder = new RunRecorder(runs, runId);
+        const memoryPrompt = [
           `Today is ${now.toISOString()}. Dream over the past ${windowHours} hours.`,
           "",
           `- Window: pass windowHours: ${windowHours} to get_webchat_conversations, get_account_chats, and get_action_logs.`,
           `- Memory directory: ${memoryDir}`,
-          `- Skills staging directory: ${join(staging, "skills")}`,
-          `- Guardian's apps directory: ${dirname(carrierDir)}`,
           `- Today's journal entry: ${journalPath}`,
         ].join("\n");
+        const memoryStopped = await runAgent("dream", memoryPrompt, memoryRecorder);
+        if (memoryStopped) return memoryStopped;
 
+        const practiceRecorder = new RunRecorder(runs, runId);
+        const practicePrompt = [
+          `Today is ${now.toISOString()}. Practice over the past ${windowHours} hours.`,
+          "",
+          `- Window: pass windowHours: ${windowHours} to get_webchat_conversations and get_action_logs.`,
+          `- Memory directory: ${memoryDir}`,
+          `- Skills staging directory: ${join(staging, "skills")}`,
+          `- Guardian's apps directory: ${appsDir}`,
+          `- Today's journal entry: ${journalPath}`,
+        ].join("\n");
+        const appsBefore = await snapshotApps(appsDir);
+        let practiceStopped: ActionResult | null;
         try {
-          for await (const msg of agentRunner.run({ agentName: "dream", prompt })) {
-            recorder.observe(msg);
-          }
-        } catch (err) {
-          runs.finish(runId, {
-            status: "failed",
-            error: err instanceof Error ? err.message : String(err),
-          });
-          throw err;
+          practiceStopped = await runAgent("dream-practice", practicePrompt, practiceRecorder);
+        } finally {
+          // App changes are live once made, so record them even from a run
+          // that failed, for the guardian to review.
+          runs.addChanges(
+            runId,
+            await appChangesSince(appsDir, appsBefore, practiceRecorder.paths),
+          );
         }
-
-        const outcome = recorder.outcome();
-        if (outcome.status !== "completed") {
-          runs.finish(runId, outcome);
-          if (recorder.error !== null) {
-            log.error("dream agent failed", { error: recorder.error });
-            return { status: "error", error: `Dream agent failed: ${recorder.error}` };
-          }
-          return { status: "ok", data: { runId, windowHours, summary: recorder.summary } };
-        }
+        if (practiceStopped) return practiceStopped;
+        const agentSummary = [memoryRecorder.summary, practiceRecorder.summary]
+          .filter(Boolean)
+          .join("\n\n");
 
         // Memory is already written, so a skill that fails to install is
         // reported with the dream rather than failing it.
@@ -182,7 +221,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           skillsError = `Skills not saved: user-skills install failed, changes rolled back: ${err instanceof Error ? err.message : String(err)}`;
           log.error("user-skills install failed", { error: skillsError, runId });
         }
-        const summary = skillsError ? `${recorder.summary}\n\n${skillsError}` : recorder.summary;
+        const summary = skillsError ? `${agentSummary}\n\n${skillsError}` : agentSummary;
         runs.finish(runId, { status: "completed", summary });
         log.info("dream completed", { runId, installed, resultLength: summary.length });
 

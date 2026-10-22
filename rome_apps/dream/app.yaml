@@ -21,6 +21,7 @@ db:
 
 agents:
   - agents/dream.yaml
+  - agents/dream-practice.yaml
   - agents/skill-review.yaml
 
 actions:

@@ -40,6 +40,8 @@ interface ChatHit {
   requests: Array<{ text: string; createdAt: number }>;
   firstAt: number;
   lastAt: number;
+  /** The chat's first message of any kind, which can predate every match. */
+  startedAt: number;
 }
 
 /** Lower-cased distinct words of a query, with surrounding quotes and punctuation stripped. */
@@ -82,6 +84,7 @@ function rankChats(rows: RequestRow[], words: string[]): ChatHit[] {
       requests: [],
       firstAt: row.created_at,
       lastAt: row.created_at,
+      startedAt: row.created_at,
     };
     chats.set(row.session_id, chat);
     chat.score = Math.max(chat.score, score);
@@ -95,9 +98,9 @@ function rankChats(rows: RequestRow[], words: string[]): ChatHit[] {
 }
 
 function formatHit(chat: ChatHit, wordCount: number, now: number): string {
-  // Wide enough for get_webchat_conversations to return the chat from its
-  // first matching request on.
-  const windowHours = Math.ceil((now - chat.firstAt) / 3600) + 1;
+  // Wide enough for get_webchat_conversations to return the whole chat, from
+  // the request that started it, not just from the first match.
+  const windowHours = Math.ceil((now - chat.startedAt) / 3600) + 1;
   const quotes = chat.requests
     .slice(0, QUOTES_PER_CHAT)
     .map((r) => `- ${isoDate(r.createdAt)}: ${clip(r.text, CHARS_PER_QUOTE)}`);
@@ -170,8 +173,23 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       LIMIT ${MAX_ROWS}
     `) as RequestRow[];
     const ranked = rankChats(rows, words);
+    const top = ranked.slice(0, limit);
+    if (top.length > 0) {
+      const starts = connection.all(sql`
+        SELECT session_id, MIN(created_at) AS started_at FROM rome_agent_messages
+        WHERE session_id IN (${sql.join(
+          top.map((chat) => sql`${chat.sessionId}`),
+          sql`, `,
+        )})
+        GROUP BY session_id
+      `) as Array<{ session_id: string; started_at: number }>;
+      for (const { session_id, started_at } of starts) {
+        const chat = top.find((c) => c.sessionId === session_id);
+        if (chat) chat.startedAt = Math.min(chat.startedAt, started_at);
+      }
+    }
     const now = Math.floor(Date.now() / 1000);
-    const sections = ranked.slice(0, limit).map((chat) => formatHit(chat, words.length, now));
+    const sections = top.map((chat) => formatHit(chat, words.length, now));
     log.info("searched chats", { days, words: words.length, chats: ranked.length });
     const header = `## Dashboard chats matching ${words.map((w) => `\`${w}\``).join(", ")}, last ${days} days`;
     return {
