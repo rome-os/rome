@@ -858,7 +858,7 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
               </span>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <span className="flex flex-col py-0.5">
+              <span className="flex flex-col">
                 <span className="whitespace-nowrap">{deviceFolder.deviceName}</span>
                 <span className="text-background/70">
                   {/* A long path wraps only between its segments. */}
