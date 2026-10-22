@@ -18,6 +18,7 @@ import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 import {
   ensureUserSkillsCarrier,
   publishStagedSkills,
+  removeStaleStaging,
   snapshotCarrierSkills,
   stageCarrierSkills,
   userSkillsCarrierDir,
@@ -199,6 +200,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         let before: Map<string, Buffer>;
         try {
           await ensureUserSkillsCarrier(carrierDir);
+          await removeStaleStaging(carrierDir);
           staging = await stageCarrierSkills(carrierDir);
           before = await snapshotCarrierSkills(staging);
         } catch (err) {

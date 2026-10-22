@@ -8,6 +8,7 @@ import {
   commitCarrier,
   ensureUserSkillsCarrier,
   registerCarrierSkills,
+  removeStaleStaging,
   restoreCarrier,
   snapshotCarrierSkills,
   userSkillsCarrierDir,
@@ -31,6 +32,21 @@ function addSkill(name: string): void {
 }
 
 describe("user-skills carrier", () => {
+  it("removes staging copies a crashed run left behind, not ones still in use", async () => {
+    mkdirSync(join(root, ".dream-skill-review-old/skills"), { recursive: true });
+    mkdirSync(join(root, ".dream-skill-review-new/skills"), { recursive: true });
+    mkdirSync(join(root, "my-app"));
+
+    await removeStaleStaging(dir, Date.now() + 13 * 60 * 60_000);
+    expect(existsSync(join(root, ".dream-skill-review-old"))).toBe(false);
+    expect(existsSync(join(root, "my-app"))).toBe(true);
+    expect(existsSync(join(root, "user-skills"))).toBe(true);
+
+    mkdirSync(join(root, ".dream-skill-review-new/skills"), { recursive: true });
+    await removeStaleStaging(dir);
+    expect(existsSync(join(root, ".dream-skill-review-new"))).toBe(true);
+  });
+
   it("resolves under the authoring root, honoring the override", () => {
     expect(userSkillsCarrierDir({ ROME_APP_AUTHORING_ROOT: "/x/apps" })).toBe(
       "/x/apps/user-skills",

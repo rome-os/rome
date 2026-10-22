@@ -261,13 +261,35 @@ const errorMessage = (err: unknown) => (err instanceof Error ? err.message : Str
  * carrier. The dot prefix sets it apart from the authored apps beside it.
  */
 export async function stageCarrierSkills(dir: string): Promise<string> {
-  const staging = await mkdtemp(join(dirname(resolve(dir)), ".dream-skill-review-"));
+  const staging = await mkdtemp(join(dirname(resolve(dir)), STAGING_PREFIX));
   await mkdir(join(staging, "skills"), { recursive: true });
   for (const [name, content] of await snapshotCarrierSkills(dir)) {
     await mkdir(join(staging, "skills", name));
     await writeFile(join(staging, "skills", name, "SKILL.md"), content);
   }
   return staging;
+}
+
+const STAGING_PREFIX = ".dream-skill-review-";
+/** Far longer than any dream or skill review runs, so only a crashed run's copy is this old. */
+const STAGING_STALE_MS = 12 * 60 * 60_000;
+
+/**
+ * Removes staging copies a crashed or restarted run left beside the carrier.
+ * A dream's copy also holds a snapshot of every app's source, so each one
+ * left behind is large.
+ */
+export async function removeStaleStaging(dir: string, now = Date.now()): Promise<void> {
+  const parent = dirname(resolve(dir));
+  const entries = await readdir(parent, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith(STAGING_PREFIX)) continue;
+    const path = join(parent, entry.name);
+    const info = await stat(path).catch(() => null);
+    if (info && now - info.mtimeMs > STAGING_STALE_MS) {
+      await rm(path, { recursive: true, force: true });
+    }
+  }
 }
 
 const LOCK_STALE_MS = 2 * 60_000;
