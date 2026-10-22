@@ -14,6 +14,19 @@ An automated triage process reads each new issue and applies its type, priority 
 
 Follow [`DEVELOPMENT.md`](DEVELOPMENT.md). It covers the prerequisites (OrbStack or Docker, Nix, and direnv), the first-time setup, and `pnpm dev:all`, the single command that starts Rome locally.
 
+## Coding principles
+
+Prefer the simple, straightforward solution. A complicated solution to a low-impact problem is usually the wrong solution. Before you write code, and again before you open a pull request, check the change against these questions:
+
+- **Is this the right problem?** Confirm what is actually broken or missing, and for whom, before you choose a fix.
+- **Is this the right solution?** Make sure the fix addresses the cause, not only one symptom of it.
+- **Is there a simpler alternative?** Always look for one. If you keep the more complex option, say why in the pull request.
+- **What is the impact?** Weigh how many users the change helps, and how much, against the code and risk it adds.
+- **Does it cover the main cases?** Handle the cases that real users hit. Do not add machinery for rare edge cases unless they put correctness, security, or data at risk.
+- **Will it be easy to maintain?** Follow established patterns and good coding practice, so that the next contributor can read, change, and delete the code without surprises.
+
+Reviewers judge a pull request by the same questions.
+
 ## Make a change
 
 [`CLAUDE.md`](CLAUDE.md) is the working playbook for people and coding agents alike. It lists the repo layout, the patterns to follow, and the known traps. The points that matter most:
