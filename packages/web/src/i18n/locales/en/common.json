@@ -4,6 +4,7 @@
     "chat": "Chat",
     "activity": "Activity",
     "people": "People",
+    "assistants": "Assistants",
     "envoys": "Envoys",
     "memory": "Memory",
     "projects": "Projects",
@@ -285,7 +286,13 @@
       "dot": "Dot",
       "muse": "Muse",
       "rome": "Rome"
-    }
+    },
+    "empty": {
+      "title": "No assistants yet",
+      "body": "Connect a Dot or Muse under Settings → Agents in Rome Cloud. It shows up here once this Rome's Agents connection is on."
+    },
+    "noMessages": "No messages yet",
+    "loadFailed": "Failed to load assistants"
   },
   "assistantChat": {
     "description": "Main answers {{name}}'s messages as Rome. What you write here goes to {{name}}.",

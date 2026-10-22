@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
-import { AssistantChats } from "./AssistantChats";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { deleteSession, listSessions, renameSession, type SessionScope } from "@/lib/chat-api";
@@ -987,10 +986,6 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               )}
             </section>
           ) : null}
-          <AssistantChats
-            collapsed={collapsedGroups.has("section:assistants")}
-            onToggle={() => toggleGroup("section:assistants")}
-          />
           {phase === "loading" ? (
             <div className="space-y-1 px-2 py-2" aria-hidden>
               <Skeleton className="h-8 w-full" />
