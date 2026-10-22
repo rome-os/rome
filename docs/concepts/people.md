@@ -1,5 +1,7 @@
 # People: Guardian, Visitor, Persons, Accounts, Addresses, Links & Outbox
 
+What person, guardian, bond level, account, link and stranger mean is in the [People](../domains/people.md) domain language. This page holds the engineering contracts behind those words, and the words of its own: visitor, address and outbox.
+
 ## Guardian
 
 The guardian is the single human user that a Rome instance serves. They control all configuration, memory, and policies. The guardian's profile (name, timezone, preferences) is stored in [memory](data.md#memory).
