@@ -13,6 +13,10 @@ import {
 } from "@/test/fake-websocket";
 import { RecentChats } from "./RecentChats";
 
+// The Assistants group reads its own endpoint and has its own test. Left out
+// here, so the fetch counts below are the chat list's alone.
+rs.mock("./AssistantChats", () => ({ AssistantChats: () => null }));
+
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });

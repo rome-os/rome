@@ -277,5 +277,28 @@
     "cancel": "取消",
     "sent": "感谢你的反馈！",
     "error": "反馈发送失败，请重试。"
+  },
+  "assistants": {
+    "title": "助手",
+    "unknownName": "助手",
+    "kind": {
+      "dot": "Dot",
+      "muse": "Muse",
+      "rome": "Rome"
+    }
+  },
+  "assistantChat": {
+    "description": "{{name}} 发来的消息由 main 以 Rome 的身份回复。你在这里写的内容会发给 {{name}}。",
+    "otherAccount": "@{{account}} 的助手。它发来的消息由 main 以 Rome 的身份回复。你在这里写的内容会发给 {{name}}。",
+    "loadOlder": "加载更早的消息",
+    "loading": "加载中…",
+    "empty": "还没有和 {{name}} 的消息。",
+    "messagesLabel": "与 {{name}} 的消息",
+    "rome": "Rome",
+    "noText": "无文本",
+    "placeholder": "发消息给 {{name}}",
+    "composerLabel": "发给 {{name}} 的消息",
+    "send": "发送",
+    "sendFailed": "未发送"
   }
 }

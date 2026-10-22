@@ -1,3 +1,4 @@
+import type { AssistantKind } from "@rome/api-types/assistants";
 import { getInstanceToken } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
@@ -25,7 +26,7 @@ export interface AgentMessageEnvelope {
   from: {
     agentId: string | null;
     name: string;
-    kind: "dot" | "rome";
+    kind: AssistantKind;
     account: string;
     sameAccount: boolean;
   };
@@ -38,7 +39,7 @@ export interface AgentMessageEnvelope {
 }
 
 export interface ExternalAgent extends ExternalAgentRef {
-  kind: "dot" | "rome";
+  kind: AssistantKind;
   /** The owner's handle. */
   account: string;
   /** False for an agent of a linked account. */

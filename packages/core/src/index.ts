@@ -1580,6 +1580,7 @@ async function main() {
       outboxRepo,
       channels,
       accountNames,
+      assistants: listedAgents,
       webchatRepo,
       webhookInvocationsRepo,
       approvalsRepo,

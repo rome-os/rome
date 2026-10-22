@@ -277,5 +277,28 @@
     "cancel": "Cancel",
     "sent": "Thanks for the feedback!",
     "error": "Couldn't send feedback. Please try again."
+  },
+  "assistants": {
+    "title": "Assistants",
+    "unknownName": "Assistant",
+    "kind": {
+      "dot": "Dot",
+      "muse": "Muse",
+      "rome": "Rome"
+    }
+  },
+  "assistantChat": {
+    "description": "Main answers {{name}}'s messages as Rome. What you write here goes to {{name}}.",
+    "otherAccount": "An assistant of @{{account}}. Main answers its messages as Rome. What you write here goes to {{name}}.",
+    "loadOlder": "Load older messages",
+    "loading": "Loading…",
+    "empty": "No messages with {{name}} yet.",
+    "messagesLabel": "Messages with {{name}}",
+    "rome": "Rome",
+    "noText": "No text",
+    "placeholder": "Message {{name}}",
+    "composerLabel": "Message to {{name}}",
+    "send": "Send",
+    "sendFailed": "Not sent"
   }
 }

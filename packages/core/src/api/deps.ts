@@ -7,6 +7,7 @@ import type { OutboxRepository } from "../db/repositories/outbox.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { Channels } from "../channels/channel.js";
 import type { AccountNames } from "../channels/account-names.js";
+import type { ExternalAgents } from "../channels/agents-accounts.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -89,6 +90,9 @@ export interface ApiDeps {
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */
   accountNames: AccountNames;
+  /** The agents Rome Cloud lists for this Rome, each an assistant with one
+   *  chat (docs/domains/chats.md#assistant). */
+  assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
   /** Messages Rome is still trying to deliver — the People surface's
    *  outbox. Separate from every message store on purpose: a row here is a
