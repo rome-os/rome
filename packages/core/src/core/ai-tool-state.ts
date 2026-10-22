@@ -186,7 +186,12 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     openai: false,
     anthropic: false,
   };
+  // Failed runs waiting to be replayed after an older usage check settles.
+  // Nothing is logged until they replay, so the older check's result is never
+  // logged as cleared before the newer failure is reached again.
+  const pendingReplays: Record<AIToolProviderId, number> = { openai: 0, anthropic: 0 };
   const logQuotaChange = (provider: AIToolProviderId, source: string): void => {
+    if (pendingReplays[provider] > 0) return;
     const target = provider === "openai" ? value.codex : value.claude;
     const exhausted = readProviderState(target, Date.now()).quotaExhausted;
     if (exhausted === loggedQuotaExhausted[provider]) return;
@@ -207,6 +212,10 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       });
     }
   };
+  // Log a limit whose end time has passed before anything reads or replaces it,
+  // so its recovery is logged on time and not hidden by a later change.
+  const logExpiry = (provider: AIToolProviderId): void =>
+    logQuotaChange(provider, "end time passed");
   const notifyCodexLoginChanged = (previous: boolean | undefined): boolean => {
     if (previous === value.codex.loggedIn) return false;
     options.onCodexLoginChanged?.();
@@ -260,6 +269,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     const existing = refreshesInFlight.get(provider);
     if (existing) return existing;
 
+    logExpiry(provider);
     const pending = refreshProvider(provider).finally(() => {
       logQuotaChange(provider, "usage check");
       if (refreshesInFlight.get(provider) === pending) {
@@ -274,6 +284,8 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     get() {
       // Reading the expiry here needs no timer to clear the flag, and a reset
       // never waits on a usage probe that the endpoint may throttle.
+      logExpiry("openai");
+      logExpiry("anthropic");
       const now = Date.now();
       return {
         codex: readProviderState(value.codex, now),
@@ -325,15 +337,20 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         target.quotaExhausted = true;
         return true;
       };
-      const applyAndLog = (): void => {
-        if (applyRuntimeSignal()) logQuotaChange(provider, "failed run");
-      };
+      logExpiry(provider);
       if (!applyRuntimeSignal()) return;
       logQuotaChange(provider, "failed run");
 
       // Keep this newer runtime signal after any older probe settles.
       const olderRefresh = refreshesInFlight.get(provider);
-      if (olderRefresh) void olderRefresh.then(applyAndLog, applyAndLog);
+      if (!olderRefresh) return;
+      pendingReplays[provider] += 1;
+      const replay = (): void => {
+        pendingReplays[provider] -= 1;
+        const applied = applyRuntimeSignal();
+        logQuotaChange(provider, applied ? "failed run" : "usage check");
+      };
+      void olderRefresh.then(replay, replay);
     },
     close() {
       if (timer) clearInterval(timer);

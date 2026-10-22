@@ -933,5 +933,57 @@ describe("AIToolState", () => {
         source: "end time passed",
       });
     });
+
+    it("logs a limit that ends and is hit again as cleared, then reached", () => {
+      const state = createAIToolState({
+        probes: probes(),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+      state.markQuotaExhausted("openai");
+      const until = state.get().codex.quotaExhaustedUntil;
+
+      rs.setSystemTime(Date.parse(until ?? "") + 1);
+      expect(state.get().codex.quotaExhausted).toBe(false);
+      expect(logs.info).toHaveBeenCalledWith("model provider usage limit cleared", {
+        provider: "openai",
+        source: "end time passed",
+      });
+
+      state.markQuotaExhausted("openai");
+      expect(logs.warn).toHaveBeenCalledTimes(2);
+      expect(logs.info).toHaveBeenCalledTimes(1);
+    });
+
+    it("logs one warning for a failed run during a usage check that finds capacity", async () => {
+      let releaseUsage!: () => void;
+      const usageGate = new Promise<void>((resolve) => {
+        releaseUsage = resolve;
+      });
+      const state = createAIToolState({
+        probes: probes({
+          codexUsage: async () => {
+            await usageGate;
+            return {
+              checkedAt: new Date(now).toISOString(),
+              source: "test",
+              fiveHour: { usedPercent: 50 },
+            };
+          },
+        }),
+        startRefresh: false,
+        refreshIntervalMs: null,
+      });
+
+      const refresh = state.refresh("openai");
+      state.markQuotaExhausted("openai");
+      releaseUsage();
+      await refresh;
+      await Promise.resolve();
+
+      expect(state.get().codex.quotaExhausted).toBe(true);
+      expect(logs.warn).toHaveBeenCalledTimes(1);
+      expect(logs.info).not.toHaveBeenCalled();
+    });
   });
 });
