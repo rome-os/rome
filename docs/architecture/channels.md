@@ -124,6 +124,8 @@ Every channel delivers every sender. Rome never asks a sender to pair or to do a
 
 - No admission blocks a sender for having no link, and no channel replies with guidance to a stranger.
 - The guardian links their own account on a platform the way they link anyone's: in People, from the stranger account that appears after they write to Rome's account.
+- On a Telegram bot, Discord, Feishu or Slack bot, the guardian's link code is the shortcut. People shows one code at a time, valid for ten minutes and used once. A direct message carrying it, to any of Rome's accounts of those kinds, links the sender to the guardian and never reaches a subscriber. The code in a group never links anyone and voids the code, since everyone in the chat has seen it. Five wrong codes void it too. A code never moves an account linked to someone else.
+- Only the guardian, on the dashboard's own origin, can ask for a code, since redeeming one makes its sender the guardian.
 - Pairing requests stored before this rule are history. Activity shows them as expired, and none can be approved.
 - Provider-owned device linking, such as WhatsApp's, keeps its provider-specific proof of control.
 

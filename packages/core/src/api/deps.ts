@@ -1,3 +1,4 @@
+import type { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
@@ -81,6 +82,8 @@ export interface ApiDeps {
   actionLoader: Pick<ActionLoader, "get">;
   db: DrizzleDb;
   personMappingRepo: PersonMappingRepository;
+  /** The guardian's link code, shown in People (channels/guardian-link-code.ts). */
+  guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route
    *  reads either store directly. */

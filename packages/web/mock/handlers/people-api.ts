@@ -527,6 +527,11 @@ export const peopleHandlers = [
     return HttpResponse.json(directoryRow(ref));
   }),
 
+  // A fixed code: mock mode links nothing, so only the dialog is exercised.
+  http.post("/api/people/link-code", () =>
+    HttpResponse.json({ code: "ROME-7KQ2M9XA", expiresAt: Date.now() + 600_000 }, { status: 201 }),
+  ),
+
   http.post("/api/people", async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as Partial<CreatePersonRequest>;
     if (!body.displayName) {

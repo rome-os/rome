@@ -16,7 +16,10 @@ import {
   type OutboxPage,
   type PeopleList,
   type SendRefusal,
+  type LinkCodeResponse,
 } from "@rome/api-types/people";
+import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
+import { currentSessionActor } from "../../lib/session-actor.js";
 import { parseMessageCursor } from "@rome/api-types/message";
 import { createPerson } from "../../people/create.js";
 import { mergePeople } from "../../people/merge.js";
@@ -60,6 +63,17 @@ export function peopleRoutes(deps: ApiDeps): Hono {
         .sort(comparePeople),
       counts: countPeople(matching),
     } satisfies PeopleList);
+  });
+
+  // A redeemed code makes its sender the guardian, so only the guardian may
+  // see one, and only from the dashboard itself.
+  app.post("/people/link-code", async (c) => {
+    if ((await currentSessionActor())?.kind !== "guardian")
+      return c.json({ error: "Guardian authentication required" }, 403);
+    if (!isSameOriginMutationRequest(c.req.raw))
+      return c.json({ error: "Cross-site requests are not allowed." }, 403);
+    c.header("Cache-Control", "no-store");
+    return c.json(deps.guardianLinkCodes.issue() satisfies LinkCodeResponse, 201);
   });
 
   app.post("/people", async (c) => {
