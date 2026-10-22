@@ -79,13 +79,33 @@ export class ScheduleTriggerProvider implements TriggerProvider {
         // one must recur.
         if (!trigger.rrule) throw new Error("schedule trigger has neither date nor rrule");
         const cronPattern = this.rruleToCron(trigger.rrule, trigger.localTime);
+        const everyDays = dailyInterval(trigger.rrule);
+        // Every N days counts from the creation date's calendar day in the
+        // resolved zone, since trigger edits keep createdAt. The cron pattern
+        // wakes daily, and `expected` gates off the other days.
+        const nextOccurrence = (): Date | null => {
+          if (everyDays === 1) return job.nextRun();
+          // The cap stays well above the interval, so a day croner does not
+          // match (such as a DST gap) cannot end the search early.
+          let candidate = job.nextRun();
+          for (let i = 0; candidate && i < 2 * everyDays + 2; i++) {
+            if (isDailyOccurrence(candidate, routine.createdAt, tzid, everyDays)) return candidate;
+            candidate = job.nextRun(candidate);
+          }
+          return null;
+        };
+        // The gate compares against the stored occurrence, not today's date.
+        // Croner delivers a fire late when the host slept past it, and that
+        // fire still counts as its occurrence on the next calendar day.
+        let expected: Date | null = null;
         const job = withoutSessionActor(
           () =>
             new Cron(cronPattern, { timezone: tzid }, async () => {
               try {
-                await fire({ scheduledTime: new Date().toISOString() });
-                const nextRun = job.nextRun();
-                await this.routinesRepo.updateNextRun(routine.id, nextRun ?? null);
+                const due = everyDays === 1 || !expected || Date.now() >= expected.getTime();
+                if (due) await fire({ scheduledTime: new Date().toISOString() });
+                expected = nextOccurrence();
+                await this.routinesRepo.updateNextRun(routine.id, expected);
               } catch (err) {
                 log.error("recurring schedule trigger failed", {
                   routineId: routine.id,
@@ -99,10 +119,10 @@ export class ScheduleTriggerProvider implements TriggerProvider {
 
         // Set initial nextRunAt — awaited so the engine + tests can rely on
         // nextRunAt being committed before activate() resolves.
-        const nextRun = job.nextRun();
-        if (nextRun) {
+        expected = nextOccurrence();
+        if (expected) {
           try {
-            await this.routinesRepo.updateNextRun(routine.id, nextRun);
+            await this.routinesRepo.updateNextRun(routine.id, expected);
           } catch (err) {
             log.warn("failed to update nextRunAt on activate", {
               routineId: routine.id,
@@ -164,7 +184,9 @@ export class ScheduleTriggerProvider implements TriggerProvider {
       case "HOURLY":
         return interval === 1 ? `${minute} * * * *` : `${minute} */${interval} * * *`;
       case "DAILY":
-        return interval === 1 ? `${minute} ${hour} * * *` : `${minute} ${hour} */${interval} * *`;
+        // A day-of-month step restarts each month, so activate() applies
+        // INTERVAL by skipping days instead.
+        return `${minute} ${hour} * * *`;
       case "WEEKLY": {
         const dayMap: Record<string, number> = {
           SU: 0,
@@ -253,6 +275,29 @@ export function nextDateForLocalTime(localTime: string, tzid: string, now = new 
   if (todayAt > now.getTime() + ONE_OFF_LEAD_MS) return today;
   const [year, month, day] = today.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+}
+
+/** The INTERVAL of a FREQ=DAILY rule, or 1 for any other rule. */
+function dailyInterval(rrule: string): number {
+  const upper = rrule.toUpperCase();
+  const freq = upper.match(/FREQ=(MINUTELY|HOURLY|DAILY|WEEKLY|MONTHLY|YEARLY)/)?.[1] ?? "DAILY";
+  if (freq !== "DAILY") return 1;
+  const interval = Number(upper.match(/INTERVAL=(\d+)/)?.[1] ?? 1);
+  return interval > 1 ? interval : 1;
+}
+
+/** Whether `at` falls on a day of an every-`interval`-days schedule counted
+ * from `anchor`'s day. Both are read as calendar dates in `tzid`, so a DST
+ * change never moves an occurrence onto a neighboring day. Days before the
+ * anchor follow the same spacing. */
+export function isDailyOccurrence(at: Date, anchor: Date, tzid: string, interval: number): boolean {
+  const diff = dayNumber(calendarDate(at, tzid)) - dayNumber(calendarDate(anchor, tzid));
+  return ((diff % interval) + interval) % interval === 0;
+}
+
+function dayNumber(date: string): number {
+  const [year, month, day] = date.split("-").map(Number);
+  return Date.UTC(year, month - 1, day) / 86_400_000;
 }
 
 /** The "YYYY-MM-DD" calendar date of `at` in `tzid`. */
