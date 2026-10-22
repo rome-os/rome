@@ -199,7 +199,7 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
         <PageHeader
           title={tCommon("nav.people")}
           actions={
-            <div className="flex flex-wrap items-center gap-2">
+            <>
               <LinkMyAccount />
               <SegmentedControl<PeopleView>
                 aria-label={t("views.label")}
@@ -210,7 +210,7 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
                   { value: "directory", label: t("views.directory") },
                 ]}
               />
-            </div>
+            </>
           }
         />
 
