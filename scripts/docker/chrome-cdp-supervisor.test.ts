@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -183,6 +184,114 @@ sleep 0.1
     expect(chromeArgs.filter((arg) => arg.startsWith("--disable-features="))).toEqual([
       "--disable-features=IgnoreDuplicateNavs",
     ]);
+    expect(supervisor.exitCode).toBeNull();
+  });
+
+  it("clears leftover BrowserMetrics files before each launch", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-supervisor-"));
+    tempDirs.push(tempDir);
+
+    const binDir = join(tempDir, "bin");
+    const countFile = join(tempDir, "chrome-count");
+    const profileDir = join(tempDir, "profile");
+    const metricsDir = join(profileDir, "BrowserMetrics");
+    mkdirSync(binDir);
+    mkdirSync(metricsDir, { recursive: true });
+    writeFileSync(countFile, "0\n", "utf8");
+    writeFileSync(join(metricsDir, "BrowserMetrics-stale.pma"), "stale");
+    writeFileSync(join(profileDir, "BrowserMetrics-spare.pma"), "spare");
+
+    makeExecutable(
+      join(binDir, "curl"),
+      `#!/usr/bin/env bash
+printf '{"User-Agent":"FakeChrome"}\\n'
+`,
+    );
+    makeExecutable(
+      join(binDir, "socat"),
+      `#!/usr/bin/env bash
+trap 'exit 0' INT TERM
+while true; do sleep 1; done
+`,
+    );
+    makeExecutable(
+      join(tempDir, "fake-chrome"),
+      `#!/usr/bin/env bash
+count="$(cat "$FAKE_CHROME_COUNT_FILE")"
+count=$((count + 1))
+printf 'metrics' >"$FAKE_CHROME_METRICS_DIR/BrowserMetrics-$count.pma"
+printf '%s\\n' "$count" >"$FAKE_CHROME_COUNT_FILE"
+sleep 0.1
+`,
+    );
+
+    supervisor = spawn("bash", [SCRIPT_PATH], {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        FAKE_CHROME_COUNT_FILE: countFile,
+        FAKE_CHROME_METRICS_DIR: metricsDir,
+        ROME_CHROME_BINARY: join(tempDir, "fake-chrome"),
+        ROME_CHROME_ENABLE_STEALTH: "0",
+        ROME_CHROME_KEEP_ALIVE: "1",
+        ROME_CHROME_RESTART_DELAY: "0.05",
+        ROME_CHROME_MAX_RESTART_DELAY: "0.1",
+        ROME_CHROME_STARTUP_WAIT: "1",
+        ROME_CHROME_USER_AGENT: "FakeChrome",
+        ROME_CHROME_USER_DATA_DIR: profileDir,
+      },
+    });
+
+    const count = await waitForCount(countFile, 3);
+    const metricsFiles = readdirSync(metricsDir);
+
+    expect(count).toBeGreaterThanOrEqual(3);
+    expect(metricsFiles).not.toContain("BrowserMetrics-stale.pma");
+    expect(metricsFiles.length).toBeLessThanOrEqual(1);
+    expect(existsSync(join(profileDir, "BrowserMetrics-spare.pma"))).toBe(true);
+    expect(supervisor.exitCode).toBeNull();
+  });
+
+  it("backs off exponentially while Chrome keeps failing to start", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-supervisor-"));
+    tempDirs.push(tempDir);
+
+    const binDir = join(tempDir, "bin");
+    mkdirSync(binDir);
+
+    makeExecutable(join(binDir, "curl"), "#!/usr/bin/env bash\nexit 7\n");
+    makeExecutable(join(binDir, "socat"), "#!/usr/bin/env bash\nexec sleep 30\n");
+    makeExecutable(join(tempDir, "fake-chrome"), "#!/usr/bin/env bash\nexit 1\n");
+
+    supervisor = spawn("bash", [SCRIPT_PATH], {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        ROME_CHROME_BINARY: join(tempDir, "fake-chrome"),
+        ROME_CHROME_ENABLE_STEALTH: "0",
+        ROME_CHROME_KEEP_ALIVE: "1",
+        ROME_CHROME_RESTART_DELAY: "0.1",
+        ROME_CHROME_MAX_RESTART_DELAY: "0.4",
+        ROME_CHROME_STARTUP_WAIT: "1",
+        ROME_CHROME_USER_AGENT: "FakeChrome",
+        ROME_CHROME_USER_DATA_DIR: join(tempDir, "profile"),
+      },
+    });
+
+    let output = "";
+    supervisor.stdout.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    const retryDelays = () =>
+      [...output.matchAll(/retrying in ([\d.]+)s/g)].map((match) => match[1]);
+    const deadline = Date.now() + 5_000;
+    while (retryDelays().length < 4 && Date.now() < deadline) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+
+    expect(retryDelays().slice(0, 4)).toEqual(["0.1", "0.2", "0.4", "0.4"]);
     expect(supervisor.exitCode).toBeNull();
   });
 

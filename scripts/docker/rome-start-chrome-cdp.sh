@@ -7,6 +7,9 @@ BIND_ADDRESS="${ROME_CHROME_BIND_ADDRESS:-0.0.0.0}"
 STARTUP_WAIT="${ROME_CHROME_STARTUP_WAIT:-20}"
 KEEP_ALIVE="${ROME_CHROME_KEEP_ALIVE:-1}"
 RESTART_DELAY="${ROME_CHROME_RESTART_DELAY:-2}"
+# Each consecutive failure doubles the restart delay up to this cap. A Chrome
+# run that lasts at least this long resets the delay to RESTART_DELAY.
+MAX_RESTART_DELAY="${ROME_CHROME_MAX_RESTART_DELAY:-60}"
 CHROME_USER_DATA_DIR="${ROME_CHROME_USER_DATA_DIR:-$HOME/.rome/chrome-profile}"
 # Keep Chrome's HTTP/media disk cache OFF the persistent chrome-profile volume
 # (which mounts $HOME/.rome): the cache is regenerable and, left in the profile,
@@ -88,6 +91,7 @@ PROXY_PROBE_ADDRESS="$(get_proxy_probe_address "$BIND_ADDRESS")"
 PROXY_PROBE_HOST="$(format_url_host "$PROXY_PROBE_ADDRESS")"
 
 CHROME_PID=""
+CHROME_STARTED_AT=0
 SOCAT_PID=""
 STEALTH_PID=""
 TERMINATING="0"
@@ -206,7 +210,8 @@ wait_for_internal_cdp() {
       return 0
     fi
     if [[ -n "$CHROME_PID" ]] && ! kill -0 "$CHROME_PID" 2>/dev/null; then
-      err "Chrome exited before CDP became available; see /tmp/chrome-ui.log"
+      err "Chrome exited before CDP became available; last lines of /tmp/chrome-ui.log:"
+      tail -n 5 /tmp/chrome-ui.log >&2 || true
       return 1
     fi
     sleep 0.2
@@ -279,10 +284,16 @@ start_chrome_instance() {
     "$CHROME_USER_DATA_DIR/SingletonCookie" \
     "$CHROME_USER_DATA_DIR/SingletonLock" \
     "$CHROME_USER_DATA_DIR/SingletonSocket"
+  # Every launch that does not shut down cleanly leaves a 4 MiB persistent
+  # histogram file here, and nothing in the container uploads or deletes it,
+  # so a crash loop fills the profile volume. A launch that dies during startup
+  # leaves the file even with --disable-features=PersistentHistograms.
+  rm -f "$CHROME_USER_DATA_DIR"/BrowserMetrics/*.pma
 
   info "starting Google Chrome on display ${DISPLAY} with CDP ${BIND_ADDRESS}:${CDP_PORT}"
   "$BROWSER_BINARY" "${chrome_args[@]}" "$CHROME_URL" >/tmp/chrome-ui.log 2>&1 &
   CHROME_PID=$!
+  CHROME_STARTED_AT=$SECONDS
 
   wait_for_internal_cdp || return 1
 
@@ -301,6 +312,13 @@ start_chrome_instance() {
   curl -sf "http://${PROXY_PROBE_HOST}:${CDP_PORT}/json/version" || true
 }
 
+# Prints min(2 * $1, MAX_RESTART_DELAY). awk because delays may be fractional.
+next_restart_delay() {
+  awk -v delay="$1" -v max="$MAX_RESTART_DELAY" \
+    'BEGIN { delay *= 2; if (delay > max) delay = max; print delay }'
+}
+
+restart_delay="$RESTART_DELAY"
 while [[ "$TERMINATING" != "1" ]]; do
   if ! start_chrome_instance; then
     cleanup_browser_instance
@@ -308,8 +326,9 @@ while [[ "$TERMINATING" != "1" ]]; do
     if [[ "$KEEP_ALIVE" == "0" ]]; then
       exit 1
     fi
-    info "Chrome startup failed; retrying in ${RESTART_DELAY}s"
-    sleep "$RESTART_DELAY"
+    info "Chrome startup failed; retrying in ${restart_delay}s"
+    sleep "$restart_delay"
+    restart_delay="$(next_restart_delay "$restart_delay")"
     continue
   fi
 
@@ -325,6 +344,11 @@ while [[ "$TERMINATING" != "1" ]]; do
     exit "$chrome_status"
   fi
 
-  info "Chrome exited with status ${chrome_status}; restarting in ${RESTART_DELAY}s"
-  sleep "$RESTART_DELAY"
+  chrome_uptime=$((SECONDS - CHROME_STARTED_AT))
+  if awk -v uptime="$chrome_uptime" -v max="$MAX_RESTART_DELAY" 'BEGIN { exit !(uptime >= max) }'; then
+    restart_delay="$RESTART_DELAY"
+  fi
+  info "Chrome exited with status ${chrome_status} after ${chrome_uptime}s; restarting in ${restart_delay}s"
+  sleep "$restart_delay"
+  restart_delay="$(next_restart_delay "$restart_delay")"
 done
