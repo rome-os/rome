@@ -604,7 +604,7 @@ describe("dream skills", () => {
     expect(changes.filter((c) => c.path.startsWith(join(apps, "notes")))).toHaveLength(3);
   });
 
-  it("keeps the practice agent's notes from earlier runs in its log", async () => {
+  it("shows the practice agent its notes from earlier runs", async () => {
     const memoryDir = join(dirname(carrierDir), "memory");
     async function dreamWithNotes(text: string): Promise<string> {
       const prompts: string[] = [];
@@ -620,17 +620,19 @@ describe("dream skills", () => {
       deps.memoryDir = memoryDir;
       (deps.agentRunner as unknown as { run: unknown }).run = run;
       await createAction(actionConfig, deps).execute({});
-      return (
-        /Practice log \(your notes from earlier runs\): (.+)$/m.exec(prompts[1] ?? "")?.[1] ?? ""
-      );
+      return prompts[1] ?? "";
     }
 
-    await dreamWithNotes("## Practice\n- reported the export bug");
-    const log = await dreamWithNotes("## Practice\n- fixed the date picker");
+    const first = await dreamWithNotes("## Practice\n- reported the export bug");
+    await dreamWithNotes("## Practice\n- fixed the date picker");
+    const third = await dreamWithNotes("## Practice\n- nothing new");
 
-    const text = readFileSync(log, "utf8");
-    expect(text).toContain("- reported the export bug");
-    expect(text).toContain("- fixed the date picker");
+    expect(first).toContain("(None yet.)");
+    expect(third.indexOf("- reported the export bug")).toBeGreaterThan(0);
+    expect(third.indexOf("- fixed the date picker")).toBeGreaterThan(
+      third.indexOf("- reported the export bug"),
+    );
+    expect(third).not.toContain("- nothing new");
   });
 
   it("says which agent failed when the practice agent fails", async () => {

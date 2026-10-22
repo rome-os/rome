@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
@@ -62,20 +62,16 @@ async function installedSkillChanges(
   return changes;
 }
 
-/** Earlier runs' practice notes the practice agent sees. */
-const PRACTICE_LOG_RUNS = 10;
-const PRACTICE_LOG_HEADING = "# Practice run ";
+/** How many earlier runs' practice notes the practice agent sees. */
+const EARLIER_PRACTICE_RUNS = 10;
 
 /**
- * Appends the practice agent's notes to the journal, recorded on the run, and
- * to the practice log, the agent's own record of earlier runs. The log holds
- * only what the practice agent wrote, so reading it crosses no trust line.
+ * Appends the practice agent's notes to the journal, and records them on the
+ * run, where the next runs' practice prompts read them back from.
  */
 async function savePracticeNotes(
   notesPath: string,
   journalPath: string,
-  logPath: string,
-  now: Date,
   runs: ReturnType<typeof createRunsRepository>,
   runId: string,
 ): Promise<void> {
@@ -87,14 +83,18 @@ async function savePracticeNotes(
   runs.addChanges(runId, [
     { op: "edit", path: journalPath, content: text, previous: "", truncated: false },
   ]);
+}
 
-  const earlier = (await readFile(logPath, "utf8").catch(() => ""))
-    .split(PRACTICE_LOG_HEADING)
-    .filter((entry) => entry.trim())
-    .slice(-(PRACTICE_LOG_RUNS - 1));
-  const entries = [...earlier, `${now.toISOString()}\n\n${notes}\n\n`];
-  await mkdir(dirname(logPath), { recursive: true });
-  await writeFile(logPath, entries.map((entry) => PRACTICE_LOG_HEADING + entry).join(""));
+/** Earlier runs' practice notes, read from the run records rather than a file any agent can write. */
+function earlierPracticeNotes(
+  runs: ReturnType<typeof createRunsRepository>,
+  memoryDir: string,
+): string {
+  const notes = runs.practiceNotes(memoryDir, EARLIER_PRACTICE_RUNS);
+  if (notes.length === 0) return "(None yet.)";
+  return notes
+    .map(({ startedAt, content }) => `### Run of ${startedAt.toISOString()}\n\n${content.trim()}`)
+    .join("\n\n");
 }
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<DreamDeps>): Action {
@@ -240,7 +240,6 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         // just wrote those from other people's chats. Its notes go to a file
         // of its own, which the action appends to the journal.
         const notesPath = join(staging, "practice.md");
-        const logPath = join(appsDir, ".dream-practice", "log.md");
         const practicePrompt = [
           `Today is ${now.toISOString()}. Practice over the past ${windowHours} hours.`,
           "",
@@ -248,7 +247,10 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           `- Skills staging directory: ${join(staging, "skills")}`,
           `- Guardian's apps directory: ${appsDir}`,
           `- Practice notes file: ${notesPath}`,
-          `- Practice log (your notes from earlier runs): ${logPath}`,
+          "",
+          "## Your notes from earlier runs",
+          "",
+          earlierPracticeNotes(runs, memoryDir),
         ].join("\n");
         const appsBefore = await snapshotApps(appsDir, join(staging, "apps-before"));
         let practiceStopped: ActionResult | null;
@@ -261,9 +263,14 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           );
         } finally {
           // App changes are live once made, so record them even from a run
-          // that failed, for the guardian to review.
-          runs.addChanges(runId, await appChangesSince(appsDir, appsBefore));
-          await savePracticeNotes(notesPath, journalPath, logPath, now, runs, runId);
+          // that failed, for the guardian to review. A failure here must not
+          // hide the run's outcome or leave it running.
+          try {
+            runs.addChanges(runId, await appChangesSince(appsDir, appsBefore));
+            await savePracticeNotes(notesPath, journalPath, runs, runId);
+          } catch (err) {
+            log.error("dream failed to record practice changes", { error: String(err), runId });
+          }
         }
         if (practiceStopped) return practiceStopped;
         const agentSummary = [memoryRecorder.summary, practiceRecorder.summary]

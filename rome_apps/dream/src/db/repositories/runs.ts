@@ -210,6 +210,31 @@ export class RunsRepository {
       .all() as FileChange[];
   }
 
+  /**
+   * The practice notes the last `limit` dreams appended to their journal under
+   * `memoryDir`, oldest first. The action records each as an edit with no
+   * previous text, which no agent's Edit produces.
+   */
+  practiceNotes(memoryDir: string, limit: number): Array<{ startedAt: Date; content: string }> {
+    const { runs, runChanges } = this.tables;
+    const rows = this.db
+      .select({ startedAt: runs.startedAt, content: runChanges.content })
+      .from(runChanges)
+      .innerJoin(runs, eq(runs.id, runChanges.runId))
+      .where(
+        and(
+          eq(runs.kind, "dream"),
+          eq(runChanges.op, "edit"),
+          eq(runChanges.previous, ""),
+          sql`substr(${runChanges.path}, 1, ${memoryDir.length + 9}) = ${`${memoryDir}/journal/`}`,
+        ),
+      )
+      .orderBy(desc(runs.startedAt), desc(runChanges.seq))
+      .limit(limit)
+      .all() as Array<{ startedAt: Date; content: string }>;
+    return rows.reverse();
+  }
+
   /** Each run's changed paths and ops, without the content, for list rows. */
   changePaths(runIds: string[]): Map<string, Array<Pick<FileChange, "op" | "path">>> {
     const byRun = new Map<string, Array<Pick<FileChange, "op" | "path">>>();

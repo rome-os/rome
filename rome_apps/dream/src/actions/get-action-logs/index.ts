@@ -37,15 +37,21 @@ function actorLabel(raw: string | null): string | null {
   }
 }
 
-/** Started by a visitor or an anonymous viewer rather than the guardian or Rome. */
-function byOutsider(raw: string | null): boolean {
-  if (!raw) return false;
-  try {
-    const { kind } = JSON.parse(raw) as { kind?: string };
-    return kind === "visitor" || kind === "anonymous";
-  } catch {
-    return true;
+/**
+ * Whether a failure's error text is safe to show: started by the guardian, or
+ * by one of their routines. Anything else, such as a visitor, an anonymous
+ * viewer, or an agent turn answering someone on Rome's accounts (no actor),
+ * can echo what someone else wrote.
+ */
+function trustedError(actor: string | null, initiator: string | null): boolean {
+  if (actor) {
+    try {
+      return (JSON.parse(actor) as { kind?: string }).kind === "guardian";
+    } catch {
+      return false;
+    }
   }
+  return initiator?.startsWith("routine:") ?? false;
 }
 
 function formatActionLogs(rows: ActionExecutionRow[]): string {
@@ -85,10 +91,11 @@ function formatActionLogs(rows: ActionExecutionRow[]): string {
     for (const errRow of errors) {
       const time = new Date(errRow.started_at * 1000).toISOString();
       const who = actorLabel(errRow.actor);
-      // A visitor's or an anonymous viewer's failure can echo what they typed,
-      // and Dream's practice agent reads these logs with Bash, so only the
-      // failure itself is shown.
-      const text = byOutsider(errRow.actor) ? "(error text hidden)" : errRow.error;
+      // Dream's practice agent reads these logs with Bash, so an untrusted
+      // failure shows that it happened, not its text.
+      const text = trustedError(errRow.actor, errRow.initiator)
+        ? errRow.error
+        : "(error text hidden)";
       lines.push(`- **[${time}] ERROR${who ? ` (by ${who})` : ""}:** ${text}`);
     }
 
