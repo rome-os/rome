@@ -46,11 +46,32 @@ function str(value: unknown): string | null {
 }
 
 /**
+ * The dream memory agent writes through `write_memory_file` and
+ * `edit_memory_file` actions, called via `execute_action`. Read as the `Write`
+ * or `Edit` they stand for.
+ */
+function memoryFileCall(
+  tool: string,
+  input: Record<string, unknown>,
+): { tool: string; input: Record<string, unknown> } | null {
+  if (tool !== "execute_action" || typeof input.action_name !== "string") return null;
+  const args = input.json_args;
+  if (!args || typeof args !== "object") return null;
+  const { path, ...rest } = args as Record<string, unknown>;
+  const name = input.action_name.split(":").at(-1);
+  if (name === "write_memory_file") return { tool: "Write", input: { file_path: path, ...rest } };
+  if (name === "edit_memory_file") return { tool: "Edit", input: { file_path: path, ...rest } };
+  return null;
+}
+
+/**
  * The file changes one tool call makes. Covers Claude's `Write`, `Edit`, and
  * `MultiEdit`; any other tool returns nothing.
  */
 export function changesFromToolUse(tool: string, input: unknown): FileChange[] {
   if (!input || typeof input !== "object") return [];
+  const memoryWrite = memoryFileCall(tool, input as Record<string, unknown>);
+  if (memoryWrite) return changesFromToolUse(memoryWrite.tool, memoryWrite.input);
   const record = input as Record<string, unknown>;
   const path = str(record.file_path);
   if (!path) return [];

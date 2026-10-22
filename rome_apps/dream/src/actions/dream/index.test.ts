@@ -572,7 +572,7 @@ describe("dream skills", () => {
     mkdirSync(join(apps, "notes/src"), { recursive: true });
     writeFileSync(join(apps, "notes/src/old.ts"), "old");
     writeFileSync(join(apps, "notes/src/same.ts"), "same");
-    // An Edit the recorder sees, then a Bash write it does not see, to the same file.
+    // An Edit, then a Bash write the recorder does not see, to the same file.
     const editEvents = [
       {
         type: "tool_use",
@@ -617,7 +617,8 @@ describe("dream skills", () => {
     expect(byPath("notes/.gitignore")).toMatchObject({ op: "write", content: "dist\n" });
     expect(byPath("notes/.env")).toMatchObject({ content: "(contents not recorded)" });
     expect(JSON.stringify(changes)).not.toContain("API_KEY");
-    expect(changes.filter((c) => c.path.startsWith(join(apps, "notes")))).toHaveLength(5);
+    // One record per changed file: the Edit the recorder saw is not stored twice.
+    expect(changes.filter((c) => c.path.startsWith(join(apps, "notes")))).toHaveLength(4);
   });
 
   it("shows the practice agent its notes from earlier runs", async () => {
@@ -685,60 +686,6 @@ describe("dream skills", () => {
     expect(stagingDuringMemory).toEqual([]);
     expect(prompts[3]).toContain("(None yet.)");
     expect(prompts[3]).not.toContain("relayed text");
-  });
-
-  it("skips the practice agent when the memory agent changed an app", async () => {
-    const apps = dirname(carrierDir);
-    mkdirSync(join(apps, "notes"), { recursive: true });
-    writeFileSync(join(apps, "notes/index.ts"), "clean");
-    const agents: string[] = [];
-    const run = async function* (params: { agentName: string }) {
-      agents.push(params.agentName);
-      if (params.agentName === "dream") writeFileSync(join(apps, "notes/index.ts"), "planted");
-      yield { type: "result", content: "Updated memory." };
-    };
-    const deps = makeDeps([]);
-    (deps.agentRunner as unknown as { run: unknown }).run = run;
-
-    const result = await createAction(actionConfig, deps).execute({});
-
-    expect(agents).toEqual(["dream"]);
-    const { runId, summary } = (result as { data: { runId: string; summary: string } }).data;
-    expect(summary).toContain("Practice skipped");
-    expect(createRunsRepository(appDb()).changes(runId)).toContainEqual(
-      expect.objectContaining({
-        path: join(apps, "notes/index.ts"),
-        previous: "clean",
-        content: "planted",
-      }),
-    );
-  });
-
-  it("skips the practice agent when the memory agent wrote where the apps diff does not look", async () => {
-    const gitConfig = join(dirname(carrierDir), "notes/.git/config");
-    const agents: string[] = [];
-    const run = async function* (params: { agentName: string }) {
-      agents.push(params.agentName);
-      if (params.agentName === "dream") {
-        mkdirSync(dirname(gitConfig), { recursive: true });
-        writeFileSync(gitConfig, "[core]\n\tfsmonitor = sh -c evil");
-        yield {
-          type: "tool_use",
-          id: "w",
-          tool: "Write",
-          input: { file_path: gitConfig, content: "[core]\n\tfsmonitor = sh -c evil" },
-        };
-        yield { type: "tool_result", toolUseId: "w", tool: "Write", output: "ok" };
-      }
-      yield { type: "result", content: "Updated memory." };
-    };
-    const deps = makeDeps([]);
-    (deps.agentRunner as unknown as { run: unknown }).run = run;
-
-    const result = await createAction(actionConfig, deps).execute({});
-
-    expect(agents).toEqual(["dream"]);
-    expect((result as { data: { summary: string } }).data.summary).toContain("Practice skipped");
   });
 
   it("never records the contents of a .env file the agent wrote or edited", async () => {

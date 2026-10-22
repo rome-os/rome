@@ -1,5 +1,5 @@
 import { appendFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
   createAppLogger,
@@ -13,6 +13,7 @@ import { createRunsRepository } from "../../db/repositories/runs.js";
 import { hasChatSince } from "../../lib/chat-activity.js";
 import { DREAM_WINDOW_HOURS } from "../../lib/dream-routine.js";
 import { appChangesSince, snapshotApps } from "../../lib/app-changes.js";
+import { profileMemoryDir } from "../../lib/memory-dir.js";
 import { type FileChange, MAX_CHANGE_CHARS } from "../../lib/changes.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 import {
@@ -33,11 +34,6 @@ export interface DreamDeps {
   carrierDir?: string;
   /** The profile's memory directory. Tests point it at a fixed path. */
   memoryDir?: string;
-}
-
-/** Core's profile memory directory (`getProfileMemoryDir`), which an app cannot import. */
-function profileMemoryDir(env: NodeJS.ProcessEnv = process.env): string {
-  return join(homedir(), ".rome", env.ROME_PROFILE || "default", "memory");
 }
 
 /** The installed skills a dream added or changed, as writes or as edits of their old text. */
@@ -217,25 +213,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
 
         // Two agents, so the one that can run code never reads what other
         // people wrote on Rome's accounts. The memory agent reads every source
-        // with file tools only. The practice agent reads the guardian's own
-        // chats and the action logs, and can change apps.
-        // Snapshot the apps before either agent runs, outside staging. The
-        // memory agent's file writes are not confined, so if it changed an
-        // app, those changes are recorded and the practice agent, which could
-        // build and reinstall them, does not run.
-        let appsBefore: Awaited<ReturnType<typeof snapshotApps>>;
-        try {
-          // Created first, so a fresh carrier does not show as an app change.
-          await ensureUserSkillsCarrier(carrierDir);
-          appsCopy = await mkdtemp(join(tmpdir(), APP_SNAPSHOT_PREFIX));
-          appsBefore = await snapshotApps(appsDir, appsCopy);
-        } catch (err) {
-          const error = `Could not snapshot the guardian's apps: ${err instanceof Error ? err.message : String(err)}`;
-          runs.finish(runId, { status: "failed", error });
-          log.error("dream failed to snapshot apps", { error, runId });
-          return { status: "error", error };
-        }
-
+        // and can write only memory, through actions that refuse any other
+        // path. The practice agent reads the guardian's own chats and the
+        // action logs, and can change apps.
         const memoryRecorder = new RunRecorder(runs, runId);
         const memoryPrompt = [
           `Today is ${now.toISOString()}. Dream over the past ${windowHours} hours.`,
@@ -247,38 +227,30 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         const memoryStopped = await runAgent("dream", "Memory agent", memoryPrompt, memoryRecorder);
         if (memoryStopped) return memoryStopped;
 
-        // Two checks: the agent's own write calls, which cover what the apps
-        // diff leaves out (.git, dependencies), and the diff, which covers a
-        // write that no tool call reported.
-        const plantedChanges = await appChangesSince(appsDir, appsBefore);
-        if (plantedChanges.length > 0 || memoryRecorder.wroteOutside(memoryDir)) {
-          runs.addChanges(runId, plantedChanges);
-          const summary = `${memoryRecorder.summary}\n\nPractice skipped: the memory agent wrote outside the memory directory, which it should never do. Review its changes on this page.`;
-          runs.finish(runId, { status: "completed", summary });
-          log.warn("dream skipped practice, memory agent wrote outside memory", {
-            runId,
-            files: plantedChanges.length,
-          });
-          return { status: "ok", data: { runId, windowHours, summary, practiceSkipped: true } };
-        }
-
-        // Staged only now, so the staging copy does not exist while the
-        // memory agent reads other people's chats and cannot plant skills or
-        // notes in it.
+        // The practice agent's skills staging copy, and its baseline for the
+        // apps diff: a copy of the apps outside staging, taken after the
+        // carrier exists so a fresh carrier does not show as an app change.
         let before: Map<string, Buffer>;
+        let appsBefore: Awaited<ReturnType<typeof snapshotApps>>;
         try {
+          await ensureUserSkillsCarrier(carrierDir);
           await removeStaleRunFolders(stagingParent(carrierDir));
           await removeStaleRunFolders(tmpdir(), APP_SNAPSHOT_PREFIX);
           staging = await stageCarrierSkills(carrierDir);
           before = await snapshotCarrierSkills(staging);
+          appsCopy = await mkdtemp(join(tmpdir(), APP_SNAPSHOT_PREFIX));
+          appsBefore = await snapshotApps(appsDir, appsCopy);
         } catch (err) {
-          const error = `Could not stage the user-skills carrier: ${err instanceof Error ? err.message : String(err)}`;
+          const error = `Could not prepare the practice run: ${err instanceof Error ? err.message : String(err)}`;
           runs.finish(runId, { status: "failed", error });
-          log.error("dream failed to stage skills", { error, runId });
+          log.error("dream failed to prepare practice", { error, runId });
           return { status: "error", error };
         }
 
-        const practiceRecorder = new RunRecorder(runs, runId, staging);
+        // The apps diff below is the authoritative record of the practice
+        // agent's app changes (staging included), so its file-tool calls there
+        // are not recorded twice.
+        const practiceRecorder = new RunRecorder(runs, runId, appsDir);
         // The practice agent gets no memory or journal path: the memory agent
         // just wrote those from other people's chats. Its notes go to a file
         // of its own, which the action appends to the journal.

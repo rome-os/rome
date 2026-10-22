@@ -1,0 +1,9 @@
+name: write_memory_file
+type: custom
+description: Write a whole file in the guardian's memory directory, creating it and its folders if needed. Refuses any path outside the memory directory. Use edit_memory_file to change part of a file.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write
+visibility: explicit

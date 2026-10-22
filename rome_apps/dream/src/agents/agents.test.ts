@@ -11,21 +11,25 @@ function agent(file: string): { tools: string[]; actions: string[] } {
 }
 
 // Chats on Rome's accounts are other people's words and can carry a prompt
-// injection. The tool and action lists are what core enforces, so the agent
-// that reads those chats cannot run code or install apps, and the agent that
-// can never reads them directly. Core ignores permissionMode, so file writes
-// are not confined, and the practice agent's other inputs can still relay other
-// people's words; its prompt covers both.
+// injection. The tool and action lists are what core enforces (it ignores
+// permissionMode), so the agent that reads those chats can only read files and
+// write memory, and the agent that runs code never reads them directly. The
+// practice agent's other inputs can still relay other people's words, which
+// its prompt covers.
 describe("dream agents", () => {
   it("keeps the agent that reads Rome's account chats to file tools", () => {
     const memory = agent("dream.yaml");
     expect(memory.actions).toContain("get_account_chats");
-    expect(memory.tools).toEqual(["Read", "Write", "Edit", "Glob", "Grep"]);
+    // No file-writing tool: core does not confine one. It writes memory through
+    // actions that refuse any path outside the memory directory.
+    expect(memory.tools).toEqual(["Read", "Glob", "Grep"]);
     expect(memory.actions).toEqual([
       "get_webchat_conversations",
       "get_account_chats",
       "get_action_logs",
       "search_chats",
+      "write_memory_file",
+      "edit_memory_file",
     ]);
   });
 

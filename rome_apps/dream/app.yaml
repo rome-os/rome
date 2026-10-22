@@ -31,6 +31,8 @@ actions:
   - actions/get-account-chats
   - actions/get-action-logs
   - actions/search-chats
+  - actions/write-memory-file
+  - actions/edit-memory-file
 
 hooks:
   - hooks/app-started
