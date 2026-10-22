@@ -58,6 +58,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - An account has at most one link to a person, and Rome never makes one from what a sender says about itself.
 - Rome never asks a sender to pair. A sender with no link is admitted and is a stranger.
 - A code People shows, sent in a direct message to any of Rome's accounts on any platform, links the account it came from to the guardian.
+- Disconnecting the last of Rome's accounts on a platform keeps every link on it.
 
 Diffs still owed to the model, each a change of its own:
 
@@ -75,7 +76,6 @@ Diffs still owed to the model, each a change of its own:
 - A woken agent gets the recent messages of its place as its default view, and a tool to read more of the chat.
 - A message to a chat other than the one the agent was woken in waits on an approval card.
 - Code, docs and the dashboard say platform for where an account lives and kind of connection for how Rome got in. Neither says service.
-- Disconnecting the last of Rome's accounts on a platform keeps every link on it.
 - Links, dismissals and who is this are keyed by platform, not by kind of connection.
 - A dismissed account is a state of the account, and an account with no person has no bond level.
 - The People page and docs say dismiss, dismissed and stranger.

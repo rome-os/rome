@@ -385,9 +385,8 @@ export class ConnectionRegistry {
    *
    *  `opts.inTx` is an optional caller participant (the `confer` seam,
    *  mirrored for teardown) enlisted in the SAME transaction as the connection/
-   *  grant deletes — e.g. the guardian channel-mapping cleanup, so it can never
-   *  be left stranded by a failure after the connection is already committed as
-   *  deleted. The in-memory teardown (`teardownAll`) and map eviction run only
+   *  grant deletes, so a caller's cleanup can never be left stranded by a
+   *  failure after the connection is already committed as deleted. The in-memory teardown (`teardownAll`) and map eviction run only
    *  AFTER that transaction commits. */
   async remove(id: ConnectionId, opts: { inTx?: (tx: DrizzleTx) => void } = {}): Promise<void> {
     const conn = this.connections.get(id);

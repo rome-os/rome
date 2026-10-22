@@ -80,7 +80,6 @@ function fakePersonRepo(): PersonMappingRepository {
     // write helpers enlisted in its transaction — not the async setters.
     writeChannelUserId: rs.fn(),
     writeChannelMapping: rs.fn(() => "id"),
-    writeDeleteGuardianChannelMappings: rs.fn(),
   } as unknown as PersonMappingRepository;
 }
 

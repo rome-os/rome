@@ -247,7 +247,6 @@ function makeSetupApp() {
   const personMappingRepo = {
     findByChannelUser: async () => null,
     findByBondLevel: async () => [],
-    writeDeleteGuardianChannelMappings: rs.fn(),
   } as unknown as ApiDeps["personMappingRepo"];
   registry.register(
     makeEmailDescriptor({
