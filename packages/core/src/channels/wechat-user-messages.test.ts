@@ -347,6 +347,62 @@ describe("wechatUserAccounts", () => {
     });
   });
 
+  it("shares one session-list read between a listing and the resolves made meanwhile", async () => {
+    let reads = 0;
+    let release!: () => void;
+    const reader = {
+      async conversations() {
+        reads += 1;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return [
+          convo({ id: "wxid_a", name: "Alice" }),
+          convo({ id: "wxid_b", name: "Bob" }),
+          convo({ id: "room@chatroom", name: "Team", isGroup: true }),
+        ];
+      },
+    } as unknown as WechatUserReader;
+    const accounts = wechatUserAccounts(reader);
+
+    const answers = Promise.all([
+      accounts.listAccounts({ limit: 50 }),
+      accounts.resolve("wxid_a"),
+      accounts.resolve("wxid_b"),
+      accounts.resolve("room@chatroom"),
+    ]);
+    release();
+    const [listed, alice, bob, room] = await answers;
+    expect(reads).toBe(1);
+    expect(listed.accounts.map((account) => account.id)).toEqual(["wxid_a", "wxid_b"]);
+    expect(alice?.name).toBe("Alice");
+    expect(bob?.name).toBe("Bob");
+    expect(room).toBeNull();
+
+    // Not a cache: once the read has settled, the next call reads again.
+    const again = accounts.resolve("wxid_a");
+    await Promise.resolve();
+    release();
+    expect((await again)?.name).toBe("Alice");
+    expect(reads).toBe(2);
+  });
+
+  it("searches the listing by name or wxid, ignoring case", async () => {
+    const accounts = wechatUserAccounts(
+      fakeReader({
+        conversations: [
+          convo({ id: "wxid_a", name: "Alice" }),
+          convo({ id: "wxid_bob", name: "Robert" }),
+          convo({ id: "wxid_c", name: "Carol" }),
+        ],
+      }),
+    );
+    const ids = async (query: string) =>
+      (await accounts.listAccounts({ query, limit: 50 })).accounts.map((account) => account.id);
+    expect(await ids("ALI")).toEqual(["wxid_a"]);
+    expect(await ids("bob")).toEqual(["wxid_bob"]);
+  });
+
   it("resolves a wxid to its account and misses a group", async () => {
     const accounts = wechatUserAccounts(
       fakeReader({
