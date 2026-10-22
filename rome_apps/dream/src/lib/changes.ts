@@ -14,7 +14,12 @@ export interface FileChange {
   path: string;
   /** The full file for a write, the replacement text for an edit. */
   content: string;
-  /** The text an edit replaced. Null for a write. */
+  /**
+   * The text an edit replaced. Null for a write. An edit with null previous
+   * text is the dream action's record of practice notes appended to the
+   * journal (`RunsRepository.practiceNotes` reads them back), so no other
+   * source may emit one.
+   */
   previous: string | null;
   truncated: boolean;
 }

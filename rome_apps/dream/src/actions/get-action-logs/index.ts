@@ -38,10 +38,12 @@ function actorLabel(raw: string | null): string | null {
 }
 
 /**
- * Whether a failure's error text is safe to show: started by the guardian, or
- * by one of their routines. Anything else, such as a visitor, an anonymous
- * viewer, or an agent turn answering someone on Rome's accounts (no actor),
- * can echo what someone else wrote.
+ * Whether a failure's error text is shown: started by the guardian, or by one
+ * of their routines. Anything else, such as a visitor, an anonymous viewer, or
+ * an agent turn answering someone on Rome's accounts (no actor), can echo what
+ * someone else wrote. Event-triggered routines are included and can still
+ * quote an inbound payload, so Dream's practice prompt reads every error
+ * message as data.
  */
 function trustedError(actor: string | null, initiator: string | null): boolean {
   if (actor) {

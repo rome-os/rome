@@ -29,11 +29,13 @@ export function inDashboardChat(session: string): SQL {
  */
 export function guardianOnlyChat(session: string): SQL {
   const s = sql.raw(session);
+  // Uncorrelated, so SQLite builds the excluded set once rather than
+  // rescanning a chat for every row it reads.
   return sql`(coalesce(${s}.owner_key, 'guardian') = 'guardian'
-    AND NOT EXISTS (
-      SELECT 1 FROM rome_agent_messages other
-      WHERE other.session_id = ${s}.id AND other.role = 'user'
-        AND coalesce(json_extract(other.actor, '$.kind'), 'guardian') <> 'guardian'
+    AND ${s}.id NOT IN (
+      SELECT session_id FROM rome_agent_messages
+      WHERE role = 'user'
+        AND coalesce(json_extract(actor, '$.kind'), 'guardian') <> 'guardian'
     ))`;
 }
 

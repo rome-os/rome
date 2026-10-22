@@ -1,9 +1,13 @@
+import { isAbsolute, relative, resolve } from "node:path";
 import type { AgentEvent } from "@rome-os/app-runtime";
 import type { RunsRepository } from "../db/repositories/runs.js";
 import { changesFromToolUse, type FileChange } from "./changes.js";
 import { HEARTBEAT_MS } from "./run-view.js";
 
 type RunOutcome = Parameters<RunsRepository["finish"]>[1];
+
+/** Tools that write a file the agent names. */
+const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
 /**
  * Watches an agent's event stream and records each file change once its tool
@@ -16,6 +20,10 @@ type RunOutcome = Parameters<RunsRepository["finish"]>[1];
  */
 export class RunRecorder {
   private readonly pending = new Map<string, FileChange[]>();
+  /** Target of each file-writing tool call in flight; null when it named none. */
+  private readonly pendingWrites = new Map<string, string | null>();
+  /** Every target a file-writing tool call succeeded on, recorded or not. */
+  private readonly written: Array<string | null> = [];
   summary = "";
   error: string | null = null;
   private interrupted = false;
@@ -44,6 +52,10 @@ export class RunRecorder {
       return;
     }
     if (event.type === "tool_use") {
+      if (WRITE_TOOLS.has(event.tool)) {
+        const target = (event.input as { file_path?: unknown } | null)?.file_path;
+        this.pendingWrites.set(event.id, typeof target === "string" ? target : null);
+      }
       const ignored = this.ignoredDir ? `${this.ignoredDir}/` : null;
       const changes = changesFromToolUse(event.tool, event.input).filter(
         (change) => !ignored || !change.path.startsWith(ignored),
@@ -52,12 +64,30 @@ export class RunRecorder {
       return;
     }
     if (event.type === "tool_result") {
+      if (this.pendingWrites.has(event.toolUseId)) {
+        if (!event.isError) this.written.push(this.pendingWrites.get(event.toolUseId) ?? null);
+        this.pendingWrites.delete(event.toolUseId);
+      }
       const changes = this.pending.get(event.toolUseId);
       if (!changes) return;
       this.pending.delete(event.toolUseId);
       if (event.isError) return;
       this.repo.addChanges(this.runId, changes);
     }
+  }
+
+  /**
+   * Whether the agent wrote anything outside `dir`, including paths the run
+   * record leaves out (`.git`, dependencies). A write that named no path
+   * counts, so the check fails closed.
+   */
+  wroteOutside(dir: string): boolean {
+    const root = resolve(dir);
+    return this.written.some((target) => {
+      if (target === null) return true;
+      const rel = relative(root, resolve(target));
+      return rel.startsWith("..") || isAbsolute(rel);
+    });
   }
 
   outcome(): RunOutcome {

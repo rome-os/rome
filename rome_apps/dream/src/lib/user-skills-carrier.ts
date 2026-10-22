@@ -274,16 +274,24 @@ const STAGING_PREFIX = ".dream-skill-review-";
 /** Far longer than any dream or skill review runs, so only a crashed run's copy is this old. */
 const STAGING_STALE_MS = 12 * 60 * 60_000;
 
+/** The folder that holds a carrier's staging copies. */
+export function stagingParent(dir: string): string {
+  return dirname(resolve(dir));
+}
+
 /**
- * Removes staging copies a crashed or restarted run left beside the carrier.
- * A dream's copy also holds a snapshot of every app's source, so each one
- * left behind is large.
+ * Removes the `prefix` folders in `parent` that a crashed or restarted run left
+ * behind: staging copies by default, or a dream's app snapshot, which is
+ * large. Only folders older than any run are removed.
  */
-export async function removeStaleStaging(dir: string, now = Date.now()): Promise<void> {
-  const parent = dirname(resolve(dir));
+export async function removeStaleRunFolders(
+  parent: string,
+  prefix = STAGING_PREFIX,
+  now = Date.now(),
+): Promise<void> {
   const entries = await readdir(parent, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.startsWith(STAGING_PREFIX)) continue;
+    if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
     const path = join(parent, entry.name);
     const info = await stat(path).catch(() => null);
     if (info && now - info.mtimeMs > STAGING_STALE_MS) {

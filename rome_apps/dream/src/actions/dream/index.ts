@@ -18,9 +18,10 @@ import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 import {
   ensureUserSkillsCarrier,
   publishStagedSkills,
-  removeStaleStaging,
+  removeStaleRunFolders,
   snapshotCarrierSkills,
   stageCarrierSkills,
+  stagingParent,
   userSkillsCarrierDir,
 } from "../../lib/user-skills-carrier.js";
 
@@ -61,6 +62,9 @@ async function installedSkillChanges(
   }
   return changes;
 }
+
+/** The OS temp folders that hold a dream's pre-run copy of the apps. */
+const APP_SNAPSHOT_PREFIX = "dream-apps-";
 
 /** How many earlier runs' practice notes the practice agent sees. */
 const EARLIER_PRACTICE_RUNS = 10;
@@ -223,7 +227,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         try {
           // Created first, so a fresh carrier does not show as an app change.
           await ensureUserSkillsCarrier(carrierDir);
-          appsCopy = await mkdtemp(join(tmpdir(), "dream-apps-"));
+          appsCopy = await mkdtemp(join(tmpdir(), APP_SNAPSHOT_PREFIX));
           appsBefore = await snapshotApps(appsDir, appsCopy);
         } catch (err) {
           const error = `Could not snapshot the guardian's apps: ${err instanceof Error ? err.message : String(err)}`;
@@ -243,12 +247,15 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         const memoryStopped = await runAgent("dream", "Memory agent", memoryPrompt, memoryRecorder);
         if (memoryStopped) return memoryStopped;
 
+        // Two checks: the agent's own write calls, which cover what the apps
+        // diff leaves out (.git, dependencies), and the diff, which covers a
+        // write that no tool call reported.
         const plantedChanges = await appChangesSince(appsDir, appsBefore);
-        if (plantedChanges.length > 0) {
+        if (plantedChanges.length > 0 || memoryRecorder.wroteOutside(memoryDir)) {
           runs.addChanges(runId, plantedChanges);
-          const summary = `${memoryRecorder.summary}\n\nPractice skipped: the memory agent changed ${plantedChanges.length} app file(s), which it should never do. Review them on this page.`;
+          const summary = `${memoryRecorder.summary}\n\nPractice skipped: the memory agent wrote outside the memory directory, which it should never do. Review its changes on this page.`;
           runs.finish(runId, { status: "completed", summary });
-          log.warn("dream skipped practice, memory agent changed apps", {
+          log.warn("dream skipped practice, memory agent wrote outside memory", {
             runId,
             files: plantedChanges.length,
           });
@@ -260,7 +267,8 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         // notes in it.
         let before: Map<string, Buffer>;
         try {
-          await removeStaleStaging(carrierDir);
+          await removeStaleRunFolders(stagingParent(carrierDir));
+          await removeStaleRunFolders(tmpdir(), APP_SNAPSHOT_PREFIX);
           staging = await stageCarrierSkills(carrierDir);
           before = await snapshotCarrierSkills(staging);
         } catch (err) {

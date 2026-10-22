@@ -8,7 +8,7 @@ import {
   commitCarrier,
   ensureUserSkillsCarrier,
   registerCarrierSkills,
-  removeStaleStaging,
+  removeStaleRunFolders,
   restoreCarrier,
   snapshotCarrierSkills,
   userSkillsCarrierDir,
@@ -37,13 +37,19 @@ describe("user-skills carrier", () => {
     mkdirSync(join(root, ".dream-skill-review-new/skills"), { recursive: true });
     mkdirSync(join(root, "my-app"));
 
-    await removeStaleStaging(dir, Date.now() + 13 * 60 * 60_000);
+    await removeStaleRunFolders(root, undefined, Date.now() + 13 * 60 * 60_000);
     expect(existsSync(join(root, ".dream-skill-review-old"))).toBe(false);
     expect(existsSync(join(root, "my-app"))).toBe(true);
     expect(existsSync(join(root, "user-skills"))).toBe(true);
 
     mkdirSync(join(root, ".dream-skill-review-new/skills"), { recursive: true });
-    await removeStaleStaging(dir);
+    await removeStaleRunFolders(root);
+    expect(existsSync(join(root, ".dream-skill-review-new"))).toBe(true);
+
+    // A dream's orphaned app snapshot, by its own prefix.
+    mkdirSync(join(root, "dream-apps-old/notes"), { recursive: true });
+    await removeStaleRunFolders(root, "dream-apps-", Date.now() + 13 * 60 * 60_000);
+    expect(existsSync(join(root, "dream-apps-old"))).toBe(false);
     expect(existsSync(join(root, ".dream-skill-review-new"))).toBe(true);
   });
 

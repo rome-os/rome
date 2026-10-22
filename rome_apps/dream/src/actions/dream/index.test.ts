@@ -714,6 +714,33 @@ describe("dream skills", () => {
     );
   });
 
+  it("skips the practice agent when the memory agent wrote where the apps diff does not look", async () => {
+    const gitConfig = join(dirname(carrierDir), "notes/.git/config");
+    const agents: string[] = [];
+    const run = async function* (params: { agentName: string }) {
+      agents.push(params.agentName);
+      if (params.agentName === "dream") {
+        mkdirSync(dirname(gitConfig), { recursive: true });
+        writeFileSync(gitConfig, "[core]\n\tfsmonitor = sh -c evil");
+        yield {
+          type: "tool_use",
+          id: "w",
+          tool: "Write",
+          input: { file_path: gitConfig, content: "[core]\n\tfsmonitor = sh -c evil" },
+        };
+        yield { type: "tool_result", toolUseId: "w", tool: "Write", output: "ok" };
+      }
+      yield { type: "result", content: "Updated memory." };
+    };
+    const deps = makeDeps([]);
+    (deps.agentRunner as unknown as { run: unknown }).run = run;
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    expect(agents).toEqual(["dream"]);
+    expect((result as { data: { summary: string } }).data.summary).toContain("Practice skipped");
+  });
+
   it("never records the contents of a .env file the agent wrote or edited", async () => {
     const env = join(dirname(carrierDir), "notes/.env");
     const deps = makeDeps([
