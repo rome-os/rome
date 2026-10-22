@@ -45,7 +45,12 @@ function actorLabel(raw: string | null): string | null {
  * quote an inbound payload, so Dream's practice prompt reads every error
  * message as data.
  */
+const DREAM_AGENT = /^agent:(?:dream:)?dream(?:-practice)?$/;
+
 function trustedError(actor: string | null, initiator: string | null): boolean {
+  // Dream's own agents inherit the guardian's actor when the guardian starts a
+  // dream, and the memory agent reads other people's chats.
+  if (initiator && DREAM_AGENT.test(initiator)) return false;
   if (actor) {
     try {
       return (JSON.parse(actor) as { kind?: string }).kind === "guardian";

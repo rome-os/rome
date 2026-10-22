@@ -15,7 +15,9 @@ export function profileMemoryDir(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
- * The absolute path `path` names inside `memoryDir`, or an error. Refused: a
+ * The absolute path `path` names inside `memoryDir`, or an error. Errors never
+ * repeat the path: action errors reach logs another agent reads, and the path
+ * comes from an agent that reads other people's chats. Refused: a
  * relative path, one outside the directory, any hidden segment (`.git` holds
  * configuration Git executes), and any symlink inside the directory, dangling
  * or not. Memory needs none of them.
@@ -25,16 +27,17 @@ export async function resolveMemoryFile(
   path: string,
   { allowRoot = false } = {},
 ): Promise<{ path: string } | { error: string }> {
-  if (!isAbsolute(path)) return { error: `${path} is not absolute; start it with ${memoryDir}` };
+  if (!isAbsolute(path))
+    return { error: `The path is not absolute; start it with ${resolve(memoryDir)}` };
   const root = resolve(memoryDir);
   const rel = relative(root, resolve(path));
-  if (rel === "" && !allowRoot) return { error: `${path} is the memory directory itself` };
+  if (rel === "" && !allowRoot) return { error: "The path is the memory directory itself" };
   if (rel.startsWith("..") || isAbsolute(rel)) {
-    return { error: `${path} is outside the memory directory ${root}` };
+    return { error: `The path is outside the memory directory ${root}` };
   }
   const segments = rel === "" ? [] : rel.split(sep);
   if (segments.some((segment) => segment.startsWith("."))) {
-    return { error: `${path} has a hidden segment, which memory does not use` };
+    return { error: "The path has a hidden segment, which memory does not use" };
   }
   const realRoot = await realpath(root).catch(() => root);
   let current = realRoot;
@@ -42,8 +45,9 @@ export async function resolveMemoryFile(
     current = join(current, segment);
     const info = await lstat(current).catch(() => null);
     if (!info) break;
-    if (info.isSymbolicLink())
-      return { error: `${path} goes through a symlink, which memory does not use` };
+    if (info.isSymbolicLink()) {
+      return { error: "The path goes through a symlink, which memory does not use" };
+    }
   }
   return { path: join(realRoot, rel) };
 }

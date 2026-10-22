@@ -5,13 +5,25 @@ import { HEARTBEAT_MS } from "./run-view.js";
 
 type RunOutcome = Parameters<RunsRepository["finish"]>[1];
 
+/** The text of a tool result: a string, or content blocks, bare or in an envelope. */
+function resultText(output: unknown): string {
+  if (typeof output === "string") return output;
+  if (Array.isArray(output)) return output.map(resultText).join("");
+  if (output && typeof output === "object") {
+    const record = output as Record<string, unknown>;
+    if (typeof record.text === "string") return record.text;
+    if ("content" in record) return resultText(record.content);
+  }
+  return "";
+}
+
 /**
  * An action that fails returns `{ status: "error" }` as an ordinary tool
  * result, without the error flag, so its output has to be read.
  */
 function reportsActionError(output: unknown): boolean {
-  const text = typeof output === "string" ? output : null;
-  if (!text?.trimStart().startsWith("{")) return false;
+  const text = resultText(output).trim();
+  if (!text.startsWith("{")) return false;
   try {
     return (JSON.parse(text) as { status?: unknown }).status === "error";
   } catch {

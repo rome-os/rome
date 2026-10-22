@@ -36,7 +36,7 @@ export function createAction(
       const target = await resolveMemoryFile(memoryDir, path);
       if ("error" in target) return { status: "error", error: target.error };
       const text = await readFile(target.path, "utf8").catch(() => null);
-      if (text === null) return { status: "error", error: `${path} does not exist` };
+      if (text === null) return { status: "error", error: "The file does not exist" };
       const at = text.indexOf(oldText);
       if (at < 0) return { status: "error", error: "old_string was not found" };
       if (text.indexOf(oldText, at + 1) >= 0) {

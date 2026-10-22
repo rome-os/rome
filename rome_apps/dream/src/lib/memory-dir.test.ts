@@ -60,6 +60,7 @@ describe("memory file actions", () => {
 
     // A dangling link to a file outside memory.
     symlinkSync(join(outside, "dangling.md"), join(memory, "dangling.md"));
+    const errors: string[] = [];
     for (const path of [
       join(outside, "x.ts"),
       "topics/a.md",
@@ -70,9 +71,14 @@ describe("memory file actions", () => {
     ]) {
       const result = await write.execute({ path, content: "planted" });
       expect(result.status).toBe("error");
+      if (result.status === "error") errors.push(result.error);
     }
     expect(() => readFileSync(join(outside, "x.ts"))).toThrow();
     expect(() => readFileSync(join(outside, "dangling.md"))).toThrow();
+    // Errors never repeat the agent's path, which could carry injected text.
+    expect(errors.some((error) => error.includes("x.ts") || error.includes("dangling"))).toBe(
+      false,
+    );
   });
 
   it("refuses an edit whose text is missing or not unique", async () => {
@@ -117,5 +123,35 @@ describe("memory file actions", () => {
         json_args: { path, content: "c" },
       }),
     ).toEqual([{ op: "write", path, content: "c", previous: null, truncated: false }]);
+  });
+});
+
+describe("recording memory actions", () => {
+  it("drops a refused call whatever shape the provider gives its result", async () => {
+    const { RunRecorder } = await import("./run-recorder.js");
+    const added: unknown[] = [];
+    const repo = { addChanges: (_id: string, changes: unknown[]) => added.push(...changes) };
+    const refused = '{"status":"error","error":"The file does not exist"}';
+    const outputs = [
+      refused,
+      [{ type: "text", text: refused }],
+      { content: [{ type: "text", text: refused }] },
+    ];
+    outputs.forEach((output, i) => {
+      const recorder = new RunRecorder(repo as never, "run");
+      recorder.observe({
+        type: "tool_use",
+        id: `t${i}`,
+        tool: "execute_action",
+        input: { action_name: "write_memory_file", json_args: { path: "/m/a.md", content: "x" } },
+      } as never);
+      recorder.observe({
+        type: "tool_result",
+        toolUseId: `t${i}`,
+        tool: "execute_action",
+        output,
+      } as never);
+    });
+    expect(added).toEqual([]);
   });
 });
