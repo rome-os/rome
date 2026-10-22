@@ -299,6 +299,7 @@
     "noText": "No text",
     "placeholder": "Message {{name}}",
     "sendFailed": "Not sent",
-    "stillSending": "Still sending"
+    "stillSending": "Still sending",
+    "loadOlderFailed": "Failed to load older messages"
   }
 }

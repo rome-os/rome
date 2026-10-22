@@ -299,6 +299,7 @@
     "noText": "无文本",
     "placeholder": "发消息给 {{name}}",
     "sendFailed": "未发送",
-    "stillSending": "仍在发送中"
+    "stillSending": "仍在发送中",
+    "loadOlderFailed": "更早的消息加载失败"
   }
 }

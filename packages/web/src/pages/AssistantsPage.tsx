@@ -92,7 +92,7 @@ export function AssistantsPage() {
             <div className="space-y-2 p-4" aria-hidden>
               <Skeleton className="h-8 w-48" />
             </div>
-          ) : assistants.error && !assistants.data ? (
+          ) : assistants.error && !assistants.data?.length ? (
             <div className="p-4">
               <Alert variant="destructive">
                 <CircleAlert aria-hidden="true" />
@@ -176,9 +176,14 @@ function AssistantChat({
     getNextPageParam: (last) => last.nextCursor,
     queryFn: ({ signal, pageParam }) => readAssistantMessages(agentId, pageParam as string, signal),
   });
-  const hasOlder = olderFrom === null ? Boolean(latest.data?.nextCursor) : older.hasNextPage;
+  // A failed first read of older history has no page to go on from, so the
+  // control stays and reads the same place again.
+  const olderFailedFirst = older.isError && !older.data;
+  const hasOlder =
+    olderFrom === null ? Boolean(latest.data?.nextCursor) : older.hasNextPage || olderFailedFirst;
   const loadOlder = () => {
     if (olderFrom === null) setOlderFrom(latest.data?.nextCursor ?? null);
+    else if (olderFailedFirst) void older.refetch();
     else void older.fetchNextPage();
   };
   // Every message the newest page has returned stays on screen. The page is a
@@ -220,7 +225,12 @@ function AssistantChat({
         <div className="flex-1">
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 pt-4 md:px-6">
             {hasOlder && (
-              <div className="mb-4 flex justify-center">
+              <div className="mb-4 flex flex-col items-center gap-2">
+                {older.isError ? (
+                  <p role="alert" className="text-aux text-destructive">
+                    {t("assistantChat.loadOlderFailed")}
+                  </p>
+                ) : null}
                 <Button
                   type="button"
                   variant="outline"

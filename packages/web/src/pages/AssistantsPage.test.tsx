@@ -38,6 +38,8 @@ let latest: Record<string, TimelinePage> = {};
 let olderPages: Record<string, TimelinePage> = {};
 /** What GET /api/assistants answers. */
 let listed: Assistant[] | "fail" = [];
+/** How many reads of older history fail before one succeeds. */
+let olderFailures = 0;
 /** Each send the page posted. */
 const sends: { id: string; text: string }[] = [];
 
@@ -62,6 +64,7 @@ function serve(assistants: Assistant[] | "fail", options: ServeOptions = {}) {
     [MUSE]: { entries: [inbound("m1", "Build passed", 2)], nextCursor: null },
   };
   olderPages = {};
+  olderFailures = 0;
   sends.length = 0;
   let lost = 0;
   let answered = 0;
@@ -105,6 +108,10 @@ function serve(assistants: Assistant[] | "fail", options: ServeOptions = {}) {
     }
     const chat = url.match(/^\/api\/assistants\/([^/?]+)\/messages(\?cursor=.+)?$/);
     if (chat) {
+      if (chat[2] && olderFailures > 0) {
+        olderFailures--;
+        return new Response("{}", { status: 503 });
+      }
       const page = chat[2] ? olderPages[chat[1]!] : latest[chat[1]!];
       return Response.json(page ?? { entries: [], nextCursor: null });
     }
@@ -325,6 +332,32 @@ describe("AssistantsPage", () => {
     serve([]);
     renderPage();
     expect(await screen.findByText("No assistants yet")).toBeTruthy();
+  });
+
+  it("says so when the list cannot be read after it was read empty", async () => {
+    serve([]);
+    const { queryClient } = renderPage();
+    expect(await screen.findByText("No assistants yet")).toBeTruthy();
+
+    listed = "fail";
+    await queryClient.invalidateQueries({ queryKey: ["assistants"] });
+    expect(await screen.findByText("Failed to load assistants")).toBeTruthy();
+    expect(screen.queryByText("No assistants yet")).toBeNull();
+  });
+
+  it("offers older history again after its first read fails", async () => {
+    serve([assistant(DOT, "Research dot", "dot")]);
+    latest[DOT] = { entries: [inbound("d2", "Newest", 2)], nextCursor: "c1" };
+    olderPages[DOT] = { entries: [inbound("d1", "Oldest", 1)], nextCursor: null };
+    olderFailures = 1;
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Load older messages" }));
+    expect(await screen.findByText("Failed to load older messages")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Load older messages" }));
+    expect(await screen.findByText("Oldest")).toBeTruthy();
   });
 
   it("says so when the list cannot be read, rather than showing none", async () => {
