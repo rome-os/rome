@@ -14,10 +14,10 @@ import {
 import { fetchJson } from "@/lib/fetch-json";
 
 /**
- * The guardian's shortcut for linking their own account on a platform where
- * Rome's account is an agent's own (docs/domains/people.md#account). Opening
- * the dialog asks for a code, and sending it from the guardian's phone to any
- * of Rome's accounts there links that account to them. Each opening shows a new
+ * The guardian's shortcut for linking one of their own accounts
+ * (docs/domains/people.md#account). Opening the dialog asks for a code, and
+ * sending it in a direct message to any of Rome's accounts links the account it
+ * came from to them. Each opening shows a new
  * code and voids the last, so the code on screen is always the one that works.
  */
 export function LinkMyAccount() {

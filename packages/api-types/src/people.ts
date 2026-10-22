@@ -1082,8 +1082,8 @@ export function parseUpdatePersonRequest(
 
 /**
  * `POST /api/people/link-code`: a code the guardian sends, in a direct message
- * from their own account, to any of Rome's accounts on a platform where Rome's
- * account is an agent's own. Redeeming it links that account to the guardian.
+ * from their own account, to any of Rome's accounts on any platform. Redeeming
+ * it links that account to the guardian.
  * One code is outstanding at a time and it is used once.
  */
 export interface LinkCodeResponse {

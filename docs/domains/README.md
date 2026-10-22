@@ -57,7 +57,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - The dashboard and docs say account, agent, connect, disconnect, link, switch and unlink.
 - An account has at most one link to a person, and Rome never makes one from what a sender says about itself.
 - Rome never asks a sender to pair. A sender with no link is admitted and is a stranger.
-- A code People shows, sent from the guardian's phone to one of Rome's accounts, links the guardian's account on that platform to them.
+- A code People shows, sent in a direct message to any of Rome's accounts on any platform, links the account it came from to the guardian.
 
 Diffs still owed to the model, each a change of its own:
 

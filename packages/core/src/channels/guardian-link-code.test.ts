@@ -82,15 +82,19 @@ describe("guardian link admission", () => {
 
   it("admits every message that is not a code, from a stranger too", async () => {
     expect(await admit("bot", "telegram", message("hello"))).toBe(true);
-    expect(await admit("bot", "whatsapp", message(codes.issue().code))).toBe(true);
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("links the sender of a direct message carrying the code to the guardian", async () => {
+  it("links the sender of a code in a direct message to the guardian, anywhere", async () => {
     const { code } = codes.issue();
     expect(await admit("bot", "discord", message(code, { channel: "discord" }))).toBe(false);
     expect((await repo.findByChannelUser("discord", "123"))?.id).toBe("owner");
     await rs.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+
+    expect(await admit("wa", "whatsapp", message(codes.issue().code, { senderId: "8613" }))).toBe(
+      false,
+    );
+    expect((await repo.findByChannelUser("whatsapp", "8613"))?.id).toBe("owner");
   });
 
   it("links a dismissed account, and refuses to move one linked to someone else", async () => {

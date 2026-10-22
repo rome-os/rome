@@ -1,9 +1,8 @@
 /**
- * The guardian's shortcut for linking their own account on a platform where
- * Rome's account is an agent's own, and Rome cannot tell which of the
- * platform's users is the guardian ([Account](docs/domains/people.md#account)).
- * People shows a code. A direct message carrying it, sent to any of Rome's
- * accounts on that platform, links the sender to the guardian.
+ * The guardian's shortcut for linking one of their own accounts on any platform
+ * ([Account](docs/domains/people.md#account)). People shows a code. A direct
+ * message carrying it, sent to any of Rome's accounts, links the sender to the
+ * guardian.
  *
  * The code is the only proof, so it is short-lived, single-use and one at a
  * time: showing a new code voids the last, five wrong codes void it, and a code
@@ -19,10 +18,6 @@ import type { Admission } from "./admission.js";
 import { sendThrough } from "./connection-ports.js";
 
 const log = createLogger("guardian-link-code");
-
-/** The kinds of connection whose account is an agent's own, so the guardian
- *  writes to it as one platform user among many. */
-export const LINK_CODE_KINDS: readonly string[] = ["telegram", "discord", "feishu", "slack_bot"];
 
 const CODE_TTL_MS = 10 * 60_000;
 const MAX_FAILURES = 5;
@@ -98,7 +93,7 @@ export function createGuardianLinkAdmission(deps: {
   registry: Pick<ConnectionRegistry, "get">;
 }): Admission {
   return async (connectionId, connectionKind, message) => {
-    if (!LINK_CODE_KINDS.includes(connectionKind) || !isLinkCodeMessage(message.text)) return true;
+    if (!isLinkCodeMessage(message.text)) return true;
     // Replies go out in the background: admission holds the chat's next
     // message until it returns, and a send that hangs must not.
     const reply = (text: string): void => {

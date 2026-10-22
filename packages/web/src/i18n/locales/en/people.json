@@ -187,7 +187,7 @@
   "linkCode": {
     "open": "Link my account",
     "title": "Link your account",
-    "description": "Send this code from your own account, in a direct message, to any of Rome's Telegram, Discord, Feishu or Slack bot accounts. The account you send it from is linked to you. The code works once.",
+    "description": "Send this code from your own account, in a direct message, to any of Rome's accounts. The account you send it from is linked to you. The code works once.",
     "copy": "Copy",
     "copied": "Copied",
     "expires": "Valid until {{time}}. Opening this again shows a new code.",
