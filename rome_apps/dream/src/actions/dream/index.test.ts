@@ -1,4 +1,6 @@
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -22,8 +24,10 @@ const actionConfig = {
 } as const;
 
 let testDb: TestDb;
+let carrierDir: string;
 
 beforeEach(() => {
+  carrierDir = join(mkdtempSync(join(tmpdir(), "dream-")), "user-skills");
   testDb = createTestDb();
   migrate(testDb.db as never, {
     migrationsFolder: MIGRATIONS_DIR,
@@ -62,6 +66,7 @@ function clearChats(): void {
 
 afterEach(() => {
   testDb.close();
+  rmSync(dirname(carrierDir), { recursive: true, force: true });
 });
 
 const appDb = () => ({
@@ -78,6 +83,8 @@ function makeDeps(
   },
 ): AppActionRuntimeDeps<DreamDeps> {
   return {
+    carrierDir,
+    memoryDir: "/p/memory",
     agentRunner: {
       async *run() {
         for (const msg of agentMessages) {
@@ -106,7 +113,7 @@ describe("dream", () => {
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const data = result.data as { summary: string; windowHours: number };
     expect(data.summary).toBe("Journal entry written.");
-    expect(data.windowHours).toBe(24);
+    expect(data.windowHours).toBe(72);
   });
 
   it("returns failure when agent emits an error", async () => {
@@ -140,7 +147,7 @@ describe("dream", () => {
     await createAction(actionConfig, deps).execute({ windowHours: 6 });
 
     const prompt = run.mock.calls[0]?.[0]?.prompt ?? "";
-    expect(prompt).toContain("get_account_chats (windowHours: 6)");
+    expect(prompt).toContain("windowHours: 6 to get_webchat_conversations, get_account_chats,");
     expect(prompt).not.toContain("fetch_channel_history");
     expect(prompt.toLowerCase()).not.toContain("discord");
   });
@@ -250,7 +257,7 @@ describe("dream", () => {
 
     it("ignores conversations older than the window", async () => {
       clearChats();
-      seedMessage({ sessionType: "webchat", role: "user", hoursAgo: 30 });
+      seedMessage({ sessionType: "webchat", role: "user", hoursAgo: 80 });
       const deps = makeDeps([]);
       const run = agentNeverRuns(deps);
 
@@ -460,5 +467,94 @@ describe("dream", () => {
     const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
     expect(run).toMatchObject({ status: "failed", error: "Model timeout" });
     expect(run?.finishedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("dream skills", () => {
+  const SKILL = "---\nname: rename-invoices\ndescription: Rename invoice PDFs\n---\n\n## Steps\n";
+
+  /** An agent that writes `rename-invoices` into the staging dir its prompt names. */
+  function skillWritingRunner(events: Array<Record<string, unknown>>) {
+    const prompts: string[] = [];
+    const run = async function* (params: { prompt: string }) {
+      prompts.push(params.prompt);
+      const staging = /Skills staging directory: (.+)$/m.exec(params.prompt)?.[1] as string;
+      mkdirSync(join(staging, "rename-invoices"), { recursive: true });
+      writeFileSync(join(staging, "rename-invoices", "SKILL.md"), SKILL);
+      for (const event of events) yield event;
+    };
+    return { run, prompts };
+  }
+
+  function withRunner(
+    runner: ReturnType<typeof skillWritingRunner>,
+    runAction = rs.fn().mockResolvedValue({ status: "ok" }),
+  ) {
+    const deps = makeDeps([], { runAction });
+    (deps.agentRunner as unknown as { run: unknown }).run = runner.run;
+    return { deps, runAction };
+  }
+
+  it("gives the agent its window, memory directory, staging directory, and journal path", async () => {
+    const runner = skillWritingRunner([{ type: "result", content: "done" }]);
+    const { deps } = withRunner(runner);
+
+    await createAction(actionConfig, deps).execute({ windowHours: 6 });
+
+    const prompt = runner.prompts[0] ?? "";
+    expect(prompt).toContain("windowHours: 6");
+    expect(prompt).toContain("Memory directory: /p/memory");
+    expect(prompt).toMatch(/Skills staging directory: .*\.dream-skill-review-.*\/skills$/m);
+    expect(prompt).toMatch(/Today's journal entry: \/p\/memory\/journal\/\d{4}\/\d{2}\/\d{2}\.md/);
+  });
+
+  it("installs the skills a completed dream saved, then drops the staging copy", async () => {
+    const runner = skillWritingRunner([{ type: "result", content: "Saved a skill." }]);
+    const { deps, runAction } = withRunner(runner);
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    expect(result).toMatchObject({
+      status: "ok",
+      data: { summary: "Saved a skill.", installed: ["skills/rename-invoices"] },
+    });
+    expect(readFileSync(join(carrierDir, "skills/rename-invoices/SKILL.md"), "utf8")).toBe(SKILL);
+    expect(readFileSync(join(carrierDir, "app.yaml"), "utf8")).toContain("skills/rename-invoices");
+    expect(runAction).toHaveBeenCalledWith("app_management", {
+      op: "install",
+      source: { mode: "source", path: carrierDir },
+    });
+    const staging = /Skills staging directory: (.+)$/m.exec(runner.prompts[0] ?? "")?.[1] ?? "";
+    expect(existsSync(dirname(staging))).toBe(false);
+  });
+
+  it("installs nothing from a dream that failed", async () => {
+    const runner = skillWritingRunner([{ type: "error", error: "Model timeout" }]);
+    const { deps, runAction } = withRunner(runner);
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    expect(result.status).toBe("error");
+    expect(runAction).not.toHaveBeenCalled();
+    expect(existsSync(join(carrierDir, "skills/rename-invoices"))).toBe(false);
+  });
+
+  it("keeps the dream completed when the skills fail to install, and says so", async () => {
+    const runner = skillWritingRunner([{ type: "result", content: "Updated memory." }]);
+    const { deps } = withRunner(
+      runner,
+      rs.fn().mockResolvedValue({ status: "error", error: "build failed" }),
+    );
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const data = result.data as { runId: string; skillsError: string; summary: string };
+    expect(data.skillsError).toContain("build failed");
+    expect(createRunsRepository(appDb()).byId(data.runId)).toMatchObject({
+      status: "completed",
+      summary: expect.stringContaining("Skills not saved"),
+    });
+    expect(existsSync(join(carrierDir, "skills/rename-invoices"))).toBe(false);
   });
 });

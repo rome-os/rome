@@ -1,12 +1,12 @@
 import type { AppStartedHook, AppStartedHookDeps } from "@rome-os/app-runtime";
-import { ensureDailyDreamRoutine } from "../../lib/daily-routine.js";
+import { ensureDreamRoutine } from "../../lib/dream-routine.js";
 
 export function createHook(deps: AppStartedHookDeps): AppStartedHook {
   return {
     async onAppStarted() {
-      if ((await ensureDailyDreamRoutine(deps.appContext)) === "created") {
-        deps.logger.info("registered the daily dream routine");
-      }
+      const outcome = await ensureDreamRoutine(deps.appContext);
+      if (outcome === "created") deps.logger.info("registered the dream routine");
+      if (outcome === "replaced") deps.logger.info("replaced the daily dream routine");
     },
   };
 }

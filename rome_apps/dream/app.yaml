@@ -2,8 +2,8 @@ formatVersion: 1
 id: dream
 name: Dream
 icon: assets/icon.svg
-version: 0.2.0
-description: Periodic self-review agent that summarizes recent conversations and updates memory
+version: 0.3.0
+description: Periodic self-review agent that updates memory from recent chats and turns repeated work into skills and tools
 tagline: "Your Rome reflects on recent conversations and remembers what matters."
 appRoot: dist
 
@@ -29,6 +29,7 @@ actions:
   - actions/get-webchat-conversations
   - actions/get-account-chats
   - actions/get-action-logs
+  - actions/search-chats
 
 hooks:
   - hooks/app-started

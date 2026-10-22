@@ -132,7 +132,11 @@ describe("user-skills carrier", () => {
       order.push("b:end");
     });
     await Promise.all([slow, fast]);
-    expect(order).toEqual(["a:start", "a:end", "b:start", "b:end"]);
+    // Either may take the lock first. Neither may start while the other holds it.
+    expect([
+      ["a:start", "a:end", "b:start", "b:end"],
+      ["b:start", "b:end", "a:start", "a:end"],
+    ]).toContainEqual(order);
   });
 
   it("commits the carrier when it is a git repo", async () => {

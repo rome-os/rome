@@ -1,3 +1,6 @@
+import { rm } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   createAppLogger,
   type Action,
@@ -8,16 +11,35 @@ import {
 } from "@rome-os/app-runtime";
 import { createRunsRepository } from "../../db/repositories/runs.js";
 import { hasChatSince } from "../../lib/chat-activity.js";
+import { DREAM_WINDOW_HOURS } from "../../lib/dream-routine.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
+import {
+  ensureUserSkillsCarrier,
+  publishStagedSkills,
+  snapshotCarrierSkills,
+  stageCarrierSkills,
+  userSkillsCarrierDir,
+} from "../../lib/user-skills-carrier.js";
 
 const log = createAppLogger("dream");
 
 export interface DreamDeps {
   agentRunner: AgentRunnerInterface;
+  /** The user-skills carrier the dream's skills install into. Tests point it at a temp dir. */
+  carrierDir?: string;
+  /** The profile's memory directory. Tests point it at a fixed path. */
+  memoryDir?: string;
+}
+
+/** Core's profile memory directory (`getProfileMemoryDir`), which an app cannot import. */
+function profileMemoryDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(homedir(), ".rome", env.ROME_PROFILE || "default", "memory");
 }
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<DreamDeps>): Action {
   const { agentRunner, appContext } = deps;
+  const carrierDir = deps.carrierDir ?? userSkillsCarrierDir();
+  const memoryDir = deps.memoryDir ?? profileMemoryDir();
 
   return {
     config,
@@ -26,7 +48,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
       properties: {
         windowHours: {
           type: "number",
-          description: "How many hours of history to review (default: 24)",
+          description: `How many hours of history to review (default: ${DREAM_WINDOW_HOURS})`,
         },
         runId: {
           type: "string",
@@ -38,11 +60,11 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
     },
 
     async execute(args): Promise<ActionResult> {
-      const windowHours = (args.windowHours as number | undefined) ?? 24;
+      const windowHours = (args.windowHours as number | undefined) ?? DREAM_WINDOW_HOURS;
       // A guardian who presses "Dream now" asked for this run, so only callers
-      // without a reserved run (the nightly routine) need a conversation to
-      // review. Checking before the reservation keeps an idle night out of the
-      // run list.
+      // without a reserved run (the routine) need a conversation to review.
+      // Checking before the reservation keeps an idle stretch out of the run
+      // list.
       if (
         typeof args.runId !== "string" &&
         !hasChatSince(appContext.db, new Date(Date.now() - windowHours * 60 * 60 * 1000))
@@ -81,57 +103,102 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
 
       log.info("dream started", { windowHours, runId });
 
-      const now = new Date();
-      const prompt = [
-        `Today is ${now.toISOString()}. Perform the scheduled self-review for the past ${windowHours} hours.`,
-        "",
-        "Follow the review process in your instructions:",
-        `1. Read memory/MEMORY.md`,
-        `2. Call get_webchat_conversations (windowHours: ${windowHours}) to fetch recent conversations`,
-        `3. Call get_account_chats (windowHours: ${windowHours}) to fetch recent chats from every one of Rome's accounts`,
-        `4. Call get_action_logs (windowHours: ${windowHours}) to fetch recent action executions`,
-        `5. Synthesize all sources into insights and updates`,
-        `6. Update memory files as needed`,
-        `7. Write today's journal entry at memory/journal/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${String(now.getUTCDate()).padStart(2, "0")}.md`,
-      ].join("\n");
-
-      let turnCount = 0;
-
+      // The agent saves skills into a private copy of the carrier, and only a
+      // dream that completes installs them.
       const stopHeartbeat = keepRunAlive(runs, runId);
+      let staging: string | undefined;
       try {
-        for await (const msg of agentRunner.run({
-          agentName: "dream",
-          prompt,
-        })) {
-          recorder.observe(msg);
-          if (msg.type === "text") turnCount++;
+        let before: Map<string, Buffer>;
+        try {
+          await ensureUserSkillsCarrier(carrierDir);
+          staging = await stageCarrierSkills(carrierDir);
+          before = await snapshotCarrierSkills(staging);
+        } catch (err) {
+          const error = `Could not stage the user-skills carrier: ${err instanceof Error ? err.message : String(err)}`;
+          runs.finish(runId, { status: "failed", error });
+          log.error("dream failed to stage skills", { error, runId });
+          return { status: "error", error };
         }
-      } catch (err) {
-        runs.finish(runId, {
-          status: "failed",
-          error: err instanceof Error ? err.message : String(err),
-        });
-        throw err;
+
+        const now = new Date();
+        const journalPath = join(
+          memoryDir,
+          "journal",
+          String(now.getUTCFullYear()),
+          String(now.getUTCMonth() + 1).padStart(2, "0"),
+          `${String(now.getUTCDate()).padStart(2, "0")}.md`,
+        );
+        const prompt = [
+          `Today is ${now.toISOString()}. Dream over the past ${windowHours} hours.`,
+          "",
+          `- Window: pass windowHours: ${windowHours} to get_webchat_conversations, get_account_chats, and get_action_logs.`,
+          `- Memory directory: ${memoryDir}`,
+          `- Skills staging directory: ${join(staging, "skills")}`,
+          `- Today's journal entry: ${journalPath}`,
+        ].join("\n");
+
+        try {
+          for await (const msg of agentRunner.run({ agentName: "dream", prompt })) {
+            recorder.observe(msg);
+          }
+        } catch (err) {
+          runs.finish(runId, {
+            status: "failed",
+            error: err instanceof Error ? err.message : String(err),
+          });
+          throw err;
+        }
+
+        const outcome = recorder.outcome();
+        if (outcome.status !== "completed") {
+          runs.finish(runId, outcome);
+          if (recorder.error !== null) {
+            log.error("dream agent failed", { error: recorder.error });
+            return { status: "error", error: `Dream agent failed: ${recorder.error}` };
+          }
+          return { status: "ok", data: { runId, windowHours, summary: recorder.summary } };
+        }
+
+        // Memory is already written, so a skill that fails to install is
+        // reported with the dream rather than failing it.
+        let installed: string[] = [];
+        let skillsError: string | undefined;
+        try {
+          installed = await publishStagedSkills(
+            carrierDir,
+            staging,
+            before,
+            async () => {
+              const res = await appContext.runAction("app_management", {
+                op: "install",
+                source: { mode: "source", path: carrierDir },
+              });
+              if (res.status === "error") throw new Error(res.error);
+            },
+            (err) => log.warn("user-skills commit failed", { error: String(err) }),
+          );
+        } catch (err) {
+          skillsError = `Skills not saved: user-skills install failed, changes rolled back: ${err instanceof Error ? err.message : String(err)}`;
+          log.error("user-skills install failed", { error: skillsError, runId });
+        }
+        const summary = skillsError ? `${recorder.summary}\n\n${skillsError}` : recorder.summary;
+        runs.finish(runId, { status: "completed", summary });
+        log.info("dream completed", { runId, installed, resultLength: summary.length });
+
+        return {
+          status: "ok",
+          data: {
+            runId,
+            windowHours,
+            summary,
+            ...(installed.length > 0 ? { installed } : {}),
+            ...(skillsError ? { skillsError } : {}),
+          },
+        };
       } finally {
         stopHeartbeat();
+        if (staging) await rm(staging, { recursive: true, force: true });
       }
-
-      runs.finish(runId, recorder.outcome());
-      if (recorder.error !== null) {
-        log.error("dream agent failed", { error: recorder.error });
-        return { status: "error", error: `Dream agent failed: ${recorder.error}` };
-      }
-      const resultContent = recorder.summary;
-      log.info("dream completed", { turnCount, resultLength: resultContent.length, runId });
-
-      return {
-        status: "ok",
-        data: {
-          runId,
-          windowHours,
-          summary: resultContent,
-        },
-      };
     },
   };
 }

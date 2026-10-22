@@ -217,6 +217,38 @@ export async function publishCarrierSkills(
   }
 }
 
+/**
+ * Publishes the skills added or edited in `staging` since `before`, the
+ * snapshot taken when it was staged, and installs the carrier, holding the
+ * carrier lock. Returns the published skill paths, empty when nothing changed.
+ * Throws when the install fails, after putting those skills back. A failed
+ * commit goes to `onCommitError` and keeps the install, since the commit is
+ * history only.
+ */
+export async function publishStagedSkills(
+  dir: string,
+  staging: string,
+  before: Map<string, Buffer>,
+  install: () => Promise<void>,
+  onCommitError: (err: unknown) => void,
+): Promise<string[]> {
+  // Changes are found by diffing the staging copy, not by parsing tool
+  // events, whose shape differs per provider (Codex edits carry no path).
+  const after = await snapshotCarrierSkills(staging);
+  const changed = changedSkills(before, after);
+  if (changed.length === 0) return [];
+  return withCarrierLock(dir, async () => {
+    const paths = await publishCarrierSkills(
+      dir,
+      before,
+      new Map(changed.map((name) => [name, after.get(name) as Buffer])),
+      install,
+    );
+    await commitCarrier(dir, changed).catch(onCommitError);
+    return paths;
+  });
+}
+
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /**
