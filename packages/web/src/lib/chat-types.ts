@@ -127,6 +127,11 @@ export interface DoneEventData {
 // A single in-flight turn returned by GET /chat/sessions/:id/turns.
 export interface TurnInfo {
   turnId: string;
+  /**
+   * The agent's own turn id, when a backend task streams it under a synthetic
+   * `turnId`. The turn's saved trace and reply carry this id.
+   */
+  agentTurnId?: string;
   streamId: string;
   startedAt: string;
   status: "running" | "queued";

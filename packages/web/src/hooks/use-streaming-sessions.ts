@@ -2,7 +2,14 @@ import { useCallback, useRef, useState } from "react";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
 export type SessionStreamState = {
+  /** The id the stream was opened under. Keys its follower, controller and Stop. */
   turnId: string;
+  /**
+   * The agent's own turn id, when the server streams the turn under a
+   * different key (a backend task's synthetic `backend:` id). The turn's saved
+   * trace and reply carry this id.
+   */
+  agentTurnId?: string;
   snapshot: TraceSnapshot | null;
   // Live preview of the CURRENT in-flight assistant text block (server
   // `assistant_text` SSE events, `{blockIx, text}`). Each completed block
@@ -48,6 +55,26 @@ export function updateSnapshot(
   const next = new Map(prev);
   next.set(sessionId, { ...existing, snapshot });
   return next;
+}
+
+// Turn-guarded like updateSnapshot. The entry stays under the id its stream
+// was opened with, so its follower and Stop keep finding it.
+export function adoptAgentTurnId(
+  prev: StreamingSessionMap,
+  sessionId: string,
+  turnId: string,
+  agentTurnId: string,
+): StreamingSessionMap {
+  const existing = prev.get(sessionId);
+  if (!existing || existing.turnId !== turnId || existing.agentTurnId === agentTurnId) return prev;
+  const next = new Map(prev);
+  next.set(sessionId, { ...existing, agentTurnId });
+  return next;
+}
+
+/** The id the transcript knows the running turn by. */
+export function runningTurnIdOf(state: SessionStreamState | null | undefined): string | null {
+  return state?.agentTurnId ?? state?.turnId ?? null;
 }
 
 // Turn-guarded like updateSnapshot. Block-guarded too: SSE events arrive in
@@ -116,9 +143,12 @@ export function useStreamingSessions() {
     },
     [],
   );
+  const adoptAgentTurn = useCallback((sessionId: string, turnId: string, agentTurnId: string) => {
+    setStreams((prev) => adoptAgentTurnId(prev, sessionId, turnId, agentTurnId));
+  }, []);
   const end = useCallback((sessionId: string, turnId: string) => {
     setStreams((prev) => endStream(prev, sessionId, turnId));
   }, []);
 
-  return { streams, streamsRef, start, update, updateText, end };
+  return { streams, streamsRef, start, update, updateText, adoptAgentTurn, end };
 }

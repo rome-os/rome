@@ -4898,6 +4898,75 @@ describe("Webchat API", () => {
       ]);
     });
 
+    it("addresses a recorded continuation by its own turn id while it runs", async () => {
+      // A defer wake-up saves its trace under the agent's turn id. The chat
+      // reattaches through the listing, so the listing and the stream must
+      // name that id too, or the chat shows the turn twice.
+      const sessionId = "sess-recorded-turn-id";
+      await deps.webchatRepo.createSession(sessionId, "Recorded Turn Id");
+      const owner = { currentTurnId: "turn-real", interrupt: rs.fn(async () => {}) };
+      rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
+      const { routes, runtime } = createWebchatRuntime(deps);
+      const recorded = { recorded: true };
+      let markStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const task = runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        await emit(
+          { type: "turn_start", turnId: "turn-real", sessionId: "agent-1", userPrompt: "Wake" },
+          recorded,
+        );
+        markStarted();
+        await gate;
+        await emit(
+          { type: "turn_end", turnId: "turn-real", status: "completed", durationMs: 1 },
+          recorded,
+        );
+      });
+      await started;
+
+      const turns = (await (await routes.request(`/chat/sessions/${sessionId}/turns`)).json()) as {
+        turnId: string;
+        agentTurnId?: string;
+        status: string;
+      }[];
+      expect(turns).toEqual([
+        expect.objectContaining({ agentTurnId: "turn-real", status: "running" }),
+      ]);
+      const streamKey = turns[0]!.turnId;
+      expect(streamKey).toMatch(/^backend:/);
+
+      const res = await routes.request("/chat/turns/turn-real/stream");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/event-stream");
+      const reader = res.body!.getReader();
+      let streamed = "";
+      while (!streamed.includes("event: turn_id")) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        streamed += new TextDecoder().decode(chunk.value);
+      }
+      expect(streamed).toContain('event: turn_id\ndata: {"turnId":"turn-real"}');
+      await reader.cancel();
+
+      const stop = await routes.request("/chat/turns/turn-real/interrupt", { method: "POST" });
+      expect(stop.status).toBe(202);
+      expect(owner.interrupt).toHaveBeenCalledTimes(1);
+
+      rs.useFakeTimers();
+      release();
+      await task;
+      await rs.advanceTimersByTimeAsync(30_000);
+      for (const turnId of [streamKey, "turn-real"]) {
+        expect((await routes.request(`/chat/turns/${turnId}/stream`)).status).toBe(404);
+      }
+    });
+
     // The connect-AI card is the second host-owned card. Only its own tool may
     // mount it: a tool_result under any other name is a spoof and is dropped.
     it.each([

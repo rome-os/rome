@@ -54,8 +54,21 @@ rs.mock("@/components/chat/ChatComposer", () => ({
 }));
 
 rs.mock("@/components/chat/MessageList", () => ({
-  MessageList: ({ live }: { live: { isStreaming: boolean; text: string } }) => (
-    <div data-testid="session-messages" data-streaming={String(live.isStreaming)}>
+  MessageList: ({
+    live,
+    rows,
+  }: {
+    live: { isStreaming: boolean; text: string };
+    rows: { kind: string; key: string }[];
+  }) => (
+    <div
+      data-testid="session-messages"
+      data-streaming={String(live.isStreaming)}
+      data-trace-rows={rows
+        .filter((row) => row.kind === "trace")
+        .map((row) => row.key)
+        .join(",")}
+    >
       {live.text}
     </div>
   ),
@@ -406,6 +419,50 @@ describe("SessionsPage live fork details", () => {
       streamController?.close();
     });
     await waitFor(() => expect(listRomeSessionMessages).toHaveBeenCalledTimes(2));
+  });
+
+  it("hides a backend turn's saved trace behind its live row once the stream names the turn", async () => {
+    // A defer wake-up streams under a synthetic `backend:` key but saves its
+    // trace under the agent's own turn id.
+    rs.mocked(listRomeSessionMessages).mockResolvedValue([
+      {
+        id: "trace-real",
+        sessionId: FORK_SESSION.id,
+        turnId: "turn-real",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-07-12T00:00:00.000Z",
+        traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+      },
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      { turnId: "backend:wake", streamId: "stream-wake", startedAt: "", status: "running" },
+    ]);
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    rs.mocked(openTurnStream).mockImplementation(async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamController = controller;
+        },
+      });
+      return new Response(body);
+    });
+
+    renderDetail();
+
+    await waitFor(() =>
+      expect(openTurnStream).toHaveBeenCalledWith("backend:wake", expect.any(AbortSignal)),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("session-messages").dataset.streaming).toBe("true"),
+    );
+    act(() => {
+      streamController?.enqueue(
+        new TextEncoder().encode('event: turn_id\ndata: {"turnId":"turn-real"}\n\n'),
+      );
+    });
+
+    await waitFor(() => expect(screen.getByTestId("session-messages").dataset.traceRows).toBe(""));
   });
 
   it("refreshes messages when a turn finishes during initial attachment", async () => {

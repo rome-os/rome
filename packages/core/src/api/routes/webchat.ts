@@ -195,7 +195,8 @@ type WebchatEventName =
   | "widget_placement"
   | "done"
   | "stream_error"
-  | "keepalive";
+  | "keepalive"
+  | "turn_id";
 
 // Mirror the agent's propose_routine tool call into a first-class assistant
 // `routine_draft_card` message so the confirm card renders inline. The card
@@ -631,11 +632,17 @@ interface ActiveWebchatStream {
   streamId: string;
   sessionId: string;
   /**
-   * turnId allocated by `AgentSession.sendTurn` (single source of
-   * truth — generated at the bottom of the agent stack). Used as the URL
-   * key for `/turns/:turnId/stream` and `/turns/:turnId/interrupt`.
+   * The stream's key: the turnId allocated by `AgentSession.sendTurn` for a
+   * user turn, or a synthetic `backend:` id for a backend task. Used as the
+   * URL key for `/turns/:turnId/stream` and `/turns/:turnId/interrupt`.
    */
   turnId: string;
+  /**
+   * The agent's own turnId when a backend task runs a recorded turn. Its trace
+   * and reply are saved under this id, so the stream also answers to it and
+   * tells clients through a `turn_id` event.
+   */
+  agentTurnId?: string;
   startedAt: string;
   finished: boolean;
   // Keyed replay buffer: late subscribers receive the latest payload per key
@@ -723,7 +730,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const activeStreams = new Map<string, ActiveWebchatStream[]>();
   /**
    * secondary index for direct lookup by turnId. Populated when a
-   * stream is enqueued (turnId is known by then because sendTurn is sync).
+   * stream is enqueued (turnId is known by then because sendTurn is sync),
+   * and again under `agentTurnId` once a backend stream learns it.
    * URL routes `/turns/:turnId/...` resolve via this map.
    */
   const streamsByTurnId = new Map<string, ActiveWebchatStream>();
@@ -858,6 +866,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (list.length === 0) activeStreams.delete(stream.sessionId);
     }
     streamsByTurnId.delete(stream.turnId);
+    if (stream.agentTurnId && streamsByTurnId.get(stream.agentTurnId) === stream) {
+      streamsByTurnId.delete(stream.agentTurnId);
+    }
   };
 
   /** Per-session promise chain — kept so backend-initiated tasks can also queue. */
@@ -2811,11 +2822,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         .filter((s) => !s.finished)
         .map((s) => ({
           turnId: s.turnId,
+          ...(s.agentTurnId ? { agentTurnId: s.agentTurnId } : {}),
           streamId: s.streamId,
           startedAt: s.startedAt,
           status:
             s.channelThreadKey &&
-            s.turnId ===
+            (s.agentTurnId ?? s.turnId) ===
               deps.agentSessionManager.peek({
                 agentName: s.agentName,
                 channelThreadKey: s.channelThreadKey,
@@ -3929,7 +3941,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // Backend tasks (e.g. approval continuation) don't have a real
     // AgentSession turnId — they're a higher-level wrapper that may run
     // arbitrary actions. Mint a synthetic turnId so the stream is still
-    // addressable via /turns/:turnId/stream like a user-initiated turn.
+    // addressable via /turns/:turnId/stream like a user-initiated turn. A
+    // recorded turn adds its own id as `agentTurnId` once it starts.
     const syntheticTurnId = `backend:${randomUUID()}`;
     const session = await deps.webchatRepo.getSession(sessionId);
     // Deliberately top-level only. A side chat has no scheduled wake-ups (see
@@ -3965,7 +3978,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let recordedCardWrites: Promise<void> = Promise.resolve();
     const emit = (msg: AgentEvent & { agent?: string }, options?: BackendEmitOptions) => {
       const recorded = options?.recorded === true;
-      if (recorded && msg.type === "turn_start") recordedTurnId = msg.turnId;
+      if (recorded && msg.type === "turn_start") {
+        recordedTurnId = msg.turnId;
+        // The recorded turn saves its trace and reply under its own id, so the
+        // stream adopts that id: a client that names the turn by it then hides
+        // the saved trace behind the live row instead of showing both.
+        if (!stream.agentTurnId) {
+          stream.agentTurnId = msg.turnId;
+          streamsByTurnId.set(msg.turnId, stream);
+          emitToStream(stream, "turn_id", { turnId: msg.turnId }, "turn_id");
+        }
+      }
       if (msg.type === "turn_start" && stream.channelThreadKey) {
         const owner = deps.agentSessionManager.peek({
           agentName: msg.agent ?? stream.agentName,

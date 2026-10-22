@@ -66,7 +66,7 @@ import { useSmoothText } from "@/hooks/use-smooth-text";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
-import { useStreamingSessions } from "@/hooks/use-streaming-sessions";
+import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
@@ -352,6 +352,7 @@ export function Chat({
     start: startSessionStream,
     update: updateSessionSnapshot,
     updateText: updateSessionAssistantText,
+    adoptAgentTurn: adoptSessionAgentTurn,
     end: endSessionStream,
   } = useStreamingSessions();
   const [streamError, setStreamError] = useState<string | ChatErrorNotice | null>(null);
@@ -584,7 +585,10 @@ export function Chat({
   // Only the floor session streams (every shallower caller is suspended).
   const floorSessionStream = streamingSessions.get(floorSessionId) ?? null;
   const currentSnapshot = floorSessionStream?.snapshot ?? null;
-  const runningTurnId = floorSessionStream?.turnId ?? null;
+  // The stream key addresses the follower and Stop. The transcript matches the
+  // turn by its running turn id, which differs for a backend task.
+  const floorStreamTurnId = floorSessionStream?.turnId ?? null;
+  const runningTurnId = runningTurnIdOf(floorSessionStream);
   const isActiveSessionStreaming = !!floorSessionStream;
   const awaitingGuardian = useMemo(
     () => isAwaitingGuardian(view, runningTurnId),
@@ -729,8 +733,8 @@ export function Chat({
   useEffect(() => {
     // The running turn lives in the floor session (the specialist during a
     // handoff), so report that — not main — to the host's turn-follow.
-    onSessionMessageRef.current?.({ sessionId: floorSessionId, turnId: runningTurnId });
-  }, [runningTurnId, floorSessionId]);
+    onSessionMessageRef.current?.({ sessionId: floorSessionId, turnId: floorStreamTurnId });
+  }, [floorStreamTurnId, floorSessionId]);
 
   // Fetch messages for a session
   const loadMessages = useCallback(
@@ -1015,6 +1019,17 @@ export function Chat({
             }
             continue;
           }
+          if (evt.event === "turn_id") {
+            // A backend task names the agent turn it runs. The entry keeps its
+            // stream key; the transcript matches the turn by this id.
+            try {
+              const { turnId: agentTurnId } = JSON.parse(evt.data) as { turnId?: string };
+              if (agentTurnId) adoptSessionAgentTurn(sessionId, turnId, agentTurnId);
+            } catch {
+              // ignore parse errors
+            }
+            continue;
+          }
           if (evt.event === "session_status") {
             // SSE-driven status lets the UI flip the
             // Send/Stop button without polling /stream-status.
@@ -1050,7 +1065,13 @@ export function Chat({
 
       return shouldStop;
     },
-    [t, updateSessionSnapshot, updateSessionAssistantText, isReadVisibleSession],
+    [
+      t,
+      updateSessionSnapshot,
+      updateSessionAssistantText,
+      adoptSessionAgentTurn,
+      isReadVisibleSession,
+    ],
   );
 
   // Follow one turn to its end. A dropped SSE connection (mobile background,
@@ -1580,7 +1601,8 @@ export function Chat({
   const displayedStreaming = isActiveSessionStreaming;
 
   // The grouped speaker rows. Memoized so a streaming turn never rebuilds the
-  // transcript — runningTurnId/isStreaming only change at turn boundaries.
+  // transcript — runningTurnId/isStreaming only change at turn boundaries, and
+  // once more when a backend turn names its agent turn.
   const rows = useMemo(
     () =>
       buildRows(displayMessages, identityBySession, mainIdentity, {

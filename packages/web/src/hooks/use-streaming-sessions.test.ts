@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@rstest/core";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
 import {
+  adoptAgentTurnId,
   endStream,
+  runningTurnIdOf,
   startStream,
   updateAssistantText,
   updateSnapshot,
@@ -110,6 +112,30 @@ describe("streaming-sessions state", () => {
     const after = updateAssistantText(state, "A", "turn-1", 0, "stale block");
     expect(after).toBe(state);
     expect(state.get("A")?.assistantText).toBe("current block");
+  });
+
+  it("names the running turn by its agent turn id while keeping the stream key", () => {
+    let state: StreamingSessionMap = startStream(new Map(), "A", "backend:wake");
+    state = updateSnapshot(state, "A", "backend:wake", snapshotFor("live"));
+    expect(runningTurnIdOf(state.get("A"))).toBe("backend:wake");
+
+    state = adoptAgentTurnId(state, "A", "backend:wake", "turn-real");
+    expect(state.get("A")?.turnId).toBe("backend:wake");
+    expect(segmentIdAt(state, "A")).toBe("live");
+    expect(runningTurnIdOf(state.get("A"))).toBe("turn-real");
+    // Updates and the end still go through the stream key.
+    state = updateSnapshot(state, "A", "backend:wake", snapshotFor("next"));
+    expect(segmentIdAt(state, "A")).toBe("next");
+    expect(endStream(state, "A", "backend:wake").has("A")).toBe(false);
+    expect(runningTurnIdOf(undefined)).toBeNull();
+  });
+
+  it("adoptAgentTurnId ignores a stale turn and a repeated id", () => {
+    let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
+    state = startStream(state, "A", "turn-2");
+    expect(adoptAgentTurnId(state, "A", "turn-1", "turn-real")).toBe(state);
+    state = adoptAgentTurnId(state, "A", "turn-2", "turn-real");
+    expect(adoptAgentTurnId(state, "A", "turn-2", "turn-real")).toBe(state);
   });
 
   it("updateAssistantText ignores writes from a stale turn", () => {
