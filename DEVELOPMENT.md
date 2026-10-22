@@ -89,6 +89,11 @@ Chrome's CDP listener stays available for login tabs and URL opening in either m
 - Use [`useLiveEvents`](packages/web/src/hooks/use-live-events.ts) for a stream that has a live-events topic, so it shares the tab's one WebSocket instead of holding an HTTP connection. Use [`useSseEvents`](packages/web/src/hooks/use-sse-events.ts) for other SSE. Validate external data with Zod at the boundary.
 - Keep the backend flow: [Hono route](packages/core/src/api/index.ts) → injected [service or dependency](packages/core/src/api/deps.ts) → Drizzle [repository](packages/core/src/db/repositories/).
 - Validate [configuration with Zod](packages/core/src/config.ts). Log through [`createLogger(component)`](packages/core/src/logger.ts).
+- Drop a system table or column across two releases, so that the previous release still boots on a migrated database. Removing the declaration first lets TypeScript prove that no reader is left, and drizzle names every declared column in each select and insert.
+  1. In the first release, remove the last reader and the declaration in [`schema/system.ts`](packages/core/src/db/schema/system.ts). Search raw `sql` queries for its name too, since TypeScript does not see them. Run `pnpm db:generate:system` and replace the statements that drop the object with `SELECT 1;`, so the database keeps it. A column kept this way must be nullable or have a default.
+  2. In a later release, drop the object with a custom migration (`pnpm db:generate:system --custom --name drop_<object>`).
+
+  A rename is an added object followed by this drop. `pnpm db:check:destructive` runs in CI and fails a migration that drops or renames a table or column the last release declares. The check does not cover a migration that rewrites a value, adds a required column, or adds a constraint, so review those for whether the previous release still reads and writes the table.
 - Use [DnD](packages/web/src/components/ui/sortable.tsx), [Motion](packages/web/src/pages/free/FreeGrid.tsx), [Monaco](packages/web/src/components/monaco-file-editor.tsx), and [Recharts](packages/web/src/pages/SessionsTrendChart.tsx) only when a feature needs them. They are not default abstractions.
 
 ## Test environment

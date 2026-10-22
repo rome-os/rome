@@ -127,13 +127,18 @@ jobs:
       - run: pnpm typecheck:lint-agents
 
   # ──────────────────────────────────────────
-  # Job 1b: DB schema drift — committed migrations must match the schema files
+  # Job 1b: DB schema drift — committed migrations must match the schema files,
+  # and none may drop what the last release still reads
   # ──────────────────────────────────────────
   db-schema:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The destructive-migration check compares against the last release
+          # tag, which a shallow clone does not contain.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v5
       - uses: actions/setup-node@v6
         with:
@@ -141,6 +146,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: scripts/check-db-schema.sh
+      - run: pnpm db:check:destructive
 
   # ──────────────────────────────────────────
   # Job 2: Unit tests, sharded
