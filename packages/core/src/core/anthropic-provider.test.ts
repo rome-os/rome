@@ -1605,6 +1605,63 @@ describe("AnthropicProvider", () => {
       expect(queryMock.mock.calls[0]![0].options.env.ROME_CHANNEL).toBe(expected);
     });
 
+    function terminalMcpTools(): string[] | undefined {
+      return queryMock.mock.calls[0]![0].options.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS?.split(",");
+    }
+
+    it("marks the registered ask_question tool terminal on an interactive surface", async () => {
+      const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
+      const session = await provider.openSession(buildParams({ supportsInteractiveSurface: true }));
+      await collectEvents(session);
+      await session.close();
+
+      // Claude Code matches tool_use names, which are mcp__<server key>__<tool name>.
+      const { mcpServers } = queryMock.mock.calls[0]![0].options;
+      const askUserTools = mcpServers.ask_user.tools.map((tool: { name: string }) => tool.name);
+      expect(askUserTools).toContain("ask_question");
+      expect(terminalMcpTools()).toEqual(["mcp__ask_user__ask_question"]);
+    });
+
+    it.each([
+      ["a non-interactive surface", { supportsInteractiveSurface: false }],
+      [
+        "a detached interactive surface",
+        { supportsInteractiveSurface: true, interactiveSurfaceDetached: true },
+      ],
+    ])("leaves Claude Code's terminal tools unset on %s", async (_label, overrides) => {
+      const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
+      const session = await provider.openSession(buildParams(overrides));
+      await collectEvents(session);
+      await session.close();
+
+      expect(terminalMcpTools()).toBeUndefined();
+    });
+
+    it("keeps inherited terminal tools and adds ask_question after them", async () => {
+      const provider = new AnthropicProvider({
+        env: {
+          PATH: "/usr/bin",
+          CLAUDE_CODE_TERMINAL_MCP_TOOLS: " mcp__x__y,,mcp__ask_user__ask_question",
+        },
+      });
+      const session = await provider.openSession(buildParams({ supportsInteractiveSurface: true }));
+      await collectEvents(session);
+      await session.close();
+
+      expect(terminalMcpTools()).toEqual(["mcp__x__y", "mcp__ask_user__ask_question"]);
+    });
+
+    it("passes inherited terminal tools through unchanged on a non-interactive surface", async () => {
+      const provider = new AnthropicProvider({
+        env: { PATH: "/usr/bin", CLAUDE_CODE_TERMINAL_MCP_TOOLS: "mcp__x__y" },
+      });
+      const session = await provider.openSession(buildParams());
+      await collectEvents(session);
+      await session.close();
+
+      expect(terminalMcpTools()).toEqual(["mcp__x__y"]);
+    });
+
     it("passes stored Anthropic-compatible provider credentials to the Claude SDK env", async () => {
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin", ANTHROPIC_AUTH_TOKEN: "old-token" },

@@ -88,6 +88,34 @@ export const CLAUDE_AGENT_SDK_ENV = {
   CLAUDE_CODE_ENABLE_TASKS: "false",
 } as const;
 
+// Tools that park the turn on a card the guardian answers next turn, so the
+// model correctly ends its response with no text after them. Claude Code
+// treats tools listed in CLAUDE_CODE_TERMINAL_MCP_TOOLS as terminal: its
+// no-visible-output guard skips a response whose last non-error tool results
+// came from one, instead of re-running the model to force a reply. The
+// CLI also counts a transcript ending in such a result as a finished turn, not
+// an interrupted one, on resume. Both behaviors are undocumented CLI internals
+// checked against agent SDK 0.3.293, so re-check them when bumping the SDK.
+// Names are `mcp__<server key>__<tool>` as registered by buildAnthropicMcpServers.
+const CLAUDE_TERMINAL_PARK_TOOLS = ["mcp__ask_user__ask_question"] as const;
+
+// Only a mounted interactive surface parks on the card. Elsewhere ask_question
+// tells the model to ask in prose, and the guard still catches an empty reply.
+function terminalMcpToolsEnv(
+  inherited: string | undefined,
+  interactive: boolean,
+): string | undefined {
+  if (!interactive) return inherited;
+  const tools = new Set(
+    (inherited ?? "")
+      .split(",")
+      .map((tool) => tool.trim())
+      .filter(Boolean),
+  );
+  for (const tool of CLAUDE_TERMINAL_PARK_TOOLS) tools.add(tool);
+  return [...tools].join(",");
+}
+
 // Rome's efforts are a subset of Claude's, so Ultrathink (`xhigh`) maps to
 // Claude's `xhigh`, not `max`.
 function toAnthropicEffort(effort: ModelReasoningEffort | undefined): EffortLevel {
@@ -539,6 +567,10 @@ export class AnthropicProvider implements ModelProvider {
       CLAUDE_CODE_EFFORT_LEVEL: effort,
       // Set even when undefined, so a value Rome itself inherited never leaks in.
       ROME_CHANNEL: params.channel,
+      CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpToolsEnv(
+        queryContext.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS,
+        params.supportsInteractiveSurface === true && params.interactiveSurfaceDetached !== true,
+      ),
     };
     const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
     const authRevokedSource = queryContext.authRevokedSource;
