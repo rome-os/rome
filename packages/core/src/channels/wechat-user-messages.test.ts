@@ -6,7 +6,8 @@
 //   2. read maps reader rows to the timeline shape, newest-first, and pages
 //      after a cursor.
 //   3. count sums per-contact counts; latest is the newest across contacts,
-//      re-read for a chat only when its last activity changes.
+//      re-read for a chat only when its last activity changes. A sweep of
+//      cold lookups leaves room in the reader's queue for a history read.
 //   4. the address book lists direct contacts (never groups) and resolves a wxid.
 
 import { describe, expect, it } from "@rstest/core";
@@ -314,6 +315,47 @@ describe("wechatUserMessages", () => {
     expect(await store.latest([account("wxid_a")])).toBeNull();
     failing = false;
     expect((await store.latest([account("wxid_a")]))?.ref).toBe("wxid_a:1");
+  });
+
+  it("lets a history read run between a cold sweep's head lookups", async () => {
+    // A reader as serial as the bridge: one call runs at a time, each a macrotask.
+    const chats = Array.from({ length: 200 }, (_, i) => `wxid_${i}`);
+    const ran: string[] = [];
+    let queue: Promise<unknown> = Promise.resolve();
+    const serial = <T>(label: string, answer: () => T): Promise<T> => {
+      const turn = queue.then(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        ran.push(label);
+        return answer();
+      });
+      queue = turn.catch(() => {});
+      return turn;
+    };
+    const reader = {
+      lastActivity: () =>
+        serial("sessions", () => new Map(chats.map((chatId) => [chatId, "1000"]))),
+      messages: (input: { chatId?: string; limit: number }) =>
+        serial(`query ${input.chatId} -n ${input.limit}`, () => [
+          msg({ id: `${input.chatId}:1`, chatId: input.chatId ?? "" }),
+        ]),
+    } as unknown as WechatUserReader;
+    const store = wechatUserMessages(reader);
+    const reads = store.byAccount;
+    if (!reads) throw new Error("the WeChat store answers per-account reads");
+
+    const sweep = Promise.all(chats.map((chatId) => reads.latest([account(chatId)])));
+    // Ask only once the sweep's lookups have reached the reader's queue.
+    while (!ran.some((label) => label.endsWith("-n 1"))) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await store.query({ chatId: "wxid_7" as ChatId, limit: 5 });
+
+    const ahead = ran.indexOf("query wxid_7 -n 5");
+    expect(
+      ran.slice(0, ahead).filter((label) => label.endsWith("-n 1")).length,
+    ).toBeLessThanOrEqual(4);
+    const heads = await sweep;
+    expect(heads.map((head) => head?.ref)).toEqual(chats.map((chatId) => `${chatId}:1`));
   });
 
   it("answers nothing for a set naming no wechat address", async () => {
