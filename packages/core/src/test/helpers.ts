@@ -692,7 +692,10 @@ export async function buildTestDeps(
   // Same provider set the daemon registers before the API comes up, so
   // routine trigger validation behaves identically here.
   routineEngine.registerProvider("schedule", new ScheduleTriggerProvider(routinesRepo));
-  routineEngine.registerProvider("event-bus", new EventBusTriggerProvider(new EventBus()));
+  routineEngine.registerProvider(
+    "event-bus",
+    new EventBusTriggerProvider(new EventBus(), routinesRepo),
+  );
 
   // Mirror daemon boot: the auth-edge snapshot is loaded from the persisted
   // `publicAccess` setting before serving (src/index.ts). Tests that change

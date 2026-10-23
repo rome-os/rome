@@ -2684,6 +2684,8 @@ export interface EventBusTrigger {
   /** Payload conditions, AND-ed together. Absent or empty means fire on every
    * event of this name. */
   filter?: EventFilterCondition[];
+  /** Fire on the first matching event only, then disable the routine. */
+  once?: boolean;
 }
 
 /** A producer app's declaration that it can currently emit `eventType`.

@@ -1,9 +1,10 @@
 // Deferred agent self-wakeup. Session model: docs/concepts/sessions.md.
 //
-// The agent calls `defer` mid-turn with a delay (or an absolute time) and a
-// note-to-self. We schedule a one-off routine that, when it fires, injects the
-// note back into the *same* thread through the `inject_thread_message`
-// dispatcher — so the agent wakes in its own conversation with full context.
+// The agent calls `defer` mid-turn with a delay, an absolute time, or an event
+// to wait for, plus a note-to-self. We create a one-off routine that, when it
+// fires, resumes the *same* session through `resume_session` — so the agent
+// wakes in its own conversation with full context. A time wakeup is a dated
+// schedule routine; an event wakeup is a `once` event-bus routine.
 //
 // This module is the pure logic half: parse the input, compute the absolute
 // fire instant, and shape the `create_routine` args. The side effects
@@ -40,26 +41,69 @@ export interface DeferDeps {
   now: number;
 }
 
-export interface DeferResult {
-  ok: true;
-  /** The name stored on the one-off routine (shown on the Routines page). */
-  name: string;
-  /** Absolute UTC instant the wakeup is scheduled for (ISO 8601). */
-  deferredUntil: string;
-  routineId?: string;
-}
+export type DeferResult =
+  | {
+      ok: true;
+      /** The name stored on the one-off routine (shown on the Routines page). */
+      name: string;
+      /** Absolute UTC instant the wakeup is scheduled for (ISO 8601). */
+      deferredUntil: string;
+      routineId?: string;
+    }
+  | {
+      ok: true;
+      name: string;
+      /** The event type the wakeup waits for. */
+      waitingFor: string;
+      routineId?: string;
+    };
 
-type ParsedDefer = { ok: true; name: string; fireAtMs: number } | { ok: false; error: string };
+type ParsedDefer =
+  | { ok: true; kind: "time"; name: string; fireAtMs: number }
+  | { ok: true; kind: "event"; name: string; event: DeferEvent }
+  | { ok: false; error: string };
+
+// Strict: an unknown key (say, a field nested one level off) is an error the
+// model sees and fixes, not a field silently dropped.
+const deferEventSchema = z.strictObject({
+  eventName: z
+    .string()
+    .transform((value) => value.trim())
+    .refine((value) => value.length > 0, { message: "defer.event.eventName is required" }),
+  sourcePattern: z
+    .string()
+    .transform((value) => value.trim())
+    .refine((value) => value.length > 0, {
+      message: "defer.event.sourcePattern must be non-empty when provided",
+    })
+    .optional(),
+  filter: z
+    .array(
+      z.object({
+        field: z
+          .string()
+          .transform((value) => value.trim())
+          .refine((value) => value.length > 0 && value.split(".").every((seg) => seg.trim()), {
+            message: "defer.event.filter field must be a dot-path with no empty segments",
+          }),
+        equals: z.string(),
+      }),
+    )
+    .optional(),
+});
+
+type DeferEvent = z.infer<typeof deferEventSchema>;
 
 /** The `defer` tool input. The MCP boundary already validates the model's call
  * against the advertised JSON schema (see `mcp-facade.ts` → `toMcpToolShape`),
  * so field types are guaranteed by the time we get here; this schema is the
- * runtime source of truth that also encodes the one constraint a JSON
- * schema can't express — `afterMinutes` and `at` are mutually exclusive and one
- * is required. The future-time check stays in code (a schema can't see "now").
- * `name` is trimmed-then-required so a whitespace-only name can't slip through. */
+ * runtime source of truth that also encodes the constraints a JSON schema
+ * can't express — exactly one of `afterMinutes`, `at` or `event` is required.
+ * The future-time check stays in code (a schema can't see "now"). `name` is
+ * trimmed-then-required so a whitespace-only name can't slip through. Strict,
+ * like the event object: an unknown key is rejected, not dropped. */
 export const deferInputSchema = z
-  .object({
+  .strictObject({
     name: z
       .string()
       .transform((value) => value.trim())
@@ -68,23 +112,36 @@ export const deferInputSchema = z
       }),
     afterMinutes: z.number().int().min(1).optional(),
     at: z.string().optional(),
+    event: deferEventSchema.optional(),
   })
-  .refine((value) => (value.afterMinutes != null) !== (value.at != null), {
-    message: 'defer needs exactly one of "afterMinutes" or "at" (an ISO 8601 instant)',
-  });
+  .refine(
+    (value) => [value.afterMinutes, value.at, value.event].filter((v) => v != null).length === 1,
+    {
+      message:
+        'defer needs exactly one of "afterMinutes", "at" (an ISO 8601 instant) or "event" (an event to wait for)',
+    },
+  );
 
 export type DeferInput = z.infer<typeof deferInputSchema>;
 
-/** Validate the tool input and resolve it to one absolute fire instant. The
- * instant is ceiled to the next whole minute (the schedule trigger is
- * minute-resolution) and must land in the future. Exported for
- * unit tests. */
+/** Validate the tool input. A time wakeup resolves to one absolute fire
+ * instant, ceiled to the next whole minute (the schedule trigger is
+ * minute-resolution) and in the future. An event wakeup resolves to the event
+ * match. Exported for unit tests. */
 export function parseDeferInput(input: unknown, now: number): ParsedDefer {
   const parsed = deferInputSchema.safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "invalid defer input" };
+    const issue = parsed.error.issues[0];
+    if (!issue) return { ok: false, error: "invalid defer input" };
+    // Name where a structural error sits ("defer.event: Unrecognized key …");
+    // the custom messages already start with their path.
+    const where = ["defer", ...issue.path.map(String)].join(".");
+    const error = issue.message.startsWith("defer") ? issue.message : `${where}: ${issue.message}`;
+    return { ok: false, error };
   }
-  const { name, afterMinutes, at } = parsed.data;
+  const { name, afterMinutes, at, event } = parsed.data;
+
+  if (event) return { ok: true, kind: "event", name, event };
 
   let rawMs: number;
   if (afterMinutes != null) {
@@ -105,13 +162,16 @@ export function parseDeferInput(input: unknown, now: number): ParsedDefer {
     return { ok: false, error: "defer fires in the past — pick a time at least a minute from now" };
   }
 
-  return { ok: true, name, fireAtMs };
+  return { ok: true, kind: "time", name, fireAtMs };
 }
 
 /** Build the args `resume_session` fires with: which runtime session to continue,
  * where its reply is delivered, and the prompt the woken turn receives.
  * No trust fields — a continuation skips the inbound trust pipeline. */
-function buildResumeArgs(name: string, context: DeferContext): Record<string, unknown> {
+function buildResumeArgs(
+  context: DeferContext,
+  prompt: Record<string, unknown>,
+): Record<string, unknown> {
   const channelContext = context.channelContext;
   return {
     sessionId: context.sessionId,
@@ -119,10 +179,7 @@ function buildResumeArgs(name: string, context: DeferContext): Record<string, un
     threadId: channelContext?.threadId,
     channelUserId: channelContext?.channelUserId,
     agentName: context.agentName ?? "main",
-    // The woken agent resumes the same session with full context, so the wakeup
-    // needs no instructions — just a simple time's-up nudge naming what it was
-    // watching. The ⏰ prefix marks it in the thread.
-    text: `⏰ Time's up: ${name}`,
+    ...prompt,
   };
 }
 
@@ -139,6 +196,33 @@ export async function runDefer(input: DeferInput, deps: DeferDeps): Promise<Defe
   const channelContext = deps.context.channelContext;
   if (!channelContext?.channel || !channelContext?.threadId) {
     throw new Error("defer is only available inside an active conversation thread");
+  }
+
+  if (parsed.kind === "event") {
+    const { eventName, sourcePattern, filter } = parsed.event;
+    const data = await deps.createRoutine({
+      name: parsed.name,
+      trigger: {
+        type: "event-bus" as const,
+        eventName,
+        ...(sourcePattern ? { sourcePattern } : {}),
+        ...(filter?.length ? { filter } : {}),
+        once: true,
+      },
+      actionName: RESUME_SESSION_ACTION,
+      // `resume_session` appends a summary of the event payload to `text`.
+      args: buildResumeArgs(deps.context, {
+        text: `📨 Event arrived: ${parsed.name}`,
+        attachEvent: true,
+      }),
+    });
+    const routineId = (data as { routineId?: string } | null | undefined)?.routineId;
+    return {
+      ok: true,
+      name: parsed.name,
+      waitingFor: eventName,
+      ...(routineId ? { routineId } : {}),
+    };
   }
 
   const fireAt = new Date(parsed.fireAtMs);
@@ -158,7 +242,10 @@ export async function runDefer(input: DeferInput, deps: DeferDeps): Promise<Defe
       localTime: iso.slice(11, 16),
     },
     actionName: RESUME_SESSION_ACTION,
-    args: buildResumeArgs(parsed.name, deps.context),
+    // The woken agent resumes the same session with full context, so the wakeup
+    // needs no instructions — just a simple time's-up nudge naming what it was
+    // watching. The ⏰ prefix marks it in the thread.
+    args: buildResumeArgs(deps.context, { text: `⏰ Time's up: ${parsed.name}` }),
   };
 
   const data = await deps.createRoutine(createArgs);

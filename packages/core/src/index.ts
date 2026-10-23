@@ -746,7 +746,7 @@ async function main() {
   // In-memory event bus (data plane): apps publish into it via the
   // `events.publish` RPC; the event-bus trigger provider reads from it.
   const eventBus = new EventBus();
-  routineEngine.registerProvider("event-bus", new EventBusTriggerProvider(eventBus));
+  routineEngine.registerProvider("event-bus", new EventBusTriggerProvider(eventBus, routinesRepo));
 
   // Manual triggers never fire on their own — they only run via runNow(). The
   // provider exists so the trigger type has a registered home (passes the API's
