@@ -9,9 +9,8 @@ cases:
           In the yellow pending-approvals banner above the status filters, click the action on
           its right ("Review" or "查看") once to show the pending requests, then stop.
       - aiAssert: >-
-          The "Pending" status filter chip is selected (orange), and the feed lists three
-          pending connection requests from "Alex" for the "Telegram",
-          "Discord", and "Feishu" channels, with Approve and Reject actions.
+          The "Pending" status filter chip is selected (orange), and the feed lists the pending
+          "send_message" approval requested by "main", with Approve and Reject actions.
       - aiAct: >-
           Click the "All" status filter chip above the Activity feed to restore the mixed feed.
           Do not click any sidebar item, and stop after selecting the filter.

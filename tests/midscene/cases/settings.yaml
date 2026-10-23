@@ -28,10 +28,10 @@ cases:
       - app.open:
           path: /settings/channels
       - aiAct: >-
-          Click the visible "Rome / can you see active chats?" conversation card once, then stop.
+          Click the visible "Rome / can you see active chats?" chat card once, then stop.
       - aiAssert: >-
           The card's configuration sections are shown, including an "Activation" section ("Rome in
-          this conversation"), a "Respond" policy set to "Only when mentioned", and "Reply
+          this chat"), a "Respond" policy set to "Only when mentioned", and "Reply
           placement" options ("Native thread", "Inline").
   - name: SET-04 Open advanced developer settings
     tags:
