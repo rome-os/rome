@@ -720,3 +720,8 @@ html.is-electron [data-app-titlebar] {
 [data-timeline-landed] {
   background: color-mix(in srgb, var(--primary) 6%, transparent);
 }
+
+[data-chat-pending-card]:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--ring) 50%, transparent);
+  outline-offset: -1px;
+}

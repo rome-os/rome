@@ -60,6 +60,8 @@
   "timeline": {
     "label": "提问时间线"
   },
+  "jumpToWaitingCard": "待你处理：跳转到待处理卡片",
+  "waitingCard": "待你处理",
   "jumpToLatest": "回到最新消息",
   "roles": {
     "agent": "助手"

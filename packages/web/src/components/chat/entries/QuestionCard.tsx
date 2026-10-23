@@ -164,7 +164,11 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
   }
 
   return (
-    <div className="mb-4 min-w-0 max-w-full rounded-12 border border-border bg-surface">
+    <div
+      tabIndex={-1}
+      data-chat-pending-card={!locked ? "" : undefined}
+      className="mb-4 min-w-0 max-w-full rounded-12 border border-border bg-surface"
+    >
       {/* A fieldset defaults to min-width: min-content, which can widen the card. */}
       <fieldset disabled={locked} className="min-w-0 p-4">
         <FieldGroup className="space-y-5">

@@ -226,6 +226,9 @@ describe("MessageList inline-card state across streaming→settled", () => {
 
     // Type into the card mid-stream.
     const input = screen.getByPlaceholderText("Type your answer…") as HTMLTextAreaElement;
+    expect(input.closest<HTMLElement>("[data-chat-card-message]")?.dataset.chatCardMessage).toBe(
+      "a-card",
+    );
     fireEvent.change(input, { target: { value: "Alice" } });
     expect(input.value).toBe("Alice");
 

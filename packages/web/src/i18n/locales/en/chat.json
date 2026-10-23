@@ -60,6 +60,8 @@
   "timeline": {
     "label": "Question timeline"
   },
+  "jumpToWaitingCard": "Needs you: jump to waiting card",
+  "waitingCard": "Needs you",
   "jumpToLatest": "Jump to the latest message",
   "roles": {
     "agent": "Assistant"

@@ -49,6 +49,7 @@ describe("AiToolsCard", () => {
     render(<AiToolsCard toolUseId="t-credits" onSubmit={onSubmit} />);
 
     const proceed = await screen.findByRole("button", { name: "Continue with credits" });
+    expect(proceed.closest("[data-chat-pending-card]")).not.toBeNull();
     expect(screen.getByText("Start with free Rome credits")).toBeTruthy();
     expect(await screen.findByText("Rome credits")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
@@ -63,6 +64,7 @@ describe("AiToolsCard", () => {
       "Continued with Rome credits",
     );
     expect(screen.getByText("Using Rome credits")).toBeTruthy();
+    expect(document.querySelector("[data-chat-pending-card]")).toBeNull();
     expect(screen.queryByRole("button", { name: "Continue with credits" })).toBeNull();
   });
 

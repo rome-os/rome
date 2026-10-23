@@ -50,6 +50,7 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
   buildRows,
+  currentReplyMessages,
   isAwaitingGuardian,
   isLastTurnFailed,
   type AgentIdentity,
@@ -66,6 +67,7 @@ import type {
 } from "@rome/api-types/trace-segments";
 import { useSmoothText } from "@/hooks/use-smooth-text";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
+import { ChatPendingCardJump } from "@/components/chat/ChatPendingCardJump";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
@@ -437,6 +439,8 @@ export function Chat({
     scrollToBottom,
   } = useStickToBottom({ initialStuck: Boolean(sessionId) });
 
+  const [floorEl, setFloorEl] = useState<HTMLDivElement | null>(null);
+
   // The timeline rail measures against these two nodes, so they are held as
   // state rather than refs: its effect has to re-run once they mount. Both
   // callbacks forward to the stick-to-bottom hook, which owns them first. Its
@@ -603,6 +607,10 @@ export function Chat({
   const isActiveSessionStreaming = !!floorSessionStream;
   const awaitingGuardian = useMemo(
     () => isAwaitingGuardian(view, runningTurnId),
+    [view, runningTurnId],
+  );
+  const currentReplyMessageIds = useMemo(
+    () => new Set(currentReplyMessages(view, runningTurnId).map((message) => message.id)),
     [view, runningTurnId],
   );
   const lastTurnFailed = useMemo(() => isLastTurnFailed(view), [view]);
@@ -2041,6 +2049,7 @@ export function Chat({
                 or the main agent). In share mode it's swapped for the ShareBar,
                 which configures + mints the link for the turns selected above. */}
               <div
+                ref={setFloorEl}
                 className={cn(
                   "pointer-events-none sticky bottom-0 z-10 px-3 md:px-6",
                   // Presentation mode gives the draft's bottom gap 5x its normal
@@ -2069,23 +2078,42 @@ export function Chat({
                     the END of the transition, so the faded-out button stops taking
                     clicks and leaves the tab order instead of lurking invisibly
                     over the transcript. */}
-                <IconButton
-                  size="md"
-                  label={t("jumpToLatest")}
-                  icon={<ArrowDown />}
-                  // IconButton mirrors its label into `title`, which the browser
-                  // renders as a native tooltip. The aria-label already names the
-                  // control, and a lone arrow above the composer needs no gloss.
-                  title={undefined}
-                  onClick={() => scrollToBottom("auto")}
-                  className={cn(
-                    // `touch-target` because this control, unlike the timeline
-                    // rail, has no width gate: it is reachable on a phone, where
-                    // the 36px step is under the 44px floor.
-                    "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
-                    !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
-                  )}
-                />
+                <div className="pointer-events-none absolute bottom-full left-1/2 mb-3 -translate-x-1/2">
+                  <div
+                    className={cn(
+                      "absolute bottom-0",
+                      mainSessionId && !isAtBottom
+                        ? "right-full mr-2"
+                        : "left-1/2 -translate-x-1/2",
+                    )}
+                  >
+                    {mainSessionId && (
+                      <ChatPendingCardJump
+                        scroller={scrollerEl}
+                        content={contentEl}
+                        floor={floorEl}
+                        currentReplyMessageIds={currentReplyMessageIds}
+                      />
+                    )}
+                  </div>
+                  <IconButton
+                    size="md"
+                    label={t("jumpToLatest")}
+                    icon={<ArrowDown />}
+                    // IconButton mirrors its label into `title`, which the browser
+                    // renders as a native tooltip. The aria-label already names the
+                    // control, and a lone arrow above the composer needs no gloss.
+                    title={undefined}
+                    onClick={() => scrollToBottom("auto")}
+                    className={cn(
+                      // `touch-target` because this control, unlike the timeline
+                      // rail, has no width gate: it is reachable on a phone, where
+                      // the 36px step is under the 44px floor.
+                      "touch-target pointer-events-auto rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
+                      !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
+                    )}
+                  />
+                </div>
                 <div className="pointer-events-auto mx-auto max-w-5xl">
                   {shareMode && mainSessionId ? (
                     <ShareBar

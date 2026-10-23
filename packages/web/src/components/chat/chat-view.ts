@@ -259,6 +259,24 @@ export function buildChatView(
   };
 }
 
+/** Assistant messages in the floor's latest turn, after its last guardian input.
+ * An unpersisted running turn supersedes the saved reply as well. */
+export function currentReplyMessages(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId">,
+  runningTurnId: string | null = null,
+): ChatMessage[] {
+  const floor = view.displayMessages.filter((m) => m.sessionId === view.floorSessionId);
+  const latestTurnId = floor.at(-1)?.turnId;
+  if (runningTurnId !== null && latestTurnId !== runningTurnId) return [];
+  const reply: ChatMessage[] = [];
+  for (let i = floor.length - 1; i >= 0; i--) {
+    const msg = floor[i];
+    if (msg.turnId !== latestTurnId || msg.role === "user") break;
+    if (msg.role === "assistant") reply.push(msg);
+  }
+  return reply.reverse();
+}
+
 // Whether the floor session is parked on a card the guardian has not answered
 // yet (an ask_question card, a connect-AI card, an app component). Only the
 // floor session's latest turn counts, meaning every assistant message that
@@ -275,22 +293,13 @@ export function isAwaitingGuardian(
   view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
   runningTurnId: string | null = null,
 ): boolean {
-  const { displayMessages, floorSessionId, interactionResults } = view;
-  const floor = displayMessages.filter((m) => m.sessionId === floorSessionId);
-  const latestTurnId = floor.at(-1)?.turnId;
-  if (runningTurnId !== null && latestTurnId !== runningTurnId) return false;
-  for (let i = floor.length - 1; i >= 0; i--) {
-    const msg = floor[i];
-    if (msg.turnId !== latestTurnId || msg.role === "user") return false;
-    if (msg.role !== "assistant") continue;
-    const waiting = parseMessageEntries(msg).some(
+  return currentReplyMessages(view, runningTurnId).some((msg) =>
+    parseMessageEntries(msg).some(
       (b) =>
         b.type === "pending_interaction" &&
-        !interactionResults.has(interactionResultKey(floorSessionId, b.toolUseId)),
-    );
-    if (waiting) return true;
-  }
-  return false;
+        !view.interactionResults.has(interactionResultKey(msg.sessionId, b.toolUseId)),
+    ),
+  );
 }
 
 // Whether the floor session's latest finished turn ended with an error: the

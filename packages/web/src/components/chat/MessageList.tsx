@@ -311,7 +311,7 @@ const RowView = memo(function RowView({
         const blocks = parseMessageEntries(m);
         if (m.id !== recapMessageId) {
           return (
-            <div key={m.id} className="flex flex-col gap-1">
+            <div key={m.id} data-chat-card-message={m.id} className="flex flex-col gap-1">
               {renderFlatEntries(blocks, {
                 ...actions,
                 sessionId: m.sessionId,
@@ -325,7 +325,7 @@ const RowView = memo(function RowView({
         const recapIndex = blocks.findIndex((block) => block.type === "turn_recap");
         const recap = blocks[recapIndex];
         return (
-          <div key={m.id} className="flex flex-col gap-1">
+          <div key={m.id} data-chat-card-message={m.id} className="flex flex-col gap-1">
             {renderFlatEntries(blocks.slice(0, recapIndex), {
               ...actions,
               sessionId: m.sessionId,

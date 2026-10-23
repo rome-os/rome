@@ -124,7 +124,11 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
   const offerCredits = !resolved && probe === "absent" && hasUsableRomeCredits(credits);
 
   return (
-    <div className="mb-4 rounded-12 border border-border bg-surface">
+    <div
+      tabIndex={-1}
+      data-chat-pending-card={!resolved && probe === "absent" ? "" : undefined}
+      className="mb-4 rounded-12 border border-border bg-surface"
+    >
       <div className="p-4">
         <p className="text-ui text-foreground">
           {connected
