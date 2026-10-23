@@ -186,31 +186,31 @@ describe("SettingsPage Advanced autosave", () => {
     const style = await screen.findByRole("radiogroup", { name: "Feishu streaming style" });
     const messages = within(style).getByRole("radio", { name: "Messages" });
     const cards = within(style).getByRole("radio", { name: "Cards" });
-    expect(messages.getAttribute("aria-checked")).toBe("true");
-    expect(cards.hasAttribute("disabled")).toBe(true);
+    expect(cards.getAttribute("aria-checked")).toBe("true");
+    expect(messages.hasAttribute("disabled")).toBe(true);
 
     await user.click(screen.getByRole("switch", { name: "Stream replies as they are written" }));
-    await waitFor(() => expect(cards.hasAttribute("disabled")).toBe(false));
-    await user.click(cards);
+    await waitFor(() => expect(messages.hasAttribute("disabled")).toBe(false));
+    await user.click(messages);
 
     await waitFor(() =>
       expect(calls).toContainEqual({
         url: "/api/settings",
         method: "PUT",
-        body: { feishuReplyStreamingStyle: "card" },
+        body: { feishuReplyStreamingStyle: "message" },
       }),
     );
-    expect(cards.getAttribute("aria-checked")).toBe("true");
+    expect(messages.getAttribute("aria-checked")).toBe("true");
   });
 
   it("shows the Feishu streaming style the instance has", async () => {
-    mockSettingsBackend({ enableReplyStreaming: true, feishuReplyStreamingStyle: "card" });
+    mockSettingsBackend({ enableReplyStreaming: true, feishuReplyStreamingStyle: "message" });
     renderAdvancedSettings();
 
     const style = await screen.findByRole("radiogroup", { name: "Feishu streaming style" });
-    expect(within(style).getByRole("radio", { name: "Cards" }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
+    expect(
+      within(style).getByRole("radio", { name: "Messages" }).getAttribute("aria-checked"),
+    ).toBe("true");
   });
 
   it("saves trimmed, per-provider tier model mappings", async () => {

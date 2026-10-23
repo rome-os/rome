@@ -34,8 +34,7 @@ export function replyStreamingSwitch(
 
 /**
  * The guardian setting that chooses how a reply streams to Feishu, beside the
- * reply streaming switch, while the two styles are compared. Any value but
- * `card` streams as messages.
+ * reply streaming switch. Any value but `message` streams as cards.
  */
 export const FEISHU_STREAMING_STYLE_SETTING_KEY = "feishuReplyStreamingStyle";
 
@@ -47,20 +46,20 @@ export const FEISHU_STREAMING_STYLE_SETTING_KEY = "feishuReplyStreamingStyle";
 export type FeishuStreamingStyle = "message" | "card";
 
 /** The Feishu streaming style, read for each message a reply creates. A
- *  setting that cannot be read counts as `message`. */
+ *  setting that cannot be read counts as `card`. */
 export function feishuStreamingStyle(
   settings: Pick<SettingsRepository, "get">,
 ): () => Promise<FeishuStreamingStyle> {
   return async () => {
     try {
-      return (await settings.get(FEISHU_STREAMING_STYLE_SETTING_KEY)) === "card"
-        ? "card"
-        : "message";
+      return (await settings.get(FEISHU_STREAMING_STYLE_SETTING_KEY)) === "message"
+        ? "message"
+        : "card";
     } catch (error) {
-      log.warn("Feishu streaming style unreadable, streaming as messages", {
+      log.warn("Feishu streaming style unreadable, streaming as cards", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return "message";
+      return "card";
     }
   };
 }

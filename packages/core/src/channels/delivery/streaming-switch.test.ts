@@ -49,18 +49,18 @@ describe("feishuStreamingStyle", () => {
         key === FEISHU_STREAMING_STYLE_SETTING_KEY ? (value as T) : null,
     });
 
-  it("streams as cards only when the setting says card", async () => {
-    expect(await styleWith("card")()).toBe("card");
-    for (const value of [null, "message", "Card", true, {}])
-      expect(await styleWith(value)()).toBe("message");
+  it("streams as messages only when the setting says message, and as cards otherwise", async () => {
+    expect(await styleWith("message")()).toBe("message");
+    for (const value of [null, "card", "Message", true, {}])
+      expect(await styleWith(value)()).toBe("card");
   });
 
-  it("streams as messages when the setting cannot be read", async () => {
+  it("streams as cards when the setting cannot be read", async () => {
     const style = feishuStreamingStyle({
       get: async () => {
         throw new Error("database is locked");
       },
     });
-    expect(await style()).toBe("message");
+    expect(await style()).toBe("card");
   });
 });

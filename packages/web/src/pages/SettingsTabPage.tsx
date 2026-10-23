@@ -1550,9 +1550,9 @@ function ImpersonationAdvancedSection({
 
 /** Features still being tried out, each off until a guardian switches it on.
  *  Reply streaming is the first: with it off, Rome sends each reply whole. The
- *  setting is `enableReplyStreaming`, read by the host on every reply. While
- *  Feishu's two streaming styles are compared, `feishuReplyStreamingStyle`
- *  chooses one, read for each message a reply creates. */
+ *  setting is `enableReplyStreaming`, read by the host on every reply.
+ *  `feishuReplyStreamingStyle` chooses how a reply streams to Feishu, cards
+ *  unless it says messages, read for each message a reply creates. */
 function ExperimentalFeaturesSection({
   settings,
   onSave,
@@ -1565,7 +1565,7 @@ function ExperimentalFeaturesSection({
   const { t } = useTranslation("settings");
   const [replyStreaming, setReplyStreaming] = useState(settings.enableReplyStreaming ?? false);
   const [feishuStyle, setFeishuStyle] = useState<FeishuStreamingStyle>(
-    settings.feishuReplyStreamingStyle === "card" ? "card" : "message",
+    settings.feishuReplyStreamingStyle === "message" ? "message" : "card",
   );
 
   function toggleReplyStreaming(next: boolean) {
