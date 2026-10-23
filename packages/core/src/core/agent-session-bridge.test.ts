@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChatId, ChatRepository, StreamAgentEvent } from "@rome-os/app-runtime";
+import type { ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import type {
   AgentSession,
@@ -586,13 +586,6 @@ describe("AgentSessionBridge reply streaming", () => {
     const recording = platform();
     const { written, edits } = recording;
     const transport = own ?? recording.transport;
-    // The host's adapter over the repository.
-    const chats =
-      repo &&
-      ({
-        ensureChannelChat: (input) => repo.ensureChannelChat(input),
-        recordOutboundMessage: (input) => repo.recordOutboundConversationMessage(input),
-      } satisfies Pick<ChatRepository, "ensureChannelChat" | "recordOutboundMessage">);
     const session = {
       key: { agentName: "main", channelThreadKey: "telegram:chat-1" },
       sessionId: "session-1",
@@ -613,7 +606,7 @@ describe("AgentSessionBridge reply streaming", () => {
             channel === "telegram" ? { transport, pacer: new Pacer(budget, systemClock) } : null,
           clock: systemClock,
           policy,
-          ...(chats ? { chats } : {}),
+          ...(repo ? { chats: repo } : {}),
         });
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
@@ -910,6 +903,23 @@ describe("AgentSessionBridge reply streaming", () => {
       const shown = JSON.stringify([{ type: "text", content: "Looking.\n\nhi there" }]);
       expect(await answers()).toEqual([shown]);
       const { repliedTo } = await repo.loadConversationContext("conversation-1", "m2");
+      expect(repliedTo?.content).toBe(shown);
+    } finally {
+      close();
+    }
+  });
+
+  it("finds the recorded answer from a quote of any message the reply wrote", async () => {
+    const { repo, close } = await recorded();
+    try {
+      const { turnEnd } = run(turnEvents({ type: "text", content: "Looking." }, ...answer), {
+        streamReply: true,
+        repo,
+      });
+
+      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+      const shown = JSON.stringify([{ type: "text", content: "Looking.\n\nhi there" }]);
+      const { repliedTo } = await repo.loadConversationContext("conversation-1", "m1");
       expect(repliedTo?.content).toBe(shown);
     } finally {
       close();

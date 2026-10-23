@@ -729,6 +729,21 @@ export const romeAgentMessages = sqliteTable(
   ],
 );
 
+// The platform messages a message row stands for besides its own
+// platform_message_id. A reply the platform shows as several messages is one
+// row, and a quote of any of them reaches it. Not a FK, as with the trace
+// blocks below: session-scoped deletes remove these rows explicitly.
+export const romeAgentMessagePlatformIds = sqliteTable(
+  "rome_agent_message_platform_ids",
+  {
+    sessionId: text("session_id").notNull(),
+    platformMessageId: text("platform_message_id").notNull(),
+    // The rome_agent_messages row the platform message belongs to.
+    messageId: text("message_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.platformMessageId] })],
+);
+
 // Append-only storage for trace content, avoiding the O(N²) cost of storing
 // the whole trace as one JSON array on the role='trace' rome_agent_messages
 // row and re-serializing it after every agent event — that multi-megabyte

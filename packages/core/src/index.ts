@@ -420,7 +420,7 @@ async function main() {
     streaming: replyStreamingOn,
     replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
     clock: systemClock,
-    ...(appRuntimeRepositories.chats ? { chats: appRuntimeRepositories.chats } : {}),
+    chats: webchatRepo,
   });
   const channelsService = createChannelsService({
     channels: () => builtChannels,

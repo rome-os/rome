@@ -21,6 +21,7 @@ import {
   sharedChats,
   webchatProjects,
   romeSessions,
+  romeAgentMessagePlatformIds,
   romeAgentMessages,
   romeAgentTraceBlocks,
   webchatTurnFeedback,
@@ -859,6 +860,9 @@ export class WebChatRepository {
       for (const chunk of chunkArray(sessionIds, SESSION_DELETE_CHUNK_SIZE)) {
         tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, chunk)).run();
         tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, chunk)).run();
+        tx.delete(romeAgentMessagePlatformIds)
+          .where(inArray(romeAgentMessagePlatformIds.sessionId, chunk))
+          .run();
         tx.delete(webchatTurnFeedback).where(inArray(webchatTurnFeedback.sessionId, chunk)).run();
         tx.delete(webchatWorkspaceLayouts)
           .where(inArray(webchatWorkspaceLayouts.sessionId, chunk))
@@ -1125,6 +1129,9 @@ export class WebChatRepository {
     sessionId: string;
     content: string;
     platformMessageId?: string;
+    /** The platform's other messages the row stands for, when it showed the
+     *  content as several. A quote of any of them reaches the row. */
+    otherPlatformMessageIds?: string[];
     senderId?: string;
     senderName?: string;
     replyToPlatformMessageId?: string;
@@ -1156,6 +1163,7 @@ export class WebChatRepository {
             replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
           })
           .where(eq(romeAgentMessages.id, delivered[0].id));
+        await this.keepPlatformMessageIds(input, delivered[0].id);
         return;
       }
     }
@@ -1183,17 +1191,19 @@ export class WebChatRepository {
             replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
           })
           .where(eq(romeAgentMessages.id, existing[0].id));
+        await this.keepPlatformMessageIds(input, existing[0].id);
         return;
       }
     }
 
     const createdAt = new Date();
+    const id = input.platformMessageId
+      ? conversationPlatformMessageId(input.sessionId, input.platformMessageId)
+      : randomUUID();
     await this.db.transaction((tx) => {
       tx.insert(romeAgentMessages)
         .values({
-          id: input.platformMessageId
-            ? conversationPlatformMessageId(input.sessionId, input.platformMessageId)
-            : randomUUID(),
+          id,
           sessionId: input.sessionId,
           turnId: input.turnId ?? null,
           role: input.knownToProvider ? "assistant" : "notification",
@@ -1207,11 +1217,36 @@ export class WebChatRepository {
         })
         .onConflictDoNothing()
         .run();
+      const others = this.otherPlatformMessageIdRows(input, id);
+      if (others.length > 0)
+        tx.insert(romeAgentMessagePlatformIds).values(others).onConflictDoNothing().run();
       tx.update(romeSessions)
         .set(advanceSessionActivitySet(createdAt))
         .where(eq(romeSessions.id, input.sessionId))
         .run();
     });
+  }
+
+  private otherPlatformMessageIdRows(
+    input: { sessionId: string; platformMessageId?: string; otherPlatformMessageIds?: string[] },
+    messageId: string,
+  ) {
+    const ids = new Set(input.otherPlatformMessageIds);
+    if (input.platformMessageId) ids.delete(input.platformMessageId);
+    return [...ids].map((platformMessageId) => ({
+      sessionId: input.sessionId,
+      platformMessageId,
+      messageId,
+    }));
+  }
+
+  private async keepPlatformMessageIds(
+    input: { sessionId: string; platformMessageId?: string; otherPlatformMessageIds?: string[] },
+    messageId: string,
+  ): Promise<void> {
+    const others = this.otherPlatformMessageIdRows(input, messageId);
+    if (others.length === 0) return;
+    await this.db.insert(romeAgentMessagePlatformIds).values(others).onConflictDoNothing();
   }
 
   async loadConversationContext(
@@ -1255,14 +1290,15 @@ export class WebChatRepository {
             .from(romeAgentMessages)
             .where(inArray(romeAgentMessages.id, projectedNotificationIds))
             .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
-    const findMessageInSession = async (targetSessionId: string, platformMessageId: string) =>
-      await this.db
-        .select({
-          id: romeAgentMessages.id,
-          content: romeAgentMessages.content,
-          senderName: romeAgentMessages.senderName,
-          createdAt: romeAgentMessages.createdAt,
-        })
+    const contextColumns = {
+      id: romeAgentMessages.id,
+      content: romeAgentMessages.content,
+      senderName: romeAgentMessages.senderName,
+      createdAt: romeAgentMessages.createdAt,
+    };
+    const findMessageInSession = async (targetSessionId: string, platformMessageId: string) => {
+      const own = await this.db
+        .select(contextColumns)
         .from(romeAgentMessages)
         .where(
           and(
@@ -1271,6 +1307,23 @@ export class WebChatRepository {
           ),
         )
         .limit(1);
+      if (own[0]) return own;
+      // A reply shown as several messages keeps the others' ids beside its row.
+      return await this.db
+        .select(contextColumns)
+        .from(romeAgentMessagePlatformIds)
+        .innerJoin(
+          romeAgentMessages,
+          eq(romeAgentMessages.id, romeAgentMessagePlatformIds.messageId),
+        )
+        .where(
+          and(
+            eq(romeAgentMessagePlatformIds.sessionId, targetSessionId),
+            eq(romeAgentMessagePlatformIds.platformMessageId, platformMessageId),
+          ),
+        )
+        .limit(1);
+    };
     let parentSessionId: string | null | undefined;
     const loadParentSessionId = async (): Promise<string | null> => {
       if (parentSessionId !== undefined) return parentSessionId;
@@ -1435,6 +1488,9 @@ export class WebChatRepository {
     await this.db.transaction((tx) => {
       tx.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.sessionId, id)).run();
       tx.delete(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).run();
+      tx.delete(romeAgentMessagePlatformIds)
+        .where(eq(romeAgentMessagePlatformIds.sessionId, id))
+        .run();
       tx.delete(webchatTurnFeedback).where(eq(webchatTurnFeedback.sessionId, id)).run();
       tx.delete(webchatWorkspaceLayouts).where(eq(webchatWorkspaceLayouts.sessionId, id)).run();
       // Kill the chat's public shares too. They're keyed by sessionId and only
@@ -2848,6 +2904,9 @@ export class WebChatRepository {
     await this.db.transaction((tx) => {
       tx.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.sessionId, sessionId)).run();
       tx.delete(romeAgentMessages).where(eq(romeAgentMessages.sessionId, sessionId)).run();
+      tx.delete(romeAgentMessagePlatformIds)
+        .where(eq(romeAgentMessagePlatformIds.sessionId, sessionId))
+        .run();
     });
   }
 

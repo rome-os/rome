@@ -4,7 +4,12 @@ import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { ApprovalsRepository } from "./approvals.js";
 import { ChatSettingsRepository } from "../../chat-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
-import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema.js";
+import {
+  romeAgentMessagePlatformIds,
+  romeAgentMessages,
+  romeSessions,
+  romeAgentTraceBlocks,
+} from "../schema.js";
 import {
   INTERRUPTED_TURN_ERROR,
   WebChatRepository,
@@ -1049,6 +1054,77 @@ describe("WebChatRepository", () => {
         role: "notification",
         contextInjectedTurnId: null,
       });
+    });
+  });
+
+  describe("a reply written as several messages", () => {
+    const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
+
+    it("is found from a quote of any of its messages, in its conversation and in a child's", async () => {
+      const conversation = await repo.ensureChannelChat({
+        channel: "telegram",
+        threadId: "split-reply",
+        agentName: "main",
+      });
+      const content = textContent("first paragraph\n\nsecond paragraph");
+      await repo.recordOutboundConversationMessage({
+        sessionId: conversation.id,
+        content,
+        platformMessageId: "part-2",
+        otherPlatformMessageIds: ["part-1", "part-2", "part-3"],
+        senderName: "Rome",
+        turnId: "turn-split",
+        knownToProvider: true,
+      });
+
+      for (const quoted of ["part-1", "part-2", "part-3"]) {
+        const { repliedTo } = await repo.loadConversationContext(conversation.id, quoted);
+        expect(repliedTo?.content).toBe(content);
+      }
+      await expect(
+        repo.loadConversationContext(conversation.id, "elsewhere"),
+      ).resolves.toMatchObject({ repliedTo: null });
+      const child = await repo.ensureChannelChat({
+        channel: "telegram",
+        threadId: "split-reply-thread",
+        parentThreadId: "split-reply",
+        agentName: "main",
+      });
+      const { repliedTo } = await repo.loadConversationContext(child.id, "part-1");
+      expect(repliedTo?.content).toBe(content);
+    });
+
+    it("keeps the ids of a row recorded again, and drops them with its conversation", async () => {
+      const conversation = await repo.ensureChannelChat({
+        channel: "telegram",
+        threadId: "split-reply-again",
+        agentName: "main",
+      });
+      const content = textContent("answer");
+      const record = () =>
+        repo.recordOutboundConversationMessage({
+          sessionId: conversation.id,
+          content,
+          platformMessageId: "again-2",
+          otherPlatformMessageIds: ["again-1"],
+          senderName: "Rome",
+          turnId: "turn-again",
+          knownToProvider: true,
+        });
+      await record();
+      await record();
+      const ids = () =>
+        testDb.db
+          .select()
+          .from(romeAgentMessagePlatformIds)
+          .where(eq(romeAgentMessagePlatformIds.sessionId, conversation.id));
+      await expect(ids()).resolves.toHaveLength(1);
+
+      await repo.deleteMessagesBySession(conversation.id);
+      await expect(ids()).resolves.toEqual([]);
+      await record();
+      await repo.deleteSession(conversation.id);
+      await expect(ids()).resolves.toEqual([]);
     });
   });
 
