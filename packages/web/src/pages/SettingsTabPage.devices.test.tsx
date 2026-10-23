@@ -271,6 +271,93 @@ it("opens a device's page with the selected command from the URL", async () => {
   );
 });
 
+describe("managing a device from its page", () => {
+  function renderDevice(
+    device: Record<string, unknown>,
+    answer: (method: string, url: string) => Response = () => new Response(null, { status: 204 }),
+  ) {
+    const requests: { method: string; url: string; body: unknown }[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/devices")
+        return new Response(
+          JSON.stringify({
+            connection: "online",
+            checkedAt: new Date().toISOString(),
+            devices: [{ id: "one", name: "MacBook", platform: "macos", ...device }],
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      if (url.startsWith("/api/devices/one")) {
+        const method = init?.method ?? "GET";
+        requests.push({
+          method,
+          url,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return answer(method, url);
+      }
+      return new Response("{}", { status: 503 });
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/settings/devices/one"]}>
+          <Routes>
+            <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
+            <Route path="/settings/devices" element={<p>Devices list</p>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return requests;
+  }
+  const menu = async (item: string) => {
+    await screen.findByRole("heading", { name: "MacBook" });
+    await userEvent.click(await screen.findByRole("button", { name: "Device actions" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: item }));
+  };
+
+  it("sends a rename to the backend", async () => {
+    const requests = renderDevice({ status: "connected" });
+    await menu("Rename");
+    const field = await screen.findByRole("textbox", { name: "Name" });
+    await userEvent.clear(field);
+    await userEvent.type(field, "Studio");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(requests).toEqual([
+        { method: "PATCH", url: "/api/devices/one", body: { name: "Studio" } },
+      ]),
+    );
+  });
+
+  it("removes a connected device in one request and returns to the list", async () => {
+    const requests = renderDevice({ status: "connected" });
+    await menu("Remove");
+    const dialog = await screen.findByRole("dialog", { name: "Remove MacBook?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    expect(await screen.findByText("Devices list")).toBeTruthy();
+    expect(requests).toEqual([{ method: "DELETE", url: "/api/devices/one", body: undefined }]);
+  });
+
+  it("keeps the dialog open while the revocation is unconfirmed", async () => {
+    renderDevice(
+      { status: "revoked" },
+      () =>
+        new Response(JSON.stringify({ error: "revocation_pending" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    await menu("Remove");
+    const dialog = await screen.findByRole("dialog", { name: "Remove MacBook?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    expect(await within(dialog).findByText(/has not confirmed it yet/)).toBeTruthy();
+    expect(screen.queryByText("Devices list")).toBeNull();
+  });
+});
+
 describe("this device in the Mac app", () => {
   const online = () => ({
     connection: "online",
@@ -310,15 +397,19 @@ describe("this device in the Mac app", () => {
     delete window.rome;
   });
 
-  it("flags this computer's card under its Rome Cloud name and turns it off", async () => {
+  it("flags this computer's card under its Rome Cloud name and disconnects it", async () => {
     const { bridge } = installBridge();
     renderDevices(online);
-    const toggle = await screen.findByRole("switch", { name: "Let Rome use this device" });
+    const menu = await screen.findByRole("button", { name: "Device actions" });
     // One card: the flag sits on the account's device, not on a card of its own.
     expect(screen.getAllByText("This device")).toHaveLength(1);
     expect(screen.getAllByText("RayBook")).toHaveLength(1);
     expect(screen.getByText("macOS · Connected")).toBeTruthy();
-    await userEvent.click(toggle);
+    await userEvent.click(menu);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Disconnect" }));
+    await userEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Disconnect" }),
+    );
     expect(bridge.setEnabled).toHaveBeenCalledWith(false);
     expect(await screen.findByText("macOS · Turned off")).toBeTruthy();
   });

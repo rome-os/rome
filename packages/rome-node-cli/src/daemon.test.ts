@@ -38,6 +38,8 @@ async function fixture(
     validationFailures?: number;
     issuedToken?: string;
     listFailure?: boolean;
+    /** Status and error code Cloud answers to device management requests. */
+    manage?: { status: number; error?: string };
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-daemon-"));
@@ -54,6 +56,7 @@ async function fixture(
   let lists = 0;
   let exchanges = 0;
   let configs = 0;
+  const managed: { method?: string; url?: string; body: string }[] = [];
   const cloud = createServer((req, res) => {
     res.setHeader("content-type", "application/json");
     if (req.url === "/api/instance/gateway-credential") {
@@ -78,6 +81,17 @@ async function fixture(
         return;
       }
       res.end(JSON.stringify({ items: [{ id: "target" }] }));
+    } else if (req.url?.startsWith("/api/account/devices/")) {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        managed.push({ method: req.method, url: req.url, body });
+        const { status, error } = options.manage ?? { status: 204 };
+        if (status === 204) res.writeHead(204).end();
+        else res.writeHead(status).end(JSON.stringify({ error }));
+      });
     } else res.writeHead(404).end("{}");
   });
   await new Promise<void>((resolve) => cloud.listen(0, "127.0.0.1", resolve));
@@ -130,6 +144,7 @@ async function fixture(
     cloudUrl,
     cli,
     lists: () => lists,
+    managed,
     exchanges: () => exchanges,
     configs: () => configs,
   };
@@ -146,6 +161,52 @@ describe("standalone CLI daemon processes", () => {
       ok: false,
       error: { code: "gateway_unavailable" },
     });
+  });
+  it("renames and removes a device through Cloud", async () => {
+    const f = await fixture();
+    await writePrivateJson(join(f.root, "caller.json"), { cloudUrl: f.cloudUrl, token: f.token });
+    const id = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    const ok = { type: "response", ok: true, result: {} };
+    const renamed = await f.cli(["device", "rename", id, "Build server"]);
+    expect(renamed.code).toBe(0);
+    expect(JSON.parse(renamed.stdout)).toEqual(ok);
+    const removed = await f.cli(["device", "remove", id]);
+    expect(removed.code).toBe(0);
+    expect(JSON.parse(removed.stdout)).toEqual(ok);
+    expect(f.managed).toEqual([
+      {
+        method: "PATCH",
+        url: `/api/account/devices/${id}`,
+        body: JSON.stringify({ name: "Build server" }),
+      },
+      { method: "DELETE", url: `/api/account/devices/${id}`, body: "" },
+    ]);
+  });
+  it.each([
+    [503, "revocation_pending"],
+    [404, "device_not_found"],
+    [400, "invalid_device_name"],
+  ])("reports Cloud's %i %s as a structured failure", async (status, error) => {
+    const f = await fixture({ manage: { status, error } });
+    await writePrivateJson(join(f.root, "caller.json"), { cloudUrl: f.cloudUrl, token: f.token });
+    const id = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    const result = await f.cli(
+      error === "invalid_device_name" ? ["device", "rename", id, " "] : ["device", "remove", id],
+    );
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      type: "response",
+      ok: false,
+      error: { code: error },
+    });
+  });
+  it("refuses a device ID that is not a UUID without calling Cloud", async () => {
+    const f = await fixture();
+    await writePrivateJson(join(f.root, "caller.json"), { cloudUrl: f.cloudUrl, token: f.token });
+    const result = await f.cli(["device", "remove", "target"]);
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout)).toMatchObject({ error: { code: "device_not_found" } });
+    expect(f.managed).toEqual([]);
   });
   it("authorizes a server from its environment, saves only the communication token, and reuses it", async () => {
     const f = await fixture();

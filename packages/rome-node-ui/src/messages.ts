@@ -38,9 +38,32 @@ export interface NodeUiMessages {
   back: string;
   thisDevice: {
     label: string;
-    toggle: string;
     connecting: string;
     disabled: string;
+  };
+  manage: {
+    menu: string;
+    rename: string;
+    renameTitle: string;
+    nameLabel: string;
+    nameHint: string;
+    save: string;
+    cancel: string;
+    connect: string;
+    disconnect: string;
+    disconnectTitle: string;
+    disconnectSelf: string;
+    remove: string;
+    removeTitle: string;
+    /** The remove dialog's first line, then one point per consequence. */
+    removeLead: string;
+    removeActive: string[];
+    removeRevoked: string[];
+    removeOnCloud: string;
+    errors: Record<
+      "device_not_found" | "invalid_device_name" | "revocation_pending" | "unavailable",
+      string
+    >;
   };
   detail: {
     commandsInDay: Plural;
@@ -132,9 +155,37 @@ const en: NodeUiMessages = {
   back: "Devices",
   thisDevice: {
     label: "This device",
-    toggle: "Let Rome use this device",
     connecting: "Connecting",
     disabled: "Turned off",
+  },
+  manage: {
+    menu: "Device actions",
+    rename: "Rename",
+    renameTitle: "Rename device",
+    nameLabel: "Name",
+    nameHint: "Up to 80 characters. Only the name changes; the device keeps its ID.",
+    save: "Save",
+    cancel: "Cancel",
+    connect: "Connect",
+    disconnect: "Disconnect",
+    disconnectTitle: "Disconnect {name}?",
+    disconnectSelf: "This is this computer, so you can connect it again here at any time.",
+    remove: "Remove",
+    removeTitle: "Remove {name}?",
+    removeLead: "This can't be undone.",
+    removeActive: [
+      "Your agent can't use {name} anymore.",
+      "To add it back, reconnect it. It returns as a new device.",
+    ],
+    removeRevoked: ["{name} is already revoked, so only its record is deleted."],
+    removeOnCloud: "Remove on Rome Cloud",
+    errors: {
+      device_not_found: "Rome Cloud has no such device in your account.",
+      invalid_device_name: "Use 1 to 80 characters without control characters.",
+      revocation_pending:
+        "The device is revoked, but Rome Cloud has not confirmed it yet. It stays under Revoked; remove it again in a moment.",
+      unavailable: "Rome Cloud could not be reached. Try again.",
+    },
   },
   detail: {
     commandsInDay: {
@@ -235,9 +286,37 @@ const zhCN: NodeUiMessages = {
   back: "设备",
   thisDevice: {
     label: "本机",
-    toggle: "允许 Rome 使用本机",
     connecting: "连接中",
     disabled: "已关闭",
+  },
+  manage: {
+    menu: "设备操作",
+    rename: "重命名",
+    renameTitle: "重命名设备",
+    nameLabel: "名称",
+    nameHint: "最多 80 个字符。只改名称，设备 ID 不变。",
+    save: "保存",
+    cancel: "取消",
+    connect: "连接",
+    disconnect: "断开",
+    disconnectTitle: "断开 {name}？",
+    disconnectSelf: "这是本机，断开后可以随时在这里重新连接。",
+    remove: "移除",
+    removeTitle: "移除 {name}？",
+    removeLead: "此操作无法撤销。",
+    removeActive: [
+      "你的 Agent 将不能再使用 {name}。",
+      "要加回来，需要重新连接，它会作为一台新设备出现。",
+    ],
+    removeRevoked: ["{name} 的授权已撤销，这里只删除它的记录。"],
+    removeOnCloud: "在 Rome Cloud 上移除",
+    errors: {
+      device_not_found: "你的账号中没有这台设备。",
+      invalid_device_name: "请使用 1 到 80 个字符，不含控制字符。",
+      revocation_pending:
+        "设备已撤销授权，但 Rome Cloud 还没确认，暂时留在“已撤销”中。请稍后再移除一次。",
+      unavailable: "无法连接 Rome Cloud，请重试。",
+    },
   },
   detail: {
     commandsInDay: { one: "条命令（最近 24 小时）", other: "条命令（最近 24 小时）" },

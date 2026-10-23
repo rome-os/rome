@@ -18,14 +18,14 @@ import {
   SectionHeading,
   SectionTitle,
 } from "@rome-os/ui/page";
-import { Switch } from "@rome-os/ui/switch";
 import { ChevronRight, Plus } from "lucide-react";
+import { DeviceMenu } from "./device-manage.js";
 import { platformOf } from "./format.js";
 import { messagesFor, plural, type NodeUiMessages } from "./messages.js";
 import { DeviceIcon, NavLink, useNow } from "./parts.js";
 import { Sparkline } from "./sparkline.js";
 import { BUCKET_MS, BUCKETS, statsByPeer, windowStart, type DeviceStats } from "./stats.js";
-import type { NodeDevice, NodeNavigation, NodeThisDevice } from "./types.js";
+import type { NodeDevice, NodeDeviceManage, NodeNavigation, NodeThisDevice } from "./types.js";
 import { useNodeSocket, useStats, type NodeSocket } from "./use-node-socket.js";
 
 const SETUP_GUIDE = "https://github.com/rome-os/rome/blob/main/packages/rome-node-cli/README.md";
@@ -36,13 +36,15 @@ export interface NodeDevicesProps {
    * Rome Core's `/ws/node`. A new value opens a new socket.
    */
   url: string;
-  /** The devices linked to the account. Activity from an unlisted id shows under that id. */
+  /** The devices linked to the account. Activity from a device not listed here is not shown. */
   devices: NodeDevice[];
   navigation: NodeNavigation;
   /** BCP 47 tag for text, dates, and numbers. Chinese for `zh*`, English otherwise. */
   locale?: string;
-  /** The computer the host page runs on. Its card comes first and has a switch. */
+  /** The computer the host page runs on. Its card comes first, and its menu connects it. */
   thisDevice?: NodeThisDevice;
+  /** Rename, disconnect, and remove in each card's menu. */
+  manage?: NodeDeviceManage;
   /** True while the host reads `devices`. */
   loading?: boolean;
 }
@@ -144,35 +146,12 @@ function Identity({
   );
 }
 
-/**
- * This computer's switch. It sits over the card's link at the identity row, because a control
- * cannot nest inside a link. `inset` matches the link's padding.
- */
-function ThisDeviceSwitch({
-  self,
-  m,
-  inset,
-}: {
-  self: NodeThisDevice;
-  m: NodeUiMessages;
-  inset: string;
-}) {
-  return (
-    <span className={cn("absolute flex h-9 items-center", inset)}>
-      <Switch
-        checked={self.state !== "disabled"}
-        disabled={self.busy}
-        onCheckedChange={(checked) => self.onEnabledChange(checked)}
-        aria-label={m.thisDevice.toggle}
-      />
-    </span>
-  );
-}
-
 export interface NodeDeviceCardProps {
   device: NodeDevice;
-  /** Set when `device` is the computer the host page runs on. Adds its flag and switch. */
+  /** Set when `device` is the computer the host page runs on. Adds its flag and connect actions. */
   thisDevice?: NodeThisDevice;
+  /** Rename, disconnect, and remove in the card's menu. */
+  manage?: NodeDeviceManage;
   /** Links the card to the device's page. Without it the card is not a link. */
   navigation?: NodeNavigation;
   /** BCP 47 tag for text. Chinese for `zh*`, English otherwise. */
@@ -183,9 +162,21 @@ export interface NodeDeviceCardProps {
  * A device's card: its name, platform, and connection. `NodeDevices` adds a line with its recent
  * commands. A host without the device service can show one on its own.
  */
-export function NodeDeviceCard({ device, thisDevice, navigation, locale }: NodeDeviceCardProps) {
+export function NodeDeviceCard({
+  device,
+  thisDevice,
+  navigation,
+  manage,
+  locale,
+}: NodeDeviceCardProps) {
   return (
-    <DeviceCard device={device} self={thisDevice} navigation={navigation} m={messagesFor(locale)} />
+    <DeviceCard
+      device={device}
+      self={thisDevice}
+      navigation={navigation}
+      manage={manage}
+      m={messagesFor(locale)}
+    />
   );
 }
 
@@ -193,19 +184,22 @@ function DeviceCard({
   device,
   self,
   navigation,
+  manage,
   m,
   chart,
 }: {
   device: NodeDevice;
   self: NodeThisDevice | undefined;
   navigation: NodeNavigation | undefined;
+  manage?: NodeDeviceManage;
   m: NodeUiMessages;
   chart?: ReactNode;
 }) {
-  // The switch sits over the right edge, so the row leaves it room. A row too narrow for the
+  const menu = Boolean(manage || self);
+  // The menu sits over the right edge, so the row leaves it room. A row too narrow for the
   // name and the curve drops the curve.
   const body = (
-    <span className={cn("@container min-w-0 flex-1", self && "pr-16")}>
+    <span className={cn("@container min-w-0 flex-1", menu && "pr-10")}>
       <span className="flex items-center gap-3">
         <Identity device={device} self={self} m={m} />
         {chart && <span className="hidden @2xs:contents">{chart}</span>}
@@ -225,7 +219,12 @@ function DeviceCard({
       ) : (
         <div className="flex items-center p-3">{body}</div>
       )}
-      {self && <ThisDeviceSwitch self={self} m={m} inset="top-3 right-3" />}
+      {menu && (
+        // Over the card's link at the identity row, because a control cannot nest inside a link.
+        <span className="absolute top-3 right-3 flex h-9 items-center">
+          <DeviceMenu device={device} self={self} manage={manage} m={m} />
+        </span>
+      )}
     </Card>
   );
 }
@@ -288,6 +287,7 @@ export function NodeDevices({
   navigation,
   locale,
   thisDevice,
+  manage,
   loading = false,
 }: NodeDevicesProps) {
   const m = messagesFor(locale);
@@ -302,20 +302,13 @@ export function NodeDevices({
   const [showRevoked, setShowRevoked] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
 
-  // Activity from a device the account no longer lists still shows, under its id.
+  // Only the account's devices show, so a removed device leaves even with recent activity.
   // This computer shows before Rome Cloud lists it, under the name the app knows.
   const self = thisDevice?.id.toLowerCase();
-  const all =
+  const listed: NodeDevice[] =
     thisDevice && !devices.some((device) => device.id.toLowerCase() === self)
       ? [...devices, { id: thisDevice.id, name: thisDevice.name, platform: thisDevice.platform }]
       : devices;
-  const known = new Set(all.map((device) => device.id.toLowerCase()));
-  const listed: NodeDevice[] = [
-    ...all,
-    ...[...byPeer.keys()]
-      .filter((peer) => peer && !known.has(peer))
-      .map((peer) => ({ id: peer, name: peer, status: "unknown" as const })),
-  ];
   const statsOf = (device: NodeDevice): DeviceStats | undefined =>
     byPeer.get(device.id.toLowerCase());
   const selfOf = (device: NodeDevice) =>
@@ -376,6 +369,7 @@ export function NodeDevices({
                 device={device}
                 self={selfOf(device)}
                 navigation={navigation}
+                manage={manage}
                 m={m}
                 chart={supported && chartOf(statsOf(device), since, m, locale)}
               />
@@ -407,6 +401,7 @@ export function NodeDevices({
                   key={device.id}
                   device={device}
                   navigation={navigation}
+                  manage={manage}
                   locale={locale}
                 />
               ))}

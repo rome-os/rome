@@ -14,7 +14,7 @@ import { FilterChipGroup } from "@rome-os/ui/filter-chip-group";
 import { IconButton } from "@rome-os/ui/icon-button";
 import { Input } from "@rome-os/ui/input";
 import { List, ListRow } from "@rome-os/ui/list-row";
-import { PageHeader, PageHeaderNav, PageHeading, PageTitle } from "@rome-os/ui/page";
+import { PageActions, PageHeader, PageHeaderNav, PageHeading, PageTitle } from "@rome-os/ui/page";
 import { Sheet, SheetDescription, SheetTitle } from "@rome-os/ui/sheet";
 import { Check, Copy, Search, X } from "lucide-react";
 import {
@@ -27,12 +27,13 @@ import {
   startOfDay,
   summarize,
 } from "./format.js";
+import { DeviceMenu } from "./device-manage.js";
 import { LoadChart } from "./load-chart.js";
 import { format, messagesFor, plural, type NodeUiMessages } from "./messages.js";
 import { DeviceIcon, ResultMark, resultPaint, useNow } from "./parts.js";
 import type { NodeActionResult, NodeActionRow } from "./protocol.js";
 import { BUCKET_MS, failureRate, statsByPeer, windowStart } from "./stats.js";
-import type { NodeDevice } from "./types.js";
+import type { NodeDevice, NodeDeviceManage, NodeThisDevice } from "./types.js";
 import {
   activeTextFilter,
   useAction,
@@ -55,6 +56,10 @@ export interface NodeDeviceActivityProps {
   /** The action shown in detail. The host keeps it in the URL. */
   selected?: number | null;
   onSelect?: (id: number | null) => void;
+  /** Rename, disconnect, and remove in the header menu. */
+  manage?: NodeDeviceManage;
+  /** Set when `device` is the computer the host page runs on. Its menu connects it. */
+  thisDevice?: NodeThisDevice;
 }
 
 type ResultFilter = NodeActionResult | "all";
@@ -234,6 +239,8 @@ export function NodeDeviceActivity({
   locale,
   selected: selectedProp,
   onSelect,
+  manage,
+  thisDevice,
 }: NodeDeviceActivityProps) {
   const m = messagesFor(locale);
   const bytes = useMemo(() => byteFormat(locale), [locale]);
@@ -343,6 +350,11 @@ export function NodeDeviceActivity({
             </p>
           </PageHeading>
         </div>
+        {(manage || thisDevice) && (
+          <PageActions>
+            <DeviceMenu device={device} self={thisDevice} manage={manage} m={m} />
+          </PageActions>
+        )}
       </PageHeader>
 
       {socket.link !== "open" && (

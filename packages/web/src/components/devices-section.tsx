@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useDeviceManage } from "@/hooks/use-device-manage";
 import { useThisDevice } from "@/hooks/use-this-device";
 import { StatusIndicator } from "@/lib/connection-status";
 import { fetchJson } from "@/lib/fetch-json";
@@ -71,6 +72,7 @@ export function DevicesSection() {
     : query.isError;
   const devices = data?.devices ?? [];
   const thisDevice = useThisDevice(() => void query.refetch());
+  const manage = useDeviceManage();
 
   // While the first read is pending, the devices page holds its place without cards.
   if (!unavailable)
@@ -81,6 +83,7 @@ export function DevicesSection() {
         navigation={navigation}
         locale={i18n.language}
         thisDevice={thisDevice ?? undefined}
+        manage={manage}
         // The order is set when the cards first draw, so they wait to learn which is this computer.
         loading={!data || thisDevice === undefined}
       />

@@ -777,6 +777,8 @@ export async function buildTestDeps(
       start: async () => {},
       listFiles: async () => ({ ok: false, code: "offline" }),
       listDevices: async () => ({ devices: [] }),
+      renameDevice: async () => ({ ok: true }),
+      removeDevice: async () => ({ ok: true }),
       getStatus: async () => ({
         connection: "not_configured",
         checkedAt: new Date().toISOString(),

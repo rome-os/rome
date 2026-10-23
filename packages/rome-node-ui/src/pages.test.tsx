@@ -4,7 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { NodeDeviceActivity } from "./device-activity.js";
 import { NodeDeviceCard, NodeDevices } from "./devices-overview.js";
 import type { NodeActionRow, NodeConnectionStatus, NodeStatus } from "./protocol.js";
-import type { NodeDevice, NodeNavigation, NodeThisDevice } from "./types.js";
+import type {
+  NodeDevice,
+  NodeDeviceManage,
+  NodeDeviceManageError,
+  NodeNavigation,
+  NodeThisDevice,
+} from "./types.js";
 
 const status: NodeStatus = {
   version: "0.1.3",
@@ -176,6 +182,16 @@ describe("NodeDevices", () => {
     expect(screen.getByText("Old phone")).toBeTruthy();
   });
 
+  it("shows no card for activity from a device the account does not list", async () => {
+    serve([row(2), row(1, { peer: "removed-device" })]);
+    render(
+      <NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={navigation()} />,
+    );
+    await screen.findByText("Workstation");
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.queryByText("removed-device")).toBeNull();
+  });
+
   it("lists devices without counts when the daemon predates log.stats", async () => {
     serve([row(1)], { stats: false });
     render(
@@ -308,6 +324,7 @@ describe("this device", () => {
       name: "Laptop.local",
       platform: "macos",
       state: "connected",
+      removeUrl: "https://cloud.test/dashboard/settings",
       onEnabledChange: rs.fn(),
       ...fields,
     } satisfies NodeThisDevice;
@@ -317,7 +334,7 @@ describe("this device", () => {
     ...devices,
   ];
 
-  it("flags its own card, puts it first, and turns it off from there", async () => {
+  it("flags its own card, puts it first, and disconnects it from its menu", async () => {
     serve([]);
     const thisDevice = self();
     render(
@@ -335,9 +352,19 @@ describe("this device", () => {
     expect(within(cards[0]!).getByText("This device")).toBeTruthy();
     expect(within(cards[0]!).getByText("macOS · Connected")).toBeTruthy();
     expect(screen.getAllByText("This device")).toHaveLength(1);
-    const toggle = screen.getByRole("switch", { name: "Let Rome use this device" });
-    expect(toggle.closest("a")).toBeNull();
-    await userEvent.click(toggle);
+    const menu = within(screen.getAllByRole("listitem")[0]!).getByRole("button", {
+      name: "Device actions",
+    });
+    expect(menu.closest("a")).toBeNull();
+    await userEvent.click(menu);
+    // This computer is removed on Rome Cloud, so the menu links there.
+    const remove = await screen.findByRole("menuitem", { name: "Remove on Rome Cloud" });
+    expect(remove.getAttribute("href")).toBe("https://cloud.test/dashboard/settings");
+    expect(remove.getAttribute("target")).toBe("_blank");
+    await userEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
+    const dialog = await screen.findByRole("dialog", { name: "Disconnect Laptop?" });
+    expect(within(dialog).getByText(/connect it again here at any time/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
     expect(thisDevice.onEnabledChange).toHaveBeenCalledWith(false);
   });
 
@@ -354,7 +381,6 @@ describe("this device", () => {
     await screen.findByText("Workstation");
     const cards = screen.getAllByRole("listitem");
     expect(cards[0]!.textContent).toContain("This device");
-    expect(within(cards[0]!).getByRole("switch")).toBeTruthy();
   });
 
   it("shows a computer the account does not list yet, turned off", async () => {
@@ -370,13 +396,13 @@ describe("this device", () => {
     );
     expect(await screen.findByText("RayBook")).toBeTruthy();
     expect(screen.getByText("macOS · Turned off")).toBeTruthy();
-    const toggle = screen.getByRole("switch", { name: "Let Rome use this device" });
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
-    await userEvent.click(toggle);
+    await userEvent.click(screen.getByRole("button", { name: "Device actions" }));
+    // Connecting again needs no confirmation.
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Connect" }));
     expect(thisDevice.onEnabledChange).toHaveBeenCalledWith(true);
   });
 
-  it("ignores the switch while a change is applied", async () => {
+  it("ignores connect and disconnect while a change is applied", async () => {
     serve([]);
     const thisDevice = self({ busy: true });
     render(
@@ -387,7 +413,9 @@ describe("this device", () => {
         thisDevice={thisDevice}
       />,
     );
-    await userEvent.click(await screen.findByRole("switch"));
+    await userEvent.click(await screen.findByRole("button", { name: "Device actions" }));
+    const item = await screen.findByRole("menuitem", { name: "Disconnect" });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
     expect(thisDevice.onEnabledChange).not.toHaveBeenCalled();
   });
 
@@ -401,7 +429,7 @@ describe("this device", () => {
     );
     expect(screen.getByText("本机")).toBeTruthy();
     expect(screen.getByText("macOS · 未连接")).toBeTruthy();
-    expect(screen.getByRole("switch", { name: "允许 Rome 使用本机" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "设备操作" })).toBeTruthy();
     expect(screen.queryByRole("link")).toBeNull();
   });
 });
@@ -461,5 +489,110 @@ describe("NodeDeviceActivity", () => {
       }),
     );
     expect(await within(sheet).findByText("exit 0")).toBeTruthy();
+  });
+});
+
+describe("device menu", () => {
+  const manage = () => ({
+    rename: rs.fn(
+      async (_id: string, _name: string): Promise<NodeDeviceManageError | null> => null,
+    ),
+    remove: rs.fn(async (_id: string): Promise<NodeDeviceManageError | null> => null),
+  });
+  function page(device: NodeDevice, actions?: NodeDeviceManage) {
+    serve([]);
+    render(
+      <NodeDeviceActivity
+        url="ws://rome.test/ws/node"
+        device={device}
+        selected={null}
+        manage={actions}
+      />,
+    );
+  }
+  const open = async () =>
+    userEvent.click(await screen.findByRole("button", { name: "Device actions" }));
+
+  it("has no menu without manage", async () => {
+    page(devices[0]!);
+    expect(await screen.findByRole("heading", { name: "Workstation" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Device actions" })).toBeNull();
+  });
+
+  it("renames with the trimmed name and closes the dialog", async () => {
+    const actions = manage();
+    page(devices[0]!, actions);
+    await open();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const field = await screen.findByRole("textbox", { name: "Name" });
+    await userEvent.clear(field);
+    await userEvent.type(field, "  Build box  ");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(actions.rename).toHaveBeenCalledWith("dev-1", "Build box");
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull());
+  });
+
+  it("keeps the rename dialog open with Cloud's reason", async () => {
+    const actions = manage();
+    actions.rename.mockResolvedValue("invalid_device_name");
+    page(devices[0]!, actions);
+    await open();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    await userEvent.type(await screen.findByRole("textbox", { name: "Name" }), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      await screen.findByText("Use 1 to 80 characters without control characters."),
+    ).toBeTruthy();
+  });
+
+  it("removes another device in one step after warning that it cannot be undone", async () => {
+    const actions = manage();
+    page(devices[0]!, actions);
+    await open();
+    expect(await screen.findByRole("menuitem", { name: "Rename" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove Workstation?" });
+    expect(within(dialog).getByText("This can't be undone.")).toBeTruthy();
+    expect(within(dialog).getByText("Your agent can't use Workstation anymore.")).toBeTruthy();
+    expect(within(dialog).getByText(/It returns as a new device/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    expect(actions.remove).toHaveBeenCalledWith("dev-1");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("offers a revoked device only removal and explains a pending revocation", async () => {
+    const actions = manage();
+    actions.remove.mockResolvedValue("revocation_pending");
+    page(devices[2]!, actions);
+    await open();
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove Old phone?" });
+    expect(within(dialog).getByText(/already revoked/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    expect(await within(dialog).findByText(/It stays under Revoked/)).toBeTruthy();
+  });
+
+  it("puts a menu on each card, over its link", async () => {
+    serve([]);
+    const actions = manage();
+    render(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={devices}
+        navigation={navigation()}
+        manage={actions}
+      />,
+    );
+    await screen.findByText("Workstation");
+    const menus = screen.getAllByRole("button", { name: "Device actions" });
+    expect(menus).toHaveLength(2);
+    expect(menus[0]!.closest("a")).toBeNull();
+    await userEvent.click(menus[1]!);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
+    await userEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove" }),
+    );
+    expect(actions.remove).toHaveBeenCalledWith("dev-2");
   });
 });

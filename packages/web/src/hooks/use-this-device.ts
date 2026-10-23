@@ -43,6 +43,7 @@ export function useThisDevice(onChange?: () => void): NodeThisDevice | null | un
     platform: "macos",
     state: status.state,
     busy,
+    removeUrl: `${import.meta.env.ROME_CLOUD_ORIGIN}/dashboard/settings`,
     onEnabledChange(enabled) {
       setBusy(true);
       bridge
