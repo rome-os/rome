@@ -1127,7 +1127,12 @@ async function openSession(
   // app_management installs land in the catalog mid-session via the
   // AppCatalog subscriber chain (skillCatalog.loadFromCatalog), and the
   // facade tools must surface them without restarting the session.
-  const getSkillCatalog = (): SkillMcpDefinition[] => deps.skillCatalog.getMcpDefinitions();
+  // An agent with an empty allow-list gets no skills, since it has no action
+  // for a skill to direct. Such an agent may read untrusted text, as the inbox
+  // sentinel does. That text must not be able to pull a skill's body out
+  // through `read_skill`.
+  const getSkillCatalog = (): SkillMcpDefinition[] =>
+    allowList.length > 0 ? deps.skillCatalog.getMcpDefinitions() : [];
   const { tools: subagentTools, targets: subagentTargets } = buildSubagentTools(
     deps.agentLoader,
     config,
