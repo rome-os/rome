@@ -95,9 +95,11 @@ export function splitsPair(text: string, at: number): boolean {
   );
 }
 
-/** An opening code fence, and what a line that closes it must repeat. A fence
- *  counts at any indent, since a list item indents the code it holds. */
+/** A code fence, and what a line that closes it must repeat. A fence counts
+ *  at any indent, since a list item indents the code it holds. */
 const FENCE = /^[ \t]*(`{3,}|~{3,})/;
+/** An opening code fence, which may also follow a list item's markers. */
+const OPENING_FENCE = /^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(`{3,}|~{3,})/;
 
 /**
  * The offset in `text` where a message that starts at `from` should end so it
@@ -148,7 +150,7 @@ export function paragraphEnd(
     if (blank && at > from && (at >= min || !text.slice(at, min).trim()) && at < to)
       starts.push(at);
     blank = false;
-    const opening = FENCE.exec(line);
+    const opening = OPENING_FENCE.exec(line);
     if (opening) fence = { char: opening[1]![0]!, length: opening[1]!.length };
   }
   // The first paragraph start whose message reaches `soft`.

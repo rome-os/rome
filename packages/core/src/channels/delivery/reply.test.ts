@@ -820,6 +820,22 @@ describe("ReplyDelivery", () => {
       ).toBe(false);
     });
 
+    it("keeps fenced code whole when a list marker opens it, streamed or whole", async () => {
+      const source = "Intro.\n\n1. ```python\n   a = 1\n\n   b = 2\n   ```\n\nDone.";
+      for (const streamed of [false, true]) {
+        platform = roomy();
+        const delivery = reply({ editIntervalMs: 0, softPartLength: 5 });
+        if (streamed) await stream(delivery, source, 10);
+        delivery.accept(text(source));
+        await delivery.finish();
+
+        expect(platform.shown.join("")).toBe(source);
+        expect(
+          platform.shown.some((shown) => shown.includes("a = 1") !== shown.includes("b = 2")),
+        ).toBe(false);
+      }
+    });
+
     it("leaves a paragraph longer than the hard length to the hard split", async () => {
       platform = roomy();
       const delivery = reply({ editIntervalMs: 0, softPartLength: 12, maxPartLength: 30 });
