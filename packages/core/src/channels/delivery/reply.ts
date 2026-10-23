@@ -3,7 +3,7 @@ import type { Clock, ClockTimer } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
 import { ReplyAssembler } from "./assembler.js";
 import { Outlasted, type Pacer, SKIPPED, SLOW_WRITE_MS } from "./pacer.js";
-import { endsMidPair, lastBreak, splitPoint, splitsPair } from "./split.js";
+import { endsMidPair, lastBreak, paragraphEnd, splitPoint, splitsPair } from "./split.js";
 import {
   asDeliveryFailure,
   DeliveryFailure,
@@ -12,6 +12,7 @@ import {
   type DeliveryTransport,
   effectiveMode,
   type PartReceipt,
+  partLength,
   type TextCodec,
 } from "./types.js";
 
@@ -208,6 +209,10 @@ class WriteTimedOut extends DeliveryFailure {
  *   so a preview that went stale while it waited is never sent. A write that
  *   nothing needs any more, or that waited past the reply's failure, is
  *   dropped.
+ * - A message holds at most the platform's limit, or the policy's when less.
+ *   Under `softPartLength`, a message that reaches it ends where the next
+ *   paragraph begins, outside fenced code, and a streamed message ends where
+ *   the complete text ends it.
  * - A message is never created for text with nothing visible in it, since a
  *   platform refuses one. The reply waits for visible text instead.
  * - A message never receives text older than what it shows.
@@ -280,7 +285,7 @@ export class ReplyDelivery {
 
   constructor(private readonly options: ReplyOptions) {
     this.mode = effectiveMode(options.policy, options.transport.capabilities);
-    const longest = options.transport.capabilities.maxPartLength;
+    const longest = partLength(options.policy, options.transport.capabilities);
     // An open preview counts as unsent until the edit that settles it has run,
     // and that edit waits its turn while the text goes on arriving. A bound
     // that cannot hold one message fails every reply while its first message
@@ -530,7 +535,7 @@ export class ReplyDelivery {
   private plan(now: number): Plan {
     // Nothing is written before the reply finishes, so there is nothing to plan.
     if (this.mode === "final" && !this.closed) return null;
-    const limit = this.options.transport.capabilities.maxPartLength;
+    const limit = partLength(this.options.policy, this.options.transport.capabilities);
     for (const [index, block] of this.assembler.blocks.entries()) {
       const state = (this.blocks[index] ??= { parts: [] });
       const complete = block.complete || this.closed;
@@ -624,6 +629,14 @@ export class ReplyDelivery {
           end = Math.min(shown, textEnd);
         // What a preview showed can end inside a pair of the final text.
         if (end > start + 1 && splitsPair(remaining, end - start)) end -= 1;
+        // A message long enough to read on its own ends with its paragraph.
+        const { softPartLength } = this.options.policy;
+        if (softPartLength) {
+          const paragraph = paragraphEnd(block.text, start, end, shown, softPartLength, (at) =>
+            codec.measure(codec.render(block.text.slice(start, at), true)),
+          );
+          if (paragraph) end = paragraph;
+        }
         let settle = complete || end < textEnd;
         let source = remaining.slice(0, end - start);
         // The split can choose a prefix with nothing visible in it, such as a

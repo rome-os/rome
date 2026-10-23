@@ -8,12 +8,14 @@ import type { DeliveryPolicy } from "./types.js";
 
 const log = createLogger("reply-streams");
 
-/** Edit about once a second, the pace Telegram allows in one chat. */
+/** Edit about once a second, the pace Telegram allows in one chat. A long
+ *  answer arrives about a paragraph to a message. */
 const DEFAULT_POLICY: DeliveryPolicy = {
   mode: "edit",
   editIntervalMs: 1000,
   blockWaitMs: 1500,
   maxPendingChars: 200_000,
+  softPartLength: 100,
 };
 
 /** Where a run's reply goes. */

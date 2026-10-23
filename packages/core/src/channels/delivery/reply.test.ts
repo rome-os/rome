@@ -702,6 +702,67 @@ describe("ReplyDelivery", () => {
     });
   });
 
+  describe("a soft part length", () => {
+    const roomy = () => new MemoryPlatform({ maxPartLength: 100, edit: true, budget: OPEN_BUDGET });
+    const SOURCE = "Para one is here.\n\nPara two.\n\nPara three is longer.";
+
+    it("ends a message with the paragraph that reaches it, and starts the next paragraph in a new one", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12 });
+      delivery.accept(text(SOURCE));
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(platform.shown).toEqual([
+        "Para one is here.\n\n",
+        "Para two.\n\nPara three is longer.",
+      ]);
+    });
+
+    it("ends each streamed message where the complete text ends it, and never shows the next paragraph in it", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12 });
+      await stream(delivery, SOURCE, 10);
+      delivery.accept(text(SOURCE));
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(outcome.parts.some((part) => part.diverged)).toBe(false);
+      expect(platform.shown).toEqual([
+        "Para one is here.\n\n",
+        "Para two.\n\nPara three is longer.",
+      ]);
+      expect(platform.messages[0]!.history.some((shown) => shown.includes("Para two"))).toBe(false);
+    });
+
+    it("keeps fenced code whole, though it holds a blank line", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 5 });
+      const source = "Intro text.\n\n```\nline one\n\nline two\n```\n\nAfter it.";
+      await stream(delivery, source, 10);
+      delivery.accept(text(source));
+      await delivery.finish();
+
+      expect(platform.shown).toEqual([
+        "Intro text.\n\n",
+        "```\nline one\n\nline two\n```\n\n",
+        "After it.",
+      ]);
+    });
+
+    it("leaves a paragraph longer than the hard length to the hard split", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12, maxPartLength: 30 });
+      const source = "one two three four five six seven eight nine ten eleven twelve";
+      delivery.accept(text(source));
+      await delivery.finish();
+
+      expect(platform.shown.join("")).toBe(source);
+      for (const shown of platform.shown) expect(shown.length).toBeLessThanOrEqual(30);
+      expect(platform.shown.length).toBeGreaterThan(2);
+    });
+  });
+
   describe("codec context", () => {
     /** Reopens a code span that the source before the message left open.
      *  It requires context, so a render without it fails the reply. */

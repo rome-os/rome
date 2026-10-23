@@ -94,3 +94,65 @@ export function splitsPair(text: string, at: number): boolean {
     isLowSurrogate(text.charCodeAt(at))
   );
 }
+
+/** An opening code fence, and what a line that closes it must repeat. */
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+
+/**
+ * The offset in `text` where a message that starts at `from` should end so it
+ * holds whole paragraphs: the start of the first paragraph that begins once
+ * the message measures at least `soft`, at or after `min` and at most `to`.
+ * Answers 0 when no such paragraph has begun yet. A blank line inside fenced
+ * code is no paragraph break, so code stays in one message.
+ *
+ * It reads only the text that has arrived, and a paragraph counts once its
+ * first visible character has, so the answer is the same while the text
+ * streams and once it is complete.
+ *
+ * Cost: one scan of `text` up to `to`, and O(log n) measures.
+ */
+export function paragraphEnd(
+  text: string,
+  from: number,
+  to: number,
+  min: number,
+  soft: number,
+  measure: (end: number) => number,
+): number {
+  const starts: number[] = [];
+  let fence: { char: string; length: number } | undefined;
+  let blank = false;
+  let offset = 0;
+  for (const line of text.slice(0, to).split("\n")) {
+    const at = offset;
+    offset += line.length + 1;
+    if (fence) {
+      const closing = FENCE.exec(line);
+      if (
+        closing &&
+        closing[1]![0] === fence.char &&
+        closing[1]!.length >= fence.length &&
+        !line.slice(closing[0].length).trim()
+      )
+        fence = undefined;
+      continue;
+    }
+    if (!line.trim()) {
+      blank = true;
+      continue;
+    }
+    if (blank && at > from && at >= min && at < to) starts.push(at);
+    blank = false;
+    const opening = FENCE.exec(line);
+    if (opening) fence = { char: opening[1]![0]!, length: opening[1]!.length };
+  }
+  // The first paragraph start whose message reaches `soft`.
+  let low = 0;
+  let high = starts.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (measure(starts[middle]!) >= soft) high = middle;
+    else low = middle + 1;
+  }
+  return starts[low] ?? 0;
+}
