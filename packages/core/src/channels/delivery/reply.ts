@@ -662,6 +662,9 @@ export class ReplyDelivery {
         if (active) {
           if (codec.render(source, settle) === active.sent && !active.uncertain) {
             if (!settle) return null;
+            // The source can have grown by text that shows nothing more, such
+            // as a closing fence the message already closed.
+            Object.assign(active, { sentSource: source, sentBefore: before });
             this.settlePart(active, end);
             continue;
           }
@@ -686,6 +689,7 @@ export class ReplyDelivery {
             end = start + cut;
             settle = true;
             if (codec.render(source, true) === active.sent && !active.uncertain) {
+              Object.assign(active, { sentSource: source, sentBefore: before });
               this.settlePart(active, end);
               continue;
             }

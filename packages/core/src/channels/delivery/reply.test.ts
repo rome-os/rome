@@ -503,6 +503,31 @@ describe("ReplyDelivery", () => {
       ).toBe(code);
     });
 
+    it("keeps a closing fence in the source of a message whose create answered after it arrived", async () => {
+      platform = new (class extends MemoryPlatform {
+        override readonly codec = feishuMarkdown;
+      })({ maxPartLength: 100, edit: true, budget: OPEN_BUDGET });
+      let release!: () => void;
+      platform.hold = new Promise((resolve) => {
+        release = resolve;
+      });
+      const delivery = reply();
+      const code = "```\nabc\n```";
+      delivery.accept(delta("```\nabc\n", "a"));
+      await advance(0);
+      // The closing fence and the final text arrive while the create is in flight.
+      delivery.accept(delta("```", "a"));
+      delivery.accept(text(code, "a"));
+      const finished = delivery.finish();
+      platform.hold = undefined;
+      release();
+      await advance(1000);
+      const outcome = await finished;
+
+      expect(platform.shown).toEqual([code]);
+      expect(outcome.parts.map((part) => part.source).join("")).toBe(code);
+    });
+
     it("lets a message's receipt lift the platform's edit cap", async () => {
       platform = new (class extends MemoryPlatform {
         override async create(conversation: string, text: string, replyTo?: string) {
@@ -759,6 +784,27 @@ describe("ReplyDelivery", () => {
         "```\nline one\n\nline two\n```\n\n",
         "After it.",
       ]);
+    });
+
+    it("cuts a streamed message where the whole text cuts it, when a delta ends in the next paragraph's indent", async () => {
+      const source = "Para one is here.\n\n  Para two is indented.\n\nPara three.";
+      platform = roomy();
+      const whole = reply({ editIntervalMs: 0, softPartLength: 12 });
+      whole.accept(text(source));
+      await whole.finish();
+      const expected = platform.shown;
+
+      platform = roomy();
+      const streamed = reply({ editIntervalMs: 0, softPartLength: 12 });
+      for (const piece of ["Para one is here.\n\n  ", "Para two is indented.\n\nPara three."]) {
+        streamed.accept(delta(piece));
+        await advance(0);
+      }
+      streamed.accept(text(source));
+      await streamed.finish();
+
+      expect(expected).toHaveLength(3);
+      expect(platform.shown).toEqual(expected);
     });
 
     it("keeps fenced code whole when a list item indents it four spaces or more", async () => {

@@ -102,7 +102,8 @@ const FENCE = /^[ \t]*(`{3,}|~{3,})/;
 /**
  * The offset in `text` where a message that starts at `from` should end so it
  * holds whole paragraphs: the start of the first paragraph that begins once
- * the message measures at least `soft`, at or after `min` and at most `to`.
+ * the message measures at least `soft`, at most `to`, and at or after `min`
+ * unless only whitespace lies between it and `min`.
  * Answers 0 when no such paragraph has begun yet. A blank line inside fenced
  * code is no paragraph break, so code stays in one message.
  *
@@ -142,7 +143,10 @@ export function paragraphEnd(
       blank = true;
       continue;
     }
-    if (blank && at > from && at >= min && at < to) starts.push(at);
+    // A message may already show the indent a paragraph starts with, which
+    // shows nothing, so the paragraph still counts from the start of its line.
+    if (blank && at > from && (at >= min || !text.slice(at, min).trim()) && at < to)
+      starts.push(at);
     blank = false;
     const opening = FENCE.exec(line);
     if (opening) fence = { char: opening[1]![0]!, length: opening[1]!.length };
