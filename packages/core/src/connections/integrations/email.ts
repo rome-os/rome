@@ -233,20 +233,24 @@ export interface EmailAutoConnectRegistry {
  * a connection the guardian removed, and a removed or revoked connection is
  * never reconnected. Resolves `true` once the grant is conferred. Rejects when
  * the provision or the conferral fails. A failed provision writes nothing, so a
- * later call retries. The guardian can still connect by hand either way.
+ * later call retries; a failed conferral has already written the row, so only
+ * the guardian's Connect click retries it.
  */
 export async function autoConnectEmail(deps: {
   registry: EmailAutoConnectRegistry;
   provision: () => Promise<EmailInboxMaterial>;
   settings: EmailSetupSettings;
 }): Promise<boolean> {
-  if (deps.registry.find("email").length > 0) return false;
-  if ((await deps.settings.get(EMAIL_SETTINGS_KEY)) !== null) return false;
+  const hasHadEmail = async () =>
+    deps.registry.find("email").length > 0 ||
+    (await deps.settings.get(EMAIL_SETTINGS_KEY)) !== null;
+  if (await hasHadEmail()) return false;
   const inbox = await deps.provision();
   return deps.registry.withGrantSection("email", "inbox", async () => {
-    // The provision ran outside the section, so a Connect click can have
-    // committed meanwhile. Re-check under the section the setup commits in.
-    if (deps.registry.find("email").length > 0) return false;
+    // The provision ran outside the section, so the guardian can have
+    // connected, and even removed, email meanwhile. Re-check under the section
+    // the setup commits in.
+    if (await hasHadEmail()) return false;
     const { credential, profile } = await emailConferral(deps.settings, inbox);
     await deps.registry.confer("email", undefined, "inbox", credential, profile);
     return true;

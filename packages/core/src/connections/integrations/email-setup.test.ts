@@ -470,6 +470,28 @@ describe("autoConnectEmail", () => {
     expect(registry.find("email")).toHaveLength(1);
   });
 
+  it("never reconnects email the guardian connected and removed while the provision was in flight", async () => {
+    const { app, registry, settingsRepo } = makeSetupApp();
+    const provision = deferred<{ address: string; inboundSecret: string }>();
+    const auto = autoConnectEmail({
+      registry,
+      provision: () => provision.promise,
+      settings: settingsRepo,
+    });
+
+    await runSetup(app);
+    const conn = registry.find("email")[0];
+    const del = await app.request(`/connections/${conn.id}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+    expect(del.status).toBe(200);
+    provision.resolve(inbox);
+
+    expect(await auto).toBe(false);
+    expect(registry.find("email")).toHaveLength(0);
+  });
+
   it("rejects on a provision error and leaves no connection behind", async () => {
     const { registry, settingsRepo } = makeSetupApp();
     const provision = async () => {
