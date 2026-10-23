@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Badge } from "@rome-os/ui/badge";
 import { Button } from "@rome-os/ui/button";
 import { Card } from "@rome-os/ui/card";
@@ -20,13 +20,13 @@ import {
 } from "@rome-os/ui/page";
 import { Switch } from "@rome-os/ui/switch";
 import { ChevronRight, Plus } from "lucide-react";
-import { clock, formatDuration, platformOf, summarize } from "./format.js";
-import { LoadChart } from "./load-chart.js";
-import { format, messagesFor, plural, type NodeUiMessages } from "./messages.js";
-import { DeviceIcon, NavLink, ResultMark, useNow } from "./parts.js";
-import { BUCKET_MS, failureRate, statsByPeer, windowStart, type DeviceStats } from "./stats.js";
+import { platformOf } from "./format.js";
+import { messagesFor, plural, type NodeUiMessages } from "./messages.js";
+import { DeviceIcon, NavLink, useNow } from "./parts.js";
+import { Sparkline } from "./sparkline.js";
+import { BUCKET_MS, BUCKETS, statsByPeer, windowStart, type DeviceStats } from "./stats.js";
 import type { NodeDevice, NodeNavigation, NodeThisDevice } from "./types.js";
-import { useActions, useNodeSocket, useStats, type NodeSocket } from "./use-node-socket.js";
+import { useNodeSocket, useStats, type NodeSocket } from "./use-node-socket.js";
 
 const SETUP_GUIDE = "https://github.com/rome-os/rome/blob/main/packages/rome-node-cli/README.md";
 
@@ -41,20 +41,11 @@ export interface NodeDevicesProps {
   navigation: NodeNavigation;
   /** BCP 47 tag for text, dates, and numbers. Chinese for `zh*`, English otherwise. */
   locale?: string;
-  /** The computer the host page runs on. Its card comes first in its group and has a switch. */
+  /** The computer the host page runs on. Its card comes first and has a switch. */
   thisDevice?: NodeThisDevice;
   /** True while the host reads `devices`. */
   loading?: boolean;
 }
-
-interface Context {
-  m: NodeUiMessages;
-  locale: string | undefined;
-  navigation: NodeNavigation;
-}
-
-const percent = (value: number, locale: string | undefined) =>
-  value.toLocaleString(locale, { style: "percent", maximumFractionDigits: 1 });
 
 /**
  * One line when the device service or its Gateway connection needs attention. A healthy
@@ -110,7 +101,7 @@ function LinkDeviceDialog({
   );
 }
 
-/** The device's name, platform, and connection, shared by both card sizes. */
+/** The device's name, platform, and connection. */
 function Identity({
   device,
   self,
@@ -134,7 +125,7 @@ function Identity({
         ? m.status[status]
         : null;
   return (
-    <span className={cn("flex min-w-0 items-center gap-3", self && "pr-16")}>
+    <span className="flex min-w-0 flex-1 items-center gap-3">
       <DeviceIcon platform={device.platform} status={status} />
       <span className="min-w-0">
         <span className="flex min-w-0 items-center gap-2">
@@ -178,124 +169,6 @@ function ThisDeviceSwitch({
   );
 }
 
-function LatestCommands({
-  socket,
-  device,
-  context: { m, locale, navigation },
-}: {
-  socket: NodeSocket;
-  device: NodeDevice;
-  context: Context;
-}) {
-  const filters = useMemo(() => ({ peer: device.id }), [device.id]);
-  const { rows, loading } = useActions(socket, filters, 3, 3);
-  // Blank rows of the same height hold the card's size until the commands arrive.
-  if (!rows.length && loading)
-    return (
-      <ul className="py-1" aria-hidden>
-        {[0, 1, 2].map((index) => (
-          <li key={index} className="h-8" />
-        ))}
-      </ul>
-    );
-  if (!rows.length)
-    return <p className="px-4 py-3 text-aux text-muted-foreground">{m.card.noCommands}</p>;
-  return (
-    <ul className="py-1">
-      {rows.map((row) => (
-        <li key={row.id}>
-          <NavLink
-            to={navigation.href(device.id, row.id)}
-            navigation={navigation}
-            className="grid grid-cols-[0.75rem_auto_minmax(0,1fr)_auto] items-center gap-2 px-4 py-2 outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
-          >
-            <span className="flex justify-center">
-              <ResultMark row={row} m={m} label={false} />
-            </span>
-            <span className="font-mono text-aux text-muted-foreground tabular-nums">
-              {clock(row.startedAt, locale)}
-            </span>
-            <span className="truncate font-mono text-aux text-foreground">{summarize(row)}</span>
-            <span className="font-mono text-aux text-muted-foreground tabular-nums">
-              {row.endedAt === null
-                ? m.result.running
-                : formatDuration(row.endedAt - row.startedAt)}
-            </span>
-          </NavLink>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function DeviceCard({
-  socket,
-  device,
-  self,
-  stats,
-  context,
-}: {
-  socket: NodeSocket;
-  device: NodeDevice;
-  self: NodeThisDevice | undefined;
-  stats: DeviceStats;
-  context: Context;
-}) {
-  const { m, locale, navigation } = context;
-  const rate = failureRate(stats.counts);
-  const countText = (count: number) => plural(m.detail.count, count, locale);
-  return (
-    <Card className="relative gap-0 overflow-hidden py-0">
-      <NavLink
-        to={navigation.href(device.id)}
-        navigation={navigation}
-        className="flex flex-col gap-3 p-4 outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
-      >
-        <Identity device={device} self={self} m={m} />
-        <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-          <span className="flex items-baseline gap-2">
-            <span className="text-title tabular-nums text-foreground">
-              {stats.counts.all.toLocaleString(locale)}
-            </span>
-            <span className="text-aux text-muted-foreground">{m.card.commands}</span>
-          </span>
-          <span className="flex gap-3 text-aux text-muted-foreground tabular-nums">
-            {rate !== null && (
-              <span className={cn(rate >= 0.05 && "text-destructive")}>
-                {format(m.card.failed, { rate: percent(rate, locale) })}
-              </span>
-            )}
-            {stats.peak && <span>{format(m.card.peak, { count: stats.peak.counts.all })}</span>}
-          </span>
-        </span>
-        <LoadChart
-          buckets={stats.buckets}
-          bucketMs={BUCKET_MS}
-          m={m}
-          locale={locale}
-          size="sm"
-          countText={countText}
-        />
-      </NavLink>
-      {self && <ThisDeviceSwitch self={self} m={m} inset="top-4 right-4" />}
-      <div className="border-t border-border">
-        <LatestCommands socket={socket} device={device} context={context} />
-      </div>
-      <NavLink
-        to={navigation.href(device.id)}
-        navigation={navigation}
-        className="flex items-center justify-between gap-2 border-t border-border px-4 py-3 text-ui outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
-      >
-        {m.card.viewAll}
-        <span className="inline-flex items-center gap-1 text-aux text-muted-foreground tabular-nums">
-          {stats.counts.all.toLocaleString(locale)}
-          <ChevronRight className="size-3.5" aria-hidden />
-        </span>
-      </NavLink>
-    </Card>
-  );
-}
-
 export interface NodeDeviceCardProps {
   device: NodeDevice;
   /** Set when `device` is the computer the host page runs on. Adds its flag and switch. */
@@ -307,12 +180,38 @@ export interface NodeDeviceCardProps {
 }
 
 /**
- * A device's compact card: its name, platform, and connection. `NodeDevices` uses it for devices
- * without recent commands. A host without the device service can show one on its own.
+ * A device's card: its name, platform, and connection. `NodeDevices` adds a line with its recent
+ * commands. A host without the device service can show one on its own.
  */
 export function NodeDeviceCard({ device, thisDevice, navigation, locale }: NodeDeviceCardProps) {
-  const m = messagesFor(locale);
-  const identity = <Identity device={device} self={thisDevice} m={m} />;
+  return (
+    <DeviceCard device={device} self={thisDevice} navigation={navigation} m={messagesFor(locale)} />
+  );
+}
+
+function DeviceCard({
+  device,
+  self,
+  navigation,
+  m,
+  chart,
+}: {
+  device: NodeDevice;
+  self: NodeThisDevice | undefined;
+  navigation: NodeNavigation | undefined;
+  m: NodeUiMessages;
+  chart?: ReactNode;
+}) {
+  // The switch sits over the right edge, so the row leaves it room. A row too narrow for the
+  // name and the curve drops the curve.
+  const body = (
+    <span className={cn("@container min-w-0 flex-1", self && "pr-16")}>
+      <span className="flex items-center gap-3">
+        <Identity device={device} self={self} m={m} />
+        {chart && <span className="hidden @2xs:contents">{chart}</span>}
+      </span>
+    </span>
+  );
   return (
     <Card className="relative gap-0 overflow-hidden py-0">
       {navigation ? (
@@ -321,21 +220,67 @@ export function NodeDeviceCard({ device, thisDevice, navigation, locale }: NodeD
           navigation={navigation}
           className="flex items-center p-3 outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
         >
-          {identity}
+          {body}
         </NavLink>
       ) : (
-        <div className="flex items-center p-3">{identity}</div>
+        <div className="flex items-center p-3">{body}</div>
       )}
-      {thisDevice && <ThisDeviceSwitch self={thisDevice} m={m} inset="top-3 right-3" />}
+      {self && <ThisDeviceSwitch self={self} m={m} inset="top-3 right-3" />}
     </Card>
   );
 }
 
+/** The start of the latest bucket with a command, or -1 without one. */
+function lastActive(stats: DeviceStats | undefined): number {
+  const buckets = stats?.buckets ?? [];
+  for (let index = buckets.length - 1; index >= 0; index -= 1)
+    if (buckets[index]!.counts.all) return buckets[index]!.start;
+  return -1;
+}
+
+/** The device's curve. A device without commands draws an empty one. */
+function chartOf(
+  stats: DeviceStats | undefined,
+  since: number,
+  m: NodeUiMessages,
+  locale: string | undefined,
+) {
+  const buckets =
+    stats?.buckets ??
+    Array.from({ length: BUCKETS }, (_, index) => ({
+      start: since + index * BUCKET_MS,
+      counts: { all: 0, running: 0, succeeded: 0, failed: 0, no_result: 0 },
+    }));
+  return (
+    <Sparkline buckets={buckets} label={plural(m.card.chart, stats?.counts.all ?? 0, locale)} />
+  );
+}
+
 /**
- * The devices linked to the account and how busy each one was over the last 24 hours. Active
- * devices get a card with their counts, load chart, and latest commands. The rest get a compact
- * card. Each card links to the device's activity page through `navigation`.
- * Needs `@rome-os/node-ui/styles.css` in the host's Tailwind build.
+ * Keeps the order the cards had when the page first drew them, so a device that connects,
+ * disconnects, or runs a command changes its card in place. A device that appears later goes last.
+ */
+function useFirstOrder(
+  devices: NodeDevice[],
+  ready: boolean,
+  rank: (list: NodeDevice[]) => NodeDevice[],
+) {
+  const order = useRef<string[] | null>(null);
+  if (!ready) return [];
+  const key = (device: NodeDevice) => device.id.toLowerCase();
+  order.current ??= rank(devices).map(key);
+  const known = new Set(order.current);
+  order.current.push(...devices.map(key).filter((id) => !known.has(id)));
+  const position = new Map(order.current.map((id, index) => [id, index]));
+  return [...devices].sort((a, b) => position.get(key(a))! - position.get(key(b))!);
+}
+
+/**
+ * The devices linked to the account, one card each with a curve of its commands over the last
+ * 24 hours.
+ * The cards keep the order they had when the page drew them: this computer, the connected
+ * devices, then the rest, each by its latest command. Each card links to the device's activity
+ * page through `navigation`. Needs `@rome-os/node-ui/styles.css` in the host's Tailwind build.
  */
 export function NodeDevices({
   url,
@@ -351,12 +296,11 @@ export function NodeDevices({
   const since = windowStart(now);
   const query = useMemo(() => ({ since, bucketMs: BUCKET_MS }), [since]);
   const { stats, supported, settled } = useStats(socket, query);
-  // The cards wait for the devices and their counts, so the page draws its groups once.
+  // The cards wait for the devices and their counts, so the page draws them once.
   const ready = !loading && settled;
   const byPeer = useMemo(() => (stats ? statsByPeer(stats) : new Map()), [stats]);
   const [showRevoked, setShowRevoked] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
-  const context: Context = { m, locale, navigation };
 
   // Activity from a device the account no longer lists still shows, under its id.
   // This computer shows before Rome Cloud lists it, under the name the app knows.
@@ -376,13 +320,24 @@ export function NodeDevices({
     byPeer.get(device.id.toLowerCase());
   const selfOf = (device: NodeDevice) =>
     device.id.toLowerCase() === self ? thisDevice : undefined;
-  const selfFirst = (a: NodeDevice, b: NodeDevice) => Number(!selfOf(a)) - Number(!selfOf(b));
+  const connected = (device: NodeDevice) =>
+    selfOf(device) ? thisDevice!.state === "connected" : device.status === "connected";
   const revoked = listed.filter((device) => device.status === "revoked");
-  const current = listed.filter((device) => device.status !== "revoked");
-  const active = current
-    .filter((device) => statsOf(device)?.counts.all)
-    .sort((a, b) => selfFirst(a, b) || statsOf(b)!.counts.all - statsOf(a)!.counts.all);
-  const quiet = current.filter((device) => !statsOf(device)?.counts.all).sort(selfFirst);
+  const current = useFirstOrder(
+    listed.filter((device) => device.status !== "revoked"),
+    ready,
+    (list) =>
+      list
+        .map((device) => ({ device, last: lastActive(statsOf(device)) }))
+        .sort(
+          (a, b) =>
+            Number(!selfOf(a.device)) - Number(!selfOf(b.device)) ||
+            Number(!connected(a.device)) - Number(!connected(b.device)) ||
+            b.last - a.last ||
+            a.device.name.localeCompare(b.device.name, locale),
+        )
+        .map(({ device }) => device),
+  );
 
   return (
     <Section
@@ -413,43 +368,21 @@ export function NodeDevices({
         <p className="text-ui text-muted-foreground">{m.noDevices}</p>
       )}
 
-      {ready && active.length > 0 && (
-        <section
-          aria-label={m.activeDevices}
-          className="grid gap-4 @2xl:grid-cols-2 @6xl:grid-cols-3"
-        >
-          {active.map((device) => (
-            <DeviceCard
-              key={device.id}
-              socket={socket}
-              device={device}
-              self={selfOf(device)}
-              stats={statsOf(device)!}
-              context={context}
-            />
-          ))}
-        </section>
-      )}
-
-      {ready && quiet.length > 0 && (
-        <section aria-labelledby="node-devices-quiet" className="flex flex-col gap-3">
-          <h3 id="node-devices-quiet" className="text-aux font-medium text-muted-foreground">
-            {supported ? m.quietDevices : m.title}
-          </h3>
-          <div className="grid gap-2 @xl:grid-cols-2 @6xl:grid-cols-3">
-            {quiet.map((device) => (
-              <NodeDeviceCard
-                key={device.id}
+      {current.length > 0 && (
+        <ul aria-label={m.title} className="grid gap-2 @xl:grid-cols-2 @6xl:grid-cols-3">
+          {current.map((device) => (
+            <li key={device.id} className="grid">
+              <DeviceCard
                 device={device}
-                thisDevice={selfOf(device)}
+                self={selfOf(device)}
                 navigation={navigation}
-                locale={locale}
+                m={m}
+                chart={supported && chartOf(statsOf(device), since, m, locale)}
               />
-            ))}
-          </div>
-        </section>
+            </li>
+          ))}
+        </ul>
       )}
-
       {ready && revoked.length > 0 && (
         <section className="flex flex-col gap-3">
           <Button

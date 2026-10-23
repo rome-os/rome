@@ -18,17 +18,12 @@ export interface NodeUiMessages {
     close: string;
   };
   status: Record<NodeDeviceStatus, string>;
-  activeDevices: string;
-  quietDevices: string;
   revokedDevices: string;
   noDevices: string;
   statsUnavailable: string;
   card: {
-    commands: string;
-    failed: string;
-    peak: string;
-    viewAll: string;
-    noCommands: string;
+    /** The name of a device's curve. */
+    chart: Plural;
   };
   chart: {
     label: string;
@@ -118,17 +113,11 @@ const en: NodeUiMessages = {
     unknown: "Unknown",
     revoked: "Access revoked",
   },
-  activeDevices: "Active devices",
-  quietDevices: "No commands in 24 h",
   revokedDevices: "Revoked",
   noDevices: "No computers are linked to this account.",
   statsUnavailable: "Restart the device service to show command counts.",
   card: {
-    commands: "commands · 24 h",
-    failed: "{rate} failed",
-    peak: "peak {count}/10 min",
-    viewAll: "View all activity",
-    noCommands: "No commands in the last 24 h.",
+    chart: { one: "{count} command in 24 h", other: "{count} commands in 24 h" },
   },
   chart: {
     label: "Commands per 10 minutes over the last 24 hours",
@@ -227,17 +216,11 @@ const zhCN: NodeUiMessages = {
     unknown: "未知",
     revoked: "授权已撤销",
   },
-  activeDevices: "活跃设备",
-  quietDevices: "24 小时内没有命令",
   revokedDevices: "已撤销",
   noDevices: "此账户尚未关联电脑。",
   statsUnavailable: "重启设备服务后即可显示命令统计。",
   card: {
-    commands: "条命令 · 24 小时",
-    failed: "{rate} 失败",
-    peak: "峰值 {count}/10 分钟",
-    viewAll: "查看全部活动",
-    noCommands: "最近 24 小时没有命令。",
+    chart: { one: "24 小时 {count} 条命令", other: "24 小时 {count} 条命令" },
   },
   chart: {
     label: "最近 24 小时每 10 分钟的命令数",

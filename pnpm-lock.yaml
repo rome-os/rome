@@ -730,6 +730,9 @@ importers:
       '@rome-os/ui':
         specifier: workspace:^
         version: link:../ui
+      recharts:
+        specifier: ^3.9.2
+        version: 3.9.2(@types/react@19.2.15)(react-dom@19.2.6(react@19.2.6))(react-is@18.3.1)(react@19.2.6)(redux@5.0.1)
       zod:
         specifier: ^4.3.6
         version: 4.4.3
