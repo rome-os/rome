@@ -377,6 +377,7 @@
       "truncated": "Showing the first 1,000 items.",
       "up": "Up one level",
       "useFolder": "Use this folder",
+      "thisDevice": "This device",
       "reasons": {
         "offline": "Offline",
         "upgrade_required": "Update rome-node"
@@ -395,7 +396,8 @@
       "listLabel": "Locations",
       "searchPlaceholder": "Search Rome Cloud and devices…",
       "noMatchesQuery": "Nothing matches “{{query}}”.",
-      "back": "Back"
+      "back": "Back",
+      "loading": "Loading devices…"
     }
   },
   "stream": {

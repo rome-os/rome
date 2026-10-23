@@ -1,4 +1,4 @@
-import type { DeviceFilesResponse, DeviceList } from "@rome/api-types/devices";
+import type { DeviceFilesResponse } from "@rome/api-types/devices";
 import type {
   AgentCatalogGroup,
   ApprovalRecord,
@@ -9,7 +9,7 @@ import type {
   ChatSearchMessageMatch,
   ChatSession,
   CreateTurnResponse,
-  ProjectCatalog,
+  ChatLocations,
   ProjectOption,
   ReasoningEffort,
   RomeSessionsPageResult,
@@ -314,10 +314,10 @@ export async function createSession(input: CreateSessionInput): Promise<ChatSess
   return jsonOrThrow<ChatSession>(res);
 }
 
-/** Authorized devices from Cloud's list. Probes no device, so it carries no online status. */
-export async function listDevices(): Promise<DeviceList> {
-  const res = await fetch("/api/devices/list", { credentials: "include" });
-  return jsonOrThrow<DeviceList>(res);
+/** Projects and Cloud's devices for the new-chat location menu. Probes no device. */
+export async function listChatLocations(): Promise<ChatLocations> {
+  const res = await fetch("/api/chat/locations", { credentials: "include" });
+  return jsonOrThrow<ChatLocations>(res);
 }
 
 /**
@@ -367,11 +367,6 @@ export async function markSessionRead(
   return jsonOrThrow<{ sessionId: string; lastSeenActivityAt: string | null; unread: boolean }>(
     res,
   );
-}
-
-export async function listProjects(): Promise<ProjectCatalog> {
-  const res = await fetch("/api/chat/projects", { credentials: "include" });
-  return jsonOrThrow<ProjectCatalog>(res);
 }
 
 export async function createProject(name: string): Promise<ProjectOption> {

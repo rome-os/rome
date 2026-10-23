@@ -1,3 +1,4 @@
+import { BrowserWindow, dialog } from "electron";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import type { CloudInstance } from "@rome-os/libs/native-auth";
@@ -7,6 +8,7 @@ import { getDb } from "./db/database";
 import { settings } from "./db/schema";
 import { handleFromAppOrInstance, handleTrusted } from "./ipc-trust";
 import type { RuntimeController } from "./runtime/controller";
+import { pickFolder } from "./pick-folder";
 import { localVmSupport } from "./runtime/manager";
 import {
   parseRuntimeTarget,
@@ -136,6 +138,19 @@ export function registerIpcHandlers(
     await options.device.setEnabled(z.boolean().parse(value));
     return options.device.status();
   });
+
+  // The dashboard marks this computer in its device list and asks here for a
+  // folder on it, so the user browses with the system dialog.
+  handleFromAppOrInstance("device:pickFolder", instanceOrigin, (event, defaultPath) =>
+    pickFolder(
+      (window, dialogOptions) =>
+        window
+          ? dialog.showOpenDialog(window, dialogOptions)
+          : dialog.showOpenDialog(dialogOptions),
+      BrowserWindow.fromWebContents(event.sender),
+      defaultPath,
+    ),
+  );
 
   handleTrusted("cloud:signIn", async () => {
     await requireAccount().signIn();

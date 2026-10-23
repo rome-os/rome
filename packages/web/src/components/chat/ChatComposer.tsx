@@ -18,14 +18,10 @@ import { SourceConnect } from "@/components/sync/SourceConnect";
 import { cn } from "@/lib/utils";
 import { discardSendOrigin, recordSendOrigin } from "@/lib/send-flight";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
-import {
-  ChatApiError,
-  createProject as apiCreateProject,
-  listProjects,
-  saveSetting,
-} from "@/lib/chat-api";
+import { ChatApiError, createProject as apiCreateProject, saveSetting } from "@/lib/chat-api";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
 import { usePeople } from "@/hooks/use-people";
+import { useChatLocations } from "@/hooks/use-chat-locations";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
   DEFAULT_LARGE_MODEL_SELECTION,
@@ -38,7 +34,6 @@ import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import type {
   AgentMention,
   PendingUpload,
-  ProjectCatalog,
   ProjectOption,
   ReasoningEffort,
   ChatErrorNotice,
@@ -325,9 +320,17 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       initialDeviceFolder ??
       (initialProjectName?.trim() ? null : (storedDraft?.deviceFolder ?? null)),
   );
-  const [projectCatalog, setProjectCatalog] = useState<ProjectCatalog | null>(null);
-  const [projectsLoading, setProjectsLoading] = useState(false);
+  const locations = useChatLocations(showProjectSelector);
+  const projectCatalog = locations.query.data?.projects ?? null;
+  // Errors from creating a project; a failed load shows from the query below.
   const [projectsError, setProjectsError] = useState<string | null>(null);
+  const locationsError = locations.query.error;
+  const loadError =
+    locationsError && !locations.query.data
+      ? locationsError instanceof ChatApiError && locationsError.message
+        ? locationsError.message
+        : t("project.errors.loadFailed")
+      : null;
   // Errors that need a composer-level banner even when the project picker
   // isn't rendered (e.g. /api/settings save failures in an embed that opts
   // out of `showProjectSelector`).
@@ -474,20 +477,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     [t, invalidateSettings],
   );
 
-  const loadProjects = useCallback(async () => {
-    setProjectsLoading(true);
-    setProjectsError(null);
-    try {
-      const data = await listProjects();
-      setProjectCatalog(data);
-    } catch (error) {
-      const fallback = t("project.errors.loadFailed");
-      setProjectsError(error instanceof ChatApiError && error.message ? error.message : fallback);
-    } finally {
-      setProjectsLoading(false);
-    }
-  }, [t]);
-
   const createProjectAndSelect = useCallback(async () => {
     const name = newProjectName.trim();
     if (!name) {
@@ -498,11 +487,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     setProjectsError(null);
     try {
       const data: ProjectOption = await apiCreateProject(name);
-      setProjectCatalog((prev) => {
-        if (!prev) return prev;
-        const projects = [...prev.projects, data].sort((a, b) => a.name.localeCompare(b.name));
-        return { ...prev, projects };
-      });
+      locations.addProject(data);
       setNewProjectName("");
       setCreateProjectFormOpen(false);
       setProjectSearchQuery("");
@@ -519,7 +504,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     } finally {
       setCreatingProject(false);
     }
-  }, [newProjectName, t, connectOnCreate]);
+  }, [newProjectName, t, connectOnCreate, locations.addProject]);
 
   const addPendingFiles = useCallback((files: File[]) => {
     // The visible file picker is disabled during an upload, but paste and the
@@ -1211,8 +1196,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 disabled={uploadInFlight}
                 t={t}
                 projectCatalog={projectCatalog}
-                projectsLoading={projectsLoading}
-                projectsError={projectsError}
+                projectsLoading={locations.query.isPending}
+                projectsError={projectsError ?? loadError}
+                devices={locations.query.data?.devices ?? null}
                 draftProjectName={draftProjectName}
                 draftProjectLabel={draftProjectLabel}
                 defaultProjectName={DEFAULT_PROJECT_NAME}
@@ -1234,8 +1220,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                   if (!nextOpen) {
                     setProjectSearchQuery("");
                     setCreateProjectFormOpen(false);
-                  } else if (!projectCatalog) {
-                    await loadProjects();
+                  } else {
+                    // The menu shows the cached answer; this only refreshes it.
+                    void locations.query.refetch();
                   }
                 }}
                 onPickProject={(name) => {

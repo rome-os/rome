@@ -1,4 +1,4 @@
-import type { DeviceFolder } from "@rome/api-types/devices";
+import type { DeviceFolder, DeviceList } from "@rome/api-types/devices";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import type { TraceErrorEvent, TraceEventDto, TraceSummary } from "@rome/api-types/trace-segments";
 import type {
@@ -172,6 +172,15 @@ export interface ProjectCatalog {
   rootPath: string;
   defaultPath: string;
   projects: ProjectOption[];
+}
+
+/**
+ * What the new-chat location menu shows. `devices` is null when Rome could not
+ * read Cloud's device list in time.
+ */
+export interface ChatLocations {
+  projects: ProjectCatalog;
+  devices: DeviceList["devices"] | null;
 }
 
 export interface PendingUpload {

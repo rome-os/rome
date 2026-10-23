@@ -654,6 +654,54 @@ describe("Webchat API", () => {
     );
   });
 
+  describe("chat locations", () => {
+    const mac = { id: "mac-1", name: "macbook", platform: "macos" };
+
+    it("answers the projects and Cloud's devices together", async () => {
+      deps.nodeDevices = { ...deps.nodeDevices, listDevices: async () => ({ devices: [mac] }) };
+      const res = await createWebchatRuntime(deps).routes.request("/chat/locations");
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        projects: { rootPath: string; projects: Array<{ name: string }> };
+        devices: unknown;
+      };
+      expect(body.projects.rootPath).toBe(projectsRoot);
+      expect(body.projects.projects.map((project) => project.name)).toEqual(["default"]);
+      expect(body.devices).toEqual([mac]);
+    });
+
+    it("answers without devices when Cloud's list is unavailable", async () => {
+      deps.nodeDevices = { ...deps.nodeDevices, listDevices: async () => null };
+      const res = await createWebchatRuntime(deps).routes.request("/chat/locations");
+      expect(await res.json()).toMatchObject({ devices: null });
+
+      deps.nodeDevices = {
+        ...deps.nodeDevices,
+        listDevices: async () => {
+          throw new Error("daemon gone");
+        },
+      };
+      const failed = await createWebchatRuntime(deps).routes.request("/chat/locations");
+      expect(failed.status).toBe(200);
+      expect(await failed.json()).toMatchObject({ devices: null });
+    });
+
+    it("does not wait past its budget for a slow device list", async () => {
+      rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        deps.nodeDevices = { ...deps.nodeDevices, listDevices: () => new Promise(() => {}) };
+        const pending = createWebchatRuntime(deps).routes.request("/chat/locations");
+        await rs.advanceTimersByTimeAsync(3_000);
+        const res = await pending;
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({ devices: null });
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+  });
+
   describe("project routes", () => {
     it("lists first-class projects and materializes their workspaces", async () => {
       const app = createWebchatRuntime(deps).routes;

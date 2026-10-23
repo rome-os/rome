@@ -199,11 +199,14 @@ function renderChatComponent(
         ? (homeData?.postTurn?.() ?? Response.json({ turnId: "turn-1" }))
         : Response.json([]);
     }
-    if (url === "/api/chat/projects") {
+    if (url === "/api/chat/locations") {
       return Response.json({
-        rootPath: "/projects",
-        defaultPath: "/projects/default",
-        projects: homeData?.projects ?? [],
+        projects: {
+          rootPath: "/projects",
+          defaultPath: "/projects/default",
+          projects: homeData?.projects ?? [],
+        },
+        devices: null,
       });
     }
     if (url.endsWith("/api/rome-news")) {

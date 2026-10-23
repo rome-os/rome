@@ -80,9 +80,14 @@ Gateway presence protocol is involved.
 A new chat can work in a folder on a connected device instead of in a Rome
 project. With at least one authorized device, the composer's project selector
 opens on two levels: first Rome Cloud and each device, then Rome Cloud's
-projects or that device's folders. The device list comes from
-`GET /api/devices/list`, which reads Cloud's list and sends nothing to any
-device, so it shows no online status. Opening a device lists its folders with
+projects or that device's folders. The selector reads its projects and devices
+in one request, `GET /api/chat/locations`, so the menu draws once. Its device
+list is Cloud's list, which sends nothing to any device, so it shows no online
+status. When Cloud's list fails or takes longer than 3 seconds, the answer has
+no devices and the menu keeps one level. In the Mac app, the computer the app
+runs on lists first, marked "This device", and opening it shows the system
+folder dialog instead of the drawn folder list while the app connects it.
+Opening a device lists its folders with
 `fs.list`, through `GET /api/devices/:deviceId/files?path=`. That request is the
 only probe: an offline device, or one that needs an update, is marked then.
 A chat holds a project or a device folder, never both, and

@@ -377,6 +377,7 @@
       "truncated": "只显示前 1,000 项。",
       "up": "返回上一级",
       "useFolder": "使用此文件夹",
+      "thisDevice": "本机",
       "reasons": {
         "offline": "离线",
         "upgrade_required": "需更新 rome-node"
@@ -395,7 +396,8 @@
       "listLabel": "位置",
       "searchPlaceholder": "搜索 Rome Cloud 和设备…",
       "noMatchesQuery": "没有匹配 “{{query}}” 的结果。",
-      "back": "返回"
+      "back": "返回",
+      "loading": "正在加载设备…"
     }
   },
   "stream": {

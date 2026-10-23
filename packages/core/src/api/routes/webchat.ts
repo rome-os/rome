@@ -727,6 +727,18 @@ const ENQUEUE_DRAIN_TIMEOUT_MS = 60_000;
 // timing the connection out and give the client's stall watchdog
 // (STREAM_STALL_TIMEOUT_MS in Chat.tsx) a liveness signal to time against.
 const TURN_STREAM_KEEPALIVE_INTERVAL_MS = 15_000;
+// The chat locations wait this long for Cloud's device list. Past it they
+// answer without devices, so a slow Cloud never holds back the projects.
+const LOCATIONS_DEVICE_LIST_BUDGET_MS = 3_000;
+
+/** `promise`'s value, or null when it takes longer than `ms` or rejects. */
+function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  return Promise.race([promise.catch(() => null), late]).finally(() => clearTimeout(timer));
+}
 
 export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: WebchatRuntime } {
   const activeStreams = new Map<string, ActiveWebchatStream[]>();
@@ -2126,7 +2138,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     );
   });
 
-  app.get("/chat/projects", async (c) => {
+  const projectCatalog = async () => {
     const rootPath = getWebchatProjectsRoot();
     await deps.webchatRepo.ensureProject(
       DEFAULT_WEBCHAT_PROJECT_NAME,
@@ -2139,8 +2151,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     await Promise.all(
       projects.map((project) => ensureWebchatProjectWorkspace(project.path, rootPath)),
     );
-    const catalog = toWebchatProjectCatalog(projects, rootPath);
-    return c.json(catalog);
+    return toWebchatProjectCatalog(projects, rootPath);
+  };
+
+  app.get("/chat/projects", async (c) => c.json(await projectCatalog()));
+
+  // Everything the new-chat location menu shows, in one answer, so the menu
+  // draws once. `devices` is null when Cloud's list is unavailable or slow.
+  app.get("/chat/locations", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const [projects, list] = await Promise.all([
+      projectCatalog(),
+      withinBudget(deps.nodeDevices.listDevices(), LOCATIONS_DEVICE_LIST_BUDGET_MS),
+    ]);
+    return c.json({ projects, devices: list?.devices ?? null });
   });
 
   app.post("/chat/projects", async (c) => {

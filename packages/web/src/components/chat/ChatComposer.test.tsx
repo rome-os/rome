@@ -78,6 +78,16 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
       return Response.json({ guardianName: "Ada", ...settings });
     }
     if (url === "/api/people") return Response.json(peopleList(options.people ?? []));
+    if (url === "/api/chat/locations") {
+      return Response.json({
+        projects: {
+          rootPath: "/projects",
+          defaultPath: "/projects/default",
+          projects: [{ name: "alpha", path: "alpha" }],
+        },
+        devices: [{ id: "mac", name: "macbook", platform: "macos" }],
+      });
+    }
     if (url === "/api/skills") {
       return Response.json({
         skills: [
@@ -852,6 +862,22 @@ describe("New chat draft", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(onSend.mock.calls[0][0]).toMatchObject({ projectPath: "default", deviceFolder });
+  });
+
+  it("reads the menu's projects and devices in one request before the menu opens", async () => {
+    const { fetchSpy } = renderComposer({ showProjectSelector: true });
+    const reads = () =>
+      fetchSpy.mock.calls
+        .map(([input]) => String(input))
+        .filter((url) => /\/api\/(chat\/locations|chat\/projects|devices)/.test(url));
+    await waitFor(() => expect(reads()).toEqual(["/api/chat/locations"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Project" }));
+    // The cached answer draws the first level at once; opening only refreshes it.
+    expect(screen.getByRole("option", { name: /Rome Cloud/ })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /macbook/ })).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    await waitFor(() => expect(reads()).toEqual(["/api/chat/locations", "/api/chat/locations"]));
   });
 
   it("drops a saved device folder when the composer opens with a project", async () => {

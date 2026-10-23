@@ -25,6 +25,7 @@ import type {
   ChatMessage,
   ChatSearchMessageMatch,
   ChatSession,
+  ChatLocations,
   ProjectCatalog,
   ProjectOption,
   SkillSummary,
@@ -52,7 +53,7 @@ import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
-import { settingsHandlers } from "./settings";
+import { pickerDevices, settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
 import { curatedChats } from "../fixtures/chats";
 
@@ -1200,6 +1201,15 @@ export const handlers = [
     return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
   }),
   http.get("/api/chat/projects", () => HttpResponse.json(projectCatalog)),
+  // Cloud's device list is the slow half of the real answer; the delay shows the
+  // menu's placeholder devices.
+  http.get("/api/chat/locations", async () => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    return HttpResponse.json({
+      projects: projectCatalog,
+      devices: pickerDevices,
+    } satisfies ChatLocations);
+  }),
   http.post("/api/chat/projects", async ({ request }) => {
     const body = (await request.json()) as { name: string };
     const created: ProjectOption = { name: body.name, path: body.name };
