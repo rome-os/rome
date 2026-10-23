@@ -1,9 +1,9 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { isLoopbackHostname } from "@rome-os/libs/net";
 import type { DrizzleDb } from "../db/index.js";
 import { createLogger } from "../logger.js";
 import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "./auth.js";
+import { hasLoopbackHostname } from "./cross-site-loopback.js";
 import type { DashboardAccessState } from "./dashboard-access-state.js";
 import { resolveGuardianSessionFromMaterial } from "./guardian-session.js";
 import { isSameOriginMutationRequest } from "./mutation-origin.js";
@@ -13,14 +13,6 @@ const log = createLogger("ws-guardian-gate");
 
 /** Who an accepted upgrade belongs to. */
 export type UpgradeCaller = { kind: "guardian" } | { kind: "dashboard-visitor"; email: string };
-
-function hasLoopbackHostname(origin: string): boolean {
-  try {
-    return isLoopbackHostname(new URL(origin).hostname);
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Accepts the guardian: a guardian cookie from the dashboard's own origin, or a

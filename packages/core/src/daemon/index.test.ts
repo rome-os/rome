@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { request as httpRequest, type IncomingHttpHeaders, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { context, propagation, trace } from "@opentelemetry/api";
 import { isTracingSuppressed } from "@opentelemetry/core";
@@ -162,6 +164,130 @@ describe("HealthCheckDaemon", () => {
     } finally {
       await daemon.stop();
     }
+  });
+
+  describe("browser callers", () => {
+    const RESTART_ACTION = { action: "restart_rome", threadId: "sess-1" };
+    // Valid against the daemon's schema, so only the guard keeps it from `configure`.
+    const HOST_FILESYSTEM_CONFIG = {
+      enabled: true,
+      connection: { host: "host.example", port: 22, username: "rome", privateKey: "key" },
+      mounts: [{ name: "home", remotePath: "/home/rome", containerPath: "/mnt/home" }],
+      remoteAccess: null,
+    };
+
+    // The file stubs global fetch, so requests to the daemon go through node:http.
+    function send(
+      port: number,
+      method: string,
+      path: string,
+      headers: Record<string, string> = {},
+      body: unknown = method === "GET" ? undefined : RESTART_ACTION,
+    ): Promise<{ status: number; headers: IncomingHttpHeaders }> {
+      return new Promise((resolve, reject) => {
+        const req = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (res) => {
+          res.resume();
+          resolve({ status: res.statusCode ?? 0, headers: res.headers });
+        });
+        req.on("error", reject);
+        req.end(body === undefined ? undefined : JSON.stringify(body));
+      });
+    }
+
+    async function startDaemon() {
+      rs.stubGlobal(
+        "fetch",
+        rs.fn(async () => new Response(JSON.stringify({ status: "ok" }), { status: 200 })),
+      );
+      const { HealthCheckDaemon } = await import("./index.js");
+      const { HostFilesystemManager } = await import("./host-filesystem.js");
+      rs.spyOn(HostFilesystemManager.prototype, "restore").mockResolvedValue(undefined);
+      const configure = rs.spyOn(HostFilesystemManager.prototype, "configure").mockResolvedValue({
+        configured: true,
+        enabled: true,
+        connection: null,
+        mounts: [],
+        remoteAccess: null,
+        lastAppliedAt: null,
+        lastError: null,
+      });
+      const enqueueAction = rs
+        .spyOn(
+          HealthCheckDaemon.prototype as never as { enqueueAction: () => unknown },
+          "enqueueAction",
+        )
+        .mockResolvedValue({ ok: true, action: "restart_rome" });
+      const daemon = new HealthCheckDaemon({
+        appDir: "/tmp/rome",
+        healthCheckIntervalMs: 60_000,
+        healthRetryDelayMs: 100,
+        healthTimeoutMs: 1_000,
+        actionHost: "127.0.0.1",
+        actionPort: 0,
+        romePort: 4141,
+      });
+      await daemon.start();
+      const { port } = (daemon as never as { server: Server }).server.address() as AddressInfo;
+      return { daemon, port, configure, enqueueAction };
+    }
+
+    it("refuses a mutation sent by a browser page", async () => {
+      const { daemon, port, configure, enqueueAction } = await startDaemon();
+      try {
+        const restart = await send(port, "POST", "/actions", {
+          "content-type": "text/plain;charset=UTF-8",
+          origin: "https://evil.example",
+        });
+        expect(restart.status).toBe(403);
+        expect(enqueueAction).not.toHaveBeenCalled();
+
+        const configured = await send(
+          port,
+          "PUT",
+          "/host-filesystem/config",
+          { "sec-fetch-site": "cross-site" },
+          HOST_FILESYSTEM_CONFIG,
+        );
+        expect(configured.status).toBe(403);
+        expect(configure).not.toHaveBeenCalled();
+      } finally {
+        await daemon.stop();
+      }
+    });
+
+    it("serves a caller that is not a browser", async () => {
+      const { daemon, port, configure, enqueueAction } = await startDaemon();
+      try {
+        const restart = await send(port, "POST", "/actions", {
+          "content-type": "application/json",
+        });
+        expect(restart.status).toBe(200);
+        expect(enqueueAction).toHaveBeenCalledTimes(1);
+
+        const configured = await send(
+          port,
+          "PUT",
+          "/host-filesystem/config",
+          { "content-type": "application/json" },
+          HOST_FILESYSTEM_CONFIG,
+        );
+        expect(configured.status).toBe(200);
+        expect(configure).toHaveBeenCalledTimes(1);
+      } finally {
+        await daemon.stop();
+      }
+    });
+
+    it("does not let a page on another origin read its responses", async () => {
+      const { daemon, port } = await startDaemon();
+      try {
+        const status = await send(port, "GET", "/status", { origin: "https://evil.example" });
+        expect(status.status).toBe(200);
+        expect(status.headers["access-control-allow-origin"]).toBeUndefined();
+      } finally {
+        await daemon.stop();
+      }
+    });
   });
 
   describe("health probe tracing", () => {
