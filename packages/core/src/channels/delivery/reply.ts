@@ -246,8 +246,9 @@ class WriteTimedOut extends DeliveryFailure {
  * - After `stop()`, nothing new is written. A write already running finishes
  *   and is reported, and a create whose result is unknown stays `unknown`.
  * - A message whose receipt says `streaming` is settled through the
- *   transport once. It is settled when its block is complete and its last write
- *   is done, before `finish()` resolves. When the reply stops or fails, what
+ *   transport once. It is settled once its text is final and its last write
+ *   is done: before the next message of its block is made, or when its block
+ *   is complete, and before `finish()` resolves. When the reply stops or fails, what
  *   is left is settled after `stop()` or `finish()` resolves, in the account's
  *   queue, and that is the one write made after a stop. A settle that fails
  *   changes nothing the reply reports.
@@ -590,6 +591,10 @@ export class ReplyDelivery {
         const last = state.parts.at(-1);
         if (last?.unknown) return null;
         const active = last && !last.settled ? last : undefined;
+        // A message whose text is final stops showing it as being written
+        // before the next message of its block is made.
+        if (last && !active && this.unfinished(last) && this.options.transport.settle)
+          return { write: "settle", block: index, part: last };
         const start = active ? active.start : Math.max(last?.end ?? 0, state.skipped ?? 0);
         // Offsets below are the block's, and `remaining` holds its text from
         // `start` on.

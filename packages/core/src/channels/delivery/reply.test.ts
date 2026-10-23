@@ -700,6 +700,17 @@ describe("ReplyDelivery", () => {
       expect(platform.shown).toEqual(["Hello"]);
       expect(settling.settled).toEqual([{ id: "m1", text: "Hello" }]);
     });
+
+    it("settles a message once its text is final, while its block still streams", async () => {
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12 });
+      await stream(delivery, "Para one is here.\n\nPara two is", 10);
+      expect(settling.settled).toEqual([{ id: "m1", text: "Para one is here.\n\n" }]);
+
+      await stream(delivery, " still going.", 10);
+      delivery.accept(text("Para one is here.\n\nPara two is still going."));
+      await delivery.finish();
+      expect(settling.settled.map(({ id }) => id)).toEqual(platform.messages.map(({ id }) => id));
+    });
   });
 
   describe("a soft part length", () => {
@@ -748,6 +759,19 @@ describe("ReplyDelivery", () => {
         "```\nline one\n\nline two\n```\n\n",
         "After it.",
       ]);
+    });
+
+    it("keeps fenced code whole when a list item indents it four spaces or more", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 5 });
+      const source = "1. Step one:\n\n    ```bash\n    echo a\n\n    echo b\n    ```\n\nDone.";
+      delivery.accept(text(source));
+      await delivery.finish();
+
+      expect(platform.shown.join("")).toBe(source);
+      expect(
+        platform.shown.some((shown) => shown.includes("echo a") !== shown.includes("echo b")),
+      ).toBe(false);
     });
 
     it("leaves a paragraph longer than the hard length to the hard split", async () => {

@@ -95,8 +95,9 @@ export function splitsPair(text: string, at: number): boolean {
   );
 }
 
-/** An opening code fence, and what a line that closes it must repeat. */
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+/** An opening code fence, and what a line that closes it must repeat. A fence
+ *  counts at any indent, since a list item indents the code it holds. */
+const FENCE = /^[ \t]*(`{3,}|~{3,})/;
 
 /**
  * The offset in `text` where a message that starts at `from` should end so it
