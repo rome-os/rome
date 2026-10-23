@@ -3,8 +3,9 @@ import { expect, type Page, test } from "@playwright/test";
 /**
  * The rail names its tiles until the guardian hides the names. A click on its
  * edge or a drag across it switches between the two widths, and the choice
- * holds across reloads. On a phone the drawer is the named rail alone, and the
- * chat list is a screen over the chat that the header's back button opens.
+ * holds across reloads. On a phone the drawer is the rail alone, named until
+ * its button hides the names, and the chat list is a screen over the chat that
+ * the header's back button opens.
  */
 const railWidth = (page: Page) =>
   page.evaluate(() =>
@@ -63,9 +64,7 @@ test.describe("desktop", () => {
 test.describe("phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-  test("the drawer is the named rail, and back opens the chat list over the chat", async ({
-    page,
-  }) => {
+  test("the drawer is the rail, and back opens the chat list over the chat", async ({ page }) => {
     await page.goto("/chat/mock-chat-build-app");
     const header = page.locator("header[data-mobile-header]");
     await expect(header).toBeVisible({ timeout: 30_000 });
@@ -93,5 +92,28 @@ test.describe("phone", () => {
     await list.getByRole("link", { name: "New chat", exact: true }).click();
     await expect(list).toHaveCount(0);
     await expect(page).toHaveURL(/\/chat$/);
+  });
+
+  test("the drawer's button hides the names, and the page is pushed by the bare rail", async ({
+    page,
+  }) => {
+    await page.goto("/memory");
+    const header = page.locator("header[data-mobile-header]");
+    await expect(header).toBeVisible({ timeout: 30_000 });
+    const pageLeft = () =>
+      page.evaluate(() => Math.round(document.querySelector("main")!.getBoundingClientRect().left));
+
+    await header.getByRole("button", { name: "Open sidebar", exact: true }).click();
+    await expect.poll(() => pageLeft()).toBe(192);
+    await page.getByRole("button", { name: "Hide names", exact: true }).click();
+    await expect(page.locator('aside a[href="/apps"]')).toHaveText("");
+    expect(await railWidth(page)).toBe(64);
+    await expect.poll(() => pageLeft()).toBe(64);
+
+    await page.reload();
+    await header.getByRole("button", { name: "Open sidebar", exact: true }).click();
+    await expect.poll(() => pageLeft()).toBe(64);
+    await page.getByRole("button", { name: "Show names", exact: true }).click();
+    await expect.poll(() => pageLeft()).toBe(192);
   });
 });

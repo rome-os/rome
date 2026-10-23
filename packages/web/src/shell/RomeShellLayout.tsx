@@ -107,10 +107,7 @@ export function RomeShellLayout() {
   const showChats = isDesktop && onChat && !collapsed;
   const phoneChatList = !isDesktop && onChat && chatListOpen && !hideSidebar;
   const sidebarShortcut = sidebarShortcutForPlatform();
-  // Names on the rail are the guardian's choice on desktop. The phone drawer
-  // covers the page anyway, so its rail always has them.
-  const railLabelled = isDesktop ? railNames : true;
-  const railRem = railLabelled ? RAIL_NAMED_REM : RAIL_BARE_REM;
+  const railRem = railNames ? RAIL_NAMED_REM : RAIL_BARE_REM;
   const sidebarWidth = hideSidebar ? "0px" : `${railRem + (showChats ? CHATS_REM : 0)}rem`;
   // The Mac app has no browser toolbar, so it gets a title bar of its own. The
   // sidebar toggle moves there from the chat list and the logo.
@@ -282,10 +279,10 @@ export function RomeShellLayout() {
     <div
       className="relative flex shrink-0 flex-col"
       style={{ width: `${railRem}rem` }}
-      data-rail-labelled={railLabelled ? "" : undefined}
+      data-rail-labelled={railNames ? "" : undefined}
     >
       <div
-        className={`flex shrink-0 items-center gap-1 pb-4 ${railLabelled ? "justify-start px-3" : "justify-center"} ${titlebar ? "pt-2" : "pt-5"}`}
+        className={`flex shrink-0 items-center gap-1 pb-4 ${railNames ? "justify-start px-3" : "justify-center"} ${titlebar ? "pt-2" : "pt-5"}`}
       >
         {/* A fixed slot, so swapping the logo link for the 32px expand
             button does not move every tile below it. */}
@@ -326,14 +323,14 @@ export function RomeShellLayout() {
             </Link>
           )}
         </div>
-        {railLabelled ? (
+        {railNames ? (
           <span className="min-w-0 truncate text-ui font-medium text-foreground">
             {t("appName")}
           </span>
         ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-idle-hidden">
-        <RailLabelsContext.Provider value={railLabelled}>
+        <RailLabelsContext.Provider value={railNames}>
           <AppGrid
             onSearch={() => setChatSearchOpen(true)}
             chatPeek={canPeek ? chatPeek.tile : undefined}
@@ -341,24 +338,23 @@ export function RomeShellLayout() {
         </RailLabelsContext.Provider>
       </div>
       <div
-        className={`flex shrink-0 py-3 ${railLabelled ? "items-center justify-between px-3" : "flex-col items-center gap-2"}`}
+        className={`flex shrink-0 py-3 ${railNames ? "items-center justify-between px-3" : "flex-col items-center gap-2"}`}
       >
-        {isDesktop ? (
-          <IconButton
-            size="sm"
-            label={railNamesLabel}
-            title={railNamesLabel}
-            icon={railNames ? <ChevronsLeft aria-hidden /> : <ChevronsRight aria-hidden />}
-            onClick={() => setRailNamesPersisted(!railNames)}
-            className={`text-subtle-foreground hover:text-foreground ${railLabelled ? "order-last" : ""}`}
-          />
-        ) : null}
+        <IconButton
+          size="sm"
+          label={railNamesLabel}
+          title={railNamesLabel}
+          icon={railNames ? <ChevronsLeft aria-hidden /> : <ChevronsRight aria-hidden />}
+          onClick={() => setRailNamesPersisted(!railNames)}
+          className={`text-subtle-foreground hover:text-foreground ${railNames ? "order-last" : ""}`}
+        />
         <ProfileMenu />
       </div>
       {isDesktop ? (
         // The edge itself, a few pixels either side of the rail's last one.
         // The button above is the named, focusable control; this is the
-        // pointer shortcut onto the same switch.
+        // pointer shortcut onto the same switch. Not on a phone, where a
+        // swipe across the edge closes the drawer.
         <div
           aria-hidden
           title={railNamesLabel}
@@ -546,7 +542,11 @@ export function RomeShellLayout() {
         <main
           ref={pageRef}
           className={`flex min-w-0 flex-1 flex-col bg-background max-md:transition-[translate] max-md:duration-200 max-md:ease-out motion-reduce:transition-none ${
-            sidebarOpen && !hideSidebar ? "max-md:translate-x-48" : ""
+            sidebarOpen && !hideSidebar
+              ? railNames
+                ? "max-md:translate-x-48"
+                : "max-md:translate-x-16"
+              : ""
           }`}
           style={
             {
