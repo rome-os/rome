@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { FakeClock } from "../../test/kit/clock.js";
-import { Outlasted, Pacer } from "./pacer.js";
+import { Outlasted, Pacer, SLOW_WRITE_MS } from "./pacer.js";
 import { type DeliveryEvent, ReplyDelivery } from "./reply.js";
 import { feishuMarkdown } from "./transports/feishu.js";
 import {
@@ -681,6 +681,24 @@ describe("ReplyDelivery", () => {
 
       expect(outcome.status).toBe("unknown");
       expect(settling.settled).toEqual([]);
+    });
+
+    it("settles a message whose create answers after the reply stopped waiting", async () => {
+      let release!: () => void;
+      platform.hold = new Promise((resolve) => {
+        release = resolve;
+      });
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      const finished = delivery.finish();
+      await advance(SLOW_WRITE_MS);
+      const outcome = await finished;
+      expect(outcome.status).toBe("unknown");
+
+      release();
+      await advance(0);
+      expect(platform.shown).toEqual(["Hello"]);
+      expect(settling.settled).toEqual([{ id: "m1", text: "Hello" }]);
     });
   });
 

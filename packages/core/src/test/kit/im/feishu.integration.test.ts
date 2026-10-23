@@ -326,8 +326,21 @@ describe("feishuTransport in the card style against the peer", () => {
     peer.server.once({ method: "POST", path: MESSAGES, dropAfterAccept: true });
 
     await expect(transport.create(FEISHU_CHAT, "one")).rejects.toMatchObject({ kind: "unknown" });
-    await peer.server.waitFor(() => peer.allCards()[0]?.streaming === false);
+    // Within the create's own write, so in the account's queue.
+    expect(peer.allCards()[0]?.streaming).toBe(false);
     expect(peer.visible().map((message) => message.text)).toEqual(["one"]);
+  });
+
+  it("rewrites a settled card whole, out of streaming mode", async () => {
+    const receipt = await transport.create(FEISHU_CHAT, "First version");
+    await transport.settle!(receipt, "First version");
+    await transport.edit!(receipt, "Final **version**");
+
+    expect(peer.visible().map((message) => message.text)).toEqual(["Final **version**"]);
+    expect(peer.cardOf(receipt.messageId)).toMatchObject({
+      streaming: false,
+      summary: "Final version",
+    });
   });
 
   it("reads the style for each new message, and writes each message in its own", async () => {
@@ -617,6 +630,37 @@ describe("a reply streamed to Feishu", () => {
       { text: text.trim(), edits: words.length - 1 },
     ]);
     expect(peer.cardOf(romeMessages()[0]!.id)).toMatchObject({ streaming: false });
+  });
+
+  it("shows a settled card's block revised by its complete text arriving again", async () => {
+    const transport = feishuTransport({
+      client: peer.createClient(),
+      replyInThread: async () => true,
+      style: async () => "card",
+    });
+    const delivery = deliver(transport, {
+      mode: "edit",
+      editIntervalMs: 0,
+      blockWaitMs: 0,
+      maxPendingChars: 100_000,
+    });
+
+    delivery.accept({ type: "text", content: "First version of it", blockId: "a" });
+    await peer.server.waitFor(() => peer.allCards()[0]?.streaming === false);
+    delivery.accept({ type: "text", content: "Final version of it", blockId: "a" });
+    delivery.accept({ type: "text_delta", content: "And more.", blockId: "b" });
+    delivery.accept({ type: "text", content: "And more.", blockId: "b" });
+    const outcome = await delivery.finish();
+
+    expect(outcome.status).toBe("delivered");
+    expect(romeMessages().map((message) => message.text)).toEqual([
+      "Final version of it",
+      "And more.",
+    ]);
+    expect(peer.allCards().map(({ streaming, summary }) => ({ streaming, summary }))).toEqual([
+      { streaming: false, summary: "Final version of it" },
+      { streaming: false, summary: "And more." },
+    ]);
   });
 
   it("ends the streaming mode of the card a stopped reply shows", async () => {

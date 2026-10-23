@@ -793,6 +793,20 @@ export class ReplyDelivery {
       } catch (error) {
         const failure = asDeliveryFailure(error);
         report(failure.kind, partIndex);
+        const late = this.outlasting as Promise<PartReceipt> | undefined;
+        if (failure instanceof WriteTimedOut && late && transport.settle) {
+          // A create that answers after the deadline leaves the reply no part
+          // to settle its message with, so it is settled once the answer comes,
+          // while the call still holds the conversation.
+          this.outlasting = late.then(async (receipt) => {
+            if (!receipt.streaming) return;
+            await transport.settle!(receipt, rendered).catch((settleError: unknown) =>
+              log.warn("a message could not be settled", {
+                error: settleError instanceof Error ? settleError.message : String(settleError),
+              }),
+            );
+          });
+        }
         if (failure.kind === "unknown") {
           state.parts.push({
             start: plan.start,

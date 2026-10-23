@@ -303,16 +303,30 @@ export class FeishuPeer implements Peer {
     if (method === "PUT" && content) return this.streamText(content[1]!, content[2]!, body);
     const settings = /^\/(\w+)\/settings$/.exec(rest);
     if (method === "PATCH" && settings) return this.cardSettings(settings[1]!, body);
+    const whole = /^\/(\w+)$/.exec(rest);
+    if (method === "PUT" && whole) return this.replaceCard(whole[1]!, body);
     return undefined;
   }
 
   private createCard(body: Record<string, unknown>): Reply | undefined {
+    const json = this.cardJson(body);
+    if (!json || "body" in json) return json;
+    const id = `7${String(this.nextCardId++).padStart(18, "0")}`;
+    this.cards.set(id, { ...json, sequence: 0 });
+    return { body: { code: 0, msg: "success", data: { card_id: id } }, source: "synthetic" };
+  }
+
+  /** What a card JSON body this peer models makes of a card, or Feishu's
+   *  refusal of it. */
+  private cardJson(
+    body: Record<string, unknown>,
+  ): Pick<PeerCard, "element" | "text" | "streaming" | "summary"> | Reply | undefined {
     if (body.type !== "card_json" || typeof body.data !== "string") return undefined;
     if (Buffer.byteLength(body.data) > CONTENT_LIMIT)
       return refusal(200860, "Card content exceeds limit.");
     const json = JSON.parse(body.data) as {
       schema?: string;
-      config?: { streaming_mode?: boolean };
+      config?: { streaming_mode?: boolean; summary?: { content?: string } };
       body?: { elements?: Array<{ tag?: string; element_id?: string; content?: string }> };
     };
     const elements = json.body?.elements ?? [];
@@ -325,14 +339,13 @@ export class FeishuPeer implements Peer {
       typeof element.content !== "string"
     )
       return undefined;
-    const id = `7${String(this.nextCardId++).padStart(18, "0")}`;
-    this.cards.set(id, {
+    const summary = json.config?.summary?.content;
+    return {
       element: element.element_id,
       text: element.content,
       streaming: json.config?.streaming_mode === true,
-      sequence: 0,
-    });
-    return { body: { code: 0, msg: "success", data: { card_id: id } }, source: "synthetic" };
+      ...(summary !== undefined ? { summary } : {}),
+    };
   }
 
   /** The card's write with `sequence`, or Feishu's refusal of it. */
@@ -357,6 +370,18 @@ export class FeishuPeer implements Peer {
     if (!card.streaming) return refusal(300309, "Card streaming closed.");
     card.text = body.content;
     if (card.messageId) this.store.edit(card.messageId, body.content.trim());
+    return { body: { code: 0, msg: "success", data: {} }, source: "synthetic", accepted: true };
+  }
+
+  /** Replaces the whole card, which Feishu allows in or out of streaming mode. */
+  private replaceCard(id: string, body: Record<string, unknown>): Reply | undefined {
+    const json = this.cardJson((body.card ?? {}) as Record<string, unknown>);
+    if (!json || "body" in json) return json;
+    const card = this.cardWrite(id, body.sequence);
+    if ("body" in card) return card;
+    delete card.summary;
+    Object.assign(card, json);
+    if (card.messageId) this.store.edit(card.messageId, card.text.trim());
     return { body: { code: 0, msg: "success", data: {} }, source: "synthetic", accepted: true };
   }
 

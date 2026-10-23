@@ -6,7 +6,10 @@ import {
   type TextCodec,
 } from "../types.js";
 import type { FeishuStreamingStyle } from "../streaming-switch.js";
+import { createLogger } from "../../../logger.js";
 import { neverConnected } from "./network.js";
+
+const log = createLogger("feishu-delivery");
 
 /** Feishu lets a message be edited this many times. */
 export const FEISHU_MAX_EDITS = 20;
@@ -39,15 +42,17 @@ export interface FeishuTransportOptions {
   style?(): Promise<FeishuStreamingStyle>;
 }
 
-/** A card a reply streams into: its id, and the last sequence number written
- *  to it, which Feishu requires to grow with every write. */
+/** A card a reply streams into: its id, the last sequence number written to
+ *  it, which Feishu requires to grow with every write, and whether its
+ *  streaming mode has ended. */
 interface Card {
   id: string;
   sequence: number;
+  settled?: true;
 }
 
-/** The streaming cards whose message id this transport knows, the oldest
- *  forgotten first. A reply settles each card it creates, which forgets it. */
+/** The cards whose message id this transport knows, the oldest forgotten
+ *  first. */
 const KNOWN_CARDS = 1000;
 /** The card element a reply's text streams into. */
 const CARD_ELEMENT = "content";
@@ -66,7 +71,8 @@ const SUMMARY_LENGTH = 50;
  * times. The capabilities say so, and Feishu's refusal of one more is
  * `unsupported`. A `card` is a CardKit card in streaming mode holding one
  * Markdown element, as the SDK's own streaming makes it. Its receipt lifts the
- * edit cap and asks for a settle, which ends streaming mode.
+ * edit cap and asks for a settle, which ends streaming mode. A card edited
+ * after that is rewritten whole.
  */
 export function feishuTransport({
   client,
@@ -127,7 +133,7 @@ export function feishuTransport({
       id = await call(async () => {
         const made = answered(
           await client.cardkit.v1.card.create({
-            data: { type: "card_json", data: JSON.stringify(cardOf(text)) },
+            data: { type: "card_json", data: JSON.stringify(cardOf(text, true)) },
           }),
         );
         return made.data?.card_id;
@@ -150,7 +156,11 @@ export function feishuTransport({
       // The message may show the card, and the reply has no receipt to settle
       // it with, so its cursor is ended here, as far as Feishu lets it be.
       if ((error as DeliveryFailure).kind === "unknown")
-        void endStreaming(card, text).catch(() => {});
+        await endStreaming(card, text).catch((settleError: unknown) =>
+          log.warn("a card shown without a receipt could not be settled", {
+            error: messageOf(settleError),
+          }),
+        );
       throw error;
     }
     cards.set(receipt.messageId, card);
@@ -215,6 +225,23 @@ export function feishuTransport({
         return;
       }
       const sequence = ++card.sequence;
+      if (card.settled) {
+        // A settled card takes no streamed text, so a block revised after it
+        // was settled rewrites the whole card, still out of streaming mode.
+        await call(async () =>
+          answered(
+            await client.cardkit.v1.card.update({
+              path: { card_id: card.id },
+              data: {
+                card: { type: "card_json", data: JSON.stringify(cardOf(text, false)) },
+                sequence,
+                uuid: `u_${card.id}_${sequence}`,
+              },
+            }),
+          ),
+        );
+        return;
+      }
       await call(async () =>
         answered(
           await client.cardkit.v1.cardElement.content({
@@ -226,28 +253,31 @@ export function feishuTransport({
     },
     settle: async (receipt, text) => {
       const card = cards.get(receipt.messageId);
-      if (!card) return;
-      cards.delete(receipt.messageId);
+      if (!card || card.settled) return;
+      card.settled = true;
       await endStreaming(card, text);
     },
   };
 }
 
-/** A card in streaming mode that shows `text` as Markdown, as the SDK's own
- *  streaming builds one. It shows the text as it is typed until it is settled. */
-function cardOf(text: string): Record<string, unknown> {
+/** A card that shows `text` as Markdown, as the SDK's own streaming builds
+ *  one. In streaming mode it shows the text as it is typed until it is
+ *  settled. Out of it, the chat list shows the text's words. */
+function cardOf(text: string, streaming: boolean): Record<string, unknown> {
   return {
     schema: "2.0",
-    config: {
-      streaming_mode: true,
-      streaming_config: {
-        print_frequency_ms: { default: 70 },
-        print_step: { default: 1 },
-        // A write shows at once what the card had yet to type, so the card
-        // never falls behind the reply.
-        print_strategy: "fast",
-      },
-    },
+    config: streaming
+      ? {
+          streaming_mode: true,
+          streaming_config: {
+            print_frequency_ms: { default: 70 },
+            print_step: { default: 1 },
+            // A write shows at once what the card had yet to type, so the card
+            // never falls behind the reply.
+            print_strategy: "fast",
+          },
+        }
+      : { streaming_mode: false, summary: { content: summaryOf(text) } },
     body: { elements: [{ tag: "markdown", element_id: CARD_ELEMENT, content: text }] },
   };
 }
