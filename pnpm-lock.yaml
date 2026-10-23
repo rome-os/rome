@@ -483,6 +483,9 @@ importers:
       electron-updater:
         specifier: ^6.3.0
         version: 6.8.3(supports-color@8.1.1)
+      koffi:
+        specifier: ^2.16.3
+        version: 2.16.3
       winston:
         specifier: ^3.19.0
         version: 3.19.0
@@ -10085,6 +10088,9 @@ packages:
     resolution: {integrity: sha512-bbHIrnGspYwe4EBPjjx+lvkUor0F2qfKQc5BPzPI4SOAImYA+k2ueVpIcF7d/W1LEVT7XoJUPt6zELeGZhXBgA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
+
+  koffi@2.16.3:
+    resolution: {integrity: sha512-E9y1AsgYGlaxMhcZzHr8y96QF2U5XzA12GGVAfbWqIubTwPNMXQarfBzePNXHe0xtIEtNd6ifAv3GAKYGUeBAQ==}
 
   kuler@2.0.0:
     resolution: {integrity: sha512-Xq9nH7KlWZmXAtodXDDRE7vs6DU1gTU8zYDHDiWLSip45Egwq3plLHzPn27NgvzL2r1LMPC1vdqh98sQxtqj4A==}
@@ -22344,6 +22350,8 @@ snapshots:
       unbash: 4.0.11
       yaml: 2.9.0
       zod: 4.4.3
+
+  koffi@2.16.3: {}
 
   kuler@2.0.0: {}
 
