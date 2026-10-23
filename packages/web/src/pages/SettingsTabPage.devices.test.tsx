@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -329,6 +329,38 @@ describe("this device in the Mac app", () => {
     await screen.findByText("macOS · Connected");
     act(() => push({ state: "offline", deviceId: "this-mac", name: "RayBook.local" }));
     expect(await screen.findByText("macOS · Not connected")).toBeTruthy();
+  });
+
+  it("draws the cards once the app names this computer, with it first", async () => {
+    const { bridge } = installBridge();
+    let answer: (status: DesktopDeviceStatus) => void = () => {};
+    bridge.get.mockImplementation(
+      () => new Promise<DesktopDeviceStatus>((resolve) => (answer = resolve)),
+    );
+    renderDevices(() => ({
+      ...online(),
+      devices: [
+        { id: "work", name: "Workstation", platform: "linux", status: "connected" },
+        ...online().devices,
+      ],
+    }));
+    await waitFor(() => expect(bridge.get).toHaveBeenCalled());
+    // The devices are read, but the order waits for the app.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.queryByText("Workstation")).toBeNull();
+    act(() => answer({ state: "connected", deviceId: "this-mac", name: "RayBook.local" }));
+    await screen.findByText("Workstation");
+    const cards = within(screen.getByRole("list", { name: "Devices" })).getAllByRole("listitem");
+    expect(cards[0]!.textContent).toContain("This device");
+    expect(cards[1]!.textContent).toContain("Workstation");
+  });
+
+  it("draws the devices when the app refuses this page", async () => {
+    const { bridge } = installBridge();
+    bridge.get.mockRejectedValue(new Error("device:get is not available to this page"));
+    renderDevices(online);
+    expect(await screen.findByText("RayBook")).toBeTruthy();
+    expect(screen.queryByText("This device")).toBeNull();
   });
 
   it("shows nothing in a browser or in an app without device controls", async () => {

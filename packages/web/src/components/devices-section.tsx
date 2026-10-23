@@ -81,7 +81,8 @@ export function DevicesSection() {
         navigation={navigation}
         locale={i18n.language}
         thisDevice={thisDevice ?? undefined}
-        loading={!data}
+        // The order is set when the cards first draw, so they wait to learn which is this computer.
+        loading={!data || thisDevice === undefined}
       />
     );
 
