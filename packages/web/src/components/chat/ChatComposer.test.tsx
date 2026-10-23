@@ -144,6 +144,30 @@ describe("text-only composer", () => {
   });
 });
 
+describe("placeholder hints", () => {
+  it("shows a different hint after each send", async () => {
+    stubCoarsePointer(false);
+    rs.spyOn(Math, "random").mockReturnValue(0);
+    const onSend = rs.fn();
+    renderComposer({ showProjectSelector: true, onSend });
+
+    const box = await screen.findByPlaceholderText("How can I help you today?");
+    await userEvent.type(box, "hi{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(await screen.findByPlaceholderText("Type / to use a skill")).toBe(box);
+  });
+
+  it("offers neither @ nor keyboard hints in an open chat on a phone", async () => {
+    stubCoarsePointer(true);
+    rs.spyOn(Math, "random").mockReturnValue(0.99);
+    renderComposer({ lockAgentMention: true });
+
+    expect(
+      await screen.findByPlaceholderText("Send anytime, even while the agent is working"),
+    ).toBeTruthy();
+  });
+});
+
 describe("composer mention list", () => {
   const GUARDIAN = person("mock-guardian", "Mock Guardian", "guardian");
   const RAY = person("ray-oster", "Ray Oster", "inner-circle");

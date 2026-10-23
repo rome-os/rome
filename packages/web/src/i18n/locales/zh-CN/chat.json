@@ -224,6 +224,15 @@
   "composer": {
     "placeholderDefault": "今天我能帮你做点什么?",
     "placeholderWithUploads": "添加消息或直接发送已上传的文件...",
+    "hints": {
+      "skill": "输入 / 使用技能",
+      "agent": "输入 @ 选择 agent",
+      "project": "在下方选择项目，让 agent 在里面工作",
+      "attach": "粘贴或拖入文件即可附上",
+      "newline": "Shift+Enter 换行",
+      "search": "{{shortcut}} 搜索对话",
+      "sendWhileWorking": "agent 工作时也可以继续发消息"
+    },
     "uploadFiles": "上传文件",
     "dropFiles": "拖放文件以上传",
     "removeFile": "移除 {{name}}",

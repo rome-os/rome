@@ -224,6 +224,15 @@
   "composer": {
     "placeholderDefault": "How can I help you today?",
     "placeholderWithUploads": "Add a message or send the uploaded files...",
+    "hints": {
+      "skill": "Type / to use a skill",
+      "agent": "Type @ to pick an agent",
+      "project": "Pick a project below for the agent to work in",
+      "attach": "Paste or drop files to attach them",
+      "newline": "Shift+Enter for a new line",
+      "search": "{{shortcut}} to search your chats",
+      "sendWhileWorking": "Send anytime, even while the agent is working"
+    },
     "uploadFiles": "Upload files",
     "dropFiles": "Drop files to upload",
     "removeFile": "Remove {{name}}",

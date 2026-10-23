@@ -48,6 +48,12 @@ import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
+import {
+  COMPOSER_HINT_KEYS,
+  composerHints,
+  pickComposerHint,
+  type ComposerHint,
+} from "./composer/composer-hints";
 import { useHorizontalScrollRail } from "./HorizontalScrollRail";
 import {
   clearNewChatDraft,
@@ -56,6 +62,7 @@ import {
   saveNewChatDraft,
 } from "@/lib/new-chat-draft-storage";
 import { randomUUID } from "@/lib/random-uuid";
+import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
 
 export interface ChatComposerSnapshot {
@@ -259,6 +266,25 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     }
   }, [agentMentionLocked]);
   const effectiveMention = pinnedAgentMention ?? draftAgentMention;
+  const coarsePointer = useCoarsePointer();
+
+  // The empty box shows one hint, picked again on each send rather than on a
+  // timer. The set of hints changes when a draft becomes a chat or the pointer
+  // changes; the shown one stays while it still applies.
+  const hints = useMemo(
+    () =>
+      composerHints({
+        draft: !agentMentionLocked,
+        textOnly,
+        projectSelector: showProjectSelector,
+        coarsePointer,
+      }),
+    [agentMentionLocked, textOnly, showProjectSelector, coarsePointer],
+  );
+  const [hint, setHint] = useState<ComposerHint>(() => pickComposerHint(hints, null));
+  useEffect(() => {
+    setHint((current) => (hints.includes(current) ? current : pickComposerHint(hints, current)));
+  }, [hints]);
 
   // Open while the message starts with `/` and the cursor is still inside the
   // first token. Selecting pins the skill as a structured chip (mirroring the
@@ -696,6 +722,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       setPendingUploads([]);
       setDraftSkill(null);
     }
+    setHint((current) => pickComposerHint(hints, current));
     try {
       await invokeOnSend(snapshot, persistNewChatDraft);
       failedSendRef.current = null;
@@ -754,6 +781,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     draftAgentMention,
     uploadInFlight,
     invokeOnSend,
+    hints,
   ]);
 
   // Re-evaluates whether the cursor sits inside an active mention token
@@ -906,7 +934,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // On touch-first devices, Enter inserts a newline instead and sending goes
   // through the send button — soft keyboards have no Shift+Enter, and an
   // accidental tap on Enter shouldn't fire a half-written message.
-  const coarsePointer = useCoarsePointer();
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // While the slash menu is open, hijack arrow/enter/escape the same way the
     // mention menu does. The two are mutually exclusive in practice: slash
@@ -1166,7 +1193,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                           placeholder ??
                           (pendingUploads.length > 0
                             ? t("composer.placeholderWithUploads")
-                            : t("composer.placeholderDefault"))
+                            : t(COMPOSER_HINT_KEYS[hint], {
+                                shortcut: chatSearchShortcutForPlatform(),
+                              }))
                         }
                         rows={1}
                         className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
