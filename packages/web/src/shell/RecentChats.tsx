@@ -299,12 +299,18 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
 export interface RecentChatsProps {
   /** Extra buttons after the list's own, such as the shell's collapse control. */
   headerControls?: ReactNode;
+  /** A control before the title, such as the phone drawer's way back to the rail. */
+  headerLeading?: ReactNode;
   /** Sit closer to the top, where a title bar above already holds the window's edge. */
   belowTitlebar?: boolean;
 }
 
 // The sidebar's second column: the header stays put while the list scrolls.
-export function RecentChats({ headerControls, belowTitlebar = false }: RecentChatsProps) {
+export function RecentChats({
+  headerControls,
+  headerLeading,
+  belowTitlebar = false,
+}: RecentChatsProps) {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
@@ -999,9 +1005,12 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className={`flex shrink-0 items-center justify-between pb-2 pl-5 pr-3 ${belowTitlebar ? "pt-2" : "pt-5"}`}
+          className={`flex shrink-0 items-center justify-between pb-2 pr-3 ${headerLeading ? "pl-2" : "pl-5"} ${belowTitlebar ? "pt-2" : "pt-5"}`}
         >
-          <span className="text-section text-foreground">{t("recentChats.title")}</span>
+          <div className="flex min-w-0 items-center gap-1">
+            {headerLeading}
+            <span className="text-section text-foreground">{t("recentChats.title")}</span>
+          </div>
           <div className="flex items-center gap-1">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

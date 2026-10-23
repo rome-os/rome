@@ -2,6 +2,7 @@
   "appName": "Rome",
   "nav": {
     "chat": "对话",
+    "chatList": "对话列表",
     "activity": "动态",
     "people": "联系人",
     "assistants": "助手",
@@ -29,8 +30,12 @@
   "sidebar": {
     "aiApps": "AI 应用",
     "appDisabled": "已停用",
+    "hideNames": "隐藏名称",
+    "more": "更多",
     "moreRecentApps": "更多最近应用",
-    "notOpened": "尚未在此设备打开"
+    "notOpened": "尚未在此设备打开",
+    "search": "搜索",
+    "showNames": "显示名称"
   },
   "recentChats": {
     "myChats": "我的聊天",

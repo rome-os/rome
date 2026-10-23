@@ -1,6 +1,19 @@
-import { Cross1Icon, HamburgerMenuIcon } from "@radix-ui/react-icons";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
+import { HamburgerMenuIcon } from "@radix-ui/react-icons";
+import {
+  ChevronLeft,
+  ChevronsLeft,
+  ChevronsRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react";
+import {
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
@@ -14,6 +27,7 @@ import { ChatSearchDialog } from "./ChatSearchDialog";
 import { DesktopTitlebar } from "./DesktopTitlebar";
 import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
+import { RailLabelsContext } from "./sidebar-shared";
 import { useChatPeek } from "./use-chat-peek";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { saveSetting } from "@/lib/chat-api";
@@ -27,6 +41,17 @@ import { isApplePlatform } from "@/lib/platform";
 
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 const SIDEBAR_COLLAPSED_KEY = "rome-sidebar-collapsed";
+const RAIL_NAMES_KEY = "rome-sidebar-names";
+/** The rail's width in rem: names beside the icons, or icons alone. */
+const RAIL_NAMED_REM = 12;
+const RAIL_BARE_REM = 4;
+/** The chat column's width in rem. */
+const CHATS_REM = 16;
+/** Travel along the rail's edge that switches the names, so a drag snaps to
+ *  one of the two widths instead of resizing freely. */
+const EDGE_SNAP_PX = 24;
+/** Travel under which a press on the edge counts as a click. */
+const EDGE_CLICK_PX = 3;
 
 const isSupportedLanguage = (lng: string | undefined): lng is string =>
   !!lng && (SUPPORTED_LANGUAGES as readonly string[]).includes(lng);
@@ -36,6 +61,16 @@ function readSidebarCollapsed(): boolean {
     return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+// Names show until the guardian hides them, so a first visit reads the rail
+// instead of guessing at its icons.
+function readRailNames(): boolean {
+  try {
+    return localStorage.getItem(RAIL_NAMES_KEY) !== "0";
+  } catch {
+    return true;
   }
 }
 
@@ -49,7 +84,12 @@ export function RomeShellLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // On a phone the chat list is a full-screen layer over the Chat page, not a
+  // drawer column: the master of a master-detail pair whose detail is the
+  // chat. It is UI state, not a route, so `/chat` still means a new chat.
+  const [chatListOpen, setChatListOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
+  const [railNames, setRailNames] = useState(readRailNames);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const isDesktop = useDesktop();
@@ -64,9 +104,14 @@ export function RomeShellLayout() {
   // hides the chat list. That is a desktop arrangement: below `md` the sidebar
   // is a slide-over, so a collapse saved on desktop must not empty the drawer.
   const onChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
-  const showChats = onChat && !(collapsed && isDesktop);
+  const showChats = isDesktop && onChat && !collapsed;
+  const phoneChatList = !isDesktop && onChat && chatListOpen && !hideSidebar;
   const sidebarShortcut = sidebarShortcutForPlatform();
-  const sidebarWidth = hideSidebar ? "0px" : showChats ? "20rem" : "4rem";
+  // Names on the rail are the guardian's choice on desktop. The phone drawer
+  // covers the page anyway, so its rail always has them.
+  const railLabelled = isDesktop ? railNames : true;
+  const railRem = railLabelled ? RAIL_NAMED_REM : RAIL_BARE_REM;
+  const sidebarWidth = hideSidebar ? "0px" : `${railRem + (showChats ? CHATS_REM : 0)}rem`;
   // The Mac app has no browser toolbar, so it gets a title bar of its own. The
   // sidebar toggle moves there from the chat list and the logo.
   const [titlebar] = useState(isElectronShell);
@@ -86,10 +131,53 @@ export function RomeShellLayout() {
     });
   }, []);
 
+  const setRailNamesPersisted = useCallback((next: boolean) => {
+    setRailNames(next);
+    try {
+      localStorage.setItem(RAIL_NAMES_KEY, next ? "1" : "0");
+    } catch {}
+  }, []);
+
+  // The rail's right edge switches the names. A click flips them; a drag
+  // snaps once it has travelled far enough toward the other width, so the
+  // rail is only ever one of its two widths.
+  const edgeDrag = useRef<{ x: number; moved: boolean } | null>(null);
+  const onEdgePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    edgeDrag.current = { x: event.clientX, moved: false };
+  };
+  const onEdgePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = edgeDrag.current;
+    if (!drag) return;
+    const dx = event.clientX - drag.x;
+    if (Math.abs(dx) > EDGE_CLICK_PX) drag.moved = true;
+    if (railNames && dx < -EDGE_SNAP_PX) {
+      setRailNamesPersisted(false);
+      drag.x = event.clientX;
+    } else if (!railNames && dx > EDGE_SNAP_PX) {
+      setRailNamesPersisted(true);
+      drag.x = event.clientX;
+    }
+  };
+  const onEdgePointerUp = () => {
+    const drag = edgeDrag.current;
+    edgeDrag.current = null;
+    if (drag && !drag.moved) setRailNamesPersisted(!railNames);
+  };
+
   useEffect(() => {
     setSidebarOpen(false);
     setChatSearchOpen(false);
   }, [location.pathname]);
+
+  // Any navigation closes the phone chat list: picking a chat, New chat, or
+  // New chat in a folder all land somewhere, even New chat on `/chat` itself,
+  // which changes the location's key.
+  useEffect(() => {
+    setChatListOpen(false);
+  }, [location.key]);
 
   // Keep the dashboard language and the backend `guardianLanguage` setting in
   // sync so server-generated channel notices (e.g. the "no AI tool configured"
@@ -189,13 +277,20 @@ export function RomeShellLayout() {
 
   // The rail, the chat list, and its peek: the browser layout and the Mac
   // app's arrange the same parts differently.
+  const railNamesLabel = t(railNames ? "sidebar.hideNames" : "sidebar.showNames");
   const rail = (
-    <div className="flex w-16 shrink-0 flex-col">
-      <div className={`flex shrink-0 justify-center pb-4 ${titlebar ? "pt-2" : "pt-5"}`}>
+    <div
+      className="relative flex shrink-0 flex-col"
+      style={{ width: `${railRem}rem` }}
+      data-rail-labelled={railLabelled ? "" : undefined}
+    >
+      <div
+        className={`flex shrink-0 items-center gap-1 pb-4 ${railLabelled ? "justify-start px-3" : "justify-center"} ${titlebar ? "pt-2" : "pt-5"}`}
+      >
         {/* A fixed slot, so swapping the logo link for the 32px expand
             button does not move every tile below it. */}
         <div className="flex size-10 items-center justify-center">
-          {onChat && !showChats && !titlebar ? (
+          {onChat && !showChats && !titlebar && isDesktop ? (
             // With the chat list collapsed, the logo doubles as the
             // control that brings it back: hover or keyboard focus
             // crossfades it into the panel glyph.
@@ -231,41 +326,70 @@ export function RomeShellLayout() {
             </Link>
           )}
         </div>
+        {railLabelled ? (
+          <span className="min-w-0 truncate text-ui font-medium text-foreground">
+            {t("appName")}
+          </span>
+        ) : null}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-idle-hidden">
-        <AppGrid
-          onSearch={() => setChatSearchOpen(true)}
-          chatPeek={canPeek ? chatPeek.tile : undefined}
-        />
+        <RailLabelsContext.Provider value={railLabelled}>
+          <AppGrid
+            onSearch={() => setChatSearchOpen(true)}
+            chatPeek={canPeek ? chatPeek.tile : undefined}
+          />
+        </RailLabelsContext.Provider>
       </div>
-      <div className="flex shrink-0 items-center justify-center py-3">
+      <div
+        className={`flex shrink-0 py-3 ${railLabelled ? "items-center justify-between px-3" : "flex-col items-center gap-2"}`}
+      >
+        {isDesktop ? (
+          <IconButton
+            size="sm"
+            label={railNamesLabel}
+            title={railNamesLabel}
+            icon={railNames ? <ChevronsLeft aria-hidden /> : <ChevronsRight aria-hidden />}
+            onClick={() => setRailNamesPersisted(!railNames)}
+            className={`text-subtle-foreground hover:text-foreground ${railLabelled ? "order-last" : ""}`}
+          />
+        ) : null}
         <ProfileMenu />
       </div>
+      {isDesktop ? (
+        // The edge itself, a few pixels either side of the rail's last one.
+        // The button above is the named, focusable control; this is the
+        // pointer shortcut onto the same switch.
+        <div
+          aria-hidden
+          title={railNamesLabel}
+          data-rail-edge
+          onPointerDown={onEdgePointerDown}
+          onPointerMove={onEdgePointerMove}
+          onPointerUp={onEdgePointerUp}
+          onPointerCancel={() => {
+            edgeDrag.current = null;
+          }}
+          className="group absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none"
+        >
+          <div className="mx-auto h-full w-0.5 bg-transparent transition-colors group-hover:bg-border-strong" />
+        </div>
+      ) : null}
     </div>
   );
   const chatList = (
     <RecentChats
       belowTitlebar={titlebar}
       headerControls={
-        <>
-          {titlebar ? null : (
-            <IconButton
-              size="sm"
-              label={t("nav.collapseSidebar")}
-              title={t("nav.collapseSidebarShortcut", { shortcut: sidebarShortcut })}
-              icon={<PanelLeftClose aria-hidden />}
-              onClick={toggleCollapsed}
-              className="hidden text-subtle-foreground hover:text-foreground md:inline-flex"
-            />
-          )}
+        titlebar ? null : (
           <IconButton
             size="sm"
-            label={t("nav.closeSidebar")}
-            icon={<Cross1Icon aria-hidden />}
-            onClick={() => setSidebarOpen(false)}
-            className="text-subtle-foreground hover:text-foreground md:hidden"
+            label={t("nav.collapseSidebar")}
+            title={t("nav.collapseSidebarShortcut", { shortcut: sidebarShortcut })}
+            icon={<PanelLeftClose aria-hidden />}
+            onClick={toggleCollapsed}
+            className="text-subtle-foreground hover:text-foreground"
           />
-        </>
+        )
       }
     />
   );
@@ -388,7 +512,7 @@ export function RomeShellLayout() {
           >
             {/* The edge line is drawn over the last pixel, not added as a
                 border: a border would make the sidebar a pixel wider than the
-                4rem or 20rem the page is pushed by. */}
+                width the page is pushed by. */}
             {/* The rail never carries a border of its own: one would take a pixel
                 from its width while the chat list shows, and shift every
                 centered tile by half of it as the list opens and closes. */}
@@ -404,7 +528,8 @@ export function RomeShellLayout() {
               <div
                 ref={peekRef}
                 data-chat-peek
-                className="absolute inset-y-0 left-16 flex w-64 min-w-0 flex-col border-x border-border bg-background shadow-10"
+                className="absolute inset-y-0 flex w-64 min-w-0 flex-col border-x border-border bg-background shadow-10"
+                style={{ left: `${railRem}rem` }}
               >
                 {peekList}
               </div>
@@ -413,7 +538,7 @@ export function RomeShellLayout() {
         ) : null}
         {searchDialog}
         {/* The in-flow sidebar pushes routed content right by its own width on
-            desktop — 20rem with the chat list, 4rem for the rail alone — and with
+            desktop — the rail, named or bare, plus the chat list when it shows — and with
             ?hideSidebar=1 there's no sidebar and content starts at the viewport
             edge. Publish that left offset so a `fixed` child like the trace
             drawer can align to the chat column. The public share tree has no
@@ -421,11 +546,7 @@ export function RomeShellLayout() {
         <main
           ref={pageRef}
           className={`flex min-w-0 flex-1 flex-col bg-background max-md:transition-[translate] max-md:duration-200 max-md:ease-out motion-reduce:transition-none ${
-            sidebarOpen && !hideSidebar
-              ? showChats
-                ? "max-md:translate-x-80"
-                : "max-md:translate-x-16"
-              : ""
+            sidebarOpen && !hideSidebar ? "max-md:translate-x-48" : ""
           }`}
           style={
             {
@@ -438,12 +559,23 @@ export function RomeShellLayout() {
               data-mobile-header
               className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-background px-2 pt-safe md:hidden"
             >
-              <IconButton
-                size="md"
-                label={t("nav.openSidebar")}
-                icon={<HamburgerMenuIcon aria-hidden />}
-                onClick={() => setSidebarOpen(true)}
-              />
+              <div className="flex shrink-0 items-center">
+                {onChat ? (
+                  // A chat is the detail of the chat list: this goes up to it.
+                  <IconButton
+                    size="md"
+                    label={t("nav.chatList")}
+                    icon={<ChevronLeft aria-hidden />}
+                    onClick={() => setChatListOpen(true)}
+                  />
+                ) : null}
+                <IconButton
+                  size="md"
+                  label={t("nav.openSidebar")}
+                  icon={<HamburgerMenuIcon aria-hidden />}
+                  onClick={() => setSidebarOpen(true)}
+                />
+              </div>
               {/* The chat page fills this with the session's identity + app
                   tabs + actions, mirroring the desktop chat navbar. Other routes
                   leave it empty, so the Rome wordmark fallback shows. */}
@@ -460,6 +592,25 @@ export function RomeShellLayout() {
             </header>
           ) : null}
           {routed}
+          {phoneChatList ? (
+            // Inside the page, so the drawer pushes it along like the page.
+            <div
+              data-phone-chat-list
+              className="fixed inset-0 z-20 flex flex-col bg-background pb-safe pt-safe md:hidden"
+            >
+              <RecentChats
+                headerLeading={
+                  <IconButton
+                    size="sm"
+                    label={t("nav.openSidebar")}
+                    icon={<HamburgerMenuIcon aria-hidden />}
+                    onClick={() => setSidebarOpen(true)}
+                    className="text-subtle-foreground hover:text-foreground"
+                  />
+                }
+              />
+            </div>
+          ) : null}
         </main>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { AppWindow, ExternalLink, Info, MessageCircle, Pin, PinOff, Search } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { AppOrigin, InstalledAppCard } from "@rome/api-types/apps";
@@ -25,8 +25,14 @@ import { useRecentApps } from "@/hooks/use-recent-apps";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import { isCarrierApp } from "@/lib/chat-helpers";
 import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
-import { RailAppIcon, RecentAppsRail } from "./RecentAppsRail";
-import { ACTIVE_CLASS, IDLE_CLASS, RAIL_LINK_CLASS, isEntryActive } from "./sidebar-shared";
+import { RailAppIcon, RailLabel, RecentAppsRail, railDotClass } from "./RecentAppsRail";
+import {
+  ACTIVE_CLASS,
+  IDLE_CLASS,
+  RailLabelsContext,
+  isEntryActive,
+  railLinkClass,
+} from "./sidebar-shared";
 
 export interface PinnedEntry {
   type: "builtin" | "app";
@@ -148,7 +154,8 @@ interface AppGridProps {
 }
 
 // The sidebar's first column: search, Rome's main surfaces, the guardian's
-// pins, then recent apps, as icon tiles whose tooltip carries the label.
+// pins, then recent apps. Labelled, each tile is a row with its name; bare, an
+// icon tile whose tooltip carries the name.
 export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   const { t } = useTranslation("common");
   const { t: tApps } = useTranslation("apps");
@@ -160,6 +167,11 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   const [installedApps, setInstalledApps] =
     useState<(InstalledAppCard | CachedApp)[]>(readLocalApps);
   const [storeOpen, setStoreOpen] = useState(false);
+  const labelled = useContext(RailLabelsContext);
+  const tileClass = railLinkClass(labelled);
+  // A labelled row already names itself, so its tooltip would only repeat it.
+  const tip = (text: string): React.ReactNode =>
+    labelled ? null : <TooltipContent side="right">{text}</TooltipContent>;
   const invalidateSettings = useInvalidateSettings();
   const invalidateApps = useInvalidateApps();
   // The Mac app has no tabs, and its shell hands every new-window request to
@@ -391,9 +403,10 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
                     type="button"
                     onClick={() => setStoreOpen(true)}
                     aria-label={label}
-                    className={`${RAIL_LINK_CLASS} ${IDLE_CLASS}`}
+                    className={`${tileClass} ${IDLE_CLASS}`}
                   >
                     {renderBuiltinIcon(entry)}
+                    {labelled ? <RailLabel>{label}</RailLabel> : null}
                   </button>
                 ) : (
                   <a
@@ -401,14 +414,15 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label={label}
-                    className={`${RAIL_LINK_CLASS} ${IDLE_CLASS}`}
+                    className={`${tileClass} ${IDLE_CLASS}`}
                   >
                     {renderBuiltinIcon(entry)}
+                    {labelled ? <RailLabel>{label}</RailLabel> : null}
                   </a>
                 )}
               </TooltipTrigger>,
             )}
-            <TooltipContent side="right">{label}</TooltipContent>
+            {tip(label)}
           </Tooltip>
         );
       }
@@ -423,9 +437,10 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
                 aria-label={label}
                 onPointerEnter={chatPeek.onPointerEnter}
                 onPointerLeave={chatPeek.onPointerLeave}
-                className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+                className={`${tileClass} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
               >
                 {renderBuiltinIcon(entry)}
+                {labelled ? <RailLabel>{label}</RailLabel> : null}
               </Link>,
             )}
           </Fragment>
@@ -439,13 +454,14 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
               <Link
                 to={entry.href}
                 aria-label={label}
-                className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+                className={`${tileClass} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
               >
                 {renderBuiltinIcon(entry)}
+                {labelled ? <RailLabel>{label}</RailLabel> : null}
               </Link>
             </TooltipTrigger>,
           )}
-          <TooltipContent side="right">{label}</TooltipContent>
+          {tip(label)}
         </Tooltip>
       );
     }
@@ -461,12 +477,13 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
             <Link
               to={app.href}
               aria-label={app.displayName}
-              className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+              className={`${tileClass} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
             >
               <RailAppIcon app={app} />
+              {labelled ? <RailLabel>{app.displayName}</RailLabel> : null}
               {app.status === "disabled" ? (
                 <span
-                  className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-border-strong"
+                  className={`${railDotClass(labelled)} h-1.5 w-1.5 rounded-full bg-border-strong`}
                   role="img"
                   aria-label={t("sidebar.appDisabled")}
                 />
@@ -474,7 +491,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
             </Link>
           </TooltipTrigger>,
         )}
-        <TooltipContent side="right">{app.displayName}</TooltipContent>
+        {tip(app.displayName)}
       </Tooltip>
     );
   };
@@ -482,7 +499,9 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   const fixedCount = REQUIRED_BUILTIN_PINS.length;
   return (
     <TooltipProvider delayDuration={150}>
-      <nav className="flex shrink-0 flex-col items-center gap-1 px-3 pb-2">
+      <nav
+        className={`flex shrink-0 flex-col gap-1 px-3 pb-2 ${labelled ? "items-stretch" : "items-center"}`}
+      >
         {onSearch ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -490,18 +509,24 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
                 type="button"
                 onClick={onSearch}
                 aria-label={t("recentChats.search")}
-                className={`${RAIL_LINK_CLASS} ${IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
+                className={`${tileClass} ${IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
               >
-                <Search className="h-4 w-4" aria-hidden />
+                <Search className="h-4 w-4 shrink-0" aria-hidden />
+                {labelled ? (
+                  <>
+                    <RailLabel>{t("sidebar.search")}</RailLabel>
+                    <kbd className="shrink-0 font-sans text-aux text-subtle-foreground max-md:hidden">
+                      {chatSearchShortcutForPlatform()}
+                    </kbd>
+                  </>
+                ) : null}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">
-              {t("recentChats.searchShortcut", { shortcut: chatSearchShortcutForPlatform() })}
-            </TooltipContent>
+            {tip(t("recentChats.searchShortcut", { shortcut: chatSearchShortcutForPlatform() }))}
           </Tooltip>
         ) : null}
         {pins.slice(0, fixedCount).map(renderPin)}
-        {pins.length > fixedCount ? <Separator className="my-1 w-6" /> : null}
+        {pins.length > fixedCount ? <Separator className={labelled ? "my-1" : "my-1 w-6"} /> : null}
         {pins.slice(fixedCount).map(renderPin)}
         <RecentAppsRail
           apps={recentApps}

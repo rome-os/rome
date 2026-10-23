@@ -2,6 +2,7 @@
   "appName": "Rome",
   "nav": {
     "chat": "Chat",
+    "chatList": "Chat list",
     "activity": "Activity",
     "people": "People",
     "assistants": "Assistants",
@@ -29,8 +30,12 @@
   "sidebar": {
     "aiApps": "AI Apps",
     "appDisabled": "Disabled",
+    "hideNames": "Hide names",
+    "more": "More",
     "moreRecentApps": "More recent apps",
-    "notOpened": "Not opened on this device"
+    "notOpened": "Not opened on this device",
+    "search": "Search",
+    "showNames": "Show names"
   },
   "recentChats": {
     "myChats": "My chats",
