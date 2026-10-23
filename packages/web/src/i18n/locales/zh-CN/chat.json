@@ -223,6 +223,7 @@
   },
   "composer": {
     "placeholderDefault": "今天我能帮你做点什么?",
+    "lockedByCard": "请先回答上方的卡片，再继续。",
     "placeholderWithUploads": "添加消息或直接发送已上传的文件...",
     "uploadFiles": "上传文件",
     "dropFiles": "拖放文件以上传",

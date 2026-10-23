@@ -293,6 +293,33 @@ export function isAwaitingGuardian(
   return false;
 }
 
+// Whether the floor session waits on a card that is the only way to answer
+// (`render.requiresCard`). The same window as isAwaitingGuardian: only the
+// latest turn's open cards count, and a running backend turn means nothing
+// waits. The composer disables itself while this holds.
+export function isLockedByCard(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  runningTurnId: string | null = null,
+): boolean {
+  const { displayMessages, floorSessionId, interactionResults } = view;
+  const floor = displayMessages.filter((m) => m.sessionId === floorSessionId);
+  const latestTurnId = floor.at(-1)?.turnId;
+  if (runningTurnId !== null && latestTurnId !== runningTurnId) return false;
+  for (let i = floor.length - 1; i >= 0; i--) {
+    const msg = floor[i];
+    if (msg.turnId !== latestTurnId || msg.role === "user") return false;
+    if (msg.role !== "assistant") continue;
+    const locking = parseMessageEntries(msg).some(
+      (b) =>
+        b.type === "pending_interaction" &&
+        b.render.requiresCard === true &&
+        !interactionResults.has(interactionResultKey(floorSessionId, b.toolUseId)),
+    );
+    if (locking) return true;
+  }
+  return false;
+}
+
 // Whether the floor session's latest finished turn ended with an error: the
 // same turn_end status the sidebar's failed mark reads.
 export function isLastTurnFailed(

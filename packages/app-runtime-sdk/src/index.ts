@@ -1578,6 +1578,11 @@ export type MessagePart =
         /** Host built-in component (e.g. the ask_question card): rendered by
          *  rome-web directly, with no owning app to validate. */
         builtin?: boolean;
+        /** The card is the only way to answer: while it waits, the host
+         *  disables the composer and says so. A typed message would otherwise
+         *  reach the agent as a reply the card cannot be answered with. Unset
+         *  (the default) keeps the composer open beside the card. */
+        requiresCard?: boolean;
       };
     }
   | {

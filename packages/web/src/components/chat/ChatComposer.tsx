@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowUp, Paperclip, Sparkles, X } from "lucide-react";
+import { ArrowUp, Lock, Paperclip, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -166,6 +166,12 @@ export interface ChatComposerProps {
     onApprove?: () => void;
     onCancel?: () => void;
   } | null;
+  // Why typing is off right now: a card in the transcript is the only way to
+  // answer. While set, a locked strip with this text stands where the box
+  // was, so the state reads at a glance. Null or undefined keeps the composer
+  // open. The draft text stays, so a message typed before the lock is not
+  // lost.
+  lockedReason?: string | null;
   // Styling for the input box itself (border, surface, padding, blur). The
   // composer owns the box so the pre-send chip row can sit *outside* it; each
   // mount passes its own box look (the floating composer adds backdrop-blur).
@@ -213,6 +219,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     onStop,
     streamError,
     designingInteraction = null,
+    lockedReason = null,
     boxClassName,
     onSend,
   },
@@ -653,8 +660,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     [addPendingFiles],
   );
 
+  const locked = lockedReason !== null && lockedReason !== undefined;
   const runSend = useCallback(async () => {
-    if (uploadInFlight || uploadInFlightRef.current) return;
+    if (locked || uploadInFlight || uploadInFlightRef.current) return;
     // A skill chip alone is a sendable turn — the server-expanded prompt asks
     // the agent to read the skill and ask what to do with it.
     if (!inputText.trim() && pendingUploads.length === 0 && !draftSkill) return;
@@ -1101,274 +1109,291 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         )}
         <WorkspaceContextChips />
       </div>
-      <div data-chat-composer-box className={cn("@container/composer relative z-10", boxClassName)}>
-        {composerError && (
-          <Alert variant="destructive" className="mb-3 px-3 py-2">
-            <AlertDescription>{composerError}</AlertDescription>
-          </Alert>
-        )}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleFileSelection}
-        />
-        {/* flow-root keeps the tray's bottom margin inside this box, so the
-            measured height is the full space the tray takes from the input. */}
-        <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">
-          <PendingUploadsList
-            uploads={pendingUploads}
-            onRemove={removePendingUpload}
-            disabled={uploadInFlight}
-            uploadProgress={uploadInFlight ? uploadProgress : undefined}
-          />
+      {locked ? (
+        // The box gives way entirely: a greyed strip with the reason, and none
+        // of the controls that would do nothing. The textarea unmounts, but its
+        // draft lives in state above, so it is back once the lock lifts.
+        <div
+          role="status"
+          data-chat-composer-locked
+          className="relative z-10 flex items-center gap-3 rounded-16 border border-border bg-muted px-4 py-3 text-ui text-foreground"
+        >
+          <Lock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1">{lockedReason}</span>
         </div>
-        {/* A wide composer keeps Send at the end of the toolbar row. A narrow
+      ) : (
+        <div
+          data-chat-composer-box
+          className={cn("@container/composer relative z-10", boxClassName)}
+        >
+          {composerError && (
+            <Alert variant="destructive" className="mb-3 px-3 py-2">
+              <AlertDescription>{composerError}</AlertDescription>
+            </Alert>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleFileSelection}
+          />
+          {/* flow-root keeps the tray's bottom margin inside this box, so the
+            measured height is the full space the tray takes from the input. */}
+          <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">
+            <PendingUploadsList
+              uploads={pendingUploads}
+              onRemove={removePendingUpload}
+              disabled={uploadInFlight}
+              uploadProgress={uploadInFlight ? uploadProgress : undefined}
+            />
+          </div>
+          {/* A wide composer keeps Send at the end of the toolbar row. A narrow
             one moves Send up beside the input and gives the toolbar a whole
             row that scrolls sideways, so no control wraps onto a row of its
             own. */}
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 [grid-template-areas:'input_input'_'tools_send'] @max-[28rem]/composer:[grid-template-areas:'input_send'_'tools_tools']">
-          <div className="[grid-area:input] @max-[28rem]/composer:self-center">
-            <SlashSkillMenu
-              ref={slashMenuRef}
-              open={slashMenuOpen && !uploadInFlight}
-              onOpenChange={(next) => {
-                if (uploadInFlightRef.current) return;
-                setSlashMenuOpen(next);
-                if (!next) setSlashQuery("");
-              }}
-              query={slashQuery}
-              onSelect={acceptSlashSkill}
-              anchor={
-                <div>
-                  <AgentMentionMenu
-                    ref={mentionMenuRef}
-                    open={mentionMenuOpen && !agentMentionLocked && !uploadInFlight}
-                    onOpenChange={(next) => {
-                      if (uploadInFlightRef.current) return;
-                      setMentionMenuOpen(next);
-                      if (!next) {
-                        setMentionAnchorIndex(null);
-                        setMentionQuery("");
-                      }
-                    }}
-                    query={mentionQuery}
-                    onSelect={acceptMention}
-                    anchor={
-                      <textarea
-                        ref={textareaRef}
-                        value={inputText}
-                        onChange={handleTextareaChange}
-                        onSelect={handleTextareaSelect}
-                        onKeyDown={handleKeyDown}
-                        onPaste={handlePaste}
-                        placeholder={
-                          pendingUploads.length > 0
-                            ? t("composer.placeholderWithUploads")
-                            : t("composer.placeholderDefault")
-                        }
-                        rows={1}
-                        className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
-                        style={{
-                          minHeight: TEXTAREA_MIN_HEIGHT,
-                          maxHeight: `${textareaMaxHeight}px`,
-                        }}
-                        onInput={(e) =>
-                          clampTextareaHeight(e.target as HTMLTextAreaElement, textareaMaxHeight)
-                        }
-                        disabled={uploadInFlight}
-                      />
-                    }
-                  />
-                </div>
-              }
-            />
-          </div>
-          <div
-            {...toolbarRail.props}
-            data-chat-composer-toolbar
-            className="flex min-w-0 flex-wrap items-center gap-2 [grid-area:tools] [mask-image:var(--scroll-fade-mask)] [-webkit-mask-image:var(--scroll-fade-mask)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @max-[28rem]/composer:-m-1 @max-[28rem]/composer:flex-nowrap @max-[28rem]/composer:overflow-x-auto @max-[28rem]/composer:overscroll-x-contain @max-[28rem]/composer:p-1"
-          >
-            {showProjectSelector && (
-              <ProjectSelector
-                ref={projectMenuRef}
-                disabled={uploadInFlight}
-                t={t}
-                projectCatalog={projectCatalog}
-                projectsLoading={projectsLoading}
-                projectsError={projectsError}
-                draftProjectName={draftProjectName}
-                draftProjectLabel={draftProjectLabel}
-                defaultProjectName={DEFAULT_PROJECT_NAME}
-                menuOpen={draftProjectMenuOpen}
-                searchQuery={projectSearchQuery}
-                setSearchQuery={setProjectSearchQuery}
-                createFormOpen={createProjectFormOpen}
-                setCreateFormOpen={setCreateProjectFormOpen}
-                newProjectName={newProjectName}
-                setNewProjectName={setNewProjectName}
-                creatingProject={creatingProject}
-                connectOnCreate={connectOnCreate}
-                setConnectOnCreate={setConnectOnCreate}
-                onToggleMenu={async () => {
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 [grid-template-areas:'input_input'_'tools_send'] @max-[28rem]/composer:[grid-template-areas:'input_send'_'tools_tools']">
+            <div className="[grid-area:input] @max-[28rem]/composer:self-center">
+              <SlashSkillMenu
+                ref={slashMenuRef}
+                open={slashMenuOpen && !uploadInFlight}
+                onOpenChange={(next) => {
                   if (uploadInFlightRef.current) return;
-                  const nextOpen = !draftProjectMenuOpen;
-                  setDraftProjectMenuOpen(nextOpen);
-                  setProjectsError(null);
-                  if (!nextOpen) {
+                  setSlashMenuOpen(next);
+                  if (!next) setSlashQuery("");
+                }}
+                query={slashQuery}
+                onSelect={acceptSlashSkill}
+                anchor={
+                  <div>
+                    <AgentMentionMenu
+                      ref={mentionMenuRef}
+                      open={mentionMenuOpen && !agentMentionLocked && !uploadInFlight}
+                      onOpenChange={(next) => {
+                        if (uploadInFlightRef.current) return;
+                        setMentionMenuOpen(next);
+                        if (!next) {
+                          setMentionAnchorIndex(null);
+                          setMentionQuery("");
+                        }
+                      }}
+                      query={mentionQuery}
+                      onSelect={acceptMention}
+                      anchor={
+                        <textarea
+                          ref={textareaRef}
+                          value={inputText}
+                          onChange={handleTextareaChange}
+                          onSelect={handleTextareaSelect}
+                          onKeyDown={handleKeyDown}
+                          onPaste={handlePaste}
+                          placeholder={
+                            pendingUploads.length > 0
+                              ? t("composer.placeholderWithUploads")
+                              : t("composer.placeholderDefault")
+                          }
+                          rows={1}
+                          className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
+                          style={{
+                            minHeight: TEXTAREA_MIN_HEIGHT,
+                            maxHeight: `${textareaMaxHeight}px`,
+                          }}
+                          onInput={(e) =>
+                            clampTextareaHeight(e.target as HTMLTextAreaElement, textareaMaxHeight)
+                          }
+                          disabled={uploadInFlight}
+                        />
+                      }
+                    />
+                  </div>
+                }
+              />
+            </div>
+            <div
+              {...toolbarRail.props}
+              data-chat-composer-toolbar
+              className="flex min-w-0 flex-wrap items-center gap-2 [grid-area:tools] [mask-image:var(--scroll-fade-mask)] [-webkit-mask-image:var(--scroll-fade-mask)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @max-[28rem]/composer:-m-1 @max-[28rem]/composer:flex-nowrap @max-[28rem]/composer:overflow-x-auto @max-[28rem]/composer:overscroll-x-contain @max-[28rem]/composer:p-1"
+            >
+              {showProjectSelector && (
+                <ProjectSelector
+                  ref={projectMenuRef}
+                  disabled={uploadInFlight}
+                  t={t}
+                  projectCatalog={projectCatalog}
+                  projectsLoading={projectsLoading}
+                  projectsError={projectsError}
+                  draftProjectName={draftProjectName}
+                  draftProjectLabel={draftProjectLabel}
+                  defaultProjectName={DEFAULT_PROJECT_NAME}
+                  menuOpen={draftProjectMenuOpen}
+                  searchQuery={projectSearchQuery}
+                  setSearchQuery={setProjectSearchQuery}
+                  createFormOpen={createProjectFormOpen}
+                  setCreateFormOpen={setCreateProjectFormOpen}
+                  newProjectName={newProjectName}
+                  setNewProjectName={setNewProjectName}
+                  creatingProject={creatingProject}
+                  connectOnCreate={connectOnCreate}
+                  setConnectOnCreate={setConnectOnCreate}
+                  onToggleMenu={async () => {
+                    if (uploadInFlightRef.current) return;
+                    const nextOpen = !draftProjectMenuOpen;
+                    setDraftProjectMenuOpen(nextOpen);
+                    setProjectsError(null);
+                    if (!nextOpen) {
+                      setProjectSearchQuery("");
+                      setCreateProjectFormOpen(false);
+                    } else if (!projectCatalog) {
+                      await loadProjects();
+                    }
+                  }}
+                  onPickProject={(name) => {
+                    if (uploadInFlightRef.current) return;
+                    setDraftProjectName(name);
+                    setDraftDeviceFolder(null);
+                    setDraftProjectMenuOpen(false);
                     setProjectSearchQuery("");
                     setCreateProjectFormOpen(false);
-                  } else if (!projectCatalog) {
-                    await loadProjects();
-                  }
-                }}
-                onPickProject={(name) => {
-                  if (uploadInFlightRef.current) return;
-                  setDraftProjectName(name);
-                  setDraftDeviceFolder(null);
-                  setDraftProjectMenuOpen(false);
-                  setProjectSearchQuery("");
-                  setCreateProjectFormOpen(false);
-                }}
-                deviceFolder={draftDeviceFolder}
-                onPickDeviceFolder={(folder) => {
-                  if (uploadInFlightRef.current) return;
-                  setDraftDeviceFolder(folder);
-                  setDraftProjectName(DEFAULT_PROJECT_NAME);
-                  setDraftProjectMenuOpen(false);
-                  setProjectSearchQuery("");
-                  setCreateProjectFormOpen(false);
-                }}
-                onCreateProject={() => {
-                  if (!uploadInFlightRef.current) void createProjectAndSelect();
-                }}
-              />
-            )}
-            {pendingConnectPath ? (
-              <SourceConnect
-                projectPath={pendingConnectPath}
-                open={!!pendingConnectPath}
-                onClose={() => setPendingConnectPath(null)}
-              />
-            ) : null}
-            {impersonationEnabled && (
-              <ImpersonationMenu
-                disabled={uploadInFlight}
-                open={impersonationMenuOpen}
-                onOpenChange={(next) => {
-                  if (!uploadInFlightRef.current) setImpersonationMenuOpen(next);
-                }}
-                selectedPersonId={selectedPersonId}
-                onSelectPersonId={(id) => {
-                  if (!uploadInFlightRef.current) setSelectedPersonId(id);
-                }}
-                options={impersonationOptions}
-                selectedPerson={selectedPerson}
-                selectedPersonLabel={selectedPersonLabel}
-                guardianLabel={guardianLabel}
-              />
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploadInFlight}
-              aria-label={t("composer.uploadFiles")}
-              title={t("composer.uploadFiles")}
-              className="touch-target"
-            >
-              <Paperclip aria-hidden />
-            </Button>
-            {showModelSelector && modelSelectorEnabled && (
-              <ModelSelectorMenu
-                open={modelMenuOpen}
-                onOpenChange={setModelMenuOpen}
-                value={largeModelSelection}
-                onChange={(next) => void updateLargeModelSelection(next)}
-                disabled={uploadInFlight}
-              />
-            )}
-            <ReasoningEffortMenu
-              open={reasoningMenuOpen}
-              onOpenChange={setReasoningMenuOpen}
-              value={reasoningEffort}
-              onChange={(next) => void updateReasoningEffort(next)}
-              disabled={uploadInFlight}
-            />
-          </div>
-          {/* Stop sits just left of Send. */}
-          <div className="flex items-center gap-2 self-end [grid-area:send]">
-            {isStreaming && onStop && (
+                  }}
+                  deviceFolder={draftDeviceFolder}
+                  onPickDeviceFolder={(folder) => {
+                    if (uploadInFlightRef.current) return;
+                    setDraftDeviceFolder(folder);
+                    setDraftProjectName(DEFAULT_PROJECT_NAME);
+                    setDraftProjectMenuOpen(false);
+                    setProjectSearchQuery("");
+                    setCreateProjectFormOpen(false);
+                  }}
+                  onCreateProject={() => {
+                    if (!uploadInFlightRef.current) void createProjectAndSelect();
+                  }}
+                />
+              )}
+              {pendingConnectPath ? (
+                <SourceConnect
+                  projectPath={pendingConnectPath}
+                  open={!!pendingConnectPath}
+                  onClose={() => setPendingConnectPath(null)}
+                />
+              ) : null}
+              {impersonationEnabled && (
+                <ImpersonationMenu
+                  disabled={uploadInFlight}
+                  open={impersonationMenuOpen}
+                  onOpenChange={(next) => {
+                    if (!uploadInFlightRef.current) setImpersonationMenuOpen(next);
+                  }}
+                  selectedPersonId={selectedPersonId}
+                  onSelectPersonId={(id) => {
+                    if (!uploadInFlightRef.current) setSelectedPersonId(id);
+                  }}
+                  options={impersonationOptions}
+                  selectedPerson={selectedPerson}
+                  selectedPersonLabel={selectedPersonLabel}
+                  guardianLabel={guardianLabel}
+                />
+              )}
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 size="icon-sm"
-                onClick={onStop}
-                className="touch-target"
-                title={t("composer.stopGenerating")}
-                aria-label={t("composer.stopGenerating")}
-              >
-                <span aria-hidden="true" className="inline-block size-2.5 bg-foreground" />
-              </Button>
-            )}
-            {showCancelUpload ? (
-              <Button
-                variant="secondary"
-                size="icon-sm"
-                onClick={cancelUpload}
-                title={cancelUploadLabel}
-                aria-label={cancelUploadLabel}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadInFlight}
+                aria-label={t("composer.uploadFiles")}
+                title={t("composer.uploadFiles")}
                 className="touch-target"
               >
-                <X aria-hidden />
+                <Paperclip aria-hidden />
               </Button>
-            ) : (
-              <Button
-                variant={
-                  !inputText.trim() && pendingUploads.length === 0 && !draftSkill
-                    ? "secondary"
-                    : "default"
-                }
-                size="icon-sm"
-                // A press on Send must not take focus from the textarea: on a
-                // phone that blur closes the soft keyboard after every turn.
-                // Cancelling mousedown keeps focus in place. Some mobile
-                // browsers still blur on the tap, so the click restores focus
-                // while it is still a user gesture, which iOS requires for the
-                // keyboard to stay up.
-                onPointerDown={() => {
-                  textareaFocusedAtPressRef.current =
-                    document.activeElement === textareaRef.current;
-                }}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  const textarea = textareaRef.current;
-                  if (
-                    textareaFocusedAtPressRef.current &&
-                    textarea &&
-                    document.activeElement !== textarea
-                  ) {
-                    textarea.focus({ preventScroll: true });
+              {showModelSelector && modelSelectorEnabled && (
+                <ModelSelectorMenu
+                  open={modelMenuOpen}
+                  onOpenChange={setModelMenuOpen}
+                  value={largeModelSelection}
+                  onChange={(next) => void updateLargeModelSelection(next)}
+                  disabled={uploadInFlight}
+                />
+              )}
+              <ReasoningEffortMenu
+                open={reasoningMenuOpen}
+                onOpenChange={setReasoningMenuOpen}
+                value={reasoningEffort}
+                onChange={(next) => void updateReasoningEffort(next)}
+                disabled={uploadInFlight}
+              />
+            </div>
+            {/* Stop sits just left of Send. */}
+            <div className="flex items-center gap-2 self-end [grid-area:send]">
+              {isStreaming && onStop && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={onStop}
+                  className="touch-target"
+                  title={t("composer.stopGenerating")}
+                  aria-label={t("composer.stopGenerating")}
+                >
+                  <span aria-hidden="true" className="inline-block size-2.5 bg-foreground" />
+                </Button>
+              )}
+              {showCancelUpload ? (
+                <Button
+                  variant="secondary"
+                  size="icon-sm"
+                  onClick={cancelUpload}
+                  title={cancelUploadLabel}
+                  aria-label={cancelUploadLabel}
+                  className="touch-target"
+                >
+                  <X aria-hidden />
+                </Button>
+              ) : (
+                <Button
+                  variant={
+                    !inputText.trim() && pendingUploads.length === 0 && !draftSkill
+                      ? "secondary"
+                      : "default"
                   }
-                  textareaFocusedAtPressRef.current = false;
-                  void runSend();
-                }}
-                disabled={
-                  uploadInFlight ||
-                  (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
-                }
-                title={sendActionLabel}
-                aria-label={sendActionLabel}
-                className="touch-target"
-              >
-                <ArrowUp aria-hidden />
-              </Button>
-            )}
+                  size="icon-sm"
+                  // A press on Send must not take focus from the textarea: on a
+                  // phone that blur closes the soft keyboard after every turn.
+                  // Cancelling mousedown keeps focus in place. Some mobile
+                  // browsers still blur on the tap, so the click restores focus
+                  // while it is still a user gesture, which iOS requires for the
+                  // keyboard to stay up.
+                  onPointerDown={() => {
+                    textareaFocusedAtPressRef.current =
+                      document.activeElement === textareaRef.current;
+                  }}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    const textarea = textareaRef.current;
+                    if (
+                      textareaFocusedAtPressRef.current &&
+                      textarea &&
+                      document.activeElement !== textarea
+                    ) {
+                      textarea.focus({ preventScroll: true });
+                    }
+                    textareaFocusedAtPressRef.current = false;
+                    void runSend();
+                  }}
+                  disabled={
+                    uploadInFlight ||
+                    (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
+                  }
+                  title={sendActionLabel}
+                  aria-label={sendActionLabel}
+                  className="touch-target"
+                >
+                  <ArrowUp aria-hidden />
+                </Button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </>
   );
 });

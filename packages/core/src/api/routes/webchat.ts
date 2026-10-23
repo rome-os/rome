@@ -298,6 +298,8 @@ type Suspension =
       /** Host built-in component (rendered by rome-web): no owning app to
        * validate; `appId` is the sentinel "core". */
       builtin?: boolean;
+      /** The card is the only way to answer (see MessagePart.render). */
+      requiresCard?: boolean;
     }
   | {
       kind: "handoff";
@@ -360,6 +362,7 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
         componentId: r.componentId,
         props: asRecord(r.props),
         builtin: r.builtin === true,
+        requiresCard: r.requiresCard === true,
       };
     }
     return null;
@@ -418,6 +421,7 @@ function buildBuiltinCard(
         componentId: suspension.componentId,
         props: suspension.props,
         builtin: true,
+        ...(suspension.requiresCard ? { requiresCard: true } : {}),
       },
     };
   }
@@ -3771,6 +3775,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                         kind: "inline",
                         componentId: suspension.componentId,
                         props: suspension.props,
+                        ...(suspension.requiresCard ? { requiresCard: true } : {}),
                       },
                     });
                   }

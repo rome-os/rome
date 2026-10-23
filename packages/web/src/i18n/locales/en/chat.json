@@ -223,6 +223,7 @@
   },
   "composer": {
     "placeholderDefault": "How can I help you today?",
+    "lockedByCard": "Answer the card above to continue.",
     "placeholderWithUploads": "Add a message or send the uploaded files...",
     "uploadFiles": "Upload files",
     "dropFiles": "Drop files to upload",

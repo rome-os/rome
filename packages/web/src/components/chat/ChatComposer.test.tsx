@@ -244,6 +244,49 @@ describe("composer Enter key", () => {
   });
 });
 
+describe("composer lock", () => {
+  const reason = "Answer the card above to continue.";
+
+  it("replaces the box with a locked strip that says why, while a card is the only way to answer", () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({ onSend, lockedReason: reason });
+
+    expect(screen.getByRole("status").textContent).toBe(reason);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Upload files" })).toBeNull();
+  });
+
+  it("brings the box back with the draft intact once the lock lifts", () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    const { rerender } = renderComposer({ onSend });
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "build me X" } });
+    // Same tree as renderComposer, so the composer keeps its state across the
+    // prop change.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const withLock = (lockedReason: string | null) => (
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ChatComposer onSend={onSend} lockedReason={lockedReason} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+
+    rerender(withLock(reason));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe(reason);
+
+    rerender(withLock(null));
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("build me X");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][0].text).toBe("build me X");
+  });
+});
+
 // Upload progress now rides inside each attachment chip as a ring, so there is
 // no reveal delay to wait out — and, crucially, nothing that mounts or unmounts
 // under the tray and shifts the composer.

@@ -31,10 +31,20 @@ const EXPLORE = "__explore__";
 export type TurnReply =
   | { kind: "text"; text: string }
   // One of welcome-to-rome's own inline components; its result returns next turn.
-  | { kind: "component"; lead?: string; componentId: string; props: Record<string, unknown> }
+  // `requiresCard` marks a step that only the card can answer: the host keeps
+  // the composer closed while the card waits, since typed text would only
+  // re-show it.
+  | {
+      kind: "component";
+      lead?: string;
+      componentId: string;
+      props: Record<string, unknown>;
+      requiresCard?: boolean;
+    }
   // The host's built-in ask_question card; its answers return as the next turn.
   | { kind: "ask"; lead?: string; questions: AskQuestion[] }
-  // The host's built-in connect-AI card; `{ connected }` or `{ skip }` returns next turn.
+  // The host's built-in connect-AI card; `{ connected }` or `{ skip }` returns
+  // next turn. Only the card can answer it, so it always closes the composer.
   | { kind: "connect_ai"; lead?: string };
 
 /** Result of summoning a specialist agent inline (blocking). */
@@ -129,6 +139,7 @@ async function namesReply(fx: WelcomeEffects, language: WelcomeLanguage): Promis
       : language.copy.greetNoName(agentName),
     componentId: "name-card",
     props: { guardianName, agentName },
+    requiresCard: true,
   };
 }
 
