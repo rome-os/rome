@@ -19,7 +19,7 @@ import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbea
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
 import { assembleDiagnosticBundle } from "./lib/diagnostics.js";
 import { NotifyClient } from "./lib/notify-client.js";
-import { recordResolvedAccount } from "./lib/guardian-auth-state.js";
+import { getGuardianAuthState, recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
@@ -1580,25 +1580,28 @@ async function main() {
     gateOverrides,
   });
 
+  const connectEmailWithoutClick = async (trigger: "seat-created" | "boot") => {
+    try {
+      const connected = await autoConnectEmail({
+        registry: connectionRegistry,
+        provision: () => mailProvider.provision(),
+        settings: settingsRepo,
+      });
+      if (connected) log.info("email connected without a click", { trigger });
+    } catch (err) {
+      log.warn("email auto-connect failed; the guardian can connect it in settings", {
+        trigger,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
       feedback: feedbackClient,
       provisionNodeCaller,
-      autoConnectEmail: async () => {
-        try {
-          const connected = await autoConnectEmail({
-            registry: connectionRegistry,
-            provision: () => mailProvider.provision(),
-            settings: settingsRepo,
-          });
-          if (connected) log.info("email connected on first cloud sign-in");
-        } catch (err) {
-          log.warn("email auto-connect failed; the guardian can connect it in settings", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      },
+      autoConnectEmail: () => connectEmailWithoutClick("seat-created"),
       nodeDevices,
       channelsService,
       chatSettings,
@@ -1778,9 +1781,22 @@ async function main() {
   // bumps the server's lastSeen without ever blocking or failing boot. The same
   // prove result records the bound account onto the guardian seat — no second
   // prove.
-  void logInstanceIdentityAtBoot(getBuildInfo().version).then((identity) =>
-    recordResolvedAccount(db, identity),
-  );
+  //
+  // It also gates connecting email for a seat created before sign-in connected
+  // it: only an enrolled instance can provision an inbox, and a warm-pool
+  // instance with no seat has no owner to provision one for.
+  void logInstanceIdentityAtBoot(getBuildInfo().version)
+    .then(async (identity) => {
+      await recordResolvedAccount(db, identity);
+      if (identity.status !== "ok") return;
+      if (!(await getGuardianAuthState(db)).exists) return;
+      await connectEmailWithoutClick("boot");
+    })
+    .catch((err) => {
+      log.warn("boot-time email auto-connect check failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
   // Beyond the boot-time prove, re-verify the instance token every 15 minutes so
   // a mid-session revocation is noticed within one interval. On a terminal

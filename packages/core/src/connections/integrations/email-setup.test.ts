@@ -420,6 +420,39 @@ describe("autoConnectEmail", () => {
     expect(conn.auth.grants().inbox).toBe("unauthorized");
   });
 
+  it("never reconnects email the guardian removed, though no connection is left", async () => {
+    const { app, registry, settingsRepo } = makeSetupApp();
+    await runSetup(app);
+    const conn = registry.find("email")[0];
+    const del = await app.request(`/connections/${conn.id}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+    expect(del.status).toBe(200);
+    expect(registry.find("email")).toHaveLength(0);
+    const provision = rs.fn(async () => inbox);
+
+    expect(await autoConnectEmail({ registry, provision, settings: settingsRepo })).toBe(false);
+
+    expect(provision).not.toHaveBeenCalled();
+    expect(registry.find("email")).toHaveLength(0);
+  });
+
+  it("connects on a later call after a failed provision", async () => {
+    const { registry, settingsRepo } = makeSetupApp();
+    const failing = async (): Promise<typeof inbox> => {
+      throw new Error("Rome Cloud mail API /api/instance/mail/provision failed (502)");
+    };
+    await expect(
+      autoConnectEmail({ registry, provision: failing, settings: settingsRepo }),
+    ).rejects.toThrow("failed (502)");
+
+    expect(
+      await autoConnectEmail({ registry, provision: async () => inbox, settings: settingsRepo }),
+    ).toBe(true);
+    expect(registry.find("email")[0].auth.grants().inbox).toBe("authorized");
+  });
+
   it("yields to a Connect click that commits while the provision is in flight", async () => {
     const { app, registry, settingsRepo } = makeSetupApp();
     const provision = deferred<{ address: string; inboundSecret: string }>();

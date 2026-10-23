@@ -29,7 +29,8 @@
 // `MailProvider.provision()` (get-or-create) inside `ctx.step`, and the
 // terminal conferral is the single ledger write. No credential ever touches the
 // settings table, so `confer()` here throws (see cross-stage notes). The first
-// Rome Cloud sign-in makes the same write without the click (`autoConnectEmail`).
+// Rome Cloud sign-in, and the first boot of an older seat that never had email,
+// make the same write without the click (`autoConnectEmail`).
 
 import type { TalkFeatures } from "../types.js";
 import {
@@ -226,10 +227,13 @@ export interface EmailAutoConnectRegistry {
  * Connect email without the guardian's Connect click: provision the inbox and
  * confer the `inbox` grant, the same terminal write the setup makes.
  *
- * Resolves `false` and provisions nothing when any email connection exists,
- * whatever its grant state, so a connection the guardian set up or revoked is
- * never touched. Resolves `true` once the grant is conferred. Rejects when the
- * provision or the conferral fails; the guardian can still connect by hand.
+ * Resolves `false` and provisions nothing when the instance has ever had email:
+ * an email connection exists in any grant state, or the email settings row
+ * exists. Every conferral writes that row and nothing deletes it, so it outlives
+ * a connection the guardian removed, and a removed or revoked connection is
+ * never reconnected. Resolves `true` once the grant is conferred. Rejects when
+ * the provision or the conferral fails. A failed provision writes nothing, so a
+ * later call retries. The guardian can still connect by hand either way.
  */
 export async function autoConnectEmail(deps: {
   registry: EmailAutoConnectRegistry;
@@ -237,6 +241,7 @@ export async function autoConnectEmail(deps: {
   settings: EmailSetupSettings;
 }): Promise<boolean> {
   if (deps.registry.find("email").length > 0) return false;
+  if ((await deps.settings.get(EMAIL_SETTINGS_KEY)) !== null) return false;
   const inbox = await deps.provision();
   return deps.registry.withGrantSection("email", "inbox", async () => {
     // The provision ran outside the section, so a Connect click can have
