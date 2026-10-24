@@ -74,7 +74,7 @@ There are no session-type exceptions: an old subagent remains visible under an a
 A new message reactivates the session and its descendants, not its ancestors or siblings.
 If every session in a tree is idle, all of its traces are archived.
 
-Handoffs have no `parentSessionId`; their link lives in a transcript card. They use their own session activity.
+Handoffs have no `parentSessionId`. Their link lives in a transcript card. They use their own session activity.
 The chat view loads a handoff child's history separately and splices it into the visible transcript.
 The calling session's trace summaries and descendant cost rollups do not read handoff traces.
 A merged transcript can therefore contain archived child steps beside active parent steps, while keeping both sessions' replies and cards.
