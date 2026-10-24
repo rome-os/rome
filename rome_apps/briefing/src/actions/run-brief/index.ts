@@ -5,7 +5,7 @@ import type {
   ActionResult,
   AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
-import { createBriefsRepository } from "../../db/repositories/briefs.js";
+import { createBriefsRepository, type Brief } from "../../db/repositories/briefs.js";
 import {
   createScoutResultsRepository,
   type ScoutResult,
@@ -49,13 +49,72 @@ function describeScoutResults(results: ScoutResult[]): string {
 
 const SUGGESTIONS_HEADER = "**Try with Rome**";
 
+/** Where the "Try with Rome" section starts and ends: up to the next bold header line. */
+function suggestionsBounds(content: string): { start: number; body: number; end: number } | null {
+  const start = content.indexOf(SUGGESTIONS_HEADER);
+  if (start < 0) return null;
+  const body = start + SUGGESTIONS_HEADER.length;
+  const next = content.slice(body).search(/\n\*\*[^*\n]+\*\*\s*\n/);
+  return { start, body, end: next < 0 ? content.length : body + next + 1 };
+}
+
 /** The "Try with Rome" section of a stored brief, so the next one does not repeat it. */
 export function suggestionsSection(content: string | null | undefined): string | null {
-  const start = content?.indexOf(SUGGESTIONS_HEADER) ?? -1;
-  if (!content || start < 0) return null;
-  const rest = content.slice(start + SUGGESTIONS_HEADER.length);
-  const next = rest.search(/\n\*\*[^*\n]+\*\*\s*\n/);
-  return (next < 0 ? rest : rest.slice(0, next)).trim() || null;
+  const bounds = content ? suggestionsBounds(content) : null;
+  if (!content || !bounds) return null;
+  return content.slice(bounds.body, bounds.end).trim() || null;
+}
+
+/** A brief without its "Try with Rome" section, which carries personal context. */
+export function withoutSuggestions(content: string): string {
+  const bounds = suggestionsBounds(content);
+  if (!bounds) return content;
+  return (content.slice(0, bounds.start) + content.slice(bounds.end)).trim();
+}
+
+/** Scheduled briefs from the past day that the guardian already received, oldest first. */
+export function previousDayBriefs(recent: Brief[], now: Date): Brief[] {
+  // A little over a day, so yesterday's brief of the same kind still counts.
+  const since = now.getTime() - 26 * 60 * 60 * 1000;
+  return recent
+    .filter(
+      (b) =>
+        b.kind !== "test" &&
+        b.status === "completed" &&
+        b.content?.trim() &&
+        b.startedAt.getTime() >= since,
+    )
+    .reverse();
+}
+
+function previousBriefsInstructions(
+  previous: Brief[],
+  tz: string,
+  includeSuggestions: boolean,
+): string[] {
+  if (previous.length === 0) return [];
+  const label = (d: Date) =>
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      weekday: "long",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(d);
+  return [
+    "CONTINUITY — the guardian already received the briefs below from the past day. Use them to follow through and to avoid repeating yourself:",
+    "   - Do not repeat anything those briefs already covered unless it changed or still needs action.",
+    "   - Carry an Action Item forward only if it still looks open, and mark it as still open. Drop it if it now looks done (e.g. they replied).",
+    "   - Point out what changed since then, such as a moved meeting or a new reply in a thread.",
+    "",
+    "--- PREVIOUS BRIEFS (past day, oldest first) ---",
+    ...previous.map((b) => {
+      const content = (b.content ?? "").trim();
+      return `### ${b.kind[0].toUpperCase()}${b.kind.slice(1)} brief — ${label(b.startedAt)}\n${
+        includeSuggestions ? content : withoutSuggestions(content)
+      }`;
+    }),
+    "",
+  ];
 }
 
 /** Briefs that leave the guardian's hands carry no personal context. */
@@ -100,6 +159,7 @@ export function buildPrompt(
   results: ScoutResult[],
   context: GuardianContext | null,
   previousSuggestions: string[],
+  previousBriefs: Brief[] = [],
 ): string {
   const { date, time } = nowLabel(tz);
   const isMorning = kind === "morning";
@@ -121,6 +181,7 @@ export function buildPrompt(
     "",
     windowHint,
     "",
+    ...previousBriefsInstructions(previousBriefs, tz, context !== null),
     "ACTION ITEMS — the guardian reads this list as what they must do. Each item costs their attention, and padding teaches them to skip the list, so include only what clearly matters to them:",
     "   - Include: a reply a real person is waiting on (someone writing to them personally, not a bulk or automated sender), a deadline, a decision only they can make, or preparation for an important event.",
     "   - Exclude: spam, marketing, promotions, newsletters, unsolicited pitches and automated notifications, even when they ask for a reply or claim urgency. Also exclude low-stakes chores, FYIs, and anything they appear to be ignoring on purpose (e.g. repeated follow-ups from a sender they never answer).",
@@ -231,9 +292,11 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       const briefsRepo = createBriefsRepository(appContext.db);
 
       const scoutResults = await resultsRepo.listUnconsumed();
-      const previousSuggestions = (await briefsRepo.listRecent(5)).flatMap(
-        (brief) => suggestionsSection(brief.content) ?? [],
-      );
+      const recentBriefs = await briefsRepo.listRecent(10);
+      const previousSuggestions = recentBriefs
+        .slice(0, 5)
+        .flatMap((brief) => suggestionsSection(brief.content) ?? []);
+      const previousBriefs = previousDayBriefs(recentBriefs, new Date());
       const context = deliversToGuardian(settings, shouldDeliver)
         ? await gatherGuardianContext(appContext, tz)
         : null;
@@ -246,7 +309,14 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         const summoned = unwrap(
           await appContext.runAction("summon", {
             agentName: "assistant",
-            prompt: buildPrompt(kind, tz, scoutResults, context, previousSuggestions),
+            prompt: buildPrompt(
+              kind,
+              tz,
+              scoutResults,
+              context,
+              previousSuggestions,
+              previousBriefs,
+            ),
           }),
         );
         if (summoned.ok) content = summonText(summoned.data);

@@ -1,6 +1,37 @@
 import { describe, expect, it } from "@rstest/core";
 import { DEFAULT_SETTINGS } from "../../db/repositories/settings.js";
-import { buildPrompt, deliversToGuardian, suggestionsSection } from "./index.js";
+import type { Brief } from "../../db/repositories/briefs.js";
+import {
+  buildPrompt,
+  deliversToGuardian,
+  previousDayBriefs,
+  suggestionsSection,
+  withoutSuggestions,
+} from "./index.js";
+
+const HOUR = 60 * 60 * 1000;
+const NOW = new Date("2026-10-23T15:00:00Z");
+
+function brief(
+  kind: string,
+  hoursAgo: number,
+  content: string | null,
+  status = "completed",
+): Brief {
+  return {
+    id: `${kind}-${hoursAgo}`,
+    kind,
+    status,
+    content,
+    error: null,
+    channel: "email",
+    delivered: true,
+    deliveryError: null,
+    scoutResultCount: 0,
+    startedAt: new Date(NOW.getTime() - hoursAgo * HOUR),
+    finishedAt: null,
+  };
+}
 
 describe("deliversToGuardian", () => {
   it("adds personal context only when the brief goes to the guardian", () => {
@@ -26,7 +57,51 @@ describe("suggestionsSection", () => {
   });
 });
 
+describe("withoutSuggestions", () => {
+  it("drops only the Try with Rome section", () => {
+    expect(
+      withoutSuggestions("**Summary**\nA\n\n**Try with Rome**\n- Idea\n\n**Calendar**\n- B"),
+    ).toBe("**Summary**\nA\n\n**Calendar**\n- B");
+    expect(withoutSuggestions("**Summary**\nA\n\n**Try with Rome**\n- Idea")).toBe(
+      "**Summary**\nA",
+    );
+    expect(withoutSuggestions("**Summary**\nA")).toBe("**Summary**\nA");
+  });
+});
+
+describe("previousDayBriefs", () => {
+  it("keeps completed scheduled briefs from the past day, oldest first", () => {
+    const recent = [
+      brief("test", 1, "test run"),
+      brief("evening", 13, "last night"),
+      brief("morning", 24, "yesterday morning"),
+      brief("morning", 20, null, "failed"),
+      brief("evening", 37, "two nights ago"),
+    ];
+    expect(previousDayBriefs(recent, NOW).map((b) => b.content)).toEqual([
+      "yesterday morning",
+      "last night",
+    ]);
+  });
+});
+
 describe("buildPrompt", () => {
+  it("passes the past day's briefs for continuity", () => {
+    const previous = [
+      brief("evening", 13, "**Action Items**\n- Reply to Sam\n\n**Try with Rome**\n- Idea"),
+    ];
+    const prompt = buildPrompt("morning", "UTC", [], { chats: "x", profile: null }, [], previous);
+    expect(prompt).toContain("CONTINUITY");
+    expect(prompt).toContain("### Evening brief — Friday 2:00 AM");
+    expect(prompt).toContain("- Reply to Sam");
+
+    const toOthers = buildPrompt("morning", "UTC", [], null, [], previous);
+    expect(toOthers).toContain("- Reply to Sam");
+    expect(toOthers).not.toContain("- Idea");
+
+    expect(buildPrompt("morning", "UTC", [], null, [])).not.toContain("CONTINUITY");
+  });
+
   it("passes personal context only with the Try with Rome rules", () => {
     const context = { chats: 'Chat "Orders":\n- I sort these by hand', profile: "Name: Ada" };
     const prompt = buildPrompt("evening", "UTC", [], context, ["- Earlier idea"]);
