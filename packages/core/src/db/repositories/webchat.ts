@@ -2481,25 +2481,32 @@ export class WebChatRepository {
       );
   }
 
-  /** One grouped activity query, with no trace payloads. Omit ids to select all idle sessions for archival. */
+  /** Root activity owns the whole tree. Omit ids to select every member of idle trees for archival. */
   async getTraceArchivedSessionIds(
     sessionIds?: readonly string[],
     cutoff = sessionTraceCutoff(),
   ): Promise<string[]> {
     if (sessionIds?.length === 0) return [];
-    const rows = await this.db
-      .select({
-        sessionId: romeAgentMessages.sessionId,
-        lastMessageAt: sql<number>`max(${romeAgentMessages.createdAt})`.mapWith(Number),
-      })
-      .from(romeAgentMessages)
-      .where(
-        and(
-          sessionIds ? inArray(romeAgentMessages.sessionId, [...new Set(sessionIds)]) : undefined,
-          inArray(romeAgentMessages.role, TRACE_ACTIVITY_ROLES),
-        ),
+    const rows = await this.db.all<{ sessionId: string; lastMessageAt: number }>(sql`
+      WITH RECURSIVE ancestors(session_id, ancestor_id, parent_id) AS (
+        SELECT id, id, parent_session_id FROM ${romeSessions}
+        WHERE ${sessionIds ? inArray(romeSessions.id, [...new Set(sessionIds)]) : sql`1`}
+        UNION
+        SELECT ancestors.session_id, parent.id, parent.parent_session_id
+        FROM ancestors JOIN ${romeSessions} AS parent ON parent.id = ancestors.parent_id
+      ),
+      roots AS MATERIALIZED (
+        SELECT session_id, ancestor_id AS root_id FROM ancestors WHERE parent_id IS NULL
+      ),
+      root_activity AS MATERIALIZED (
+        SELECT session_id, max(created_at) AS last_message_at FROM ${romeAgentMessages}
+        WHERE session_id IN (SELECT root_id FROM roots)
+          AND ${inArray(romeAgentMessages.role, TRACE_ACTIVITY_ROLES)}
+        GROUP BY session_id
       )
-      .groupBy(romeAgentMessages.sessionId);
+      SELECT roots.session_id AS sessionId, root_activity.last_message_at AS lastMessageAt
+      FROM roots JOIN root_activity ON root_activity.session_id = roots.root_id
+    `);
     return rows
       .filter((row) => isSessionTraceArchived(new Date(row.lastMessageAt * 1000), cutoff))
       .map((row) => row.sessionId);

@@ -1101,7 +1101,10 @@ function ReadOnlySessionChat({
     [view.interactionResults],
   );
   const loadStoredTrace = useCallback(
-    async (messageId: string, includeSubagentUsage: boolean): Promise<TraceSnapshot | null> => {
+    async (
+      messageId: string,
+      includeSubagentUsage: boolean,
+    ): Promise<TraceSnapshot | "archived" | null> => {
       const params = new URLSearchParams({
         includeSubagentUsage: String(includeSubagentUsage),
       });
@@ -1110,8 +1113,8 @@ function ReadOnlySessionChat({
         { credentials: "include" },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { trace: TraceSnapshot | null };
-      return data.trace;
+      const data = (await res.json()) as { trace: TraceSnapshot | null; traceArchived?: boolean };
+      return data.traceArchived ? "archived" : data.trace;
     },
     [],
   );

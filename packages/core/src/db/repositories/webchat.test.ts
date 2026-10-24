@@ -227,6 +227,76 @@ describe("WebChatRepository", () => {
     activityQuery.mockRestore();
   });
 
+  it.each([
+    ["2026-10-23T12:00:00Z", false],
+    ["2026-10-16T12:00:00Z", true],
+    ["2026-10-17T12:00:00Z", true],
+    ["2026-10-17T12:00:01Z", false],
+  ] as const)("uses root activity at %s for the entire nested tree (archived: %s)", async (lastMessageAt, archived) => {
+    await repo.createSession("root", "Root");
+    await repo.createSession("unrelated", "Unrelated");
+    for (const [id, parentSessionId] of [
+      ["child", "root"],
+      ["grandchild", "child"],
+      ["sibling", "root"],
+    ]) {
+      await repo.ensureRomeSession({
+        id,
+        parentSessionId,
+        type: "subagent",
+        name: id,
+        agentName: "main",
+      });
+    }
+    for (const id of ["root", "child", "grandchild", "sibling", "unrelated"]) {
+      await repo.appendTraceBlocks({
+        messageId: `${id}-trace`,
+        sessionId: id,
+        turnId: "old-turn",
+        startSeq: 0,
+        blocks: [{ type: "thinking", content: `${id} steps` }],
+      });
+    }
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await repo.addMessage("root-latest", "root", "user", "Continue");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date(lastMessageAt) })
+      .where(eq(romeAgentMessages.id, "root-latest"));
+    await repo.addMessage("unrelated-latest", "unrelated", "user", "Continue");
+    // A child cannot change the tree's clock, even when it is newer than an idle root.
+    await repo.addMessage("sibling-latest", "sibling", "assistant", "Child reply");
+    const cutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
+    const options = { sessionActivityCutoff: cutoff };
+    const query = rs.spyOn(testDb.db, "all");
+    expect((await repo.getTraceArchivedSessionIds(undefined, cutoff)).sort()).toEqual(
+      archived ? ["child", "grandchild", "root", "sibling"] : [],
+    );
+    expect(query).toHaveBeenCalledTimes(1);
+    query.mockRestore();
+    expect(await repo.getTraceArchivedSessionIds(["grandchild"], cutoff)).toEqual(
+      archived ? ["grandchild"] : [],
+    );
+    for (const id of ["root", "child", "grandchild", "sibling"]) {
+      expect((await repo.getTraceContents(id, options))[0]?.traceArchived).toBe(
+        archived ? true : undefined,
+      );
+      expect((await repo.getTraceContentByTurn(id, "old-turn", options))?.traceArchived).toBe(
+        archived ? true : undefined,
+      );
+      expect((await repo.getMessageContentForDisplay(`${id}-trace`, options))?.traceArchived).toBe(
+        archived ? true : undefined,
+      );
+    }
+    const children = await repo.getTraceContentsByTurns(
+      ["child", "grandchild"].map((sessionId) => ({ sessionId, turnId: "old-turn" })),
+      options,
+    );
+    expect(children.map((row) => row.sessionId).sort()).toEqual(
+      archived ? [] : ["child", "grandchild"],
+    );
+  });
+
   it("filters owners before returning chats and preserves the all-owner default", async () => {
     await repo.createSession("legacy", "Legacy");
     await repo.createSession(

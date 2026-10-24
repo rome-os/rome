@@ -61,20 +61,23 @@ A turn is one request to an agent plus the agent work that follows until the age
 
 ## Chat trace window
 
-The dashboard loads all traces of a session while its latest conversation message is less than seven days old.
-At exactly seven idle days, the whole session shows chat history only, with an archived-steps note on each turn.
+The dashboard loads all traces of a session tree while the root session's latest conversation message is less than seven days old.
+Follow `parentSessionId` through any subagent or handoff nesting to find the root. Children share the root's clock, never their own.
+At exactly seven idle days on the root, the whole tree shows chat history only, with an archived-steps note on each turn.
 User messages, assistant replies, cards, and interaction results stay in the transcript.
 History, lazy trace reads, and raw downloads follow the same session-wide decision.
 
 Activity includes user, assistant, trace, and notification rows. Notifications record real out-of-band conversation messages.
 Reading, renaming, pinning, and unknown metadata roles do not count. Session creation without messages does not make an archive candidate.
-Each read batches the latest message times for the sessions it needs, without reading trace payloads.
+Each read resolves roots and batches their latest message times in one query, without reading trace payloads.
+A child's old messages cannot hide its summaries or costs while its root is active.
 
 This window changes dashboard reads, not storage. It deletes nothing and does not change sharing, usage accounting, or agent resume context.
-A new conversation message makes every trace in the session visible again while its blocks remain in the database.
-Archival candidates are whole idle sessions, never individual turns selected by their age.
+A new conversation message in the root makes every trace in its tree visible again while its blocks remain in the database.
+Archival candidates are whole idle root-session trees, never individual children or turns selected by their age.
 The window and idle predicate live in `packages/core/src/webchat/trace-retention.ts`.
-The repository's `getTraceArchivedSessionIds` selects idle sessions for both dashboard reads and archival work.
+The repository's `getTraceArchivedSessionIds` selects idle tree members for both dashboard reads and archival work.
+With no requested ids, it selects every member of each idle root's tree together.
 
 ## Event
 

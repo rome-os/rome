@@ -504,7 +504,9 @@ describe("Webchat API", () => {
     expect(history).not.toContain('"traceArchived":true');
   });
 
-  it("aggregates completed child trace summaries without duplicating them in storage", async () => {
+  it("keeps 30-day-old child summaries while their root is active, and hides the tree when idle", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
     const parentSessionId = "parent-summary-session";
     const parentTurnId = "parent-summary-turn";
     const childSessionId = "child-summary-session";
@@ -616,6 +618,12 @@ describe("Webchat API", () => {
       ]),
       parentTurnId,
     );
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "root-latest"));
     const app = createWebchatRuntime(deps).routes;
     const getTraceContentsByTurns = rs.spyOn(deps.webchatRepo, "getTraceContentsByTurns");
     const getTraceContentByTurn = rs.spyOn(deps.webchatRepo, "getTraceContentByTurn");
@@ -652,9 +660,24 @@ describe("Webchat API", () => {
     expect(await deps.webchatRepo.getMessageContent("parent-summary-trace")).not.toContain(
       "traceSummary",
     );
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "root-latest"));
+    for (const sessionId of [parentSessionId, childSessionId, secondChildSessionId]) {
+      const history = (await (
+        await app.request(`/sessions/${sessionId}/messages`)
+      ).json()) as Array<{ role: string; traceArchived?: boolean; traceSummary?: unknown }>;
+      const traces = history.filter((row) => row.role === "trace");
+      expect(traces).toHaveLength(1);
+      expect(traces[0]?.traceArchived).toBe(true);
+      expect(traces[0]?.traceSummary).toBeUndefined();
+    }
   });
 
-  it("aggregates descendant token usage only on trace reads", async () => {
+  it("keeps complete cost and usage from 30-day-old descendants while their root is active", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
     const parentSessionId = "parent-usage-session";
     const parentTurnId = "parent-usage-turn";
     const childSessionId = "child-usage-session";
@@ -766,6 +789,12 @@ describe("Webchat API", () => {
       ]),
       parentTurnId,
     );
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "root-latest"));
     const app = createWebchatRuntime(deps).routes;
     const readAccounting = async (path: string) => {
       const response = await app.request(path);
