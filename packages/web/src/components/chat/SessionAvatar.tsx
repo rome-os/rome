@@ -53,7 +53,7 @@ export function SessionAvatar({
           <button
             type="button"
             aria-label={description}
-            className="relative shrink-0 rounded-8 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="relative shrink-0 rounded-8 outline-1 outline-offset-0 outline-transparent transition-colors focus-visible:outline-solid focus-visible:outline-ring/50"
           >
             {avatar}
             <span className="absolute -right-1 -bottom-1 flex size-3.5 items-center justify-center rounded-full bg-background ring-1 ring-border">
