@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.8.2](https://github.com/rome-os/rome/compare/app-runtime-v0.8.1...app-runtime-v0.8.2) (2026-10-24)
+
+
+### Features
+
+* **core:** subscribe to an event's source when defer waits on it ([#1315](https://github.com/rome-os/rome/issues/1315)) ([55cfac3](https://github.com/rome-os/rome/commit/55cfac3eb4155b4826f3078f9aa9a820258b41f3))
+
 ## [0.8.1](https://github.com/rome-os/rome/compare/app-runtime-v0.8.0...app-runtime-v0.8.1) (2026-10-23)
 
 
