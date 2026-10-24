@@ -21,7 +21,7 @@ import workflowStudioIcon from "../../../../rome_apps/workflow-studio/src/assets
 // `pnpm build:apps` packs into dist/first-party-artifacts/ and boot installs.
 // Each field is copied from that app.yaml. `hasFrontend` mirrors whether the
 // manifest declares `web:`. Core still lists an app without one (assistant),
-// with no open link.
+// with no open link. `hideInLauncher` mirrors the manifest's top-level flag.
 const definitions = [
   {
     id: "assistant",
@@ -31,6 +31,7 @@ const definitions = [
       'General assistance agents and routine-management guidance. Provides the routine-from-chat skill — reach for it first whenever the guardian wants something to happen automatically: it turns a plain-language "do this automatically" request into an event-triggered ("text me when I get an email from my landlord") or scheduled ("remind me every Friday at 9am") routine instead of hand-building a trigger.',
     hasFrontend: false,
     iconUrl: assistantIcon,
+    hideInLauncher: true,
   },
   {
     id: "briefing",
@@ -49,6 +50,7 @@ const definitions = [
       "Operate the agent's browser to visit and act on websites via predefined automation actions/scripts exposed by the `opencli` tool. You can get the supported commands by running shell command `opencli <site_name> --help`, where site_name can be amazon, google, instagram, linkedin, producthunt, substack, twitter, wikipedia, xiaohongshu, youtube or more. To know all available commands, run `opencli list`. Also drives ChatGPT through the logged-in browser session — `chatgpt_chat` sends a prompt and returns the markdown response, and `chatgpt_image` generates a ChatGPT image and saves it to disk.",
     hasFrontend: true,
     iconUrl: browserAutomationIcon,
+    hideInLauncher: true,
   },
   {
     id: "coding",
@@ -58,6 +60,7 @@ const definitions = [
       "The coding agent, the app_creation skill, and a frontend gallery of live UI mocks. Use app_creation when visuals are important, such as for apps, dashboards, games, and other Rome experiences that need a polished UI.",
     hasFrontend: true,
     iconUrl: codingIcon,
+    hideInLauncher: true,
   },
   {
     id: "connector",
@@ -84,6 +87,7 @@ const definitions = [
     description: "Incoming-message triage, routing, and channel hooks",
     hasFrontend: true,
     iconUrl: inboxIcon,
+    hideInLauncher: true,
   },
   {
     id: "recap",
@@ -170,5 +174,6 @@ export const firstPartyApps: InstalledAppCard[] = definitions.map((app) => ({
   projectPath: null,
   origin: "builtin",
   iconUrl: app.iconUrl,
+  hideInLauncher: app.hideInLauncher ?? false,
   installedAt: bootedAt,
 }));

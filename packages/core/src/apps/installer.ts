@@ -76,6 +76,7 @@ export type ResolveDisplayMetadataResult =
       displayName: string;
       iconAbsolutePath: string | undefined;
       includeSource: boolean;
+      hideInLauncher: boolean;
     }
   | { ok: false; reason: string };
 
@@ -415,6 +416,7 @@ export class AppInstaller {
         iconAbsolutePath:
           iconCandidate !== undefined && safeIsFile(iconCandidate) ? iconCandidate : undefined,
         includeSource: manifest.includeSource === true,
+        hideInLauncher: manifest.hideInLauncher === true,
       };
     } catch (err) {
       return {
@@ -484,6 +486,7 @@ export class AppInstaller {
       icon: data.icon,
       appRoot: data.appRoot,
       includeSource: data.includeSource,
+      hideInLauncher: data.hideInLauncher,
       remix: data.remix,
       agents: (data.agents ?? []).map(normalizeArtifactEntry),
       actions: (data.actions ?? []).map(normalizeArtifactEntry),

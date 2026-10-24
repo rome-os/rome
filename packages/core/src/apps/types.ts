@@ -136,6 +136,8 @@ export interface RomeAppManifest {
   appRoot?: string;
   /** Local source-availability signal copied from app.yaml. */
   includeSource?: boolean;
+  /** Keeps the app out of the dashboard launcher surfaces. */
+  hideInLauncher?: boolean;
   /** Store version this app was remixed from, when present. */
   remix?: { listing: string; version: string };
   agents: RomeAppArtifactEntry[];

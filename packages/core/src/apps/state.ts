@@ -37,6 +37,8 @@ export interface AppView extends Omit<AppEntry, "state"> {
   iconAbsolutePath?: string;
   /** Passive manifest metadata. Never use this to decide whether the app can run. */
   includeSource?: boolean;
+  /** Passive manifest metadata: keep the app out of the launcher surfaces. */
+  hideInLauncher?: boolean;
 }
 
 export interface ResolvedArtifacts {

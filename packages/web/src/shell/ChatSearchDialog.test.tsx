@@ -414,6 +414,8 @@ describe("ChatSearchDialog", () => {
         }),
         // A carrier opens fine but is plumbing, not a destination.
         installedApp("user-skills", "Notes Skills"),
+        // So does an app whose app.yaml opts out of the launcher.
+        installedApp("notes-hidden", "Notes Hidden", { hideInLauncher: true }),
       ],
     );
     const user = userEvent.setup();

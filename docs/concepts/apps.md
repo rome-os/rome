@@ -7,6 +7,7 @@ Apps are the extension system. An app bundles related [agents](agents.md), [acti
 - Only manifest-declared artifacts are loaded. An artifact not listed in the manifest does not exist as far as the runtime is concerned.
 - Disabling an app removes its artifacts (agents, actions, skills, hooks) from the running registries. Enabling it puts them back.
 - First-party apps (shipped with Rome) are required and immutable to users: they cannot be uninstalled or replaced, and enable/disable is the only user control — except the system app, which cannot be disabled either ([boot convergence](../architecture/app-lifecycle.md#boot-convergence)).
+- `app.yaml#hideInLauncher: true` keeps an app off the dashboard's launcher surfaces: the Apps page, the sidebar, search, and the app picker. The app still loads, and its pages still open by URL or from a chat link.
 
 **Not to be confused with:**
 

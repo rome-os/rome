@@ -8,10 +8,11 @@ import { WidgetPicker } from "./WidgetPicker";
 // Built once in the factory rather than per call, so the array identity stays
 // stable across renders and the memo downstream does not rebuild every frame.
 rs.mock("@/hooks/use-apps", () => {
-  const app = (id: string, displayName: string, hasFrontend = true) => ({
+  const app = (id: string, displayName: string, hasFrontend = true, hideInLauncher = false) => ({
     id,
     displayName,
     hasFrontend,
+    hideInLauncher,
     status: "active",
     // Given so each row's text is its display name alone. Without one the row
     // draws the initial as a letter tile, which lands in `textContent` too.
@@ -20,8 +21,10 @@ rs.mock("@/hooks/use-apps", () => {
   const apps = [
     app("recipe-box", "Recipe Box"),
     app("notes", "Notes"),
-    // Filtered out before the list is built, so it must never appear.
+    // Filtered out before the list is built, so none of these may appear.
     app("headless", "Headless", false),
+    app("user-skills", "User Skills"),
+    app("quiet", "Quiet App", true, true),
   ];
   return { useApps: () => ({ apps }) };
 });
@@ -48,7 +51,7 @@ function optionNames() {
 }
 
 describe("WidgetPicker", () => {
-  it("lists the built-in widgets and every app with a frontend", async () => {
+  it("lists the built-in widgets and every launcher app with a frontend", async () => {
     await openPicker();
 
     expect(optionNames()).toEqual(["Browser", "Projects", "Recipe Box", "Notes"]);

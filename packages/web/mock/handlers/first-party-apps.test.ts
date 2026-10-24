@@ -23,7 +23,7 @@ describe("first-party app fixtures", () => {
     expect(firstPartyApps.map((app) => app.id).sort()).toEqual(packedIds());
   });
 
-  it("matches each app.yaml's name, version, and web entry", () => {
+  it("matches each app.yaml's name, version, web entry, and launcher flag", () => {
     for (const app of firstPartyApps) {
       const manifest = readFileSync(join(appsDir, app.id, "app.yaml"), "utf8");
       expect({
@@ -31,11 +31,13 @@ describe("first-party app fixtures", () => {
         displayName: app.displayName,
         version: app.version,
         hasFrontend: app.hasFrontend,
+        hideInLauncher: app.hideInLauncher,
       }).toEqual({
         id: app.id,
         displayName: topLevelScalar(manifest, "name"),
         version: topLevelScalar(manifest, "version"),
         hasFrontend: /^web:/m.test(manifest),
+        hideInLauncher: topLevelScalar(manifest, "hideInLauncher") === "true",
       });
     }
   });

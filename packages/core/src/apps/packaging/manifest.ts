@@ -134,6 +134,9 @@ export const AppManifestSchema = z
     icon: z.string().min(1).optional(),
     appRoot: z.string().min(1).optional(),
     includeSource: z.boolean().optional(),
+    // Keeps the app out of the launcher surfaces (Apps page, sidebar, search,
+    // app picker). The app still installs, loads, and opens by URL.
+    hideInLauncher: z.boolean().optional(),
     remix: RemixDeclarationSchema.optional(),
     // Basic store-listing metadata still lives in app.yaml because it is small
     // and useful for local display too. Rich store-page metadata and media live

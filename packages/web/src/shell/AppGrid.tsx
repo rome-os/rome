@@ -21,7 +21,7 @@ import { useApps, useInvalidateApps } from "@/hooks/use-apps";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
 import { useRecentApps } from "@/hooks/use-recent-apps";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
-import { isCarrierApp } from "@/lib/chat-helpers";
+import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
 import { RailAppIcon, RailLabel, RecentAppsRail, railDotClass } from "./RecentAppsRail";
 import {
@@ -106,7 +106,7 @@ function readLocalApps(): CachedApp[] {
     const stored = localStorage.getItem(APPS_CACHE_KEY);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? parsed.filter((app) => !isCarrierApp(app?.id)) : [];
+    return Array.isArray(parsed) ? parsed.filter((app) => app && !isHiddenInLauncher(app)) : [];
   } catch {
     return [];
   }
@@ -204,8 +204,8 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
 
   useEffect(() => {
     if (!appsFromQuery) return;
-    // Carriers (e.g. user-skills) are plumbing, never a pin or a recent app.
-    const sidebarApps = appsFromQuery.filter((app) => !isCarrierApp(app.id));
+    // Hidden apps (e.g. the user-skills carrier) are never a pin or a recent app.
+    const sidebarApps = appsFromQuery.filter((app) => !isHiddenInLauncher(app));
     setInstalledApps(sidebarApps);
     writeLocalApps(sidebarApps);
   }, [appsFromQuery]);
