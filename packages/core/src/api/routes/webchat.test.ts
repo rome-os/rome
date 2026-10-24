@@ -373,6 +373,104 @@ describe("Webchat API", () => {
     ]);
   });
 
+  it.each([
+    "webchat",
+    "action",
+    "subagent",
+    "fork",
+  ] as const)("keeps old %s replies and cards but archives every dashboard trace read", async (type) => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
+    const sessionId = `retention-${type}`;
+    await deps.webchatRepo.ensureRomeSession({
+      id: sessionId,
+      type,
+      name: "Retention",
+      agentName: "main",
+    });
+    const reply = JSON.stringify([
+      { type: "text", content: "The final reply" },
+      {
+        type: "pending_interaction",
+        toolUseId: "question",
+        appId: "questions",
+        render: { type: "text", text: "Pick one" },
+      },
+    ]);
+    for (const [turnId, createdAt] of [
+      ["old", new Date("2026-10-16T12:00:00Z")],
+      ["recent", new Date("2026-10-18T12:00:00Z")],
+      ["boundary", new Date("2026-10-17T12:00:00Z")],
+    ] as const) {
+      await deps.webchatRepo.addMessage(
+        `${sessionId}-${turnId}-user`,
+        sessionId,
+        "user",
+        "My question",
+        turnId,
+      );
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: `${sessionId}-${turnId}`,
+        sessionId,
+        turnId,
+        startSeq: 0,
+        blocks: [
+          { type: "thinking", content: "Private thinking" },
+          { type: "tool_use", id: "read", tool: "Read", input: {} },
+          { type: "tool_result", toolUseId: "read", tool: "Read", output: "Heavy output" },
+          { type: "result", content: "The final reply" },
+          { type: "turn_end", turnId, status: "completed", durationMs: 1000 },
+        ],
+      });
+      await deps.webchatRepo.addMessage(
+        `${sessionId}-${turnId}-reply`,
+        sessionId,
+        "assistant",
+        reply,
+        turnId,
+      );
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ createdAt })
+        .where(eq(romeAgentMessages.turnId, turnId));
+    }
+    const app = createWebchatRuntime(deps).routes;
+    const response = await app.request(`/sessions/${sessionId}/messages`);
+    const messages = (await response.json()) as Array<{
+      id: string;
+      content: string;
+      traceArchived?: boolean;
+      traceSummary?: unknown;
+    }>;
+    expect(messages.find((m) => m.id === `${sessionId}-old`)).toMatchObject({
+      content: "[]",
+      traceArchived: true,
+    });
+    expect(messages.find((m) => m.id === `${sessionId}-old`)?.traceSummary).toBeUndefined();
+    expect(messages.find((m) => m.id === `${sessionId}-old-reply`)?.content).toBe(reply);
+    expect(messages.find((m) => m.id === `${sessionId}-old-user`)?.content).toBe("My question");
+    for (const turnId of ["recent", "boundary"])
+      expect(messages.find((m) => m.id === `${sessionId}-${turnId}`)?.traceSummary).toBeTruthy();
+    for (const endpoint of [
+      `/sessions/messages/${sessionId}-old/content`,
+      `/chat/messages/${sessionId}-old/content`,
+      `/sessions/${sessionId}/turns/old/trace`,
+      `/sessions/${sessionId}/turns/old/trace.json`,
+      ...(type === "webchat" ? [`/chat/sessions/${sessionId}/turns/old/trace.json`] : []),
+    ]) {
+      const archived = await app.request(endpoint);
+      expect(archived.status).toBe(200);
+      expect(await archived.json()).toEqual({ trace: null, traceArchived: true });
+    }
+    const recent = await app.request(`/sessions/messages/${sessionId}-recent/content`);
+    expect(JSON.stringify(await recent.json())).toContain("Heavy output");
+    expect(await deps.webchatRepo.getMessageContent(`${sessionId}-old`)).toContain("Heavy output");
+    if (type === "webchat")
+      expect(await (await app.request(`/chat/sessions/${sessionId}/messages`)).json()).toEqual(
+        messages,
+      );
+  });
+
   it("aggregates completed child trace summaries without duplicating them in storage", async () => {
     const parentSessionId = "parent-summary-session";
     const parentTurnId = "parent-summary-turn";
@@ -510,10 +608,13 @@ describe("Webchat API", () => {
       ],
     });
     expect(getTraceContentsByTurns).toHaveBeenCalledTimes(1);
-    expect(getTraceContentsByTurns).toHaveBeenCalledWith([
-      { sessionId: childSessionId, turnId: childTurnId },
-      { sessionId: secondChildSessionId, turnId: secondChildTurnId },
-    ]);
+    expect(getTraceContentsByTurns).toHaveBeenCalledWith(
+      [
+        { sessionId: childSessionId, turnId: childTurnId },
+        { sessionId: secondChildSessionId, turnId: secondChildTurnId },
+      ],
+      { traceSince: expect.any(Date) },
+    );
     expect(getTraceContentByTurn).not.toHaveBeenCalled();
     expect(await deps.webchatRepo.getMessageContent("parent-summary-trace")).not.toContain(
       "traceSummary",

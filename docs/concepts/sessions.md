@@ -59,6 +59,16 @@ A turn is one request to an agent plus the agent work that follows until the age
 - **Step** — a single model call inside a turn. A turn that uses tools takes several steps, because each tool result feeds the next model call.
 - **Run** — an action run is one execution of an [action](actions.md), and a routine run is one fire of a [routine](data.md#routines). Neither is a turn.
 
+## Chat trace window
+
+The dashboard loads a turn's trace only within seven days of the trace row's creation.
+At exactly seven days, the trace stays available. After that, the chat shows an archived-steps note instead of a trace trigger.
+User messages, assistant replies, cards, and interaction results stay in the transcript.
+Lazy trace reads and raw downloads follow the same cutoff.
+
+This window changes dashboard reads, not storage. It deletes nothing and does not change sharing, usage accounting, or agent resume context.
+The window lives in `packages/core/src/webchat/trace-retention.ts`, shared with trace archival work.
+
 ## Event
 
 An event is one item of a turn's stream, as Rome publishes it to its consumers. Events fall into four groups:

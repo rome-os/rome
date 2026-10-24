@@ -4,6 +4,7 @@ import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { ApprovalsRepository } from "./approvals.js";
 import { ChatSettingsRepository } from "../../chat-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
+import { chatTraceCutoff } from "../../webchat/trace-retention.js";
 import {
   romeAgentMessagePlatformIds,
   romeAgentMessages,
@@ -56,6 +57,122 @@ describe("WebChatRepository", () => {
   afterEach(() => {
     rs.useRealTimers();
     testDb.close();
+  });
+
+  it("never selects block content when all requested traces are archived", async () => {
+    await repo.createSession("old-only", "Old only");
+    await repo.appendTraceBlocks({
+      messageId: "old-only-trace",
+      sessionId: "old-only",
+      turnId: "turn",
+      startSeq: 0,
+      blocks: [{ type: "thinking", content: "Heavy payload" }],
+    });
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-10-16T12:00:00Z") });
+    const select = testDb.db.select.bind(testDb.db);
+    const spy = rs.spyOn(testDb.db, "select").mockImplementation(((
+      fields?: Record<string, unknown>,
+    ) => {
+      expect(fields?.content).not.toBe(romeAgentTraceBlocks.content);
+      return fields ? select(fields as never) : select();
+    }) as typeof testDb.db.select);
+    const options = { traceSince: chatTraceCutoff(new Date("2026-10-24T12:00:00Z")) };
+    try {
+      expect((await repo.getTraceContents("old-only", options))[0]?.traceArchived).toBe(true);
+      expect(
+        (await repo.getMessageContentForDisplay("old-only-trace", options))?.traceArchived,
+      ).toBe(true);
+      expect((await repo.getTraceContentByTurn("old-only", "turn", options))?.traceArchived).toBe(
+        true,
+      );
+      expect(
+        await repo.getTraceContentsByTurns([{ sessionId: "old-only", turnId: "turn" }], options),
+      ).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("omits old trace payloads at the source while keeping the exact cutoff and chat rows", async () => {
+    await repo.createSession("retention", "Retention");
+    const now = new Date("2026-10-24T12:00:00Z");
+    const traceSince = chatTraceCutoff(now);
+    const blocks = [
+      { type: "thinking", content: "private steps" },
+      { type: "result", content: "Reply" },
+    ];
+    for (const [id, date] of [
+      ["recent", "2026-10-18T12:00:00Z"],
+      ["boundary", "2026-10-17T12:00:00Z"],
+      ["expired", "2026-10-17T11:59:59Z"],
+      ["old", "2026-10-16T12:00:00Z"],
+    ]) {
+      await repo.appendTraceBlocks({
+        messageId: id,
+        sessionId: "retention",
+        turnId: id,
+        startSeq: 0,
+        blocks,
+      });
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ createdAt: new Date(date!) })
+        .where(eq(romeAgentMessages.id, id!));
+    }
+    await repo.addMessage("legacy", "retention", "trace", JSON.stringify(blocks), "legacy");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "legacy"));
+    await repo.addMessage("prompt", "retention", "user", "Keep my question", "old");
+    await repo.addMessage(
+      "reply",
+      "retention",
+      "assistant",
+      JSON.stringify([{ type: "text", content: "Reply" }]),
+      "old",
+    );
+
+    const traces = await repo.getTraceContents("retention", { traceSince });
+    for (const id of ["old", "expired", "legacy"]) {
+      expect(traces.find((row) => row.id === id)).toEqual({
+        id,
+        content: "[]",
+        traceArchived: true,
+      });
+      expect(await repo.getMessageContentForDisplay(id, { traceSince })).toEqual({
+        id,
+        content: "[]",
+        traceArchived: true,
+      });
+      expect(await repo.getTraceContentByTurn("retention", id, { traceSince })).toEqual({
+        id,
+        content: "[]",
+        traceArchived: true,
+      });
+      expect(await repo.getMessageContent(id)).toBe(JSON.stringify(blocks));
+    }
+    for (const id of ["recent", "boundary"]) {
+      expect(traces.find((row) => row.id === id)?.content).toBe(JSON.stringify(blocks));
+      expect((await repo.getMessageContentForDisplay(id, { traceSince }))?.content).toBe(
+        JSON.stringify(blocks),
+      );
+    }
+    const children = await repo.getTraceContentsByTurns(
+      ["old", "recent", "boundary", "legacy"].map((turnId) => ({ sessionId: "retention", turnId })),
+      { traceSince },
+    );
+    expect(children.map((row) => row.id).sort()).toEqual(["boundary", "recent"]);
+    expect((await repo.getMessageContentForDisplay("prompt", { traceSince }))?.content).toBe(
+      "Keep my question",
+    );
+    expect((await repo.getMessageContentForDisplay("reply", { traceSince }))?.content).toContain(
+      "Reply",
+    );
+
+    // After archival removes the blocks, the dashboard response is identical.
+    await testDb.db.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.messageId, "old"));
+    expect(await repo.getTraceContents("retention", { traceSince })).toEqual(traces);
   });
 
   it("filters owners before returning chats and preserves the all-owner default", async () => {

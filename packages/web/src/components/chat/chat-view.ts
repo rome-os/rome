@@ -342,7 +342,8 @@ export function buildRows(
   const tracesByTurn = new Map<string, ChatMessage>();
   const turnsWithAssistant = new Set<string>();
   for (const m of messages) {
-    if (m.role === "trace" && m.turnId && m.traceSummary) tracesByTurn.set(m.turnId, m);
+    if (m.role === "trace" && m.turnId && (m.traceSummary || m.traceArchived))
+      tracesByTurn.set(m.turnId, m);
     if (m.role === "assistant" && m.turnId) turnsWithAssistant.add(m.turnId);
   }
   const isRunningTurn = (turnId: string | null | undefined) =>
@@ -357,7 +358,7 @@ export function buildRows(
       continue;
     }
     if (msg.role === "trace") {
-      if (!msg.traceSummary) continue;
+      if (!msg.traceSummary && !msg.traceArchived) continue;
       // Merged into the turn's grouped row when it has assistant replies; only
       // stands alone for a reply-less turn. Never mid-stream for the running
       // turn (the live trace button carries it).

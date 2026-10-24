@@ -287,6 +287,32 @@ export type WebchatSessionNameChangedListener = (event: {
   name: string;
 }) => void;
 
+interface TraceReadOptions {
+  /** Dashboard reads omit traces strictly older than this instant. Other readers stay unbounded. */
+  traceSince?: Date;
+}
+
+function traceReadFields({ traceSince }: TraceReadOptions) {
+  const archived = traceSince
+    ? sql<boolean>`${romeAgentMessages.role} = 'trace' AND ${romeAgentMessages.createdAt} < ${traceSince.getTime() / 1000}`.mapWith(
+        Boolean,
+      )
+    : sql<boolean>`0`.mapWith(Boolean);
+  return {
+    id: romeAgentMessages.id,
+    traceArchived: archived,
+    content: sql<string>`CASE WHEN ${archived} THEN '[]' ELSE ${romeAgentMessages.content} END`,
+  };
+}
+
+function traceContentResult(row: { id: string; content: string; traceArchived: boolean }) {
+  return {
+    id: row.id,
+    content: row.content,
+    ...(row.traceArchived ? { traceArchived: true } : {}),
+  };
+}
+
 const webchatMessageSelectFields = {
   id: romeAgentMessages.id,
   sessionId: romeAgentMessages.sessionId,
@@ -2450,19 +2476,27 @@ export class WebChatRepository {
       );
   }
 
-  async getTraceContents(sessionId: string) {
+  async getTraceContents(sessionId: string, options: TraceReadOptions = {}) {
     const stubs = await this.db
-      .select({ id: romeAgentMessages.id, content: romeAgentMessages.content })
+      .select(traceReadFields(options))
       .from(romeAgentMessages)
       .where(and(eq(romeAgentMessages.sessionId, sessionId), eq(romeAgentMessages.role, "trace")));
-    if (stubs.length === 0) return stubs;
+    if (stubs.length === 0) return stubs.map(traceContentResult);
+
+    const readableIds = stubs.filter((stub) => !stub.traceArchived).map((stub) => stub.id);
+    if (readableIds.length === 0) return stubs.map(traceContentResult);
 
     const blockRows = await this.db
       .select({ messageId: romeAgentTraceBlocks.messageId, content: romeAgentTraceBlocks.content })
       .from(romeAgentTraceBlocks)
-      .where(eq(romeAgentTraceBlocks.sessionId, sessionId))
+      .where(
+        and(
+          eq(romeAgentTraceBlocks.sessionId, sessionId),
+          inArray(romeAgentTraceBlocks.messageId, readableIds),
+        ),
+      )
       .orderBy(asc(romeAgentTraceBlocks.messageId), asc(romeAgentTraceBlocks.seq));
-    if (blockRows.length === 0) return stubs;
+    if (blockRows.length === 0) return stubs.map(traceContentResult);
 
     const blocksByMessage = new Map<string, string[]>();
     for (const row of blockRows) {
@@ -2474,12 +2508,15 @@ export class WebChatRepository {
       }
     }
     return stubs.map((stub) => ({
-      id: stub.id,
+      ...traceContentResult(stub),
       content: mergeTraceContent(stub.content, blocksByMessage.get(stub.id) ?? []),
     }));
   }
 
-  async getTraceContentsByTurns(refs: readonly { sessionId: string; turnId: string }[]) {
+  async getTraceContentsByTurns(
+    refs: readonly { sessionId: string; turnId: string }[],
+    options: TraceReadOptions = {},
+  ) {
     const traceTurnKey = (sessionId: string, turnId: string): string =>
       JSON.stringify([sessionId, turnId]);
     const refsByKey = new Map(
@@ -2501,6 +2538,9 @@ export class WebChatRepository {
       .where(
         and(
           eq(romeAgentMessages.role, "trace"),
+          options.traceSince
+            ? sql`${romeAgentMessages.createdAt} >= ${options.traceSince.getTime() / 1000}`
+            : undefined,
           inArray(romeAgentMessages.sessionId, sessionIds),
           inArray(romeAgentMessages.turnId, turnIds),
         ),
@@ -2786,9 +2826,9 @@ export class WebChatRepository {
       .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
   }
 
-  async getTraceContentByTurn(sessionId: string, turnId: string) {
+  async getTraceContentByTurn(sessionId: string, turnId: string, options: TraceReadOptions = {}) {
     const rows = await this.db
-      .select({ id: romeAgentMessages.id, content: romeAgentMessages.content })
+      .select(traceReadFields(options))
       .from(romeAgentMessages)
       .where(
         and(
@@ -2800,22 +2840,29 @@ export class WebChatRepository {
       .limit(1);
     const stub = rows[0];
     if (!stub) return null;
+    if (stub.traceArchived) return traceContentResult(stub);
     return {
-      id: stub.id,
+      ...traceContentResult(stub),
       content: mergeTraceContent(stub.content, await this.getTraceBlockContents(stub.id)),
     };
   }
 
   async getMessageContent(id: string) {
+    return (await this.getMessageContentForDisplay(id))?.content ?? null;
+  }
+
+  async getMessageContentForDisplay(id: string, options: TraceReadOptions = {}) {
     const rows = await this.db
-      .select({ content: romeAgentMessages.content })
+      .select(traceReadFields(options))
       .from(romeAgentMessages)
       .where(eq(romeAgentMessages.id, id));
-    const content = rows[0]?.content;
-    if (content === undefined) return null;
-    // Non-trace messages never have block rows, so the lookup is a no-op
-    // for them and the stored content is returned as-is.
-    return mergeTraceContent(content, await this.getTraceBlockContents(id));
+    const stub = rows[0];
+    if (!stub) return null;
+    if (stub.traceArchived) return traceContentResult(stub);
+    return {
+      ...traceContentResult(stub),
+      content: mergeTraceContent(stub.content, await this.getTraceBlockContents(id)),
+    };
   }
 
   async getLayout(sessionId: string): Promise<unknown[] | null> {

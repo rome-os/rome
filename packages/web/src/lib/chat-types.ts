@@ -159,6 +159,7 @@ export interface ChatMessage {
   content: string; // JSON array of blocks
   createdAt: string;
   traceSummary?: TraceSummary | null;
+  traceArchived?: boolean;
   /** Who sent a user message. Absent when the message recorded no sender. */
   sender?: ChatMessageSender;
 }
