@@ -20,9 +20,8 @@ import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { deleteSession } from "@/lib/chat-api";
-import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { useApps } from "@/hooks/use-apps";
-import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
+import { SessionAvatar } from "@/components/chat/SessionAvatar";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { SlotContent } from "@/components/slot";
@@ -380,25 +379,20 @@ export function FreeGrid() {
 
           <SlotContent name="mobileHeader">
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <AgentAvatar
+              <SessionAvatar
                 iconUrl={pinnedAgentMention?.iconUrl}
                 label={pinnedAgentMention?.appLabel}
-                size="sm"
-                className="shrink-0"
+                model={model}
+                reasoningEffort={reasoningEffort}
               />
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-ui text-foreground">
-                  {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
+              <span className="truncate text-ui text-foreground">
+                {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
+              </span>
+              {sessionName?.trim() && pinnedAgentMention && (
+                <span className="shrink-0 truncate text-aux text-muted-foreground">
+                  {pinnedAgentMention.appLabel}
                 </span>
-                <div className="flex min-w-0 items-center gap-2">
-                  <SessionModelLabel model={model} reasoningEffort={reasoningEffort} />
-                  {sessionName?.trim() && pinnedAgentMention && (
-                    <span className="truncate text-aux text-muted-foreground">
-                      {pinnedAgentMention.appLabel}
-                    </span>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

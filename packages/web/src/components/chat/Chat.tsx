@@ -42,8 +42,7 @@ import {
   traceDrawerContentInsetClass,
   type TraceDrawerTarget,
 } from "@/components/agent-trace/TraceDrawer";
-import { AgentAvatar } from "@/components/chat/AgentAvatar";
-import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
+import { SessionAvatar } from "@/components/chat/SessionAvatar";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { prettyAgentName } from "@/lib/agent-name";
 import { artifactLocalName } from "@/lib/artifact-name";
@@ -1852,16 +1851,15 @@ export function Chat({
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {untitledEmptyChat ? null : (
           <>
-            <AgentAvatar
+            <SessionAvatar
               iconUrl={pinnedAgentMention?.iconUrl}
               label={pinnedAgentMention?.appLabel}
-              size="sm"
-              className="shrink-0"
+              model={model}
+              reasoningEffort={reasoningEffort}
             />
             <span className="truncate text-ui text-foreground">
               {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
             </span>
-            <SessionModelLabel model={model} reasoningEffort={reasoningEffort} />
             {sessionName?.trim() && pinnedAgentMention && (
               <span className="shrink-0 truncate text-aux text-muted-foreground">
                 {pinnedAgentMention.appLabel}

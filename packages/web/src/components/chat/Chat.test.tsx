@@ -376,7 +376,7 @@ describe("Chat agent identity", () => {
     expect(screen.getByRole("button", { name: "chat.expandTools" })).toBeTruthy();
   });
 
-  it("shows the session model in the chat header", () => {
+  it("marks the header avatar with the session model's vendor", () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "A conversation",
       model: "gpt-5.5",
@@ -384,10 +384,11 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    expect(screen.getByLabelText("navbar.sessionModel").textContent).toBe("gpt-5.5");
+    const avatar = screen.getByRole("button", { name: "navbar.sessionModel" });
+    expect(avatar.querySelector('svg[aria-label="ChatGPT"]')).toBeTruthy();
   });
 
-  it("shows the effort the session's last turn ran with beside the model", () => {
+  it("names the effort the session's last turn ran with", () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "A conversation",
       model: "gpt-5.5",
@@ -396,10 +397,7 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    // The provider's own effort term, with no mapping to composer labels.
-    expect(screen.getByLabelText("navbar.sessionModelWithEffort").textContent).toBe(
-      "gpt-5.5 · max",
-    );
+    expect(screen.getByRole("button", { name: "navbar.sessionModelWithEffort" })).toBeTruthy();
   });
 
   it("does not invent a model for a session without a pin", () => {

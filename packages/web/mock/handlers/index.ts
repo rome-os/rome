@@ -738,9 +738,19 @@ const session = (
 const chatSessions: ChatSession[] = [
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
-  { ...session("mock-chat-1", "Morning brief tweaks", "default"), running: true },
-  { ...session("mock-chat-2", "Draft launch email", "website-redesign"), unread: true },
-  { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true },
+  {
+    ...session("mock-chat-1", "Morning brief tweaks", "default"),
+    running: true,
+    model: "claude-opus-5-5[1m]",
+    reasoningEffort: "high",
+  },
+  {
+    ...session("mock-chat-2", "Draft launch email", "website-redesign"),
+    unread: true,
+    model: "gpt-5.6-sol",
+    reasoningEffort: "xhigh",
+  },
+  { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true, model: "gemini-2.5-pro" },
   { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
   // A chat that works in a folder on another computer groups under that folder.
   {
