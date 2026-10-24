@@ -1,0 +1,16 @@
+[Unit]
+Description=Load the preloaded Rome image into dockerd on first boot
+After=docker.service
+Requires=docker.service
+ConditionPathExists=/var/lib/rome/rome.tar
+
+[Service]
+Type=oneshot
+# Loading a multi-GB archive on a slow disk outweighs the default 90s.
+TimeoutStartSec=30min
+ExecStart=/usr/bin/docker load -i /var/lib/rome/rome.tar
+ExecStartPost=/bin/rm -f /var/lib/rome/rome.tar
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
