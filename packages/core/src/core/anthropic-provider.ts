@@ -89,6 +89,13 @@ export const CLAUDE_AGENT_SDK_ENV = {
   CLAUDE_CODE_ENABLE_TASKS: "false",
 } as const;
 
+export const CLAUDE_AGENT_SDK_SETTINGS = {
+  attribution: {
+    commit: "🤖 Generated with Rome OS (https://github.com/rome-os/rome)",
+    pr: "🤖 Generated with [Rome OS](https://github.com/rome-os/rome)",
+  },
+} as const;
+
 // Tools that park the turn on a card the guardian answers next turn, so the
 // model correctly ends its response with no text after them. Claude Code
 // treats tools listed in CLAUDE_CODE_TERMINAL_MCP_TOOLS as terminal: its
@@ -643,6 +650,7 @@ export class AnthropicProvider implements ModelProvider {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         settingSources: ["project"],
+        settings: CLAUDE_AGENT_SDK_SETTINGS,
         ...(params.workingDir ? { cwd: params.workingDir } : {}),
         ...(params.fork
           ? {

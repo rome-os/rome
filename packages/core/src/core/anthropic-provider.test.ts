@@ -674,6 +674,22 @@ describe("AnthropicProvider", () => {
     await session.close();
   });
 
+  it("attributes commits and PRs to Rome OS through SDK flag settings", async () => {
+    const session = await new AnthropicProvider().openSession(buildParams());
+
+    expect(queryMock.mock.calls[0]![0].options).toMatchObject({
+      settingSources: ["project"],
+      settings: {
+        attribution: {
+          commit: "🤖 Generated with Rome OS (https://github.com/rome-os/rome)",
+          pr: "🤖 Generated with [Rome OS](https://github.com/rome-os/rome)",
+        },
+      },
+    });
+
+    await session.close();
+  });
+
   it("uses SDK outputFormat and publishes only the native structured terminal", async () => {
     const schema = {
       type: "object",
