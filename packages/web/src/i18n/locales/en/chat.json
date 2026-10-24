@@ -4,6 +4,7 @@
     "mermaid": "Mermaid diagram"
   },
   "title": "Rome",
+  "senderGuardian": "Guardian",
   "inputState": {
     "queued": "Waiting to be included",
     "submitted": "Sending to agent",

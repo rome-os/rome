@@ -43,6 +43,8 @@ import {
   type TraceDrawerTarget,
 } from "@/components/agent-trace/TraceDrawer";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
+import { senderFromIdentity } from "@/components/chat/SenderAvatar";
+import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { prettyAgentName } from "@/lib/agent-name";
 import { artifactLocalName } from "@/lib/artifact-name";
@@ -578,6 +580,13 @@ export function Chat({
   useEffect(() => {
     floorSessionIdRef.current = floorSessionId;
   }, [floorSessionId]);
+  // A message shows its sender before the server has it, so the signed-in
+  // person's avatar appears on their bubble as they send.
+  const { data: viewer } = useDashboardIdentity();
+  const viewerSenderRef = useRef(senderFromIdentity(viewer));
+  useEffect(() => {
+    viewerSenderRef.current = senderFromIdentity(viewer);
+  }, [viewer]);
   const isReadVisibleSession = useCallback(
     (id: string) => id === mainSessionIdRef.current || id === floorSessionIdRef.current,
     [],
@@ -1305,6 +1314,7 @@ export function Chat({
           role: "user",
           content: optimisticUserContent,
           createdAt: sentAt,
+          sender: viewerSenderRef.current,
         });
       }
 
@@ -1356,6 +1366,7 @@ export function Chat({
         role: "user",
         content: optimisticUserContent,
         createdAt: sentAt,
+        sender: viewerSenderRef.current,
       };
       putUserMessage(userMsg, immediateInputId);
 

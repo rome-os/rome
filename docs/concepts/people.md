@@ -28,6 +28,7 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 - A visitor reaches only the surfaces its email is allow-listed for: individual access-gated apps, or the full dashboard when the guardian keeps a dashboard allow-list. A visitor can never hold guardian privileges.
 - The visitor's email is authoritative from the Rome Cloud sign-in exchange. Nothing the browser supplies can set or change it.
 - Every request re-checks allow-list membership, so removing an email revokes access immediately rather than at the next sign-in. The email comparison is case-insensitive.
+- Each sign-in keeps the visitor's email and Rome Cloud picture in `visitor_profiles`, replacing the last one. Chat reads it to show who sent a message, so it is display only and never authenticates anyone.
 
 **Not to be confused with:**
 

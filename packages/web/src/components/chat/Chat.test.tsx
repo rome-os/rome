@@ -38,6 +38,17 @@ rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t }),
 }));
 
+rs.mock("@/hooks/use-dashboard-identity", () => ({
+  useDashboardIdentity: () => ({
+    data: {
+      kind: "visitor",
+      accountId: "acct-ana",
+      email: "ana@example.com",
+      avatarUrl: "https://example.com/ana.png",
+    },
+  }),
+}));
+
 rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: mockUseSessionIdentity,
 }));
@@ -104,14 +115,24 @@ rs.mock("@/components/chat/MessageList", () => ({
     rows,
   }: {
     live: { identity: { name: string } };
-    rows: { kind: string; key: string; message?: { content: string } }[];
+    rows: {
+      kind: string;
+      key: string;
+      message?: { content: string; sender?: { name: string | null; avatarUrl: string | null } };
+    }[];
   }) => (
     <>
       <div data-testid="message-list">{live.identity.name}</div>
       {rows
         .filter((row) => row.kind === "user")
         .map((row) => (
-          <div key={row.key} data-testid="user-row" data-row-key={row.key}>
+          <div
+            key={row.key}
+            data-testid="user-row"
+            data-row-key={row.key}
+            data-sender={row.message?.sender?.name}
+            data-sender-avatar={row.message?.sender?.avatarUrl}
+          >
             {row.message?.content}
           </div>
         ))}
@@ -760,6 +781,31 @@ describe("Chat turn stream lifecycle", () => {
 
     expect(screen.getAllByTestId("user-row")).toHaveLength(1);
     expect(screen.getByTestId("user-row")).toBe(bubble);
+  });
+
+  it("shows the signed-in person as the sender of a message they send", async () => {
+    let resolvePost!: (result: Awaited<ReturnType<typeof postSessionTurn>>) => void;
+    rs.mocked(postSessionTurn).mockImplementationOnce(
+      () => new Promise((resolve) => (resolvePost = resolve)),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+
+    fireEvent.click(screen.getByTestId("send-text-button"));
+    const early = await screen.findByTestId("user-row");
+    expect(early.dataset.sender).toBe("ana@example.com");
+    expect(early.dataset.senderAvatar).toBe("https://example.com/ana.png");
+
+    await act(async () => {
+      resolvePost({
+        ok: true,
+        data: {
+          turnId: "turn-1",
+          inputId: "11111111-1111-4111-8111-111111111111",
+          inputState: "submitted",
+        },
+      });
+    });
+    expect(screen.getByTestId("user-row").dataset.sender).toBe("ana@example.com");
   });
 
   it("takes the early bubble back down when the send is refused", async () => {

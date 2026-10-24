@@ -2378,6 +2378,22 @@ export class WebChatRepository {
       );
   }
 
+  /** The person who sent each user message in a session, for messages that
+   * recorded one. */
+  async getUserMessageActors(sessionId: string): Promise<Map<string, SessionActor>> {
+    const rows = await this.db
+      .select({ id: romeAgentMessages.id, actor: romeAgentMessages.actor })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "user"),
+          isNotNull(romeAgentMessages.actor),
+        ),
+      );
+    return new Map(rows.flatMap((row) => (row.actor ? [[row.id, row.actor] as const] : [])));
+  }
+
   async getHistoryMessages(
     threadId: string | null,
     since: Date,

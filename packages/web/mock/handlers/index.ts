@@ -251,6 +251,7 @@ const turn = (
       role: "user",
       content: JSON.stringify(typeof prompt === "string" ? [text(prompt)] : prompt),
       createdAt: startedAt,
+      sender: { kind: "guardian", name: identity.displayName, avatarUrl: identity.avatarUrl },
     },
   ];
   if (traceEvents?.length) {

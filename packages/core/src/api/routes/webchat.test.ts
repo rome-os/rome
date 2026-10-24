@@ -30,7 +30,8 @@ import type {
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
-import { webchatProjects, romeAgentMessages } from "../../db/schema.js";
+import { guardianAuth, webchatProjects, romeAgentMessages } from "../../db/schema.js";
+import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
@@ -99,6 +100,60 @@ describe("Webchat API", () => {
     const all = [guardianId, visitorId, otherId, "legacy"].sort();
     expect(await list(visitor)).toEqual(all);
     expect(await list(visitor, "all")).toEqual(all);
+  });
+
+  it("names each user message's sender with their current picture", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const sessionId = "people";
+    await deps.webchatRepo.createSession(sessionId, "People");
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const ada = { kind: "visitor" as const, accountId: "acct-ada", email: "ada@example.com" };
+    const lin = { kind: "visitor" as const, accountId: "acct-lin", email: "lin@example.com" };
+    await deps.webchatRepo.recordUserInput("from-guardian", sessionId, "[]", guardian);
+    await deps.webchatRepo.recordUserInput("from-ada", sessionId, "[]", ada);
+    await deps.webchatRepo.recordUserInput("from-lin", sessionId, "[]", lin);
+    await deps.webchatRepo.recordUserInput("unattributed", sessionId, "[]");
+    // Pictures recorded after the messages still show on them.
+    await testDb.db.insert(guardianAuth).values({
+      id: "seat-row",
+      userId: "seat",
+      passwordHash: "x",
+      email: "ray@example.com",
+      avatarUrl: "https://example.com/ray.png",
+      createdAt: new Date(),
+    });
+    await deps.settingsRepo.set("guardianName", "Ray");
+    await new VisitorProfilesRepository(testDb.db).record("acct-ada", {
+      email: "ada@new.example.com",
+      avatarUrl: "https://example.com/ada.png",
+    });
+
+    const response = await app.request(`/chat/sessions/${sessionId}/messages`);
+
+    expect(response.status).toBe(200);
+    const senders = Object.fromEntries(
+      ((await response.json()) as { id: string; sender?: unknown }[]).map((message) => [
+        message.id,
+        message.sender,
+      ]),
+    );
+    expect(senders).toEqual({
+      "from-guardian": { kind: "guardian", name: "Ray", avatarUrl: "https://example.com/ray.png" },
+      "from-ada": {
+        kind: "visitor",
+        accountId: "acct-ada",
+        name: "ada@new.example.com",
+        avatarUrl: "https://example.com/ada.png",
+      },
+      // Signed in before profiles were kept: the email the message recorded.
+      "from-lin": {
+        kind: "visitor",
+        accountId: "acct-lin",
+        name: "lin@example.com",
+        avatarUrl: null,
+      },
+      unattributed: undefined,
+    });
   });
 
   it("persists appended inputs once and keeps one stream owner", async () => {

@@ -27,3 +27,11 @@ export type StoredErrorPart = Pick<
 
 /** One part of a stored WebChat message's content. */
 export type TranscriptPart = MessagePart | HandbackApprovedPart | StoredErrorPart;
+
+/** The person who sent a WebChat user message, as the dashboard shows them.
+ * Absent when the message recorded no sender: one sent before senders were
+ * recorded, or one an agent or a channel wrote. `name` is the guardian's name
+ * or the visitor's email, null when neither is known. */
+export type ChatMessageSender =
+  | { kind: "guardian"; name: string | null; avatarUrl: string | null }
+  | { kind: "visitor"; accountId: string; name: string | null; avatarUrl: string | null };

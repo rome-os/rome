@@ -1,5 +1,5 @@
 import type { DeviceFolder, DeviceList } from "@rome/api-types/devices";
-import type { TranscriptPart } from "@rome/api-types/chat";
+import type { ChatMessageSender, TranscriptPart } from "@rome/api-types/chat";
 import type { TraceErrorEvent, TraceEventDto, TraceSummary } from "@rome/api-types/trace-segments";
 import type {
   RomeSessionDetail,
@@ -159,6 +159,8 @@ export interface ChatMessage {
   content: string; // JSON array of blocks
   createdAt: string;
   traceSummary?: TraceSummary | null;
+  /** Who sent a user message. Absent when the message recorded no sender. */
+  sender?: ChatMessageSender;
 }
 
 export interface ProjectOption {

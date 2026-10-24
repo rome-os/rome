@@ -78,6 +78,7 @@ import {
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
 import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
+import { resolveChatSenders } from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
@@ -1112,10 +1113,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
     return { ...summary, subagents };
   };
-  const enrichStoredMessages = async (
-    sessionId: string,
-    messages: Awaited<ReturnType<ApiDeps["webchatRepo"]["getMessages"]>>,
-  ) => {
+  type StoredMessages = Awaited<ReturnType<ApiDeps["webchatRepo"]["getMessages"]>>;
+  const attachTraceSummaries = async (sessionId: string, messages: StoredMessages) => {
     const hasTrace = messages.some((m) => m.role === "trace");
     if (!hasTrace) return messages;
     const traceContents = await deps.webchatRepo.getTraceContents(sessionId);
@@ -1152,6 +1151,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             traceSummary: aggregateStoredSubagentSummaries(snapshot.summary, childSummaries),
           }
         : message;
+    });
+  };
+  const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
+    const withTraces = await attachTraceSummaries(sessionId, messages);
+    const actors = await deps.webchatRepo.getUserMessageActors(sessionId);
+    const senders = await resolveChatSenders(deps, actors);
+    if (senders.size === 0) return withTraces;
+    return withTraces.map((message) => {
+      const sender = senders.get(message.id);
+      return sender ? { ...message, sender } : message;
     });
   };
 

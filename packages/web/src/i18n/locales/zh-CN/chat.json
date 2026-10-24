@@ -4,6 +4,7 @@
     "mermaid": "Mermaid 图表"
   },
   "title": "Rome",
+  "senderGuardian": "守护者",
   "inputState": {
     "queued": "等待加入对话",
     "submitted": "正在发送给 Agent",

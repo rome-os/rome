@@ -429,6 +429,17 @@ export const guardianAuth = sqliteTable("guardian_auth", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+// The last Rome Cloud profile each visitor signed in with, kept so other
+// dashboard people see who sent a chat message. A visitor's own session holds
+// the same fields, but only in their cookie. Display only, never used for
+// authentication; a sign-in overwrites the row.
+export const visitorProfiles = sqliteTable("visitor_profiles", {
+  accountId: text("account_id").primaryKey(),
+  email: text("email").notNull(),
+  avatarUrl: text("avatar_url"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 export const oauthPendingAttempts = sqliteTable(
   "oauth_pending_attempts",
   {
