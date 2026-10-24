@@ -20,14 +20,20 @@ import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { readActivity } from "./activity.js";
+import { linkReach, type LinkReach, type PlatformOfChannel } from "./link-reach.js";
 import { readSendStates, type SendDeps } from "./send.js";
 import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
 export interface PeopleReadDeps extends SendDeps {
   db: DrizzleDb;
-  personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings" | "findById">;
+  personMappingRepo: Pick<
+    PersonMappingRepository,
+    "findAllWithMappings" | "findById" | "findByChannelUser" | "linkKeyOf"
+  >;
   channels: Channels;
   accountNames: Pick<AccountNames, "displayNames">;
+  platformOfChannel?: PlatformOfChannel;
+  recordedChannels?: () => readonly string[];
 }
 
 /** A person as the repository reads them: the row and the accounts linked to
@@ -36,16 +42,15 @@ export type PersonRow = Awaited<ReturnType<PersonMappingRepository["findAllWithM
 
 /** Every curated person. */
 export async function readPeople(deps: PeopleReadDeps): Promise<PersonResource[]> {
-  const persons = (await deps.personMappingRepo.findAllWithMappings()).filter(
-    (person) => person.id !== STRANGER_PERSON_ID,
-  );
-  return serialize(deps, persons);
+  const everyone = await deps.personMappingRepo.findAllWithMappings();
+  const persons = everyone.filter((person) => person.id !== STRANGER_PERSON_ID);
+  return serialize(deps, persons, linkReach(deps, everyone));
 }
 
 /** One curated person, or null when the id names none. */
 export async function readPerson(deps: PeopleReadDeps, id: string): Promise<PersonResource | null> {
   const person = await findPerson(deps, id);
-  return person && (await serialize(deps, [person]))[0];
+  return person && (await serialize(deps, [person], linkReach(deps)))[0];
 }
 
 /** The person an id names, as stored — for a caller that needs the mappings
@@ -66,22 +71,33 @@ export async function findPerson(
 async function serialize(
   deps: PeopleReadDeps,
   persons: readonly PersonRow[],
+  reach: LinkReach,
 ): Promise<PersonResource[]> {
   // One mapping is one account on the wire, so a client can address the link
   // it sees. The activity fold is the one place two mappings of a single
   // account collapse — reporting one person's history twice would be a wrong
   // number, whereas showing both addresses is only what the guardian stored.
   const refs = persons.flatMap((person) => person.channelMappings);
+  // Each link reaches its account at every one of Rome's accounts on its
+  // platform, so names, history and activity are read at all of them.
+  const reaches = await Promise.all(
+    persons.flatMap((person) =>
+      person.channelMappings.map((mapping) => reach.of(person.id, mapping)),
+    ),
+  );
+  let taken = 0;
+  const reachByPerson = persons.map((person) => {
+    const own = reaches.slice(taken, taken + person.channelMappings.length).flat();
+    taken += person.channelMappings.length;
+    return own;
+  });
 
   // Independent of each other, and both reach the same channel mirrors: read
   // together, a mirror that folds its whole address book per call serves both
   // from one read of it instead of two.
   const [accountsByPerson, names, sendStates, memoryPaths] = await Promise.all([
-    timelineAccounts(
-      deps,
-      persons.map((person) => person.channelMappings),
-    ),
-    deps.accountNames.displayNames(refs),
+    timelineAccounts(deps, reachByPerson),
+    deps.accountNames.displayNames(reaches.flat()),
     // Whether each mapping can be written to, asked of the live connections
     // rather than stored: a channel that went down between two reads has to
     // change this answer, and nothing writes a row when it does.
@@ -89,6 +105,16 @@ async function serialize(
     memoryProfilePaths(persons),
   ]);
   const activity = await readActivity(personMessageStores(deps), accountsByPerson);
+
+  // The first of Rome's accounts on the platform that knows a name for the
+  // account names it. A channel that knows none answers the address itself.
+  const firstNames: string[] = [];
+  let offset = 0;
+  for (const reach of reaches) {
+    const answers = names.slice(offset, offset + reach.length);
+    firstNames.push(answers.find((name, j) => name !== reach[j]!.channelUserId) ?? answers[0]!);
+    offset += reach.length;
+  }
 
   let next = 0;
   return persons.map((person, i) => ({
@@ -100,9 +126,10 @@ async function serialize(
       return {
         channel: mapping.channel,
         channelUserId: mapping.channelUserId,
-        displayName: names[index],
+        displayName: firstNames[index],
+        readThrough: reaches[index]!.map((address) => address.channel),
         send: sendStates[index] ?? ("not-connected" as AccountSendState),
-        latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], mapping),
+        latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], reaches[index]!),
       };
     }),
     memoryPath: memoryPaths[i],
@@ -153,11 +180,17 @@ async function memoryProfilePaths(persons: readonly PersonRow[]): Promise<(strin
 function latestAtOf(
   heads: Map<MessageAccount, Message>,
   accounts: readonly MessageAccount[] | undefined,
-  mapping: { channel: string; channelUserId: string },
+  reach: readonly { channel: string; channelUserId: string }[],
 ): number | null {
-  const account = accounts?.find(
-    (candidate) =>
-      candidate.channel === mapping.channel && candidate.addresses.includes(mapping.channelUserId),
-  );
-  return (account && heads.get(account)?.timestamp) ?? null;
+  let latest: number | null = null;
+  for (const address of reach) {
+    const account = accounts?.find(
+      (candidate) =>
+        candidate.channel === address.channel &&
+        candidate.addresses.includes(address.channelUserId),
+    );
+    const at = (account && heads.get(account)?.timestamp) ?? null;
+    if (at !== null && (latest === null || at > latest)) latest = at;
+  }
+  return latest;
 }

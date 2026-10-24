@@ -6,7 +6,6 @@ import {
   accountHandle,
   accountSegments,
   segmentAccount,
-  segmentEntries,
   segmentOutbox,
 } from "./send-model";
 
@@ -16,6 +15,7 @@ import {
 
 function account(over: Partial<LinkedAccount> & Pick<LinkedAccount, "channel">): LinkedAccount {
   return {
+    readThrough: [over.channel],
     channelUserId: "u1",
     displayName: "someone",
     send: "yes",
@@ -106,22 +106,6 @@ describe("segmentAccount", () => {
   });
 });
 
-describe("segmentEntries", () => {
-  const entries: Message[] = [
-    { source: "whatsapp", timestamp: 20, body: "wa", direction: "inbound", ref: "a" },
-    { source: "telegram", timestamp: 10, body: "tg", direction: "inbound", ref: "b" },
-  ];
-
-  it("shows everything on the merged segment", () => {
-    expect(segmentEntries(entries, null)).toHaveLength(2);
-  });
-
-  it("narrows to the segment's channel, which is all an entry names", () => {
-    const scoped = segmentEntries(entries, account({ channel: "telegram" }));
-    expect(scoped.map((entry) => entry.body)).toEqual(["tg"]);
-  });
-});
-
 describe("segmentOutbox", () => {
   const messages = [
     {
@@ -152,6 +136,15 @@ describe("segmentOutbox", () => {
     // half of the pair that can be told apart.
     const scoped = segmentOutbox(messages, account({ channel: "whatsapp", channelUserId: "b" }));
     expect(scoped.map((message) => message.text)).toEqual(["two"]);
+  });
+
+  it("keeps the account's rows on every channel it is read through", () => {
+    const other = { ...messages[1]!, id: "3", channel: "whatsapp_2", text: "three" };
+    const scoped = segmentOutbox(
+      [...messages, other],
+      account({ channel: "whatsapp", channelUserId: "b", readThrough: ["whatsapp", "whatsapp_2"] }),
+    );
+    expect(scoped.map((message) => message.text)).toEqual(["two", "three"]);
   });
 });
 

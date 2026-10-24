@@ -89,7 +89,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
-import { domainOf, domainOfGrants } from "./channels/platform.js";
+import { domainOf, domainOfGrants, platformOf } from "./channels/platform.js";
 import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
@@ -297,6 +297,7 @@ async function main() {
   // The connection kind a channel name belongs to. Whatever is keyed by connection kind, such
   // as a descriptor, a channel policy, or a person's link, reads it.
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
+  const platformOfChannel = (name: string) => channelRecords.platformOf(name) ?? platformOf(name);
   const personMappingRepo = new PersonMappingRepository(db, connectionKindOfChannel);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
@@ -1617,6 +1618,8 @@ async function main() {
       guardianLinkCodes,
       outboxRepo,
       channels,
+      platformOfChannel,
+      recordedChannels: () => channelRecords.all().map((record) => record.id),
       accountNames,
       assistants: listedAgents,
       webchatRepo,

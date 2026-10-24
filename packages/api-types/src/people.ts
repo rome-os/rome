@@ -776,6 +776,10 @@ export interface LinkedAccount {
   channel: string;
   channelUserId: string;
   displayName: string;
+  /** The channels this account is read through: the link's own first, then
+   *  Rome's other accounts on its platform. Its history and its failed sends
+   *  are the ones on these channels. */
+  readThrough: string[];
   /** Whether Rome can send here, and when it cannot, which of the reasons it
    *  is. See {@link AccountSendState}. */
   send: AccountSendState;
