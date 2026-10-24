@@ -36,6 +36,11 @@ import {
   withSessionKind,
 } from "../session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
+import {
+  isSessionTraceArchived,
+  sessionTraceCutoff,
+  TRACE_ACTIVITY_ROLES,
+} from "../../webchat/trace-retention.js";
 import type {
   TraceSubagentResultEvent,
   TraceSubagentStartEvent,
@@ -288,13 +293,13 @@ export type WebchatSessionNameChangedListener = (event: {
 }) => void;
 
 interface TraceReadOptions {
-  /** Dashboard reads omit traces strictly older than this instant. Other readers stay unbounded. */
-  traceSince?: Date;
+  /** Dashboard reads hide all traces in sessions whose last message is at or before this cutoff. */
+  sessionActivityCutoff?: Date;
 }
 
-function traceReadFields({ traceSince }: TraceReadOptions) {
-  const archived = traceSince
-    ? sql<boolean>`${romeAgentMessages.role} = 'trace' AND ${romeAgentMessages.createdAt} < ${traceSince.getTime() / 1000}`.mapWith(
+function traceReadFields(archivedSessionIds: string[]) {
+  const archived = archivedSessionIds.length
+    ? sql<boolean>`${romeAgentMessages.role} = 'trace' AND ${inArray(romeAgentMessages.sessionId, archivedSessionIds)}`.mapWith(
         Boolean,
       )
     : sql<boolean>`0`.mapWith(Boolean);
@@ -2476,25 +2481,44 @@ export class WebChatRepository {
       );
   }
 
+  /** One grouped activity query, with no trace payloads. Omit ids to select all idle sessions for archival. */
+  async getTraceArchivedSessionIds(
+    sessionIds?: readonly string[],
+    cutoff = sessionTraceCutoff(),
+  ): Promise<string[]> {
+    if (sessionIds?.length === 0) return [];
+    const rows = await this.db
+      .select({
+        sessionId: romeAgentMessages.sessionId,
+        lastMessageAt: sql<number>`max(${romeAgentMessages.createdAt})`.mapWith(Number),
+      })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          sessionIds ? inArray(romeAgentMessages.sessionId, [...new Set(sessionIds)]) : undefined,
+          inArray(romeAgentMessages.role, TRACE_ACTIVITY_ROLES),
+        ),
+      )
+      .groupBy(romeAgentMessages.sessionId);
+    return rows
+      .filter((row) => isSessionTraceArchived(new Date(row.lastMessageAt * 1000), cutoff))
+      .map((row) => row.sessionId);
+  }
+
   async getTraceContents(sessionId: string, options: TraceReadOptions = {}) {
+    const archivedSessionIds = options.sessionActivityCutoff
+      ? await this.getTraceArchivedSessionIds([sessionId], options.sessionActivityCutoff)
+      : [];
     const stubs = await this.db
-      .select(traceReadFields(options))
+      .select(traceReadFields(archivedSessionIds))
       .from(romeAgentMessages)
       .where(and(eq(romeAgentMessages.sessionId, sessionId), eq(romeAgentMessages.role, "trace")));
-    if (stubs.length === 0) return stubs.map(traceContentResult);
-
-    const readableIds = stubs.filter((stub) => !stub.traceArchived).map((stub) => stub.id);
-    if (readableIds.length === 0) return stubs.map(traceContentResult);
+    if (stubs.length === 0 || archivedSessionIds.length > 0) return stubs.map(traceContentResult);
 
     const blockRows = await this.db
       .select({ messageId: romeAgentTraceBlocks.messageId, content: romeAgentTraceBlocks.content })
       .from(romeAgentTraceBlocks)
-      .where(
-        and(
-          eq(romeAgentTraceBlocks.sessionId, sessionId),
-          inArray(romeAgentTraceBlocks.messageId, readableIds),
-        ),
-      )
+      .where(eq(romeAgentTraceBlocks.sessionId, sessionId))
       .orderBy(asc(romeAgentTraceBlocks.messageId), asc(romeAgentTraceBlocks.seq));
     if (blockRows.length === 0) return stubs.map(traceContentResult);
 
@@ -2524,7 +2548,14 @@ export class WebChatRepository {
     );
     const uniqueRefs = [...refsByKey.values()];
     if (uniqueRefs.length === 0) return [];
-    const sessionIds = [...new Set(uniqueRefs.map((ref) => ref.sessionId))];
+    const requestedSessionIds = [...new Set(uniqueRefs.map((ref) => ref.sessionId))];
+    const archivedSessionIds = new Set(
+      options.sessionActivityCutoff
+        ? await this.getTraceArchivedSessionIds(requestedSessionIds, options.sessionActivityCutoff)
+        : [],
+    );
+    const sessionIds = requestedSessionIds.filter((id) => !archivedSessionIds.has(id));
+    if (sessionIds.length === 0) return [];
     const turnIds = [...new Set(uniqueRefs.map((ref) => ref.turnId))];
 
     const candidateStubs = await this.db
@@ -2538,9 +2569,6 @@ export class WebChatRepository {
       .where(
         and(
           eq(romeAgentMessages.role, "trace"),
-          options.traceSince
-            ? sql`${romeAgentMessages.createdAt} >= ${options.traceSince.getTime() / 1000}`
-            : undefined,
           inArray(romeAgentMessages.sessionId, sessionIds),
           inArray(romeAgentMessages.turnId, turnIds),
         ),
@@ -2827,8 +2855,11 @@ export class WebChatRepository {
   }
 
   async getTraceContentByTurn(sessionId: string, turnId: string, options: TraceReadOptions = {}) {
+    const archivedSessionIds = options.sessionActivityCutoff
+      ? await this.getTraceArchivedSessionIds([sessionId], options.sessionActivityCutoff)
+      : [];
     const rows = await this.db
-      .select(traceReadFields(options))
+      .select(traceReadFields(archivedSessionIds))
       .from(romeAgentMessages)
       .where(
         and(
@@ -2852,13 +2883,26 @@ export class WebChatRepository {
   }
 
   async getMessageContentForDisplay(id: string, options: TraceReadOptions = {}) {
+    if (options.sessionActivityCutoff) {
+      const [message] = await this.db
+        .select({ sessionId: romeAgentMessages.sessionId, role: romeAgentMessages.role })
+        .from(romeAgentMessages)
+        .where(eq(romeAgentMessages.id, id));
+      if (!message) return null;
+      if (message.role === "trace") {
+        const archivedSessionIds = await this.getTraceArchivedSessionIds(
+          [message.sessionId],
+          options.sessionActivityCutoff,
+        );
+        if (archivedSessionIds.length) return { id, content: "[]", traceArchived: true };
+      }
+    }
     const rows = await this.db
-      .select(traceReadFields(options))
+      .select(traceReadFields([]))
       .from(romeAgentMessages)
       .where(eq(romeAgentMessages.id, id));
     const stub = rows[0];
     if (!stub) return null;
-    if (stub.traceArchived) return traceContentResult(stub);
     return {
       ...traceContentResult(stub),
       content: mergeTraceContent(stub.content, await this.getTraceBlockContents(id)),

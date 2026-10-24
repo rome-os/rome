@@ -4,7 +4,7 @@ import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { ApprovalsRepository } from "./approvals.js";
 import { ChatSettingsRepository } from "../../chat-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
-import { chatTraceCutoff } from "../../webchat/trace-retention.js";
+import { sessionTraceCutoff } from "../../webchat/trace-retention.js";
 import {
   romeAgentMessagePlatformIds,
   romeAgentMessages,
@@ -76,7 +76,7 @@ describe("WebChatRepository", () => {
       expect(fields?.content).not.toBe(romeAgentTraceBlocks.content);
       return fields ? select(fields as never) : select();
     }) as typeof testDb.db.select);
-    const options = { traceSince: chatTraceCutoff(new Date("2026-10-24T12:00:00Z")) };
+    const options = { sessionActivityCutoff: sessionTraceCutoff(new Date("2026-10-24T12:00:00Z")) };
     try {
       expect((await repo.getTraceContents("old-only", options))[0]?.traceArchived).toBe(true);
       expect(
@@ -93,37 +93,27 @@ describe("WebChatRepository", () => {
     }
   });
 
-  it("omits old trace payloads at the source while keeping the exact cutoff and chat rows", async () => {
+  it.each([
+    ["2026-10-18T12:00:00Z", false],
+    ["2026-10-16T12:00:00Z", true],
+    ["2026-10-17T12:00:00Z", true],
+    ["2026-10-17T12:00:01Z", false],
+  ] as const)("uses the session's last message at %s (archived: %s) for every trace", async (lastMessageAt, archived) => {
     await repo.createSession("retention", "Retention");
-    const now = new Date("2026-10-24T12:00:00Z");
-    const traceSince = chatTraceCutoff(now);
+    const sessionActivityCutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
+    const options = { sessionActivityCutoff };
     const blocks = [
       { type: "thinking", content: "private steps" },
       { type: "result", content: "Reply" },
     ];
-    for (const [id, date] of [
-      ["recent", "2026-10-18T12:00:00Z"],
-      ["boundary", "2026-10-17T12:00:00Z"],
-      ["expired", "2026-10-17T11:59:59Z"],
-      ["old", "2026-10-16T12:00:00Z"],
-    ]) {
-      await repo.appendTraceBlocks({
-        messageId: id,
-        sessionId: "retention",
-        turnId: id,
-        startSeq: 0,
-        blocks,
-      });
-      await testDb.db
-        .update(romeAgentMessages)
-        .set({ createdAt: new Date(date!) })
-        .where(eq(romeAgentMessages.id, id!));
-    }
+    await repo.appendTraceBlocks({
+      messageId: "old",
+      sessionId: "retention",
+      turnId: "old",
+      startSeq: 0,
+      blocks,
+    });
     await repo.addMessage("legacy", "retention", "trace", JSON.stringify(blocks), "legacy");
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
-      .where(eq(romeAgentMessages.id, "legacy"));
     await repo.addMessage("prompt", "retention", "user", "Keep my question", "old");
     await repo.addMessage(
       "reply",
@@ -132,47 +122,109 @@ describe("WebChatRepository", () => {
       JSON.stringify([{ type: "text", content: "Reply" }]),
       "old",
     );
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await repo.addMessage("latest", "retention", "user", "More please", "latest");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date(lastMessageAt) })
+      .where(eq(romeAgentMessages.id, "latest"));
 
-    const traces = await repo.getTraceContents("retention", { traceSince });
-    for (const id of ["old", "expired", "legacy"]) {
-      expect(traces.find((row) => row.id === id)).toEqual({
-        id,
-        content: "[]",
-        traceArchived: true,
-      });
-      expect(await repo.getMessageContentForDisplay(id, { traceSince })).toEqual({
-        id,
-        content: "[]",
-        traceArchived: true,
-      });
-      expect(await repo.getTraceContentByTurn("retention", id, { traceSince })).toEqual({
-        id,
-        content: "[]",
-        traceArchived: true,
-      });
+    const activityQuery = rs.spyOn(repo, "getTraceArchivedSessionIds");
+    const traces = await repo.getTraceContents("retention", options);
+    expect(activityQuery).toHaveBeenCalledTimes(1);
+    expect(activityQuery).toHaveBeenCalledWith(["retention"], sessionActivityCutoff);
+    activityQuery.mockRestore();
+    for (const id of ["old", "legacy"]) {
+      const expected = archived
+        ? { id, content: "[]", traceArchived: true }
+        : { id, content: JSON.stringify(blocks) };
+      expect(traces.find((row) => row.id === id)).toEqual(expected);
+      expect(await repo.getMessageContentForDisplay(id, options)).toEqual(expected);
+      expect(await repo.getTraceContentByTurn("retention", id, options)).toEqual(expected);
       expect(await repo.getMessageContent(id)).toBe(JSON.stringify(blocks));
     }
-    for (const id of ["recent", "boundary"]) {
-      expect(traces.find((row) => row.id === id)?.content).toBe(JSON.stringify(blocks));
-      expect((await repo.getMessageContentForDisplay(id, { traceSince }))?.content).toBe(
-        JSON.stringify(blocks),
-      );
-    }
     const children = await repo.getTraceContentsByTurns(
-      ["old", "recent", "boundary", "legacy"].map((turnId) => ({ sessionId: "retention", turnId })),
-      { traceSince },
+      ["old", "legacy"].map((turnId) => ({ sessionId: "retention", turnId })),
+      options,
     );
-    expect(children.map((row) => row.id).sort()).toEqual(["boundary", "recent"]);
-    expect((await repo.getMessageContentForDisplay("prompt", { traceSince }))?.content).toBe(
+    expect(children.map((row) => row.id).sort()).toEqual(archived ? [] : ["legacy", "old"]);
+    expect((await repo.getMessageContentForDisplay("prompt", options))?.content).toBe(
       "Keep my question",
     );
-    expect((await repo.getMessageContentForDisplay("reply", { traceSince }))?.content).toContain(
-      "Reply",
-    );
+    expect((await repo.getMessageContentForDisplay("reply", options))?.content).toContain("Reply");
+    if (archived) {
+      await testDb.db.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.messageId, "old"));
+      expect(await repo.getTraceContents("retention", options)).toEqual(traces);
+    }
+  });
 
-    // After archival removes the blocks, the dashboard response is identical.
-    await testDb.db.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.messageId, "old"));
-    expect(await repo.getTraceContents("retention", { traceSince })).toEqual(traces);
+  it.each([
+    "user",
+    "assistant",
+    "trace",
+    "notification",
+  ])("counts a recent %s message as activity and restores all old steps", async (role) => {
+    await repo.createSession("idle", "Idle");
+    await repo.appendTraceBlocks({
+      messageId: "idle-trace",
+      sessionId: "idle",
+      turnId: "old-turn",
+      startSeq: 0,
+      blocks: [{ type: "thinking", content: "old steps" }],
+    });
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    const options = { sessionActivityCutoff: sessionTraceCutoff(new Date("2026-10-24T12:00:00Z")) };
+    expect((await repo.getTraceContents("idle", options))[0]?.traceArchived).toBe(true);
+    await repo.addMessage("new-message", "idle", role, "[]", "new-turn");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-18T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "new-message"));
+    expect(await repo.getTraceArchivedSessionIds(["idle"], options.sessionActivityCutoff)).toEqual(
+      [],
+    );
+    expect((await repo.getTraceContentByTurn("idle", "old-turn", options))?.content).toContain(
+      "old steps",
+    );
+  });
+
+  it("ignores session metadata and unknown message roles, and batches idle-session selection", async () => {
+    await repo.createSession("idle", "Idle");
+    await repo.createSession("active", "Active");
+    await repo.createSession("empty", "Empty");
+    for (const id of ["idle", "active"]) {
+      await repo.addMessage(
+        `${id}-trace`,
+        id,
+        "trace",
+        JSON.stringify([{ type: "thinking", content: id }]),
+        "old-turn",
+      );
+    }
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await repo.addMessage("active-reply", "active", "assistant", "Reply");
+    await repo.addMessage("metadata", "idle", "system", "Metadata");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-18T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "active-reply"));
+    await repo.updateSessionName("idle", "Renamed");
+    await repo.markSessionRead("idle");
+    await testDb.db.update(romeSessions).set({
+      activityAt: new Date("2026-10-24T12:00:00Z"),
+      pinnedAt: new Date("2026-10-24T12:00:00Z"),
+    });
+    const cutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
+    expect(await repo.getTraceArchivedSessionIds(undefined, cutoff)).toEqual(["idle"]);
+    expect(await repo.getTraceArchivedSessionIds([], cutoff)).toEqual([]);
+    const activityQuery = rs.spyOn(repo, "getTraceArchivedSessionIds");
+    const children = await repo.getTraceContentsByTurns(
+      ["idle", "active", "active"].map((sessionId) => ({ sessionId, turnId: "old-turn" })),
+      { sessionActivityCutoff: cutoff },
+    );
+    expect(activityQuery).toHaveBeenCalledTimes(1);
+    expect(children.map((row) => row.sessionId)).toEqual(["active"]);
+    activityQuery.mockRestore();
   });
 
   it("filters owners before returning chats and preserves the all-owner default", async () => {

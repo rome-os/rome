@@ -118,7 +118,11 @@ rs.mock("@/components/chat/MessageList", () => ({
     rows: {
       kind: string;
       key: string;
-      message?: { content: string; sender?: { name: string | null; avatarUrl: string | null } };
+      message?: {
+        content: string;
+        traceArchived?: boolean;
+        sender?: { name: string | null; avatarUrl: string | null };
+      };
     }[];
   }) => (
     <>
@@ -139,7 +143,12 @@ rs.mock("@/components/chat/MessageList", () => ({
       {rows
         .filter((row) => row.kind === "trace")
         .map((row) => (
-          <div key={row.key} data-testid="trace-row" data-row-key={row.key} />
+          <div
+            key={row.key}
+            data-testid="trace-row"
+            data-row-key={row.key}
+            data-archived={row.message?.traceArchived}
+          />
         ))}
     </>
   ),
@@ -451,6 +460,68 @@ describe("Chat agent identity", () => {
 });
 
 describe("Chat session events", () => {
+  const archivedTrace = {
+    id: "old-trace",
+    sessionId: "session-1",
+    turnId: "old-turn",
+    role: "trace" as const,
+    content: "[]",
+    createdAt: "2026-09-24T12:00:00Z",
+    traceArchived: true,
+  };
+  const restoredTrace = {
+    ...archivedTrace,
+    traceArchived: undefined,
+    traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+  };
+
+  it.each([
+    "user",
+    "assistant",
+    "trace",
+    "notification",
+  ])("reloads archived turns immediately when a %s message arrives", async (role) => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    rs.mocked(listSessionMessages)
+      .mockResolvedValueOnce([archivedTrace])
+      .mockResolvedValueOnce([restoredTrace]);
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("trace-row").getAttribute("data-archived")).toBe("true"),
+    );
+    act(() =>
+      MockEventSource.instances[0]?.emit("message_insert", {
+        id: "new-message",
+        sessionId: "session-1",
+        turnId: "new-turn",
+        role,
+        content: "[]",
+        createdAt: "2026-10-24T12:00:00Z",
+      }),
+    );
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getAllByTestId("trace-row")[0]?.getAttribute("data-archived")).toBeNull(),
+    );
+  });
+
+  it("reloads archived turns on send acceptance without waiting for a message event or completed turn", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    rs.mocked(listSessionMessages)
+      .mockResolvedValueOnce([archivedTrace])
+      .mockResolvedValueOnce([restoredTrace]);
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId: "turn-1" } });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("trace-row").getAttribute("data-archived")).toBe("true"),
+    );
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByTestId("trace-row").getAttribute("data-archived")).toBeNull(),
+    );
+  });
+
   it("delivers a validated inserted message to the active session", async () => {
     rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
     const onSessionMessage = rs.fn();

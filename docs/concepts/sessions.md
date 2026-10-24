@@ -61,13 +61,20 @@ A turn is one request to an agent plus the agent work that follows until the age
 
 ## Chat trace window
 
-The dashboard loads a turn's trace only within seven days of the trace row's creation.
-At exactly seven days, the trace stays available. After that, the chat shows an archived-steps note instead of a trace trigger.
+The dashboard loads all traces of a session while its latest conversation message is less than seven days old.
+At exactly seven idle days, the whole session shows chat history only, with an archived-steps note on each turn.
 User messages, assistant replies, cards, and interaction results stay in the transcript.
-Lazy trace reads and raw downloads follow the same cutoff.
+History, lazy trace reads, and raw downloads follow the same session-wide decision.
+
+Activity includes user, assistant, trace, and notification rows. Notifications record real out-of-band conversation messages.
+Reading, renaming, pinning, and unknown metadata roles do not count. Session creation without messages does not make an archive candidate.
+Each read batches the latest message times for the sessions it needs, without reading trace payloads.
 
 This window changes dashboard reads, not storage. It deletes nothing and does not change sharing, usage accounting, or agent resume context.
-The window lives in `packages/core/src/webchat/trace-retention.ts`, shared with trace archival work.
+A new conversation message makes every trace in the session visible again while its blocks remain in the database.
+Archival candidates are whole idle sessions, never individual turns selected by their age.
+The window and idle predicate live in `packages/core/src/webchat/trace-retention.ts`.
+The repository's `getTraceArchivedSessionIds` selects idle sessions for both dashboard reads and archival work.
 
 ## Event
 

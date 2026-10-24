@@ -378,7 +378,7 @@ describe("Webchat API", () => {
     "action",
     "subagent",
     "fork",
-  ] as const)("keeps old %s replies and cards but archives every dashboard trace read", async (type) => {
+  ] as const)("uses session inactivity for all %s history, lazy reads, and downloads", async (type) => {
     rs.useFakeTimers({ toFake: ["Date"] });
     rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
     const sessionId = `retention-${type}`;
@@ -397,11 +397,7 @@ describe("Webchat API", () => {
         render: { type: "text", text: "Pick one" },
       },
     ]);
-    for (const [turnId, createdAt] of [
-      ["old", new Date("2026-10-16T12:00:00Z")],
-      ["recent", new Date("2026-10-18T12:00:00Z")],
-      ["boundary", new Date("2026-10-17T12:00:00Z")],
-    ] as const) {
+    for (const turnId of ["old", "older"]) {
       await deps.webchatRepo.addMessage(
         `${sessionId}-${turnId}-user`,
         sessionId,
@@ -429,46 +425,83 @@ describe("Webchat API", () => {
         reply,
         turnId,
       );
+    }
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-09-24T12:00:00Z") })
+      .where(eq(romeAgentMessages.sessionId, sessionId));
+    await deps.webchatRepo.addMessage(
+      `${sessionId}-latest`,
+      sessionId,
+      "user",
+      "Continue",
+      "latest",
+    );
+    const app = createWebchatRuntime(deps).routes;
+    for (const [lastMessageAt, archived] of [
+      ["2026-10-18T12:00:00Z", false],
+      ["2026-10-16T12:00:00Z", true],
+      ["2026-10-17T12:00:00Z", true],
+      ["2026-10-17T12:00:01Z", false],
+    ] as const) {
       await testDb.db
         .update(romeAgentMessages)
-        .set({ createdAt })
-        .where(eq(romeAgentMessages.turnId, turnId));
+        .set({ createdAt: new Date(lastMessageAt) })
+        .where(eq(romeAgentMessages.id, `${sessionId}-latest`));
+      const activityQuery = rs.spyOn(deps.webchatRepo, "getTraceArchivedSessionIds");
+      const response = await app.request(`/sessions/${sessionId}/messages`);
+      expect(activityQuery).toHaveBeenCalledTimes(1);
+      activityQuery.mockRestore();
+      const messages = (await response.json()) as Array<{
+        id: string;
+        content: string;
+        traceArchived?: boolean;
+        traceSummary?: unknown;
+      }>;
+      for (const turnId of ["old", "older"]) {
+        const trace = messages.find((m) => m.id === `${sessionId}-${turnId}`);
+        expect(trace?.content).toBe("[]");
+        expect(trace?.traceArchived).toBe(archived ? true : undefined);
+        expect(Boolean(trace?.traceSummary)).toBe(!archived);
+      }
+      expect(messages.find((m) => m.id === `${sessionId}-old-reply`)?.content).toBe(reply);
+      expect(messages.find((m) => m.id === `${sessionId}-old-user`)?.content).toBe("My question");
+      for (const endpoint of [
+        `/sessions/messages/${sessionId}-old/content`,
+        `/chat/messages/${sessionId}-old/content`,
+        `/sessions/${sessionId}/turns/old/trace`,
+        `/sessions/${sessionId}/turns/old/trace.json`,
+        ...(type === "webchat" ? [`/chat/sessions/${sessionId}/turns/old/trace.json`] : []),
+      ]) {
+        const result = await app.request(endpoint);
+        expect(result.status).toBe(200);
+        const payload = await result.json();
+        if (archived) expect(payload).toEqual({ trace: null, traceArchived: true });
+        else expect(JSON.stringify(payload)).toContain("Heavy output");
+      }
+      expect(await deps.webchatRepo.getMessageContent(`${sessionId}-old`)).toContain(
+        "Heavy output",
+      );
+      if (type === "webchat")
+        expect(await (await app.request(`/chat/sessions/${sessionId}/messages`)).json()).toEqual(
+          messages,
+        );
     }
-    const app = createWebchatRuntime(deps).routes;
-    const response = await app.request(`/sessions/${sessionId}/messages`);
-    const messages = (await response.json()) as Array<{
-      id: string;
-      content: string;
-      traceArchived?: boolean;
-      traceSummary?: unknown;
-    }>;
-    expect(messages.find((m) => m.id === `${sessionId}-old`)).toMatchObject({
-      content: "[]",
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, `${sessionId}-latest`));
+    expect(await (await app.request(`/chat/messages/${sessionId}-old/content`)).json()).toEqual({
+      trace: null,
       traceArchived: true,
     });
-    expect(messages.find((m) => m.id === `${sessionId}-old`)?.traceSummary).toBeUndefined();
-    expect(messages.find((m) => m.id === `${sessionId}-old-reply`)?.content).toBe(reply);
-    expect(messages.find((m) => m.id === `${sessionId}-old-user`)?.content).toBe("My question");
-    for (const turnId of ["recent", "boundary"])
-      expect(messages.find((m) => m.id === `${sessionId}-${turnId}`)?.traceSummary).toBeTruthy();
-    for (const endpoint of [
-      `/sessions/messages/${sessionId}-old/content`,
-      `/chat/messages/${sessionId}-old/content`,
-      `/sessions/${sessionId}/turns/old/trace`,
-      `/sessions/${sessionId}/turns/old/trace.json`,
-      ...(type === "webchat" ? [`/chat/sessions/${sessionId}/turns/old/trace.json`] : []),
-    ]) {
-      const archived = await app.request(endpoint);
-      expect(archived.status).toBe(200);
-      expect(await archived.json()).toEqual({ trace: null, traceArchived: true });
-    }
-    const recent = await app.request(`/sessions/messages/${sessionId}-recent/content`);
-    expect(JSON.stringify(await recent.json())).toContain("Heavy output");
-    expect(await deps.webchatRepo.getMessageContent(`${sessionId}-old`)).toContain("Heavy output");
-    if (type === "webchat")
-      expect(await (await app.request(`/chat/sessions/${sessionId}/messages`)).json()).toEqual(
-        messages,
-      );
+    await deps.webchatRepo.addMessage(`${sessionId}-reactivate`, sessionId, "user", "New message");
+    const restored = await (await app.request(`/chat/messages/${sessionId}-old/content`)).json();
+    expect(JSON.stringify(restored)).toContain("Heavy output");
+    const history = JSON.stringify(
+      await (await app.request(`/sessions/${sessionId}/messages`)).json(),
+    );
+    expect(history).not.toContain('"traceArchived":true');
   });
 
   it("aggregates completed child trace summaries without duplicating them in storage", async () => {
@@ -613,7 +646,7 @@ describe("Webchat API", () => {
         { sessionId: childSessionId, turnId: childTurnId },
         { sessionId: secondChildSessionId, turnId: secondChildTurnId },
       ],
-      { traceSince: expect.any(Date) },
+      { sessionActivityCutoff: expect.any(Date) },
     );
     expect(getTraceContentByTurn).not.toHaveBeenCalled();
     expect(await deps.webchatRepo.getMessageContent("parent-summary-trace")).not.toContain(

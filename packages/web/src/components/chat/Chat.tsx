@@ -195,7 +195,7 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   id: z.string(),
   sessionId: z.string(),
   turnId: z.string().nullable().optional(),
-  role: z.enum(["user", "assistant", "trace"]),
+  role: z.enum(["user", "assistant", "trace", "notification"]),
   content: z.string(),
   createdAt: z.string(),
   traceSummary: traceSummarySchema.nullable().optional(),
@@ -335,6 +335,7 @@ export function Chat({
   const mainSessionId = sessionId || createdSessionId;
   const mainSessionIdRef = useRef(mainSessionId);
   const [messages, setMessages] = useState<Map<string, ChatMessage[]>>(new Map());
+  const traceArchivedSessionsRef = useRef(new Set<string>());
   const [subagentIconByName, setSubagentIconByName] = useState<ReadonlyMap<string, string | null>>(
     () => new Map(),
   );
@@ -772,6 +773,9 @@ export function Chat({
           return;
         }
         const fetchedMessages = orderChatMessages(data);
+        if (fetchedMessages.some((message) => message.traceArchived))
+          traceArchivedSessionsRef.current.add(id);
+        else traceArchivedSessionsRef.current.delete(id);
         const dropMessageIds = options.dropLocalOptimistic
           ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
           : undefined;
@@ -796,6 +800,15 @@ export function Chat({
       }
     },
     [isReadVisibleSession, markSessionRead],
+  );
+
+  // A new message reactivates every turn's steps. Fetch server truth once,
+  // rather than waiting for the new turn to finish or guessing the cutoff here.
+  const refreshArchivedSession = useCallback(
+    (sid: string) => {
+      if (traceArchivedSessionsRef.current.delete(sid)) void loadMessages(sid, { force: true });
+    },
+    [loadMessages],
   );
 
   // Load messages when the main session changes (also covers initial mount).
@@ -830,10 +843,11 @@ export function Chat({
         next.set(sid, mergeChatMessage(existing, message));
         return next;
       });
+      refreshArchivedSession(sid);
       void markSessionRead(sid);
       onSessionMessageRef.current?.({ sessionId: sid, turnId: message.turnId ?? null });
     },
-    [markSessionRead],
+    [markSessionRead, refreshArchivedSession],
   );
   const handleSessionName = useCallback(
     (sid: string, event: z.infer<typeof sessionNameSchema>) => {
@@ -1354,6 +1368,7 @@ export function Chat({
         throw new Error(result.message || `post turn failed (${result.status})`);
       }
 
+      refreshArchivedSession(sendingSessionId);
       const createResp: CreateTurnResponse = result.data;
       const pendingTurnId = createResp.turnId;
       const turnsForSession = inflightTurnsRef.current.get(sendingSessionId) ?? new Set<string>();
@@ -1414,7 +1429,15 @@ export function Chat({
         }
       })();
     },
-    [followTurn, endSessionStream, startSessionStream, streamingSessionsRef, t, scrollToBottom],
+    [
+      followTurn,
+      endSessionStream,
+      startSessionStream,
+      streamingSessionsRef,
+      t,
+      scrollToBottom,
+      refreshArchivedSession,
+    ],
   );
 
   // Send a turn into the active session. The composer owns the input state

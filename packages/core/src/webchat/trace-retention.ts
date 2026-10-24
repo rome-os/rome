@@ -1,6 +1,17 @@
-/** Shared with trace archival: exactly seven days, measured from the trace row's creation. */
+/** Dashboard trace visibility and archival share a seven-day session inactivity window. */
 export const TRACE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
-export function chatTraceCutoff(now = new Date()): Date {
+// Notifications are real out-of-band conversation messages, not session metadata.
+export const TRACE_ACTIVITY_ROLES = ["user", "assistant", "trace", "notification"] as const;
+
+export function sessionTraceCutoff(now = new Date()): Date {
   return new Date(now.getTime() - TRACE_RETENTION_MS);
+}
+
+/** Exactly seven idle days counts as archived. */
+export function isSessionTraceArchived(
+  lastMessageAt: Date,
+  cutoff = sessionTraceCutoff(),
+): boolean {
+  return lastMessageAt.getTime() <= cutoff.getTime();
 }
