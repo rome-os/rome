@@ -87,7 +87,6 @@ const definitions = [
     description: "Incoming-message triage, routing, and channel hooks",
     hasFrontend: true,
     iconUrl: inboxIcon,
-    hideInLauncher: true,
   },
   {
     id: "recap",
