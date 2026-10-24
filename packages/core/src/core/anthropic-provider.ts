@@ -91,7 +91,7 @@ export const CLAUDE_AGENT_SDK_ENV = {
 
 export const CLAUDE_AGENT_SDK_SETTINGS = {
   attribution: {
-    commit: "🤖 Generated with Rome OS (https://github.com/rome-os/rome)",
+    commit: "Co-Authored-By: Rome OS <noreply@romeos.cc>",
     pr: "🤖 Generated with [Rome OS](https://github.com/rome-os/rome)",
   },
 } as const;

@@ -681,7 +681,7 @@ describe("AnthropicProvider", () => {
       settingSources: ["project"],
       settings: {
         attribution: {
-          commit: "🤖 Generated with Rome OS (https://github.com/rome-os/rome)",
+          commit: "Co-Authored-By: Rome OS <noreply@romeos.cc>",
           pr: "🤖 Generated with [Rome OS](https://github.com/rome-os/rome)",
         },
       },
