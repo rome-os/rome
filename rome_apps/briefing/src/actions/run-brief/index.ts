@@ -121,7 +121,7 @@ export function buildPrompt(
     "",
     windowHint,
     "",
-    "FORMAT: Start with a one-line greeting and date. Then short sections, each with a bold header on its own line, in this order: **Summary** (a 2–3 sentence executive summary of the day), **Action Items** (a short prioritized to-do list — one concrete action per bullet, most urgent first), then **Calendar**, **Messages**, **Scouting**, and last **Try with Rome** only when a suggestion qualifies. Keep it skimmable and tight. Return ONLY the briefing markdown.",
+    "FORMAT: Start with a one-line greeting and date. Then short sections, each with a bold header on its own line, in this order: **Summary** (a 2–3 sentence executive summary of the day), **Action Items** (only things that genuinely matter to the guardian — a reply someone is waiting on, a deadline, a decision, or prep for an important event; one concrete action per bullet, most urgent first. Leave out low-stakes chores, newsletters, promotions, FYIs and anything the guardian has been ignoring on purpose — padding the list teaches them to skip it. Fewer is better; if nothing is important, write '_Nothing urgent._'), then **Calendar**, **Messages**, **Scouting**, and last **Try with Rome** only when a suggestion qualifies. Keep it skimmable and tight. Return ONLY the briefing markdown.",
     "",
     "--- SCOUTING FINDINGS SINCE LAST BRIEF ---",
     describeScoutResults(results),
