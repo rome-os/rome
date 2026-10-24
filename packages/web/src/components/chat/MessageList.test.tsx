@@ -7,6 +7,11 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 rs.mock("@/components/logo", () => ({
   RomeLogo: (props: Record<string, unknown>) => <div data-testid="rome-logo" {...props} />,
 }));
+rs.mock("@/hooks/use-dashboard-identity", () => ({
+  useDashboardIdentity: () => ({
+    data: { kind: "guardian", userId: "seat", displayName: null, avatarUrl: null },
+  }),
+}));
 rs.mock("@/components/chat/TurnBranchButton", () => ({
   TurnBranchButton: () => <button type="button">side-chat-branch</button>,
 }));
