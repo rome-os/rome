@@ -13,6 +13,7 @@ function makeEffects(node: WelcomeProgress["node"], overrides: Partial<WelcomePr
     ideasGeneratedAt: null,
     aiConnected: null,
     completedAt: null,
+    sessionId: null,
     ...overrides,
   };
   const progress = {
