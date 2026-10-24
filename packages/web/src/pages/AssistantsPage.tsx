@@ -272,7 +272,15 @@ function AssistantChat({
           </div>
         </div>
 
-        <div className="pointer-events-none sticky bottom-0 z-10 px-3 pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:px-6 md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]">
+        {/* Below md the floor paints the canvas and takes pointer events. Its
+            side gutters and bottom padding sit outside the box's blur, and on a
+            phone a transparent strip there shows the transcript beside and
+            below the box, and lets a tap land on a link it hides. From md up
+            it stays transparent, so messages scroll visibly under the box. */}
+        <div
+          data-chat-floor
+          className="pointer-events-none sticky bottom-0 z-10 px-3 pb-[calc(var(--rome-safe-area-bottom)+1rem)] max-md:pointer-events-auto max-md:bg-chat-canvas md:px-6 md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]"
+        >
           <div className="pointer-events-auto mx-auto max-w-5xl">
             <ChatComposer
               textOnly

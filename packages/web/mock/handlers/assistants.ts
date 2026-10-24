@@ -28,6 +28,44 @@ const chats = new Map<string, Message[]>([
   [
     DOT,
     [
+      // A long enough history that a phone scrolls, with a table far enough
+      // down that it can be scrolled under the composer.
+      line(DOT, "inbound", now - 9000, "Good morning. What are you working on today?"),
+      line(
+        DOT,
+        "outbound",
+        now - 8940,
+        "Reviewing this week's reports and chasing the open comments on each.",
+      ),
+      line(DOT, "inbound", now - 8800, "Which reports are waiting on a review this week?"),
+      line(
+        DOT,
+        "outbound",
+        now - 8740,
+        [
+          "Three reports are waiting:",
+          "",
+          "| Report | Owner | Due |",
+          "| --- | --- | --- |",
+          "| Q3 draft | Dana | Friday |",
+          "| Churn review | Sam | Monday |",
+          "| Pricing memo | Priya | Tuesday |",
+        ].join("\n"),
+      ),
+      line(DOT, "inbound", now - 7000, "Which of them has the most open comments?"),
+      line(
+        DOT,
+        "outbound",
+        now - 6940,
+        "The Q3 draft has nine open comments. The other two have fewer than three each.",
+      ),
+      line(DOT, "inbound", now - 6800, "Please remind the owners about their due dates."),
+      line(
+        DOT,
+        "outbound",
+        now - 6740,
+        "Reminders are sent. Dana, Sam and Priya each have a note with the due date.",
+      ),
       line(DOT, "inbound", now - 3600, "Can you check whether the Q3 report draft is in Projects?"),
       line(
         DOT,
