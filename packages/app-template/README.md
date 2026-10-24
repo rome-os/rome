@@ -13,12 +13,13 @@ template/
     assets/                 # optional store-only images / videos
   package.json              # depends on @rome-os/{app-runtime,app-web-sdk,ui}
   drizzle.config.ts
-  actions/hello/            # one trivial action
-  actions/ask-agent/        # reference: invoke an agent via summon (opt-in)
-  api/index.ts              # metadata + runAction examples (run-hello, ask)
-  db/{schema,repositories,migrations/}
-  web/                      # React entry importing @rome-os/ui primitives
-  skills/                   # empty
+  src/actions/hello/        # one trivial action
+  src/actions/ask-agent/    # reference: invoke an agent via summon (opt-in)
+  src/agents/demo.yaml      # the agent ask-agent summons
+  src/api/index.ts          # metadata + runAction examples (run-hello, ask)
+  src/db/{schema,repositories,migrations/}
+  src/web/                  # React entry importing @rome-os/ui primitives
+  src/skills/               # empty
 
 workflow/
   README.md                 # workflow-focused App Store readme body
