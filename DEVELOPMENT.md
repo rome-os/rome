@@ -149,6 +149,33 @@ rm -rf ~/.rome-worktrees/<slug>
 `git worktree remove` without first running `down -v` leaves an orphan
 host dir, but it cannot pollute any other worktree.
 
+The slug is the branch name, so switching branches in one checkout starts a
+different stack with its own data and address. To keep one stack across
+branches, set `ROME_DEV_SLUG` for that checkout's commands:
+
+```bash
+ROME_DEV_SLUG=rome pnpm dev:all   # always http://rome.rome.localhost:3000
+ROME_DEV_SLUG=rome ./r pnpm test  # ./r finds the container by the same slug
+```
+
+Set it per command, not in a shell profile or a direnv `.envrc`. A profile
+pins every worktree on the machine to one stack, and an `.envrc` in the main
+checkout reaches the worktrees nested under it (`.worktrees/`,
+`.claude/worktrees/`). Either undoes the isolation above. A pinned stack remembers
+the checkout that started it, and `pnpm dev:all` from another checkout refuses
+it even while it is stopped. Remove `.dev-stack-owner` from the stack's home dir
+to hand it over.
+
+Every branch then shares that stack's data, including the database. A
+migration from one branch stays applied after you switch to a branch that does
+not have it.
+
+`pnpm gc:worktrees` removes a worktree's stack only when that worktree started
+it. `pnpm dev:all` records the starting checkout in `.dev-stack-owner` in the
+stack's home dir. A stack started before that file existed is judged by its
+containers instead, and is kept when it has none or Docker cannot report them.
+Remove a kept stack by hand with the reset commands above.
+
 **Gotcha:** bare-metal `pnpm start` (host Node, no container) still
 writes to `~/.rome/<profile>/`, so it does *not* share state with
 `pnpm dev:all`. Mixing the two paths against the same source tree

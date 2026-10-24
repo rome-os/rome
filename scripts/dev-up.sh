@@ -151,10 +151,18 @@ if [ -n "$existing_project_labels" ]; then
     while IFS= read -r dir; do
       [ -n "$dir" ] && printf '  %s\n' "$dir" >&2
     done <<<"$other_roots"
-    echo "        Two worktrees share a basename. Rename one directory and retry." >&2
+    if [ -n "${ROME_DEV_SLUG:-}" ]; then
+      echo "        ROME_DEV_SLUG=${ROME_DEV_SLUG} pins this name. Unset it here, or run dev:all from that checkout." >&2
+    else
+      echo "        Two worktrees share a basename. Rename one directory and retry." >&2
+    fi
     exit 1
   fi
 fi
+
+# A stopped stack has no running containers for the check above to see, so
+# also refuse a pinned one whose recorded owner is another checkout.
+scripts/dev-stack-owner-check.sh "$ROME_WORKTREE_HOME" "$(git rev-parse --show-toplevel)"
 
 # ---------------------------------------------------------------------------
 # 0.2. Preflight — drop containers in this project that reference a network
@@ -461,6 +469,16 @@ echo "dev-up: starting worktree stack (project=${SLUG}) ..."
 # Per-worktree stack (project=$SLUG); the reclaim path protects against a wedged
 # rome-edge endpoint.
 ensure_edge_singleton docker compose -f compose.dev.yml -p "$SLUG" up -d rome chrome
+# The checkout that started this stack. gc-worktrees reads it before it removes
+# a stack, since containers, the other proof, can be pruned. Written only now,
+# after the collision check passed and the stack came up, so a refused start
+# never claims another checkout's stack.
+# A second line marks a stack pinned by ROME_DEV_SLUG, which only its owner
+# may start (scripts/dev-stack-owner-check.sh).
+{
+  git rev-parse --show-toplevel
+  if [ -n "${ROME_DEV_SLUG:-}" ]; then echo pinned; fi
+} >"${ROME_WORKTREE_HOME}/.dev-stack-owner"
 
 # ---------------------------------------------------------------------------
 # 5b. Wait for /api/health so the readiness banner doesn't print before

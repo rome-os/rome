@@ -27,16 +27,21 @@
  *     skipped, because GC'ing it would surprise a user who's about to
  *     start work.
  *
- * Slug derivation matches scripts/worktree-slug.sh.
+ * It looks a worktree's stack and home dir up by the worktree directory's
+ * name (#1314), and removes them only when that stack was started from this
+ * worktree and is not the one ROME_DEV_SLUG pins (see
+ * scripts/gc-stack-guard.ts).
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import { checkbox } from "@inquirer/prompts";
+
+import { mayTearDownStack, OWNER_FILE, pinnedSlug, slugify } from "./gc-stack-guard.js";
 
 // Types
 
@@ -72,6 +77,8 @@ interface Eligible {
   actions: string; // e.g. "·DOHWB" or "··O·WB" — char per step
   rmRomeHome: boolean;
   hasCompose: boolean;
+  /** A home dir gc keeps because it cannot prove this worktree owns it. */
+  keptHome: string | null;
   locked: boolean; // needs `git worktree unlock` before remove
 }
 
@@ -164,14 +171,75 @@ const USAGE = `Usage: pnpm gc:worktrees [-y|--yes] [--include-locked] [--force]
                     untracked/modified file safety check).
 `;
 
-// slugify (mirrors scripts/worktree-slug.sh)
+// Stack ownership. gc looks a worktree's stack up by the worktree directory's
+// name, which can differ from the name dev-up.sh gave it (#1314). Before it
+// removes that stack it checks who started it (gc-stack-guard.ts).
 
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 63);
+let warnedDockerUnreachable = false;
+
+/** The owner file's content in the stack `slug`'s home dir, or null. */
+function stackOwner(slug: string): string | null {
+  try {
+    return (
+      readFileSync(join(homedir(), ".rome-worktrees", slug, OWNER_FILE), "utf8")
+        .split("\n")[0]
+        .trim() || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** The compose working directory of each container in the stack `slug`, or
+ *  null when Docker could not be asked. */
+function stackOwnerDirs(slug: string): string[] | null {
+  const r = run("docker", [
+    "ps",
+    "-a",
+    "--filter",
+    `label=com.docker.compose.project=${slug}`,
+    "--format",
+    '{{.Label "com.docker.compose.project.working_dir"}}',
+  ]);
+  if (!r.ok) {
+    if (!warnedDockerUnreachable) {
+      warnedDockerUnreachable = true;
+      console.warn(
+        "docker is unreachable, so every stack and its home dir is kept. Run gc again once Docker is up.",
+      );
+    }
+    return null;
+  }
+  return [
+    ...new Set(
+      r.stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+/** The stack actions gc may take for a worktree, after the ownership check. */
+function stackActions(
+  slug: string,
+  worktreePath: string,
+): { hasCompose: boolean; rmRomeHome: boolean; keptHome: string | null } {
+  const owner = stackOwner(slug);
+  const owned = mayTearDownStack({
+    slug,
+    worktreePath,
+    pinned: pinnedSlug(process.env),
+    owner,
+    ownerDirs: stackOwnerDirs(slug),
+  });
+  const home = join(homedir(), ".rome-worktrees", slug);
+  const homeExists = existsSync(home);
+  return {
+    hasCompose: owned && existsSync(join(worktreePath, "compose.dev.yml")),
+    rmRomeHome: owned && homeExists,
+    keptHome: !owned && homeExists ? home : null,
+  };
 }
 
 // Worktree discovery
@@ -314,8 +382,7 @@ function classify(wt: Worktree, ctx: Ctx): Classified {
   if (state === "UNMERGED") return skip("UNMERGED");
 
   const slug = slugify(base);
-  const hasCompose = existsSync(join(wt.path, "compose.dev.yml"));
-  const rmRomeHome = existsSync(join(homedir(), ".rome-worktrees", slug));
+  const { hasCompose, rmRomeHome, keptHome } = stackActions(slug, wt.path);
   const actions =
     (wt.locked ? "L" : "·") + (hasCompose ? "D" : "·") + (rmRomeHome ? "H" : "·") + "WB";
 
@@ -327,6 +394,7 @@ function classify(wt: Worktree, ctx: Ctx): Classified {
     actions,
     rmRomeHome,
     hasCompose,
+    keptHome,
     locked: wt.locked,
   };
 }
@@ -422,6 +490,14 @@ Legend  L=git worktree unlock      D=docker compose down -v
         H=rm rome-home             W=git worktree remove
         B=git branch -D            ·=skipped
 `);
+    const kept = eligible.filter((e) => e.keptHome !== null);
+    if (kept.length > 0) {
+      console.log(
+        "Kept, since gc cannot prove these worktrees started them. Remove by hand if unused:",
+      );
+      for (const e of kept) console.log(`  ${e.slug.padEnd(30)} ${e.keptHome}`);
+      console.log("");
+    }
   }
 }
 
@@ -560,8 +636,7 @@ function dirtyToEligible(s: Skipped): Eligible {
     throw new Error("dirtyToEligible: not a dirty worktree with a branch");
   }
   const slug = slugify(s.base);
-  const hasCompose = existsSync(join(s.worktree.path, "compose.dev.yml"));
-  const rmRomeHome = existsSync(join(homedir(), ".rome-worktrees", slug));
+  const { hasCompose, rmRomeHome, keptHome } = stackActions(slug, s.worktree.path);
   const actions =
     (s.worktree.locked ? "L" : "·") + (hasCompose ? "D" : "·") + (rmRomeHome ? "H" : "·") + "WB";
   return {
@@ -572,6 +647,7 @@ function dirtyToEligible(s: Skipped): Eligible {
     actions,
     rmRomeHome,
     hasCompose,
+    keptHome,
     locked: s.worktree.locked,
   };
 }
