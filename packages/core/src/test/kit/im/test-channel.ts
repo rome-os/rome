@@ -175,6 +175,7 @@ const discord = () =>
       platform: "discord",
       peer,
       conversation,
+      delivery: adapter.replyDelivery(),
       send: (message) => adapter.send(conversation, message),
       receive: (text) => heard.receive(() => peer.emitMessage(text)),
     };

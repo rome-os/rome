@@ -357,6 +357,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             inboundMedia,
             activity,
             directory,
+            replyDelivery: adapter.replyDelivery(),
           };
           return {
             start(deliver, fault): void {

@@ -65,6 +65,8 @@ export class DiscordPeer implements Peer {
     [DISCORD_DM, { id: DISCORD_DM, type: 1, recipients: [ALICE] }],
   ]);
   private readonly dmByRecipient = new Map([[DISCORD_USER, DISCORD_DM]]);
+  /** The message each enforced nonce created. */
+  private readonly nonces = new Map<string, VisibleMessage>();
   private readonly sessions = new Set<WebSocket>();
   private nextId = BigInt(String(created.id));
   private sequence = 0;
@@ -196,7 +198,14 @@ export class DiscordPeer implements Peer {
   }
 
   private create(channel: WireChannel, body: Record<string, unknown>): Reply {
-    const text = String(body.content ?? "");
+    // Discord answers a create whose enforced nonce made a message in the last
+    // few minutes with that message, and posts nothing.
+    const nonce =
+      body.enforce_nonce === true && body.nonce !== undefined ? String(body.nonce) : null;
+    const made = nonce === null ? undefined : this.nonces.get(nonce);
+    if (made) return synthetic(this.wire(made));
+    // Discord drops leading and trailing whitespace from a message's content.
+    const text = String(body.content ?? "").trim();
     if (!text || text.length > TEXT_LIMIT) return invalidContent(text);
     const reference = (body.message_reference as { message_id?: string } | undefined)?.message_id;
     if (reference !== undefined && this.store.get(reference)?.conversation !== channel.id)
@@ -213,6 +222,7 @@ export class DiscordPeer implements Peer {
       ...(reference !== undefined ? { replyTo: reference } : {}),
     });
     this.stamp(message.id);
+    if (nonce !== null) this.nonces.set(nonce, message);
     return { body: this.wire(message), source: "capture", accepted: true };
   }
 
@@ -223,7 +233,8 @@ export class DiscordPeer implements Peer {
         body: { code: 50005, message: "Cannot edit a message authored by another user" },
         source: "synthetic",
       };
-    const text = String(body.content ?? "");
+    // Discord drops leading and trailing whitespace from a message's content.
+    const text = String(body.content ?? "").trim();
     if (!text || text.length > TEXT_LIMIT) return invalidContent(text);
     this.store.edit(message.id, text);
     this.timestamps.get(message.id)!.edited_timestamp = new Date().toISOString();
