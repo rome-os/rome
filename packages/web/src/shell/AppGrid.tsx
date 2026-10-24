@@ -12,8 +12,6 @@ import {
 } from "@/components/ui/context-menu";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { AppStoreSheet } from "@/components/AppStoreSheet";
-import { APP_STORE_BROWSE_URL } from "@/lib/app-store-url";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { isElectronShell } from "@/lib/electron-shell";
 import { saveSetting } from "@/lib/chat-api";
@@ -166,7 +164,6 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   );
   const [installedApps, setInstalledApps] =
     useState<(InstalledAppCard | CachedApp)[]>(readLocalApps);
-  const [storeOpen, setStoreOpen] = useState(false);
   const labelled = useContext(RailLabelsContext);
   const tileClass = railLinkClass(labelled);
   // A labelled row already names itself, so its tooltip would only repeat it.
@@ -283,8 +280,8 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
 
   // Rome's own surfaces sit in the same pin list as apps, so their rows answer
   // a right-click the same way. Split view is the one app action they lack:
-  // the chat's side panel hosts app widgets only. The store row already leaves
-  // the page, so it offers just Unpin, and the required pins offer no Unpin.
+  // the chat's side panel hosts app widgets only. The required pins offer no
+  // Unpin.
   const withBuiltinContextMenu = (
     entry: BuiltinNavEntry,
     trigger: React.ReactNode,
@@ -292,7 +289,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     const canUnpin = !isRequiredBuiltinPin(entry.id);
     // Without tabs the open item is a plain Open, which a menu earns only
     // beside Unpin; alone it would repeat a click and take over a long-press.
-    const canOpen = entry.id !== "store" && (canOpenNewTab || canUnpin);
+    const canOpen = canOpenNewTab || canUnpin;
     if (!canOpen && !canUnpin) return trigger;
     return (
       <ContextMenu>
@@ -373,59 +370,11 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
 
   const builtinMap = new Map(APP_NAV.map((b) => [b.id, b]));
 
-  // The App Store lives on Rome Cloud. A browser opens it in a new tab, which
-  // is what a tab is for; the Mac app (see `inDesktopApp`) swaps to the embedded
-  // sheet instead.
-  const storeSheet = inDesktopApp ? (
-    <AppStoreSheet
-      open={storeOpen}
-      onClose={() => setStoreOpen(false)}
-      onInstalled={() => {
-        void invalidateApps.list();
-        void invalidateApps.updates();
-      }}
-    />
-  ) : null;
-
   const renderPin = (pin: PinnedEntry): React.ReactNode => {
     if (pin.type === "builtin") {
       const entry = builtinMap.get(pin.id);
       if (!entry) return null;
       const label = t(entry.labelKey);
-      if (entry.id === "store") {
-        return (
-          <Tooltip key={`builtin-${pin.id}`}>
-            {withBuiltinContextMenu(
-              entry,
-              <TooltipTrigger asChild>
-                {inDesktopApp ? (
-                  <button
-                    type="button"
-                    onClick={() => setStoreOpen(true)}
-                    aria-label={label}
-                    className={`${tileClass} ${IDLE_CLASS}`}
-                  >
-                    {renderBuiltinIcon(entry)}
-                    {labelled ? <RailLabel>{label}</RailLabel> : null}
-                  </button>
-                ) : (
-                  <a
-                    href={APP_STORE_BROWSE_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={label}
-                    className={`${tileClass} ${IDLE_CLASS}`}
-                  >
-                    {renderBuiltinIcon(entry)}
-                    {labelled ? <RailLabel>{label}</RailLabel> : null}
-                  </a>
-                )}
-              </TooltipTrigger>,
-            )}
-            {tip(label)}
-          </Tooltip>
-        );
-      }
       const active = isEntryActive(location.pathname, entry.href);
       if (entry.id === "chat" && chatPeek) {
         return (
@@ -537,7 +486,6 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
           }
         />
       </nav>
-      {storeSheet}
     </TooltipProvider>
   );
 }

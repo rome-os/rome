@@ -359,11 +359,7 @@ export default function AppsIndexPage() {
       <AppTile
         key={`builtin:${entry.id}`}
         ariaLabel={label}
-        clickTarget={
-          entry.id === "store"
-            ? { type: "action", onClick: () => setStoreOpen(true) }
-            : { type: "link", href: entry.href }
-        }
+        clickTarget={{ type: "link", href: entry.href }}
         menuLabel={t("installed.moreActionsAria", { name: label })}
         menu={
           isRequiredBuiltinPin(entry.id) ? null : (

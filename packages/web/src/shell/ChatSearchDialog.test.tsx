@@ -521,18 +521,6 @@ describe("ChatSearchDialog", () => {
     );
   });
 
-  it("leaves the App Store, which has no dashboard page, out of page results", async () => {
-    mockSessionSearch([], [], []);
-    const user = userEvent.setup();
-    renderSearch("/chat", true);
-
-    await user.type(
-      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
-      "store",
-    );
-    expect(await screen.findByText("No pages, apps, or chats found")).toBeTruthy();
-  });
-
   it("matches translated page labels and keeps the English alias", async () => {
     await i18n.changeLanguage("zh-CN");
     try {

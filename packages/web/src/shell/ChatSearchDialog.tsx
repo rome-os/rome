@@ -76,10 +76,6 @@ interface PageSearchEntry {
   label: string;
 }
 
-/** Built-in pages the switcher can open. The App Store has no dashboard route
- * (it opens a sheet or Rome Cloud), so it stays with the sidebar and launcher. */
-const SEARCHABLE_PAGES = APP_NAV.filter((page) => page.id !== "store");
-
 /**
  * The agent filter while the query is a lone `@` token at its start, else
  * null. Only a leading token counts, so a search that merely contains `@` (an
@@ -389,7 +385,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
 
   const normalizedQuery = normalizeSearchText(searchQuery);
   const matchingPageEntries = useMemo(
-    () => matchingPages(SEARCHABLE_PAGES, (page) => t(page.labelKey), normalizedQuery),
+    () => matchingPages(APP_NAV, (page) => t(page.labelKey), normalizedQuery),
     [normalizedQuery, t],
   );
   const matchingApps = useMemo(
