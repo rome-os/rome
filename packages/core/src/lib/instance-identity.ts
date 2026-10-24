@@ -112,7 +112,7 @@ export interface InstanceIdentity {
   /** Rome Cloud profile picture for the account owner. Null means Cloud knows
    *  the account has no picture; undefined means the response omitted the field. */
   avatarUrl?: string | null;
-  /** The rest of the whoami account, reduced to what an agent may read. */
+  /** The whole whoami account, for `system:get_guardian_cloud_profile`. */
   profile?: CloudProfile;
 }
 

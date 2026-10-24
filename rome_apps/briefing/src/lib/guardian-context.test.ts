@@ -89,31 +89,16 @@ describe("gatherGuardianContext", () => {
     expect((await gatherGuardianContext(appContext(), "UTC", now)).chats).toBeNull();
   });
 
-  it("formats the cloud profile and tolerates an unavailable one", async () => {
-    const profile = await gatherGuardianContext(
-      appContext({
-        status: "ok",
-        data: {
-          name: "Ada",
-          survey: {
-            background: "Bakery owner",
-            buildGoals: ["Order tracking"],
-            buildDescription: null,
-          },
-          publicProfile: { headline: null, role: "Owner", company: "Ada's Cakes", summary: null },
-        },
-      }),
-      "UTC",
-      now,
-    );
-    expect(profile.profile).toBe(
-      [
-        "Name: Ada",
-        "Background (their survey answer): Bakery owner",
-        "Wants to build with Rome (their survey answer): Order tracking",
-        "Public work profile: Owner at Ada's Cakes",
-      ].join("\n"),
-    );
+  it("passes the whole cloud profile and tolerates an unavailable or empty one", async () => {
+    const data = {
+      displayName: "Ada",
+      survey: { professionalBackground: "other", buildGoals: ["Order tracking"] },
+      research: { status: "completed", report: { headline: "Owner, Ada's Cakes" } },
+    };
+    const { profile } = await gatherGuardianContext(appContext({ status: "ok", data }), "UTC", now);
+    expect(JSON.parse(profile ?? "")).toEqual(data);
     expect((await gatherGuardianContext(appContext(), "UTC", now)).profile).toBeNull();
+    const empty = appContext({ status: "ok", data: {} });
+    expect((await gatherGuardianContext(empty, "UTC", now)).profile).toBeNull();
   });
 });

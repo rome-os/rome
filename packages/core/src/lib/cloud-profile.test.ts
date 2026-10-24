@@ -55,48 +55,12 @@ const account = {
 };
 
 describe("readCloudProfile", () => {
-  it("keeps work context and drops what identifies or reaches the guardian", () => {
-    const profile = readCloudProfile(account);
-    expect(profile).toEqual({
-      name: "Ada Lovelace",
-      survey: {
-        background: "Bakery owner",
-        buildGoals: ["Order tracking"],
-        buildDescription: "A pickup board",
-      },
-      publicProfile: {
-        headline: "Owner, Ada's Cakes",
-        role: "Owner",
-        company: "Ada's Cakes",
-        summary: "Runs a two-store bakery.",
-      },
-    });
-    const sent = JSON.stringify(profile);
-    for (const kept of [
-      "ada@example.com",
-      "ada-l",
-      "San Francisco",
-      "second store",
-      "same bakery",
-    ]) {
-      expect(sent).not.toContain(kept);
-    }
+  it("passes the whole whoami account through", () => {
+    expect(readCloudProfile(account)).toEqual(account);
   });
 
-  it("describes no public profile unless research matched the guardian", () => {
-    for (const status of ["unverified", "not_found", null]) {
-      const report = { ...account.research.report, identity: { status, basis: null } };
-      const profile = readCloudProfile({ ...account, research: { ...account.research, report } });
-      expect(profile.publicProfile).toBeNull();
-    }
-  });
-
-  it("reads an older whoami that sends only id, email and avatar", () => {
-    expect(readCloudProfile({ id: "acct", email: "a@b.c", avatarUrl: null })).toEqual({
-      name: null,
-      survey: null,
-      publicProfile: null,
-    });
+  it("reads a missing or malformed account as an empty profile", () => {
+    for (const value of [null, undefined, "x", []]) expect(readCloudProfile(value)).toEqual({});
   });
 });
 

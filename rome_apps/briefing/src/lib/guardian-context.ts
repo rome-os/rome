@@ -3,10 +3,10 @@ import type { RomeAppContext } from "@rome-os/app-runtime";
 import { unwrap } from "./action-result.js";
 
 // Personal context for the brief's "Try with Rome" section: what the guardian
-// recently asked Rome in webchat, and what they shared with Rome Cloud about
-// their work. Only the guardian's own words are read: a dashboard chat a
-// visitor owns or wrote in is left out whole (the same rule Dream's
-// chat-activity uses), as are archived chats and the agent's replies.
+// recently asked Rome in webchat, and their full Rome Cloud profile. Only the
+// guardian's own chat words are read: a dashboard chat a visitor owns or wrote
+// in is left out whole (the same rule Dream's chat-activity uses), as are
+// archived chats and the agent's replies.
 
 const WINDOW_HOURS = 48;
 const MAX_MESSAGES = 60;
@@ -110,40 +110,13 @@ function messageText(raw: string): string {
     .trim();
 }
 
-interface CloudProfile {
-  name: string | null;
-  survey: {
-    background: string | null;
-    buildGoals: string[];
-    buildDescription: string | null;
-  } | null;
-  publicProfile: {
-    headline: string | null;
-    role: string | null;
-    company: string | null;
-    summary: string | null;
-  } | null;
-}
-
+/** The guardian's Rome Cloud profile, passed to the brief as JSON. */
 async function readProfile(appContext: RomeAppContext): Promise<string | null> {
-  let profile: CloudProfile;
   try {
     const res = unwrap(await appContext.runAction("get_guardian_cloud_profile", {}));
-    if (!res.ok || !res.data) return null;
-    profile = res.data as CloudProfile;
+    if (!res.ok || !res.data || typeof res.data !== "object") return null;
+    return Object.keys(res.data).length > 0 ? JSON.stringify(res.data, null, 2) : null;
   } catch {
     return null;
   }
-  const lines: string[] = [];
-  if (profile.name) lines.push(`Name: ${profile.name}`);
-  const survey = profile.survey;
-  if (survey?.background) lines.push(`Background (their survey answer): ${survey.background}`);
-  const goals = [...(survey?.buildGoals ?? []), survey?.buildDescription].filter(Boolean);
-  if (goals.length > 0)
-    lines.push(`Wants to build with Rome (their survey answer): ${goals.join("; ")}`);
-  const pub = profile.publicProfile;
-  const work = pub?.headline ?? [pub?.role, pub?.company].filter(Boolean).join(" at ");
-  if (work) lines.push(`Public work profile: ${work}`);
-  if (pub?.summary) lines.push(`Public work summary: ${pub.summary}`);
-  return lines.length > 0 ? lines.join("\n") : null;
 }

@@ -2,20 +2,7 @@ import type { Action, ActionConfig, ActionResult } from "@rome-os/app-runtime";
 
 /** Structural copies of core's guardian-profile contract. Keep in sync: apps
  * cannot import core, and workers receive a proxy instead of the real client. */
-export interface CloudProfile {
-  name: string | null;
-  survey: {
-    background: string | null;
-    buildGoals: string[];
-    buildDescription: string | null;
-  } | null;
-  publicProfile: {
-    headline: string | null;
-    role: string | null;
-    company: string | null;
-    summary: string | null;
-  } | null;
-}
+export type CloudProfile = Record<string, unknown>;
 
 export type CloudProfileOutcome =
   | { kind: "ok"; profile: CloudProfile }
