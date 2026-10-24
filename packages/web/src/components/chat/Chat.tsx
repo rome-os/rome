@@ -2048,10 +2048,19 @@ export function Chat({
                 ("scroll under the composer") instead of stopping at a solid dock.
                 It talks to whoever holds the floor (the open handoff's specialist,
                 or the main agent). In share mode it's swapped for the ShareBar,
-                which configures + mints the link for the turns selected above. */}
+                which configures + mints the link for the turns selected above.
+
+                Below md the floor paints the canvas instead. Its side gutters
+                and bottom padding sit outside the box's blur, and on a phone a
+                transparent strip there shows table rows and text beside and
+                below the box, which reads as a second transcript. The floor
+                also takes pointer events there, so a tap on the canvas cannot
+                land on a link it hides. It stays inside the scroller, so the
+                scroll and keyboard geometry match the desktop layout. */}
               <div
+                data-chat-floor
                 className={cn(
-                  "pointer-events-none sticky bottom-0 z-10 px-3 md:px-6",
+                  "pointer-events-none sticky bottom-0 z-10 px-3 max-md:pointer-events-auto max-md:bg-chat-canvas md:px-6",
                   // Presentation mode gives the draft's bottom gap 5x its normal
                   // size so a recording framed on the empty state keeps the
                   // composer clear of the capture's lower edge.
