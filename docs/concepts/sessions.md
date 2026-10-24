@@ -61,23 +61,29 @@ A turn is one request to an agent plus the agent work that follows until the age
 
 ## Chat trace window
 
-The dashboard loads all traces of a session tree while the root session's latest conversation message is less than seven days old.
-Follow `parentSessionId` through any subagent or handoff nesting to find the root. Children share the root's clock, never their own.
-At exactly seven idle days on the root, the whole tree shows chat history only, with an archived-steps note on each turn.
+A session's effective activity is the latest conversation message across itself and every ancestor reached through `parentSessionId`.
+The dashboard loads all of its traces while that time is less than seven days old.
+At exactly seven idle days, the session shows chat history only, with an archived-steps note on each turn.
 User messages, assistant replies, cards, and interaction results stay in the transcript.
 History, lazy trace reads, and raw downloads follow the same session-wide decision.
 
 Activity includes user, assistant, trace, and notification rows. Notifications record real out-of-band conversation messages.
-Reading, renaming, pinning, and unknown metadata roles do not count. Session creation without messages does not make an archive candidate.
-Each read resolves roots and batches their latest message times in one query, without reading trace payloads.
-A child's old messages cannot hide its summaries or costs while its root is active.
+Reading, renaming, pinning, and unknown metadata roles do not count. A lineage with no conversation messages is not an archive candidate.
+Each read batches session and ancestor message times in one recursive query, without reading trace payloads.
+There are no session-type exceptions: an old subagent remains visible under an active ancestor, and a fork, promoted side chat, or channel thread can stay active on its own messages under an idle source.
+A new message reactivates the session and its descendants, not its ancestors or siblings.
+If every session in a tree is idle, all of its traces are archived.
+
+Handoffs have no `parentSessionId`; their link lives in a transcript card. They use their own session activity.
+The chat view loads a handoff child's history separately and splices it into the visible transcript.
+The calling session's trace summaries and descendant cost rollups do not read handoff traces.
+A merged transcript can therefore contain archived child steps beside active parent steps, while keeping both sessions' replies and cards.
 
 This window changes dashboard reads, not storage. It deletes nothing and does not change sharing, usage accounting, or agent resume context.
-A new conversation message in the root makes every trace in its tree visible again while its blocks remain in the database.
-Archival candidates are whole idle root-session trees, never individual children or turns selected by their age.
+Reactivation reveals retained traces while their blocks remain in the database.
 The window and idle predicate live in `packages/core/src/webchat/trace-retention.ts`.
-The repository's `getTraceArchivedSessionIds` selects idle tree members for both dashboard reads and archival work.
-With no requested ids, it selects every member of each idle root's tree together.
+The repository's `getTraceArchivedSessionIds` applies that predicate to explicitly requested sessions.
+Step 2 will add its own archival selection query and must account for handoff links before removing traces.
 
 ## Event
 

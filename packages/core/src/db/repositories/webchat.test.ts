@@ -215,7 +215,9 @@ describe("WebChatRepository", () => {
       pinnedAt: new Date("2026-10-24T12:00:00Z"),
     });
     const cutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
-    expect(await repo.getTraceArchivedSessionIds(undefined, cutoff)).toEqual(["idle"]);
+    expect(await repo.getTraceArchivedSessionIds(["idle", "active", "empty"], cutoff)).toEqual([
+      "idle",
+    ]);
     expect(await repo.getTraceArchivedSessionIds([], cutoff)).toEqual([]);
     const activityQuery = rs.spyOn(repo, "getTraceArchivedSessionIds");
     const children = await repo.getTraceContentsByTurns(
@@ -232,7 +234,7 @@ describe("WebChatRepository", () => {
     ["2026-10-16T12:00:00Z", true],
     ["2026-10-17T12:00:00Z", true],
     ["2026-10-17T12:00:01Z", false],
-  ] as const)("uses root activity at %s for the entire nested tree (archived: %s)", async (lastMessageAt, archived) => {
+  ] as const)("inherits ancestor activity at %s in a nested idle tree (archived: %s)", async (lastMessageAt, archived) => {
     await repo.createSession("root", "Root");
     await repo.createSession("unrelated", "Unrelated");
     for (const [id, parentSessionId] of [
@@ -264,14 +266,17 @@ describe("WebChatRepository", () => {
       .set({ createdAt: new Date(lastMessageAt) })
       .where(eq(romeAgentMessages.id, "root-latest"));
     await repo.addMessage("unrelated-latest", "unrelated", "user", "Continue");
-    // A child cannot change the tree's clock, even when it is newer than an idle root.
-    await repo.addMessage("sibling-latest", "sibling", "assistant", "Child reply");
     const cutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
     const options = { sessionActivityCutoff: cutoff };
     const query = rs.spyOn(testDb.db, "all");
-    expect((await repo.getTraceArchivedSessionIds(undefined, cutoff)).sort()).toEqual(
-      archived ? ["child", "grandchild", "root", "sibling"] : [],
-    );
+    expect(
+      (
+        await repo.getTraceArchivedSessionIds(
+          ["root", "child", "grandchild", "sibling", "unrelated"],
+          cutoff,
+        )
+      ).sort(),
+    ).toEqual(archived ? ["child", "grandchild", "root", "sibling"] : []);
     expect(query).toHaveBeenCalledTimes(1);
     query.mockRestore();
     expect(await repo.getTraceArchivedSessionIds(["grandchild"], cutoff)).toEqual(
@@ -295,6 +300,56 @@ describe("WebChatRepository", () => {
     expect(children.map((row) => row.sessionId).sort()).toEqual(
       archived ? [] : ["child", "grandchild"],
     );
+  });
+
+  it("reactivates an idle branch and its descendants without reactivating ancestors or siblings", async () => {
+    await repo.createSession("root", "Idle source");
+    for (const [id, parentSessionId] of [
+      ["branch", "root"],
+      ["grandchild", "branch"],
+      ["sibling", "root"],
+    ]) {
+      await repo.ensureRomeSession({
+        id,
+        name: id,
+        parentSessionId,
+        type: "fork",
+        agentName: "main",
+      });
+    }
+    const ids = ["root", "branch", "grandchild", "sibling"];
+    for (const id of ids) {
+      await repo.appendTraceBlocks({
+        messageId: `${id}-trace`,
+        sessionId: id,
+        turnId: "old-turn",
+        startSeq: 0,
+        blocks: [{ type: "thinking", content: `${id} steps` }],
+      });
+    }
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-10-10T12:00:00Z") });
+    const cutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
+    expect((await repo.getTraceArchivedSessionIds(ids, cutoff)).sort()).toEqual([...ids].sort());
+    await repo.addMessage("branch-latest", "branch", "user", "Continue here");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "branch-latest"));
+    expect((await repo.getTraceArchivedSessionIds(ids, cutoff)).sort()).toEqual([
+      "root",
+      "sibling",
+    ]);
+    expect(await repo.getTraceArchivedSessionIds(["grandchild"], cutoff)).toEqual([]);
+    const options = { sessionActivityCutoff: cutoff };
+    for (const id of ["branch", "grandchild"]) {
+      expect((await repo.getTraceContents(id, options))[0]?.content).toContain(`${id} steps`);
+      expect((await repo.getTraceContentByTurn(id, "old-turn", options))?.content).toContain(
+        `${id} steps`,
+      );
+      expect(
+        (await repo.getMessageContentForDisplay(`${id}-trace`, options))?.traceArchived,
+      ).toBeUndefined();
+    }
   });
 
   it("filters owners before returning chats and preserves the all-owner default", async () => {
