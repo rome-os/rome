@@ -44,7 +44,7 @@ cases:
           and open it once. Then scroll down until its heading is near the top of the screen, and
           stop.
       - aiAssert: >-
-          The Developer Settings section is expanded and shows the "Fable" setting directly below
+          The Developer Settings section is expanded and shows the "Model ID mappings" setting directly below
           its heading.
       # The section is taller than one screen, so the heading and the switch are
       # checked in separate screenshots.

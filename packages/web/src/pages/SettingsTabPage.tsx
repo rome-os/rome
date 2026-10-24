@@ -136,7 +136,6 @@ type FeishuStreamingStyle = "message" | "card";
 interface SettingsData {
   "feedback.agentReportsEnabled"?: boolean;
   enableModelSelector?: boolean;
-  enableFable?: boolean;
   enableImpersonation?: boolean;
   enableReplyStreaming?: boolean;
   feishuReplyStreamingStyle?: FeishuStreamingStyle;
@@ -1117,7 +1116,6 @@ function DeveloperSettingsSection({
       </summary>
       <Section className="mt-3">
         <FormRows>
-          <FableAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <TierModelMappingsAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
@@ -1126,35 +1124,6 @@ function DeveloperSettingsSection({
         {open && <RelayHealthSection />}
       </Section>
     </details>
-  );
-}
-
-function FableAdvancedSection({
-  settings,
-  onSave,
-  saving,
-}: {
-  settings: SettingsData;
-  onSave: (p: Record<string, unknown>) => Promise<void>;
-  saving: boolean;
-}) {
-  const { t } = useTranslation("settings");
-  const [enabled, setEnabled] = useState(settings.enableFable ?? false);
-
-  function toggle(next: boolean) {
-    setEnabled(next);
-    void onSave({ enableFable: next });
-  }
-
-  return (
-    <SettingsToggleRow
-      title={t("advanced.fable.title")}
-      description={t("advanced.fable.description")}
-      label={t("advanced.fable.toggleLabel")}
-      checked={enabled}
-      onChange={toggle}
-      disabled={saving}
-    />
   );
 }
 
@@ -1251,9 +1220,6 @@ function TierModelMappingsAdvancedSection({
           );
         })}
       </FormRows>
-      <p className="mt-2 text-aux text-muted-foreground">
-        {t("advanced.tierModelMappings.fableNote")}
-      </p>
       <Button type="button" size="sm" className="mt-3" onClick={save} disabled={saving}>
         {t("advanced.tierModelMappings.save")}
       </Button>

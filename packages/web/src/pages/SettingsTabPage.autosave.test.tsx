@@ -117,18 +117,18 @@ describe("SettingsPage Advanced autosave", () => {
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
   });
 
-  it("autosaves the Fable developer setting when changed", async () => {
+  it("autosaves a developer setting when changed", async () => {
     const calls = mockSettingsBackend();
     const user = userEvent.setup();
     renderAdvancedSettings();
 
-    await user.click(await screen.findByText("Route large models to Fable"));
+    await user.click(await screen.findByText("Enable model selector in chat"));
 
     await waitFor(() =>
       expect(calls).toContainEqual({
         url: "/api/settings",
         method: "PUT",
-        body: { enableFable: true },
+        body: { enableModelSelector: true },
       }),
     );
   });

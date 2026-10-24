@@ -6,7 +6,7 @@
 
 ## Context
 
-An [agent](../concepts/agents.md) names a model tier, and the tier maps to a concrete model through mutable global state: plan entitlements, the Fable setting, provider login, and provider quota. A [session](../concepts/sessions.md) outlives that state. A conversation opened this morning is still open when a plan refresh lands, a setting flips, or a quota window opens.
+An [agent](../concepts/agents.md) names a model tier, and the tier maps to a concrete model through mutable global state: plan entitlements, tier model mappings, provider login, and provider quota. A [session](../concepts/sessions.md) outlives that state. A conversation opened this morning is still open when a plan refresh lands, a setting flips, or a quota window opens.
 
 Resolving the tier on every turn ties the model to whatever the global state says at that moment. One conversation then runs on two models across two of its turns. The transcript records an exchange no single model produced, and the provider backend closes and reopens mid-thread, which throws away the prompt cache built over the conversation.
 
@@ -25,7 +25,7 @@ A session records the concrete model that produced its history and requests exac
 - **Persist the model as a preference that tier resolution overrides when entitlements change.** Rejected because an entitlement change is exactly the moment the pin has to hold. A preference that yields to the state it was recorded to outlast decides nothing.
 - **Fall back to an available model and re-pin the session.** Rejected because a silent substitution changes what model a thread runs on without the guardian knowing, which is the failure the pin exists to prevent. It also rewrites the record of what produced the history, so the substitution leaves no trace to notice later.
 - **Split by recoverability: fail closed on transient loss (quota, logged out) and re-resolve when access is lost permanently.** Rejected because Rome cannot tell the two apart at resolution time. A revoked entitlement and a plan that refreshes in an hour arrive as the same denial, so the split turns "never substitute silently" into a guess.
-- **Treat the Fable setting as an entitlement, so toggling it off moves pinned sessions off Fable.** Rejected because the setting is a Rome-side preference over new resolutions, and honoring it mid-session is a silent substitution wearing a different name.
+- **Treat a model setting as an entitlement, so changing it moves pinned sessions to the new model.** Rejected because the setting is a Rome-side preference over new resolutions, and honoring it mid-session is a silent substitution wearing a different name.
 - **Prompt the guardian for a substitute when the pinned model cannot run.** Rejected because unattended sessions have no guardian to ask. A routine turn would block on a prompt nobody sees, which is a worse failure than an error the caller can read.
 
 ## Consequences
