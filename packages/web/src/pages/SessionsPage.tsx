@@ -58,6 +58,7 @@ import {
 } from "@/lib/chat-api";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
+import { modelDisplayName } from "@/lib/model-display";
 import type {
   ChatMessage,
   RomeSessionExplorerRecord,
@@ -587,7 +588,7 @@ function SessionsIndexPage({
     model
       ? {
           key: "model",
-          label: `Model: ${model.kind === "unknown" ? "Unknown" : model.name}`,
+          label: `Model: ${model.kind === "unknown" ? "Unknown" : modelDisplayName(model.name)}`,
           clear: () => setModel(undefined),
         }
       : null,

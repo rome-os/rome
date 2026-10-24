@@ -5,7 +5,7 @@ import { ModelProviderIcon } from "@/components/brand-icons/ai-tool-icons";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { COARSE_POINTER_QUERY, matchesMediaQuery } from "@/lib/media-query";
-import { formatModelName, formatReasoningEffort } from "@/lib/model-display";
+import { modelDisplayName, reasoningEffortDisplayName } from "@/lib/model-display";
 
 /**
  * The chat header avatar. When the session has pinned a model, the avatar
@@ -33,8 +33,10 @@ export function SessionAvatar({
   const description = reasoningEffort
     ? t("navbar.sessionModelWithEffort", { model, effort: reasoningEffort })
     : t("navbar.sessionModel", { model });
-  const name = formatModelName(model);
-  const summary = reasoningEffort ? `${name} · ${formatReasoningEffort(reasoningEffort)}` : name;
+  const name = modelDisplayName(model);
+  const summary = reasoningEffort
+    ? `${name} · ${reasoningEffortDisplayName(reasoningEffort)}`
+    : name;
 
   // A tooltip trigger closes on click. Without hover, a tap is the only way
   // to open it, so a tap opens it instead; a tap outside closes it.
