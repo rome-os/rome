@@ -516,10 +516,15 @@ async function rewriteRemixManifest(
     );
   }
   if (sourceManifest.eventSources) {
+    // A local name (format 1) maps to the new local name, a qualified ID
+    // (format 2, "<appId>:<name>") to the new app's qualified ID.
     const actionNames = new Map<string, string>();
     for (const rename of artifactRenames.actions) {
       actionNames.set(rename.sourceName, rename.targetName);
       actionNames.set(rename.sourcePublicName, rename.targetName);
+      const qualified = `${params.appId}:${rename.targetName}`;
+      actionNames.set(`${sourceManifest.id}:${rename.sourceName}`, qualified);
+      actionNames.set(`${sourceManifest.id}:${rename.sourcePublicName}`, qualified);
     }
     document.set(
       "eventSources",

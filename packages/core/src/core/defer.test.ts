@@ -220,6 +220,23 @@ describe("runDefer", () => {
     expect(createRoutine).not.toHaveBeenCalled();
   });
 
+  it("creates the wait and passes on a warning from the event source", async () => {
+    const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-w" });
+    const prepareEventWait = rs.fn(async () => ({
+      ok: true as const,
+      warning: "Nothing has emitted it since Rome started",
+    }));
+    const result = await runDefer(
+      { name: "reply", event: { eventName: "provider:event:gmail.new_message" } },
+      { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+    );
+    expect(createRoutine).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      ok: true,
+      warning: "Nothing has emitted it since Rome started",
+    });
+  });
+
   it("does not ask the event source for a time wakeup", async () => {
     const prepareEventWait = rs.fn();
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-t" });

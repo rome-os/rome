@@ -22,7 +22,7 @@ export type RunEnsureAction = (
 export type Subscription = "existing" | "created";
 
 export type EventWaitResult =
-  | { ok: true; subscription?: Subscription }
+  | { ok: true; subscription?: Subscription; warning?: string }
   | { ok: false; error: string };
 
 export interface EventSourcesDeps {
@@ -40,6 +40,9 @@ export interface EventSourcesDeps {
  * `ensureAction` to check or create the subscription.
  */
 export class EventSources {
+  /** Tail of each source's queue of subscribing calls, keyed by source. */
+  private readonly queues = new Map<string, Promise<unknown>>();
+
   constructor(private readonly deps: EventSourcesDeps) {}
 
   /** The source that declares `eventName`, if any. The first match wins. */
@@ -59,7 +62,7 @@ export class EventSources {
   declaredEntries(): EventCatalogEntry[] {
     return this.deps.listSources().flatMap((source) =>
       source.types.map((type) => ({
-        eventType: source.events.replace("*", type),
+        eventType: source.events.replaceAll("*", type),
         appId: source.appId,
         subscribable: true,
         keys: source.keys,
@@ -69,9 +72,10 @@ export class EventSources {
 
   /**
    * Make sure an event wait can fire. A declared event subscribes at the
-   * provider (or confirms the subscription exists). An undeclared event must
-   * at least have been emitted once, so a typo or an event nothing produces
-   * fails now instead of waiting forever.
+   * provider (or confirms the subscription exists), and the wait fails when it
+   * can't. An undeclared event is accepted; when nothing has emitted it since
+   * boot the result carries a warning, because the catalog starts empty on
+   * every boot and can't tell a typo from an event that just hasn't happened.
    */
   async prepareWait(
     eventName: string,
@@ -82,13 +86,18 @@ export class EventSources {
     if (!source) {
       if (this.deps.isKnownEventType(eventName)) return { ok: true };
       return {
-        ok: false,
-        error:
-          `No app produces "${eventName}". Find the exact event name with search_event_catalog, ` +
-          "or wait with afterMinutes instead.",
+        ok: true,
+        warning:
+          `Nothing has emitted "${eventName}" since Rome started, and no app declares it. ` +
+          "The wait is set; if the name may be wrong, check it with search_event_catalog.",
       };
     }
-    const result = await this.ensure(source, eventName, filter, run, false);
+    // One subscribing call per source at a time: a provider subscription is
+    // often a read-modify-write of shared state (one webhook per repo), and
+    // two at once can drop each other's event.
+    const result = await this.serialized(`${source.appId}:${source.ensureAction}`, () =>
+      this.ensure(source, eventName, filter, run, false),
+    );
     if (!result.ok) return result;
     return { ok: true, subscription: result.subscription as Subscription };
   }
@@ -105,6 +114,16 @@ export class EventSources {
     const result = await this.ensure(source, eventName, filter, run, true);
     if (!result.ok) return result;
     return { ok: true, active: result.subscription === "active" };
+  }
+
+  private serialized<T>(key: string, task: () => Promise<T>): Promise<T> {
+    const next = (this.queues.get(key) ?? Promise.resolve()).then(task);
+    const tail = next.catch(() => undefined);
+    this.queues.set(key, tail);
+    void tail.then(() => {
+      if (this.queues.get(key) === tail) this.queues.delete(key);
+    });
+    return next;
   }
 
   private async ensure(

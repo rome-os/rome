@@ -44,11 +44,19 @@ function makeClient(hooks: GithubHook[]) {
   return { client, ops };
 }
 
-function ensure(hooks: GithubHook[], event: string, dryRun: boolean) {
+function ensure(
+  hooks: GithubHook[],
+  event: string,
+  dryRun: boolean,
+  names: { asked: string; github: string } = { asked: "acme/widgets", github: "acme/widgets" },
+) {
   const { client, ops } = makeClient(hooks);
   const secret = rs.fn(async () => "s3cret");
   const run = ensureGithubEvent({
     client,
+    targetName: names.asked,
+    targetField: "repository.full_name",
+    canonicalName: async () => names.github,
     relayDepositUrl: RELAY_URL,
     legacyInstanceUrl: null,
     event,
@@ -110,6 +118,22 @@ describe("ensureGithubEvent", () => {
     expect(await run).toBe("created");
     expect(ops).toEqual(["list", "list", "create:workflow_run"]);
     expect(secret).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ensureGithubEvent with a name in the wrong case", () => {
+  it("refuses before touching the webhook and names GitHub's spelling", async () => {
+    for (const dryRun of [false, true]) {
+      const { run, ops, secret } = ensure([], "workflow_run", dryRun, {
+        asked: "Acme/Widgets",
+        github: "acme/widgets",
+      });
+      await expect(run).rejects.toThrow(
+        'GitHub spells Acme/Widgets as acme/widgets. Filter repository.full_name on "acme/widgets"',
+      );
+      expect(ops).toEqual([]);
+      expect(secret).not.toHaveBeenCalled();
+    }
   });
 });
 

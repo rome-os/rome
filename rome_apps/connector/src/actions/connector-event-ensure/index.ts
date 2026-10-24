@@ -1,3 +1,4 @@
+import type { Octokit } from "@octokit/rest";
 import {
   createAppLogger,
   defineAction,
@@ -77,8 +78,17 @@ export function describeGithubError(target: string, err: unknown): string {
   return `GitHub webhook on ${target} failed: ${message}`;
 }
 
+/** The filter names the target in a case GitHub's events never carry. */
+export class GithubTargetCaseError extends Error {}
+
 export interface EnsureGithubEventInput {
   client: GithubHookClient;
+  /** The repo (`owner/name`) or org login as the wait's filter spells it. */
+  targetName: string;
+  /** GitHub's own spelling of the target, the value its events carry. */
+  canonicalName: () => Promise<string>;
+  /** The filter field that names the target. */
+  targetField: string;
   relayDepositUrl: string;
   legacyInstanceUrl: string | null;
   /** GitHub event name, e.g. `workflow_run`. */
@@ -92,6 +102,14 @@ export interface EnsureGithubEventInput {
 export async function ensureGithubEvent(
   input: EnsureGithubEventInput,
 ): Promise<"active" | "inactive" | "existing" | "created"> {
+  // GitHub resolves names in any case, but a routine filter compares exactly,
+  // so a wait on "Acme/Widgets" would subscribe and then never match.
+  const canonical = await input.canonicalName();
+  if (canonical !== input.targetName) {
+    throw new GithubTargetCaseError(
+      `GitHub spells ${input.targetName} as ${canonical}. Filter ${input.targetField} on "${canonical}"; events carry that exact value.`,
+    );
+  }
   const delivering = hooksDeliver(
     await input.client.listHooks(),
     input.relayDepositUrl,
@@ -107,6 +125,17 @@ export async function ensureGithubEvent(
     secret: await input.secret(),
   });
   return "created";
+}
+
+async function readGithubCanonicalName(
+  octokit: Octokit,
+  target: GithubHookTarget,
+): Promise<string> {
+  if ("repo" in target) {
+    const [owner, repo] = target.repo.split("/");
+    return (await octokit.rest.repos.get({ owner, repo })).data.full_name;
+  }
+  return (await octokit.rest.orgs.get({ org: target.org })).data.login;
 }
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
@@ -129,6 +158,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         };
       }
       const targetName = "repo" in target ? target.repo : target.org;
+      const targetField = "repo" in target ? REPO_FIELD : ORG_FIELD;
 
       const resolved = await resolveGithubHookSetup(deps);
       if (!resolved.ok) return { status: "error", error: resolved.error };
@@ -136,6 +166,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       try {
         const subscription = await ensureGithubEvent({
           client: createGithubHookClient(octokit, target),
+          targetName,
+          targetField,
+          canonicalName: () => readGithubCanonicalName(octokit, target),
           relayDepositUrl,
           legacyInstanceUrl,
           event,
@@ -147,7 +180,8 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         }
         return { status: "ok", data: { subscription } };
       } catch (err) {
-        const error = describeGithubError(targetName, err);
+        const error =
+          err instanceof GithubTargetCaseError ? err.message : describeGithubError(targetName, err);
         log.error("github event ensure failed", { target: targetName, event, error });
         return { status: "error", error };
       }

@@ -427,6 +427,54 @@ describe("remixApp", () => {
     ).toMatch(/^---\nname: calendar_help\n/mu);
   });
 
+  it("points a format 2 event source's qualified ensureAction at the remixed action", async () => {
+    const f = await fixture();
+    const manifest = [
+      "formatVersion: 2",
+      "id: calendar",
+      "name: Calendar",
+      "version: 1.2.3",
+      "description: Calendar",
+      "includeSource: true",
+      "actions:",
+      "  - actions/calendar-ensure",
+      "eventSources:",
+      "  - events: calendar.*",
+      "    ensureAction: calendar:calendar_ensure",
+      "",
+    ].join("\n");
+    const actionConfig = [
+      "name: calendar_ensure",
+      "type: custom",
+      "description: Subscribe to calendar events",
+      "complexity: simple",
+      "speed: fast",
+      "reliability: high",
+      "sideEffects: write",
+      "",
+    ].join("\n");
+    for (const dir of [
+      join(f.bundleRoot, "actions", "calendar-ensure"),
+      join(f.bundleRoot, "src", "actions", "calendar-ensure"),
+    ]) {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "action.yaml"), actionConfig);
+    }
+    await writeFile(join(f.bundleRoot, "app.yaml"), manifest);
+    await cp(f.bundleRoot, f.installedBundleRoot, { recursive: true });
+
+    const result = await remixApp(
+      { appId: "ray-calendar", name: "@ray/calendar", from: { appId: "calendar" } },
+      f,
+    );
+
+    expect(parseYaml(await readFile(join(result.rootPath, "app.yaml"), "utf-8"))).toMatchObject({
+      eventSources: [
+        { events: "calendar.*", ensureAction: "ray-calendar:ray_calendar__calendar_ensure" },
+      ],
+    });
+  });
+
   it("uses only the local installed manifest to grant remixability", async () => {
     const f = await fixture(false);
 

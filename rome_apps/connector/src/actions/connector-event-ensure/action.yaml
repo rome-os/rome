@@ -11,7 +11,9 @@ description: |
   otherwise it subscribes when needed and returns `existing | created`. A
   GitHub subscription merges the event into Rome's existing webhook on that
   repo or org. Fails with a readable reason: GitHub not connected, no target
-  in the filter, or GitHub refusing the webhook (admin access needed).
+  in the filter, a repo or org name whose case differs from GitHub's (the
+  error gives the exact spelling), or GitHub refusing the webhook (admin
+  access needed).
 entry: ./index.ts
 visibility: explicit
 complexity: simple

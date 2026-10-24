@@ -114,15 +114,56 @@ describe("EventSources", () => {
       expect(result.ok).toBe(false);
     });
 
-    it("accepts an undeclared event only when the catalog has it", async () => {
+    it("accepts an undeclared event, with a warning when nothing has emitted it", async () => {
       const run = rs.fn<RunEnsureAction>();
       expect(await sources(["test.ci.done"]).prepareWait("test.ci.done", [], run)).toEqual({
         ok: true,
       });
-      const missing = await sources().prepareWait("test.ci.done", [], run);
-      expect(missing.ok).toBe(false);
-      if (!missing.ok) expect(missing.error).toContain("search_event_catalog");
+      const unseen = await sources().prepareWait("provider:event:gmail.new_message", [], run);
+      expect(unseen.ok).toBe(true);
+      if (unseen.ok) expect(unseen.warning).toContain("search_event_catalog");
       expect(run).not.toHaveBeenCalled();
+    });
+
+    it("runs one subscribing call per source at a time", async () => {
+      // Each call reads the shared list, yields, then writes it back, like a
+      // webhook update. Run concurrently, the second write would drop the first.
+      let hookEvents: string[] = [];
+      let inFlight = 0;
+      let maxInFlight = 0;
+      const run = rs.fn<RunEnsureAction>(async (_name, args) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        const read = [...hookEvents];
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        hookEvents = [...read, String(args.eventName)];
+        inFlight -= 1;
+        return { status: "ok", data: { subscription: "created" } };
+      });
+      const s = sources();
+      await Promise.all([
+        s.prepareWait("provider:event:github.workflow_run", REPO_FILTER, run),
+        s.prepareWait("provider:event:github.push", REPO_FILTER, run),
+      ]);
+      expect(maxInFlight).toBe(1);
+      expect(hookEvents.sort()).toEqual([
+        "provider:event:github.push",
+        "provider:event:github.workflow_run",
+      ]);
+    });
+
+    it("keeps the queue moving after a failed call", async () => {
+      const run = rs
+        .fn<RunEnsureAction>()
+        .mockRejectedValueOnce(new Error("boom"))
+        .mockResolvedValueOnce({ status: "ok", data: { subscription: "existing" } });
+      const s = sources();
+      const [first, second] = await Promise.all([
+        s.prepareWait("provider:event:github.push", REPO_FILTER, run),
+        s.prepareWait("provider:event:github.push", REPO_FILTER, run),
+      ]);
+      expect(first.ok).toBe(false);
+      expect(second).toEqual({ ok: true, subscription: "existing" });
     });
   });
 

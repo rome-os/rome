@@ -44,7 +44,10 @@ export interface DeferDeps {
   prepareEventWait?: (
     eventName: string,
     filter: { field: string; equals: string }[],
-  ) => Promise<{ ok: true; subscription?: "existing" | "created" } | { ok: false; error: string }>;
+  ) => Promise<
+    | { ok: true; subscription?: "existing" | "created"; warning?: string }
+    | { ok: false; error: string }
+  >;
   /** Wall-clock `Date.now()` for the running turn, injected for testability. */
   now: number;
 }
@@ -66,6 +69,9 @@ export type DeferResult =
       /** For an app-declared event: whether the provider subscription was
        * already there or was created for this wait. */
       subscription?: "existing" | "created";
+      /** Set when the wait was created but may never fire, e.g. nothing has
+       * emitted the event since boot. */
+      warning?: string;
       routineId?: string;
     };
 
@@ -238,6 +244,7 @@ export async function runDefer(input: DeferInput, deps: DeferDeps): Promise<Defe
       name: parsed.name,
       waitingFor: eventName,
       ...(prepared.subscription ? { subscription: prepared.subscription } : {}),
+      ...(prepared.warning ? { warning: prepared.warning } : {}),
       ...(routineId ? { routineId } : {}),
     };
   }
