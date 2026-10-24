@@ -264,6 +264,34 @@ describe("RecentChats", () => {
     await waitFor(() => expect(listCalls()).toBe(before + 1));
   });
 
+  it("still shows the cached list after a long time away", async () => {
+    mockSessions([
+      {
+        id: "cached",
+        name: "Cached chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-01T00:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "alpha",
+        projectPath: "alpha",
+      },
+    ]);
+    const queryClient = testQueryClient();
+    const view = renderRecentChats("/chat", undefined, queryClient);
+    await screen.findByText("Cached chat");
+    rs.useFakeTimers();
+    view.unmount();
+    // Past React Query's default five-minute garbage collection.
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(10 * 60_000);
+    });
+
+    renderRecentChats("/chat", undefined, queryClient);
+
+    expect(screen.getByText("Cached chat")).toBeTruthy();
+  });
+
   it("offers a retry instead of claiming the guardian has no chats when the fetch fails", async () => {
     let attempts = 0;
     rs.spyOn(globalThis, "fetch").mockImplementation((async () => {

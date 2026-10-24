@@ -15,7 +15,9 @@ function chatSessionsQueryKey(status: SessionStatusFilter, scope: SessionScope) 
  * The sidebar's chat list, cached across mounts. The list unmounts whenever
  * the guardian leaves Chat or collapses it, so a remount shows the cached rows
  * at once and refetches behind them (`staleTime: 0`). A filter change keeps
- * the previous rows until the new list lands.
+ * the previous rows until the new list lands. Lists stay cached for the tab's
+ * lifetime (`gcTime: Infinity`), since there are at most one per filter and
+ * scope, so a long time away from Chat still comes back to rows.
  */
 export function useChatSessions(status: SessionStatusFilter, scope: SessionScope) {
   const queryClient = useQueryClient();
@@ -23,6 +25,7 @@ export function useChatSessions(status: SessionStatusFilter, scope: SessionScope
     queryKey: chatSessionsQueryKey(status, scope),
     queryFn: () => listSessions(status, scope),
     staleTime: 0,
+    gcTime: Number.POSITIVE_INFINITY,
     placeholderData: keepPreviousData,
   });
 
