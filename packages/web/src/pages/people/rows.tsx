@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { ListRow } from "@/components/ui/list-row";
 import { Avatar, AVATAR_TONE, GUARDIAN_TONE } from "./avatar";
-import { ChannelGlyph, ChannelPill } from "./channel-meta";
+import { ChannelGlyph, ChannelPill, channelLabel } from "./channel-meta";
 import { timeAgo } from "./format";
 import { isRowFixed, rowHandle, type PeopleRow, type RowLevel } from "./people-model";
 import { accountHandle } from "./send-model";
@@ -243,6 +243,9 @@ function GuardianAccounts({ accounts }: { accounts: PeopleRow["accounts"] }) {
         >
           <span className="shrink-0">
             <ChannelGlyph channel={account.channel} />
+            {/* The glyph is hidden from assistive tech, so the platform is
+                named for it here. */}
+            <span className="sr-only">{channelLabel(t, account.channel)}</span>
           </span>
           <span className="min-w-0 break-all font-mono tabular-nums">{accountHandle(account)}</span>
         </span>

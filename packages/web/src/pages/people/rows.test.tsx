@@ -92,6 +92,8 @@ describe("DirectoryRow", () => {
       />,
     );
     expect(screen.getByText("418820113")).toBeTruthy();
+    // The glyph is aria-hidden, so the platform reaches a screen reader as text.
+    expect(screen.getByRole("button", { name: /Mock Guardian.*Telegram.*418820113/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /Mock Guardian/ }));
     expect(onOpen).toHaveBeenCalledOnce();
   });
