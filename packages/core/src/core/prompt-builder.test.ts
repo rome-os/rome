@@ -231,6 +231,24 @@ describe("PromptBuilder", () => {
     expect(systemPrompt).toContain("`http://127.0.0.1:4141/apps/<appId>` to use a specific app");
   });
 
+  it("points the main agent at Rome's docs for questions about Rome itself", () => {
+    const docsDir = join(mockPaths.projectRoot, "docs");
+    mkdirSync(docsDir, { recursive: true });
+
+    const systemPrompt = new PromptBuilder().build(mainConfig, corePromptOptions);
+
+    expect(systemPrompt).toContain(
+      `Rome's docs are in \`${docsDir}\`. Search them before answering whether Rome supports something.`,
+    );
+  });
+
+  it("omits the docs pointer when the docs did not ship", () => {
+    const systemPrompt = new PromptBuilder().build(mainConfig, corePromptOptions);
+
+    expect(systemPrompt).toContain("# Runtime Context");
+    expect(systemPrompt).not.toContain("Rome's docs are in");
+  });
+
   it("asks guardian-facing agents to state a short plan before long-running work", () => {
     const prompt = new PromptBuilder().build({ ...mainConfig, actions: ["*"] }, corePromptOptions);
     // Cut at the next top-level heading so the checks stay inside this section.

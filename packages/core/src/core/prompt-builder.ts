@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { AgentConfig } from "../types.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -12,6 +12,7 @@ import {
   getProfileMemoryDir,
   getProjectRoot,
   getRepoAppsDir,
+  getRepoDocsDir,
 } from "../paths.js";
 import { getInternalApiBaseUrl } from "../internal-api-url.js";
 import { getWebchatProjectsRoot, resolveWebchatProjectPath } from "../webchat/projects.js";
@@ -261,6 +262,8 @@ export class PromptBuilder {
   private readonly profileMemoryDir: string;
   private readonly profileInstalledAppsDir: string;
   private readonly repoAppsDir: string;
+  /** Null when the docs did not ship, so the prompt never points at a missing path. */
+  private readonly repoDocsDir: string | null;
 
   /**
    * @param romeEmailAddress Synchronous accessor for Rome's own provisioned
@@ -286,6 +289,8 @@ export class PromptBuilder {
     this.profileMemoryDir = getProfileMemoryDir();
     this.profileInstalledAppsDir = getProfileInstalledAppsDir();
     this.repoAppsDir = getRepoAppsDir(this.projectRoot);
+    const repoDocsDir = getRepoDocsDir(this.projectRoot);
+    this.repoDocsDir = existsSync(repoDocsDir) ? repoDocsDir : null;
   }
 
   build(config: AgentConfig, options: PromptBuildOptions): string {
@@ -459,6 +464,13 @@ export class PromptBuilder {
       "- The browser profile is persistent: a site the guardian signs into once stays logged in for later turns, so you can reuse an authenticated session without signing in again. If the guardian asks you to perform a task behind an auth wall while the account is not logged in, ask the guardian if they would like to log in using the browser.",
       `- In the agent browser, visit \`${internalApiBaseUrl}\` to open the Rome dashboard, or \`${internalApiBaseUrl}/apps/<appId>\` to use a specific app.`,
     ];
+
+    if (this.repoDocsDir) {
+      lines.push(
+        "",
+        `Rome's docs are in \`${this.repoDocsDir}\`. Search them before answering whether Rome supports something.`,
+      );
+    }
 
     const publicOrigin = this.romePublicOrigin?.trim();
     if (publicOrigin) {

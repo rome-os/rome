@@ -179,6 +179,11 @@ async function main() {
   await copyPath("infra/chrome");
   copiedTopLevelPaths.add("infra");
 
+  // The main agent's prompt points at docs/ so it can answer the guardian's
+  // questions about what Rome supports from the docs for the version it runs.
+  await copyPath("docs");
+  copiedTopLevelPaths.add("docs");
+
   assertForbiddenPackagesAbsent();
 
   const workspacePackages = await listWorkspacePackages(runtimeWorkspace);
