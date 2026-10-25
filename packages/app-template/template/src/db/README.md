@@ -23,7 +23,7 @@ DB connection for this app until you opt in.
    ```ts
    import { createHelloRepository } from "../db/repositories/hello.js";
    const repo = createHelloRepository(runtime.appContext.db);
-   await repo.recordGreeting("hello");
+   repo.recordGreeting("hello");
    ```
 
 Re-run `pnpm db:generate` whenever you change `schema.ts` to produce a new
