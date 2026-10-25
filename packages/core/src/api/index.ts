@@ -18,6 +18,7 @@ import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { wechatAppRoutes } from "./routes/wechat-app.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
+import { refuseCrossSiteLoopbackMutations } from "./middleware/loopback-cross-site.js";
 import { sessionActorMiddleware } from "../lib/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
@@ -93,6 +94,11 @@ export function buildApp(
   const app = new Hono();
   app.onError(errorHandler);
 
+  // The in-container browser shares loopback with Rome's own callers, so a
+  // page it opens on any site could otherwise post to every route below as
+  // the guardian.
+  app.use("*", refuseCrossSiteLoopbackMutations());
+
   // Same-container Agent surface. This is deliberately outside `/api`, which
   // is Caddy-proxied, and refuses to register on a non-loopback listener.
   app.route(
@@ -125,8 +131,10 @@ export function buildApp(
   // here on purpose: the Hono server binds to loopback (`INTERNAL_API_HOST`),
   // so the only callers are (1) internal Rome processes inside the container
   // and (2) Caddy after `forward_auth` clears the request at the public edge.
-  // A Rome instance is single-tenant by design, so route handlers do not need
-  // to derive a userId — the instance itself is the user. See
+  // The in-container browser is also a loopback caller, which is why the
+  // cross-site mutation guard above runs before these routes. A Rome instance
+  // is single-tenant by design, so route handlers do not need to derive a
+  // userId — the instance itself is the user. See
   // `scripts/generate-caddyfile.ts` for the edge-side enforcement.
   const api = new Hono();
 

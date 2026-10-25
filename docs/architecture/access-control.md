@@ -33,6 +33,10 @@ The edge consults the probe on routes configured with `forward_auth` and forward
 
 `/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks guardian identity and browser origin before accepting any of these WebSocket upgrades, including requests that arrive through Tailnet Serve. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. `/ws/events` also admits a visitor on the dashboard allow-list, who gets the chat topics but not the app catalog, as on the matching SSE routes. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
+The same browser can also send a cross-site form post or `text/plain` fetch to the internal listener, with no CORS preflight. Loopback trust would run it as the guardian. So a direct loopback caller, one with no `X-Forwarded-For`, may not send a mutating method (anything but GET, HEAD and OPTIONS) from another site. Rome refuses it when `Sec-Fetch-Site` is `cross-site` or `same-site`, or when the Origin is not the dashboard's own loopback origin. A page on another loopback port counts as another site, and `Origin: null` passes only with `Sec-Fetch-Site: same-origin`. A caller that sends neither header, such as a script or Rome's own fetch, is not a browser page and passes.
+
+The health daemon on port 9368 serves no page. It refuses every mutating method that carries an Origin, or a `Sec-Fetch-Site` of `cross-site` or `same-site`. It also sends no CORS header, so no page can read its status.
+
 ### Invariants
 
 - The edge is fail-closed: every API path is private unless an explicit allow-list entry opens it. A newly added API route inherits the private default.
