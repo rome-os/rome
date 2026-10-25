@@ -22,6 +22,7 @@ import type {
   Capability,
   CapabilityStatus,
   Connection,
+  ConnectionState,
   ConnectionDescriptor,
   ConnectionId,
   Credential,
@@ -980,6 +981,12 @@ class ConnectionImpl implements Connection {
   isUnlocked(cap: Capability): boolean {
     const slot = this.slots.get(cap);
     return slot ? slot.epoch !== null : false;
+  }
+
+  state(): ConnectionState | null {
+    const states = Object.values(this.grants());
+    if (states.includes("degraded")) return "broken";
+    return states.every((state) => state === "authorized") ? "working" : null;
   }
 
   status(): Record<Capability, CapabilityStatus> {

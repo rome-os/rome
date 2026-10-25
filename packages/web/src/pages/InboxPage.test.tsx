@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { connections as mockConnections } from "../../mock/handlers/connections-store";
+import type { GrantState } from "@/lib/connections-api";
+import { stateOfGrants } from "@/test/connection-state";
 import InboxPage from "./InboxPage";
 
 beforeAll(async () => {
@@ -28,11 +30,12 @@ function mockBackend(connections: unknown[] = []) {
   }) as typeof fetch);
 }
 
-// A lean /api/connections row for the source overview: grant states + whether
+// A lean /api/connections row for the source overview: its state + whether
 // the Talk capability is unlocked.
-function connectionRow(kind: string, grants: Record<string, string>, talkUnlocked: boolean) {
+function connectionRow(kind: string, grants: Record<string, GrantState>, talkUnlocked: boolean) {
   return {
     connectionKind: kind,
+    state: stateOfGrants(grants),
     grants,
     capabilities: { talk: { state: talkUnlocked ? "unlocked" : "needs-auth" } },
   };

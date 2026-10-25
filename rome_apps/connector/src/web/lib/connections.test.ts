@@ -4,7 +4,7 @@ import {
   CATALOG,
   CATALOG_BY_SLUG,
   ROME_MANAGED_CATALOG,
-  romeManagedGrantsUsable,
+  romeManagedConnectionWorking,
   connectedRomeManagedSlugs,
   isRomeSettingsLink,
   type ConnectedAccount,
@@ -185,25 +185,37 @@ describe("Rome-managed providers", () => {
   });
 });
 
-describe("romeManagedGrantsUsable", () => {
-  it("counts only an authorized grant as connected", () => {
-    expect(romeManagedGrantsUsable({ store: "authorized" })).toBe(true);
-    // A degraded grant is on file but its token is dead: the card keeps
+describe("romeManagedConnectionWorking", () => {
+  it("counts only a working connection as connected", () => {
+    expect(romeManagedConnectionWorking({ state: "working" })).toBe(true);
+    // A broken connection is on file but its token is dead: the card keeps
     // offering the reconnect.
-    expect(romeManagedGrantsUsable({ store: "degraded" })).toBe(false);
-    expect(romeManagedGrantsUsable({ store: "unauthorized" })).toBe(false);
-    expect(romeManagedGrantsUsable(undefined)).toBe(false);
+    expect(romeManagedConnectionWorking({ state: "broken" })).toBe(false);
+    expect(romeManagedConnectionWorking({ state: null })).toBe(false);
+    expect(romeManagedConnectionWorking(undefined)).toBe(false);
+  });
+
+  it("reads the grants of a host from before connection states", () => {
+    expect(romeManagedConnectionWorking({ grants: { store: "authorized" } })).toBe(true);
+    expect(romeManagedConnectionWorking({ grants: { store: "degraded" } })).toBe(false);
+    expect(romeManagedConnectionWorking({ grants: { store: "unauthorized" } })).toBe(false);
+  });
+
+  it("trusts the state over the grants when a host sends both", () => {
+    expect(romeManagedConnectionWorking({ state: "broken", grants: { store: "authorized" } })).toBe(
+      false,
+    );
   });
 });
 
 describe("connectedRomeManagedSlugs", () => {
   it("marks a Rome-managed card connected from the registry, not Composio", () => {
     const slugs = connectedRomeManagedSlugs([
-      { connectionKind: "shopify", grants: { store: "authorized" } },
-      { connectionKind: "github", grants: { user: "degraded" } },
-      { connectionKind: "slack", grants: { workspace: "unauthorized" } },
+      { connectionKind: "shopify", state: "working" },
+      { connectionKind: "github", state: "broken" },
+      { connectionKind: "slack", state: null },
       // A kind of connection outside the Rome-managed catalog never counts.
-      { connectionKind: "telegram", grants: { bot: "authorized" } },
+      { connectionKind: "telegram", state: "working" },
     ]);
     expect([...slugs]).toEqual(["shopify"]);
     expect(connectedRomeManagedSlugs(undefined).size).toBe(0);

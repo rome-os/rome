@@ -26,6 +26,8 @@ describe("ensureZeroGrantConnections", () => {
     expect(registry.find("webchat")).toHaveLength(1);
     // webchat is zero-grant → unlocked at birth
     expect(registry.find("webchat")[0].isUnlocked("talk")).toBe(true);
+    // With no grant to reject, it is always working.
+    expect(registry.find("webchat")[0].state()).toBe("working");
 
     // Idempotent: a second run does not create a duplicate connection.
     await ensureZeroGrantConnections(registry);

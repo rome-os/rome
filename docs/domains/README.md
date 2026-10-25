@@ -64,6 +64,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - A fix that reaches another account is refused for a Telegram bot, a signed-in Telegram user, a Feishu or Lark app, a Discord bot and a Slack bot.
 - Connecting through a setup flow is one step: the connection exists only once setup succeeds.
 - What a connection lets Rome do is fixed by its kind.
+- Working and broken are states of the connection, and the dashboard shows them.
 
 Diffs still owed to the model, each a change of its own:
 
@@ -92,6 +93,5 @@ Diffs still owed to the model, each a change of its own:
 - A fix that reaches another account is refused for every kind of connection, email, WhatsApp and the sign-ins such as GitHub included.
 - Connecting through a sign-in such as GitHub is one step too. A sign-in Rome rejects leaves no connection behind.
 - A connection holds one grant, and renewing or fixing replaces it whole.
-- Working and broken are states of the connection, and the dashboard shows them.
 - Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
 - The code says chat, act and watch for what a connection lets Rome do.

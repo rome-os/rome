@@ -25,7 +25,7 @@ import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 
 /** Whether the card's own Talk (not a folded personal-account slot) is connected. */
 function talkConnected(card: ConnectionCard): boolean {
-  return card.slots.some((slot) => slot.key !== "session" && slot.state !== "unauthorized");
+  return card.slots.some((slot) => slot.key !== "session" && slot.state !== null);
 }
 
 export function AccountControls({
@@ -98,7 +98,7 @@ function newAccountSlot(card: ConnectionCard): ConnectionSlot | null {
   return {
     ...own,
     connectionId: null,
-    state: "unauthorized",
+    state: null,
     display: null,
     identity: null,
     activeSetupCid: null,

@@ -91,6 +91,12 @@ function useGalleryFetchGuard() {
 
 let fixtureId = 0;
 
+/** The connection's state as core derives it from its grants. */
+function connectionState(states: GrantState[]): ApiConnection["state"] {
+  if (states.includes("degraded")) return "broken";
+  return states.every((state) => state === "authorized") ? "working" : null;
+}
+
 /** One mock ConnectionView row. Grants map name → state (+ optional display). */
 function apiConnection(
   service: string,
@@ -114,6 +120,7 @@ function apiConnection(
     id: options.placeholder ? null : `fixture-${service}-${fixtureId++}`,
     connectionKind: service,
     label: service,
+    state: connectionState(Object.values(grantStates)),
     grants: grantStates,
     display,
     // Capability statuses don't drive the card presentation (copy is

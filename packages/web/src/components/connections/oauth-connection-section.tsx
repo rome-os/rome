@@ -185,7 +185,7 @@ export function OAuthConnectionSection({
     );
   }
 
-  if (slot.state === "unauthorized") {
+  if (slot.state === null) {
     return (
       <ConnectionSlotCard
         service={card.service}
@@ -246,11 +246,11 @@ export function OAuthConnectionSection({
     );
   }
 
-  // Conferred (authorized or degraded): the account identity is the card
+  // Connected (working or broken): the account identity is the card
   // title; avatar (when present) replaces the brand badge in the header. The
   // handle/email becomes the connected subtitle when it adds information
   // beyond the title.
-  const expired = slot.state === "degraded";
+  const expired = slot.state === "broken";
   const accountLine = slot.identity ?? label;
   const accountDetail =
     (slot.display?.email !== accountLine ? slot.display?.email : null) ||

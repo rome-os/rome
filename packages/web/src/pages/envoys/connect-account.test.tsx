@@ -8,6 +8,7 @@ import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import i18n from "@/i18n";
 import type { ApiConnection } from "@/lib/connections-api";
 import EnvoysPage from "./EnvoysPage";
+import { stateOfGrants } from "@/test/connection-state";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -23,6 +24,7 @@ function connection(service: string, overrides: Partial<ApiConnection> = {}): Ap
     id: `${service}-id`,
     connectionKind: service,
     label: service,
+    state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? { bot: "authorized" }),
     grants: { bot: "authorized" },
     display: { bot: { displayName: service } },
     capabilities: {

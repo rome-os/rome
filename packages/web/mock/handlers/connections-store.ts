@@ -6,10 +6,10 @@ import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 // behind that channel have to notice. Keeping it in `index.ts` would have meant
 // `people.ts` importing the module that imports it.
 //
-// Every card reads its state from `grants`, never from `capabilities`: a
-// connection with an empty grant map renders "Not connected" however unlocked
-// its capabilities claim to be. Each entry below therefore carries the grant
-// its ceremony would have conferred, or the Connections page would contradict
+// Every card reads its state from `state`, never from `capabilities`: a
+// connection with no state renders "Not connected" however unlocked its
+// capabilities claim to be. Each entry below therefore carries the working
+// state its ceremony would have left, or the Connections page would contradict
 // the surfaces these fixtures feed — the People page's WhatsApp contacts, and
 // the configured Discord and Telegram conversations below.
 export const connections: { connections: ApiConnection[] } = {
@@ -18,6 +18,7 @@ export const connections: { connections: ApiConnection[] } = {
       id: "github-demo",
       connectionKind: "github",
       label: "GitHub · Rome Demo",
+      state: "working",
       grants: { user: "authorized" },
       display: {
         user: { displayName: "Rome Demo", handle: "rome-demo", email: null, avatarUrl: null },
@@ -48,6 +49,7 @@ export const connections: { connections: ApiConnection[] } = {
         id: `${service}-demo`,
         connectionKind: service,
         label: `${label} · Rome Demo`,
+        state: "working",
         grants: { [grant]: "authorized" },
         display: {
           [grant]: { displayName: "Rome Demo", handle: null, email, avatarUrl: null },
@@ -69,6 +71,7 @@ export const connections: { connections: ApiConnection[] } = {
       id: "discord-1",
       connectionKind: "discord",
       label: "Discord · Rome",
+      state: "working",
       grants: { bot: "authorized" },
       display: {
         bot: { displayName: "Rome", handle: "rome#4417", email: null, avatarUrl: null },
@@ -88,6 +91,7 @@ export const connections: { connections: ApiConnection[] } = {
       id: "telegram-1",
       connectionKind: "telegram",
       label: "Telegram · Rome",
+      state: "working",
       grants: { bot: "authorized" },
       display: {
         bot: { displayName: "Rome", handle: "@rome_guardian_bot", email: null, avatarUrl: null },
@@ -111,6 +115,7 @@ export const connections: { connections: ApiConnection[] } = {
       id: "whatsapp-1",
       connectionKind: "whatsapp",
       label: "WhatsApp · Rome",
+      state: "working",
       grants: { session: "authorized" },
       display: {
         session: { displayName: "Rome", handle: "+1 (415) 555-0100", email: null, avatarUrl: null },
@@ -130,6 +135,7 @@ export const connections: { connections: ApiConnection[] } = {
       id: "linkedin-1",
       connectionKind: "linkedin",
       label: "LinkedIn · Rome",
+      state: "working",
       grants: { session: "authorized" },
       display: {
         session: { displayName: "Rome", handle: "rome-guardian", email: null, avatarUrl: null },

@@ -1316,8 +1316,7 @@ export const handlers = [
         { status: 400 },
       );
     }
-    const connected = Object.values(target.grants).some((state) => state !== "unauthorized");
-    if (!connected) {
+    if (target.state === null) {
       return HttpResponse.json(
         { error: "This account does not receive messages." },
         { status: 409 },
@@ -1353,6 +1352,7 @@ export const handlers = [
       return HttpResponse.json({ error: "Unknown grant." }, { status: 404 });
     }
     connection.grants[grant] = "unauthorized";
+    connection.state = null;
     connection.display[grant] = null;
     // Which capability a grant backs is the registry's to know, and a fixture
     // cannot reproduce that map without inventing it. What it can say without
@@ -1369,9 +1369,7 @@ export const handlers = [
     }
     // Core removes an account of a service that names its accounts, which
     // the linkable services are.
-    const unconnectedAccount =
-      LINKABLE_KINDS.has(connection.connectionKind) &&
-      Object.values(connection.grants).every((state) => state === "unauthorized");
+    const unconnectedAccount = LINKABLE_KINDS.has(connection.connectionKind);
     if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
     const others = connections.connections.filter(
       (candidate) =>

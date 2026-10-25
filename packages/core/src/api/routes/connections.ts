@@ -4,7 +4,7 @@
 // integrations alike — the sole feed for the dashboard's Connections surface.
 // Registered connection kinds with no connection row yet appear as offerable
 // placeholders (`id: null`) so a fresh install still renders the full catalog.
-// The projection speaks registry vocabulary (GrantState / CapabilityStatus)
+// The projection speaks registry vocabulary (ConnectionState / CapabilityStatus)
 // verbatim; identity only ever crosses through the descriptor's `reviveProfile`
 // hook, so no kind-specific profile field name is known here. Minting stays in
 // the connect setup, a later account of a connection kind included.
@@ -23,6 +23,7 @@ import type {
   CapabilityStatus,
   Connection,
   ConnectionDescriptor,
+  ConnectionState,
   GrantName,
   GrantState,
 } from "../../connections/types.js";
@@ -86,6 +87,10 @@ interface ConnectionView
    *  before the rename read. */
   service: string;
   label: string;
+  /** Working or broken. Null for a placeholder, and for a connection a
+   *  disconnect kept with no access. */
+  state: ConnectionState | null;
+  /** @deprecated Per-grant states, which apps built before `state` read. */
   grants: Record<GrantName, GrantState>;
   /** One entry per declared grant: the revived display, or null when the grant
    *  has no stored profile or the descriptor exposes no projection. */
@@ -155,6 +160,7 @@ function buildConnectionView(
     connectionKind: conn.connectionKind,
     service: conn.connectionKind,
     label: conn.label,
+    state: conn.state(),
     grants,
     display,
     capabilities: conn.status(),
@@ -236,6 +242,7 @@ function placeholderView(
     connectionKind,
     service: connectionKind,
     label: connectionKind,
+    state: null,
     grants,
     display,
     capabilities: {

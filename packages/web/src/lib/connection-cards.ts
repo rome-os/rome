@@ -9,7 +9,7 @@
  * personal account folds onto the Telegram card as its `session` slot; the
  * Composio account broker appends as a synthetic card since it is not a
  * registry connection). Connection state stays registry vocabulary
- * (`GrantState`) verbatim — the old client-side fold of
+ * (`ConnectionState`) verbatim — the old client-side fold of
  * `/api/channels/status` + `/api/integrations` and its
  * `UnifiedConnection`/`CredentialSlot` vocabulary are gone.
  *
@@ -24,8 +24,8 @@ import type {
   ApiConnection,
   CapabilityDegradation,
   ConnectHint,
+  ConnectionState,
   GrantDisplay,
-  GrantState,
 } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 
@@ -41,7 +41,8 @@ export interface ConnectionSlot {
   /** The registry grant name this slot revokes (`DELETE
    *  /api/connections/:id/grants/:grant`); null for zero-grant services. */
   grant: string | null;
-  state: GrantState;
+  /** The backing connection's state: null while it gives Rome no access. */
+  state: ConnectionState | null;
   display: GrantDisplay | null;
   /** Folded display identity (displayName, else handle, else email). */
   identity: string | null;
@@ -152,13 +153,13 @@ function foldIdentity(display: GrantDisplay | null): string | null {
 }
 
 function toSlots(connection: ApiConnection, key?: SlotKey): ConnectionSlot[] {
-  return Object.entries(connection.grants).map(([grant, state]) => {
+  return Object.keys(connection.grants).map((grant) => {
     const display = connection.display[grant] ?? null;
     return {
       key: key ?? slotKeyFor(connection.connectionKind, grant),
       connectionId: connection.id,
       grant,
-      state,
+      state: connection.state,
       display,
       identity: foldIdentity(display),
       activeSetupCid: connection.setups[grant] ?? null,
@@ -200,13 +201,13 @@ export function accountRoute(cards: ConnectionCard[], connectionId: string): str
 function toCard(connection: ApiConnection): ConnectionCard {
   const alwaysOn = connection.connectionKind === "webchat";
   const slots = alwaysOn
-    ? // Zero-grant: synthesize the single always-authorized presentation slot.
+    ? // Zero-grant: synthesize the single always-working presentation slot.
       [
         {
           key: "bot" as const,
           connectionId: connection.id,
           grant: null,
-          state: "authorized" as const,
+          state: "working" as const,
           display: null,
           identity: null,
           activeSetupCid: null,
@@ -251,7 +252,7 @@ function composioCard(status: ComposioCliStatus): ConnectionCard {
         key: "user",
         connectionId: null,
         grant: null,
-        state: status.loggedIn ? "authorized" : "unauthorized",
+        state: status.loggedIn ? "working" : null,
         display: null,
         identity: null,
         activeSetupCid: null,

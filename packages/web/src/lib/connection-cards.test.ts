@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import { buildConnectionCards } from "@/lib/connection-cards";
 import type { ApiConnection, GrantDisplay } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+import { stateOfGrants } from "@/test/connection-state";
 
 /**
  * The presentation fold over `GET /api/connections`: one card per service,
@@ -21,6 +22,7 @@ function conn(
   return {
     id: `conn-${overrides.connectionKind}`,
     label: overrides.connectionKind,
+    state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? {}),
     grants: {},
     display: {},
     capabilities: {
@@ -94,7 +96,7 @@ describe("buildConnectionCards — runtime degradation", () => {
       reason: "WeChat reported a stale session.",
       retryAt: "2026-07-20T12:00:00.000Z",
     });
-    expect(cards[0].slots[0].state).toBe("authorized");
+    expect(cards[0].slots[0].state).toBe("working");
   });
 });
 
@@ -125,7 +127,7 @@ describe("buildConnectionCards — Telegram fold", () => {
     expect(bot).toMatchObject({
       connectionId: "conn-tg",
       grant: "bot",
-      state: "authorized",
+      state: "working",
       identity: "mybot",
     });
 
@@ -135,7 +137,7 @@ describe("buildConnectionCards — Telegram fold", () => {
     expect(session).toMatchObject({
       connectionId: "conn-tg-user",
       grant: "session",
-      state: "authorized",
+      state: "working",
       identity: "My Name",
     });
     expect(session?.display).toEqual(display({ displayName: "My Name", handle: "me" }));
@@ -180,7 +182,7 @@ describe("buildConnectionCards — Telegram fold", () => {
       key: "session",
       connectionId: "conn-tg-user",
       grant: "session",
-      state: "degraded",
+      state: "broken",
       identity: "My Name",
     });
   });
@@ -211,14 +213,14 @@ describe("buildConnectionCards — Composio card", () => {
     expect(last.alwaysOn).toBe(false);
   });
 
-  it("maps the CLI login state onto the synthetic slot's grant state", () => {
+  it("maps the CLI login state onto the synthetic slot's state", () => {
     const loggedOut = buildConnectionCards([], composio({ loggedIn: false }));
     expect(loggedOut[0].slots).toEqual([
       {
         key: "user",
         connectionId: null,
         grant: null,
-        state: "unauthorized",
+        state: null,
         display: null,
         identity: null,
         activeSetupCid: null,
@@ -226,7 +228,7 @@ describe("buildConnectionCards — Composio card", () => {
     ]);
 
     const loggedIn = buildConnectionCards([], composio({ loggedIn: true }));
-    expect(loggedIn[0].slots[0].state).toBe("authorized");
+    expect(loggedIn[0].slots[0].state).toBe("working");
   });
 });
 
@@ -297,7 +299,7 @@ describe("buildConnectionCards — slot mapping", () => {
     expect(cards.find((c) => c.service === "github")?.slots[0].key).toBe("user");
   });
 
-  it("webchat is alwaysOn with one synthesized authorized slot (zero-grant service)", () => {
+  it("webchat is alwaysOn with one synthesized working slot (zero-grant service)", () => {
     const cards = buildConnectionCards([conn({ connectionKind: "webchat", id: "conn-webchat" })]);
     expect(cards).toHaveLength(1);
     const webchat = cards[0];
@@ -308,7 +310,7 @@ describe("buildConnectionCards — slot mapping", () => {
         key: "bot",
         connectionId: "conn-webchat",
         grant: null,
-        state: "authorized",
+        state: "working",
         display: null,
         identity: null,
         activeSetupCid: null,
@@ -352,7 +354,7 @@ describe("buildConnectionCards — slot mapping", () => {
     expect(cards[0].slots[0]).toMatchObject({
       connectionId: null,
       grant: "user",
-      state: "unauthorized",
+      state: null,
     });
   });
 });

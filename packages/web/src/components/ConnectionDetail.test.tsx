@@ -10,6 +10,7 @@ import { buildConnectionCards, type ConnectionCard } from "@/lib/connection-card
 import type { ApiConnection, ConnectHint, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import { toast } from "sonner";
+import { stateOfGrants } from "@/test/connection-state";
 
 rs.mock("sonner", () => ({
   toast: Object.assign(
@@ -62,6 +63,7 @@ function connection(
   return {
     id: `conn-${overrides.connectionKind}`,
     label: overrides.connectionKind,
+    state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? {}),
     grants: {},
     display: {},
     capabilities: {

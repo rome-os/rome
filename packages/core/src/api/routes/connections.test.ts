@@ -97,6 +97,7 @@ describe("GET /connections", () => {
       connectionKind: "fake-telegram",
       service: "fake-telegram",
       label: "Telegram",
+      state: "working",
       grants: { bot: "authorized" },
       display: {
         bot: { displayName: "Rome Bot", handle: "rome_bot", email: null, avatarUrl: null },
@@ -195,6 +196,7 @@ describe("GET /connections", () => {
       connectionKind: "fake-discord",
       service: "fake-discord",
       label: "fake-discord",
+      state: null,
       grants: { bot: "unauthorized", user: "unauthorized" },
       display: { bot: null, user: null },
       capabilities: {

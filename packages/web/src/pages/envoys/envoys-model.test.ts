@@ -2,11 +2,13 @@ import { describe, expect, it } from "@rstest/core";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import type { ApiConnection } from "@/lib/connections-api";
 import { buildEnvoys, connectChoices } from "./envoys-model";
+import { stateOfGrants } from "@/test/connection-state";
 
 function connection(overrides: Partial<ApiConnection> & { connectionKind: string }): ApiConnection {
   return {
     id: `${overrides.connectionKind}-id`,
     label: overrides.connectionKind,
+    state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? { bot: "authorized" }),
     grants: { bot: "authorized" },
     display: { bot: null },
     capabilities: {

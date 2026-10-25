@@ -61,7 +61,7 @@ export function ConnectionDetailBody({
     <div className="space-y-6">
       {card.slots.map((slot, index) => {
         const isSecondary = index > 0;
-        const showAvailableToAdd = isSecondary && slot.state === "unauthorized";
+        const showAvailableToAdd = isSecondary && slot.state === null;
         const role = isSecondary ? "secondary" : "primary";
         return (
           <div key={slot.key} className="space-y-2">

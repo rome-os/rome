@@ -205,12 +205,26 @@ export type CapabilityStatus =
   | { state: "needs-subscription" }
   | { state: "unsupported" };
 
+/**
+ * Whether the platform accepts the connection's grant. A broken connection
+ * keeps its account and that account's agent until the guardian gives access
+ * again (docs/domains/connections.md).
+ */
+export type ConnectionState = "working" | "broken";
+
 /** One connection kind, named grants, up to three capabilities. */
 export interface Connection {
   readonly id: ConnectionId;
   readonly connectionKind: string;
   readonly label: string;
   readonly auth: AuthState;
+  /**
+   * Broken when a grant is degraded, working when every grant is authorized.
+   * Null while a grant is unauthorized: a disconnect that keeps the
+   * connection leaves no access behind, so it is neither. A connection with
+   * no grants is working.
+   */
+  state(): ConnectionState | null;
   /** Discovery with reasons — drives the dashboard and connect hints. */
   status(): Record<Capability, CapabilityStatus>;
   /** Whether `cap` is built and live now. `status()` reads the grants; this

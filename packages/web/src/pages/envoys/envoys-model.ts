@@ -60,8 +60,8 @@ function accountName(connection: ApiConnection): string | null {
 
 /** The grant through which an account is connected, if any. */
 function connectedGrant(connection: ApiConnection): string | null {
-  const grant = Object.entries(connection.grants).find(([, state]) => state !== "unauthorized");
-  return grant ? grant[0] : null;
+  if (connection.state === null) return null;
+  return Object.keys(connection.grants)[0] ?? null;
 }
 
 function toAccount(connection: ApiConnection): EnvoyAccount | null {

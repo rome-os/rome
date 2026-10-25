@@ -23,6 +23,7 @@ function connection(service: string, name: string, agent: string | null): ApiCon
     id: `${service}-id`,
     connectionKind: service,
     label: service,
+    state: "working",
     grants: { bot: "authorized" },
     display: { bot: { displayName: name } },
     capabilities: {
