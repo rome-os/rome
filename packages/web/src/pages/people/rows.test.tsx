@@ -74,11 +74,25 @@ describe("DirectoryRow", () => {
     // This is the guardian's own row: not moved, not merged, not selected.
     render(
       <DirectoryRow
-        row={row({ id: "me", displayName: "Mock Guardian", level: "guardian" })}
+        row={row({ id: "me", displayName: "Mock Guardian", level: "guardian", accounts: [] })}
         onToggleSelect={() => {}}
       />,
     );
     expect(screen.queryByRole("button", { name: /^Select/ })).toBeNull();
-    expect(screen.getByText("That is you. Full access to every surface.")).toBeTruthy();
+    expect(screen.getByText(/No accounts linked yet/)).toBeTruthy();
+  });
+
+  it("lists the guardian's linked accounts under their name and opens their page", async () => {
+    const user = userEvent.setup();
+    const onOpen = rs.fn();
+    render(
+      <DirectoryRow
+        row={row({ id: "me", displayName: "Mock Guardian", level: "guardian" })}
+        onOpen={onOpen}
+      />,
+    );
+    expect(screen.getByText("418820113")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Mock Guardian/ }));
+    expect(onOpen).toHaveBeenCalledOnce();
   });
 });

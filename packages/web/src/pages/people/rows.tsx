@@ -5,6 +5,7 @@ import { Avatar, AVATAR_TONE, GUARDIAN_TONE } from "./avatar";
 import { ChannelGlyph, ChannelPill } from "./channel-meta";
 import { timeAgo } from "./format";
 import { isRowFixed, rowHandle, type PeopleRow, type RowLevel } from "./people-model";
+import { accountHandle } from "./send-model";
 
 // The three rows the page renders. They differ by what the reader is doing:
 // routing to whoever has something new (stream), deciding where an unplaced
@@ -174,7 +175,7 @@ export function DirectoryRow({
       <span className="block truncate text-ui text-foreground">{row.displayName}</span>
       <span className="block truncate text-aux text-muted-foreground">
         {fixed ? (
-          t("guardian.meta")
+          <GuardianAccounts accounts={row.accounts} />
         ) : (
           <span className="font-mono tabular-nums">{handle ?? ""}</span>
         )}
@@ -187,10 +188,7 @@ export function DirectoryRow({
     // separate targets — select, open, and the menu — so the row itself is none
     // of them. The fill marks the row the pointer is over, and predates the
     // move onto `ListRow`.
-    <ListRow
-      selected={selected}
-      className={cn(ROW_GRID, fixed ? "cursor-default" : !selected && "hover:bg-surface-hover")}
-    >
+    <ListRow selected={selected} className={cn(ROW_GRID, !selected && "hover:bg-surface-hover")}>
       {fixed || !onToggleSelect ? (
         <Avatar name={row.displayName} tone={fixed ? GUARDIAN_TONE : AVATAR_TONE} />
       ) : (
@@ -207,7 +205,7 @@ export function DirectoryRow({
           <Avatar name={row.displayName} />
         </button>
       )}
-      {onOpen && !fixed ? (
+      {onOpen ? (
         <button type="button" onClick={onOpen} className="min-w-0 text-left">
           {who}
         </button>
@@ -216,5 +214,30 @@ export function DirectoryRow({
       )}
       <span className="flex items-center justify-end gap-2">{actions}</span>
     </ListRow>
+  );
+}
+
+/**
+ * The guardian's line under their name: the accounts that are theirs, each by
+ * its channel glyph and handle, so the roster answers "which accounts are me"
+ * without opening the person page. With none linked yet it says so, since the
+ * guardian's next step is "Link my account" beside the page title.
+ */
+function GuardianAccounts({ accounts }: { accounts: PeopleRow["accounts"] }) {
+  const { t } = useTranslation("people");
+  if (accounts.length === 0) return <>{t("guardian.noAccounts")}</>;
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+      <span className="shrink-0">{t("guardian.you")}</span>
+      {accounts.map((account) => (
+        <span
+          key={`${account.channel}:${account.channelUserId}`}
+          className="inline-flex shrink-0 items-center gap-1"
+        >
+          <ChannelGlyph channel={account.channel} />
+          <span className="font-mono tabular-nums">{accountHandle(account)}</span>
+        </span>
+      ))}
+    </span>
   );
 }

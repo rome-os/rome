@@ -211,19 +211,22 @@ describe("directoryGroups", () => {
       group.rows.map((row) => row.displayName),
     ]);
 
-  it("groups the placed people in ladder order, and orders each group by name", () => {
-    // "All" is the roster the guardian has placed, in ladder order, and the
-    // order within a group is the name, not what anyone last said.
+  it("leads with the guardian, then the placed people in ladder order, each group by name", () => {
+    // "All" is the guardian's own row, where they read which accounts are
+    // theirs, then the roster they have placed, in ladder order. The order
+    // within a group is the name, not what anyone last said.
     expect(groupsOf({ filter: "all", search: "" })).toEqual([
+      ["guardian", ["Mock Guardian"]],
       ["inner-circle", ["Ray Oster"]],
       ["other", ["Sam Okafor"]],
     ]);
   });
 
-  it("holds every position but the placed ones back from All, and enters each on purpose", () => {
-    // A queue, a dismissal and the reader's own row each answer a different
-    // question than "who does Rome know", so none of the three pads All.
+  it("holds the unplaced positions back from All, and enters each on purpose", () => {
+    // A queue and a dismissal each answer a different question than "who does
+    // Rome know", so neither pads All.
     expect(groupsOf({ filter: "all", search: "" }).map(([level]) => level)).toEqual([
+      "guardian",
       "inner-circle",
       "other",
     ]);
@@ -233,8 +236,8 @@ describe("directoryGroups", () => {
     expect(groupsOf({ filter: "stranger", search: "" })).toEqual([["stranger", ["Prize"]]]);
   });
 
-  it("leaves the guardian to a search rather than a chip", () => {
-    // No chip selects the guardian, and no chip carries them along either.
+  it("gives the guardian no chip of their own", () => {
+    // No chip selects the guardian, and a level chip does not carry them along.
     expect(groupsOf({ filter: "inner-circle", search: "" }).map(([level]) => level)).not.toContain(
       "guardian",
     );

@@ -144,7 +144,14 @@ export const persons: PersonFixture[] = [
     id: "mock-guardian",
     displayName: "Mock Guardian",
     bondLevel: "guardian",
-    channelMappings: [],
+    // The guardian's own accounts: a signed-in Telegram and WhatsApp, which are
+    // theirs the moment they connect, and a Feishu account linked by code. The
+    // directory row lists them under the name.
+    channelMappings: [
+      { channel: "telegram_user", channelUserId: "201447" },
+      { channel: "whatsapp", channelUserId: "15550100999@s.whatsapp.net" },
+      { channel: "feishu", channelUserId: "ou_7c3e19d2aa" },
+    ],
   },
   {
     id: "ray-oster",
