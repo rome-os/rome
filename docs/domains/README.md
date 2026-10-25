@@ -68,7 +68,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - What a connection lets Rome do is fixed by its kind.
 - Working and broken are states of the connection, and the dashboard shows them.
 - The dashboard chat is Rome's own channel, not a connection.
-- Rome's account record knows its platform and the platform's own id, and connecting an account that takes no agent again reaches its kept record by them.
+- Rome's account record knows its platform and the platform's own id.
 
 Diffs still owed to the model, each a change of its own:
 

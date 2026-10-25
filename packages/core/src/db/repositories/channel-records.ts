@@ -50,9 +50,10 @@ export class ChannelNotLinkable extends Error {
 
 type Exec = DrizzleDb | DrizzleTx;
 
-/** Let go of the account `accountId` on `platform` from every unbacked
- *  channel but `keep`, so channel `keep` can record it. A backed channel keeps
- *  it: only one live grant reaches an account, so none other is backed by it. */
+/** Let go of the account `accountId` on `platform` from every channel but
+ *  `keep`, so channel `keep` can record it. It runs only once the registry has
+ *  refused an account another live grant reaches, so a channel that still holds
+ *  the account is unbacked or backed by a Connection whose grant was given up. */
 function releaseAccount(exec: Exec, platform: string, accountId: string, keep: string): void {
   exec
     .update(channels)
@@ -61,7 +62,6 @@ function releaseAccount(exec: Exec, platform: string, accountId: string, keep: s
       and(
         eq(channels.platform, platform),
         eq(channels.platformAccountId, accountId),
-        isNull(channels.connectionId),
         ne(channels.id, keep),
       ),
     )
@@ -212,9 +212,9 @@ export class ChannelRecordsRepository {
    * when its connection kind takes one, and to none by default: Rome picks no agent
    * for an account. `domain` is a Feishu app's domain, which decides its
    * channel's platform. `accountId` is the platform's own id for the account
-   * the Connection reaches, when its grant reports one: an unbacked channel
-   * holding the same account is taken back before any other, and one holding
-   * another account never is.
+   * the Connection reaches, when its grant reports one, and the channel records
+   * it. Which channel is taken back does not depend on it yet: names such as
+   * `email` and `whatsapp` still reach a connection kind's one channel.
    */
   claim(
     exec: Exec,
@@ -237,21 +237,16 @@ export class ChannelRecordsRepository {
           .from(channels)
           .where(and(eq(channels.connectionKind, connectionKind), isNull(channels.connectionId)))
           .all()
-          .filter(
-            (row) =>
-              row.platformAccountId === null ||
-              (row.platform === platform && row.platformAccountId === accountId),
-          )
           .sort(
             (a, b) =>
-              Number(b.platformAccountId !== null) - Number(a.platformAccountId !== null) ||
               Number(b.id === connectionKind) - Number(a.id === connectionKind) ||
               a.createdAt.getTime() - b.createdAt.getTime(),
           )[0];
     if (vacant) {
       // Only a connection kind that takes no agent gets here, so the channel starts with none.
       if (accountId !== null) releaseAccount(exec, platform, accountId, vacant.id);
-      const platformAccountId = accountId ?? vacant.platformAccountId;
+      // A different account taking the channel back replaces the one it held.
+      const platformAccountId = accountId;
       exec
         .update(channels)
         .set({ connectionId: connection.id, agent: null, platformAccountId })
@@ -282,77 +277,20 @@ export class ChannelRecordsRepository {
 
   /**
    * Record that the channel `connectionId` backs is the account the platform
-   * knows as `accountId`, once a grant reports it. A channel holds one account
-   * for good: when a Connection kept across a revoke is given access to
-   * another account, its channel is released, as on a disconnect, and the
-   * Connection takes the new account's record. That record is an unbacked
-   * channel of the same connection kind that takes no agent and holds the
-   * account, so the account keeps its history, or else a fresh one. A
-   * channel that knows no account yet takes this one, unless such a kept
-   * record exists, in which case the Connection moves to it and the channel
-   * it leaves is released.
+   * knows as `accountId`, once a grant reports it. A Connection kept across a
+   * revoke may be given access to another account, which then replaces the
+   * one its channel held.
    */
-  recordAccount(exec: Exec, connectionId: string, accountId: string, now = new Date()): void {
+  recordAccount(exec: Exec, connectionId: string, accountId: string): void {
     const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
     if (!row || row.platformAccountId === accountId) return;
     this.ids.clear();
     this.links.clear();
-    const linkable = LINKABLE_KINDS.has(row.connectionKind);
-    const kept = linkable
-      ? undefined
-      : exec
-          .select()
-          .from(channels)
-          .where(
-            and(
-              eq(channels.platform, row.platform),
-              eq(channels.platformAccountId, accountId),
-              eq(channels.connectionKind, row.connectionKind),
-              isNull(channels.connectionId),
-            ),
-          )
-          .get();
-    if (row.platformAccountId === null && !kept) {
-      releaseAccount(exec, row.platform, accountId, row.id);
-      exec
-        .update(channels)
-        .set({ platformAccountId: accountId })
-        .where(eq(channels.id, row.id))
-        .run();
-      return;
-    }
-    // The channel this Connection leaves keeps its own account, unless its
-    // kind takes an agent, as `vacate` does.
+    releaseAccount(exec, row.platform, accountId, row.id);
     exec
       .update(channels)
-      .set({
-        connectionId: null,
-        agent: null,
-        platformAccountId: linkable ? null : row.platformAccountId,
-      })
+      .set({ platformAccountId: accountId })
       .where(eq(channels.id, row.id))
-      .run();
-    if (kept) {
-      exec
-        .update(channels)
-        .set({ connectionId, agent: null })
-        .where(eq(channels.id, kept.id))
-        .run();
-      return;
-    }
-    const id = randomUUID();
-    releaseAccount(exec, row.platform, accountId, id);
-    exec
-      .insert(channels)
-      .values({
-        id,
-        connectionKind: row.connectionKind,
-        platform: row.platform,
-        platformAccountId: accountId,
-        connectionId,
-        agent: null,
-        createdAt: now,
-      })
       .run();
   }
 

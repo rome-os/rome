@@ -293,7 +293,7 @@ describe("ConnectionRegistry account participants", () => {
 });
 
 describe("ConnectionRegistry account records", () => {
-  it("moves a Connection kept across a revoke to the record of the account it reaches next", async () => {
+  function recordingRegistry() {
     const db = createTestDb();
     const records = new ChannelRecordsRepository(db.db);
     const registry = new ConnectionRegistry({
@@ -304,26 +304,46 @@ describe("ConnectionRegistry account records", () => {
       onRemove: (tx, id) => records.vacate(tx, id),
     });
     registry.register(botIdDescriptor());
+    return { ...db, records, registry };
+  }
+
+  it("records the account a Connection kept across a revoke reaches next", async () => {
+    const { records, registry, close } = recordingRegistry();
     try {
       const conn = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
         botId: "100",
       });
-      const first = records.byConnection(conn.id);
-      expect(first?.platformAccountId).toBe("100");
+      expect(records.byConnection(conn.id)?.platformAccountId).toBe("100");
 
       await registry.revoke(conn.id, "bot");
       await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-2"), { botId: "200" });
       expect(records.byConnection(conn.id)?.platformAccountId).toBe("200");
-      expect(records.byId(first!.id)).toMatchObject({
-        connectionId: null,
-        platformAccountId: "100",
-      });
-
-      await registry.revoke(conn.id, "bot");
-      await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-3"), { botId: "100" });
-      expect(records.byConnection(conn.id)?.id).toBe(first!.id);
     } finally {
-      db.close();
+      close();
+    }
+  });
+
+  it("connects an account again while the Connection whose grant was revoked stays", async () => {
+    const { records, registry, close } = recordingRegistry();
+    try {
+      const old = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
+        botId: "100",
+      });
+      await registry.revoke(old.id, "bot");
+
+      const next = await registry.confer(
+        SERVICE,
+        undefined,
+        "bot",
+        credentialFor("t-2"),
+        { botId: "100" },
+        { another: true },
+      );
+      expect(next.id).not.toBe(old.id);
+      expect(records.byConnection(next.id)?.platformAccountId).toBe("100");
+      expect(records.byConnection(old.id)?.platformAccountId).toBeNull();
+    } finally {
+      close();
     }
   });
 });
