@@ -83,6 +83,7 @@
         // The action engine spawns these by resolved path, so no import
         // reaches them. See packages/core/src/actions/engine.ts.
         "src/actions/worker.ts",
+        "src/webchat/trace-archive-worker.ts",
         "src/actions/worker-bootstrap.ts",
         // oclif discovers commands by directory, named in package.json.
         "src/apps/cli/commands/**/*.ts",

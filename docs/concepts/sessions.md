@@ -79,11 +79,19 @@ The chat view loads a handoff child's history separately and splices it into the
 The calling session's trace summaries and descendant cost rollups do not read handoff traces.
 A merged transcript can therefore contain archived child steps beside active parent steps, while keeping both sessions' replies and cards.
 
-This window changes dashboard reads, not storage. It deletes nothing and does not change sharing, usage accounting, or agent resume context.
-Reactivation reveals retained traces while their blocks remain in the database.
-The window and idle predicate live in `packages/core/src/webchat/trace-retention.ts`.
-The repository's `getTraceArchivedSessionIds` applies that predicate to explicitly requested sessions.
-Step 2 will add its own archival selection query and must account for handoff links before removing traces.
+Rome archives idle steps before removing their heavy database blocks. The archive contains every block and identifies its session without the database.
+Self-hosted instances keep verified local files. Cloud-hosted instances upload to private account storage and remove the local file only after a confirmed upload.
+An unreachable archive store leaves both the local file and database blocks intact.
+Reactivation keeps exported turns archived and shows new turns in full. History, lazy reads, descendant reads, downloads, and new shares never expose retained accounting blocks as complete steps.
+
+Usage totals, model attribution, settled turn status, and descendant cost remain identical after archiving.
+Chat deletion removes local archives and durably retries remote deletion without delaying the chat delete.
+Instance teardown leaves Cloud archives with the account. Account deletion owns their removal.
+Restore is separate from this window.
+
+Archive passes start ten minutes after boot and repeat daily. Pruning yields between byte-capped batches.
+Database compaction requires substantial free pages, a quiet 02:00–06:00 guardian-local window, no running turn or imminent routine, and enough disk for a copy.
+Compaction never runs at boot.
 
 ## Event
 

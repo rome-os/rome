@@ -18,6 +18,9 @@ import {
   type SQL,
 } from "drizzle-orm";
 import {
+  ARCHIVE_KEEP_BLOCK_TYPES,
+  romeTraceArchives,
+  romeTraceArchiveDeletes,
   sharedChats,
   webchatProjects,
   romeSessions,
@@ -27,6 +30,7 @@ import {
   webchatTurnFeedback,
   webchatWorkspaceLayouts,
 } from "../schema.js";
+import { traceSessionActivitySql } from "./trace-activity.js";
 import type { DrizzleDb } from "../index.js";
 import {
   channelChatId,
@@ -36,11 +40,7 @@ import {
   withSessionKind,
 } from "../session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
-import {
-  isSessionTraceArchived,
-  sessionTraceCutoff,
-  TRACE_ACTIVITY_ROLES,
-} from "../../webchat/trace-retention.js";
+import { isSessionTraceArchived, sessionTraceCutoff } from "../../webchat/trace-retention.js";
 import type {
   TraceSubagentResultEvent,
   TraceSubagentStartEvent,
@@ -298,11 +298,15 @@ interface TraceReadOptions {
 }
 
 function traceReadFields(archivedSessionIds: string[]) {
-  const archived = archivedSessionIds.length
+  const idle = archivedSessionIds.length
     ? sql<boolean>`${romeAgentMessages.role} = 'trace' AND ${inArray(romeAgentMessages.sessionId, archivedSessionIds)}`.mapWith(
         Boolean,
       )
     : sql<boolean>`0`.mapWith(Boolean);
+  const archived =
+    sql<boolean>`${romeAgentMessages.role} = 'trace' AND (${idle} OR ${romeAgentMessages.traceArchiveId} IS NOT NULL)`.mapWith(
+      Boolean,
+    );
   return {
     id: romeAgentMessages.id,
     traceArchived: archived,
@@ -711,6 +715,19 @@ function decodeProjectSessionCursor(cursor: string | undefined): ProjectSessionC
 }
 
 export class WebChatRepository {
+  private archiveDeleteListeners = new Set<() => void>();
+
+  onTraceArchiveDelete(listener: () => void): () => void {
+    this.archiveDeleteListeners.add(listener);
+    return () => {
+      this.archiveDeleteListeners.delete(listener);
+    };
+  }
+
+  private notifyArchiveDelete() {
+    for (const listener of this.archiveDeleteListeners) listener();
+  }
+
   private messageInsertedListeners = new Set<WebchatMessageInsertedListener>();
   private sessionNameChangedListeners = new Set<WebchatSessionNameChangedListener>();
 
@@ -876,7 +893,7 @@ export class WebChatRepository {
     // it survives the delete and is left pointing at a project that no longer
     // exists. `.all()` is the synchronous terminal the better-sqlite3
     // transaction scope requires (the same shape the deletes' `.run()` uses).
-    return this.db.transaction((tx) => {
+    const count = this.db.transaction((tx) => {
       const sessionIds = tx
         .select({ id: romeSessions.id })
         .from(romeSessions)
@@ -888,6 +905,13 @@ export class WebChatRepository {
 
       // Same persistence contract as deleteSession(), but batched for project
       // deletion and all session kinds (top-level chats plus handoff children).
+      for (const id of sessionIds) {
+        tx.insert(romeTraceArchiveDeletes).values({ sessionId: id }).onConflictDoNothing().run();
+        tx.update(romeTraceArchives)
+          .set({ status: "discarded" })
+          .where(eq(romeTraceArchives.sessionId, id))
+          .run();
+      }
       for (const chunk of chunkArray(sessionIds, SESSION_DELETE_CHUNK_SIZE)) {
         tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, chunk)).run();
         tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, chunk)).run();
@@ -904,6 +928,8 @@ export class WebChatRepository {
 
       return sessionIds.length;
     });
+    this.notifyArchiveDelete();
+    return count;
   }
 
   async listProjects(): Promise<StoredWebchatProject[]> {
@@ -1517,6 +1543,11 @@ export class WebChatRepository {
     // Promise — dropping the await would silently turn this into a fire-
     // and-forget delete.
     await this.db.transaction((tx) => {
+      tx.insert(romeTraceArchiveDeletes).values({ sessionId: id }).onConflictDoNothing().run();
+      tx.update(romeTraceArchives)
+        .set({ status: "discarded" })
+        .where(eq(romeTraceArchives.sessionId, id))
+        .run();
       tx.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.sessionId, id)).run();
       tx.delete(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).run();
       tx.delete(romeAgentMessagePlatformIds)
@@ -1531,6 +1562,7 @@ export class WebChatRepository {
       tx.delete(sharedChats).where(eq(sharedChats.sessionId, id)).run();
       tx.delete(romeSessions).where(eq(romeSessions.id, id)).run();
     });
+    this.notifyArchiveDelete();
   }
 
   async getSessionOwnerKey(sessionId?: string | null): Promise<string | null> {
@@ -2487,24 +2519,9 @@ export class WebChatRepository {
     cutoff = sessionTraceCutoff(),
   ): Promise<string[]> {
     if (sessionIds.length === 0) return [];
-    const rows = await this.db.all<{ sessionId: string; lastMessageAt: number }>(sql`
-      WITH RECURSIVE ancestors(session_id, ancestor_id, parent_id) AS (
-        SELECT id, id, parent_session_id FROM ${romeSessions}
-        WHERE ${inArray(romeSessions.id, [...new Set(sessionIds)])}
-        UNION
-        SELECT ancestors.session_id, parent.id, parent.parent_session_id
-        FROM ancestors JOIN ${romeSessions} AS parent ON parent.id = ancestors.parent_id
-      ),
-      activity AS MATERIALIZED (
-        SELECT session_id, max(created_at) AS last_message_at FROM ${romeAgentMessages}
-        WHERE session_id IN (SELECT ancestor_id FROM ancestors)
-          AND ${inArray(romeAgentMessages.role, TRACE_ACTIVITY_ROLES)}
-        GROUP BY session_id
-      )
-      SELECT ancestors.session_id AS sessionId, max(activity.last_message_at) AS lastMessageAt
-      FROM ancestors JOIN activity ON activity.session_id = ancestors.ancestor_id
-      GROUP BY ancestors.session_id
-    `);
+    const rows = await this.db.all<{ sessionId: string; lastMessageAt: number }>(
+      traceSessionActivitySql(sessionIds),
+    );
     return rows
       .filter((row) => isSessionTraceArchived(new Date(row.lastMessageAt * 1000), cutoff))
       .map((row) => row.sessionId);
@@ -2520,10 +2537,12 @@ export class WebChatRepository {
       .where(and(eq(romeAgentMessages.sessionId, sessionId), eq(romeAgentMessages.role, "trace")));
     if (stubs.length === 0 || archivedSessionIds.length > 0) return stubs.map(traceContentResult);
 
+    const visibleIds = stubs.filter((stub) => !stub.traceArchived).map((stub) => stub.id);
+    if (!visibleIds.length) return stubs.map(traceContentResult);
     const blockRows = await this.db
       .select({ messageId: romeAgentTraceBlocks.messageId, content: romeAgentTraceBlocks.content })
       .from(romeAgentTraceBlocks)
-      .where(eq(romeAgentTraceBlocks.sessionId, sessionId))
+      .where(inArray(romeAgentTraceBlocks.messageId, visibleIds))
       .orderBy(asc(romeAgentTraceBlocks.messageId), asc(romeAgentTraceBlocks.seq));
     if (blockRows.length === 0) return stubs.map(traceContentResult);
 
@@ -2538,13 +2557,28 @@ export class WebChatRepository {
     }
     return stubs.map((stub) => ({
       ...traceContentResult(stub),
-      content: mergeTraceContent(stub.content, blocksByMessage.get(stub.id) ?? []),
+      content: stub.traceArchived
+        ? "[]"
+        : mergeTraceContent(stub.content, blocksByMessage.get(stub.id) ?? []),
     }));
   }
 
   async getTraceContentsByTurns(
     refs: readonly { sessionId: string; turnId: string }[],
     options: TraceReadOptions = {},
+  ) {
+    return this.readTraceTurns(refs, options);
+  }
+
+  /** Accounting only: retained blocks are never a displayable trace. Includes archived turns. */
+  async getTraceAccountingByTurns(refs: readonly { sessionId: string; turnId: string }[]) {
+    return this.readTraceTurns(refs, {}, true);
+  }
+
+  private async readTraceTurns(
+    refs: readonly { sessionId: string; turnId: string }[],
+    options: TraceReadOptions,
+    accountingOnly = false,
   ) {
     const traceTurnKey = (sessionId: string, turnId: string): string =>
       JSON.stringify([sessionId, turnId]);
@@ -2559,7 +2593,9 @@ export class WebChatRepository {
         ? await this.getTraceArchivedSessionIds(requestedSessionIds, options.sessionActivityCutoff)
         : [],
     );
-    const sessionIds = requestedSessionIds.filter((id) => !archivedSessionIds.has(id));
+    const sessionIds = accountingOnly
+      ? requestedSessionIds
+      : requestedSessionIds.filter((id) => !archivedSessionIds.has(id));
     if (sessionIds.length === 0) return [];
     const turnIds = [...new Set(uniqueRefs.map((ref) => ref.turnId))];
 
@@ -2576,6 +2612,7 @@ export class WebChatRepository {
           eq(romeAgentMessages.role, "trace"),
           inArray(romeAgentMessages.sessionId, sessionIds),
           inArray(romeAgentMessages.turnId, turnIds),
+          accountingOnly ? undefined : isNull(romeAgentMessages.traceArchiveId),
         ),
       )
       .orderBy(
@@ -2593,9 +2630,17 @@ export class WebChatRepository {
       .select({ messageId: romeAgentTraceBlocks.messageId, content: romeAgentTraceBlocks.content })
       .from(romeAgentTraceBlocks)
       .where(
-        inArray(
-          romeAgentTraceBlocks.messageId,
-          stubs.map((stub) => stub.id),
+        and(
+          inArray(
+            romeAgentTraceBlocks.messageId,
+            stubs.map((stub) => stub.id),
+          ),
+          accountingOnly
+            ? inArray(
+                sql`json_extract(${romeAgentTraceBlocks.content}, '$.type')`,
+                ARCHIVE_KEEP_BLOCK_TYPES,
+              )
+            : undefined,
         ),
       )
       .orderBy(asc(romeAgentTraceBlocks.messageId), asc(romeAgentTraceBlocks.seq));
@@ -2908,6 +2953,7 @@ export class WebChatRepository {
       .where(eq(romeAgentMessages.id, id));
     const stub = rows[0];
     if (!stub) return null;
+    if (stub.traceArchived) return traceContentResult(stub);
     return {
       ...traceContentResult(stub),
       content: mergeTraceContent(stub.content, await this.getTraceBlockContents(id)),
@@ -3014,12 +3060,21 @@ export class WebChatRepository {
     // One transaction so trace block rows can't outlive (or orphan) their
     // stub message rows — same crash-safety contract as deleteSession.
     await this.db.transaction((tx) => {
+      tx.insert(romeTraceArchiveDeletes)
+        .values({ sessionId: sessionId })
+        .onConflictDoNothing()
+        .run();
+      tx.update(romeTraceArchives)
+        .set({ status: "discarded" })
+        .where(eq(romeTraceArchives.sessionId, sessionId))
+        .run();
       tx.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.sessionId, sessionId)).run();
       tx.delete(romeAgentMessages).where(eq(romeAgentMessages.sessionId, sessionId)).run();
       tx.delete(romeAgentMessagePlatformIds)
         .where(eq(romeAgentMessagePlatformIds.sessionId, sessionId))
         .run();
     });
+    this.notifyArchiveDelete();
   }
 
   async getTurnFeedback(sessionId: string, turnId: string): Promise<StoredTurnFeedback | null> {

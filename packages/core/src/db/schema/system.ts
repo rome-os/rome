@@ -707,6 +707,7 @@ export const romeAgentMessages = sqliteTable(
     id: text("id").primaryKey(),
     sessionId: text("session_id").notNull(),
     turnId: text("turn_id"),
+    traceArchiveId: text("trace_archive_id"),
     inputState: text("input_state").$type<AgentInputState>(),
     actor: text("actor", { mode: "json" }).$type<SessionActor>(),
     role: text("role").notNull(), // 'user' | 'assistant' | 'notification' | 'trace'
@@ -732,6 +733,9 @@ export const romeAgentMessages = sqliteTable(
   (table) => [
     index("idx_rome_agent_messages_session_id").on(table.sessionId),
     index("idx_rome_agent_messages_turn_id").on(table.turnId),
+    index("idx_rome_agent_messages_trace_archive")
+      .on(table.traceArchiveId)
+      .where(sql`${table.traceArchiveId} IS NOT NULL`),
     index("idx_rome_agent_messages_role_created_at").on(table.role, table.createdAt),
     // A session's newest trace, for the sidebar's lastTurnFailed. Without it
     // SQLite walks the role index across every session's traces.
@@ -758,6 +762,40 @@ export const romeAgentMessagePlatformIds = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.sessionId, table.platformMessageId] })],
 );
+
+export const romeTraceArchives = sqliteTable(
+  "rome_trace_archives",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id").notNull(),
+    status: text("status", { enum: ["exported", "stored", "pruned", "discarded"] }).notNull(),
+    location: text("location").notNull(),
+    bytes: integer("bytes").notNull(),
+    sha256: text("sha256").notNull(),
+    manifest: text("manifest"),
+    blockCount: integer("block_count").notNull(),
+    messageCount: integer("message_count").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    storedAt: integer("stored_at", { mode: "timestamp" }),
+    prunedAt: integer("pruned_at", { mode: "timestamp" }),
+  },
+  (table) => [index("idx_rome_trace_archives_session").on(table.sessionId)],
+);
+
+// No session FK: the privacy retry must survive deletion of the chat itself.
+export const romeTraceArchiveDeletes = sqliteTable("rome_trace_archive_deletes", {
+  sessionId: text("session_id").primaryKey(),
+});
+
+// SQL reads these for usage, model, status and subagent rollups. Any SQL that
+// reads block types from old sessions must use one of these.
+export const ARCHIVE_KEEP_BLOCK_TYPES = [
+  "result",
+  "error",
+  "turn_end",
+  "subagent_start",
+  "subagent_result",
+] as const;
 
 // Append-only storage for trace content, avoiding the O(N²) cost of storing
 // the whole trace as one JSON array on the role='trace' rome_agent_messages

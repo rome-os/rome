@@ -1006,7 +1006,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         visited.add(key);
         return true;
       });
-    const rows = await deps.webchatRepo.getTraceContentsByTurns(refs, { sessionActivityCutoff });
+    const rows = await deps.webchatRepo.getTraceAccountingByTurns(refs);
     const rowsByTurn = new Map(rows.map((row) => [`${row.sessionId}:${row.turnId}`, row]));
     const children = await Promise.all(
       refs.map(async (ref): Promise<DescendantUsage> => {
@@ -1194,7 +1194,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (visited.has(sid)) return;
       visited.add(sid);
       const rows = await deps.webchatRepo.getMessages(sid);
-      const traceContents = await deps.webchatRepo.getTraceContents(sid);
+      const traceContents = await deps.webchatRepo.getTraceContents(sid, {
+        sessionActivityCutoff: sessionTraceCutoff(),
+      });
       const contentById = new Map(traceContents.map((r) => [r.id, r.content]));
       const childSessionIds: string[] = [];
       for (const row of rows) {

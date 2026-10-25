@@ -322,7 +322,14 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
             ? String((body as { title?: unknown }).title)
             : undefined,
       });
-      return json(imported, { status: imported.traceCount > 0 ? 200 : 404 });
+      return json(imported, {
+        status:
+          imported.traceCount > 0
+            ? 200
+            : imported.message === "This chat's steps are archived."
+              ? 409
+              : 404,
+      });
     }
 
     if (request.method === "POST" && route === "imports/bundle") {
@@ -583,6 +590,12 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     sessionId: string,
     options: { title?: string },
   ): { collectionId: string | null; traceCount: number; message: string } {
+    const archived = this.ctx.db.connection.get(sql`
+      SELECT 1 FROM rome_agent_messages
+      WHERE session_id = ${sessionId} AND role = 'trace' AND trace_archive_id IS NOT NULL LIMIT 1
+    `);
+    if (archived)
+      return { collectionId: null, traceCount: 0, message: "This chat's steps are archived." };
     const rows = this.ctx.db.connection.all(sql`
       SELECT
         ws.id AS session_id,

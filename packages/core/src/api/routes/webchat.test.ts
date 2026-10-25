@@ -692,6 +692,57 @@ describe("Webchat API", () => {
     }
   });
 
+  it("shows archived old turns and full new turns after reactivation, including raw downloads", async () => {
+    const sessionId = "reactivated-archive";
+    await deps.webchatRepo.createSession(sessionId, "Reactivated archive");
+    for (const turnId of ["old", "new"]) {
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: `archive-${turnId}`,
+        sessionId,
+        turnId,
+        startSeq: 0,
+        blocks: [
+          { type: "thinking", content: `${turnId} full trace` },
+          { type: "tool_result", toolUseId: "tool", tool: "Read", output: `${turnId} full trace` },
+          { type: "result", content: "done" },
+        ],
+      });
+    }
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ traceArchiveId: "archive" })
+      .where(eq(romeAgentMessages.id, "archive-old"));
+    const app = createWebchatRuntime(deps).routes;
+    for (const path of [
+      `/sessions/${sessionId}/messages`,
+      `/chat/sessions/${sessionId}/messages`,
+    ]) {
+      const messages = (await (await app.request(path)).json()) as Array<{
+        id: string;
+        traceArchived?: boolean;
+        traceSummary?: unknown;
+      }>;
+      expect(messages.find((m) => m.id === "archive-old")).toMatchObject({ traceArchived: true });
+      expect(messages.find((m) => m.id === "archive-old")?.traceSummary).toBeUndefined();
+      expect(messages.find((m) => m.id === "archive-new")?.traceSummary).toBeDefined();
+    }
+    for (const turn of ["old", "new"]) {
+      for (const path of [
+        `/sessions/messages/archive-${turn}/content`,
+        `/chat/messages/archive-${turn}/content`,
+        `/sessions/${sessionId}/turns/${turn}/trace`,
+        `/sessions/${sessionId}/turns/${turn}/trace.json`,
+        `/chat/sessions/${sessionId}/turns/${turn}/trace.json`,
+      ]) {
+        const response = await app.request(path);
+        expect(response.status).toBe(200);
+        const payload = await response.json();
+        if (turn === "old") expect(payload).toEqual({ trace: null, traceArchived: true });
+        else expect(JSON.stringify(payload)).toContain("new full trace");
+      }
+    }
+  });
+
   it("keeps complete cost and usage from 30-day-old descendants while their root is active", async () => {
     rs.useFakeTimers({ toFake: ["Date"] });
     rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
@@ -850,6 +901,18 @@ describe("Webchat API", () => {
         },
       ],
     });
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ traceArchiveId: "test-archive" })
+      .where(eq(romeAgentMessages.id, "grandchild-usage-trace"));
+    await expect(
+      readAccounting("/chat/messages/parent-usage-trace/content"),
+    ).resolves.toMatchObject({ costUsd: 1.23, includedSubagentCount: 2 });
+    const archivedGrandchild = await app.request(
+      `/sessions/${grandchildSessionId}/turns/${grandchildTurnId}/trace`,
+    );
+    expect(await archivedGrandchild.json()).toEqual({ trace: null, traceArchived: true });
+
     await expect(
       readAccounting("/chat/messages/parent-usage-trace/content?includeSubagentUsage=false"),
     ).resolves.toMatchObject({
