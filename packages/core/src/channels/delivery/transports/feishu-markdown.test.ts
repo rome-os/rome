@@ -30,6 +30,22 @@ describe("Feishu fenced Markdown", () => {
     ).toBe("```text\nsecond half\n```");
   });
 
+  it("does not open the code again when the continuation closes it before any code", () => {
+    const before = { before: "```ts\nconst a = 1;\n" };
+    for (const source of ["", "`", "``", "```", "\n", "  \n```"])
+      expect(feishuMarkdown.render(source, false, before)).toBe("");
+    expect(feishuMarkdown.render("```\nAfter", true, before)).toBe("After");
+    expect(feishuMarkdown.render("\nconst b = 2;", false, before)).toBe(
+      "```ts\n\nconst b = 2;\n```",
+    );
+  });
+
+  it("never shrinks a measure when a large heading brings H6 headings down", () => {
+    const small = "###### x\n".repeat(8);
+    const measure = (source: string) => feishuMarkdown.measure(feishuMarkdown.render(source, true));
+    expect(measure(`${small}# x`)).toBeGreaterThanOrEqual(measure(small));
+  });
+
   it("never shrinks a rendering as its source grows through a closing fence", () => {
     const source = "Intro\n\n```python\n# comment\nx = 1\n```\n\nDone";
     for (const settled of [false, true]) {

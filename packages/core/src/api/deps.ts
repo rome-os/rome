@@ -9,6 +9,7 @@ import type { PersonMappingRepository } from "../db/repositories/person-mapping.
 import type { Channels } from "../channels/channel.js";
 import type { ChannelOfLink, SendersOfLink } from "../db/repositories/channel-records.js";
 import type { AccountNames } from "../channels/account-names.js";
+import type { ExternalAgents } from "../channels/agents-accounts.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -99,6 +100,10 @@ export interface ApiDeps {
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */
   accountNames: AccountNames;
+  /** The agents Rome Cloud lists for this Rome. Each is an assistant with one
+   *  chat (docs/domains/chats.md#assistant), and the dashboard shows all but
+   *  other Romes. */
+  assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
   /** Messages Rome is still trying to deliver — the People surface's
    *  outbox. Separate from every message store on purpose: a row here is a
@@ -140,7 +145,10 @@ export interface ApiDeps {
   appsRoot?: string;
   settingsRepo: SettingsRepository;
   feedback: FeedbackRelay;
-  nodeDevices: Pick<ReturnType<typeof createNodeDevicesService>, "getStatus" | "start">;
+  nodeDevices: Pick<
+    ReturnType<typeof createNodeDevicesService>,
+    "getStatus" | "start" | "listFiles" | "listDevices" | "renameDevice" | "removeDevice"
+  >;
   provisionNodeCaller?: () => Promise<void>;
   /** Connects the Rome Cloud email inbox unless an email connection exists.
    *  Never rejects. */

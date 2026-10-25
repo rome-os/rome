@@ -27,6 +27,7 @@
     "./channel-accounts": "./src/channel-accounts.ts",
     "./account-agents": "./src/account-agents.ts",
     "./people": "./src/people.ts",
+    "./assistants": "./src/assistants.ts",
     "./platform": "./src/platform.ts",
     "./persons": "./src/persons.ts",
     "./devices": "./src/devices.ts",

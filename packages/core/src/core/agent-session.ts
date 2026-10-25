@@ -17,6 +17,7 @@ import type { SessionsRepository } from "../db/repositories/sessions.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
   buildInteractiveSurfaceGuidanceSection,
+  buildDeviceFolderBlock,
   buildThreadContextBlock,
   type PromptBuilder,
 } from "./prompt-builder.js";
@@ -45,6 +46,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
+import type { EventSources } from "../events/event-sources.js";
 import type {
   ActionMcpDefinition,
   ModelSession,
@@ -405,6 +407,9 @@ interface ManagerDeps {
   /** The connection kind behind a channel id. When absent, every channel id reads as
    *  its own connection kind, which holds only where no connection kind has a second channel. */
   connectionKindOfChannel?: ConnectionKindOfChannel;
+  /** App-declared event sources: an event `defer` subscribes through them.
+   *  When absent, an event wait is created without any check. */
+  eventSources?: EventSources;
 }
 
 /** The parts of a channel's surface that change how its sessions prompt. */
@@ -1316,6 +1321,15 @@ async function openSession(
     isGuardianFacingChannel(key.channelThreadKey, deps.connectionKindOfChannel) &&
     !opts.isSubagent &&
     !init.interactiveSurfaceDetached;
+  const eventSources = deps.eventSources;
+  // Actions `defer` runs on the agent's behalf are attributed to its turn.
+  const agentRunContext = (refs: TurnExecRefs) => ({
+    initiator: `agent:${key.agentName}`,
+    sessionId: refs.sessionId,
+    agentName: key.agentName,
+    channelThreadKey: key.channelThreadKey,
+    turnId: refs.getTurnId(),
+  });
   const makeExecuteDefer =
     (refs: TurnExecRefs) =>
     async (input: DeferInput): Promise<unknown> =>
@@ -1327,19 +1341,23 @@ async function openSession(
             channelContext: refs.getThreadContext(),
           },
           createRoutine: async (createArgs) => {
-            const result = await deps.actionEngine.run("create_routine", createArgs, {
-              initiator: `agent:${key.agentName}`,
-              sessionId: refs.sessionId,
-              agentName: key.agentName,
-              channelThreadKey: key.channelThreadKey,
-              turnId: refs.getTurnId(),
-            });
+            const result = await deps.actionEngine.run(
+              "create_routine",
+              createArgs,
+              agentRunContext(refs),
+            );
             if (result.status === "error") throw new Error(result.error);
             if (result.status !== "ok") {
               throw new Error(`create_routine returned ${result.status}`);
             }
             return result.data;
           },
+          prepareEventWait: eventSources
+            ? (eventName, filter) =>
+                eventSources.prepareWait(eventName, filter, (name, args) =>
+                  deps.actionEngine.run(name, args, agentRunContext(refs)),
+                )
+            : undefined,
           now: Date.now(),
         }),
       );
@@ -3484,6 +3502,11 @@ class AgentSessionImpl implements AgentSession {
               };
         pendingConversationMessageIds = storedContext.pendingNotificationIds;
         userPrompt = prependConversationContext(userPrompt, conversationContext);
+      }
+      // Every turn, subagents included: the folder is where the work happens.
+      const deviceFolderBlock = buildDeviceFolderBlock(tc);
+      if (deviceFolderBlock) {
+        userPrompt = `${deviceFolderBlock}\n\n${userPrompt}`;
       }
       if (!this.isSubagent && this.isNewSession && !this.threadContextInjected && tc) {
         this.threadContextInjected = true;

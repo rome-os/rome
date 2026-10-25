@@ -29,7 +29,7 @@ function unconnected(grant: string): ConnectionSlot {
     key: "bot",
     connectionId: null,
     grant,
-    state: "unauthorized",
+    state: null,
     display: null,
     identity: null,
     activeSetupCid: null,
@@ -41,7 +41,7 @@ function connected(grant: string, identity: string | null): ConnectionSlot {
     key: "bot",
     connectionId: "conn-1",
     grant,
-    state: "authorized",
+    state: "working",
     display: identity
       ? { displayName: null, handle: identity, email: null, avatarUrl: null }
       : null,
@@ -117,7 +117,7 @@ it("renews a degraded account in place instead of only offering Disconnect", asy
   renderCard(
     <ChannelConnectCard
       config={CHANNEL_CONFIGS.discord}
-      slot={{ ...connected("bot", "@rome_helper"), state: "degraded" }}
+      slot={{ ...connected("bot", "@rome_helper"), state: "broken" }}
       role="primary"
       onRefresh={() => {}}
     />,
@@ -136,7 +136,7 @@ it("renews a degraded account in place instead of only offering Disconnect", asy
 
 it("offers Reconnect again when a renewed account degrades a second time", async () => {
   stubFetch();
-  const degraded = { ...connected("bot", "@rome_helper"), state: "degraded" as const };
+  const degraded = { ...connected("bot", "@rome_helper"), state: "broken" as const };
   const card = (slot: ConnectionSlot) => (
     <MemoryRouter>
       <ChannelConnectCard

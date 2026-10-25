@@ -5,6 +5,32 @@ import { HEARTBEAT_MS } from "./run-view.js";
 
 type RunOutcome = Parameters<RunsRepository["finish"]>[1];
 
+/** The text of a tool result: a string, or content blocks, bare or in an envelope. */
+function resultText(output: unknown): string {
+  if (typeof output === "string") return output;
+  if (Array.isArray(output)) return output.map(resultText).join("");
+  if (output && typeof output === "object") {
+    const record = output as Record<string, unknown>;
+    if (typeof record.text === "string") return record.text;
+    if ("content" in record) return resultText(record.content);
+  }
+  return "";
+}
+
+/**
+ * An action that fails returns `{ status: "error" }` as an ordinary tool
+ * result, without the error flag, so its output has to be read.
+ */
+function reportsActionError(output: unknown): boolean {
+  const text = resultText(output).trim();
+  if (!text.startsWith("{")) return false;
+  try {
+    return (JSON.parse(text) as { status?: unknown }).status === "error";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Watches an agent's event stream and records each file change once its tool
  * call succeeds. A failed `Edit` changed nothing, so a change is held until its
@@ -20,9 +46,14 @@ export class RunRecorder {
   error: string | null = null;
   private interrupted = false;
 
+  /**
+   * @param ignoredDir Changes under it are not recorded: the action records
+   *   the authoritative version of what the agent writes there.
+   */
   constructor(
     private readonly repo: RunsRepository,
     private readonly runId: string,
+    private readonly ignoredDir?: string,
   ) {}
 
   observe(event: AgentEvent): void {
@@ -39,7 +70,10 @@ export class RunRecorder {
       return;
     }
     if (event.type === "tool_use") {
-      const changes = changesFromToolUse(event.tool, event.input);
+      const ignored = this.ignoredDir ? `${this.ignoredDir}/` : null;
+      const changes = changesFromToolUse(event.tool, event.input).filter(
+        (change) => !ignored || !change.path.startsWith(ignored),
+      );
       if (changes.length > 0) this.pending.set(event.id, changes);
       return;
     }
@@ -47,7 +81,7 @@ export class RunRecorder {
       const changes = this.pending.get(event.toolUseId);
       if (!changes) return;
       this.pending.delete(event.toolUseId);
-      if (event.isError) return;
+      if (event.isError || reportsActionError(event.output)) return;
       this.repo.addChanges(this.runId, changes);
     }
   }

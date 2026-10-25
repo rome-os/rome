@@ -109,6 +109,26 @@ export class DeviceConnector {
     return { items: body.items };
   }
 
+  /** Renames a device of the account. Cloud validates the name. */
+  async rename(deviceId: string, name: string): Promise<void> {
+    if (this.stopped) throw new Error("connector_stopped");
+    if (!isUuid(deviceId)) throw new CloudError("device_not_found");
+    const { cloudUrl, token } = this.options.credential;
+    await cloudRequest(cloudUrl, `/api/account/devices/${deviceId}`, token, "PATCH", { name });
+  }
+
+  /**
+   * Revokes a device of the account and deletes its record. Throws CloudError
+   * `revocation_pending` when the device is revoked but the Gateway has not
+   * confirmed it yet, so the record stays listed as revoked.
+   */
+  async remove(deviceId: string): Promise<void> {
+    if (this.stopped) throw new Error("connector_stopped");
+    if (!isUuid(deviceId)) throw new CloudError("device_not_found");
+    const { cloudUrl, token } = this.options.credential;
+    await cloudRequest(cloudUrl, `/api/account/devices/${deviceId}`, token, "DELETE");
+  }
+
   private receive(message: GatewayMessage) {
     const pending = this.pending.get(message.id);
     if (!pending || pending.binary) return;

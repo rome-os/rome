@@ -1,8 +1,29 @@
-import { forwardRef, useMemo, useRef, type Ref } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import type { TFunction } from "i18next";
-import { Check, ChevronDown, FolderPlus, X } from "lucide-react";
+import {
+  ArrowUp,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Cloud,
+  Folder,
+  FolderPlus,
+  Laptop,
+  X,
+} from "lucide-react";
 import { getProjectDisplayName } from "@/lib/chat-helpers";
 import type { ProjectCatalog } from "@/lib/chat-types";
+import {
+  childPath,
+  deviceFolderLabel,
+  tildePath,
+  type DraftDeviceFolder,
+} from "@/lib/device-folder";
+import type { DeviceFilesErrorCode } from "@rome/api-types/devices";
+import { useDeviceFolderBrowser, type PickerDevice } from "./use-device-folder-browser";
+import { useThisDevice } from "@/hooks/use-this-device";
+import { desktopFolderPicker } from "@/lib/electron-shell";
 import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import {
   Command,
@@ -14,6 +35,8 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
@@ -42,6 +65,15 @@ interface ProjectSelectorProps {
   onToggleMenu: () => void;
   onPickProject: (name: string) => void;
   onCreateProject: () => void;
+  /** Cloud's devices, or null when Rome could not read them. Empty keeps one level. */
+  devices?: PickerDevice[] | null;
+  /** The draft's device folder. It excludes a project: the draft holds one or the other. */
+  deviceFolder?: DraftDeviceFolder | null;
+  /**
+   * Enables device folders. With at least one device the menu has two levels:
+   * Rome Cloud and each device first, then projects or that device's folders.
+   */
+  onPickDeviceFolder?: (folder: DraftDeviceFolder) => void;
 }
 
 export const ProjectSelector = forwardRef(function ProjectSelector(
@@ -67,12 +99,83 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
     onToggleMenu,
     onPickProject,
     onCreateProject,
+    devices = null,
+    deviceFolder = null,
+    onPickDeviceFolder,
   }: ProjectSelectorProps,
   ref: Ref<HTMLDivElement>,
 ) {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const isDefault = draftProjectName === defaultProjectName;
   const projects = projectCatalog?.projects ?? [];
+  const browser = useDeviceFolderBrowser(menuOpen && !disabled);
+  const browse = browser.browse;
+  const thisDevice = useThisDevice();
+  const [pickNative] = useState(desktopFolderPicker);
+  const [view, setView] = useState<"root" | "rome">("root");
+  useEffect(() => {
+    if (!menuOpen) setView("root");
+  }, [menuOpen]);
+  // Projects and devices arrive in one answer. Until then the menu shows the
+  // first level with placeholder devices, so it does not open on the projects
+  // and then change shape. With no device it stays one level: projects only.
+  const locationsPending = Boolean(onPickDeviceFolder) && projectsLoading;
+  const twoLevel = Boolean(onPickDeviceFolder) && (locationsPending || (devices?.length ?? 0) > 0);
+  const atRoot = twoLevel && !browse && view === "root";
+  const inProjects = !browse && !atRoot;
+  const romeLabel = t("project.locations.rome");
+  const searchLabel = browse
+    ? t("project.devices.searchPlaceholder")
+    : atRoot
+      ? t("project.locations.searchPlaceholder")
+      : t("project.searchPlaceholder");
+  const folderLabel = deviceFolder ? deviceFolderLabel(deviceFolder) : null;
+  const query = searchQuery.trim().toLowerCase();
+  const folderEntries = (browse?.folder?.entries ?? []).filter(
+    (entry) =>
+      (entry.type === "dir" || entry.type === "symlink") &&
+      (!query || entry.name.toLowerCase().includes(query)),
+  );
+  const browseHome = browse ? browser.homeOf(browse.device.id) : null;
+  const browseStatus = !browse
+    ? null
+    : browse.loading
+      ? { text: t("project.devices.loading"), loading: true }
+      : browse.error
+        ? { text: t(`project.devices.errors.${browse.error}`), loading: false }
+        : folderEntries.length === 0
+          ? {
+              text: query
+                ? t("project.devices.noMatchesQuery", { query: searchQuery })
+                : t("project.devices.empty"),
+              loading: false,
+            }
+          : null;
+  const toRoot = () => {
+    browser.close();
+    setView("root");
+    setSearchQuery("");
+  };
+  // This computer picks with the system dialog. The menu stays open behind it,
+  // so a cancel leaves the user where they were.
+  const openDevice = (device: PickerDevice) => {
+    setSearchQuery("");
+    if (!pickNative || thisDevice?.id !== device.id || thisDevice.state !== "connected") {
+      void browser.open(device);
+      return;
+    }
+    pickNative(deviceFolder?.deviceId === device.id ? deviceFolder.path : undefined)
+      .then((picked) => {
+        if (!picked || !onPickDeviceFolder) return;
+        onPickDeviceFolder({
+          deviceId: device.id,
+          deviceName: device.name,
+          path: picked.path,
+          home: picked.home,
+        });
+      })
+      .catch(() => void browser.open(device));
+  };
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -123,14 +226,20 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
             // carries its own open-state fill through `aria-expanded`. `ghost`
             // sets no resting colour, so the label takes one or it reads as the
             // loudest thing in a row of muted chrome.
-            variant={isDefault ? "ghost" : "secondary"}
+            variant={isDefault && !folderLabel ? "ghost" : "secondary"}
             size="sm"
             disabled={disabled}
-            className={cn("max-w-[200px] touch-target", isDefault && "text-muted-foreground")}
-            title={isDefault ? t("project.buttonLabel") : draftProjectLabel}
+            className={cn(
+              "max-w-[200px] touch-target",
+              isDefault && !folderLabel && "text-muted-foreground",
+            )}
+            title={folderLabel ?? (isDefault ? t("project.buttonLabel") : draftProjectLabel)}
             aria-label={t("project.buttonLabel")}
           >
-            <span className="truncate">{isDefault ? defaultProjectName : draftProjectLabel}</span>
+            {folderLabel ? <Laptop data-icon="inline-start" aria-hidden="true" /> : null}
+            <span className="truncate">
+              {folderLabel ?? (isDefault ? defaultProjectName : draftProjectLabel)}
+            </span>
             <ChevronDown data-icon="inline-end" aria-hidden="true" />
           </Button>
         </PopoverTrigger>
@@ -142,6 +251,21 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
           aria-label={t("project.menuTitle")}
           className="w-80 gap-0 overflow-hidden rounded-12 p-0 shadow-10"
         >
+          {twoLevel && !atRoot ? (
+            <div className="flex items-center gap-1 border-b border-border-subtle p-1">
+              <IconButton
+                size="sm"
+                label={t("project.locations.back")}
+                icon={<ChevronLeft aria-hidden />}
+                onClick={toRoot}
+                className="text-muted-foreground hover:text-foreground"
+              />
+              <span className="min-w-0 truncate text-ui text-foreground">
+                {browse ? browse.device.name : romeLabel}
+              </span>
+            </div>
+          ) : null}
+
           {/* Filtering stays here rather than moving to cmdk: cmdk sorts matches
               by score, which would unpin the trailing "no project selected"
               row from the bottom of the list. */}
@@ -154,7 +278,7 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
             // cmdk renders this as the hidden label naming the input, and
             // aria-labelledby beats aria-label, so this string is what decides
             // the combobox's accessible name. The popover keeps its own title.
-            label={t("project.searchPlaceholder")}
+            label={searchLabel}
             className="bg-transparent"
           >
             <CommandInput
@@ -163,10 +287,10 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
               // Same string as the label above, which is what actually names the
               // field; this only matters if cmdk ever stops emitting
               // aria-labelledby. Keeping them equal means they cannot disagree.
-              aria-label={t("project.searchPlaceholder")}
+              aria-label={searchLabel}
               value={searchQuery}
               onValueChange={setSearchQuery}
-              placeholder={t("project.searchPlaceholder")}
+              placeholder={searchLabel}
             >
               {searchQuery && (
                 <IconButton
@@ -189,7 +313,51 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
                 list itself stays mounted even while empty: cmdk's input always
                 points `aria-controls` at it, so unmounting would leave that
                 reference dangling. */}
-            {status ? (
+            {browse ? (
+              <DeviceFolderList
+                t={t}
+                path={browse.folder?.path ?? null}
+                parent={browse.folder?.parent ?? null}
+                label={browse.folder ? tildePath(browse.folder.path, browseHome) : ""}
+                status={browseStatus}
+                entries={browseStatus ? [] : folderEntries}
+                truncated={Boolean(browse.folder?.truncated) && !browse.loading}
+                onUp={() => {
+                  if (browse.folder?.parent) {
+                    setSearchQuery("");
+                    void browser.open(browse.device, browse.folder.parent);
+                  }
+                }}
+                onOpen={(name) => {
+                  if (!browse.folder) return;
+                  setSearchQuery("");
+                  void browser.open(browse.device, childPath(browse.folder.path, name));
+                }}
+              />
+            ) : null}
+
+            {atRoot ? (
+              <LocationList
+                t={t}
+                query={query}
+                romeLabel={romeLabel}
+                romeSelection={
+                  deviceFolder ? null : isDefault ? defaultProjectName : draftProjectLabel
+                }
+                devices={devices ?? []}
+                loading={locationsPending}
+                deviceErrorById={browser.deviceErrorById}
+                deviceFolder={deviceFolder}
+                thisDeviceId={thisDevice?.id ?? null}
+                onRome={() => {
+                  setView("rome");
+                  setSearchQuery("");
+                }}
+                onDevice={openDevice}
+              />
+            ) : null}
+
+            {!inProjects ? null : status ? (
               <EmptyState>
                 {status.loading ? (
                   <EmptyStateIcon>
@@ -210,124 +378,156 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
                 the constant to the row's height — revisit it if the row grows,
                 e.g. if a longer translation of `noProjectSelected` wraps to a
                 second line at this popover's width. */}
-            <CommandList
-              label={t("project.listLabel")}
-              className={`max-h-[260px] ${resetRowVisible ? "scroll-pb-12" : ""}`}
-            >
-              {status ? null : (
-                <CommandGroup>
-                  {namedProjects.map((project, index) => {
-                    const isSelected = project.name === draftProjectName;
-                    return (
-                      <CommandItem
-                        key={project.name}
-                        // cmdk keys the roving selection on `value` and folds
-                        // case, so two names differing only in case would
-                        // register as one option and Enter could pick the wrong
-                        // one. Names are user-supplied, so the index keeps them
-                        // distinct. Nothing reads the value — filtering is ours.
-                        value={`${index}:${project.name}`}
-                        onSelect={() => onPickProject(project.name)}
-                        className="text-foreground"
-                      >
-                        <span className="min-w-0 flex-1 truncate">
-                          {project.displayName ?? getProjectDisplayName(project.name)}
-                        </span>
-                        <span className="flex w-3.5 justify-center text-foreground">
-                          {isSelected ? <Check className="size-3.5 shrink-0" aria-hidden /> : null}
-                        </span>
-                      </CommandItem>
-                    );
-                  })}
-                </CommandGroup>
-              )}
+            {!inProjects ? null : (
+              <CommandList
+                label={t("project.listLabel")}
+                className={`max-h-[260px] ${resetRowVisible ? "scroll-pb-12" : ""}`}
+              >
+                {status ? null : (
+                  <CommandGroup>
+                    {namedProjects.map((project, index) => {
+                      const isSelected = project.name === draftProjectName;
+                      return (
+                        <CommandItem
+                          key={project.name}
+                          // cmdk keys the roving selection on `value` and folds
+                          // case, so two names differing only in case would
+                          // register as one option and Enter could pick the wrong
+                          // one. Names are user-supplied, so the index keeps them
+                          // distinct. Nothing reads the value — filtering is ours.
+                          value={`${index}:${project.name}`}
+                          onSelect={() => onPickProject(project.name)}
+                          className="text-foreground"
+                        >
+                          <span className="min-w-0 flex-1 truncate">
+                            {project.displayName ?? getProjectDisplayName(project.name)}
+                          </span>
+                          <span className="flex w-3.5 justify-center text-foreground">
+                            {isSelected ? (
+                              <Check className="size-3.5 shrink-0" aria-hidden />
+                            ) : null}
+                          </span>
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                )}
 
-              {/* Withheld until the catalog lands. Mounted during the loading
+                {/* Withheld until the catalog lands. Mounted during the loading
                   frame this is the only option, so cmdk selects it and keeps
                   that selection once the projects arrive — leaving the
                   highlight on the trailing reset row instead of the first
                   project, which is then what Enter picks. */}
-              {!projectsLoading && defaultProject && (
-                // Sticky so it stays visible once the projects overflow the
-                // list's own scroll box — before the migration it sat in a
-                // footer outside that box. Opaque, or the rows scroll under it.
-                //
-                // This row's height is what the list reserves as scroll padding
-                // above; changing its padding or type here means rechecking
-                // that value, or a highlighted row parks underneath it again.
-                // The failure is visual only, so no test will catch it.
-                <CommandGroup className="sticky bottom-0 border-t border-border-subtle bg-popover">
-                  <CommandItem
-                    value={defaultProject.name}
-                    onSelect={() => onPickProject(defaultProject.name)}
-                    className="text-muted-foreground"
-                  >
-                    <span className="min-w-0 flex-1 truncate">
-                      {defaultProject.name}
-                      <span className="ml-2 text-aux text-subtle-foreground">
-                        {t("project.noProjectSelected")}
+                {!projectsLoading && defaultProject && (
+                  // Sticky so it stays visible once the projects overflow the
+                  // list's own scroll box — before the migration it sat in a
+                  // footer outside that box. Opaque, or the rows scroll under it.
+                  //
+                  // This row's height is what the list reserves as scroll padding
+                  // above; changing its padding or type here means rechecking
+                  // that value, or a highlighted row parks underneath it again.
+                  // The failure is visual only, so no test will catch it.
+                  <CommandGroup className="sticky bottom-0 border-t border-border-subtle bg-popover">
+                    <CommandItem
+                      value={defaultProject.name}
+                      onSelect={() => onPickProject(defaultProject.name)}
+                      className="text-muted-foreground"
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {defaultProject.name}
+                        <span className="ml-2 text-aux text-subtle-foreground">
+                          {t("project.noProjectSelected")}
+                        </span>
                       </span>
-                    </span>
-                    <span className="flex w-3.5 justify-center text-foreground">
-                      {isDefault ? <Check className="size-3.5 shrink-0" aria-hidden /> : null}
-                    </span>
-                  </CommandItem>
-                </CommandGroup>
-              )}
-            </CommandList>
+                      <span className="flex w-3.5 justify-center text-foreground">
+                        {isDefault && !deviceFolder ? (
+                          <Check className="size-3.5 shrink-0" aria-hidden />
+                        ) : null}
+                      </span>
+                    </CommandItem>
+                  </CommandGroup>
+                )}
+              </CommandList>
+            )}
           </Command>
 
           {/* Outside <Command>: cmdk's root claims the arrow keys and Enter that
               the new-project field needs for editing and submit. */}
-          <div className="border-t border-border-subtle p-1">
-            {createFormOpen ? (
-              <div className="px-1 py-1">
-                <div className="flex gap-2">
-                  <Input
-                    autoFocus
-                    value={newProjectName}
-                    onChange={(event) => setNewProjectName(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        setCreateFormOpen(false);
-                        setNewProjectName("");
-                        return;
-                      }
-                      if (shouldSubmitOnEnter(event)) {
-                        event.preventDefault();
-                        onCreateProject();
-                      }
-                    }}
-                    placeholder={t("project.createPlaceholder")}
-                    className="min-w-0 flex-1"
-                  />
+          {atRoot ? null : (
+            <div className="border-t border-border-subtle p-1">
+              {browse ? (
+                <div className="flex px-1 py-1">
                   <Button
                     type="button"
-                    disabled={creatingProject || !newProjectName.trim()}
-                    onClick={onCreateProject}
+                    className="min-w-0 flex-1"
+                    // Not disabled while a folder loads: the button would flicker on every step.
+                    // A click then takes the folder the label still shows.
+                    disabled={!browse.folder || Boolean(browse.error)}
+                    onClick={() => {
+                      if (!browse.folder || !onPickDeviceFolder) return;
+                      onPickDeviceFolder({
+                        deviceId: browse.device.id,
+                        deviceName: browse.device.name,
+                        path: browse.folder.path,
+                        home: browseHome,
+                      });
+                      toRoot();
+                    }}
                   >
-                    {t("project.createButton")}
+                    {t("project.devices.useFolder")}
                   </Button>
                 </div>
-                <label className="mt-2 flex cursor-pointer items-center justify-between gap-2 px-1 text-aux text-muted-foreground">
-                  <span>{t("project.connectOnCreate", "Connect to a source after creating")}</span>
-                  <Switch checked={connectOnCreate} onCheckedChange={setConnectOnCreate} />
-                </label>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setCreateFormOpen(true)}
-                className="flex w-full items-center gap-2 rounded-8 px-2 py-1 text-left text-ui text-foreground transition hover:bg-surface-muted"
-              >
-                <span className="flex h-[22px] w-[22px] items-center justify-center text-muted-foreground">
-                  <FolderPlus className="size-4 shrink-0" aria-hidden />
-                </span>
-                {t("project.createAction")}
-              </button>
-            )}
-          </div>
+              ) : createFormOpen ? (
+                <div className="px-1 py-1">
+                  <div className="flex gap-2">
+                    <Input
+                      autoFocus
+                      value={newProjectName}
+                      onChange={(event) => setNewProjectName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          setCreateFormOpen(false);
+                          setNewProjectName("");
+                          return;
+                        }
+                        if (shouldSubmitOnEnter(event)) {
+                          event.preventDefault();
+                          onCreateProject();
+                        }
+                      }}
+                      placeholder={t("project.createPlaceholder")}
+                      className="min-w-0 flex-1"
+                    />
+                    <Button
+                      type="button"
+                      disabled={creatingProject || !newProjectName.trim()}
+                      onClick={onCreateProject}
+                    >
+                      {t("project.createButton")}
+                    </Button>
+                  </div>
+                  <label className="mt-2 flex cursor-pointer items-center justify-between gap-2 px-1 text-aux text-muted-foreground">
+                    <span>
+                      {t("project.connectOnCreate", "Connect to a source after creating")}
+                    </span>
+                    <Switch checked={connectOnCreate} onCheckedChange={setConnectOnCreate} />
+                  </label>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setCreateFormOpen(true)}
+                  className="flex w-full items-center gap-2 rounded-8 px-2 py-1 text-left text-ui text-foreground transition hover:bg-surface-muted"
+                >
+                  <span className="flex h-[22px] w-[22px] items-center justify-center text-muted-foreground">
+                    <FolderPlus className="size-4 shrink-0" aria-hidden />
+                  </span>
+                  {t("project.createAction")}
+                </button>
+              )}
+            </div>
+          )}
 
           {projectsError && (
             <div className="border-t border-border-subtle px-3 py-2 text-aux text-destructive-fg">
@@ -339,3 +539,187 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
     </div>
   );
 });
+
+interface DeviceFolderListProps {
+  t: TFunction;
+  path: string | null;
+  parent: string | null;
+  label: string;
+  status: { text: string; loading: boolean } | null;
+  entries: { name: string }[];
+  truncated: boolean;
+  onUp: () => void;
+  onOpen: (name: string) => void;
+}
+
+/** Browse mode of the selector: one folder of a device, its parent on the top row. */
+function DeviceFolderList({
+  t,
+  path,
+  parent,
+  label,
+  status,
+  entries,
+  truncated,
+  onUp,
+  onOpen,
+}: DeviceFolderListProps) {
+  return (
+    <>
+      <CommandList label={t("project.devices.listLabel")} className="max-h-[260px]">
+        <CommandGroup>
+          <CommandItem
+            value="device-folder:up"
+            disabled={!parent}
+            onSelect={onUp}
+            className="text-muted-foreground"
+          >
+            <ArrowUp className="size-4 shrink-0" aria-hidden />
+            <span className="min-w-0 flex-1 truncate" title={path ?? undefined}>
+              {label}
+            </span>
+            {parent ? <span className="sr-only">{t("project.devices.up")}</span> : null}
+          </CommandItem>
+          {entries.map((entry, index) => (
+            <CommandItem
+              key={entry.name}
+              // File names can differ only in case; see the project rows above.
+              value={`${index}:${entry.name}`}
+              onSelect={() => onOpen(entry.name)}
+              className="text-foreground"
+            >
+              <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+      {status ? (
+        <EmptyState>
+          {status.loading ? (
+            <EmptyStateIcon>
+              <Spinner label={status.text} />
+            </EmptyStateIcon>
+          ) : null}
+          <EmptyStateTitle>{status.text}</EmptyStateTitle>
+        </EmptyState>
+      ) : null}
+      {truncated ? (
+        <p className="px-3 pb-2 text-aux text-subtle-foreground">
+          {t("project.devices.truncated")}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+interface LocationListProps {
+  t: TFunction;
+  query: string;
+  romeLabel: string;
+  /** The project picked in Rome, or null while a device folder is picked. */
+  romeSelection: string | null;
+  devices: PickerDevice[];
+  deviceErrorById: Record<string, DeviceFilesErrorCode>;
+  deviceFolder: DraftDeviceFolder | null;
+  /** The computer the Mac app runs on. It lists first, marked. */
+  thisDeviceId: string | null;
+  /** The devices are not known yet; placeholders stand in for them. */
+  loading: boolean;
+  onRome: () => void;
+  onDevice: (device: PickerDevice) => void;
+}
+
+/** First level of the two-level menu: where the chat works, Rome Cloud or a device. */
+function LocationList({
+  t,
+  query,
+  romeLabel,
+  romeSelection,
+  devices,
+  deviceErrorById,
+  deviceFolder,
+  thisDeviceId,
+  loading,
+  onRome,
+  onDevice,
+}: LocationListProps) {
+  const matches = (name: string) => !query || name.toLowerCase().includes(query);
+  const visibleDevices = devices
+    .filter((device) => matches(device.name))
+    .sort((a, b) => Number(b.id === thisDeviceId) - Number(a.id === thisDeviceId));
+  const romeVisible = matches(romeLabel);
+  return (
+    <>
+      {romeVisible || visibleDevices.length > 0 || loading ? null : (
+        <EmptyState>
+          <EmptyStateTitle>{t("project.locations.noMatchesQuery", { query })}</EmptyStateTitle>
+        </EmptyState>
+      )}
+      <CommandList label={t("project.locations.listLabel")} className="max-h-[260px]">
+        <CommandGroup>
+          {romeVisible ? (
+            <CommandItem value="location:rome" onSelect={onRome} className="text-foreground">
+              <Cloud className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1 truncate">
+                {romeLabel}
+                {romeSelection ? (
+                  <span className="ml-2 text-aux text-subtle-foreground">{romeSelection}</span>
+                ) : null}
+              </span>
+              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            </CommandItem>
+          ) : null}
+          {visibleDevices.map((device) => {
+            // Known only after the device was opened: the list probes nothing.
+            const reason = deviceErrorById[device.id];
+            const selected = deviceFolder?.deviceId === device.id;
+            return (
+              <CommandItem
+                key={device.id}
+                value={`device:${device.id}`}
+                disabled={Boolean(reason)}
+                onSelect={() => onDevice(device)}
+                className="text-foreground"
+              >
+                <Laptop className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="flex min-w-0 flex-1 items-center gap-2">
+                  <span className="min-w-0 truncate">{device.name}</span>
+                  {device.id === thisDeviceId ? (
+                    <Badge variant="muted" className="h-5 shrink-0">
+                      {t("project.devices.thisDevice")}
+                    </Badge>
+                  ) : null}
+                  {selected && deviceFolder ? (
+                    <span className="min-w-0 truncate text-aux text-subtle-foreground">
+                      {tildePath(deviceFolder.path, deviceFolder.home)}
+                    </span>
+                  ) : null}
+                </span>
+                {reason ? (
+                  <span className="shrink-0 text-aux text-subtle-foreground">
+                    {t(`project.devices.reasons.${reason}`)}
+                  </span>
+                ) : (
+                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                )}
+              </CommandItem>
+            );
+          })}
+        </CommandGroup>
+      </CommandList>
+      {/* Outside the listbox, whose children have to be options or groups. */}
+      {loading ? (
+        <div role="status" className="flex flex-col gap-1 px-1 pb-1">
+          <span className="sr-only">{t("project.locations.loading")}</span>
+          {["first", "second"].map((key) => (
+            <div key={key} aria-hidden className="flex h-8 items-center gap-2 px-2">
+              <Skeleton className="size-4 shrink-0" />
+              <Skeleton className="h-3 w-32" />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}

@@ -38,6 +38,17 @@ rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t }),
 }));
 
+rs.mock("@/hooks/use-dashboard-identity", () => ({
+  useDashboardIdentity: () => ({
+    data: {
+      kind: "visitor",
+      accountId: "acct-ana",
+      email: "ana@example.com",
+      avatarUrl: "https://example.com/ana.png",
+    },
+  }),
+}));
+
 rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: mockUseSessionIdentity,
 }));
@@ -104,16 +115,40 @@ rs.mock("@/components/chat/MessageList", () => ({
     rows,
   }: {
     live: { identity: { name: string } };
-    rows: { kind: string; key: string; message?: { content: string } }[];
+    rows: {
+      kind: string;
+      key: string;
+      message?: {
+        content: string;
+        traceArchived?: boolean;
+        sender?: { name: string | null; avatarUrl: string | null };
+      };
+    }[];
   }) => (
     <>
       <div data-testid="message-list">{live.identity.name}</div>
       {rows
         .filter((row) => row.kind === "user")
         .map((row) => (
-          <div key={row.key} data-testid="user-row" data-row-key={row.key}>
+          <div
+            key={row.key}
+            data-testid="user-row"
+            data-row-key={row.key}
+            data-sender={row.message?.sender?.name}
+            data-sender-avatar={row.message?.sender?.avatarUrl}
+          >
             {row.message?.content}
           </div>
+        ))}
+      {rows
+        .filter((row) => row.kind === "trace")
+        .map((row) => (
+          <div
+            key={row.key}
+            data-testid="trace-row"
+            data-row-key={row.key}
+            data-archived={row.message?.traceArchived}
+          />
         ))}
     </>
   ),
@@ -371,7 +406,7 @@ describe("Chat agent identity", () => {
     expect(screen.getByRole("button", { name: "chat.expandTools" })).toBeTruthy();
   });
 
-  it("shows the session model in the chat header", () => {
+  it("marks the header avatar with the session model's vendor", () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "A conversation",
       model: "gpt-5.5",
@@ -379,10 +414,11 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    expect(screen.getByLabelText("navbar.sessionModel").textContent).toBe("gpt-5.5");
+    const avatar = screen.getByRole("button", { name: "navbar.sessionModel" });
+    expect(avatar.querySelector('svg[aria-label="ChatGPT"]')).toBeTruthy();
   });
 
-  it("shows the effort the session's last turn ran with beside the model", () => {
+  it("names the effort the session's last turn ran with", () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "A conversation",
       model: "gpt-5.5",
@@ -391,10 +427,7 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    // The provider's own effort term, with no mapping to composer labels.
-    expect(screen.getByLabelText("navbar.sessionModelWithEffort").textContent).toBe(
-      "gpt-5.5 · max",
-    );
+    expect(screen.getByRole("button", { name: "navbar.sessionModelWithEffort" })).toBeTruthy();
   });
 
   it("does not invent a model for a session without a pin", () => {
@@ -427,6 +460,68 @@ describe("Chat agent identity", () => {
 });
 
 describe("Chat session events", () => {
+  const archivedTrace = {
+    id: "old-trace",
+    sessionId: "session-1",
+    turnId: "old-turn",
+    role: "trace" as const,
+    content: "[]",
+    createdAt: "2026-09-24T12:00:00Z",
+    traceArchived: true,
+  };
+  const restoredTrace = {
+    ...archivedTrace,
+    traceArchived: undefined,
+    traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+  };
+
+  it.each([
+    "user",
+    "assistant",
+    "trace",
+    "notification",
+  ])("reloads archived turns immediately when a %s message arrives", async (role) => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    rs.mocked(listSessionMessages)
+      .mockResolvedValueOnce([archivedTrace])
+      .mockResolvedValueOnce([restoredTrace]);
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("trace-row").getAttribute("data-archived")).toBe("true"),
+    );
+    act(() =>
+      MockEventSource.instances[0]?.emit("message_insert", {
+        id: "new-message",
+        sessionId: "session-1",
+        turnId: "new-turn",
+        role,
+        content: "[]",
+        createdAt: "2026-10-24T12:00:00Z",
+      }),
+    );
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getAllByTestId("trace-row")[0]?.getAttribute("data-archived")).toBeNull(),
+    );
+  });
+
+  it("reloads archived turns on send acceptance without waiting for a message event or completed turn", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    rs.mocked(listSessionMessages)
+      .mockResolvedValueOnce([archivedTrace])
+      .mockResolvedValueOnce([restoredTrace]);
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId: "turn-1" } });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("trace-row").getAttribute("data-archived")).toBe("true"),
+    );
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByTestId("trace-row").getAttribute("data-archived")).toBeNull(),
+    );
+  });
+
   it("delivers a validated inserted message to the active session", async () => {
     rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
     const onSessionMessage = rs.fn();
@@ -759,6 +854,31 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("user-row")).toBe(bubble);
   });
 
+  it("shows the signed-in person as the sender of a message they send", async () => {
+    let resolvePost!: (result: Awaited<ReturnType<typeof postSessionTurn>>) => void;
+    rs.mocked(postSessionTurn).mockImplementationOnce(
+      () => new Promise((resolve) => (resolvePost = resolve)),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+
+    fireEvent.click(screen.getByTestId("send-text-button"));
+    const early = await screen.findByTestId("user-row");
+    expect(early.dataset.sender).toBe("ana@example.com");
+    expect(early.dataset.senderAvatar).toBe("https://example.com/ana.png");
+
+    await act(async () => {
+      resolvePost({
+        ok: true,
+        data: {
+          turnId: "turn-1",
+          inputId: "11111111-1111-4111-8111-111111111111",
+          inputState: "submitted",
+        },
+      });
+    });
+    expect(screen.getByTestId("user-row").dataset.sender).toBe("ana@example.com");
+  });
+
   it("takes the early bubble back down when the send is refused", async () => {
     let resolvePost!: (result: Awaited<ReturnType<typeof postSessionTurn>>) => void;
     rs.mocked(postSessionTurn).mockImplementationOnce(
@@ -841,6 +961,130 @@ describe("Chat turn stream lifecycle", () => {
       );
       expect(composer()).toBe("true");
     } finally {
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
+    }
+  });
+
+  it("hides a backend turn's saved trace behind its live row once the stream names the turn", async () => {
+    // A defer wake-up streams under a synthetic `backend:` key but saves its
+    // trace under the agent's own turn id.
+    const encoder = new TextEncoder();
+    const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
+    const traceMessage = (id: string, turnId: string) => ({
+      id,
+      sessionId: "session-1",
+      turnId,
+      role: "trace" as const,
+      content: "[]",
+      createdAt: "2026-10-22T00:00:00.000Z",
+      traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+    });
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      traceMessage("trace-old", "turn-old"),
+      traceMessage("trace-real", "turn-real"),
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      { turnId: "backend:wake", streamId: "stream-wake", startedAt: "", status: "running" },
+    ]);
+    rs.mocked(openTurnStream).mockImplementation((_turnId, signal) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode('event: turn_id\ndata: {"turnId":"turn-real"}\n\n'));
+          signal?.addEventListener(
+            "abort",
+            () => controller.error(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        },
+      });
+      return Promise.resolve(new Response(body));
+    });
+    try {
+      renderChat(<Chat sessionId="session-1" />);
+      await waitFor(() =>
+        expect(openTurnStream).toHaveBeenCalledWith("backend:wake", expect.any(Object)),
+      );
+      // The earlier reply-less turn still stands alone. The running turn's
+      // saved trace is carried by the live row only.
+      await waitFor(() =>
+        expect(screen.getAllByTestId("trace-row").map((row) => row.dataset.rowKey)).toEqual([
+          "trace-old",
+        ]),
+      );
+      expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+
+      // Stop still names the `turnId` the stream was opened under, which the
+      // listing keeps reporting, so the accepted interrupt does not
+      // force-release the running turn.
+      rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 202 }));
+      rs.useFakeTimers();
+      fireEvent.click(screen.getByTestId("stop-button"));
+      await act(async () => {
+        await rs.advanceTimersByTimeAsync(2_500);
+      });
+      expect(interruptTurn).toHaveBeenCalledWith("backend:wake");
+      expect(rs.mocked(openTurnStream).mock.calls[0]?.[1]?.aborted).toBe(false);
+      expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+    } finally {
+      rs.mocked(listSessionMessages).mockResolvedValue([]);
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
+    }
+  });
+
+  it("hides a backend turn's saved trace on reattach when the listing names the turn", async () => {
+    // A reload mid-turn finds the turn in the listing, which already carries the
+    // agent's turn id. The stream sends nothing here, so only the listing can
+    // name the turn.
+    const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
+    const traceMessage = (id: string, turnId: string) => ({
+      id,
+      sessionId: "session-1",
+      turnId,
+      role: "trace" as const,
+      content: "[]",
+      createdAt: "2026-10-22T00:00:00.000Z",
+      traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+    });
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      traceMessage("trace-old", "turn-old"),
+      traceMessage("trace-real", "turn-real"),
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      {
+        turnId: "backend:wake",
+        agentTurnId: "turn-real",
+        streamId: "stream-wake",
+        startedAt: "",
+        status: "running",
+      },
+    ]);
+    rs.mocked(openTurnStream).mockImplementation((_turnId, signal) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener(
+            "abort",
+            () => controller.error(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        },
+      });
+      return Promise.resolve(new Response(body));
+    });
+    try {
+      renderChat(<Chat sessionId="session-1" />);
+      await waitFor(() =>
+        expect(openTurnStream).toHaveBeenCalledWith("backend:wake", expect.any(Object)),
+      );
+      await waitFor(() =>
+        expect(screen.getAllByTestId("trace-row").map((row) => row.dataset.rowKey)).toEqual([
+          "trace-old",
+        ]),
+      );
+      expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+    } finally {
+      rs.mocked(listSessionMessages).mockResolvedValue([]);
       rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
       rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
     }

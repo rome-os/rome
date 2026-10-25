@@ -18,14 +18,10 @@ import { SourceConnect } from "@/components/sync/SourceConnect";
 import { cn } from "@/lib/utils";
 import { discardSendOrigin, recordSendOrigin } from "@/lib/send-flight";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
-import {
-  ChatApiError,
-  createProject as apiCreateProject,
-  listProjects,
-  saveSetting,
-} from "@/lib/chat-api";
+import { ChatApiError, createProject as apiCreateProject, saveSetting } from "@/lib/chat-api";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
 import { usePeople } from "@/hooks/use-people";
+import { useChatLocations } from "@/hooks/use-chat-locations";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
   DEFAULT_LARGE_MODEL_SELECTION,
@@ -38,7 +34,6 @@ import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import type {
   AgentMention,
   PendingUpload,
-  ProjectCatalog,
   ProjectOption,
   ReasoningEffort,
   ChatErrorNotice,
@@ -53,6 +48,12 @@ import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
+import {
+  COMPOSER_HINT_KEYS,
+  composerHints,
+  pickComposerHint,
+  type ComposerHint,
+} from "./composer/composer-hints";
 import { useHorizontalScrollRail } from "./HorizontalScrollRail";
 import {
   clearNewChatDraft,
@@ -61,6 +62,8 @@ import {
   saveNewChatDraft,
 } from "@/lib/new-chat-draft-storage";
 import { randomUUID } from "@/lib/random-uuid";
+import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
+import type { DraftDeviceFolder } from "@/lib/device-folder";
 
 export interface ChatComposerSnapshot {
   text: string;
@@ -69,6 +72,8 @@ export interface ChatComposerSnapshot {
   largeModelSelection?: string;
   reasoningEffort: ReasoningEffort;
   projectPath: string;
+  // Set only in draft mode, and only when no project is: the two exclude each other.
+  deviceFolder?: DraftDeviceFolder;
   // Set only in draft mode when the user picked an `@app/agent` from the
   // mention menu. Active sessions inherit their agent from `pinnedAgentMention`
   // instead — `onSend` for those should ignore this field.
@@ -129,6 +134,10 @@ export interface ChatComposerProps {
   // Seed for the draft project name. Honored once at mount and again when it
   // changes from undefined → defined (i.e., transitioning into a new draft).
   initialProjectName?: string;
+  // Seed for the draft device folder, e.g. "New chat in this folder" in the
+  // sidebar. Same timing as initialProjectName, and it wins over both the
+  // project and a saved draft.
+  initialDeviceFolder?: DraftDeviceFolder;
   // Pinned agent for an active session — once set, the chip is non-removable
   // and the `@` menu is suppressed (session is locked to this agent).
   pinnedAgentMention?: AgentMention | null;
@@ -163,6 +172,12 @@ export interface ChatComposerProps {
   // composer owns the box so the pre-send chip row can sit *outside* it; each
   // mount passes its own box look (the floating composer adds backdrop-blur).
   boxClassName?: string;
+  // A box for plain text only, for a chat whose other end is not one of Rome's
+  // agents (an assistant's chat): no attachments, reasoning effort,
+  // impersonation, workspace chips or `/` skills, none of which reach it.
+  textOnly?: boolean;
+  // Replaces the default placeholder.
+  placeholder?: string;
   // Called when the user submits. The composer clears text immediately but
   // keeps uploading attachments visible until this promise settles. If it
   // rejects, the submitted inputs remain available for a retry.
@@ -198,6 +213,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     showProjectSelector = false,
     showModelSelector = false,
     initialProjectName,
+    initialDeviceFolder,
     pinnedAgentMention = null,
     initialAgentMention = null,
     lockAgentMention = false,
@@ -206,6 +222,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     streamError,
     designingInteraction = null,
     boxClassName,
+    textOnly = false,
+    placeholder,
     onSend,
   },
   ref,
@@ -248,6 +266,25 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     }
   }, [agentMentionLocked]);
   const effectiveMention = pinnedAgentMention ?? draftAgentMention;
+  const coarsePointer = useCoarsePointer();
+
+  // The empty box shows one hint, picked again on each send rather than on a
+  // timer. The set of hints changes when a draft becomes a chat or the pointer
+  // changes; the shown one stays while it still applies.
+  const hints = useMemo(
+    () =>
+      composerHints({
+        draft: !agentMentionLocked,
+        textOnly,
+        projectSelector: showProjectSelector,
+        coarsePointer,
+      }),
+    [agentMentionLocked, textOnly, showProjectSelector, coarsePointer],
+  );
+  const [hint, setHint] = useState<ComposerHint>(() => pickComposerHint(hints, null));
+  useEffect(() => {
+    setHint((current) => (hints.includes(current) ? current : pickComposerHint(hints, current)));
+  }, [hints]);
 
   // Open while the message starts with `/` and the cursor is still inside the
   // first token. Selecting pins the skill as a structured chip (mirroring the
@@ -297,12 +334,29 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
 
-  const [draftProjectName, setDraftProjectName] = useState(
-    () => initialProjectName?.trim() || storedDraft?.projectPath || DEFAULT_PROJECT_NAME,
+  const [draftProjectName, setDraftProjectName] = useState(() =>
+    initialDeviceFolder
+      ? DEFAULT_PROJECT_NAME
+      : initialProjectName?.trim() || storedDraft?.projectPath || DEFAULT_PROJECT_NAME,
   );
-  const [projectCatalog, setProjectCatalog] = useState<ProjectCatalog | null>(null);
-  const [projectsLoading, setProjectsLoading] = useState(false);
+  // A project and a device folder exclude each other: a project the composer
+  // opens with wins over a folder left in the saved draft.
+  const [draftDeviceFolder, setDraftDeviceFolder] = useState<DraftDeviceFolder | null>(
+    () =>
+      initialDeviceFolder ??
+      (initialProjectName?.trim() ? null : (storedDraft?.deviceFolder ?? null)),
+  );
+  const locations = useChatLocations(showProjectSelector);
+  const projectCatalog = locations.query.data?.projects ?? null;
+  // Errors from creating a project; a failed load shows from the query below.
   const [projectsError, setProjectsError] = useState<string | null>(null);
+  const locationsError = locations.query.error;
+  const loadError =
+    locationsError && !locations.query.data
+      ? locationsError instanceof ChatApiError && locationsError.message
+        ? locationsError.message
+        : t("project.errors.loadFailed")
+      : null;
   // Errors that need a composer-level banner even when the project picker
   // isn't rendered (e.g. /api/settings save failures in an embed that opts
   // out of `showProjectSelector`).
@@ -365,8 +419,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const textareaFocusedAtPressRef = useRef(false);
 
   useEffect(() => {
-    if (initialProjectName) setDraftProjectName(initialProjectName.trim());
+    if (!initialProjectName) return;
+    setDraftProjectName(initialProjectName.trim());
+    setDraftDeviceFolder(null);
   }, [initialProjectName]);
+  useEffect(() => {
+    if (!initialDeviceFolder) return;
+    setDraftDeviceFolder(initialDeviceFolder);
+    setDraftProjectName(DEFAULT_PROJECT_NAME);
+  }, [initialDeviceFolder]);
   useEffect(() => {
     if (initialAgentMention && !agentMentionLocked) setDraftAgentMention(initialAgentMention);
   }, [initialAgentMention, agentMentionLocked]);
@@ -385,6 +446,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         agentMention: draftAgentMention,
         skill: draftSkill,
         personaId: selectedPersonId,
+        ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
       },
       authEpoch,
     );
@@ -393,6 +455,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     authEpoch,
     inputText,
     draftProjectName,
+    draftDeviceFolder,
     draftAgentMention,
     draftSkill,
     selectedPersonId,
@@ -440,20 +503,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     [t, invalidateSettings],
   );
 
-  const loadProjects = useCallback(async () => {
-    setProjectsLoading(true);
-    setProjectsError(null);
-    try {
-      const data = await listProjects();
-      setProjectCatalog(data);
-    } catch (error) {
-      const fallback = t("project.errors.loadFailed");
-      setProjectsError(error instanceof ChatApiError && error.message ? error.message : fallback);
-    } finally {
-      setProjectsLoading(false);
-    }
-  }, [t]);
-
   const createProjectAndSelect = useCallback(async () => {
     const name = newProjectName.trim();
     if (!name) {
@@ -464,15 +513,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     setProjectsError(null);
     try {
       const data: ProjectOption = await apiCreateProject(name);
-      setProjectCatalog((prev) => {
-        if (!prev) return prev;
-        const projects = [...prev.projects, data].sort((a, b) => a.name.localeCompare(b.name));
-        return { ...prev, projects };
-      });
+      locations.addProject(data);
       setNewProjectName("");
       setCreateProjectFormOpen(false);
       setProjectSearchQuery("");
       setDraftProjectName(data.name);
+      setDraftDeviceFolder(null);
       setDraftProjectMenuOpen(false);
       if (connectOnCreate) {
         setPendingConnectPath(data.name);
@@ -484,7 +530,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     } finally {
       setCreatingProject(false);
     }
-  }, [newProjectName, t, connectOnCreate]);
+  }, [newProjectName, t, connectOnCreate, locations.addProject]);
 
   const addPendingFiles = useCallback((files: File[]) => {
     // The visible file picker is disabled during an upload, but paste and the
@@ -568,6 +614,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             showModelSelector && modelSelectorEnabled ? largeModelSelection : undefined,
           reasoningEffort,
           projectPath: draftProjectName,
+          deviceFolder: draftDeviceFolder ?? undefined,
           agentMention: draftAgentMention ?? undefined,
           skillName,
         };
@@ -597,6 +644,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       modelSelectorEnabled,
       largeModelSelection,
       draftProjectName,
+      draftDeviceFolder,
       draftAgentMention,
       onSend,
       invokeOnSend,
@@ -615,13 +663,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      const files = extractFilesFromClipboard(event.clipboardData);
+      const files = textOnly ? [] : extractFilesFromClipboard(event.clipboardData);
       if (files.length > 0) {
         event.preventDefault();
         addPendingFiles(files);
       }
     },
-    [addPendingFiles],
+    [addPendingFiles, textOnly],
   );
 
   const runSend = useCallback(async () => {
@@ -649,6 +697,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         showModelSelector && modelSelectorEnabled ? largeModelSelection : undefined,
       reasoningEffort,
       projectPath: draftProjectName,
+      deviceFolder: draftDeviceFolder ?? undefined,
       // Pinned sessions ignore this; draft hosts read it to lock the new
       // session to the picked agent.
       agentMention: draftAgentMention ?? undefined,
@@ -673,6 +722,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       setPendingUploads([]);
       setDraftSkill(null);
     }
+    setHint((current) => pickComposerHint(hints, current));
     try {
       await invokeOnSend(snapshot, persistNewChatDraft);
       failedSendRef.current = null;
@@ -702,6 +752,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             agentMention: draftAgentMention,
             skill,
             personaId: selectedPersonId,
+            ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
           },
           authEpoch,
         );
@@ -726,9 +777,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     largeModelSelection,
     reasoningEffort,
     draftProjectName,
+    draftDeviceFolder,
     draftAgentMention,
     uploadInFlight,
     invokeOnSend,
+    hints,
   ]);
 
   // Re-evaluates whether the cursor sits inside an active mention token
@@ -776,7 +829,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       const token = value.slice(1, cursor);
       const slashCount = token.split("/").length - 1;
       const slashShapeAllowed = slashCount === 0 || (token.startsWith("@") && slashCount === 1);
-      if (value.startsWith("/") && cursor >= 1 && !/\s/.test(token) && slashShapeAllowed) {
+      if (
+        !textOnly &&
+        value.startsWith("/") &&
+        cursor >= 1 &&
+        !/\s/.test(token) &&
+        slashShapeAllowed
+      ) {
         setSlashQuery(token);
         setSlashMenuOpen(true);
         return;
@@ -786,7 +845,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setSlashQuery("");
       }
     },
-    [slashMenuOpen],
+    [slashMenuOpen, textOnly],
   );
 
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -875,7 +934,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // On touch-first devices, Enter inserts a newline instead and sending goes
   // through the send button — soft keyboards have no Shift+Enter, and an
   // accidental tap on Enter shouldn't fire a half-written message.
-  const coarsePointer = useCoarsePointer();
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // While the slash menu is open, hijack arrow/enter/escape the same way the
     // mention menu does. The two are mutually exclusive in practice: slash
@@ -1067,7 +1125,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             onRemove={uploadInFlight ? undefined : () => setDraftSkill(null)}
           />
         )}
-        <WorkspaceContextChips />
+        {textOnly ? null : <WorkspaceContextChips />}
       </div>
       <div data-chat-composer-box className={cn("@container/composer relative z-10", boxClassName)}>
         {composerError && (
@@ -1132,9 +1190,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                         onKeyDown={handleKeyDown}
                         onPaste={handlePaste}
                         placeholder={
-                          pendingUploads.length > 0
+                          placeholder ??
+                          (pendingUploads.length > 0
                             ? t("composer.placeholderWithUploads")
-                            : t("composer.placeholderDefault")
+                            : t(COMPOSER_HINT_KEYS[hint], {
+                                shortcut: chatSearchShortcutForPlatform(),
+                              }))
                         }
                         rows={1}
                         className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
@@ -1164,8 +1225,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 disabled={uploadInFlight}
                 t={t}
                 projectCatalog={projectCatalog}
-                projectsLoading={projectsLoading}
-                projectsError={projectsError}
+                projectsLoading={locations.query.isPending}
+                projectsError={projectsError ?? loadError}
+                devices={locations.query.data?.devices ?? null}
                 draftProjectName={draftProjectName}
                 draftProjectLabel={draftProjectLabel}
                 defaultProjectName={DEFAULT_PROJECT_NAME}
@@ -1187,13 +1249,24 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                   if (!nextOpen) {
                     setProjectSearchQuery("");
                     setCreateProjectFormOpen(false);
-                  } else if (!projectCatalog) {
-                    await loadProjects();
+                  } else {
+                    // The menu shows the cached answer; this only refreshes it.
+                    void locations.query.refetch();
                   }
                 }}
                 onPickProject={(name) => {
                   if (uploadInFlightRef.current) return;
                   setDraftProjectName(name);
+                  setDraftDeviceFolder(null);
+                  setDraftProjectMenuOpen(false);
+                  setProjectSearchQuery("");
+                  setCreateProjectFormOpen(false);
+                }}
+                deviceFolder={draftDeviceFolder}
+                onPickDeviceFolder={(folder) => {
+                  if (uploadInFlightRef.current) return;
+                  setDraftDeviceFolder(folder);
+                  setDraftProjectName(DEFAULT_PROJECT_NAME);
                   setDraftProjectMenuOpen(false);
                   setProjectSearchQuery("");
                   setCreateProjectFormOpen(false);
@@ -1210,7 +1283,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 onClose={() => setPendingConnectPath(null)}
               />
             ) : null}
-            {impersonationEnabled && (
+            {impersonationEnabled && !textOnly && (
               <ImpersonationMenu
                 disabled={uploadInFlight}
                 open={impersonationMenuOpen}
@@ -1227,18 +1300,20 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 guardianLabel={guardianLabel}
               />
             )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploadInFlight}
-              aria-label={t("composer.uploadFiles")}
-              title={t("composer.uploadFiles")}
-              className="touch-target"
-            >
-              <Paperclip aria-hidden />
-            </Button>
+            {textOnly ? null : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadInFlight}
+                aria-label={t("composer.uploadFiles")}
+                title={t("composer.uploadFiles")}
+                className="touch-target"
+              >
+                <Paperclip aria-hidden />
+              </Button>
+            )}
             {showModelSelector && modelSelectorEnabled && (
               <ModelSelectorMenu
                 open={modelMenuOpen}
@@ -1248,13 +1323,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 disabled={uploadInFlight}
               />
             )}
-            <ReasoningEffortMenu
-              open={reasoningMenuOpen}
-              onOpenChange={setReasoningMenuOpen}
-              value={reasoningEffort}
-              onChange={(next) => void updateReasoningEffort(next)}
-              disabled={uploadInFlight}
-            />
+            {textOnly ? null : (
+              <ReasoningEffortMenu
+                open={reasoningMenuOpen}
+                onOpenChange={setReasoningMenuOpen}
+                value={reasoningEffort}
+                onChange={(next) => void updateReasoningEffort(next)}
+                disabled={uploadInFlight}
+              />
+            )}
           </div>
           {/* Stop sits just left of Send. */}
           <div className="flex items-center gap-2 self-end [grid-area:send]">

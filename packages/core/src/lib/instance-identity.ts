@@ -1,5 +1,6 @@
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 import { createLogger } from "../logger.js";
+import { type CloudProfile, readCloudProfile } from "./cloud-profile.js";
 
 const log = createLogger("instance-identity");
 
@@ -111,6 +112,8 @@ export interface InstanceIdentity {
   /** Rome Cloud profile picture for the account owner. Null means Cloud knows
    *  the account has no picture; undefined means the response omitted the field. */
   avatarUrl?: string | null;
+  /** The whole whoami account, for `system:get_guardian_cloud_profile`. */
+  profile?: CloudProfile;
 }
 
 // The outcome of presenting the durable token to Rome Cloud. `revoked` and
@@ -187,7 +190,10 @@ export async function proveIdentity(opts: ProveIdentityOptions = {}): Promise<Pr
         : null
       : undefined;
 
-  return { status: "ok", identity: { accountId, instanceId, email, avatarUrl } };
+  return {
+    status: "ok",
+    identity: { accountId, instanceId, email, avatarUrl, profile: readCloudProfile(data?.account) },
+  };
 }
 
 // Best-effort identity announcement at boot. Authenticate is "constant,

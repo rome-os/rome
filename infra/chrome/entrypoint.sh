@@ -5,9 +5,10 @@
 # keep-alives Chrome and socat-forwards CDP to $ROME_CHROME_BIND_ADDRESS:9222
 # (127.0.0.1 — the network namespace is shared with the rome container).
 #
-# There is no port-conflict logic here: the container is always created fresh
-# by compose (`up --force-recreate` in dev-up.sh), so a plain sequential boot
-# suffices.
+# A restart (`restart: unless-stopped`, an engine restart) reuses the
+# container's writable layer, so /tmp still holds the previous X server's lock
+# and socket while none of its processes survive. The boot clears both before
+# starting Xtigervnc, so a plain sequential boot suffices.
 set -euo pipefail
 
 export DISPLAY="${DISPLAY:-:99}"
@@ -22,6 +23,11 @@ else
 fi
 VNC_PORT="${ROME_VNC_PORT:-5900}"
 NOVNC_PORT="${ROME_NOVNC_PORT:-6080}"
+
+# A stale lock makes Xtigervnc exit with "Server is already active", and a
+# stale socket makes the wait below pass without a server, so Chrome then
+# crash-loops on "Missing X server".
+rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
 
 echo "Starting TigerVNC on ${DISPLAY}, RFB :${VNC_PORT} ..."
 Xtigervnc "$DISPLAY" \

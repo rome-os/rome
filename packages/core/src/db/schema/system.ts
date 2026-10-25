@@ -10,6 +10,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
+import type { DeviceFolder } from "@rome/api-types/devices";
 import type { OutboxMessage } from "@rome/api-types/people";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
@@ -432,6 +433,17 @@ export const guardianAuth = sqliteTable("guardian_auth", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+// The last Rome Cloud profile each visitor signed in with, kept so other
+// dashboard people see who sent a chat message. A visitor's own session holds
+// the same fields, but only in their cookie. Display only, never used for
+// authentication; a sign-in overwrites the row.
+export const visitorProfiles = sqliteTable("visitor_profiles", {
+  accountId: text("account_id").primaryKey(),
+  email: text("email").notNull(),
+  avatarUrl: text("avatar_url"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 export const oauthPendingAttempts = sqliteTable(
   "oauth_pending_attempts",
   {
@@ -493,6 +505,9 @@ export const romeSessions = sqliteTable(
     largeModelSelection: text("large_model_selection"),
     projectName: text("project_name").notNull().default(DEFAULT_WEBCHAT_PROJECT_NAME),
     projectPath: text("project_path"),
+    // Folder on a rome-node device the chat works in, set only when the chat
+    // is created. NULL for every chat without one and every other session type.
+    deviceFolder: text("device_folder", { mode: "json" }).$type<DeviceFolder>(),
     // Agent the session is bound to. NULL means the default "main" agent.
     // Locked on first turn so the session can't switch agents mid-thread.
     agentName: text("agent_name"),
@@ -729,6 +744,21 @@ export const romeAgentMessages = sqliteTable(
   ],
 );
 
+// The platform messages a message row stands for besides its own
+// platform_message_id. A reply the platform shows as several messages is one
+// row, and a quote of any of them reaches it. Not a FK, as with the trace
+// blocks below: session-scoped deletes remove these rows explicitly.
+export const romeAgentMessagePlatformIds = sqliteTable(
+  "rome_agent_message_platform_ids",
+  {
+    sessionId: text("session_id").notNull(),
+    platformMessageId: text("platform_message_id").notNull(),
+    // The rome_agent_messages row the platform message belongs to.
+    messageId: text("message_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.platformMessageId] })],
+);
+
 // Append-only storage for trace content, avoiding the O(N²) cost of storing
 // the whole trace as one JSON array on the role='trace' rome_agent_messages
 // row and re-serializing it after every agent event — that multi-megabyte
@@ -881,7 +911,9 @@ export const connections = sqliteTable("connections", {
 
 // One row per channel a Connection backs: Rome's presence on a platform, with
 // an id minted once and never changed. The first channel of a connection kind takes
-// the connection kind's name as its id, and later ones get an opaque id. A row
+// the connection kind's name as its id, and later ones get an opaque id. A linkable
+// connection kind's account connected through setup always gets an opaque id, and only
+// its account from before channels were recorded keeps the name. A row
 // outlives its Connection, unbacked and unlinked, so its id is never minted
 // again: a linkable connection kind's next Connection gets a channel of its own, and
 // another connection kind's takes the row back. `agent` is the canonical id of the
@@ -918,6 +950,19 @@ export const connectionGrants = sqliteTable(
     lastRenewedAt: integer("last_renewed_at", { mode: "timestamp" }),
     degradedAt: integer("degraded_at", { mode: "timestamp" }),
     degradedReason: text("degraded_reason"),
+    // The account the grant reaches, read from its profile: the platform and
+    // the platform's own id for the account. Null when the profile names none.
+    platform: text("platform"),
+    accountId: text("account_id"),
   },
-  (table) => [primaryKey({ columns: [table.custody, table.name] })],
+  (table) => [
+    primaryKey({ columns: [table.custody, table.name] }),
+    // At most one connection reaches an account at a time, across every kind of
+    // connection on its platform. A broken (degraded) grant still counts, so a
+    // broken connection keeps its account. Vocabulary:
+    // docs/domains/connections.md#connection.
+    uniqueIndex("uq_connection_grants_account")
+      .on(table.platform, table.accountId)
+      .where(sql`${table.accountId} IS NOT NULL AND ${table.state} != 'unauthorized'`),
+  ],
 );

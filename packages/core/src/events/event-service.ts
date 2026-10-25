@@ -1,7 +1,14 @@
-import type { EventCatalogEntry, EventCatalogReader, EventPublisher } from "@rome-os/app-runtime";
+import type {
+  EventCatalogEntry,
+  EventCatalogReader,
+  EventCatalogSearchOptions,
+  EventCatalogSearchResult,
+  EventPublisher,
+} from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import type { EventBus } from "./event-bus.js";
-import { inferPayloadSchema, type EventCatalog } from "../event-catalog.js";
+import { inferPayloadSchema, searchCatalogEntries, type EventCatalog } from "../event-catalog.js";
+import { matchToFilter, type EventSources, type RunEnsureAction } from "./event-sources.js";
 
 const log = createLogger("event-service");
 
@@ -21,6 +28,9 @@ export class EventService implements EventPublisher, EventCatalogReader {
   constructor(
     private readonly bus: EventBus,
     private readonly catalog: EventCatalog,
+    /** Types apps declare in app.yaml, merged into search results, and the
+     * action runner a `match` search probes them with. */
+    private readonly declared?: { sources: EventSources; run: RunEnsureAction },
   ) {}
 
   async publish(event: {
@@ -55,10 +65,52 @@ export class EventService implements EventPublisher, EventCatalogReader {
     return { accepted: true };
   }
 
+  /** Observed and declared types together. An observed type keeps its
+   * observed schema and gains the declaration's `subscribable` / `keys`. With
+   * `match`, each subscribable result also reports `active`, asked of the
+   * producer; without it no provider is called. */
   async search(
     query: string,
     limit: number,
-  ): Promise<{ entries: EventCatalogEntry[]; total: number }> {
-    return this.catalog.search(query, limit);
+    options: EventCatalogSearchOptions = {},
+  ): Promise<EventCatalogSearchResult> {
+    if (!this.declared) return this.catalog.search(query, limit);
+    const { sources, run } = this.declared;
+
+    const merged = new Map<string, EventCatalogEntry>();
+    for (const entry of this.catalog.list()) {
+      const source = sources.sourceFor(entry.eventType);
+      merged.set(
+        entry.eventType,
+        source ? { ...entry, subscribable: true, keys: source.keys } : { ...entry },
+      );
+    }
+    for (const entry of sources.declaredEntries()) {
+      if (!merged.has(entry.eventType)) merged.set(entry.eventType, entry);
+    }
+    const result = searchCatalogEntries([...merged.values()], query, limit);
+    if (!options.match) return result;
+
+    // One probe at a time: each runs an action, and `limit` bounds the count.
+    // The first failure (not connected, no access to the target) would repeat
+    // for every type, so it stops further probes.
+    const filter = matchToFilter(options.match);
+    let matchError: string | undefined;
+    const entries: EventCatalogEntry[] = [];
+    for (const entry of result.entries) {
+      if (!entry.subscribable || matchError) {
+        entries.push(entry);
+        continue;
+      }
+      const probe = await sources.probe(entry.eventType, filter, run);
+      if (probe.ok) {
+        entries.push({ ...entry, active: probe.active });
+        continue;
+      }
+      log.info("event source probe failed", { eventType: entry.eventType, error: probe.error });
+      matchError ??= probe.error;
+      entries.push(entry);
+    }
+    return { entries, total: result.total, ...(matchError ? { matchError } : {}) };
   }
 }

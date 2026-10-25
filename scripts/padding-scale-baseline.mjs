@@ -10,7 +10,6 @@
  */
 export const BASELINE = {
   "packages/web/src/components/docx-preview-pane.tsx": ["padding: 1rem"],
-  "packages/web/src/globals.css": ["padding-top: 2.5rem"],
   "packages/web/src/pages/dev/StyleGuidePage.tsx": [
     "padding: 12px",
     "padding: 16px",
@@ -42,8 +41,6 @@ export const BASELINE = {
     "padding: clamp(1rem, 2vw, 1.75rem)",
   ],
   "rome_apps/inbox/src/web/App.tsx": ['padding: "24px"', 'padding: "32px"'],
-  "rome_apps/recap/src/web/App.tsx": ["p-[18px]"],
-  "rome_apps/system/src/web/App.tsx": ['padding: "24px"', 'padding: "32px"'],
 };
 
 export const baselineKeys = new Set(

@@ -16,8 +16,9 @@ cases:
           on the Chat home and leave the project and reasoning settings unchanged.
       - aiAssert: >-
           The chat home shows the greeting "Welcome," and the headline "What should we create?". The
-          message composer shows the placeholder "How can I help you today?", the current project
-          name "default", and a reasoning effort control that currently reads "Think". A button
+          message composer shows a one-line hint as its placeholder (for example "How can I help
+          you today?" or "Type / to use a skill"), the current project name "default", and a
+          reasoning effort control that currently reads "Think". A button
           with an attachment icon is visible, along with the project picker, reasoning control, and
           arrow-shaped send button. The temporary "draft" text has been cleared and no message was
           sent.

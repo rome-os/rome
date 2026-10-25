@@ -407,6 +407,7 @@ export function makePasteTalk(opts?: FakeTalkerOptions): PasteTalkFixture {
     connectionKind: "fake-telegram",
     // Names its account by the profile's `botId`, as Telegram does.
     accountIdOf: (_grant, profile) => (typeof profile.botId === "string" ? profile.botId : null),
+    takesAgent: true,
     auth: {
       bot: tokenPaste({
         label: "Fake bot token",

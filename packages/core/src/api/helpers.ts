@@ -1,3 +1,4 @@
+import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TraceEventDto } from "@rome/api-types/trace-segments";
 import type { AgentEvent } from "../types.js";
 import type { ActionResult } from "../actions/types.js";
@@ -105,6 +106,7 @@ export function toWebchatSessionResponse(
     largeModelSelection?: string | null;
     projectName: string;
     projectPath?: string | null;
+    deviceFolder?: DeviceFolder | null;
     agentName?: string | null;
     archivedAt?: Date | null;
     pinnedAt?: Date | null;
@@ -126,6 +128,7 @@ export function toWebchatSessionResponse(
     largeModelSelection: session.largeModelSelection ?? null,
     projectName: session.projectName,
     projectPath: session.projectPath ?? session.projectName,
+    deviceFolder: session.deviceFolder ?? null,
     agentName: session.agentName ?? null,
     archivedAt: session.archivedAt ? session.archivedAt.toISOString() : null,
     pinnedAt: session.pinnedAt ? session.pinnedAt.toISOString() : null,

@@ -87,9 +87,9 @@ describe("registerBuiltinConnections", () => {
     expect(registered.has(WECHAT_USER_KIND)).toBe(false);
   });
 
-  // Removal on disconnect follows `accountIdOf` on a Talk, and a fresh channel
+  // Removal on disconnect follows `takesAgent` on a Talk, and a fresh channel
   // follows `LINKABLE_KINDS`; the two must name the same kinds.
-  it("names its accounts exactly for the services an agent can be linked to", () => {
+  it("takes an agent exactly for the kinds an agent can be linked to", () => {
     const registered = new Map<string, ConnectionDescriptor>();
     const registry = {
       register: (descriptor: ConnectionDescriptor) =>
@@ -103,7 +103,7 @@ describe("registerBuiltinConnections", () => {
     } as unknown as BuiltinConnectionDeps);
 
     const naming = [...registered.values()].filter(
-      (descriptor) => descriptor.capabilities.talker && descriptor.accountIdOf,
+      (descriptor) => descriptor.capabilities.talker && descriptor.takesAgent,
     );
     expect(naming.map((descriptor) => descriptor.connectionKind).sort()).toEqual(
       [...LINKABLE_KINDS].sort(),
@@ -111,5 +111,26 @@ describe("registerBuiltinConnections", () => {
     // A disconnect removes the account once its grant goes, which covers every
     // grant only while the service holds one.
     for (const descriptor of naming) expect(Object.keys(descriptor.auth)).toHaveLength(1);
+  });
+
+  // A grant names the account it reaches, and every kind with a platform has
+  // accounts (docs/domains/connections.md#grant).
+  it("names the account for every kind that holds a grant", () => {
+    const registered = new Map<string, ConnectionDescriptor>();
+    const registry = {
+      register: (descriptor: ConnectionDescriptor) =>
+        registered.set(descriptor.connectionKind, descriptor),
+    } as unknown as ConnectionRegistry;
+
+    registerBuiltinConnections(registry, {
+      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
+      listAgents: () => [],
+      wechatUserRuntime: {} as WechatUserRuntime,
+    } as unknown as BuiltinConnectionDeps);
+
+    const unnamed = [...registered.values()]
+      .filter((descriptor) => Object.keys(descriptor.auth).length > 0 && !descriptor.accountIdOf)
+      .map((descriptor) => descriptor.connectionKind);
+    expect(unnamed).toEqual([]);
   });
 });

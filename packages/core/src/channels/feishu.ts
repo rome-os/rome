@@ -9,6 +9,7 @@ import {
 } from "@larksuiteoapi/node-sdk";
 import { isStopCommand } from "@rome-os/app-runtime";
 import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./account-agents.js";
+import type { FeishuStreamingStyle } from "./delivery/streaming-switch.js";
 import { feishuTransport } from "./delivery/transports/feishu.js";
 import type { DeliveryTransport } from "./delivery/types.js";
 import { preserveMentionOnlyText } from "./mention-only.js";
@@ -53,6 +54,9 @@ export interface FeishuConfig {
   /** Whether an agent is loaded, aliases included. Absent, every agent counts
    *  as loaded. */
   hasAgent?: (name: string) => boolean;
+  /** How a streamed reply shows, read for each message it creates. Absent,
+   *  it streams as messages. */
+  replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
   /**
    * Optional fault seam the Talker wires in. Fires on a terminal
    * `error` event from the long connection so the Talker maps it (auth →
@@ -143,6 +147,7 @@ export class FeishuAdapter {
   private readonly listAgents?: () => string[];
   private readonly accountAgent?: () => string | null | undefined;
   private readonly hasAgent?: (name: string) => boolean;
+  private readonly replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
   private readonly onFault?: (err: unknown) => void;
   private readonly observedConversations = new Map<
     string,
@@ -178,6 +183,7 @@ export class FeishuAdapter {
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
     this.hasAgent = config.hasAgent;
+    this.replyStreamingStyle = config.replyStreamingStyle;
     this.onFault = config.onFault;
   }
 
@@ -244,11 +250,13 @@ export class FeishuAdapter {
     }
   }
 
-  /** Streams replies through this adapter's client, placed as `send` places them. */
+  /** Streams replies through this adapter's client, placed as `send` places
+   *  them, in the style the guardian chose. */
   replyDelivery(): DeliveryTransport {
     return feishuTransport({
       client: this.channel.rawClient,
       replyInThread: (chat) => this.repliesInThread(chat),
+      ...(this.replyStreamingStyle ? { style: this.replyStreamingStyle } : {}),
     });
   }
 

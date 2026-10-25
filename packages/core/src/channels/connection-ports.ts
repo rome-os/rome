@@ -351,6 +351,9 @@ function connectionReplies(
       ...(declared.edit
         ? { edit: (receipt, text) => live((transport) => transport.edit?.(receipt, text)) }
         : {}),
+      ...(declared.settle
+        ? { settle: (receipt, text) => live((transport) => transport.settle?.(receipt, text)) }
+        : {}),
     },
   };
 }

@@ -329,6 +329,7 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
     severalAccounts: true,
     reviveProfile: (_grant, record) => reviveSlackBotProfile(record),
     accountIdOf: (_grant, record) => slackBotAccountId(record),
+    takesAgent: true,
     auth: { bot: botScheme },
     capabilities: {
       talker: {

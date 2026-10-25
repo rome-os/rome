@@ -8,6 +8,9 @@ const device = {
   get: (): Promise<DeviceStatus> => ipcRenderer.invoke("device:get"),
   setEnabled: (enabled: boolean): Promise<DeviceStatus> =>
     ipcRenderer.invoke("device:setEnabled", enabled),
+  /** A folder on this computer from the system dialog, or null when the user cancels. */
+  pickFolder: (defaultPath?: string): Promise<{ path: string; home: string } | null> =>
+    ipcRenderer.invoke("device:pickFolder", defaultPath),
   onStatus: (callback: (status: DeviceStatus) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: DeviceStatus) => callback(status);
     ipcRenderer.on("device:status", listener);
@@ -69,7 +72,6 @@ const api = {
   // One-way on purpose: the pill never needs an answer, and the main process
   // owns all window geometry — the page only reports gestures.
   pill: {
-    ready: (): void => ipcRenderer.send("pill:ready"),
     setSize: (width: number, height: number): void =>
       ipcRenderer.send("pill:setSize", width, height),
     click: (): void => ipcRenderer.send("pill:click"),
@@ -85,7 +87,6 @@ const api = {
       "updater:status",
       "runtime:status",
       "rome-image:status",
-      "pill:name",
       "device:status",
     ];
     if (validChannels.includes(channel)) {

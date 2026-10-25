@@ -59,6 +59,32 @@ A turn is one request to an agent plus the agent work that follows until the age
 - **Step** — a single model call inside a turn. A turn that uses tools takes several steps, because each tool result feeds the next model call.
 - **Run** — an action run is one execution of an [action](actions.md), and a routine run is one fire of a [routine](data.md#routines). Neither is a turn.
 
+## Chat trace window
+
+A session's effective activity is the latest conversation message across itself and every ancestor reached through `parentSessionId`.
+The dashboard loads all of its traces while that time is less than seven days old.
+At exactly seven idle days, the session shows chat history only, with an archived-steps note on each turn.
+User messages, assistant replies, cards, and interaction results stay in the transcript.
+History, lazy trace reads, and raw downloads follow the same session-wide decision.
+
+Activity includes user, assistant, trace, and notification rows. Notifications record real out-of-band conversation messages.
+Reading, renaming, pinning, and unknown metadata roles do not count. A lineage with no conversation messages is not an archive candidate.
+Each read batches session and ancestor message times in one recursive query, without reading trace payloads.
+There are no session-type exceptions: an old subagent remains visible under an active ancestor, and a fork, promoted side chat, or channel thread can stay active on its own messages under an idle source.
+A new message reactivates the session and its descendants, not its ancestors or siblings.
+If every session in a tree is idle, all of its traces are archived.
+
+Handoffs have no `parentSessionId`. Their link lives in a transcript card. They use their own session activity.
+The chat view loads a handoff child's history separately and splices it into the visible transcript.
+The calling session's trace summaries and descendant cost rollups do not read handoff traces.
+A merged transcript can therefore contain archived child steps beside active parent steps, while keeping both sessions' replies and cards.
+
+This window changes dashboard reads, not storage. It deletes nothing and does not change sharing, usage accounting, or agent resume context.
+Reactivation reveals retained traces while their blocks remain in the database.
+The window and idle predicate live in `packages/core/src/webchat/trace-retention.ts`.
+The repository's `getTraceArchivedSessionIds` applies that predicate to explicitly requested sessions.
+Step 2 will add its own archival selection query and must account for handoff links before removing traces.
+
 ## Event
 
 An event is one item of a turn's stream, as Rome publishes it to its consumers. Events fall into four groups:

@@ -38,7 +38,11 @@ See the [library examples](../packages/rome-node-core/README.md) for both APIs.
 ## Device status in Settings
 
 Settings → Devices shows the caller connection, connected device count, and each
-device's name, platform, and status. The dashboard refreshes every 15 seconds
+device's name, platform, and status. Each card's menu renames the device or removes
+it, which revokes it and deletes it from the account in one step. A removed device
+returns only as a new device, after `rome-node connect` and a new approval. A
+device whose revocation the Gateway has not confirmed stays listed as revoked, and
+removing it again deletes it. The dashboard refreshes every 15 seconds
 while open. `client.getDevicesStatus()` returns the same daemon-owned checks.
 
 It only connects to an existing daemon and returns `null` if none is running.
@@ -75,6 +79,47 @@ not checked within that budget remain unknown. Gateway connection setup has its
 own existing wait limits. No history, remote actions with side effects, or new
 Gateway presence protocol is involved.
 
+## Chat device folders
+
+A new chat can work in a folder on a connected device instead of in a Rome
+project. With at least one authorized device, the composer's project selector
+opens on two levels: first Rome Cloud and each device, then Rome Cloud's
+projects or that device's folders. The selector reads its projects and devices
+in one request, `GET /api/chat/locations`, so the menu draws once. Its device
+list is Cloud's list, which sends nothing to any device, so it shows no online
+status. When Cloud's list fails or takes longer than 3 seconds, the answer has
+no devices and the menu keeps one level. In the Mac app, the computer the app
+runs on lists first, marked "This device", and opening it shows the system
+folder dialog instead of the drawn folder list while the app connects it.
+Opening a device lists its folders with
+`fs.list`, through `GET /api/devices/:deviceId/files?path=`. That request is the
+only probe: an offline device, or one that needs an update, is marked then.
+A chat holds a project or a device folder, never both, and
+`POST /api/chat/sessions` rejects a request that names both.
+
+Rome sets the folder only when it creates the chat. `POST /api/chat/sessions`
+takes `deviceFolder: { deviceId, path }`, lists the path once to check it, and
+stores the real path with the device name and platform from Cloud's list. The
+session response returns `deviceFolder`, or `null`.
+
+The agent still runs on Rome, in `projects/default`. Every user message of the
+chat starts with a `<device_folder>` block that names the folder and the device,
+and tells the agent to run programs there with `rome-node device run <id> exec`
+and `cwd` set to the folder. The block repeats on every turn so that it stays in
+context after compaction. Subagents get it from the turn's thread context. A
+side chat and a handoff conversation copy the folder into their own session, and
+a deferred continuation reads it from its chat, so their later turns keep it.
+
+Limits:
+
+- The agent reaches the folder only through `exec`, so only agents with Bash can
+  use it. The caller waits 60 seconds at most, and a local timeout does not cancel
+  the remote program. Output is not streamed.
+- The folder is the default `cwd` for the agent's commands, not a sandbox. `exec`
+  runs as the device's OS user.
+- Only webchat chats, their side chats, and their handoff conversations store a
+  device folder.
+
 ## Local client protocol
 
 Clients connect to `ws://127.0.0.1:<port>/rpc` using the private credential from
@@ -88,6 +133,8 @@ The connection uses JSON-RPC 2.0 and starts with `daemon.hello`, passing
 | `daemon.status` | Read caller status without opening a Gateway connection |
 | `daemon.stop` | Explicitly stop the shared daemon |
 | `devices.list` | List authorized devices from Cloud |
+| `devices.rename` | Rename `{ deviceId, name }` in the account through Cloud |
+| `devices.remove` | Revoke `{ deviceId }` and delete it from the account through Cloud |
 | `devices.status` | Check device reachability with read-only `system.info` requests |
 | `devices.run` | Forward `{ deviceId, action, args }` to a device |
 | `devices.runBinary` | Forward `{ deviceId, action, args }` and input bytes to a device as a binary frame |
@@ -366,7 +413,8 @@ gets only the system directories.
 The user can turn the computer off as a device and on again. The choice persists
 across restarts: while it is off, the app stays signed in and opens the Rome, but
 does not connect the computer. Settings → Devices in the Rome the app opened shows
-a "This device" card with that switch, only inside the app. The app answers the
+a "This device" card whose menu has Connect or Disconnect, only inside the app.
+The menu cannot remove this computer. It links to Rome Cloud, which can. The app answers the
 card's requests only from the top frame of that Rome's origin. Other pages in its
 window, and the Rome in a browser, cannot read or change the device.
 
@@ -433,6 +481,18 @@ for action arguments, examples, and result handling. Each command also accepts
 that listed devices are online. `device describe <id>` invokes `system.info`,
 which returns the computer name, platform, and supported actions.
 
+`device rename <id> <name>` and `device remove <id>` change the account's device
+list in Cloud. They do not contact the device, so it can be offline. Cloud trims
+names to 1–80 characters without control characters. Names need not be unique.
+`remove` revokes the device, which disconnects it, then deletes the record. A
+removed computer must run `connect` and be approved again. Cloud keeps the record
+until the Gateway confirms the revocation, and until then `remove` fails with
+`revocation_pending`. The device is already revoked. Run `remove` again later.
+Rome Core exposes the same operations as `PATCH /api/devices/:deviceId` with
+`{ name }` and `DELETE /api/devices/:deviceId`. Both answer 204, or 404
+`device_not_found`, 400 `invalid_device_name`, 409 `revocation_pending`, or 503
+`unavailable`.
+
 `device run <id> exec --args <json>` starts a program with an argument vector.
 The arguments are `command`, optional `args: string[]`, and optional `cwd`.
 The executor does not concatenate a shell command. Invoke a shell explicitly
@@ -461,6 +521,23 @@ Examples for Windows:
 {"command":"powershell.exe","args":["-NoProfile","-Command","Get-Content -Raw -LiteralPath 'C:\\Work\\README.md'"]}
 {"command":"powershell.exe","args":["-NoProfile","-Command","Set-Content -LiteralPath 'C:\\Work\\example.txt' -Value 'Hello'"]}
 ```
+
+`device run <id> fs.list --args '{"path":"/workspace"}'` lists one folder without
+starting a program. `path` is optional: no path means the device user's home folder,
+and a relative path starts there. `~` is not expanded. The result is:
+
+```json
+{"path":"/workspace","parent":"/","entries":[{"name":"src","type":"dir"}],"truncated":false}
+```
+
+`path` is the folder's real path, with symlinks resolved. `parent` is `null` at the
+filesystem root. Each entry has a `type` of `dir`, `file`, `symlink`, or `other`.
+A symlink is reported as `symlink` and is not followed. Folders come first, then
+symlinks, files, and others, each sorted by name. A reply carries at most 1000
+entries and sets `truncated` when the folder holds more. Failures use the codes
+`not_found`, `not_a_directory`, `permission_denied`, and `invalid_args`. A device
+on an older version answers `unsupported_action`. Check `system.info` `actions`
+for `fs.list` before relying on it.
 
 A text-mode exec result has `exitCode`, `signal`, `stdout`, `stderr`, and
 `truncated: { stdout: false, stderr: false }`. Text mode decodes output as UTF-8,

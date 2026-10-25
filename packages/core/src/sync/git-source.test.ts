@@ -464,6 +464,8 @@ describe("githubCommitterIdentity", () => {
         last_renewed_at integer,
         degraded_at integer,
         degraded_reason text,
+        platform text,
+        account_id text,
         PRIMARY KEY (custody, name)
       );
     `);

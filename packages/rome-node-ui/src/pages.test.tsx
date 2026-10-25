@@ -4,7 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { NodeDeviceActivity } from "./device-activity.js";
 import { NodeDeviceCard, NodeDevices } from "./devices-overview.js";
 import type { NodeActionRow, NodeConnectionStatus, NodeStatus } from "./protocol.js";
-import type { NodeDevice, NodeNavigation, NodeThisDevice } from "./types.js";
+import type {
+  NodeDevice,
+  NodeDeviceManage,
+  NodeDeviceManageError,
+  NodeNavigation,
+  NodeThisDevice,
+} from "./types.js";
 
 const status: NodeStatus = {
   version: "0.1.3",
@@ -157,23 +163,33 @@ function navigation(): NodeNavigation & { navigate: ReturnType<typeof rs.fn> } {
 }
 
 describe("NodeDevices", () => {
-  it("gives active devices a card and links them to their page", async () => {
-    serve([row(3, { exitCode: 1, command: "pnpm", args: ["test"] }), row(2), row(1)]);
+  it("lists every device with a curve of its commands and links it to its page", async () => {
+    serve([row(3, { exitCode: 1 }), row(2), row(1)]);
     const nav = navigation();
     render(<NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={nav} />);
-    const active = await screen.findByRole("region", { name: "Active devices" });
-    expect(within(active).getByText("Workstation")).toBeTruthy();
-    expect(within(active).getByText("33.3% failed")).toBeTruthy();
-    const latest = await within(active).findByText("pnpm test");
-    expect(latest.closest("a")?.getAttribute("href")).toBe("/devices/dev-1?command=3");
-    await userEvent.click(within(active).getByText("View all activity"));
+    const cards = await screen.findAllByRole("listitem");
+    expect(cards.map((card) => card.textContent)).toEqual([
+      "WorkstationLinux · Connected",
+      "LaptopmacOS · Not connected",
+    ]);
+    expect(within(cards[0]!).getByRole("img", { name: "3 commands in 24 h" })).toBeTruthy();
+    expect(within(cards[1]!).getByRole("img", { name: "0 commands in 24 h" })).toBeTruthy();
+    await userEvent.click(screen.getByText("Workstation"));
     expect(nav.navigate).toHaveBeenCalledWith("/devices/dev-1");
-    // The idle device gets a compact card, and the revoked one waits behind a toggle.
-    expect(screen.getByText("No commands in 24 h")).toBeTruthy();
-    expect(screen.getByText("Laptop")).toBeTruthy();
+    // The revoked device waits behind a toggle.
     expect(screen.queryByText("Old phone")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: /Revoked/ }));
     expect(screen.getByText("Old phone")).toBeTruthy();
+  });
+
+  it("shows no card for activity from a device the account does not list", async () => {
+    serve([row(2), row(1, { peer: "removed-device" })]);
+    render(
+      <NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={navigation()} />,
+    );
+    await screen.findByText("Workstation");
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.queryByText("removed-device")).toBeNull();
   });
 
   it("lists devices without counts when the daemon predates log.stats", async () => {
@@ -184,8 +200,8 @@ describe("NodeDevices", () => {
     expect(
       await screen.findByText("Restart the device service to show command counts."),
     ).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Active devices" })).toBeNull();
     expect(screen.getByText("Workstation")).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
   });
 
   it("says nothing about a healthy service and names a Gateway problem", async () => {
@@ -204,13 +220,12 @@ describe("NodeDevices", () => {
     expect((await screen.findByRole("status")).textContent).toBe("Reconnecting to Gateway");
   });
 
-  it("draws the device groups once, after the counts arrive", async () => {
+  it("draws the devices once, after the counts arrive", async () => {
     serve([row(2), row(1)]);
     const answer = FakeSocket.reply;
     const held: Array<() => void> = [];
     FakeSocket.reply = (socket, message) => {
-      if (message.method === "log.stats" || message.method === "log.query")
-        held.push(() => answer(socket, message));
+      if (message.method === "log.stats") held.push(() => answer(socket, message));
       else answer(socket, message);
     };
     render(
@@ -218,16 +233,48 @@ describe("NodeDevices", () => {
     );
     await waitFor(() => expect(held).toHaveLength(1));
     expect(screen.queryByText("Workstation")).toBeNull();
-    expect(screen.queryByText("No commands in 24 h")).toBeNull();
     act(() => held.shift()!());
-    const active = await screen.findByRole("region", { name: "Active devices" });
-    expect(screen.getByText("Laptop")).toBeTruthy();
-    // Blank rows hold the latest commands' place until they arrive.
-    await waitFor(() => expect(held).toHaveLength(1));
-    expect(active.querySelectorAll("ul[aria-hidden] > li")).toHaveLength(3);
-    act(() => held.shift()!());
-    expect(await within(active).findAllByText("git status")).toHaveLength(2);
-    expect(active.querySelector("ul[aria-hidden]")).toBeNull();
+    expect(await screen.findByRole("img", { name: "2 commands in 24 h" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "0 commands in 24 h" })).toBeTruthy();
+  });
+
+  it("orders devices once: connected first, then by their latest command", async () => {
+    const hour = 60 * 60 * 1000;
+    serve([
+      row(1, { peer: "dev-b", startedAt: Date.now() - 5 * hour }),
+      row(2, { peer: "dev-c", startedAt: Date.now() - 2 * hour }),
+    ]);
+    const list: NodeDevice[] = [
+      { id: "dev-a", name: "Idle", platform: "linux", status: "not_connected" },
+      { id: "dev-b", name: "Older", platform: "linux", status: "not_connected" },
+      { id: "dev-c", name: "Newer", platform: "linux", status: "not_connected" },
+      { id: "dev-d", name: "Online", platform: "linux", status: "connected" },
+    ];
+    const names = () =>
+      screen.getAllByRole("listitem").map((card) => within(card).getAllByText(/./)[0]!.textContent);
+    const { rerender } = render(
+      <NodeDevices url="ws://rome.test/ws/node" devices={list} navigation={navigation()} />,
+    );
+    await screen.findByText("Online");
+    expect(names()).toEqual(["Online", "Newer", "Older", "Idle"]);
+    expect(screen.getAllByRole("img", { name: "1 command in 24 h" })).toHaveLength(2);
+    // A change of connection updates the card in place, and a new device goes last.
+    rerender(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={[
+          { ...list[0]!, status: "connected" },
+          ...list.slice(1, 3),
+          { ...list[3]!, status: "not_connected" },
+          { id: "dev-e", name: "New", platform: "linux", status: "connected" },
+        ]}
+        navigation={navigation()}
+      />,
+    );
+    expect(names()).toEqual(["Online", "Newer", "Older", "Idle", "New"]);
+    expect(
+      within(screen.getAllByRole("listitem")[0]!).getByText("Linux · Not connected"),
+    ).toBeTruthy();
   });
 
   it("lists the devices when the socket closes before any counts", async () => {
@@ -245,7 +292,7 @@ describe("NodeDevices", () => {
       <NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={navigation()} />,
     );
     expect(await screen.findByText("Workstation")).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Active devices" })).toBeNull();
+    expect(screen.getByText("Laptop")).toBeTruthy();
   });
 
   it("waits for the host's devices", async () => {
@@ -277,6 +324,7 @@ describe("this device", () => {
       name: "Laptop.local",
       platform: "macos",
       state: "connected",
+      removeUrl: "https://cloud.test/dashboard/settings",
       onEnabledChange: rs.fn(),
       ...fields,
     } satisfies NodeThisDevice;
@@ -286,7 +334,7 @@ describe("this device", () => {
     ...devices,
   ];
 
-  it("flags its own card, puts it first, and turns it off from there", async () => {
+  it("flags its own card, puts it first, and disconnects it from its menu", async () => {
     serve([]);
     const thisDevice = self();
     render(
@@ -297,21 +345,31 @@ describe("this device", () => {
         thisDevice={thisDevice}
       />,
     );
-    const quiet = await screen.findByRole("region", { name: "No commands in 24 h" });
-    const cards = within(quiet).getAllByRole("link");
+    await screen.findByText("Build server");
+    const cards = screen.getAllByRole("link");
     // The account's name wins over the app's, and the app's state over the account's.
     expect(within(cards[0]!).getByText("Laptop")).toBeTruthy();
     expect(within(cards[0]!).getByText("This device")).toBeTruthy();
     expect(within(cards[0]!).getByText("macOS · Connected")).toBeTruthy();
     expect(screen.getAllByText("This device")).toHaveLength(1);
-    const toggle = screen.getByRole("switch", { name: "Let Rome use this device" });
-    expect(toggle.closest("a")).toBeNull();
-    await userEvent.click(toggle);
+    const menu = within(screen.getAllByRole("listitem")[0]!).getByRole("button", {
+      name: "Device actions",
+    });
+    expect(menu.closest("a")).toBeNull();
+    await userEvent.click(menu);
+    // This computer is removed on Rome Cloud, so the menu links there.
+    const remove = await screen.findByRole("menuitem", { name: "Remove on Rome Cloud" });
+    expect(remove.getAttribute("href")).toBe("https://cloud.test/dashboard/settings");
+    expect(remove.getAttribute("target")).toBe("_blank");
+    await userEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
+    const dialog = await screen.findByRole("dialog", { name: "Disconnect Laptop?" });
+    expect(within(dialog).getByText(/connect it again here at any time/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
     expect(thisDevice.onEnabledChange).toHaveBeenCalledWith(false);
   });
 
-  it("puts it first among active devices", async () => {
-    serve([row(3), row(2), row(1, { peer: "dev-2" })]);
+  it("puts it first even when other devices are busier", async () => {
+    serve([row(3), row(2), row(1, { peer: "dev-2", startedAt: Date.now() - 5 * 60 * 60 * 1000 })]);
     render(
       <NodeDevices
         url="ws://rome.test/ws/node"
@@ -320,13 +378,9 @@ describe("this device", () => {
         thisDevice={self()}
       />,
     );
-    const active = await screen.findByRole("region", { name: "Active devices" });
-    await within(active).findByText("Workstation");
-    const names = within(active)
-      .getAllByRole("link", { name: /macOS|Linux/ })
-      .map((link) => link.textContent);
-    expect(names[0]).toContain("This device");
-    expect(within(active).getByRole("switch")).toBeTruthy();
+    await screen.findByText("Workstation");
+    const cards = screen.getAllByRole("listitem");
+    expect(cards[0]!.textContent).toContain("This device");
   });
 
   it("shows a computer the account does not list yet, turned off", async () => {
@@ -342,13 +396,13 @@ describe("this device", () => {
     );
     expect(await screen.findByText("RayBook")).toBeTruthy();
     expect(screen.getByText("macOS · Turned off")).toBeTruthy();
-    const toggle = screen.getByRole("switch", { name: "Let Rome use this device" });
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
-    await userEvent.click(toggle);
+    await userEvent.click(screen.getByRole("button", { name: "Device actions" }));
+    // Connecting again needs no confirmation.
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Connect" }));
     expect(thisDevice.onEnabledChange).toHaveBeenCalledWith(true);
   });
 
-  it("ignores the switch while a change is applied", async () => {
+  it("ignores connect and disconnect while a change is applied", async () => {
     serve([]);
     const thisDevice = self({ busy: true });
     render(
@@ -359,7 +413,9 @@ describe("this device", () => {
         thisDevice={thisDevice}
       />,
     );
-    await userEvent.click(await screen.findByRole("switch"));
+    await userEvent.click(await screen.findByRole("button", { name: "Device actions" }));
+    const item = await screen.findByRole("menuitem", { name: "Disconnect" });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
     expect(thisDevice.onEnabledChange).not.toHaveBeenCalled();
   });
 
@@ -373,7 +429,7 @@ describe("this device", () => {
     );
     expect(screen.getByText("本机")).toBeTruthy();
     expect(screen.getByText("macOS · 未连接")).toBeTruthy();
-    expect(screen.getByRole("switch", { name: "允许 Rome 使用本机" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "设备操作" })).toBeTruthy();
     expect(screen.queryByRole("link")).toBeNull();
   });
 });
@@ -433,5 +489,110 @@ describe("NodeDeviceActivity", () => {
       }),
     );
     expect(await within(sheet).findByText("exit 0")).toBeTruthy();
+  });
+});
+
+describe("device menu", () => {
+  const manage = () => ({
+    rename: rs.fn(
+      async (_id: string, _name: string): Promise<NodeDeviceManageError | null> => null,
+    ),
+    remove: rs.fn(async (_id: string): Promise<NodeDeviceManageError | null> => null),
+  });
+  function page(device: NodeDevice, actions?: NodeDeviceManage) {
+    serve([]);
+    render(
+      <NodeDeviceActivity
+        url="ws://rome.test/ws/node"
+        device={device}
+        selected={null}
+        manage={actions}
+      />,
+    );
+  }
+  const open = async () =>
+    userEvent.click(await screen.findByRole("button", { name: "Device actions" }));
+
+  it("has no menu without manage", async () => {
+    page(devices[0]!);
+    expect(await screen.findByRole("heading", { name: "Workstation" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Device actions" })).toBeNull();
+  });
+
+  it("renames with the trimmed name and closes the dialog", async () => {
+    const actions = manage();
+    page(devices[0]!, actions);
+    await open();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const field = await screen.findByRole("textbox", { name: "Name" });
+    await userEvent.clear(field);
+    await userEvent.type(field, "  Build box  ");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(actions.rename).toHaveBeenCalledWith("dev-1", "Build box");
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull());
+  });
+
+  it("keeps the rename dialog open with Cloud's reason", async () => {
+    const actions = manage();
+    actions.rename.mockResolvedValue("invalid_device_name");
+    page(devices[0]!, actions);
+    await open();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    await userEvent.type(await screen.findByRole("textbox", { name: "Name" }), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      await screen.findByText("Use 1 to 80 characters without control characters."),
+    ).toBeTruthy();
+  });
+
+  it("removes another device in one step after warning that it cannot be undone", async () => {
+    const actions = manage();
+    page(devices[0]!, actions);
+    await open();
+    expect(await screen.findByRole("menuitem", { name: "Rename" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove Workstation?" });
+    expect(within(dialog).getByText("This can't be undone.")).toBeTruthy();
+    expect(within(dialog).getByText("Your agent can't use Workstation anymore.")).toBeTruthy();
+    expect(within(dialog).getByText(/It returns as a new device/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    expect(actions.remove).toHaveBeenCalledWith("dev-1");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("offers a revoked device only removal and explains a pending revocation", async () => {
+    const actions = manage();
+    actions.remove.mockResolvedValue("revocation_pending");
+    page(devices[2]!, actions);
+    await open();
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove Old phone?" });
+    expect(within(dialog).getByText(/already revoked/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    expect(await within(dialog).findByText(/It stays under Revoked/)).toBeTruthy();
+  });
+
+  it("puts a menu on each card, over its link", async () => {
+    serve([]);
+    const actions = manage();
+    render(
+      <NodeDevices
+        url="ws://rome.test/ws/node"
+        devices={devices}
+        navigation={navigation()}
+        manage={actions}
+      />,
+    );
+    await screen.findByText("Workstation");
+    const menus = screen.getAllByRole("button", { name: "Device actions" });
+    expect(menus).toHaveLength(2);
+    expect(menus[0]!.closest("a")).toBeNull();
+    await userEvent.click(menus[1]!);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
+    await userEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove" }),
+    );
+    expect(actions.remove).toHaveBeenCalledWith("dev-2");
   });
 });

@@ -1,5 +1,5 @@
 import path from "path";
-import { app, BrowserWindow, ipcMain, Menu, screen, session } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, screen } from "electron";
 import { eq } from "drizzle-orm";
 import { getDb } from "./db/database";
 import { settings } from "./db/schema";
@@ -7,19 +7,17 @@ import {
   clampPillPosition,
   defaultPillPosition,
   isPillEnabled,
-  parseAgentName,
   parsePillPosition,
   PILL_DEFAULT_HEIGHT,
   PILL_DEFAULT_WIDTH,
   PILL_ENABLED_KEY,
-  PILL_FALLBACK_NAME,
   PILL_POSITION_KEY,
   type Point,
   type Size,
 } from "./floating-pill-state";
 import { isQuitting, requestStopAndQuit } from "./lifecycle";
 import { createLogger } from "./logger";
-import type { RuntimeStatus } from "./runtime/manager";
+import { preventActivation } from "./prevent-activation";
 import type { Runtime } from "./runtime/runtime";
 
 const log = createLogger("pill");
@@ -67,7 +65,6 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
   const { showMainWindow, openSettings, runtimeManager } = options;
 
   let win: BrowserWindow | null = null;
-  let name = PILL_FALLBACK_NAME;
   let size: Size = { width: PILL_DEFAULT_WIDTH, height: PILL_DEFAULT_HEIGHT };
   let dragOffset: Point | null = null;
   let enabledChanged: (() => void) | null = null;
@@ -147,6 +144,17 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
     });
     win = created;
 
+    // Without this, pressing the icon activates Rome, and becoming active hides
+    // the icon before the press reaches the page: every click and drag opens
+    // Rome instead.
+    try {
+      if (!preventActivation(created)) {
+        log.warn("AppKit has no _setPreventsActivation:, so pressing the icon activates Rome");
+      }
+    } catch (err) {
+      log.warn(`Failed to keep the icon from activating Rome (${String(err)})`);
+    }
+
     created.on("closed", () => {
       if (win === created) win = null;
     });
@@ -161,53 +169,18 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
     void created.loadFile(PILL_HTML);
   };
 
-  const refreshName = async (): Promise<void> => {
-    // With the icon turned off there is nowhere to show a name.
-    if (!win || win.isDestroyed() || !runtimeManager.isReady()) return;
-    try {
-      // The body is the guardian's whole settings map, connector secrets
-      // included, and only agentName is read from it. It must never be logged.
-      const response = await session.defaultSession.fetch(
-        `${runtimeManager.getDashboardUrl()}/api/settings`,
-        {
-          // The route is behind the dashboard's session cookie. Electron sends
-          // it by default only while the request carries no Origin header.
-          credentials: "include",
-          // This runs on every switch away from Rome; a runtime that has
-          // stopped answering should not leave one request hanging per switch.
-          signal: AbortSignal.timeout(5_000),
-        },
-      );
-      // Signed out, or the runtime is mid-restart: keep the name we have
-      // rather than flickering back to the fallback.
-      if (!response.ok) return;
-      const next = parseAgentName(await response.json()) ?? PILL_FALLBACK_NAME;
-      if (next === name) return;
-      name = next;
-      if (win && !win.isDestroyed()) win.webContents.send("pill:name", name);
-    } catch (err) {
-      log.warn(`Failed to refresh the agent name (${String(err)})`);
-    }
-  };
-
   const isEnabled = (): boolean => isPillEnabled(readSetting(PILL_ENABLED_KEY));
 
   const setEnabled = (enabled: boolean): void => {
     writeSetting(PILL_ENABLED_KEY, enabled ? "true" : "false");
     if (enabled) {
       createWindow(true);
-      void refreshName();
     } else if (win && !win.isDestroyed()) {
       win.destroy();
       win = null;
     }
     enabledChanged?.();
   };
-
-  ipcMain.on("pill:ready", (event) => {
-    if (!fromPill(event)) return;
-    event.sender.send("pill:name", name);
-  });
 
   // The page owns the icon's layout, so it reports the size the window has to
   // be: both dimensions, measured, rather than one of them restated here.
@@ -216,7 +189,8 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
     if (!Number.isFinite(rawWidth) || !Number.isFinite(rawHeight)) return;
     size = { width: Math.ceil(rawWidth), height: Math.ceil(rawHeight) };
     win.setSize(size.width, size.height);
-    // A longer name widens the icon to the right, which can push it off-screen.
+    // The measured size can differ from the default and push the icon
+    // off-screen.
     clampIntoView();
   });
 
@@ -275,10 +249,6 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
     ]).popup({ window: win });
   });
 
-  runtimeManager.on("status", (status: RuntimeStatus) => {
-    if (status.phase === "ready") void refreshName();
-  });
-
   // App activation, not window focus: a sheet on the main window makes it
   // "main but not key", and the window-level events and getFocusedWindow()
   // then disagree, which would leave the pill on top of a focused Rome.
@@ -292,10 +262,6 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
   app.on("did-resign-active", () => {
     romeActive = false;
     syncVisibility();
-    // The name is set in onboarding and edited in the dashboard's settings,
-    // both inside the main window. Leaving Rome is when the pill comes into
-    // view, so that is when to re-read.
-    void refreshName();
   });
 
   // A display unplugged or rearranged while Rome runs can leave the icon on a
@@ -305,7 +271,6 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
   screen.on("display-metrics-changed", clampIntoView);
 
   if (isEnabled()) createWindow();
-  void refreshName();
 
   return {
     isEnabled,

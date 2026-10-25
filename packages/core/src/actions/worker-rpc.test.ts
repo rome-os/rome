@@ -80,6 +80,7 @@ function makeServer(
     routinesRepo?: unknown;
     eventBus?: EventBus;
     eventCatalog?: EventCatalog;
+    eventService?: EventService;
     appManager?: { setEnabled: ReturnType<typeof rs.fn>; install?: ReturnType<typeof rs.fn> };
     appStore?: {
       listListings: ReturnType<typeof rs.fn>;
@@ -112,7 +113,7 @@ function makeServer(
   const services = {
     routineEngine,
     routinesRepo: overrides.routinesRepo,
-    eventService: new EventService(eventBus, eventCatalog),
+    eventService: overrides.eventService ?? new EventService(eventBus, eventCatalog),
     // catalog/db are only touched by uninstall --purge, which these tests don't
     // exercise, so stub them.
     appLifecycle: new AppLifecycleService(appManager as never, {} as never, {} as never),
@@ -953,6 +954,25 @@ describe("WorkerRpcServer event discovery", () => {
       ],
       total: 1,
     });
+  });
+
+  it("passes events.searchCatalog's match through to the event service", async () => {
+    const eventService = new EventService(new EventBus(), new EventCatalog());
+    const search = rs
+      .spyOn(eventService, "search")
+      .mockResolvedValue({ entries: [], total: 0, matchError: "not connected" });
+    const { server } = makeServer({ eventService });
+    const fake = connect(server);
+
+    const response = await rpc(fake, "events.searchCatalog", {
+      query: "github",
+      match: { "repository.full_name": "acme/widgets" },
+    });
+
+    expect(search).toHaveBeenCalledWith("github", 10, {
+      match: { "repository.full_name": "acme/widgets" },
+    });
+    expect(response.result).toEqual({ entries: [], total: 0, matchError: "not connected" });
   });
 
   it("rejects events.searchCatalog with a non-positive limit", async () => {

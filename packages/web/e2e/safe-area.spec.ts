@@ -9,7 +9,7 @@ test("mobile shell paints edge-to-edge while scroll content respects safe areas"
   page,
 }) => {
   await page.goto("/sessions");
-  await expect(page.locator('header[data-app-titlebar="header"]')).toBeVisible({
+  await expect(page.locator("header[data-mobile-header]")).toBeVisible({
     timeout: 30_000,
   });
 
@@ -25,7 +25,7 @@ test("mobile shell paints edge-to-edge while scroll content respects safe areas"
     { top: TOP_INSET, bottom: BOTTOM_INSET },
   );
 
-  const header = page.locator('header[data-app-titlebar="header"]');
+  const header = page.locator("header[data-mobile-header]");
   const content = page.locator("[data-safe-area-bounded]");
   const scrollArea = page.locator("[data-safe-area-scroll]");
   const [headerBox, contentBox, scrollPaddingBottom] = await Promise.all([

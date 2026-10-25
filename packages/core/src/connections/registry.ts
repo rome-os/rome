@@ -5,7 +5,14 @@ import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
 import { isUnconnectedAccount } from "./unconnected-accounts.js";
-import type { ConnectionRecord, GrantLedger, GrantRecord, PersistedCredential } from "./ledger.js";
+import { domainOf, domainOfGrants, platformOf } from "../channels/platform.js";
+import type {
+  ConnectionRecord,
+  GrantAccount,
+  GrantLedger,
+  GrantRecord,
+  PersistedCredential,
+} from "./ledger.js";
 import {
   AccountAlreadyConnectedError,
   DifferentAccountError,
@@ -22,6 +29,7 @@ import type {
   Capability,
   CapabilityStatus,
   Connection,
+  ConnectionState,
   ConnectionDescriptor,
   ConnectionId,
   Credential,
@@ -90,6 +98,32 @@ export function toPersisted(cred: Credential): PersistedCredential {
   return { material: { kind: "inline", record: cred.material }, expiresAt: cred.expiresAt };
 }
 
+/** The account `profile` names for `grant`: the platform and the platform's own
+ *  id for it, or undefined when the connection kind names none. `domain` is the
+ *  Feishu app's domain, which `platformOf` reads. */
+export function accountOf(
+  descriptor: ConnectionDescriptor,
+  grant: GrantName,
+  profile: ProfileRecord,
+  domain: string | undefined = domainOf(profile),
+): GrantAccount | undefined {
+  const accountId = descriptor.accountIdOf?.(grant, profile);
+  if (!accountId) return undefined;
+  return { platform: platformOf(descriptor.connectionKind, domain), accountId };
+}
+
+/** The account `record` reaches: the stored one, or the one its profile names
+ *  when none was stored, as for a grant the boot pass left without one. A
+ *  Feishu grant from before profiles names its domain only in its material. */
+export function reachedAccount(
+  descriptor: ConnectionDescriptor,
+  record: GrantRecord,
+): GrantAccount | undefined {
+  if (record.account) return record.account;
+  if (!record.profile) return undefined;
+  return accountOf(descriptor, record.name, record.profile, domainOfGrants([record]));
+}
+
 /** The ledger patch that authorizes a grant with a freshly conferred credential
  *  (+ optional profile). Shared by the in-place `applyNewCredential` path and the
  *  transactional `confer` path so both write an identical row. */
@@ -97,14 +131,18 @@ function conferralPatch(
   now: Date,
   cred: Credential,
   profile?: ProfileRecord,
-): Partial<Pick<GrantRecord, "state" | "credential" | "profile" | "conferredAt" | "degraded">> {
+  account?: GrantAccount,
+): Partial<
+  Pick<GrantRecord, "state" | "credential" | "profile" | "account" | "conferredAt" | "degraded">
+> {
   return {
     state: "authorized",
     credential: toPersisted(cred),
-    // Written in the SAME update as the credential. Only patched
-    // when the conferral supplied one, so an import with no identity to record
-    // leaves any existing profile untouched rather than wiping it.
-    ...(profile !== undefined ? { profile } : {}),
+    // Written in the SAME update as the credential, with the account it names.
+    // Only patched when the conferral supplied one, so an import with no
+    // identity to record leaves any existing profile untouched rather than
+    // wiping it.
+    ...(profile !== undefined ? { profile, account } : {}),
     conferredAt: now,
     degraded: undefined,
   };
@@ -385,9 +423,8 @@ export class ConnectionRegistry {
    *
    *  `opts.inTx` is an optional caller participant (the `confer` seam,
    *  mirrored for teardown) enlisted in the SAME transaction as the connection/
-   *  grant deletes — e.g. the guardian channel-mapping cleanup, so it can never
-   *  be left stranded by a failure after the connection is already committed as
-   *  deleted. The in-memory teardown (`teardownAll`) and map eviction run only
+   *  grant deletes, so a caller's cleanup can never be left stranded by a
+   *  failure after the connection is already committed as deleted. The in-memory teardown (`teardownAll`) and map eviction run only
    *  AFTER that transaction commits. */
   async remove(id: ConnectionId, opts: { inTx?: (tx: DrizzleTx) => void } = {}): Promise<void> {
     const conn = this.connections.get(id);
@@ -478,12 +515,16 @@ export class ConnectionRegistry {
     }
 
     const id = conn?.id ?? crypto.randomUUID();
-    if (registered && profile !== undefined) {
-      if (conn) await this.refuseDifferentAccount(registered.descriptor, id, grant, profile);
-      await this.refuseAccountHeldElsewhere(registered.descriptor, id, grant, profile);
+    const account =
+      registered && profile !== undefined
+        ? accountOf(registered.descriptor, grant, profile)
+        : undefined;
+    if (registered && account) {
+      if (conn) await this.refuseDifferentAccount(registered.descriptor, id, grant, account);
+      await this.refuseAccountHeldElsewhere(registered.descriptor, id, account);
     }
     const createdAt = this.clock();
-    const patch = conferralPatch(this.now(), credential, profile);
+    const patch = conferralPatch(this.now(), credential, profile, account);
     const ledger = this.ledger;
 
     // One transaction spanning every durable write of the conferral: mint (if a
@@ -531,20 +572,19 @@ export class ConnectionRegistry {
     return conn as Connection;
   }
 
-  /** Throws DifferentAccountError when `connectionId`'s grant still names an
-   *  account and `profile` names another. A disconnected grant holds no
-   *  profile, so it never refuses there. */
+  /** Throws DifferentAccountError when `connectionId`'s grant still reaches an
+   *  account and `account` is another. A disconnected grant reaches none, so it
+   *  never refuses there. A held grant with no stored account still reaches the
+   *  one its profile names. */
   private async refuseDifferentAccount(
     descriptor: ConnectionDescriptor,
     connectionId: ConnectionId,
     grant: GrantName,
-    profile: ProfileRecord,
+    account: GrantAccount,
   ): Promise<void> {
-    const accountIdOf = descriptor.accountIdOf;
-    if (!accountIdOf) return;
-    const held = await this.ledger.getGrant(connectionId, grant);
-    const heldId = held?.profile === undefined ? null : accountIdOf(grant, held.profile);
-    if (heldId !== null && heldId !== accountIdOf(grant, profile)) {
+    const record = await this.ledger.getGrant(connectionId, grant);
+    const held = record ? reachedAccount(descriptor, record) : undefined;
+    if (held && (held.platform !== account.platform || held.accountId !== account.accountId)) {
       throw new DifferentAccountError(
         descriptor.connectionKind,
         connectionId,
@@ -553,32 +593,42 @@ export class ConnectionRegistry {
     }
   }
 
-  /** Throws AccountAlreadyConnectedError when another Connection of the
-   *  connection kind holds `grant`, in any state but "unauthorized", for the account
-   *  `profile` names. Call under the connection kind's `connectionMutex`, so no confer
-   *  can fill another Connection between this read and the caller's write. */
+  /** Throws AccountAlreadyConnectedError when another Connection, of any kind,
+   *  holds a grant in any state but "unauthorized" that reaches `account`. Under
+   *  the connection kind's `connectionMutex` no confer of this kind can fill
+   *  another Connection between this read and the caller's write. A confer of
+   *  another kind on the same platform can, and the ledger's unique index on
+   *  the account refuses the later write. */
   private async refuseAccountHeldElsewhere(
     descriptor: ConnectionDescriptor,
     connectionId: ConnectionId,
-    grant: GrantName,
-    profile: ProfileRecord,
+    account: GrantAccount,
   ): Promise<void> {
-    const accountIdOf = descriptor.accountIdOf;
-    if (!accountIdOf) return;
-    const accountId = accountIdOf(grant, profile);
-    if (!accountId) return;
-    for (const other of this.find(descriptor.connectionKind)) {
-      if (other.id === connectionId) continue;
-      const held = await this.ledger.getGrant(other.id, grant);
-      if (
-        held &&
-        held.state !== "unauthorized" &&
-        held.profile !== undefined &&
-        accountIdOf(grant, held.profile) === accountId
-      ) {
-        throw new AccountAlreadyConnectedError(descriptor.connectionKind, accountId, other.id);
+    const other =
+      (await this.ledger.connectionReaching(account, connectionId)) ??
+      (await this.unrecordedReaching(account, connectionId));
+    if (other) {
+      throw new AccountAlreadyConnectedError(descriptor.connectionKind, account.accountId, other);
+    }
+  }
+
+  /** The Connection, other than `exceptId`, whose held grant has no stored
+   *  account but whose profile names `account`. The boot pass leaves such a
+   *  grant when an older connection reached the same account, and it still
+   *  reaches that account once the older one is disconnected. */
+  private async unrecordedReaching(
+    account: GrantAccount,
+    exceptId: ConnectionId,
+  ): Promise<ConnectionId | null> {
+    for (const record of await this.ledger.heldGrantsWithoutAccount(exceptId)) {
+      const kind = this.connections.get(record.custody)?.connectionKind;
+      const descriptor = kind ? this.descriptors.get(kind)?.descriptor : undefined;
+      const held = descriptor ? reachedAccount(descriptor, record) : undefined;
+      if (held?.platform === account.platform && held.accountId === account.accountId) {
+        return record.custody;
       }
     }
+    return null;
   }
 
   /** Headless conferral: skip confer(), inject a caller-supplied credential.
@@ -981,6 +1031,12 @@ class ConnectionImpl implements Connection {
   isUnlocked(cap: Capability): boolean {
     const slot = this.slots.get(cap);
     return slot ? slot.epoch !== null : false;
+  }
+
+  state(): ConnectionState | null {
+    const states = Object.values(this.grants());
+    if (states.includes("degraded")) return "broken";
+    return states.every((state) => state === "authorized") ? "working" : null;
   }
 
   status(): Record<Capability, CapabilityStatus> {
@@ -1391,7 +1447,10 @@ class ConnectionImpl implements Connection {
         materialFingerprint(current.material) === materialFingerprint(credential.material)
       ) {
         if (profile !== undefined) {
-          await this.ledger.updateGrant(this.id, grant, { profile });
+          await this.ledger.updateGrant(this.id, grant, {
+            profile,
+            account: accountOf(this.descriptor, grant, profile),
+          });
           // The credential is byte-identical, but a re-conferral can still change
           // the profile (renamed login, moved workspace) — re-sync custody so a
           // profile-derived artifact (the Slack file's teamId) stays current.
@@ -1416,7 +1475,12 @@ class ConnectionImpl implements Connection {
     await this.ledger.updateGrant(
       this.id,
       grant,
-      conferralPatch(this.registry.now(), cred, profile),
+      conferralPatch(
+        this.registry.now(),
+        cred,
+        profile,
+        profile === undefined ? undefined : accountOf(this.descriptor, grant, profile),
+      ),
     );
     await this.activateGrantInMemory(grant, cred);
   }
@@ -1473,6 +1537,7 @@ class ConnectionImpl implements Connection {
       // `conferredAt` is deliberately NOT cleared, so the grant keeps a record
       // of its last conferral.
       profile: undefined,
+      account: undefined,
       degraded: undefined,
     };
     if (opts.inTx) {
@@ -1734,6 +1799,7 @@ class ConnectionImpl implements Connection {
         state: "unauthorized",
         credential: undefined,
         profile: undefined,
+        account: undefined,
         degraded: undefined,
       });
     }

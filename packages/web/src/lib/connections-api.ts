@@ -1,7 +1,7 @@
 /**
  * Client types + fetchers for the registry-native connection surface
  * (`GET /api/connections`). The types mirror the backend's
- * ConnectionView projection verbatim — registry vocabulary (GrantState /
+ * ConnectionView projection verbatim — registry vocabulary (ConnectionState /
  * CapabilityStatus), identity only through the generic display projection.
  * Presentation (labels, icons, ordering, slot grouping) lives in
  * `connection-cards.ts`, not here.
@@ -20,6 +20,10 @@ import { fetchJson } from "@/lib/fetch-json";
 export const CONNECTIONS_REFRESH_INTERVAL_MS = 30_000;
 
 export type GrantState = "unauthorized" | "authorized" | "degraded";
+
+/** Whether the platform accepts the connection's grant
+ *  (docs/domains/connections.md). */
+export type ConnectionState = "working" | "broken";
 
 export type Capability = "talk" | "act" | "watch";
 
@@ -59,6 +63,11 @@ export interface ApiConnection extends ConnectionAccountFields {
   /** The kind of connection, such as `telegram_user`. */
   connectionKind: string;
   label: string;
+  /** Working or broken. Null for a placeholder, and for a connection a
+   *  disconnect kept with no access. */
+  state: ConnectionState | null;
+  /** The grant names, each a slot the dashboard can revoke. Read the
+   *  connection's state from `state`, not from these. */
   grants: Record<string, GrantState>;
   display: Record<string, GrantDisplay | null>;
   capabilities: Record<Capability, CapabilityStatus>;

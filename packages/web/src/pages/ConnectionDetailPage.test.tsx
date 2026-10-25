@@ -7,6 +7,7 @@ import i18n from "@/i18n";
 import ConnectionDetailPage from "@/pages/ConnectionDetailPage";
 import type { ApiConnection, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+import { stateOfGrants } from "@/test/connection-state";
 
 /** A later account's channel id, opaque as core mints it. */
 const SECOND_FEISHU = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
@@ -26,6 +27,7 @@ function connection(
   return {
     id: `conn-${overrides.connectionKind}`,
     label: overrides.connectionKind,
+    state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? {}),
     grants: {},
     display: {},
     capabilities: {

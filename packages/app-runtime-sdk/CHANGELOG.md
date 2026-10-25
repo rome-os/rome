@@ -1,5 +1,20 @@
 # @rome-os/app-runtime
 
+## [0.8.2](https://github.com/rome-os/rome/compare/app-runtime-v0.8.1...app-runtime-v0.8.2) (2026-10-24)
+
+
+### Features
+
+* **core:** subscribe to an event's source when defer waits on it ([#1315](https://github.com/rome-os/rome/issues/1315)) ([55cfac3](https://github.com/rome-os/rome/commit/55cfac3eb4155b4826f3078f9aa9a820258b41f3))
+
+## [0.8.1](https://github.com/rome-os/rome/compare/app-runtime-v0.8.0...app-runtime-v0.8.1) (2026-10-23)
+
+
+### Features
+
+* **core:** let defer wake a session when an event arrives ([#1285](https://github.com/rome-os/rome/issues/1285)) ([174a3bc](https://github.com/rome-os/rome/commit/174a3bc519d7ada7095c4667bde6970072f72362))
+* let a new chat work in a folder on a connected device ([#1267](https://github.com/rome-os/rome/issues/1267)) ([c327426](https://github.com/rome-os/rome/commit/c3274267262499ebb2a8a9354b962e74c6a00c36))
+
 ## [0.8.0](https://github.com/rome-os/rome/compare/app-runtime-v0.7.9...app-runtime-v0.8.0) (2026-10-21)
 
 

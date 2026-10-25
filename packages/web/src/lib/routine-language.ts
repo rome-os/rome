@@ -21,6 +21,8 @@ export interface EventBusTrigger {
   type: "event-bus";
   eventName: string;
   sourcePattern?: string;
+  // Fires on the first matching event only (an agent's `defer` event wait).
+  once?: boolean;
 }
 
 // A routine that never fires on its own; it only runs via "Run now".
@@ -227,9 +229,13 @@ export function describeEvent(trigger: EventBusTrigger): string {
 }
 
 // Full trigger phrase for the card's primary line, capitalized as a sentence
-// opener: "Every weekday at 9:00 AM" / "Whenever the order created event happens".
+// opener: "Every weekday at 9:00 AM" / "Whenever the order created event happens"
+// / "The next time the ci done event happens".
 export function describeTrigger(trigger: Trigger): string {
   if (isScheduleTrigger(trigger)) return describeSchedule(trigger);
+  if (isEventTrigger(trigger) && trigger.once) {
+    return `The next time ${describeEvent(trigger)}`;
+  }
   if (isEventTrigger(trigger)) return `Whenever ${describeEvent(trigger)}`;
   return "Only when you run it";
 }

@@ -8,6 +8,7 @@ description: >-
   mocks. Use app_creation when visuals are important, such as for apps,
   dashboards, games, and other Rome experiences that need a polished UI.
 tagline: "Plan, build, and preview apps with agents that write the code."
+hideInLauncher: true
 appRoot: dist
 
 web:

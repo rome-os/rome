@@ -226,7 +226,7 @@ function ConnectOn({
     key: delegate ? "session" : "bot",
     connectionId: null,
     grant: config.defaultGrant,
-    state: "unauthorized",
+    state: null,
     display: null,
     identity: null,
     activeSetupCid: choice.activeSetupCid,

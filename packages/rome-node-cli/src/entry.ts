@@ -244,8 +244,8 @@ async function main(): Promise<void> {
   const listing = positionals.length === 1;
   if (
     !listing &&
-    !(command === "describe" && positionals.length === 3) &&
-    !(command === "run" && positionals.length === 4)
+    !(["describe", "remove"].includes(command) && positionals.length === 3) &&
+    !(["run", "rename"].includes(command) && positionals.length === 4)
   )
     throw new Error("Invalid device command. Run rome-node --help.");
   if (!listing && !validId(deviceId)) throw new Error("Invalid device ID.");
@@ -261,6 +261,12 @@ async function main(): Promise<void> {
   try {
     if (listing) {
       process.stdout.write(`${JSON.stringify(await client.listDevices())}\n`);
+      return;
+    }
+    if (command === "rename" || command === "remove") {
+      if (command === "rename") await client.renameDevice(deviceId, action);
+      else await client.removeDevice(deviceId);
+      process.stdout.write(`${JSON.stringify({ type: "response", ok: true, result: {} })}\n`);
       return;
     }
     if (values.input !== undefined || values.output !== undefined) {

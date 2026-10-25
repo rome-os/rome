@@ -15,7 +15,7 @@ const notConnected: ConnectionCard = {
       key: "bot",
       connectionId: null,
       grant: "bot",
-      state: "unauthorized",
+      state: null,
       display: null,
       identity: null,
       activeSetupCid: null,
@@ -35,7 +35,7 @@ const connected: ConnectionCard = {
     {
       ...notConnected.slots[0],
       connectionId: "storybook-discord",
-      state: "authorized",
+      state: "working",
       identity: "Rome Bot",
     },
   ],

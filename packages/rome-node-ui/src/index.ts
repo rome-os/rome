@@ -8,6 +8,8 @@ export {
 export type { NodeActionRow, NodeEvent, NodeStats, NodeStatus } from "./protocol.js";
 export type {
   NodeDevice,
+  NodeDeviceManage,
+  NodeDeviceManageError,
   NodeDeviceStatus,
   NodeNavigation,
   NodeThisDevice,

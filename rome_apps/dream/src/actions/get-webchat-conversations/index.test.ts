@@ -288,6 +288,31 @@ describe("get_webchat_conversations against the system schema", () => {
     expect(data.content).not.toContain("dream prompt");
   });
 
+  it("leaves out chats a visitor owns or wrote in", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    seedSession("mine", "Mine", "webchat", now - 60);
+    seedSession("shared", "Shared", "webchat", now - 60);
+    seedSession("theirs", "Theirs", "webchat", now - 60);
+    testDb.db.run(sql`UPDATE rome_sessions SET owner_key = 'visitor:acc' WHERE id = 'theirs'`);
+    seedMessage("m1", "mine", "user", text("guardian request"), now - 50);
+    seedMessage("m2", "shared", "user", text("guardian start"), now - 50);
+    seedMessage("m3", "shared", "user", text("visitor request"), now - 40);
+    testDb.db.run(
+      sql`UPDATE rome_agent_messages SET actor = '{"kind":"visitor","accountId":"acc","email":"v@example.com"}' WHERE id = 'm3'`,
+    );
+    seedMessage("m4", "theirs", "user", text("owner request"), now - 50);
+
+    const all = await createAction(actionConfig, realDeps()).execute({ windowHours: 1 });
+    const one = await createAction(actionConfig, realDeps()).execute({ sessionId: "shared" });
+
+    const content = (all as { data: { content: string } }).data.content;
+    expect(content).toContain("guardian request");
+    expect(content).not.toContain("guardian start");
+    expect(content).not.toContain("visitor request");
+    expect(content).not.toContain("owner request");
+    expect((one as { data: { messageCount: number } }).data.messageCount).toBe(0);
+  });
+
   it("scopes to one session", async () => {
     const now = Math.floor(Date.now() / 1000);
     seedSession("a", "Chat A", "webchat", now - 60);

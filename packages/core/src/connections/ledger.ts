@@ -29,6 +29,13 @@ export interface PersistedCredential {
   expiresAt: Date | "never";
 }
 
+/** The account a grant reaches: its platform and the platform's own id for it,
+ *  read from the grant's profile when access was given. */
+export interface GrantAccount {
+  platform: string;
+  accountId: string;
+}
+
 export interface GrantRecord {
   custody: string; // connectionId
   name: GrantName;
@@ -38,6 +45,10 @@ export interface GrantRecord {
    *  SAME update as `credential` — never through a separate setter. Absent until
    *  a conferral supplies one; degrade preserves it (no wipe), revoke clears it. */
   profile?: ProfileRecord;
+  /** The account the profile names, written in the same update as the profile
+   *  and cleared with it. Absent when the profile names none. At most one grant
+   *  in any state but "unauthorized" reaches an account. */
+  account?: GrantAccount;
   /** When the last conferral filled this grant. Retained through `revoke()`. */
   conferredAt?: Date;
   lastRenewedAt?: Date;
@@ -48,7 +59,7 @@ export interface GrantRecord {
 export type GrantPatch = Partial<
   Pick<
     GrantRecord,
-    "state" | "credential" | "profile" | "conferredAt" | "lastRenewedAt" | "degraded"
+    "state" | "credential" | "profile" | "account" | "conferredAt" | "lastRenewedAt" | "degraded"
   >
 >;
 
@@ -72,6 +83,12 @@ export interface GrantLedger {
   writeConnection(exec: SqliteExec, rec: ConnectionRecord): void;
   writeEnsureGrant(exec: SqliteExec, custody: string, name: GrantName): void;
   writeGrant(exec: SqliteExec, custody: string, name: GrantName, patch: GrantPatch): void;
+  /** The Connection, other than `exceptId`, holding a grant in any state but
+   *  "unauthorized" that reaches `account`, or null. */
+  connectionReaching(account: GrantAccount, exceptId: ConnectionId): Promise<ConnectionId | null>;
+  /** The grants, outside `exceptId`, held in any state but "unauthorized" with
+   *  a profile and no stored account: those the boot pass left without one. */
+  heldGrantsWithoutAccount(exceptId: ConnectionId): Promise<GrantRecord[]>;
   /** Ids of the Connections of `connectionKind`, other than `exceptId`, that hold
    *  every grant in `needs` in a state other than "unauthorized". Reads
    *  through `tx`, so the answer holds for the rest of that transaction. */

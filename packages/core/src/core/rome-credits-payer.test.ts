@@ -1,7 +1,9 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import { createRomeCreditsPayer } from "./rome-credits-payer.js";
-import type { AIToolStateValue } from "./ai-tool-state.js";
+import { createAIToolState, type AIToolStateValue } from "./ai-tool-state.js";
+import { SharedCodexAccountService } from "./codex/account-service.js";
+import { ROME_CREDITS_MODEL_PROVIDER_ID } from "./codex/rome-credits-provider.js";
 
 function fakeManager(onSet: (provider: string | null) => void = () => {}, onRestart = () => {}) {
   let provider: string | null = null;
@@ -303,5 +305,69 @@ describe("Rome credits payer", () => {
       await payer.settled();
       expect(payer.servedModels()).toEqual(["gpt-5.6-terra"]);
     });
+  });
+
+  it("holds credits when Codex rejects the saved ChatGPT login", async () => {
+    // Codex hides an unusable ChatGPT login under the ChatGPT payer, and under
+    // the credits payer it hides every OpenAI account.
+    let provider: string | null = null;
+    const setDefaultProvider = rs.fn((next: string | null) => {
+      provider = next;
+    });
+    const rpc = {
+      request: async <T>(method: string): Promise<T> => {
+        if (method !== "account/read") throw new Error(`unexpected ${method}`);
+        return {
+          account: null,
+          requiresOpenaiAuth: provider !== ROME_CREDITS_MODEL_PROVIDER_ID,
+        } as T;
+      },
+      onNotification: () => () => {},
+      onExit: () => () => {},
+    };
+    let marked = false;
+    const accounts = new SharedCodexAccountService(rpc, {
+      usageCachePaths: [],
+      markAuthRevoked: async () => {
+        marked = true;
+      },
+      readFileStatus: async () =>
+        marked
+          ? { loggedIn: false, authMode: "chatgpt", needsReauth: true }
+          : { loggedIn: true, authMode: "chatgpt" },
+    });
+    let creditsRead: Promise<void> = Promise.resolve();
+    const aiToolState = createAIToolState({
+      probes: { codexStatus: () => accounts.getStatus(), codexUsage: async () => null },
+      refreshIntervalMs: null,
+      startRefresh: false,
+      onCodexLoginChanged: () => payer.sync(),
+      onCodexRefreshed: () => {
+        creditsRead = payer.refresh();
+      },
+    });
+    const payer = createRomeCreditsPayer({
+      aiToolState,
+      appServerManager: {
+        getDefaultProvider: () => provider,
+        setDefaultProvider,
+        restart: () => {},
+      },
+      getInstanceToken: () => "romeinst_123",
+      hasRomeCloud: () => true,
+      fetchRomeCredits: async () => view(),
+    });
+    payer.sync();
+
+    for (let hour = 0; hour < 3; hour++) {
+      await aiToolState.refresh("openai");
+      await payer.settled();
+      await creditsRead;
+    }
+
+    expect(setDefaultProvider.mock.calls).toEqual([[ROME_CREDITS_MODEL_PROVIDER_ID]]);
+    expect(aiToolState.get().codex).toMatchObject({ loggedIn: false, needsReauth: true });
+    accounts.close();
+    aiToolState.close();
   });
 });

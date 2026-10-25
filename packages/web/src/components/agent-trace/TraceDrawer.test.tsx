@@ -99,3 +99,33 @@ describe("TraceDrawer subagent usage", () => {
     expect(await screen.findByText("3")).toBeTruthy();
   });
 });
+
+describe("TraceDrawer archived steps", () => {
+  it("handles a stale trace link without showing steps, retry, or download", async () => {
+    const fetch = rs.fn(
+      async () => new Response(JSON.stringify({ trace: null, traceArchived: true })),
+    );
+    rs.stubGlobal("fetch", fetch);
+    try {
+      render(
+        <TraceDrawer
+          target={{
+            kind: "stored",
+            messageId: "old",
+            sessionId: "s",
+            turnId: "t",
+            summary: targetSummary,
+          }}
+          onClose={() => {}}
+          renderInlineBlock={() => null}
+          renderRunBlocks={() => null}
+        />,
+      );
+      expect(await screen.findByText("trace.archived")).toBeTruthy();
+      expect(screen.queryByRole("link", { name: "trace.drawer.dumpAriaLabel" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /retry/i })).toBeNull();
+    } finally {
+      rs.unstubAllGlobals();
+    }
+  });
+});

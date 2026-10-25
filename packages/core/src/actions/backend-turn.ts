@@ -28,7 +28,7 @@ import type {
   ChatRepository,
 } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
-import type { AgentRunnerInterface, RunParams } from "../core/types.js";
+import type { AgentRunnerInterface, RunParams, ThreadContext } from "../core/types.js";
 import type { AgentEvent } from "../types.js";
 import { createLogger } from "../logger.js";
 
@@ -83,6 +83,12 @@ export interface BackendTurnRunnerDeps {
    * project to honor (non-webchat channels, unknown threads); the session then
    * falls back to the default working dir. */
   resolveWorkingDir?: (channel: string, threadId: string) => Promise<string | undefined>;
+  /** Resolve the device folder the continued chat works in, so a continuation
+   * keeps the `<device_folder>` block its chat's turns carry. */
+  resolveDeviceFolder?: (
+    channel: string,
+    threadId: string,
+  ) => Promise<ThreadContext["deviceFolder"] | undefined>;
   /** Durable conversation projection used to attach provider delivery ids. */
   chats?: ChatRepository;
 }
@@ -94,6 +100,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     params: BackendTurnParams,
     workingDir: string | undefined,
     trace: Pick<RunParams, "persistTrace" | "persistTranscript"> = {},
+    deviceFolder?: ThreadContext["deviceFolder"],
   ): AsyncIterable<AgentEvent> => {
     return deps.agentRunner.run({
       ...trace,
@@ -110,6 +117,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         channel: params.channel,
         threadId: params.threadId,
         channelUserId: params.channelUserId,
+        ...(deviceFolder ? { deviceFolder } : {}),
       },
       // A continuation is not a guardian-authored turn — mark it system so the
       // turn-level logic treats it as an internal re-entry, not a fresh message.
@@ -147,7 +155,10 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       // Resolve the continued session's project dir up front so the resumed turn
       // runs where its SDK transcript lives (defer/timer fire on a fresh stack
       // that never carried it). Undefined ⇒ keep the default-dir fallback.
-      const workingDir = await deps.resolveWorkingDir?.(params.channel, params.threadId);
+      const [workingDir, deviceFolder] = await Promise.all([
+        deps.resolveWorkingDir?.(params.channel, params.threadId),
+        deps.resolveDeviceFolder?.(params.channel, params.threadId),
+      ]);
 
       if (params.channel === "webchat") {
         // The turn queues behind any in-flight browser turn and shows live on
@@ -160,7 +171,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
           let reply = "";
           let turnId: string | undefined;
           const trace = { persistTrace: true, persistTranscript: false };
-          for await (const msg of runTurn(params, workingDir, trace)) {
+          for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
             if (msg.type === "turn_start") turnId = msg.turnId;
             if (msg.type === "result") reply = msg.content;
             await emit({ ...msg, agent: params.agentName }, { recorded: true });
@@ -178,7 +189,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       // on the channel's `send` port.
       let reply = "";
       let turnId: string | undefined;
-      for await (const msg of runTurn(params, workingDir)) {
+      for await (const msg of runTurn(params, workingDir, {}, deviceFolder)) {
         if (msg.type === "turn_start") turnId = msg.turnId;
         if (msg.type === "result") reply = msg.content;
       }

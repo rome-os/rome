@@ -20,6 +20,7 @@ interface FixtureApp {
   iconUrl: string;
   origin: "local" | "builtin" | "appstore";
   installedAt: string | null;
+  hideInLauncher?: boolean;
 }
 
 function fixture(id: string, displayName: string, extra: Partial<FixtureApp> = {}): FixtureApp {
@@ -88,13 +89,14 @@ afterEach(() => {
 });
 
 describe("Recent apps on the rail", () => {
-  it("lists recent unpinned apps newest first, below a divider, without system apps", async () => {
+  it("lists recent unpinned apps newest first, below a divider, without system or hidden apps", async () => {
     seed(
       [
         fixture("a", "Alpha"),
         fixture("b", "Bravo", { installedAt: minutesAgo(1) }),
         fixture("sys", "System Thing", { origin: "builtin", installedAt: minutesAgo(1) }),
         fixture("user-skills", "User Skills", { installedAt: minutesAgo(1) }),
+        fixture("quiet", "Quiet App", { installedAt: minutesAgo(1), hideInLauncher: true }),
       ],
       { a: minutesAgo(30) },
     );
@@ -109,6 +111,7 @@ describe("Recent apps on the rail", () => {
     expect(labels.slice(-2)).toEqual(["Bravo", "Alpha"]);
     expect(labels).not.toContain("System Thing");
     expect(labels).not.toContain("User Skills");
+    expect(labels).not.toContain("Quiet App");
     const bravo = screen.getByRole("link", { name: "Bravo" });
     expect(bravo.previousElementSibling?.getAttribute("data-orientation")).toBe("horizontal");
   });

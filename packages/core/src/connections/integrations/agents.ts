@@ -294,6 +294,8 @@ export function makeAgentsDescriptor(
   return {
     connectionKind: AGENTS_KIND,
     reviveProfile: (_grant, record) => reviveAgentsProfile(record),
+    // The agent Rome Cloud assigned this Rome.
+    accountIdOf: (_grant, record) => (typeof record.agentId === "string" && record.agentId) || null,
     auth: { cloud: agentsScheme(client) },
     capabilities: {
       talker: {

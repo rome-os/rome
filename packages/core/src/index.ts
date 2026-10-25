@@ -14,12 +14,14 @@ import {
   logInstanceIdentityAtBoot,
   seedInstanceTokenFromEnv,
   onInstanceTokenChanged,
+  proveIdentity,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
 import { assembleDiagnosticBundle } from "./lib/diagnostics.js";
 import { NotifyClient } from "./lib/notify-client.js";
-import { recordResolvedAccount } from "./lib/guardian-auth-state.js";
+import { CloudProfileClient } from "./lib/cloud-profile.js";
+import { getGuardianAuthState, recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
@@ -143,6 +145,7 @@ import { stopActiveConversationTurn } from "./core/chat-stop.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
 import { EventBus } from "./events/event-bus.js";
 import { EventService } from "./events/event-service.js";
+import { EventSources } from "./events/event-sources.js";
 import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
@@ -172,13 +175,17 @@ import { PolicyEngine } from "./core/policy-engine.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
 import type { EmailAdapter, EmailSettings } from "./channels/email.js";
-import { resolveWebchatContinuationWorkingDir } from "./webchat/projects.js";
+import {
+  resolveWebchatContinuationDeviceFolder,
+  resolveWebchatContinuationWorkingDir,
+} from "./webchat/projects.js";
 import { SkillCatalog } from "./core/skill-catalog.js";
 import { createActiveSubagentRegistry } from "./core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./core/subagent-execution.js";
 import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
+import { preserveRecapOptOutAtBoot } from "./apps/recap-upgrade.js";
 import { createRomeCloudListingClient } from "./apps/rome-cloud-listing-client.js";
 import { createArtifactReferenceResolver } from "./apps/artifact-reference.js";
 import { createArtifactLoadFailureReporter } from "./apps/artifact-load-failure-reporter.js";
@@ -223,6 +230,7 @@ import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
+import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
 import { ensureZeroGrantConnections } from "./connections/zero-grant.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
@@ -372,7 +380,9 @@ async function main() {
   // the load()/import that hydrate + rebuild live connections run LATER — after
   // the message hook exists, so the first Talk unlock can attach its subscription.
   // Each Connection of a connection kind with a Talk backs one channel, recorded and
-  // released in the same transaction as the Connection.
+  // released in the same transaction as the Connection. A newly connected
+  // account of a linkable connection kind gets an opaque id, so it never shares an id
+  // with an account that came before it.
   const talks = (connectionKind: string) =>
     connectionRegistry.getDescriptor(connectionKind)?.capabilities.talker !== undefined;
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
@@ -419,7 +429,7 @@ async function main() {
     streaming: replyStreamingOn,
     replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
     clock: systemClock,
-    ...(appRuntimeRepositories.chats ? { chats: appRuntimeRepositories.chats } : {}),
+    chats: webchatRepo,
   });
   const channelsService = createChannelsService({
     channels: () => builtChannels,
@@ -568,6 +578,7 @@ async function main() {
   // control (preserved across boot reinstalls). Then assert that every app the
   // core agents reference is in that set — a core agent pointing at an unpacked
   // app must fail boot loudly, not surface later as "unknown subagent".
+  await preserveRecapOptOutAtBoot(appManager, settingsRepo);
   const firstPartyBoot = await installFirstPartyAppsAtBoot({
     appManager,
     appCatalog,
@@ -745,7 +756,7 @@ async function main() {
   // In-memory event bus (data plane): apps publish into it via the
   // `events.publish` RPC; the event-bus trigger provider reads from it.
   const eventBus = new EventBus();
-  routineEngine.registerProvider("event-bus", new EventBusTriggerProvider(eventBus));
+  routineEngine.registerProvider("event-bus", new EventBusTriggerProvider(eventBus, routinesRepo));
 
   // Manual triggers never fire on their own — they only run via runNow(). The
   // provider exists so the trigger type has a registered home (passes the API's
@@ -756,7 +767,22 @@ async function main() {
   // action depends on. The same instances back both the in-process action path
   // (injected into appActionDeps) and the WorkerRPC handlers, so a worker's
   // proxy and a main-process call resolve to identical behavior.
-  const eventService = new EventService(eventBus, eventCatalog);
+  // Event types apps declare in app.yaml (`eventSources`). `defer` subscribes
+  // through them; catalog search lists their types before the first emission
+  // and, given `match`, probes them as the system.
+  const eventSources = new EventSources({
+    listSources: () =>
+      appCatalog
+        .listResolved()
+        .flatMap((app) =>
+          (app.manifest.eventSources ?? []).map((source) => ({ ...source, appId: app.appId })),
+        ),
+    isKnownEventType: (eventName) => eventCatalog.get(eventName) !== undefined,
+  });
+  const eventService = new EventService(eventBus, eventCatalog, {
+    sources: eventSources,
+    run: (name, args) => actionEngine.run(name, args, { initiator: "system:event-catalog" }),
+  });
   const chatSettings = new ChatSettingsService({
     repository: new ChatSettingsRepository(db),
     connections: connectionRegistry,
@@ -868,6 +894,7 @@ async function main() {
         return talker ? talkerChannelSurface(talker) : null;
       },
       connectionKindOfChannel,
+      eventSources,
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
@@ -931,6 +958,8 @@ async function main() {
     // no backend turn runs before boot completes.
     channel: (name) => channels.find((channel) => channel.name === name) ?? null,
     resolveWorkingDir: resolveContinuationWorkingDir,
+    resolveDeviceFolder: (channel, threadId) =>
+      resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
   });
 
@@ -956,6 +985,7 @@ async function main() {
       assembleDiagnosticBundle({ settingsRepo, channelsService, appCatalog, bootVersionReport }),
     agentReportsEnabled: async () => (await settingsRepo.get(AGENT_REPORTS_ENABLED_KEY)) !== false,
   });
+  const cloudProfileClient = new CloudProfileClient(() => proveIdentity());
   const resolveArtifactReference = createArtifactReferenceResolver({
     agentLoader,
     actionRegistry,
@@ -1041,6 +1071,7 @@ async function main() {
       favorService,
       hostExecution,
       feedback: feedbackClient,
+      cloudProfile: cloudProfileClient,
       agentNames: agentNameResolver,
     },
   );
@@ -1054,6 +1085,7 @@ async function main() {
       favorService,
       hostExecution,
       feedback: feedbackClient,
+      cloudProfile: cloudProfileClient,
       agentNames: agentNameResolver,
     }),
   );
@@ -1411,6 +1443,9 @@ async function main() {
   // An account exists only while connected, so one an earlier version left
   // unconnected goes before any channel is recorded for it.
   await removeUnconnectedAccounts(connectionRegistry);
+  // A grant from before grants named their account learns it now, so the next
+  // connect of that account is refused.
+  await recordGrantAccounts(connectionRegistry);
   // Connections minted before channels were recorded get theirs now. Each
   // connection kind held one, so each takes its connection kind's name.
   await claimChannels(
@@ -1482,6 +1517,7 @@ async function main() {
     backendTurnRunner,
     notify: notifyClient,
     feedback: feedbackClient,
+    cloudProfile: cloudProfileClient,
     agentNames: agentNameResolver,
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
@@ -1577,25 +1613,28 @@ async function main() {
     gateOverrides,
   });
 
+  const connectEmailWithoutClick = async (trigger: "seat-created" | "boot") => {
+    try {
+      const connected = await autoConnectEmail({
+        registry: connectionRegistry,
+        provision: () => mailProvider.provision(),
+        settings: settingsRepo,
+      });
+      if (connected) log.info("email connected without a click", { trigger });
+    } catch (err) {
+      log.warn("email auto-connect failed; the guardian can connect it in settings", {
+        trigger,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
       feedback: feedbackClient,
       provisionNodeCaller,
-      autoConnectEmail: async () => {
-        try {
-          const connected = await autoConnectEmail({
-            registry: connectionRegistry,
-            provision: () => mailProvider.provision(),
-            settings: settingsRepo,
-          });
-          if (connected) log.info("email connected on first cloud sign-in");
-        } catch (err) {
-          log.warn("email auto-connect failed; the guardian can connect it in settings", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      },
+      autoConnectEmail: () => connectEmailWithoutClick("seat-created"),
       nodeDevices,
       channelsService,
       chatSettings,
@@ -1608,6 +1647,7 @@ async function main() {
       channelOfLink,
       sendersOfLink,
       accountNames,
+      assistants: listedAgents,
       webchatRepo,
       webhookInvocationsRepo,
       approvalsRepo,
@@ -1776,9 +1816,22 @@ async function main() {
   // bumps the server's lastSeen without ever blocking or failing boot. The same
   // prove result records the bound account onto the guardian seat — no second
   // prove.
-  void logInstanceIdentityAtBoot(getBuildInfo().version).then((identity) =>
-    recordResolvedAccount(db, identity),
-  );
+  //
+  // It also gates connecting email for a seat created before sign-in connected
+  // it: only an enrolled instance can provision an inbox, and a warm-pool
+  // instance with no seat has no owner to provision one for.
+  void logInstanceIdentityAtBoot(getBuildInfo().version)
+    .then(async (identity) => {
+      await recordResolvedAccount(db, identity);
+      if (identity.status !== "ok") return;
+      if (!(await getGuardianAuthState(db)).exists) return;
+      await connectEmailWithoutClick("boot");
+    })
+    .catch((err) => {
+      log.warn("boot-time email auto-connect check failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
   // Beyond the boot-time prove, re-verify the instance token every 15 minutes so
   // a mid-session revocation is noticed within one interval. On a terminal

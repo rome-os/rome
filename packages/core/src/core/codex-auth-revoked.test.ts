@@ -22,12 +22,27 @@ describe("isCodexAuthRevokedError", () => {
     expect(isCodexAuthRevokedError({ message: "your refresh token is revoked, sorry" })).toBe(true);
   });
 
+  it("matches Codex's workspace-routing rejection of the ChatGPT login", () => {
+    expect(
+      isCodexAuthRevokedError({ message: "workspace routing discovery unauthorized (401)" }),
+    ).toBe(true);
+    expect(isCodexAuthRevokedError("workspace routing discovery unauthorized (401)")).toBe(true);
+  });
+
+  it("matches the structured permanent refresh failure", () => {
+    expect(
+      isCodexAuthRevokedError({ message: "something went wrong", codexErrorInfo: "unauthorized" }),
+    ).toBe(true);
+  });
+
   it("does not match unrelated failures (quota, transient, network)", () => {
     for (const message of [
       "You've hit your usage limit. Try again in 4 days.",
       "stream error: server is overloaded",
       "request timed out",
       "401 Unauthorized",
+      "workspace routing discovery timed out",
+      "workspace routing discovery failed",
     ]) {
       expect(isCodexAuthRevokedError({ message })).toBe(false);
       expect(isCodexAuthRevokedError(message)).toBe(false);

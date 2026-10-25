@@ -51,7 +51,8 @@
     "noActivity": "No activity yet"
   },
   "guardian": {
-    "meta": "That is you. Full access to every surface."
+    "you": "You",
+    "noAccounts": "That is you. No accounts linked yet. Use Link my account to add one."
   },
   "actions": {
     "select": "Select {{name}}",

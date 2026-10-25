@@ -51,9 +51,9 @@ const geometry = (page: Page) =>
       Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth,
   }));
 
-// Off Chat the sidebar is the rail alone, `w-16`.
-const OPEN = { sidebarLeft: 0, pageLeft: 64, overflowX: 0 };
-const SHUT = { sidebarLeft: -64, pageLeft: 0, overflowX: 0 };
+// The phone drawer is the rail with its names, 12rem.
+const OPEN = { sidebarLeft: 0, pageLeft: 192, overflowX: 0 };
+const SHUT = { sidebarLeft: -192, pageLeft: 0, overflowX: 0 };
 
 test("a swipe right opens the sidebar and pushes the page", async ({ page }) => {
   const cdp = await open(page);

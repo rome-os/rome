@@ -8,6 +8,7 @@ import { normalizePublicAccessEmail } from "../../lib/public-access-config.js";
 import { isValidAppId } from "../../apps/packaging/app-id.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { createLogger } from "../../logger.js";
+import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:visitor-auth");
@@ -152,6 +153,7 @@ export function beginDashboardVisitorFlow(next?: string): string | null {
 export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): Hono {
   const app = new Hono();
   const fetchImpl = seams.fetchImpl ?? globalThis.fetch;
+  const visitorProfiles = new VisitorProfilesRepository(deps.db);
 
   app.post("/auth/visitor/start", async (c) => {
     const body = await c.req
@@ -266,6 +268,14 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
         );
       }
 
+      // Any visitor may also be on the dashboard list, so every sign-in keeps
+      // the profile. Chat shows it beside their messages, and a failed write
+      // costs only that, so it never fails the sign-in.
+      await visitorProfiles.record(accountId, { email, avatarUrl }).catch((err: unknown) => {
+        log.warn("visitor profile write failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       issueVisitorSession(c, accountId, email, favorViewerToken, avatarUrl);
       return c.redirect(entry.next);
     } catch (err) {

@@ -8,6 +8,7 @@ import {
   commitCarrier,
   ensureUserSkillsCarrier,
   registerCarrierSkills,
+  removeStaleRunFolders,
   restoreCarrier,
   snapshotCarrierSkills,
   userSkillsCarrierDir,
@@ -31,6 +32,27 @@ function addSkill(name: string): void {
 }
 
 describe("user-skills carrier", () => {
+  it("removes staging copies a crashed run left behind, not ones still in use", async () => {
+    mkdirSync(join(root, ".dream-skill-review-old/skills"), { recursive: true });
+    mkdirSync(join(root, ".dream-skill-review-new/skills"), { recursive: true });
+    mkdirSync(join(root, "my-app"));
+
+    await removeStaleRunFolders(root, undefined, Date.now() + 13 * 60 * 60_000);
+    expect(existsSync(join(root, ".dream-skill-review-old"))).toBe(false);
+    expect(existsSync(join(root, "my-app"))).toBe(true);
+    expect(existsSync(join(root, "user-skills"))).toBe(true);
+
+    mkdirSync(join(root, ".dream-skill-review-new/skills"), { recursive: true });
+    await removeStaleRunFolders(root);
+    expect(existsSync(join(root, ".dream-skill-review-new"))).toBe(true);
+
+    // A dream's orphaned app snapshot, by its own prefix.
+    mkdirSync(join(root, "dream-apps-old/notes"), { recursive: true });
+    await removeStaleRunFolders(root, "dream-apps-", Date.now() + 13 * 60 * 60_000);
+    expect(existsSync(join(root, "dream-apps-old"))).toBe(false);
+    expect(existsSync(join(root, ".dream-skill-review-new"))).toBe(true);
+  });
+
   it("resolves under the authoring root, honoring the override", () => {
     expect(userSkillsCarrierDir({ ROME_APP_AUTHORING_ROOT: "/x/apps" })).toBe(
       "/x/apps/user-skills",
@@ -132,7 +154,11 @@ describe("user-skills carrier", () => {
       order.push("b:end");
     });
     await Promise.all([slow, fast]);
-    expect(order).toEqual(["a:start", "a:end", "b:start", "b:end"]);
+    // Either may take the lock first. Neither may start while the other holds it.
+    expect([
+      ["a:start", "a:end", "b:start", "b:end"],
+      ["b:start", "b:end", "a:start", "a:end"],
+    ]).toContainEqual(order);
   });
 
   it("commits the carrier when it is a git repo", async () => {

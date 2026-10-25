@@ -438,6 +438,7 @@ describe("AgentRunner", () => {
             romeSessionId: "parent-chat",
             threadName: "Fixing the build",
             threadType: "private",
+            deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
           },
           parentTurnId: "parent-turn-1",
           label: "recap",
@@ -456,6 +457,8 @@ describe("AgentRunner", () => {
         triggerName: "recap",
         sourceChannel: "webchat",
         sourceThreadId: "parent-chat",
+        // Follow-up turns of the side chat rebuild their context from this row.
+        deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
       });
 
       const transcript = await repo.getMessages("fork-session");
@@ -4084,6 +4087,33 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("prepends <device_folder> on every turn, subagents included", async () => {
+      const withFolder = {
+        ...webchatThreadContext,
+        deviceFolder: { deviceId: "mac-1", deviceName: "macbook", platform: "macos", path: "/w" },
+      };
+      for (const isSubagent of [false, true]) {
+        const manager = createAgentSessionManager(
+          managerDeps(createTestModelResolver({ providers: [alwaysResultProvider()] })),
+          { keepAliveAcrossTurns: true, isSubagent },
+        );
+        const session = await manager.acquire(
+          { agentName: "test-main", channelThreadKey: `webchat:tc-folder-${isSubagent}` },
+          { threadContext: withFolder, workingDir: projectWorkingDir },
+        );
+        for (const prompt of ["First", "Second"]) {
+          const userPrompt = initUserPrompt(
+            await collectMessages(
+              session.sendTurn({ prompt }, { threadContext: withFolder }).events,
+            ),
+          );
+          expect(userPrompt).toContain('Work in folder "/w" on Rome node device "macbook"');
+          expect(userPrompt.indexOf("<device_folder>")).toBeLessThan(userPrompt.indexOf(prompt));
+        }
+        await manager.shutdown();
+      }
+    });
+
     it("skips stored-message context for a channel whose surface needs none", async () => {
       const webchatRepo = new WebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
@@ -4955,12 +4985,12 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("a Fable-pinned session keeps running Fable after the setting is turned off", async () => {
+    it("a pinned session keeps its model after the tier mapping changes", async () => {
       const state = {
         codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
         claude: { loggedIn: true, quotaExhausted: false },
       };
-      let enableFable = true;
+      let tierModelMappings: unknown = { anthropic: { large: FABLE_MODEL } };
       const opens: ModelSessionParams[] = [];
       const claude: ModelProvider = {
         id: "anthropic",
@@ -4982,7 +5012,7 @@ describe("AgentRunner", () => {
         aiToolState: { get: () => state, refresh: async () => state },
         settingsRepo: {
           get: async <T = unknown>(key: string): Promise<T | null> =>
-            key === "enableFable" ? (enableFable as T) : null,
+            key === "tierModelMappings" ? (tierModelMappings as T) : null,
         },
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
@@ -4990,15 +5020,15 @@ describe("AgentRunner", () => {
       });
       const session = await manager.acquire({
         agentName: "test-main",
-        channelThreadKey: "webchat:fable-pin",
+        channelThreadKey: "webchat:mapping-pin",
       });
 
       await collectMessages(session.sendTurn({ prompt: "first" }).events);
       expect(opens[0].model).toBe(FABLE_MODEL);
 
-      // The toggle is a Rome-side preference, not an entitlement: it governs
-      // new resolutions only. The pinned session stays on Fable.
-      enableFable = false;
+      // A mapping is a Rome-side preference, not an entitlement: it governs
+      // new resolutions only. The pinned session stays on the mapped model.
+      tierModelMappings = null;
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
 
       expect(second.find((message) => message.type === "result")).toMatchObject({

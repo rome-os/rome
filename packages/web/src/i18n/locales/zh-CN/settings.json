@@ -727,15 +727,16 @@
         "title": "回复流式输出",
         "description": "适用于守护者在 Telegram 和飞书的私聊。在 Telegram 中，回复以纯文本显示。回复中途失败时不会重发，可能停在未完成的状态。",
         "toggleLabel": "边生成边发送回复"
+      },
+      "feishuStreamingStyle": {
+        "title": "飞书流式样式",
+        "description": "消息每条最多编辑 20 次，之后回复在新消息里继续。卡片以打字效果显示文字。",
+        "message": "消息",
+        "card": "卡片"
       }
     },
     "developerSettings": {
       "title": "开发者设置"
-    },
-    "fable": {
-      "title": "Fable",
-      "description": "仅在 Claude 可用时生效。",
-      "toggleLabel": "将 large 模型路由到 Fable"
     },
     "tierModelMappings": {
       "title": "模型 ID 映射",
@@ -750,7 +751,6 @@
         "medium": "Claude medium 模型 ID",
         "small": "Claude small 模型 ID"
       },
-      "fableNote": "Claude large 映射会替换 Fable 的模型 ID，但 Fable 仍会优先为 large 层级选择 Claude。",
       "save": "保存映射"
     },
     "modelSelector": {

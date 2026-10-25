@@ -34,6 +34,7 @@ function controller(
     remoteReady?: boolean;
     signedIn?: boolean;
     listInstances?: () => Promise<CloudInstance[]>;
+    override?: Runtime;
   } = {},
 ) {
   const writes: RuntimeTarget[] = [];
@@ -64,6 +65,7 @@ function controller(
       return remote;
     },
     relaunch,
+    override: options.override,
   });
   return { subject, writes, relaunch, local, signOut, created };
 }
@@ -126,5 +128,22 @@ describe("RuntimeController", () => {
     await connecting;
     expect(writes).toEqual([{ kind: "local" }]);
     expect(subject.activeTarget()).toEqual({ kind: "local" });
+  });
+
+  it("opens an override instead of the saved target, and saves a pick for the next launch", () => {
+    const override = new FakeRuntime();
+    override.ready = true;
+    const { subject, writes, relaunch, local, created } = controller(
+      { kind: "local" },
+      { override: override as unknown as Runtime },
+    );
+    expect(subject.runtime.inner).toBe(override);
+    expect(created).toEqual([]);
+
+    expect(subject.setTarget(welcome)).toBe("relaunching");
+    expect(writes).toEqual([welcome]);
+    expect(relaunch).toHaveBeenCalled();
+    expect(subject.runtime.inner).toBe(override);
+    expect(local.ensureReady).not.toHaveBeenCalled();
   });
 });

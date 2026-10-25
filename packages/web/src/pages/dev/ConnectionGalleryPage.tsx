@@ -91,6 +91,12 @@ function useGalleryFetchGuard() {
 
 let fixtureId = 0;
 
+/** The connection's state as core derives it from its grants. */
+function connectionState(states: GrantState[]): ApiConnection["state"] {
+  if (states.includes("degraded")) return "broken";
+  return states.every((state) => state === "authorized") ? "working" : null;
+}
+
 /** One mock ConnectionView row. Grants map name → state (+ optional display). */
 function apiConnection(
   service: string,
@@ -114,6 +120,7 @@ function apiConnection(
     id: options.placeholder ? null : `fixture-${service}-${fixtureId++}`,
     connectionKind: service,
     label: service,
+    state: connectionState(Object.values(grantStates)),
     grants: grantStates,
     display,
     // Capability statuses don't drive the card presentation (copy is
@@ -254,8 +261,8 @@ const SCENARIOS: GalleryScenario[] = [
     composio: composioStatus({ loggedIn: true }),
   },
   {
-    title: "Degraded (needs attention)",
-    note: "The ledger knows these grants are broken (degraded): the Telegram personal-account session was revoked upstream, GitHub renders as needs-reconnect (still connected). Google: provider unavailable on this host. Composio: login in flight. (Guardian-verification ceremony states — codes, polling — live in the pure-view section above; they are ceremony state, not grant state.)",
+    title: "Broken (needs attention)",
+    note: "The platform stopped accepting these grants, so their connections are broken: the Telegram personal-account session was revoked upstream, and GitHub needs its access given again. Google: provider unavailable on this host. Composio: login in flight. (Guardian-verification ceremony states — codes, polling — live in the pure-view section above; they are ceremony state, not grant state.)",
     connections: [
       apiConnection("telegram", {
         bot: { state: "authorized", display: { handle: "rome_dev_bot" } },

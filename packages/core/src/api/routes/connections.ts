@@ -4,7 +4,7 @@
 // integrations alike — the sole feed for the dashboard's Connections surface.
 // Registered connection kinds with no connection row yet appear as offerable
 // placeholders (`id: null`) so a fresh install still renders the full catalog.
-// The projection speaks registry vocabulary (GrantState / CapabilityStatus)
+// The projection speaks registry vocabulary (ConnectionState / CapabilityStatus)
 // verbatim; identity only ever crosses through the descriptor's `reviveProfile`
 // hook, so no kind-specific profile field name is known here. Minting stays in
 // the connect setup, a later account of a connection kind included.
@@ -18,12 +18,12 @@ import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-provide
 import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
 import type { GrantRecord } from "../../connections/ledger.js";
-import type { DrizzleTx } from "../../db/index.js";
 import type {
   Capability,
   CapabilityStatus,
   Connection,
   ConnectionDescriptor,
+  ConnectionState,
   GrantName,
   GrantState,
 } from "../../connections/types.js";
@@ -87,6 +87,10 @@ interface ConnectionView
    *  before the rename read. */
   service: string;
   label: string;
+  /** Working or broken. Null for a placeholder, and for a connection a
+   *  disconnect kept with no access. */
+  state: ConnectionState | null;
+  /** @deprecated Per-grant states, which apps built before `state` read. */
   grants: Record<GrantName, GrantState>;
   /** One entry per declared grant: the revived display, or null when the grant
    *  has no stored profile or the descriptor exposes no projection. */
@@ -156,6 +160,7 @@ function buildConnectionView(
     connectionKind: conn.connectionKind,
     service: conn.connectionKind,
     label: conn.label,
+    state: conn.state(),
     grants,
     display,
     capabilities: conn.status(),
@@ -237,6 +242,7 @@ function placeholderView(
     connectionKind,
     service: connectionKind,
     label: connectionKind,
+    state: null,
     grants,
     display,
     capabilities: {
@@ -321,35 +327,6 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     });
   });
 
-  /** Enlist mapping cleanup in connection deletion or Talk-grant
-   *  revocation. Unrelated grants have no cleanup participant. */
-  const guardianMappingTeardown = (
-    registry: ConnectionRegistry,
-    conn: Connection,
-    grant?: string,
-  ): ((tx: DrizzleTx) => void) | undefined => {
-    const talker = registry.getDescriptor(conn.connectionKind)?.capabilities.talker;
-    if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return undefined;
-    return (tx) => {
-      // Guardian links are keyed by connection kind, so they stay while another
-      // Connection of the connection kind still has every Talk grant conferred: the
-      // guardian can still reach Rome through that bot. A degraded grant
-      // counts, since its credential is still held and the link is needed when
-      // it recovers. Backing a channel does not count, because a channel stays
-      // bound to its Connection after Talk is revoked and hears no one then.
-      // The grant states are read through `tx`, so a teardown of the other
-      // Connection that commits first is seen here.
-      // This assumes a user's id is the same through every bot of the
-      // connection kind. Where ids are per app (Feishu's open_id), a link paired only
-      // through the removed bot stays behind and never matches again.
-      const stillTalks =
-        registry.getLedger().connectionsHoldingIn(tx, conn.connectionKind, talker.needs, conn.id)
-          .length > 0;
-      if (!stillTalks)
-        deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.connectionKind);
-    };
-  };
-
   app.delete("/connections/:id/grants/:name", async (c) => {
     if (!isSameOriginMutationRequest(c.req.raw)) {
       return c.json({ error: "Cross-site requests are not allowed." }, 403);
@@ -375,7 +352,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const removed = await registry.withGrantSection(conn.connectionKind, name, async () => {
       // A disconnect that ran while this one waited may have removed it.
       if (!registry.all().some((held) => held.id === conn.id)) return true;
-      await registry.revoke(conn.id, name, { inTx: guardianMappingTeardown(registry, conn, name) });
+      await registry.revoke(conn.id, name);
       if (!(await isUnconnectedAccount(registry, conn))) return false;
       try {
         await registry.remove(conn.id);
@@ -403,7 +380,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const registry = requireConnectionRegistry(deps);
     const conn = findConnection(registry, c.req.param("id"));
     if (!conn) return c.json({ error: "Unknown connection." }, 404);
-    await registry.remove(conn.id, { inTx: guardianMappingTeardown(registry, conn) });
+    await registry.remove(conn.id);
     return c.json({ ok: true });
   });
 

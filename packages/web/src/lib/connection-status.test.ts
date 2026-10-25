@@ -2,17 +2,21 @@ import { describe, expect, it } from "@rstest/core";
 import { buildConnectionCards } from "@/lib/connection-cards";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 import { connectionStatus } from "@/lib/connection-status";
-import type { ApiConnection, GrantState } from "@/lib/connections-api";
+import type { ApiConnection, ConnectionState, GrantState } from "@/lib/connections-api";
+import { stateOfGrants } from "@/test/connection-state";
 
 /**
  * The status vocabulary the guardian actually reads on a row. These assertions
  * pin the slot-state → { label, tone } mapping directly — the row and the
  * detail header both go through `connectionStatus`, so this is the single
- * behavioral contract for what "Connected" / "Not connected" / "Unavailable"
+ * behavioral contract for what "Working" / "Broken" / "Not connected" / "Unavailable"
  * mean and which dot tone each carries.
  */
 
-function slot(state: GrantState, overrides: Partial<ConnectionSlot> = {}): ConnectionSlot {
+function slot(
+  state: ConnectionState | null,
+  overrides: Partial<ConnectionSlot> = {},
+): ConnectionSlot {
   return {
     key: "bot",
     connectionId: "conn-1",
@@ -38,21 +42,21 @@ function card(overrides: Partial<ConnectionCard> = {}): ConnectionCard {
 }
 
 describe("connectionStatus — status vocabulary", () => {
-  it("alwaysOn (webchat) ⇒ green Connected, regardless of slots", () => {
+  it("alwaysOn (webchat) ⇒ green Working, regardless of slots", () => {
     expect(connectionStatus(card({ service: "webchat", alwaysOn: true, slots: [] }))).toEqual({
-      label: "Connected",
+      label: "Working",
       tone: "success",
     });
   });
 
-  it("an authorized slot ⇒ green Connected", () => {
-    expect(connectionStatus(card({ slots: [slot("authorized")] }))).toEqual({
-      label: "Connected",
+  it("a working slot ⇒ green Working", () => {
+    expect(connectionStatus(card({ slots: [slot("working")] }))).toEqual({
+      label: "Working",
       tone: "success",
     });
   });
 
-  it("a transient runtime impairment ⇒ amber Degraded without changing the grant slot", () => {
+  it("a transient runtime impairment ⇒ amber Working, with the reason", () => {
     expect(
       connectionStatus(
         card({
@@ -60,45 +64,46 @@ describe("connectionStatus — status vocabulary", () => {
             reason: "WeChat reported a stale session.",
             retryAt: "2026-07-20T12:00:00.000Z",
           },
-          slots: [slot("authorized")],
+          slots: [slot("working")],
         }),
       ),
     ).toEqual({
-      label: "Degraded",
+      label: "Working",
       tone: "attention",
       title: "WeChat reported a stale session. Automatic retry at 2026-07-20T12:00:00.000Z.",
     });
   });
 
-  it("a degraded slot beats an authorized sibling ⇒ attention-toned Not connected", () => {
+  it("a broken slot beats a working sibling ⇒ attention-toned Broken", () => {
     expect(
-      connectionStatus(card({ slots: [slot("authorized"), slot("degraded", { key: "session" })] })),
+      connectionStatus(card({ slots: [slot("working"), slot("broken", { key: "session" })] })),
     ).toEqual({
-      label: "Not connected",
+      label: "Broken",
       tone: "attention",
-      title: "Access expired — reconnect",
+      title: "The platform stopped accepting Rome's access. Give access again.",
     });
   });
 
-  it("a lone degraded slot ⇒ attention-toned Not connected", () => {
-    expect(connectionStatus(card({ slots: [slot("degraded")] }))).toEqual({
-      label: "Not connected",
+  it("a lone broken slot ⇒ attention-toned Broken", () => {
+    expect(connectionStatus(card({ slots: [slot("broken")] }))).toEqual({
+      label: "Broken",
       tone: "attention",
-      title: "Access expired — reconnect",
+      title: "The platform stopped accepting Rome's access. Give access again.",
     });
   });
 
-  it("unauthorized ⇒ muted Not connected", () => {
-    expect(connectionStatus(card({ slots: [slot("unauthorized")] }))).toEqual({
+  it("no state ⇒ muted Not connected", () => {
+    expect(connectionStatus(card({ slots: [slot(null)] }))).toEqual({
       label: "Not connected",
       tone: "muted",
     });
   });
 
-  it("unauthorized with a ledger row (mid-ceremony) is still a muted Not connected, not attention", () => {
-    expect(
-      connectionStatus(card({ slots: [slot("unauthorized", { connectionId: "conn-1" })] })),
-    ).toEqual({ label: "Not connected", tone: "muted" });
+  it("no state with a ledger row (a kept disconnect) is still a muted Not connected, not attention", () => {
+    expect(connectionStatus(card({ slots: [slot(null, { connectionId: "conn-1" })] }))).toEqual({
+      label: "Not connected",
+      tone: "muted",
+    });
   });
 
   it("nothing conferred + unavailable connect hint ⇒ muted Unavailable, carrying the reason as a title", () => {
@@ -107,7 +112,7 @@ describe("connectionStatus — status vocabulary", () => {
         card({
           service: "github",
           kind: "oauth",
-          slots: [slot("unauthorized", { key: "user", connectionId: null, grant: "user" })],
+          slots: [slot(null, { key: "user", connectionId: null, grant: "user" })],
           connect: {
             url: null,
             available: false,
@@ -122,22 +127,22 @@ describe("connectionStatus — status vocabulary", () => {
     });
   });
 
-  it("an authorized slot wins over an unavailable connect hint", () => {
+  it("a working slot wins over an unavailable connect hint", () => {
     expect(
       connectionStatus(
         card({
-          slots: [slot("authorized")],
+          slots: [slot("working")],
           connect: { url: null, available: false, unavailableReason: "down" },
         }),
       ),
-    ).toEqual({ label: "Connected", tone: "success" });
+    ).toEqual({ label: "Working", tone: "success" });
   });
 
   it("nothing conferred + available connect hint ⇒ muted Not connected", () => {
     expect(
       connectionStatus(
         card({
-          slots: [slot("unauthorized")],
+          slots: [slot(null)],
           connect: { url: "https://oauth/x", available: true, unavailableReason: null },
         }),
       ),
@@ -148,8 +153,8 @@ describe("connectionStatus — status vocabulary", () => {
 /**
  * The Telegram fold's row status, driven end-to-end from the registry
  * connections through `buildConnectionCards` → `connectionStatus`. The
- * any-authorized rule means a working bot with no personal account is fully
- * "Connected" (no "1 of 2" nagging); a degraded slot overrides that.
+ * any-working rule means a working bot with no personal account is fully
+ * "Working" (no "1 of 2" nagging), and a broken slot overrides that.
  */
 describe("connectionStatus — Telegram fold row states", () => {
   function telegramConn(state: GrantState): ApiConnection {
@@ -157,6 +162,7 @@ describe("connectionStatus — Telegram fold row states", () => {
       id: "conn-tg",
       connectionKind: "telegram",
       label: "Telegram",
+      state: stateOfGrants({ bot: state }),
       grants: { bot: state },
       display: {
         bot: { displayName: null, handle: "mybot", email: null, avatarUrl: null },
@@ -179,6 +185,7 @@ describe("connectionStatus — Telegram fold row states", () => {
       id: "conn-tg-user",
       connectionKind: "telegram_user",
       label: "Telegram personal account",
+      state: stateOfGrants({ session: state }),
       grants: { session: state },
       display: {
         session: { displayName: "My Name", handle: "me", email: null, avatarUrl: null },
@@ -209,32 +216,32 @@ describe("connectionStatus — Telegram fold row states", () => {
     });
   });
 
-  it("bot-only: bot authorized, no personal account ⇒ Connected (no 1-of-2 nagging)", () => {
+  it("bot-only: bot working, no personal account ⇒ Working (no 1-of-2 nagging)", () => {
     expect(telegramStatus([telegramConn("authorized")])).toEqual({
-      label: "Connected",
+      label: "Working",
       tone: "success",
     });
   });
 
-  it("account-only: personal account authorized, no bot connection ⇒ Connected", () => {
+  it("account-only: personal account working, no bot connection ⇒ Working", () => {
     expect(telegramStatus([telegramUserConn("authorized")])).toEqual({
-      label: "Connected",
+      label: "Working",
       tone: "success",
     });
   });
 
-  it("both authorized ⇒ Connected", () => {
+  it("both working ⇒ Working", () => {
     expect(telegramStatus([telegramConn("authorized"), telegramUserConn("authorized")])).toEqual({
-      label: "Connected",
+      label: "Working",
       tone: "success",
     });
   });
 
-  it("bot authorized + personal-account session degraded ⇒ attention override (Not connected, attention)", () => {
+  it("bot working + personal account broken ⇒ attention override (Broken)", () => {
     expect(telegramStatus([telegramConn("authorized"), telegramUserConn("degraded")])).toEqual({
-      label: "Not connected",
+      label: "Broken",
       tone: "attention",
-      title: "Access expired — reconnect",
+      title: "The platform stopped accepting Rome's access. Give access again.",
     });
   });
 });

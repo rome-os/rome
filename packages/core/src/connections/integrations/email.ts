@@ -29,7 +29,8 @@
 // `MailProvider.provision()` (get-or-create) inside `ctx.step`, and the
 // terminal conferral is the single ledger write. No credential ever touches the
 // settings table, so `confer()` here throws (see cross-stage notes). The first
-// Rome Cloud sign-in makes the same write without the click (`autoConnectEmail`).
+// Rome Cloud sign-in, and the first boot of an older seat that never had email,
+// make the same write without the click (`autoConnectEmail`).
 
 import type { TalkFeatures } from "../types.js";
 import {
@@ -226,22 +227,30 @@ export interface EmailAutoConnectRegistry {
  * Connect email without the guardian's Connect click: provision the inbox and
  * confer the `inbox` grant, the same terminal write the setup makes.
  *
- * Resolves `false` and provisions nothing when any email connection exists,
- * whatever its grant state, so a connection the guardian set up or revoked is
- * never touched. Resolves `true` once the grant is conferred. Rejects when the
- * provision or the conferral fails; the guardian can still connect by hand.
+ * Resolves `false` and provisions nothing when the instance has ever had email:
+ * an email connection exists in any grant state, or the email settings row
+ * exists. Every conferral writes that row and nothing deletes it, so it outlives
+ * a connection the guardian removed, and a removed or revoked connection is
+ * never reconnected. Resolves `true` once the grant is conferred. Rejects when
+ * the provision or the conferral fails. A failed provision writes nothing, so a
+ * later call retries; a failed conferral has already written the row, so only
+ * the guardian's Connect click retries it.
  */
 export async function autoConnectEmail(deps: {
   registry: EmailAutoConnectRegistry;
   provision: () => Promise<EmailInboxMaterial>;
   settings: EmailSetupSettings;
 }): Promise<boolean> {
-  if (deps.registry.find("email").length > 0) return false;
+  const hasHadEmail = async () =>
+    deps.registry.find("email").length > 0 ||
+    (await deps.settings.get(EMAIL_SETTINGS_KEY)) !== null;
+  if (await hasHadEmail()) return false;
   const inbox = await deps.provision();
   return deps.registry.withGrantSection("email", "inbox", async () => {
-    // The provision ran outside the section, so a Connect click can have
-    // committed meanwhile. Re-check under the section the setup commits in.
-    if (deps.registry.find("email").length > 0) return false;
+    // The provision ran outside the section, so the guardian can have
+    // connected, and even removed, email meanwhile. Re-check under the section
+    // the setup commits in.
+    if (await hasHadEmail()) return false;
     const { credential, profile } = await emailConferral(deps.settings, inbox);
     await deps.registry.confer("email", undefined, "inbox", credential, profile);
     return true;
@@ -266,6 +275,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
   return {
     connectionKind: "email",
     reviveProfile: (_grant, record) => reviveEmailProfile(record),
+    accountIdOf: (_grant, record) => (typeof record.address === "string" && record.address) || null,
     auth: {
       inbox: inboxScheme,
     },

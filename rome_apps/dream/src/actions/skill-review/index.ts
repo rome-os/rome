@@ -11,14 +11,11 @@ import {
 import { createRunsRepository, type RunsRepository } from "../../db/repositories/runs.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 import {
-  changedSkills,
-  commitCarrier,
   ensureUserSkillsCarrier,
-  publishCarrierSkills,
+  publishStagedSkills,
   snapshotCarrierSkills,
   stageCarrierSkills,
   userSkillsCarrierDir,
-  withCarrierLock,
 } from "../../lib/user-skills-carrier.js";
 
 const log = createAppLogger("skill_review");
@@ -72,44 +69,36 @@ export function createAction(
 
       // A saved SKILL.md is not a skill until the carrier listing it is
       // installed, so publish and install it here; the save is never silent.
-      // Changes are found by diffing the staging copy, not by parsing tool
-      // events, whose shape differs per provider (Codex edits carry no path).
-      const after = await snapshotCarrierSkills(staging);
-      const changed = changedSkills(before, after);
-      let installed: string[] | undefined;
-      if (changed.length > 0) {
-        try {
-          installed = await withCarrierLock(carrierDir, async () => {
-            const paths = await publishCarrierSkills(
-              carrierDir,
-              before,
-              new Map(changed.map((name) => [name, after.get(name) as Buffer])),
-              async () => {
-                const res = await appContext.runAction("app_management", {
-                  op: "install",
-                  source: { mode: "source", path: carrierDir },
-                });
-                if (res.status === "error") throw new Error(res.error);
-              },
-            );
-            // History only; a failed commit must not undo a working install.
-            await commitCarrier(carrierDir, changed).catch((err) =>
-              log.warn("user-skills commit failed", { error: String(err) }),
-            );
-            return paths;
-          });
-        } catch (err) {
-          const error = `Skill not saved: user-skills install failed, changes rolled back: ${err instanceof Error ? err.message : String(err)}`;
-          runs.finish(runId, { status: "failed", error });
-          log.error("user-skills install failed", { error });
-          return { status: "error", error };
-        }
+      let installed: string[];
+      try {
+        installed = await publishStagedSkills(
+          carrierDir,
+          staging,
+          before,
+          async () => {
+            const res = await appContext.runAction("app_management", {
+              op: "install",
+              source: { mode: "source", path: carrierDir },
+            });
+            if (res.status === "error") throw new Error(res.error);
+          },
+          (err) => log.warn("user-skills commit failed", { error: String(err) }),
+        );
+      } catch (err) {
+        const error = `Skill not saved: user-skills install failed, changes rolled back: ${err instanceof Error ? err.message : String(err)}`;
+        runs.finish(runId, { status: "failed", error });
+        log.error("user-skills install failed", { error });
+        return { status: "error", error };
       }
 
       runs.finish(runId, outcome);
       return {
         status: "ok",
-        data: { runId, result: recorder.summary, ...(installed ? { installed } : {}) },
+        data: {
+          runId,
+          result: recorder.summary,
+          ...(installed.length > 0 ? { installed } : {}),
+        },
       };
     } finally {
       await rm(staging, { recursive: true, force: true });

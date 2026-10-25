@@ -46,7 +46,7 @@ describe("parseDeferInput", () => {
   it("resolves afterMinutes to an absolute minute-aligned instant", () => {
     const r = parseDeferInput({ name: "check CI", afterMinutes: 5 }, NOW);
     expect(r.ok).toBe(true);
-    if (r.ok) {
+    if (r.ok && r.kind === "time") {
       expect(r.name).toBe("check CI");
       expect(new Date(r.fireAtMs).toISOString()).toBe("2026-06-25T12:05:00.000Z");
     }
@@ -57,13 +57,15 @@ describe("parseDeferInput", () => {
     const now = Date.parse("2026-06-25T12:00:30.000Z");
     const r = parseDeferInput({ name: "x", afterMinutes: 1 }, now);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(new Date(r.fireAtMs).toISOString()).toBe("2026-06-25T12:02:00.000Z");
+    if (r.ok && r.kind === "time")
+      expect(new Date(r.fireAtMs).toISOString()).toBe("2026-06-25T12:02:00.000Z");
   });
 
   it("accepts an absolute ISO instant", () => {
     const r = parseDeferInput({ name: "x", at: "2026-06-25T18:30:00Z" }, NOW);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(new Date(r.fireAtMs).toISOString()).toBe("2026-06-25T18:30:00.000Z");
+    if (r.ok && r.kind === "time")
+      expect(new Date(r.fireAtMs).toISOString()).toBe("2026-06-25T18:30:00.000Z");
   });
 
   it("rejects an at-instant in the past", () => {
@@ -75,7 +77,176 @@ describe("parseDeferInput", () => {
   });
 });
 
+describe("parseDeferInput with an event", () => {
+  it("trims the event's match strings", () => {
+    const r = parseDeferInput(
+      {
+        name: "CI",
+        event: {
+          eventName: "  ci.done ",
+          sourcePattern: " connector ",
+          filter: [{ field: " pr.number ", equals: " 12" }],
+        },
+      },
+      NOW,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok && r.kind === "event") {
+      expect(r.event).toEqual({
+        eventName: "ci.done",
+        sourcePattern: "connector",
+        // `equals` is matched against payload values verbatim, so it isn't trimmed.
+        filter: [{ field: "pr.number", equals: " 12" }],
+      });
+    }
+  });
+
+  it("requires exactly one of afterMinutes/at/event", () => {
+    expect(
+      parseDeferInput({ name: "x", afterMinutes: 5, event: { eventName: "ci.done" } }, NOW).ok,
+    ).toBe(false);
+    expect(
+      parseDeferInput({ name: "x", at: "2026-06-25T13:00:00Z", event: { eventName: "e" } }, NOW).ok,
+    ).toBe(false);
+  });
+
+  // In a live run a model nested a field one level off, and zod's default
+  // stripping dropped it without a word. An unknown key at either level is an
+  // error naming where it sits.
+  it("rejects an unknown key instead of silently dropping it", () => {
+    const top = parseDeferInput({ name: "x", event: { eventName: "e" }, note: "y" }, NOW);
+    expect(top).toMatchObject({ ok: false });
+    if (!top.ok) expect(top.error).toMatch(/^defer: .*note/);
+
+    const nested = parseDeferInput({ name: "x", event: { eventName: "e", source: "ci" } }, NOW);
+    expect(nested).toMatchObject({ ok: false });
+    if (!nested.ok) expect(nested.error).toMatch(/^defer\.event: .*source/);
+  });
+
+  it("rejects a blank eventName, a blank sourcePattern, or a filter path with an empty segment", () => {
+    expect(parseDeferInput({ name: "x", event: { eventName: "  " } }, NOW).ok).toBe(false);
+    expect(
+      parseDeferInput({ name: "x", event: { eventName: "e", sourcePattern: " " } }, NOW).ok,
+    ).toBe(false);
+    expect(
+      parseDeferInput(
+        { name: "x", event: { eventName: "e", filter: [{ field: "a..b", equals: "1" }] } },
+        NOW,
+      ).ok,
+    ).toBe(false);
+  });
+});
+
 describe("runDefer", () => {
+  it("creates a once event-bus routine for an event wait", async () => {
+    const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-ev" });
+    const result = await runDefer(
+      {
+        name: "CI on #12",
+        event: {
+          eventName: "github.check_suite",
+          filter: [{ field: "pr", equals: "12" }],
+        },
+      },
+      { context: baseContext, createRoutine, now: NOW },
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      name: "CI on #12",
+      waitingFor: "github.check_suite",
+      routineId: "r-ev",
+    });
+    const args = createRoutine.mock.calls[0][0];
+    expect(args.name).toBe("CI on #12");
+    expect(args.actionName).toBe(RESUME_SESSION_ACTION);
+    expect(args.trigger).toEqual({
+      type: "event-bus",
+      eventName: "github.check_suite",
+      filter: [{ field: "pr", equals: "12" }],
+      once: true,
+    });
+    expect(args.args).toMatchObject({
+      sessionId: "agent-session-1",
+      channel: "webchat",
+      threadId: "sess-1",
+      channelUserId: "guardian-1",
+      agentName: "main",
+      text: "📨 Event arrived: CI on #12",
+      attachEvent: true,
+    });
+  });
+
+  it("subscribes through the event source before it creates the wait", async () => {
+    const calls: string[] = [];
+    const prepareEventWait = rs.fn(async () => {
+      calls.push("prepare");
+      return { ok: true as const, subscription: "created" as const };
+    });
+    const createRoutine = rs.fn(async () => {
+      calls.push("create");
+      return { routineId: "r-ev" };
+    });
+    const filter = [{ field: "repository.full_name", equals: "acme/widgets" }];
+    const result = await runDefer(
+      { name: "CI", event: { eventName: "provider:event:github.workflow_run", filter } },
+      { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+    );
+
+    expect(calls).toEqual(["prepare", "create"]);
+    expect(prepareEventWait).toHaveBeenCalledWith("provider:event:github.workflow_run", filter);
+    expect(result).toEqual({
+      ok: true,
+      name: "CI",
+      waitingFor: "provider:event:github.workflow_run",
+      subscription: "created",
+      routineId: "r-ev",
+    });
+  });
+
+  it("creates no wait when the event source refuses", async () => {
+    const createRoutine = rs.fn();
+    const prepareEventWait = rs.fn(async () => ({
+      ok: false as const,
+      error: "GitHub refused the webhook on acme/widgets",
+    }));
+    await expect(
+      runDefer(
+        { name: "CI", event: { eventName: "provider:event:github.workflow_run" } },
+        { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+      ),
+    ).rejects.toThrow("GitHub refused the webhook on acme/widgets");
+    expect(prepareEventWait).toHaveBeenCalledWith("provider:event:github.workflow_run", []);
+    expect(createRoutine).not.toHaveBeenCalled();
+  });
+
+  it("creates the wait and passes on a warning from the event source", async () => {
+    const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-w" });
+    const prepareEventWait = rs.fn(async () => ({
+      ok: true as const,
+      warning: "Nothing has emitted it since Rome started",
+    }));
+    const result = await runDefer(
+      { name: "reply", event: { eventName: "provider:event:gmail.new_message" } },
+      { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+    );
+    expect(createRoutine).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      ok: true,
+      warning: "Nothing has emitted it since Rome started",
+    });
+  });
+
+  it("does not ask the event source for a time wakeup", async () => {
+    const prepareEventWait = rs.fn();
+    const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-t" });
+    await runDefer(
+      { name: "x", afterMinutes: 5 },
+      { context: baseContext, createRoutine, prepareEventWait, now: NOW },
+    );
+    expect(prepareEventWait).not.toHaveBeenCalled();
+  });
+
   it("creates a one-off UTC routine targeting the dispatcher", async () => {
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-1" });
     const result = await runDefer(
@@ -117,6 +288,7 @@ describe("runDefer", () => {
     expect(args.name).toBe("检查 GitHub CI");
     expect(args.args.text).toBe("⏰ Time's up: 检查 GitHub CI");
     expect(args.args).not.toHaveProperty("messageId");
+    expect(args.args).not.toHaveProperty("attachEvent");
   });
 
   it("throws on a missing thread context", async () => {

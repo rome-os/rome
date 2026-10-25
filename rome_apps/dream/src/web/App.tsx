@@ -66,7 +66,7 @@ const EMPTY_FILTER_COPY: Record<
 > = {
   dream: {
     title: "No dreams yet",
-    description: "A dream runs every night and on demand with Dream now.",
+    description: "A dream runs every three days and on demand with Dream now.",
   },
   skill_review: {
     title: "No skill reviews yet",
@@ -195,8 +195,8 @@ function DreamPage() {
           </EmptyStateIcon>
           <EmptyStateTitle>No dreams yet</EmptyStateTitle>
           <EmptyStateDescription>
-            Each night Rome reviews the day's conversations, updates memory, and writes a journal
-            entry. Skill reviews appear here after long working chats.
+            Every three days Rome reviews its recent chats, updates memory, turns repeated work into
+            skills, and writes a journal entry. Skill reviews appear here after long working chats.
           </EmptyStateDescription>
           <EmptyStateAction>{dreamButton}</EmptyStateAction>
         </EmptyState>

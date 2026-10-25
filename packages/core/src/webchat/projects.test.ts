@@ -9,6 +9,7 @@ import {
   normalizeSelectedWebchatProjectPath,
   normalizeWebchatProjectPath,
   resolveProjectWorkingDirWithinRoot,
+  resolveWebchatContinuationDeviceFolder,
   resolveWebchatContinuationWorkingDir,
   resolveWebchatProjectPath,
 } from "./projects.js";
@@ -53,6 +54,34 @@ describe("webchat project helpers", () => {
     expect(resolveWebchatProjectPath("landingpage/content", "/tmp/projects")).toBe(
       "/tmp/projects/landingpage/content",
     );
+  });
+
+  describe("resolveWebchatContinuationDeviceFolder", () => {
+    const folder = { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" };
+
+    it("returns the webchat chat's device folder", async () => {
+      const repo = {
+        getSession: async (id: string) => (id === "chat-1" ? { deviceFolder: folder } : null),
+      };
+      await expect(
+        resolveWebchatContinuationDeviceFolder("webchat", "chat-1", repo),
+      ).resolves.toEqual(folder);
+    });
+
+    it("returns undefined without a folder, for unknown chats, and for other channels", async () => {
+      const repo = {
+        getSession: async (id: string) => (id === "plain" ? { deviceFolder: null } : null),
+      };
+      await expect(
+        resolveWebchatContinuationDeviceFolder("webchat", "plain", repo),
+      ).resolves.toBeUndefined();
+      await expect(
+        resolveWebchatContinuationDeviceFolder("webchat", "missing", repo),
+      ).resolves.toBeUndefined();
+      await expect(
+        resolveWebchatContinuationDeviceFolder("telegram", "plain", repo),
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe("resolveWebchatContinuationWorkingDir", () => {

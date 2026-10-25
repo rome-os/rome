@@ -28,6 +28,7 @@ import {
 import type { FavorService } from "../favors/types.js";
 import type { HostExecutionService } from "../host-execution/service.js";
 import type { FeedbackService } from "../lib/feedback-client.js";
+import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { AgentNamesService } from "../channels/agent-names.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 
@@ -83,6 +84,8 @@ interface AppActionServices {
   hostExecution?: HostExecutionService;
   /** System-only: reporter provenance must come from system:send_feedback. */
   feedback?: FeedbackService;
+  /** System-only: apps read the guardian's Cloud profile only via system:get_guardian_cloud_profile. */
+  cloudProfile?: CloudProfileService;
   /** System-only: lists the guardian's agents and linked accounts', so only
    *  system:send_message resolves a name in it. */
   agentNames?: AgentNamesService;
@@ -134,6 +137,9 @@ function createAppActionRuntimeDeps(
         : {}),
       ...(record.metadata.ownerId === "system" && services.feedback
         ? { feedback: services.feedback }
+        : {}),
+      ...(record.metadata.ownerId === "system" && services.cloudProfile
+        ? { cloudProfile: services.cloudProfile }
         : {}),
       ...(record.metadata.ownerId === "system" && services.agentNames
         ? { agentNames: services.agentNames }

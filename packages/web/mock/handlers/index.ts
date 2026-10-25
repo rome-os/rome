@@ -25,6 +25,7 @@ import type {
   ChatMessage,
   ChatSearchMessageMatch,
   ChatSession,
+  ChatLocations,
   ProjectCatalog,
   ProjectOption,
   SkillSummary,
@@ -49,9 +50,10 @@ import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
+import { assistantHandlers } from "./assistants";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
-import { settingsHandlers } from "./settings";
+import { pickerDevices, settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
 import { curatedChats } from "../fixtures/chats";
 
@@ -249,6 +251,7 @@ const turn = (
       role: "user",
       content: JSON.stringify(typeof prompt === "string" ? [text(prompt)] : prompt),
       createdAt: startedAt,
+      sender: { kind: "guardian", name: identity.displayName, avatarUrl: identity.avatarUrl },
     },
   ];
   if (traceEvents?.length) {
@@ -736,10 +739,30 @@ const session = (
 const chatSessions: ChatSession[] = [
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
-  { ...session("mock-chat-1", "Morning brief tweaks", "default"), running: true },
-  { ...session("mock-chat-2", "Draft launch email", "website-redesign"), unread: true },
-  { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true },
+  {
+    ...session("mock-chat-1", "Morning brief tweaks", "default"),
+    running: true,
+    model: "claude-opus-5-5[1m]",
+    reasoningEffort: "high",
+  },
+  {
+    ...session("mock-chat-2", "Draft launch email", "website-redesign"),
+    unread: true,
+    model: "gpt-5.6-sol",
+    reasoningEffort: "xhigh",
+  },
+  { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true, model: "gemini-2.5-pro" },
   { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
+  // A chat that works in a folder on another computer groups under that folder.
+  {
+    ...session("mock-chat-device-folder", "Fix the flaky e2e test"),
+    deviceFolder: {
+      deviceId: "mac",
+      deviceName: "MacBook Pro",
+      platform: "macos",
+      path: "/Users/ray/code/rome",
+    },
+  },
 ];
 
 const messageText = (message: ChatMessage): string =>
@@ -1189,6 +1212,15 @@ export const handlers = [
     return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
   }),
   http.get("/api/chat/projects", () => HttpResponse.json(projectCatalog)),
+  // Cloud's device list is the slow half of the real answer; the delay shows the
+  // menu's placeholder devices.
+  http.get("/api/chat/locations", async () => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    return HttpResponse.json({
+      projects: projectCatalog,
+      devices: pickerDevices,
+    } satisfies ChatLocations);
+  }),
   http.post("/api/chat/projects", async ({ request }) => {
     const body = (await request.json()) as { name: string };
     const created: ProjectOption = { name: body.name, path: body.name };
@@ -1284,8 +1316,7 @@ export const handlers = [
         { status: 400 },
       );
     }
-    const connected = Object.values(target.grants).some((state) => state !== "unauthorized");
-    if (!connected) {
+    if (target.state === null) {
       return HttpResponse.json(
         { error: "This account does not receive messages." },
         { status: 409 },
@@ -1321,6 +1352,7 @@ export const handlers = [
       return HttpResponse.json({ error: "Unknown grant." }, { status: 404 });
     }
     connection.grants[grant] = "unauthorized";
+    connection.state = null;
     connection.display[grant] = null;
     // Which capability a grant backs is the registry's to know, and a fixture
     // cannot reproduce that map without inventing it. What it can say without
@@ -1337,9 +1369,7 @@ export const handlers = [
     }
     // Core removes an account of a service that names its accounts, which
     // the linkable services are.
-    const unconnectedAccount =
-      LINKABLE_KINDS.has(connection.connectionKind) &&
-      Object.values(connection.grants).every((state) => state === "unauthorized");
+    const unconnectedAccount = LINKABLE_KINDS.has(connection.connectionKind);
     if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
     const others = connections.connections.filter(
       (candidate) =>
@@ -1395,6 +1425,7 @@ export const handlers = [
   ...appHandlers,
   ...activityHandlers,
   ...peopleHandlers,
+  ...assistantHandlers,
   ...routineHandlers,
   // The session inventory behind /sessions/all, over the same four seeded
   // chats the conversation routes serve — one inventory row per chat, its run

@@ -348,12 +348,13 @@ export interface PeopleGroup {
  * The directory's groups, in ladder order, after the chip and the search box
  * have each had their say.
  *
- * "All" is the people the guardian has placed, and only those: the three
- * assignable levels. The ladder's other positions each answer a different
- * question — Unknown is the accounts still waiting on a decision, Stranger is
- * what was decided against, Guardian is the reader themselves — so each is
- * entered on purpose rather than padding the list somebody scrolls to look a
- * contact up in.
+ * "All" is the guardian's own row, then the people the guardian has placed:
+ * the three assignable levels. The guardian's row leads because it is where
+ * they read which accounts are theirs. The ladder's other positions each
+ * answer a different question — Unknown is the accounts still waiting on a
+ * decision, Stranger is what was decided against — so each is entered on
+ * purpose rather than padding the list somebody scrolls to look a contact up
+ * in.
  *
  * A search still reaches every one of them, held-back positions included: a
  * roster that filtered the address book would answer "no such contact" for
@@ -374,7 +375,8 @@ export function directoryGroups(
     if (group.rows.length === 0) return false;
     if (searching) return true;
     return options.filter === "all"
-      ? (ASSIGNABLE_BOND_LEVELS as readonly RowLevel[]).includes(group.level)
+      ? group.level === "guardian" ||
+          (ASSIGNABLE_BOND_LEVELS as readonly RowLevel[]).includes(group.level)
       : group.level === options.filter;
   });
 }

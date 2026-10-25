@@ -27,6 +27,7 @@ import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
 import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
 import type { AgentNamesService } from "../channels/agent-names.js";
+import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
@@ -156,6 +157,7 @@ const EventsPublishParams = z.object({
 const EventsSearchCatalogParams = z.object({
   query: z.string().default(""),
   limit: z.number().int().positive().max(50).default(10),
+  match: z.record(z.string(), z.string()).optional(),
 });
 
 const SessionContinueParams = z.object({
@@ -230,6 +232,8 @@ export interface WorkerRpcServices {
    * returns only the classified `SendOutcome`. */
   notify: NotifyService;
   feedback: FeedbackService;
+  /** System-only: what `system:get_guardian_cloud_profile` reads from Rome Cloud. */
+  cloudProfile: CloudProfileService;
   /** System-only: how `system:send_message` turns an agent's name into its id. */
   agentNames: AgentNamesService;
 }
@@ -289,6 +293,7 @@ export class WorkerRpcServer {
         "session.continue": (params) => this.handleSessionContinue(params),
         "feedback.send": (params) =>
           this.services.feedback.send(parseParams("feedback.send", feedbackSendSchema, params)),
+        "cloudProfile.get": () => this.services.cloudProfile.get(),
         "notify.send": (params) => {
           // The sender reads token/origin from main-process state; the only wire
           // param is the optional body. Preserve the no-body call shape
@@ -489,7 +494,11 @@ export class WorkerRpcServer {
   }
 
   private async handleEventsSearchCatalog(params: unknown): Promise<unknown> {
-    const { query, limit } = parseParams("events.searchCatalog", EventsSearchCatalogParams, params);
-    return await this.services.eventService.search(query, limit);
+    const { query, limit, match } = parseParams(
+      "events.searchCatalog",
+      EventsSearchCatalogParams,
+      params,
+    );
+    return await this.services.eventService.search(query, limit, match ? { match } : {});
   }
 }

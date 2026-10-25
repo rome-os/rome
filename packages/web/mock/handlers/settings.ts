@@ -1,4 +1,4 @@
-import type { DevicesStatus } from "@rome/api-types/devices";
+import type { DeviceFilesResponse, DeviceList, DevicesStatus } from "@rome/api-types/devices";
 import { validateCustomAnthropicEnv } from "@rome/api-types/anthropic-compatible-env";
 import {
   listAnthropicCompatibleProviderSummaries,
@@ -273,21 +273,91 @@ const favorPacks: FavorRechargePackView[] = [
   { id: "pack-5000", favors: 5000, displayPrice: "$45" },
 ];
 
+// Folders the chat folder picker browses on the mock MacBook. Keys are real paths.
+const macHome = "/Users/ray";
+const macFolders: Record<string, string[]> = {
+  "/": ["Applications", "Library", "System", "Users"],
+  "/Users": ["Shared", "ray"],
+  [macHome]: ["Desktop", "Documents", "Downloads", "code", "notes"],
+  [`${macHome}/code`]: ["rome", "rspack", "midscene", "dotfiles"],
+  [`${macHome}/code/rome`]: ["docs", "packages", "rome_apps", "scripts"],
+};
+
+function macFiles(path: string | null): DeviceFilesResponse | null {
+  const real = path ? path.replace(/(.)\/+$/, "$1") : macHome;
+  const folders = macFolders[real] ?? (real.startsWith(`${macHome}/`) ? [] : null);
+  if (!folders) return null;
+  const parent = real === "/" ? null : real.slice(0, real.lastIndexOf("/")) || "/";
+  return {
+    path: real,
+    parent,
+    entries: [
+      ...folders.map((name) => ({ name, type: "dir" as const })),
+      ...(real === macHome ? [{ name: ".zshrc", type: "file" as const }] : []),
+    ],
+    truncated: false,
+  };
+}
+
+/** Same devices as `/api/devices` below, without status: the picker probes none. */
+export const pickerDevices: DeviceList["devices"] = [
+  { id: "mac", name: "MacBook Pro", platform: "macos" },
+  { id: "linux", name: "Development workstation", platform: "linux" },
+  { id: "windows", name: "Windows PC", platform: "windows" },
+  { id: "build", name: "Build server", platform: "linux" },
+];
+
+/** `/api/devices`. Rename and remove change it until the mock reloads. */
+const statusDevices: DevicesStatus["devices"] = [
+  { id: "mac", name: "MacBook Pro", platform: "macos", status: "connected" },
+  { id: "linux", name: "Development workstation", platform: "linux", status: "connected" },
+  { id: "windows", name: "Windows PC", platform: "windows", status: "not_connected" },
+  { id: "build", name: "Build server", platform: "linux", status: "not_connected" },
+  { id: "old-laptop", name: "Old laptop", platform: "darwin", status: "revoked" },
+];
+
 export const settingsHandlers = [
+  http.get("/api/devices/list", () =>
+    HttpResponse.json({ devices: pickerDevices } satisfies DeviceList),
+  ),
+  http.get("/api/devices/:deviceId/files", async ({ params, request }) => {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (params.deviceId === "linux") {
+      return HttpResponse.json({ error: "upgrade_required" }, { status: 409 });
+    }
+    if (params.deviceId !== "mac") {
+      return HttpResponse.json({ error: "offline" }, { status: 503 });
+    }
+    const folder = macFiles(new URL(request.url).searchParams.get("path"));
+    return folder
+      ? HttpResponse.json(folder)
+      : HttpResponse.json({ error: "not_found" }, { status: 404 });
+  }),
   http.post("/api/devices/start", () => new HttpResponse(null, { status: 204 })),
   http.get("/api/devices", () =>
     HttpResponse.json({
       connection: "online",
       checkedAt: new Date().toISOString(),
-      devices: [
-        { id: "mac", name: "MacBook Pro", platform: "macos", status: "connected" },
-        { id: "linux", name: "Development workstation", platform: "linux", status: "connected" },
-        { id: "windows", name: "Windows PC", platform: "windows", status: "not_connected" },
-        { id: "build", name: "Build server", platform: "linux", status: "not_connected" },
-        { id: "old-laptop", name: "Old laptop", platform: "darwin", status: "revoked" },
-      ],
+      devices: statusDevices,
     } satisfies DevicesStatus),
   ),
+  http.patch("/api/devices/:deviceId", async ({ params, request }) => {
+    const device = statusDevices.find((item) => item.id === params.deviceId);
+    if (!device || device.status === "revoked")
+      return HttpResponse.json({ error: "device_not_found" }, { status: 404 });
+    const { name } = (await request.json()) as { name?: unknown };
+    const trimmed = typeof name === "string" ? name.trim() : "";
+    if (!trimmed || trimmed.length > 80)
+      return HttpResponse.json({ error: "invalid_device_name" }, { status: 400 });
+    device.name = trimmed;
+    return new HttpResponse(null, { status: 204 });
+  }),
+  http.delete("/api/devices/:deviceId", ({ params }) => {
+    const index = statusDevices.findIndex((item) => item.id === params.deviceId);
+    if (index < 0) return HttpResponse.json({ error: "device_not_found" }, { status: 404 });
+    statusDevices.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
   http.get("/api/computer-use", () =>
     HttpResponse.json({
       daemon: { status: "running", version: "1.8.8" },

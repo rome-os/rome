@@ -66,6 +66,21 @@ describe("CLI device connector", () => {
     expect(String(f.fetch.mock.calls[0][0])).toContain("/api/account/devices");
   });
 
+  it("renames and removes through Cloud without opening a Gateway connection", async () => {
+    const f = fixture();
+    f.fetch.mockImplementation(async () => new Response(null, { status: 204 }));
+    await f.connector.rename(device, "Mac");
+    await f.connector.remove(device);
+    expect(
+      f.fetch.mock.calls.map(([input, init]) => [init?.method, new URL(String(input)).pathname]),
+    ).toEqual([
+      ["PATCH", `/api/account/devices/${device}`],
+      ["DELETE", `/api/account/devices/${device}`],
+    ]);
+    expect(f.connect).not.toHaveBeenCalled();
+    await expect(f.connector.remove("target")).rejects.toMatchObject({ code: "device_not_found" });
+  });
+
   it("shares one connection across concurrent requests and matches sender and request ID", async () => {
     const f = fixture();
     const promises = Array.from({ length: 10 }, (_, n) => f.connector.run("target", "exec", { n }));

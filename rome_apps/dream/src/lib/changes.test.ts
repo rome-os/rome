@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { MAX_CHANGE_CHARS, changesFromToolUse, classifyPath, groupByFile } from "./changes.js";
+import { lineDiff } from "../web/lib/diff.js";
 
 const MEMORY = "/home/rome/.rome/default/memory";
 
@@ -53,7 +54,189 @@ describe("changesFromToolUse", () => {
   });
 });
 
+// Shapes taken from a Codex skill-review run's trace: the provider reports a
+// `fileChange` item as tool `Edit`, with the raw item as the input.
+const SKILL =
+  "/home/rome/.rome/default/projects/apps/.dream-skill-review-RRj4um/skills/rome-agent-run-audit";
+
+const UPDATE_DIFF =
+  "@@ -2,3 +2,3 @@\n name: rome-agent-run-audit\n-description: Diagnose Rome crashes, restarts.\n+description: Diagnose Rome crashes, daemon health-check restarts.\n ---\n@@ -27,2 +27,4 @@\n \n+### Investigate a daemon health-check restart\n+\n ## Recover the execution timeline\n";
+
+const ADD_TEXT =
+  "# Measure memory pressure against real coding work\n\nUse read-only observations first.\n";
+
+function fileChange(changes: unknown[]): Record<string, unknown> {
+  return { type: "fileChange", id: "exec-e8af79c4", changes, status: "inProgress" };
+}
+
+describe("changesFromToolUse on a Codex fileChange", () => {
+  it("records an update as one edit per run of changed lines, with the text around it", () => {
+    const changes = changesFromToolUse(
+      "Edit",
+      fileChange([
+        {
+          path: `${SKILL}/SKILL.md`,
+          kind: { type: "update", move_path: null },
+          diff: UPDATE_DIFF,
+        },
+      ]),
+    );
+    expect(changes).toEqual([
+      {
+        op: "edit",
+        path: `${SKILL}/SKILL.md`,
+        previous: "name: rome-agent-run-audit\ndescription: Diagnose Rome crashes, restarts.\n---",
+        content:
+          "name: rome-agent-run-audit\ndescription: Diagnose Rome crashes, daemon health-check restarts.\n---",
+        truncated: false,
+      },
+      {
+        op: "edit",
+        path: `${SKILL}/SKILL.md`,
+        previous: "\n## Recover the execution timeline",
+        content:
+          "\n### Investigate a daemon health-check restart\n\n## Recover the execution timeline",
+        truncated: false,
+      },
+    ]);
+  });
+
+  it("records an add as a write of the whole file", () => {
+    expect(
+      changesFromToolUse(
+        "Edit",
+        fileChange([
+          { path: `${SKILL}/references/memory-pressure.md`, kind: { type: "add" }, diff: ADD_TEXT },
+        ]),
+      ),
+    ).toEqual([
+      {
+        op: "write",
+        path: `${SKILL}/references/memory-pressure.md`,
+        content: ADD_TEXT,
+        previous: null,
+        truncated: false,
+      },
+    ]);
+  });
+
+  it("records every file of a call that touches several, in order", () => {
+    const changes = changesFromToolUse(
+      "Edit",
+      fileChange([
+        { path: `${SKILL}/SKILL.md`, kind: { type: "update", move_path: null }, diff: UPDATE_DIFF },
+        { path: `${SKILL}/references/memory-pressure.md`, kind: { type: "add" }, diff: ADD_TEXT },
+      ]),
+    );
+    expect(changes.map((c) => [c.op, c.path.split("/").at(-1)])).toEqual([
+      ["edit", "SKILL.md"],
+      ["edit", "SKILL.md"],
+      ["write", "memory-pressure.md"],
+    ]);
+  });
+
+  it("splits a hunk that changes two places so unchanged lines between them stay context", () => {
+    const changes = changesFromToolUse(
+      "Edit",
+      fileChange([
+        {
+          path: "/x/a.md",
+          kind: { type: "update", move_path: null },
+          diff: "@@ -1,7 +1,7 @@\n head\n-old first\n+new first\n same\n also same\n-old second\n+new second\n tail\n",
+        },
+      ]),
+    );
+    expect(changes.map((c) => [c.previous, c.content])).toEqual([
+      ["head\nold first\nsame\nalso same", "head\nnew first\nsame\nalso same"],
+      ["same\nalso same\nold second\ntail", "same\nalso same\nnew second\ntail"],
+    ]);
+    // What the page draws from each change: the shared lines read as context.
+    const drawn = changes.map((c) => lineDiff(c.previous ?? "", c.content).map((l) => l.type));
+    expect(drawn).toEqual([
+      ["context", "removed", "added", "context", "context"],
+      ["context", "context", "removed", "added", "context"],
+    ]);
+  });
+
+  it("records nothing for a hunk with no changed lines", () => {
+    expect(
+      changesFromToolUse(
+        "Edit",
+        fileChange([
+          {
+            path: "/x/a.md",
+            kind: { type: "update", move_path: null },
+            diff: "@@ -1,2 +1,2 @@\n a\n b\n",
+          },
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it("records an update that renames the file under the new path", () => {
+    const [change] = changesFromToolUse(
+      "Edit",
+      fileChange([
+        {
+          path: `${SKILL}/references/old.md`,
+          kind: { type: "update", move_path: `${SKILL}/references/new.md` },
+          diff: "@@ -1 +1 @@\n-a\n+b\n",
+        },
+      ]),
+    );
+    expect(change).toMatchObject({ op: "edit", path: `${SKILL}/references/new.md` });
+  });
+
+  it("reads a diff with no hunk header as one hunk, and skips the no-newline marker", () => {
+    const [change] = changesFromToolUse(
+      "Edit",
+      fileChange([
+        {
+          path: "/x/a.md",
+          kind: { type: "update", move_path: null },
+          diff: "-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n",
+        },
+      ]),
+    );
+    expect(change).toMatchObject({ op: "edit", previous: "old", content: "new" });
+  });
+
+  it("records nothing for a delete, a missing diff, or a malformed entry", () => {
+    expect(
+      changesFromToolUse(
+        "Edit",
+        fileChange([
+          { path: "/x/a.md", kind: { type: "delete" }, diff: "-gone\n" },
+          { path: "/x/b.md", kind: { type: "add" } },
+          { kind: { type: "add" }, diff: "no path" },
+          null,
+        ]),
+      ),
+    ).toEqual([]);
+    expect(changesFromToolUse("Edit", { type: "fileChange", id: "x" })).toEqual([]);
+  });
+
+  it("caps a large add and marks it truncated", () => {
+    const [change] = changesFromToolUse(
+      "Edit",
+      fileChange([
+        { path: "/x/a.md", kind: { type: "add" }, diff: "x".repeat(MAX_CHANGE_CHARS + 10) },
+      ]),
+    );
+    expect(change?.content.length).toBe(MAX_CHANGE_CHARS);
+    expect(change?.truncated).toBe(true);
+  });
+});
+
 describe("classifyPath", () => {
+  it("keeps an app's own memory folder out of the guardian's memory", () => {
+    expect(classifyPath("/p/projects/apps/notes/src/memory/store.ts")).toMatchObject({
+      area: "other",
+      memoryFile: null,
+    });
+    expect(classifyPath(`${MEMORY}/topics/x.md`)).toMatchObject({ area: "memory" });
+  });
+
   it("recognizes the daily journal", () => {
     expect(classifyPath(`${MEMORY}/journal/2026/10/06.md`)).toMatchObject({
       area: "journal",

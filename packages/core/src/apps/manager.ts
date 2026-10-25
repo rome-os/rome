@@ -200,6 +200,7 @@ export class AppManager {
       }
       const startedAt = nowIso();
       const op: InFlightOp = { kind: "install", source, startedAt };
+      let installedHash: string | null = null;
       this.inFlightOps.set(appId, op);
       try {
         await this.catalog?.refresh(appId);
@@ -240,10 +241,7 @@ export class AppManager {
           version: result.version,
           cacheHit: result.cacheHit,
         });
-        await this.installer.gcInstalledCache(appId, {
-          keep: INSTALLED_CACHE_RETAINED_OLD_VERSIONS,
-          protectedHashes: [result.hash],
-        });
+        installedHash = result.hash;
         return {
           appId,
           state: "installed",
@@ -306,6 +304,14 @@ export class AppManager {
       } finally {
         this.inFlightOps.delete(appId);
         await this.catalog?.refresh(appId);
+        // The catalog serves the replaced bundle until the refresh above, so
+        // the old bundle directory is collected only after it.
+        if (installedHash != null) {
+          await this.installer.gcInstalledCache(appId, {
+            keep: INSTALLED_CACHE_RETAINED_OLD_VERSIONS,
+            protectedHashes: [installedHash],
+          });
+        }
       }
     });
   }

@@ -44,6 +44,7 @@ import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
 import { accountsRoutes } from "./routes/accounts.js";
 import { accountDecisionRoutes } from "./routes/account-decisions.js";
 import { peopleRoutes } from "./routes/people.js";
+import { assistantsRoutes } from "./routes/assistants.js";
 import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
 import { actionExecutionsRoutes } from "./routes/action-executions.js";
@@ -182,6 +183,7 @@ export function buildApp(
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
   api.route("/", peopleRoutes(deps));
+  api.route("/", assistantsRoutes(deps));
   api.route("/", accountsRoutes(deps));
   api.route("/", accountDecisionRoutes(deps));
   api.route("/", sentinelLogRoutes(deps));

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { FakeClock } from "../../test/kit/clock.js";
-import { Outlasted, Pacer } from "./pacer.js";
+import { Outlasted, Pacer, SLOW_WRITE_MS } from "./pacer.js";
 import { type DeliveryEvent, ReplyDelivery } from "./reply.js";
+import { feishuMarkdown } from "./transports/feishu.js";
 import {
   type DeliveryCapabilities,
   DeliveryFailure,
@@ -471,6 +472,380 @@ describe("ReplyDelivery", () => {
       expect(events.filter((event) => event.write === "edit").map((event) => event.result)).toEqual(
         ["unsupported"],
       );
+    });
+
+    it("keeps a closing fence that shows nothing in the source of the message before it", async () => {
+      platform = new (class extends MemoryPlatform {
+        override readonly codec = feishuMarkdown;
+      })({ maxPartLength: 100, maxEditsPerMessage: 1, edit: true, budget: OPEN_BUDGET });
+      const delivery = reply();
+      const code = "```\nabc\ndef\n```";
+      for (const piece of ["```\nabc\n", "def\n"]) {
+        delivery.accept(delta(piece, "a"));
+        await advance(1000);
+      }
+      // The message spent its last edit before the closing fence arrived.
+      expect(platform.messages).toHaveLength(1);
+      delivery.accept(delta("```", "a"));
+      delivery.accept(text(code, "a"));
+      await advance(1000);
+      delivery.accept(text("After.", "b"));
+      const finished = delivery.finish();
+      await advance(1000);
+      const outcome = await finished;
+
+      expect(platform.shown).toEqual(["```\nabc\ndef\n```", "After."]);
+      expect(
+        outcome.parts
+          .filter((part) => part.block === 0)
+          .map((part) => part.source)
+          .join(""),
+      ).toBe(code);
+    });
+
+    it("keeps a closing fence in the source of a message whose create answered after it arrived", async () => {
+      platform = new (class extends MemoryPlatform {
+        override readonly codec = feishuMarkdown;
+      })({ maxPartLength: 100, edit: true, budget: OPEN_BUDGET });
+      let release!: () => void;
+      platform.hold = new Promise((resolve) => {
+        release = resolve;
+      });
+      const delivery = reply();
+      const code = "```\nabc\n```";
+      delivery.accept(delta("```\nabc\n", "a"));
+      await advance(0);
+      // The closing fence and the final text arrive while the create is in flight.
+      delivery.accept(delta("```", "a"));
+      delivery.accept(text(code, "a"));
+      const finished = delivery.finish();
+      platform.hold = undefined;
+      release();
+      await advance(1000);
+      const outcome = await finished;
+
+      expect(platform.shown).toEqual([code]);
+      expect(outcome.parts.map((part) => part.source).join("")).toBe(code);
+    });
+
+    it("lets a message's receipt lift the platform's edit cap", async () => {
+      platform = new (class extends MemoryPlatform {
+        override async create(conversation: string, text: string, replyTo?: string) {
+          return { ...(await super.create(conversation, text, replyTo)), maxEdits: Infinity };
+        }
+      })({ maxPartLength: 100, maxEditsPerMessage: 2, edit: true, budget: OPEN_BUDGET });
+      const delivery = reply();
+      await stream(delivery, "one two three four five ", 1000);
+      const finished = delivery.finish();
+      await advance(1000);
+
+      expect((await finished).status).toBe("delivered");
+      expect(platform.messages.map((message) => message.history)).toEqual([
+        ["one ", "one two ", "one two three ", "one two three four ", "one two three four five "],
+      ]);
+    });
+  });
+
+  describe("settling messages", () => {
+    /** A platform that marks a message finished, as a streaming card does. */
+    class SettlingPlatform extends MemoryPlatform {
+      readonly settled: Array<{ id: string; text: string }> = [];
+      settleFailure?: DeliveryFailure;
+      /** Whether a new message shows as still being written. */
+      streaming = true;
+      override async create(conversation: string, text: string, replyTo?: string) {
+        const receipt = await super.create(conversation, text, replyTo);
+        return this.streaming ? { ...receipt, streaming: true as const } : receipt;
+      }
+      async settle(receipt: PartReceipt, text: string): Promise<void> {
+        if (this.settleFailure) throw this.settleFailure;
+        this.settled.push({ id: receipt.messageId, text });
+      }
+    }
+    let settling: SettlingPlatform;
+
+    beforeEach(() => {
+      settling = new SettlingPlatform();
+      platform = settling;
+    });
+
+    it("settles each message once, after its last write, as soon as its block is complete", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      await stream(delivery, "Looking it up.", 10, "c");
+      delivery.accept(text("Looking it up.", "c"));
+      await advance(0);
+      // The commentary is complete while the answer still streams.
+      await stream(delivery, "The answer", 10, "a");
+      expect(settling.settled).toEqual([{ id: "m1", text: "Looking it up." }]);
+
+      await stream(delivery, " is 42.", 10, "a");
+      delivery.accept(text("The answer is 42.", "a"));
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(settling.settled).toEqual([
+        { id: "m1", text: "Looking it up." },
+        { id: "m2", text: "The answer is 42." },
+      ]);
+      const writes = events.map(({ write, block }) => `${write} ${block}`);
+      expect(writes.filter((write) => write.startsWith("settle"))).toEqual([
+        "settle 0",
+        "settle 1",
+      ]);
+      // A message's settle follows its block's last write.
+      expect(writes.lastIndexOf("settle 1")).toBe(writes.length - 1);
+      expect(writes.indexOf("settle 0")).toBeGreaterThan(writes.lastIndexOf("edit 0"));
+    });
+
+    it("settles every message of a block split across several", async () => {
+      const delivery = reply();
+      const source = "one two three four five six seven eight nine ten eleven twelve";
+      await stream(delivery, source, 600);
+      delivery.accept(text(source));
+      const finished = delivery.finish();
+      await advance(10_000);
+      await finished;
+
+      expect(settling.settled.map(({ id }) => id)).toEqual(platform.messages.map(({ id }) => id));
+      expect(settling.settled.map(({ text }) => text)).toEqual(platform.shown);
+    });
+
+    it("settles what a stopped reply shows after the stop returns, and writes nothing else", async () => {
+      const delivery = reply({ editIntervalMs: 1000 });
+      delivery.accept(delta("Hello"));
+      await advance(0);
+      delivery.accept(delta(" more text"));
+      const outcome = await delivery.stop();
+      await advance(5000);
+
+      expect(outcome.status).toBe("stopped");
+      expect(platform.shown).toEqual(["Hello"]);
+      expect(settling.settled).toEqual([{ id: "m1", text: "Hello" }]);
+      expect(events.map(({ write }) => write)).toEqual(["create", "settle"]);
+    });
+
+    it("settles what a failed reply shows", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      await advance(0);
+      platform.failures.push({ write: "edit", failure: new DeliveryFailure("rejected", "no") });
+      delivery.accept(delta(" there"));
+      const outcome = await delivery.finish();
+      await advance(0);
+
+      expect(outcome.status).toBe("partial");
+      expect(settling.settled).toEqual([{ id: "m1", text: "Hello" }]);
+    });
+
+    it("reports a reply delivered when settling a message fails", async () => {
+      settling.settleFailure = new DeliveryFailure("rejected", "streaming already closed");
+      const delivery = reply({ editIntervalMs: 0 });
+      await stream(delivery, "The answer is 42.", 10);
+      delivery.accept(text("The answer is 42."));
+      const outcome = await delivery.finish();
+      await advance(0);
+
+      expect(outcome).toMatchObject({ status: "delivered" });
+      expect(outcome.failure).toBeUndefined();
+      expect(events.filter(({ write }) => write === "settle").map(({ result }) => result)).toEqual([
+        "rejected",
+      ]);
+    });
+
+    it("settles only the messages whose receipt says they are still streaming", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      await stream(delivery, "Looking it up.", 10, "c");
+      delivery.accept(text("Looking it up.", "c"));
+      await advance(0);
+      settling.streaming = false;
+      await stream(delivery, "The answer is 42.", 10, "a");
+      delivery.accept(text("The answer is 42.", "a"));
+      await delivery.finish();
+
+      expect(settling.settled).toEqual([{ id: "m1", text: "Looking it up." }]);
+      expect(events.filter(({ write }) => write === "settle")).toHaveLength(1);
+    });
+
+    it("reports a reply delivered when its settle waits out the account's queue", async () => {
+      const pacer = new Pacer(OPEN_BUDGET, clock);
+      const delivery = new ReplyDelivery({
+        transport: settling,
+        pacer,
+        policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+        conversation: "c1",
+        clock,
+        observe: (event) => events.push(event),
+      });
+      // Another conversation's rate limit pauses the account as the last write lands.
+      const create = settling.create.bind(settling);
+      settling.create = async (...args) => {
+        const receipt = await create(...args);
+        pacer.pause(120_000, "rate-limited");
+        return receipt;
+      };
+      delivery.accept(text("The answer is 42."));
+      const finished = delivery.finish();
+      await advance(70_000);
+      const outcome = await finished;
+
+      expect(platform.shown).toEqual(["The answer is 42."]);
+      expect(outcome.status).toBe("delivered");
+      expect(outcome.failure).toBeUndefined();
+      expect(settling.settled).toEqual([]);
+    });
+
+    it("does not settle a message whose create is unknown", async () => {
+      platform.failures.push({
+        write: "create",
+        failure: new DeliveryFailure("unknown", "the answer was lost"),
+      });
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      const outcome = await delivery.finish();
+      await advance(0);
+
+      expect(outcome.status).toBe("unknown");
+      expect(settling.settled).toEqual([]);
+    });
+
+    it("settles a message whose create answers after the reply stopped waiting", async () => {
+      let release!: () => void;
+      platform.hold = new Promise((resolve) => {
+        release = resolve;
+      });
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      const finished = delivery.finish();
+      await advance(SLOW_WRITE_MS);
+      const outcome = await finished;
+      expect(outcome.status).toBe("unknown");
+
+      release();
+      await advance(0);
+      expect(platform.shown).toEqual(["Hello"]);
+      expect(settling.settled).toEqual([{ id: "m1", text: "Hello" }]);
+    });
+
+    it("settles a message once its text is final, while its block still streams", async () => {
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12 });
+      await stream(delivery, "Para one is here.\n\nPara two is", 10);
+      expect(settling.settled).toEqual([{ id: "m1", text: "Para one is here.\n\n" }]);
+
+      await stream(delivery, " still going.", 10);
+      delivery.accept(text("Para one is here.\n\nPara two is still going."));
+      await delivery.finish();
+      expect(settling.settled.map(({ id }) => id)).toEqual(platform.messages.map(({ id }) => id));
+    });
+  });
+
+  describe("a soft part length", () => {
+    const roomy = () => new MemoryPlatform({ maxPartLength: 100, edit: true, budget: OPEN_BUDGET });
+    const SOURCE = "Para one is here.\n\nPara two.\n\nPara three is longer.";
+
+    it("ends a message with the paragraph that reaches it, and starts the next paragraph in a new one", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12 });
+      delivery.accept(text(SOURCE));
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(platform.shown).toEqual([
+        "Para one is here.\n\n",
+        "Para two.\n\nPara three is longer.",
+      ]);
+    });
+
+    it("ends each streamed message where the complete text ends it, and never shows the next paragraph in it", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12 });
+      await stream(delivery, SOURCE, 10);
+      delivery.accept(text(SOURCE));
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(outcome.parts.some((part) => part.diverged)).toBe(false);
+      expect(platform.shown).toEqual([
+        "Para one is here.\n\n",
+        "Para two.\n\nPara three is longer.",
+      ]);
+      expect(platform.messages[0]!.history.some((shown) => shown.includes("Para two"))).toBe(false);
+    });
+
+    it("keeps fenced code whole, though it holds a blank line", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 5 });
+      const source = "Intro text.\n\n```\nline one\n\nline two\n```\n\nAfter it.";
+      await stream(delivery, source, 10);
+      delivery.accept(text(source));
+      await delivery.finish();
+
+      expect(platform.shown).toEqual([
+        "Intro text.\n\n",
+        "```\nline one\n\nline two\n```\n\n",
+        "After it.",
+      ]);
+    });
+
+    it("cuts a streamed message where the whole text cuts it, when a delta ends in the next paragraph's indent", async () => {
+      const source = "Para one is here.\n\n  Para two is indented.\n\nPara three.";
+      platform = roomy();
+      const whole = reply({ editIntervalMs: 0, softPartLength: 12 });
+      whole.accept(text(source));
+      await whole.finish();
+      const expected = platform.shown;
+
+      platform = roomy();
+      const streamed = reply({ editIntervalMs: 0, softPartLength: 12 });
+      for (const piece of ["Para one is here.\n\n  ", "Para two is indented.\n\nPara three."]) {
+        streamed.accept(delta(piece));
+        await advance(0);
+      }
+      streamed.accept(text(source));
+      await streamed.finish();
+
+      expect(expected).toHaveLength(3);
+      expect(platform.shown).toEqual(expected);
+    });
+
+    it("keeps fenced code whole when a list item indents it four spaces or more", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 5 });
+      const source = "1. Step one:\n\n    ```bash\n    echo a\n\n    echo b\n    ```\n\nDone.";
+      delivery.accept(text(source));
+      await delivery.finish();
+
+      expect(platform.shown.join("")).toBe(source);
+      expect(
+        platform.shown.some((shown) => shown.includes("echo a") !== shown.includes("echo b")),
+      ).toBe(false);
+    });
+
+    it("keeps fenced code whole when a list marker opens it, streamed or whole", async () => {
+      const source = "Intro.\n\n1. ```python\n   a = 1\n\n   b = 2\n   ```\n\nDone.";
+      for (const streamed of [false, true]) {
+        platform = roomy();
+        const delivery = reply({ editIntervalMs: 0, softPartLength: 5 });
+        if (streamed) await stream(delivery, source, 10);
+        delivery.accept(text(source));
+        await delivery.finish();
+
+        expect(platform.shown.join("")).toBe(source);
+        expect(
+          platform.shown.some((shown) => shown.includes("a = 1") !== shown.includes("b = 2")),
+        ).toBe(false);
+      }
+    });
+
+    it("leaves a paragraph longer than the hard length to the hard split", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12, maxPartLength: 30 });
+      const source = "one two three four five six seven eight nine ten eleven twelve";
+      delivery.accept(text(source));
+      await delivery.finish();
+
+      expect(platform.shown.join("")).toBe(source);
+      for (const shown of platform.shown) expect(shown.length).toBeLessThanOrEqual(30);
+      expect(platform.shown.length).toBeGreaterThan(2);
     });
   });
 

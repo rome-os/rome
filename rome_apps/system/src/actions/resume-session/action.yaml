@@ -1,6 +1,6 @@
 name: resume_session
 type: system
-description: Internal — continue an existing conversation. Fired by a defer one-off routine; resumes the exact AgentSession captured by the routine and delivers the reply to its original channel thread. Not agent-callable.
+description: Internal — continue an existing conversation. Fired by a defer one-off routine (a time or event wakeup); resumes the exact AgentSession captured by the routine and delivers the reply to its original channel thread. Not agent-callable.
 complexity: simple
 speed: fast
 reliability: high

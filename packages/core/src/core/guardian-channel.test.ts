@@ -15,7 +15,7 @@ describe("isGuardianFacingChannel", () => {
   it("reads a service's second channel, keyed by an opaque id, as that service", () => {
     testDb = createTestDb();
     const records = new ChannelRecordsRepository(testDb.db);
-    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, NOW);
+    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, NOW, { id: "telegram" });
     const second = records.claim(testDb.db, { id: "c2", connectionKind: "telegram" }, NOW).id;
     const connectionKindOf = recordedConnectionKindOf(testDb.db);
 

@@ -1,4 +1,11 @@
 // @rstest-environment jsdom
+import type { ComponentProps } from "react";
+import type { ChatRow } from "@/components/chat/chat-view";
+import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
+import * as traceDrawerModule from "@/components/agent-trace/TraceDrawer" with {
+  rstest: "importActual",
+};
+import i18n from "@/i18n";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   MemoryRouter,
@@ -23,8 +30,10 @@ import {
 } from "@/lib/chat-api";
 import SessionsPage from "./SessionsPage";
 
+const realTraceDrawer = rs.hoisted(() => ({ enabled: false }));
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
-  TraceDrawer: () => null,
+  TraceDrawer: (props: ComponentProps<typeof traceDrawerModule.TraceDrawer>) =>
+    realTraceDrawer.enabled ? <traceDrawerModule.TraceDrawer {...props} /> : null,
   traceDrawerContentInsetClass: () => "",
 }));
 
@@ -54,9 +63,45 @@ rs.mock("@/components/chat/ChatComposer", () => ({
 }));
 
 rs.mock("@/components/chat/MessageList", () => ({
-  MessageList: ({ live }: { live: { isStreaming: boolean; text: string } }) => (
-    <div data-testid="session-messages" data-streaming={String(live.isStreaming)}>
+  MessageList: ({
+    live,
+    rows,
+    onOpenStoredTrace,
+  }: {
+    live: { isStreaming: boolean; text: string };
+    rows: ChatRow[];
+    onOpenStoredTrace: (target: TraceDrawerTarget) => void;
+  }) => (
+    <div
+      data-testid="session-messages"
+      data-streaming={String(live.isStreaming)}
+      data-trace-rows={rows
+        .filter((row) => row.kind === "trace")
+        .map((row) => row.key)
+        .join(",")}
+    >
       {live.text}
+      {realTraceDrawer.enabled
+        ? rows.map((row) =>
+            row.kind === "trace" && row.message.traceSummary ? (
+              <button
+                key={row.key}
+                type="button"
+                onClick={() =>
+                  onOpenStoredTrace({
+                    kind: "stored",
+                    messageId: row.message.id,
+                    sessionId: row.message.sessionId,
+                    turnId: row.message.turnId ?? null,
+                    summary: row.message.traceSummary!,
+                  })
+                }
+              >
+                Open stored steps
+              </button>
+            ) : null,
+          )
+        : null}
     </div>
   ),
 }));
@@ -221,8 +266,39 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  realTraceDrawer.enabled = false;
   rs.restoreAllMocks();
   rs.clearAllMocks();
+});
+
+describe("Sessions viewer archived traces", () => {
+  it("shows the archived note instead of an error and Retry for a stale trace button", async () => {
+    await i18n.changeLanguage("en");
+    realTraceDrawer.enabled = true;
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listRomeSessionMessages).mockResolvedValue([
+      {
+        id: "old-trace",
+        sessionId: FORK_SESSION.id,
+        turnId: "old-turn",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-09-24T12:00:00Z",
+        traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+      },
+    ]);
+    const fetchTrace = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ trace: null, traceArchived: true })));
+    renderDetail();
+    fireEvent.click(await screen.findByRole("button", { name: "Open stored steps" }));
+    expect(await screen.findByText("Steps from this turn are archived.")).toBeTruthy();
+    expect(fetchTrace).toHaveBeenCalledWith(
+      "/api/sessions/messages/old-trace/content?includeSubagentUsage=true",
+      { credentials: "include" },
+    );
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
 });
 
 describe("SessionsPage missing sessions", () => {
@@ -406,6 +482,91 @@ describe("SessionsPage live fork details", () => {
       streamController?.close();
     });
     await waitFor(() => expect(listRomeSessionMessages).toHaveBeenCalledTimes(2));
+  });
+
+  it("hides a backend turn's saved trace behind its live row once the stream names the turn", async () => {
+    // A defer wake-up streams under a synthetic `backend:` turnId but saves
+    // its trace under the agent's own turn id.
+    rs.mocked(listRomeSessionMessages).mockResolvedValue([
+      {
+        id: "trace-real",
+        sessionId: FORK_SESSION.id,
+        turnId: "turn-real",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-07-12T00:00:00.000Z",
+        traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+      },
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      { turnId: "backend:wake", streamId: "stream-wake", startedAt: "", status: "running" },
+    ]);
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    rs.mocked(openTurnStream).mockImplementation(async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamController = controller;
+        },
+      });
+      return new Response(body);
+    });
+
+    renderDetail();
+
+    await waitFor(() =>
+      expect(openTurnStream).toHaveBeenCalledWith("backend:wake", expect.any(AbortSignal)),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("session-messages").dataset.streaming).toBe("true"),
+    );
+    act(() => {
+      streamController?.enqueue(
+        new TextEncoder().encode('event: turn_id\ndata: {"turnId":"turn-real"}\n\n'),
+      );
+    });
+
+    await waitFor(() => expect(screen.getByTestId("session-messages").dataset.traceRows).toBe(""));
+  });
+
+  it("hides a backend turn's saved trace from the first render when the listing names the turn", async () => {
+    // The listing already reports `agentTurnId`, so the stream need not send
+    // a `turn_id` event before the live row carries the saved trace.
+    rs.mocked(listRomeSessionMessages).mockResolvedValue([
+      {
+        id: "trace-real",
+        sessionId: FORK_SESSION.id,
+        turnId: "turn-real",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-07-12T00:00:00.000Z",
+        traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+      },
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      {
+        turnId: "backend:wake",
+        agentTurnId: "turn-real",
+        streamId: "stream-wake",
+        startedAt: "",
+        status: "running",
+      },
+    ]);
+    rs.mocked(openTurnStream).mockImplementation(async () => {
+      const body = new ReadableStream<Uint8Array>({ start() {} });
+      return new Response(body);
+    });
+
+    renderDetail();
+
+    await waitFor(() =>
+      expect(openTurnStream).toHaveBeenCalledWith("backend:wake", expect.any(AbortSignal)),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("session-messages").dataset.streaming).toBe("true"),
+    );
+    await waitFor(() => expect(listRomeSessionMessages).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.getByTestId("session-messages").dataset.traceRows).toBe("");
   });
 
   it("refreshes messages when a turn finishes during initial attachment", async () => {

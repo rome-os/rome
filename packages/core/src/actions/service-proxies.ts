@@ -18,6 +18,7 @@
 import { callMain, isTransportUncertain } from "./worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../lib/feedback-client.js";
+import type { CloudProfileOutcome, CloudProfileService } from "../lib/cloud-profile.js";
 import type { AgentNameResolution, AgentNamesService } from "../channels/agent-names.js";
 import type { NotifyContent, NotifyService, SendOutcome } from "../lib/notify-client.js";
 import type {
@@ -42,8 +43,9 @@ import type {
   ChatSettingsControl,
   ChatSettingsPage,
   ChatSettingsSnapshot,
-  EventCatalogEntry,
   EventCatalogReader,
+  EventCatalogSearchOptions,
+  EventCatalogSearchResult,
   EventPublisher,
   Routine,
   RoutineEngine,
@@ -146,10 +148,12 @@ export class EventCatalogProxy implements EventCatalogReader {
   async search(
     query: string,
     limit: number,
-  ): Promise<{ entries: EventCatalogEntry[]; total: number }> {
-    return await callMain<{ entries: EventCatalogEntry[]; total: number }>("events.searchCatalog", {
+    options: EventCatalogSearchOptions = {},
+  ): Promise<EventCatalogSearchResult> {
+    return await callMain<EventCatalogSearchResult>("events.searchCatalog", {
       query,
       limit,
+      ...(options.match ? { match: options.match } : {}),
     });
   }
 }
@@ -337,6 +341,13 @@ export class EmailInboundControlProxy implements EmailInboundControl {
 export class AgentNamesProxy implements AgentNamesService {
   resolve(name: string): Promise<AgentNameResolution> {
     return callMain<AgentNameResolution>("agentNames.resolve", { name });
+  }
+}
+
+/** The instance token that reads the guardian's profile stays in main. */
+export class CloudProfileProxy implements CloudProfileService {
+  get(): Promise<CloudProfileOutcome> {
+    return callMain<CloudProfileOutcome>("cloudProfile.get", {});
   }
 }
 

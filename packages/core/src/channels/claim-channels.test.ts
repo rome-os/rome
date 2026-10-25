@@ -15,7 +15,7 @@ describe("claimChannels", () => {
   it("names each unrecorded Connection after its service and keeps recorded ones", async () => {
     testDb = createTestDb();
     const records = new ChannelRecordsRepository(testDb.db);
-    records.claim(testDb.db, { id: "c1", connectionKind: "feishu" }, new Date());
+    records.claim(testDb.db, { id: "c1", connectionKind: "feishu" }, new Date(), { id: "feishu" });
 
     await claimChannels(testDb.db, records, [
       { id: "c1", connectionKind: "feishu" },
@@ -34,7 +34,9 @@ describe("claimChannels", () => {
   it("asks only unrecorded Connections their domain, and puts a Lark app on Lark", async () => {
     testDb = createTestDb();
     const records = new ChannelRecordsRepository(testDb.db);
-    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, new Date());
+    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, new Date(), {
+      id: "telegram",
+    });
     const asked: string[] = [];
 
     await claimChannels(

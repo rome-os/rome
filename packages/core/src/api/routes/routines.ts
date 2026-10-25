@@ -89,6 +89,9 @@ function validateTrigger(trigger: Trigger, hasProvider: (type: string) => boolea
     if (!trigger.eventName || typeof trigger.eventName !== "string") {
       return "event-bus.eventName is required";
     }
+    if (trigger.once !== undefined && typeof trigger.once !== "boolean") {
+      return "event-bus.once must be a boolean";
+    }
   }
   return null;
 }

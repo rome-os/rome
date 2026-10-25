@@ -1,3 +1,4 @@
+import type { ExternalAgents } from "../channels/agents-accounts.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -478,6 +479,8 @@ export interface TestDeps extends ApiDeps {
 
 export interface BuildTestDepsOptions {
   channels?: string[];
+  /** The agents Rome Cloud lists. Agents is not connected by default. */
+  assistants?: ExternalAgents;
 }
 
 const unavailableFavorService: FavorService = {
@@ -690,7 +693,10 @@ export async function buildTestDeps(
   // Same provider set the daemon registers before the API comes up, so
   // routine trigger validation behaves identically here.
   routineEngine.registerProvider("schedule", new ScheduleTriggerProvider(routinesRepo));
-  routineEngine.registerProvider("event-bus", new EventBusTriggerProvider(new EventBus()));
+  routineEngine.registerProvider(
+    "event-bus",
+    new EventBusTriggerProvider(new EventBus(), routinesRepo),
+  );
 
   // Mirror daemon boot: the auth-edge snapshot is loaded from the persisted
   // `publicAccess` setting before serving (src/index.ts). Tests that change
@@ -727,6 +733,7 @@ export async function buildTestDeps(
     channelOfLink: (link: string) => channelRecords.channelOfLink(link),
     sendersOfLink: (link: string) => channelRecords.sendersOfLink(link),
     accountNames,
+    assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,
     approvalsRepo,
     approvalHandler,
@@ -774,6 +781,10 @@ export async function buildTestDeps(
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),
     nodeDevices: {
       start: async () => {},
+      listFiles: async () => ({ ok: false, code: "offline" }),
+      listDevices: async () => ({ devices: [] }),
+      renameDevice: async () => ({ ok: true }),
+      removeDevice: async () => ({ ok: true }),
       getStatus: async () => ({
         connection: "not_configured",
         checkedAt: new Date().toISOString(),

@@ -3,27 +3,12 @@ import {
   clampPillPosition,
   defaultPillPosition,
   isPillEnabled,
-  parseAgentName,
   parsePillPosition,
   supportsFloatingPill,
 } from "./floating-pill-state";
 
 const WORK_AREA = { x: 0, y: 25, width: 1440, height: 875 };
 const SIZE = { width: 160, height: 56 };
-
-describe("parseAgentName", () => {
-  it("returns the trimmed agent name", () => {
-    expect(parseAgentName({ agentName: "  JessieRome " })).toBe("JessieRome");
-  });
-
-  it("returns null when the instance never set one", () => {
-    // Instances onboarded before agentName existed return a settings map
-    // without the key, and the pill falls back to "Rome".
-    expect(parseAgentName({ guardianName: "Jessie" })).toBeNull();
-    expect(parseAgentName({ agentName: "   " })).toBeNull();
-    expect(parseAgentName(null)).toBeNull();
-  });
-});
 
 describe("isPillEnabled", () => {
   it("is off until someone turns it on", () => {

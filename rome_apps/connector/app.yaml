@@ -54,6 +54,31 @@ actions:
   - actions/connector-event-subscribe
   - actions/connector-github-subscribe
   - actions/connector-github-unsubscribe
+  - actions/connector-event-ensure
+
+# Events this app delivers on the bus. A `defer` on one of them calls
+# `ensureAction` to subscribe first, and `search_event_catalog` lists `types`
+# before they are first emitted. `keys`: filter fields that pick the repo or org.
+eventSources:
+  - events: "provider:event:github.*"
+    keys: [["repository.full_name"], ["organization.login"]]
+    types:
+      - push
+      - pull_request
+      - pull_request_review
+      - pull_request_review_comment
+      - issues
+      - issue_comment
+      - workflow_run
+      - workflow_job
+      - check_suite
+      - check_run
+      - status
+      - release
+      - create
+      - delete
+      - deployment_status
+    ensureAction: connector_event_ensure
 
 skills:
   - skills/composio-cli

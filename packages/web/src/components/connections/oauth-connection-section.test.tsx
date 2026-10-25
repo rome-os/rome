@@ -5,6 +5,7 @@ import i18n from "@/i18n";
 import { OAuthConnectionSection } from "@/components/connections/oauth-connection-section";
 import { buildConnectionCards, type ConnectionCard } from "@/lib/connection-cards";
 import type { ApiConnection, ConnectHint, GrantDisplay, GrantState } from "@/lib/connections-api";
+import { stateOfGrants } from "@/test/connection-state";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -58,6 +59,7 @@ function githubCard(
     id: "conn-github",
     connectionKind: "github",
     label: "GitHub",
+    state: stateOfGrants({ user: state }),
     grants: { user: state },
     display: { user: display },
     capabilities: {
@@ -88,6 +90,7 @@ function shopifyCard(
     id: "conn-shopify",
     connectionKind: "shopify",
     label: "Shopify",
+    state: stateOfGrants({ store: state }),
     grants: { store: state },
     display: { store: display },
     capabilities: {

@@ -21,6 +21,8 @@ const client = createNodeClient(nodeConfigFromEnvironment(process.env));
 const status = await client.getConnectionStatus();
 const devices = await client.listDevices();
 const connections = await client.getDevicesStatus();
+await client.renameDevice("device-id", "Build server");
+await client.removeDevice("old-device-id");
 const info = await client.describe("device-id");
 const result = await client.run("device-id", "exec", {
   command: "git",
@@ -47,6 +49,13 @@ client.disconnect();
 Gateway connection. `connection` describes the caller connection to Gateway,
 not the online state of remote devices. `listDevices()` returns authorized
 devices without asserting that they are online.
+
+`renameDevice(deviceId, name)` and `removeDevice(deviceId)` change the account's
+device list in Cloud and resolve with no value. A failure throws
+`DeviceActionError` with code `device_not_found`, `invalid_device_name`,
+`invalid_device_session`, or `cloud_unavailable`. `removeDevice` revokes the
+device first and throws `revocation_pending` while the Gateway has not confirmed
+the revocation. The device stays listed as revoked until a later call deletes it.
 
 `runBinary(deviceId, action, args?, body?)` resolves to `{ response, body }`.
 It sends `body` as input bytes in a binary frame. For `exec`, the input is the
@@ -203,7 +212,7 @@ where `expiresIn` is in seconds. It returns a `DeviceSession` after approval and
 rejects on denial, expiry, cancellation, or a terminal error. It opens no browser
 or callback listener. The callback receives neither the device code nor the access token.
 
-The host exposes `system.info` and `exec`, in text envelopes and in binary frames.
+The host exposes `system.info`, `exec`, and the read-only `fs.list`, in text envelopes and in binary frames.
 It also accepts the internal file transfers that `copy()` uses. Programs run as the application's OS
 user. Connection loss terminates direct child processes on a best-effort basis.
 A local caller timeout does not cancel remote execution.

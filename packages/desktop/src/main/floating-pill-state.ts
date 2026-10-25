@@ -1,10 +1,9 @@
 // The size the window opens at, before the page has measured itself and
 // reported the real one. The page owns the layout; these only have to be close
 // enough that the first frame does not jump far.
-export const PILL_DEFAULT_WIDTH = 96;
-export const PILL_DEFAULT_HEIGHT = 80;
+export const PILL_DEFAULT_WIDTH = 48;
+export const PILL_DEFAULT_HEIGHT = 48;
 export const PILL_EDGE_MARGIN = 24;
-export const PILL_FALLBACK_NAME = "Rome";
 
 export const PILL_ENABLED_KEY = "floatingPill.enabled";
 export const PILL_POSITION_KEY = "floatingPill.position";
@@ -20,15 +19,6 @@ export interface Size {
 }
 
 export interface Rect extends Point, Size {}
-
-/** The agent's name out of a `GET /api/settings` body, or null when unset. */
-export function parseAgentName(settings: unknown): string | null {
-  if (typeof settings !== "object" || settings === null) return null;
-  const raw = (settings as Record<string, unknown>).agentName;
-  if (typeof raw !== "string") return null;
-  const name = raw.trim();
-  return name.length > 0 ? name : null;
-}
 
 // Opt-in: a permanent object on the desktop is the user's call, so the icon is
 // off until they turn it on from the tray. Only an explicit "true" is on.

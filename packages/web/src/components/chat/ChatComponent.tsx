@@ -1,3 +1,4 @@
+import type { DraftDeviceFolder } from "@/lib/device-folder";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -35,6 +36,7 @@ export interface ChatComponentProps {
   onSessionNotFound?: () => void;
   onSessionMessage?: (message: SessionMessage) => void;
   initialProjectName?: string;
+  initialDeviceFolder?: DraftDeviceFolder;
   initialAgentMention?: AgentMention | null;
   // Pre-fills the draft composer without sending — task text seeded
   // via navigateRome chat/new draft.
@@ -42,6 +44,8 @@ export interface ChatComponentProps {
   // Pre-pins a skill chip on the draft composer without sending —
   // the structured counterpart of initialDraftText, seeded by the Skills app.
   initialSkillName?: string;
+  /** Passed to `Chat`: the slot to draw the chat's bar into. */
+  navbarSlot?: string;
 }
 
 export function ChatComponent({
@@ -50,9 +54,11 @@ export function ChatComponent({
   onSessionNotFound,
   onSessionMessage,
   initialProjectName,
+  initialDeviceFolder,
   initialAgentMention,
   initialDraftText,
   initialSkillName,
+  navbarSlot,
 }: ChatComponentProps) {
   const { i18n } = useTranslation("chat");
 
@@ -109,7 +115,15 @@ export function ChatComponent({
     }
     const state = { ...location.state };
     // FreeGrid's effect consumes this render's widgets even after history state is stripped.
-    const prefillKeys = ["draft", "skill", "projectPath", "agentMention", "agentName", "widgets"];
+    const prefillKeys = [
+      "draft",
+      "skill",
+      "projectPath",
+      "deviceFolder",
+      "agentMention",
+      "agentName",
+      "widgets",
+    ];
     if (!prefillKeys.some((key) => key in state)) return;
     for (const key of prefillKeys) delete state[key];
     navigate(location.pathname + location.search, {
@@ -231,8 +245,10 @@ export function ChatComponent({
         onSessionMessage={onSessionMessage}
         onSessionCreated={handleSessionCreated}
         initialProjectName={initialProjectName}
+        initialDeviceFolder={initialDeviceFolder}
         initialAgentMention={initialAgentMention}
         composerRef={composerRef}
+        navbarSlot={navbarSlot}
         centerDraftComposer={greetingOnlyHome}
         emptyState={
           <ChatEmptyState

@@ -31,6 +31,7 @@ import {
   NotifyServiceProxy,
   AgentNamesProxy,
   FeedbackServiceProxy,
+  CloudProfileProxy,
   RoutineEngineProxy,
   SystemUpgradeServiceProxy,
   ChannelsServiceProxy,
@@ -200,6 +201,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
         enabled: config.hostExecutionEnabled,
       }),
       feedback: new FeedbackServiceProxy(),
+      cloudProfile: new CloudProfileProxy(),
       agentNames: new AgentNamesProxy(),
     },
   );

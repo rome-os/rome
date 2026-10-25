@@ -37,7 +37,7 @@ async function measure(page: Page) {
     const composer = document.querySelector(composerSelector)!.getBoundingClientRect();
     // The phone header; from the md breakpoint up the sidebar replaces it and
     // the chat starts at the top of the screen.
-    const header = document.querySelector('header[data-app-titlebar="header"]')!;
+    const header = document.querySelector("header[data-mobile-header]")!;
     const headerRect = header.getBoundingClientRect();
     const headerShown = getComputedStyle(header).display !== "none";
     // Timeline anchors wrap only the person's turns. Their parent is the

@@ -2899,6 +2899,56 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  describe("workspace routing rejection of the ChatGPT login", () => {
+    const WORKSPACE_401 = "workspace routing discovery unauthorized (401)";
+
+    async function runFailedTurn(provider: CodexAppServerProvider) {
+      requestMock.mockImplementation(async (method: string) => {
+        if (method === "thread/start") {
+          captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+        }
+        if (method === "turn/start") {
+          const n = captured.onNotification!;
+          n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+          n("turn/completed", {
+            threadId: "thr-1",
+            turn: { id: "turn-1", status: "failed", error: { message: WORKSPACE_401 } },
+          });
+        }
+        return {};
+      });
+      const session = await provider.openSession(buildParams());
+      const collected = collectUntilTerminal(session);
+      await session.sendUserInput({ text: "hi" });
+      const error = (await collected).find((m) => m.type === "error");
+      await session.close();
+      return error;
+    }
+
+    it("flags the login for re-login while ChatGPT pays", async () => {
+      const onAuthRevoked = rs.fn(async () => {});
+      const error = await runFailedTurn(
+        new CodexAppServerProvider({ onAuthRevoked, isUsingRomeCredits: () => false }),
+      );
+
+      expect(error).toMatchObject({ type: "error", error: WORKSPACE_401, code: "auth_revoked" });
+      expect(markCodexAuthRevokedMock).toHaveBeenCalledTimes(1);
+      expect(onAuthRevoked).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves the login alone while Rome credits pay", async () => {
+      const onAuthRevoked = rs.fn(async () => {});
+      const error = await runFailedTurn(
+        new CodexAppServerProvider({ onAuthRevoked, isUsingRomeCredits: () => true }),
+      );
+
+      expect(error).toMatchObject({ type: "error", error: WORKSPACE_401 });
+      expect(error).not.toMatchObject({ code: "auth_revoked" });
+      expect(markCodexAuthRevokedMock).not.toHaveBeenCalled();
+      expect(onAuthRevoked).not.toHaveBeenCalled();
+    });
+  });
+
   it("tags a server-side turn failure as transient rather than usage_limit", async () => {
     const provider = new CodexAppServerProvider();
     requestMock.mockImplementation(async (method: string) => {

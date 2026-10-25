@@ -48,3 +48,23 @@ export function desktopDevice(): DesktopDeviceBridge | null {
     ? (device as DesktopDeviceBridge)
     : null;
 }
+
+/** A folder on this computer that the user picked in the system dialog. */
+export interface DesktopPickedFolder {
+  path: string;
+  home: string;
+}
+
+/**
+ * The Mac app's system folder dialog for this computer, or null in a browser or
+ * an app without it. Resolves null when the user cancels.
+ */
+export function desktopFolderPicker():
+  | ((defaultPath?: string) => Promise<DesktopPickedFolder | null>)
+  | null {
+  const device = desktopDevice() as { pickFolder?: unknown } | null;
+  const pick = device?.pickFolder;
+  return typeof pick === "function"
+    ? (pick as (defaultPath?: string) => Promise<DesktopPickedFolder | null>)
+    : null;
+}

@@ -108,6 +108,7 @@
     "payload": "Payload"
   },
   "trace": {
+    "archived": "Steps from this turn are archived.",
     "loading": "Loading trace...",
     "retry": "Retry",
     "failedWithReason": "Error: {{reason}}",

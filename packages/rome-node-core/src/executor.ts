@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { platform } from "node:os";
+import { readdir, realpath, stat } from "node:fs/promises";
+import { homedir, platform } from "node:os";
+import { dirname, resolve } from "node:path";
 import { actionError, isRecord, type ActionResponse } from "./actions.js";
 import {
   decodeMeta,
@@ -43,6 +45,67 @@ function execInput(input: unknown): ExecInput | null {
   };
 }
 
+/** The most entries one fs.list reply carries. */
+export const FS_LIST_LIMIT = 1000;
+
+type EntryType = "dir" | "file" | "symlink" | "other";
+const typeOrder: Record<EntryType, number> = { dir: 0, symlink: 1, file: 2, other: 3 };
+
+function fsError(error: unknown): ActionResponse {
+  const code = isRecord(error) ? error.code : undefined;
+  if (code === "ENOENT") return actionError("not_found", "The folder does not exist.");
+  if (code === "EACCES" || code === "EPERM")
+    return actionError("permission_denied", "The computer's user cannot read this folder.");
+  if (code === "ENOTDIR") return actionError("not_a_directory", "The path is not a folder.");
+  return actionError("fs_failed", "Could not read the folder.");
+}
+
+/** Lists one folder. No path means the home folder; a relative path starts there. */
+async function listFolder(input: unknown): Promise<ActionResponse> {
+  const raw = input === undefined || input === null ? {} : input;
+  if (
+    !isRecord(raw) ||
+    (raw.path !== undefined &&
+      (typeof raw.path !== "string" || !raw.path || raw.path.includes("\0")))
+  )
+    return actionError("invalid_args", "fs.list takes an optional non-empty string path.");
+  let path: string;
+  let entries: { name: string; type: EntryType }[];
+  try {
+    path = await realpath(resolve(homedir(), (raw.path as string | undefined) ?? "."));
+    if (!(await stat(path)).isDirectory())
+      return actionError("not_a_directory", "The path is not a folder.");
+    entries = (await readdir(path, { withFileTypes: true })).map((entry) => ({
+      name: entry.name,
+      type: entry.isDirectory()
+        ? "dir"
+        : entry.isFile()
+          ? "file"
+          : entry.isSymbolicLink()
+            ? "symlink"
+            : "other",
+    }));
+  } catch (error) {
+    return fsError(error);
+  }
+  // Folders first, so a large folder still shows its subfolders after the cap.
+  entries.sort(
+    (a, b) =>
+      typeOrder[a.type] - typeOrder[b.type] || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+  );
+  const parent = dirname(path);
+  return {
+    type: "response",
+    ok: true,
+    result: {
+      path,
+      parent: parent === path ? null : parent,
+      entries: entries.slice(0, FS_LIST_LIMIT),
+      truncated: entries.length > FS_LIST_LIMIT,
+    },
+  };
+}
+
 /** Overwrites each secret occurrence with as many `*` bytes, so byte offsets stay valid. */
 export function redactBytes(data: Buffer, secrets: string[]): Buffer {
   for (const secret of secrets) {
@@ -71,7 +134,7 @@ export function createExecutor(
       platform: platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : platform(),
       // Lists caller-facing actions only. transfer.open is an internal frame protocol for
       // rome-node cp, so it is omitted on purpose. Callers detect it through transferVersion.
-      actions: ["system.info", "exec"],
+      actions: ["system.info", "exec", "fs.list"],
       frameVersion: 1,
       transferVersion: TRANSFER_VERSION,
     },
@@ -163,6 +226,7 @@ export function createExecutor(
         },
       };
     },
+    "fs.list": listFolder,
   };
   const empty = new Uint8Array();
   // Binary mode: the request body is the program's stdin and stdout is the response body.
@@ -171,6 +235,7 @@ export function createExecutor(
     (args: unknown, body: Uint8Array) => Promise<{ response: ActionResponse; body: Uint8Array }>
   > = {
     "system.info": async () => ({ response: info(), body: empty }),
+    "fs.list": async (input) => ({ response: await listFolder(input), body: empty }),
     exec: async (input, body) => {
       const parsed = execInput(input);
       if (!parsed) return { response: invalidExec(), body: empty };

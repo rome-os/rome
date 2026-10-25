@@ -1,4 +1,5 @@
 import { memo, type ReactNode, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
 import type { TraceSnapshot, TraceSubagentSummary } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
@@ -134,7 +135,13 @@ export function hasPendingApprovalConfirmation(messages: ChatMessage[]): boolean
   return false;
 }
 
+function ArchivedTraceNote() {
+  const { t } = useTranslation("activity");
+  return <p className="px-3 text-aux text-muted-foreground">{t("trace.archived")}</p>;
+}
+
 function renderTrace(trace: ChatMessage, onOpen: (target: TraceDrawerTarget) => void) {
+  if (trace.traceArchived) return null;
   return trace.traceSummary ? (
     <TraceTrigger
       messageId={trace.id}
@@ -237,6 +244,7 @@ const RowView = memo(function RowView({
           subagentIconByName,
         )}
       >
+        {row.message.traceArchived ? <ArchivedTraceNote /> : null}
         {plan?.steps.length ? <TurnSummaryGroup plan={plan} live={false} /> : null}
       </MessageRow>
     );
@@ -307,6 +315,7 @@ const RowView = memo(function RowView({
         ) : null
       }
     >
+      {!live && row.trace?.traceArchived ? <ArchivedTraceNote /> : null}
       {row.messages.map((m) => {
         const blocks = parseMessageEntries(m);
         if (m.id !== recapMessageId) {

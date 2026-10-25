@@ -4,6 +4,7 @@
     "mermaid": "Mermaid 图表"
   },
   "title": "Rome",
+  "senderGuardian": "守护者",
   "inputState": {
     "queued": "等待加入对话",
     "submitted": "正在发送给 Agent",
@@ -224,6 +225,15 @@
   "composer": {
     "placeholderDefault": "今天我能帮你做点什么?",
     "placeholderWithUploads": "添加消息或直接发送已上传的文件...",
+    "hints": {
+      "skill": "输入 / 使用技能",
+      "agent": "输入 @ 选择 agent",
+      "project": "在下方选择项目，让 agent 在里面工作",
+      "attach": "粘贴或拖入文件即可附上",
+      "newline": "Shift+Enter 换行",
+      "search": "{{shortcut}} 搜索对话",
+      "sendWhileWorking": "agent 工作时也可以继续发消息"
+    },
     "uploadFiles": "上传文件",
     "dropFiles": "拖放文件以上传",
     "removeFile": "移除 {{name}}",
@@ -367,6 +377,37 @@
       "loadFailed": "加载项目失败。",
       "updateFailed": "更新项目失败。",
       "createFailed": "创建项目失败。"
+    },
+    "devices": {
+      "listLabel": "文件夹",
+      "searchPlaceholder": "搜索当前文件夹…",
+      "loading": "正在读取文件夹…",
+      "empty": "这里没有文件夹。",
+      "noMatchesQuery": "没有文件夹匹配 “{{query}}”。",
+      "truncated": "只显示前 1,000 项。",
+      "up": "返回上一级",
+      "useFolder": "使用此文件夹",
+      "thisDevice": "本机",
+      "reasons": {
+        "offline": "离线",
+        "upgrade_required": "需更新 rome-node"
+      },
+      "errors": {
+        "offline": "设备离线。",
+        "upgrade_required": "请先在这台设备上更新 rome-node，才能浏览文件夹。",
+        "not_found": "这个文件夹已不存在。",
+        "not_a_directory": "这个路径不是文件夹。",
+        "permission_denied": "设备上的用户无权读取这个文件夹。",
+        "unavailable": "无法读取这个文件夹。"
+      }
+    },
+    "locations": {
+      "rome": "Rome Cloud",
+      "listLabel": "位置",
+      "searchPlaceholder": "搜索 Rome Cloud 和设备…",
+      "noMatchesQuery": "没有匹配 “{{query}}” 的结果。",
+      "back": "返回",
+      "loading": "正在加载设备…"
     }
   },
   "stream": {

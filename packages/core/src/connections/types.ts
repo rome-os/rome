@@ -205,12 +205,26 @@ export type CapabilityStatus =
   | { state: "needs-subscription" }
   | { state: "unsupported" };
 
+/**
+ * Whether the platform accepts the connection's grant. A broken connection
+ * keeps its account and that account's agent until the guardian gives access
+ * again (docs/domains/connections.md).
+ */
+export type ConnectionState = "working" | "broken";
+
 /** One connection kind, named grants, up to three capabilities. */
 export interface Connection {
   readonly id: ConnectionId;
   readonly connectionKind: string;
   readonly label: string;
   readonly auth: AuthState;
+  /**
+   * Broken when a grant is degraded, working when every grant is authorized.
+   * Null while a grant is unauthorized: a disconnect that keeps the
+   * connection leaves no access behind, so it is neither. A connection with
+   * no grants is working.
+   */
+  state(): ConnectionState | null;
   /** Discovery with reasons — drives the dashboard and connect hints. */
   status(): Record<Capability, CapabilityStatus>;
   /** Whether `cap` is built and live now. `status()` reads the grants; this
@@ -314,18 +328,21 @@ export interface ConnectionDescriptor {
    *  (webchat, email), leaves it unset. Vocabulary:
    *  docs/domains/chats.md#account. */
   severalAccounts?: boolean;
-  /** The platform account a grant's profile names (a bot id, an app id), or
-   *  null when the profile names none. It reads the one field rather than
-   *  parsing the strict profile schema, so a stored profile with an extra key
-   *  still names its account.
-   *  `ConnectionRegistry.confer` refuses a conferral whose account another
-   *  Connection of the connection kind already holds in the same grant. A connection kind that
-   *  leaves it unset is never refused.
-   *  A connection kind with a Talk that declares it holds accounts that exist only while
-   *  connected: the last grant's disconnect removes the Connection
-   *  (`isUnconnectedAccount`). Declare it only for a connection kind in
-   *  `LINKABLE_KINDS`, whose channels start fresh. */
+  /** The platform's own id for the account a grant's profile names (a bot id,
+   *  an app id, an inbox address), or null when the profile names none. It reads
+   *  the one field rather than parsing the strict profile schema, so a stored
+   *  profile with an extra key still names its account.
+   *  The ledger stores it on the grant with the account's platform. Conferral
+   *  refuses an account another live grant reaches on that platform, whatever
+   *  its connection kind, and a fix that reaches another account
+   *  (docs/domains/connections.md#connection). A connection kind that leaves it
+   *  unset, or a profile it answers null for, is never refused. */
   accountIdOf?(grant: GrantName, profile: ProfileRecord): string | null;
+  /** True when this kind's accounts take an agent. Such an account exists only
+   *  while connected: the last grant's disconnect removes the Connection
+   *  (`isUnconnectedAccount`). Declare it exactly for the kinds in
+   *  `LINKABLE_KINDS`, whose channels start fresh. */
+  takesAgent?: boolean;
   capabilities: Partial<{
     talker: {
       needs: readonly GrantName[];

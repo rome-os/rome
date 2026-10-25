@@ -5,6 +5,11 @@
  * memory files and writes a journal entry, the skill-review agent writes or
  * edits a `SKILL.md`. Recording those calls is what lets the UI show what came
  * out of a run without diffing the filesystem afterwards.
+ *
+ * Two providers report those calls in two shapes. Claude Code sends one file
+ * per call, as the whole file or as the replaced and replacement text. Codex
+ * sends one `fileChange` item per call, covering one or more files, each as a
+ * unified diff. Both land here as the same `FileChange` rows.
  */
 
 export type ChangeOp = "write" | "edit";
@@ -14,9 +19,22 @@ export interface FileChange {
   path: string;
   /** The full file for a write, the replacement text for an edit. */
   content: string;
-  /** The text an edit replaced. Null for a write. */
+  /**
+   * The text an edit replaced. Null for a write. An edit with null previous
+   * text is the dream action's record of practice notes appended to the
+   * journal (`RunsRepository.practiceNotes` reads them back), so no other
+   * source may emit one.
+   */
   previous: string | null;
   truncated: boolean;
+}
+
+/** `.env` files can hold secrets, so only their path is recorded. `.env.example` is source. */
+const SECRET_FILE = /(?:^|\/)\.env(?!\.example$)[^/]*$/;
+export const SECRET_PLACEHOLDER = "(contents not recorded)";
+
+export function isSecretFile(path: string): boolean {
+  return SECRET_FILE.test(path);
 }
 
 /** Caps one stored change, so a full-file rewrite of a large memory file
@@ -32,15 +50,161 @@ function str(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+interface Region {
+  before: string;
+  after: string;
+}
+
+/**
+ * Splits a unified diff into regions, one per run of changed lines, each as
+ * the text before and after with the unchanged lines around it. A hunk that
+ * changes two places with unchanged lines between them yields two regions,
+ * because the page's line diff treats only a shared start and end as
+ * context, and would show the lines between as removed and added again. The
+ * diff carries no `---`/`+++` file header, only `@@` lines, and a diff with
+ * no `@@` line is one hunk.
+ */
+function regionsOf(diff: string): Region[] {
+  const lines = diff.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  const regions: Region[] = [];
+  let leading: string[] = [];
+  let removed: string[] = [];
+  let added: string[] = [];
+  let trailing: string[] = [];
+  let open = false;
+
+  const close = () => {
+    if (open) {
+      regions.push({
+        before: [...leading, ...removed, ...trailing].join("\n"),
+        after: [...leading, ...added, ...trailing].join("\n"),
+      });
+    }
+    // The unchanged lines after one run lead into the next.
+    leading = trailing;
+    removed = [];
+    added = [];
+    trailing = [];
+    open = false;
+  };
+
+  for (const line of lines) {
+    if (line.startsWith("\\")) continue;
+    if (line.startsWith("@@")) {
+      close();
+      leading = [];
+      continue;
+    }
+    if (line.startsWith("-") || line.startsWith("+")) {
+      if (trailing.length > 0) close();
+      open = true;
+      (line.startsWith("-") ? removed : added).push(line.slice(1));
+      continue;
+    }
+    // A context line is prefixed with one space. An unprefixed line is a
+    // context line some diff writers emit for an empty source line.
+    const text = line.startsWith(" ") ? line.slice(1) : line;
+    (open ? trailing : leading).push(text);
+  }
+  close();
+  return regions;
+}
+
+/**
+ * The file changes in a Codex `fileChange` item. An `add` is the whole new
+ * file, so it records as a write. An `update` records one edit per run of
+ * changed lines, so the page shows the same diff Codex applied; an update
+ * that also renames the file records under the new path, the one that exists
+ * after the run. A `delete` leaves nothing to show and records nothing.
+ */
+function changesFromFileChange(record: Record<string, unknown>): FileChange[] {
+  if (!Array.isArray(record.changes)) return [];
+  return record.changes.flatMap((item): FileChange[] => {
+    if (!item || typeof item !== "object") return [];
+    const { path, kind, diff } = item as Record<string, unknown>;
+    const file = str(path);
+    const text = str(diff);
+    if (!file || text === null) return [];
+    const kindRecord = kind && typeof kind === "object" ? (kind as Record<string, unknown>) : null;
+    switch (kindRecord ? str(kindRecord.type) : null) {
+      case "add": {
+        const content = clip(text);
+        return [
+          {
+            op: "write",
+            path: file,
+            content: content.text,
+            previous: null,
+            truncated: content.truncated,
+          },
+        ];
+      }
+      case "update": {
+        const target = str(kindRecord?.move_path) || file;
+        return regionsOf(text).map(({ before, after }) => {
+          const content = clip(after);
+          const previous = clip(before);
+          return {
+            op: "edit",
+            path: target,
+            content: content.text,
+            previous: previous.text,
+            truncated: content.truncated || previous.truncated,
+          };
+        });
+      }
+      default:
+        return [];
+    }
+  });
+}
+
+/**
+ * The dream memory agent writes through `write_memory_file` and
+ * `edit_memory_file` actions, called via `execute_action`. Read as the `Write`
+ * or `Edit` they stand for.
+ */
+function memoryFileCall(
+  tool: string,
+  input: Record<string, unknown>,
+): { tool: string; input: Record<string, unknown> } | null {
+  if (tool !== "execute_action" || typeof input.action_name !== "string") return null;
+  const args = input.json_args;
+  if (!args || typeof args !== "object") return null;
+  const { path, ...rest } = args as Record<string, unknown>;
+  const name = input.action_name.split(":").at(-1);
+  if (name === "write_memory_file") return { tool: "Write", input: { file_path: path, ...rest } };
+  if (name === "edit_memory_file") return { tool: "Edit", input: { file_path: path, ...rest } };
+  return null;
+}
+
 /**
  * The file changes one tool call makes. Covers Claude's `Write`, `Edit`, and
- * `MultiEdit`; any other tool returns nothing.
+ * `MultiEdit`, and the Codex `fileChange` item the provider reports as `Edit`;
+ * any other tool returns nothing.
  */
 export function changesFromToolUse(tool: string, input: unknown): FileChange[] {
   if (!input || typeof input !== "object") return [];
+  const memoryWrite = memoryFileCall(tool, input as Record<string, unknown>);
+  if (memoryWrite) return changesFromToolUse(memoryWrite.tool, memoryWrite.input);
   const record = input as Record<string, unknown>;
+  if (record.type === "fileChange") return changesFromFileChange(record);
   const path = str(record.file_path);
   if (!path) return [];
+  if (isSecretFile(path)) {
+    const op: ChangeOp = tool === "Write" ? "write" : "edit";
+    if (!["Write", "Edit", "MultiEdit"].includes(tool)) return [];
+    return [
+      {
+        op,
+        path,
+        content: SECRET_PLACEHOLDER,
+        previous: op === "edit" ? "" : null,
+        truncated: false,
+      },
+    ];
+  }
 
   const edit = (oldText: unknown, newText: unknown): FileChange | null => {
     const next = str(newText);
@@ -97,6 +261,7 @@ export interface ClassifiedPath {
 }
 
 const MEMORY_RE = /^(?:.*?\/)?memory\/(.+)$/;
+const APP_SOURCE_RE = /(?:^|\/)(?:projects\/apps|apps\/installed|rome_apps)\/[^/]+\//;
 const JOURNAL_RE = /^journal\/\d{4}\/\d{2}\/\d{2}\.md$/;
 const SKILL_RE = /(?:^|\/)skills\/([^/]+)\/SKILL\.md$/i;
 /** Where a skill's app lives: the repo seed, an installed artifact, or a
@@ -120,7 +285,8 @@ export function classifyPath(path: string): ClassifiedPath {
     };
   }
 
-  const memory = MEMORY_RE.exec(path);
+  // An app's own `memory/` folder is app source, not the guardian's memory.
+  const memory = APP_SOURCE_RE.test(path) ? null : MEMORY_RE.exec(path);
   if (memory?.[1]) {
     const memoryFile = memory[1];
     return {

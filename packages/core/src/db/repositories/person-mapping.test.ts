@@ -135,7 +135,7 @@ describe("PersonMappingRepository", () => {
     const records = new ChannelRecordsRepository(testDb.db);
     repo = new PersonMappingRepository(testDb.db, recordedConnectionKindOf(testDb.db));
     const now = new Date();
-    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now);
+    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now, { id: "telegram" });
     const second = records.claim(testDb.db, { id: "c2", connectionKind: "telegram" }, now).id;
     const personId = await repo.create({
       displayName: "Erin",
@@ -151,7 +151,7 @@ describe("PersonMappingRepository", () => {
     const records = new ChannelRecordsRepository(testDb.db);
     repo = new PersonMappingRepository(testDb.db, recordedConnectionKindOf(testDb.db));
     const now = new Date();
-    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now);
+    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now, { id: "telegram" });
     const second = records.claim(testDb.db, { id: "c2", connectionKind: "telegram" }, now).id;
     const personId = await repo.create({ displayName: "Erin", bondLevel: "inner-circle" });
 
@@ -196,53 +196,6 @@ describe("PersonMappingRepository", () => {
   it("findByChannelUser() returns null for unknown user", async () => {
     const found = await repo.findByChannelUser("slack", "unknown-user");
     expect(found).toBeNull();
-  });
-
-  it("writeDeleteGuardianChannelMappings() removes only guardian mappings inside a caller transaction", async () => {
-    const guardianId = await repo.create({
-      displayName: "Guardian",
-      bondLevel: "guardian",
-      channelMappings: [
-        { channel: "feishu", channelUserId: "ou-old" },
-        { channel: "telegram", channelUserId: "tg-guardian" },
-      ],
-    });
-    const friendId = await repo.create({
-      displayName: "Friend",
-      bondLevel: "inner-circle",
-      channelMappings: [{ channel: "feishu", channelUserId: "ou-friend" }],
-    });
-
-    testDb.db.transaction((tx) => {
-      repo.writeDeleteGuardianChannelMappings(tx, "feishu");
-    });
-
-    expect((await repo.findById(guardianId))!.channelMappings).toEqual([
-      { channel: "telegram", channelUserId: "tg-guardian" },
-    ]);
-    expect((await repo.findById(friendId))!.channelMappings).toEqual([
-      { channel: "feishu", channelUserId: "ou-friend" },
-    ]);
-  });
-
-  it("writeDeleteGuardianChannelMappings() is rolled back when its transaction throws", async () => {
-    const guardianId = await repo.create({
-      displayName: "Guardian",
-      bondLevel: "guardian",
-      channelMappings: [{ channel: "feishu", channelUserId: "ou-old" }],
-    });
-
-    expect(() =>
-      testDb.db.transaction((tx) => {
-        repo.writeDeleteGuardianChannelMappings(tx, "feishu");
-        throw new Error("participant boom");
-      }),
-    ).toThrow("participant boom");
-
-    // The delete shared the aborted transaction, so nothing committed.
-    expect((await repo.findById(guardianId))!.channelMappings).toEqual([
-      { channel: "feishu", channelUserId: "ou-old" },
-    ]);
   });
 
   it("findById() returns person with all channel mappings", async () => {

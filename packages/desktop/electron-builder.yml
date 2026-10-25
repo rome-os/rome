@@ -9,6 +9,10 @@ files:
   - src/renderer/**/*
   - "!**/*.ts"
   - "!**/*.map"
+  # koffi ships sources and a prebuilt binary for every platform; the app
+  # needs only its loader and the macOS binaries.
+  - "!**/node_modules/koffi/{doc,lib,src,vendor}/**"
+  - "!**/node_modules/koffi/build/koffi/!(darwin_*)/**"
 extraMetadata:
   main: dist/main/index.js
 asar: true

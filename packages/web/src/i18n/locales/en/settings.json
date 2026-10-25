@@ -727,15 +727,16 @@
         "title": "Reply streaming",
         "description": "Applies to the guardian's direct chats on Telegram and Feishu. On Telegram, replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
         "toggleLabel": "Stream replies as they are written"
+      },
+      "feishuStreamingStyle": {
+        "title": "Feishu streaming style",
+        "description": "Messages take up to 20 edits each, then the reply goes on in a new one. Cards show the text as it is typed.",
+        "message": "Messages",
+        "card": "Cards"
       }
     },
     "developerSettings": {
       "title": "Developer Settings"
-    },
-    "fable": {
-      "title": "Fable",
-      "description": "Only applies when Claude is available.",
-      "toggleLabel": "Route large models to Fable"
     },
     "tierModelMappings": {
       "title": "Model ID mappings",
@@ -750,7 +751,6 @@
         "medium": "Claude medium model ID",
         "small": "Claude small model ID"
       },
-      "fableNote": "A Claude large mapping replaces Fable's model ID while Fable still prefers Claude for large tiers.",
       "save": "Save mappings"
     },
     "modelSelector": {
