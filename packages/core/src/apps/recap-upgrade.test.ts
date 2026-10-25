@@ -10,6 +10,7 @@ import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { installFirstPartyAppsAtBoot } from "./boot-upgrade.js";
 import { packArtifact } from "./packaging/index.js";
+import { preserveRecapOptOutAtBoot } from "./recap-upgrade.js";
 import { createAppRuntimeRepositories } from "./repositories.js";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
 
@@ -45,7 +46,8 @@ describe("recap to system upgrade", () => {
     });
   }
 
-  function boot() {
+  async function boot() {
+    await preserveRecapOptOutAtBoot(harness.appManager, settingsRepo);
     return installFirstPartyAppsAtBoot({
       appManager: harness.appManager,
       appCatalog: harness.catalog,
@@ -61,7 +63,10 @@ describe("recap to system upgrade", () => {
     });
   }
 
-  it("removes the old seed app across a restart and reads its global settings in System", async () => {
+  it.each([
+    true,
+    false,
+  ])("preserves effective recap consent across an upgrade (legacy app enabled: %s)", async (appEnabled) => {
     await pack("recap", "0.1.1");
     await pack("system", "0.2.20");
     await boot();
@@ -69,6 +74,7 @@ describe("recap to system upgrade", () => {
     await settingsRepo.set("recap.createAudio", true);
     await settingsRepo.set("recap.threshold", "long");
     await settingsRepo.set("recap.audioSpeed", "slower");
+    await harness.appManager.setEnabled("recap", appEnabled);
 
     await rm(join(projectRoot, "dist", "first-party-artifacts", "recap"), { recursive: true });
     await pack("system", "0.2.21");
@@ -91,12 +97,14 @@ describe("recap to system upgrade", () => {
       caller: { kind: "guardian", userId: "u1", via: "cookie" },
     });
     expect(await response.json()).toEqual({
-      enabled: true,
+      enabled: appEnabled,
       createAudio: true,
       threshold: "long",
       audioSpeed: "slower",
     });
+    await settingsRepo.set("recap.enabled", true);
     expect((await boot()).removed).toEqual([]);
+    expect(await settingsRepo.get("recap.enabled")).toBe(true);
   });
 
   it("does not treat stored audio consent as recap consent", async () => {

@@ -185,6 +185,7 @@ import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry
 import { createSubagentExecutionService } from "./core/subagent-execution.js";
 import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
+import { preserveRecapOptOutAtBoot } from "./apps/recap-upgrade.js";
 import { createRomeCloudListingClient } from "./apps/rome-cloud-listing-client.js";
 import { createArtifactReferenceResolver } from "./apps/artifact-reference.js";
 import { createArtifactLoadFailureReporter } from "./apps/artifact-load-failure-reporter.js";
@@ -572,6 +573,7 @@ async function main() {
   // control (preserved across boot reinstalls). Then assert that every app the
   // core agents reference is in that set — a core agent pointing at an unpacked
   // app must fail boot loudly, not surface later as "unknown subagent".
+  await preserveRecapOptOutAtBoot(appManager, settingsRepo);
   const firstPartyBoot = await installFirstPartyAppsAtBoot({
     appManager,
     appCatalog,
