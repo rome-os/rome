@@ -9,6 +9,10 @@ describe("startedElsewhere", () => {
     expect(startedElsewhere([worktree, "/src/rome"], worktree)).toBe(true);
   });
 
+  it("protects every stack when Docker cannot be asked", () => {
+    expect(startedElsewhere(null, worktree)).toBe(true);
+  });
+
   it("lets gc remove a stack this worktree started, or one with no containers", () => {
     expect(startedElsewhere([worktree], worktree)).toBe(false);
     expect(startedElsewhere([], worktree)).toBe(false);

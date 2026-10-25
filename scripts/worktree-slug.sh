@@ -32,6 +32,13 @@ if [ -n "${ROME_DEV_SLUG:-}" ]; then
     echo "worktree-slug: ROME_DEV_SLUG=\"$ROME_DEV_SLUG\" has no letters or digits." >&2
     exit 1
   fi
+  # The shared singletons' compose projects and the hostnames they route.
+  case "$slug" in
+    rome-traefik | rome-obs | obs | clickhouse | otlp)
+      echo "worktree-slug: ROME_DEV_SLUG=\"$ROME_DEV_SLUG\" names a shared Rome stack." >&2
+      exit 1
+      ;;
+  esac
   printf '%s\n' "$slug"
   exit 0
 fi

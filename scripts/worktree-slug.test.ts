@@ -64,4 +64,13 @@ describe("worktree-slug.sh", () => {
       expect(r.stderr).toContain("ROME_DEV_SLUG");
     }
   });
+
+  it("refuses the shared singleton stacks and their hostnames", () => {
+    for (const value of ["rome-traefik", "Rome Obs", "obs", "clickhouse", "otlp"]) {
+      const r = slug(value);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toContain("shared Rome stack");
+    }
+  });
 });

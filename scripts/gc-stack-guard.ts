@@ -28,9 +28,14 @@ function real(path: string): string {
 
 /**
  * True when any of the stack's containers was started from a directory other
- * than `worktreePath`. `ownerDirs` is each container's compose working
- * directory; a stack with no containers has none and is not protected.
+ * than `worktreePath`, or when Docker could not be asked (`ownerDirs` null).
+ * `ownerDirs` is each container's compose working directory; a stack with no
+ * containers has none and is not protected.
  */
-export function startedElsewhere(ownerDirs: readonly string[], worktreePath: string): boolean {
+export function startedElsewhere(
+  ownerDirs: readonly string[] | null,
+  worktreePath: string,
+): boolean {
+  if (ownerDirs === null) return true;
   return ownerDirs.some((dir) => dir !== worktreePath && real(dir) !== real(worktreePath));
 }
