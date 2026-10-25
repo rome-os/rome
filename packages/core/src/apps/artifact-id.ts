@@ -64,6 +64,11 @@ export function artifactLocalName(id: string): string {
   return separator < 0 ? id : id.slice(separator + 1);
 }
 
+/** Returns the owning namespace of a canonical id ("core" or an app id), or null for any other value. */
+export function artifactNamespace(id: string): string | null {
+  return isCanonicalArtifactId(id) ? id.slice(0, id.indexOf(":")) : null;
+}
+
 export function claimLegacyArtifactName(
   bindings: LegacyArtifactBindings,
   kind: NamespacedArtifactKind,
