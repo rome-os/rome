@@ -1,5 +1,6 @@
 import { type Api, GrammyError, HttpError } from "grammy";
 import { DeliveryFailure, type DeliveryTransport, plainText } from "../types.js";
+import { neverConnected } from "./network.js";
 
 /**
  * Reply delivery over the Telegram Bot API. Text goes out plain, so a preview
@@ -37,12 +38,12 @@ export function telegramTransport(api: Api): DeliveryTransport {
               }
             : {}),
         });
-        return { messageId: String(sent.message_id), conversationId: String(sent.chat.id) };
+        return { messageId: String(sent.message_id), chatId: String(sent.chat.id) };
       }),
     edit: (receipt, text) =>
       call(async () => {
         try {
-          await api.editMessageText(receipt.conversationId, Number(receipt.messageId), text);
+          await api.editMessageText(receipt.chatId, Number(receipt.messageId), text);
         } catch (error) {
           // The message already shows this text, which is what the edit asked for.
           if (error instanceof GrammyError && error.description.includes("message is not modified"))
@@ -59,27 +60,6 @@ async function call<T>(write: () => Promise<T>): Promise<T> {
   } catch (error) {
     throw classify(error);
   }
-}
-
-/** System errors that mean the connection to Telegram was never made. A reset
- *  or a timeout is not among them, since it can follow a request already sent. */
-const NEVER_CONNECTED = new Set([
-  "ENOTFOUND",
-  "EAI_AGAIN",
-  "ECONNREFUSED",
-  "ENETUNREACH",
-  "EHOSTUNREACH",
-]);
-
-/** Whether the error, or a cause it wraps, is a failure to connect. */
-function neverConnected(error: unknown): boolean {
-  let cause: unknown = error;
-  for (let depth = 0; depth < 3 && cause && typeof cause === "object"; depth++) {
-    const { code, cause: inner } = cause as { code?: unknown; cause?: unknown };
-    if (typeof code === "string" && NEVER_CONNECTED.has(code)) return true;
-    cause = inner;
-  }
-  return false;
 }
 
 function classify(error: unknown): DeliveryFailure {

@@ -17,16 +17,16 @@ export interface RecordedConversation {
  */
 export async function findRecordedConversation(
   webchatRepo: WebChatRepository | undefined,
-  conversationId: string | undefined,
+  chatId: string | undefined,
 ): Promise<RecordedConversation | undefined> {
-  if (!webchatRepo || !conversationId) return undefined;
+  if (!webchatRepo || !chatId) return undefined;
   let conversation;
   try {
-    conversation = await webchatRepo.getSession(conversationId);
+    conversation = await webchatRepo.getSession(chatId);
   } catch (err) {
     // The lookup only refines where turns record, so it must not fail the session.
     log.warn("failed to read a session's recorded conversation", {
-      conversationId,
+      chatId,
       error: err instanceof Error ? err.message : String(err),
     });
     return undefined;

@@ -14,13 +14,13 @@ import { toast } from "sonner";
 import type { TFunction } from "i18next";
 import { Search } from "lucide-react";
 import type {
-  ConversationSettingField,
-  ConversationSettings,
-  ConversationSettingsListItem,
-  ConversationSettingsSnapshot,
-  PartialConversationSettings,
+  ChatSettingField,
+  ChatSettings,
+  ChatSettingsListItem,
+  ChatSettingsSnapshot,
+  PartialChatSettings,
   ProviderSessionResetPolicy,
-} from "@rome/api-types/conversation-settings";
+} from "@rome/api-types/chat-settings";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -46,10 +46,10 @@ import { Switch } from "@/components/ui/switch";
 import { artifactLocalName, artifactOwnerId } from "@/lib/artifact-name";
 import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
 import { fetchConnections, type ApiConnection } from "@/lib/connections-api";
-import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 
 interface PageResponse {
-  items: ConversationSettingsListItem[];
+  items: ChatSettingsListItem[];
   nextCursor?: string;
 }
 
@@ -86,7 +86,7 @@ export function ChannelsSettingsPage() {
   const [availability, setAvailability] = useState("");
   const [connections, setConnections] = useState<ApiConnection[]>([]);
   const [agentNames, setAgentNames] = useState<string[]>([]);
-  const [items, setItems] = useState<ConversationSettingsListItem[]>([]);
+  const [items, setItems] = useState<ChatSettingsListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -102,7 +102,7 @@ export function ChannelsSettingsPage() {
         if (availability) search.set("availability", availability);
         if (cursor) search.set("cursor", cursor);
         const [page, connectionList, agentPage] = await Promise.all([
-          api<PageResponse>(`/api/conversation-settings?${search}`),
+          api<PageResponse>(`/api/chat-settings?${search}`),
           fetchConnections(),
           api<AgentPage>("/api/agents"),
         ]);
@@ -144,7 +144,7 @@ export function ChannelsSettingsPage() {
       new Map(
         connections.flatMap((connection) =>
           connection.id !== null &&
-          LINKABLE_SERVICES.has(connection.service) &&
+          LINKABLE_KINDS.has(connection.connectionKind) &&
           connection.agent === null
             ? [
                 [
@@ -165,7 +165,7 @@ export function ChannelsSettingsPage() {
       new Map(
         connections.flatMap((connection) =>
           connection.id !== null &&
-          LINKABLE_SERVICES.has(connection.service) &&
+          LINKABLE_KINDS.has(connection.connectionKind) &&
           typeof connection.agent === "string"
             ? [[connection.id, connection.agent]]
             : [],
@@ -176,13 +176,12 @@ export function ChannelsSettingsPage() {
 
   // Stable identity: every card takes this as a dependency, so an inline
   // function here would change on each render and churn their save closures.
-  const handleSaved = useCallback((snapshot: ConversationSettingsSnapshot) => {
+  const handleSaved = useCallback((snapshot: ChatSettingsSnapshot) => {
     setItems((current) =>
       current.map((candidate) =>
         candidate.snapshot.conversation.ref.connectionId ===
           snapshot.conversation.ref.connectionId &&
-        candidate.snapshot.conversation.ref.conversationId ===
-          snapshot.conversation.ref.conversationId
+        candidate.snapshot.conversation.ref.chatId === snapshot.conversation.ref.chatId
           ? { ...candidate, snapshot, source: hasOverrides(snapshot) ? "configured" : "known" }
           : candidate,
       ),
@@ -282,7 +281,7 @@ export function ChannelsSettingsPage() {
           <div className="space-y-4">
             {items.map((item) => (
               <ConversationRow
-                key={`${item.snapshot.conversation.ref.connectionId}:${item.snapshot.conversation.ref.conversationId}`}
+                key={`${item.snapshot.conversation.ref.connectionId}:${item.snapshot.conversation.ref.chatId}`}
                 item={item}
                 agentNames={agentNames}
                 silentAccount={silentAccounts.get(item.snapshot.conversation.ref.connectionId)}
@@ -315,7 +314,7 @@ function ConversationRow({
   accountAgent,
   onSaved,
 }: {
-  item: ConversationSettingsListItem;
+  item: ChatSettingsListItem;
   agentNames: string[];
   /** Set when Rome does not listen to the conversation's account: the page that links
    *  its agent. */
@@ -323,7 +322,7 @@ function ConversationRow({
   /** The agent linked to the conversation's account, which answers while the
    *  conversation has no agent of its own. */
   accountAgent: string | undefined;
-  onSaved: (snapshot: ConversationSettingsSnapshot) => void;
+  onSaved: (snapshot: ChatSettingsSnapshot) => void;
 }) {
   const { t } = useTranslation("settings");
   const agentFieldId = useId();
@@ -338,9 +337,7 @@ function ConversationRow({
     (field) =>
       settingSource(snapshot, field) === "overridden" && !(field === "routing.agentName" && silent),
   ).length;
-  const [draft, setDraft] = useState<ConversationSettings>(() =>
-    structuredClone(snapshot.effective),
-  );
+  const [draft, setDraft] = useState<ChatSettings>(() => structuredClone(snapshot.effective));
   const [saving, setSaving] = useState(false);
   // Whether the conversation follows its account's agent, kept beside
   // the draft: effective settings read the same for no choice and a pin to
@@ -367,7 +364,7 @@ function ConversationRow({
    * value would still be the previous one.
    */
   const draftRef = useRef(draft);
-  const applyDraft = useCallback((next: ConversationSettings) => {
+  const applyDraft = useCallback((next: ChatSettings) => {
     draftRef.current = next;
     setDraft(next);
   }, []);
@@ -377,7 +374,7 @@ function ConversationRow({
    * the values are read off the draft at flush time, so a field edited several
    * times in one burst contributes exactly one value: its last.
    */
-  const dirty = useRef(new Set<ConversationSettingField>());
+  const dirty = useRef(new Set<ChatSettingField>());
   const flushTimer = useRef<number>(undefined);
   // Serializes PATCHes: two edits in quick succession must not race, or the
   // later response can be overtaken by the earlier one and show a stale value.
@@ -393,7 +390,7 @@ function ConversationRow({
    * pre-edit value, and pruning against it would drop a genuine change back to
    * that value as if it were a no-op.
    */
-  const projected = useRef<ConversationSettings>(structuredClone(snapshot.effective));
+  const projected = useRef<ChatSettings>(structuredClone(snapshot.effective));
   /** Batches enqueued but not yet settled; only the last one may resync `projected`. */
   const queued = useRef(0);
 
@@ -403,9 +400,9 @@ function ConversationRow({
     // A field edited and put back before the debounce elapsed is not an edit.
     // Sending it would make the round-trip a durable override, which the UI has
     // no way to undo — so diff against projected state and drop no-ops.
-    const sent: Array<[ConversationSettingField, unknown, unknown]> = [];
-    const set: PartialConversationSettings = {};
-    const clear: ConversationSettingField[] = [];
+    const sent: Array<[ChatSettingField, unknown, unknown]> = [];
+    const set: PartialChatSettings = {};
+    const clear: ChatSettingField[] = [];
     const ahead = structuredClone(projected.current);
     // Only a linked account has a link to follow.
     const follow = accountAgent !== undefined && followRef.current;
@@ -429,7 +426,7 @@ function ConversationRow({
     setSaving(true);
     inFlight.current = inFlight.current
       .then(() =>
-        api<ConversationSettingsSnapshot>("/api/conversation-settings", {
+        api<ChatSettingsSnapshot>("/api/chat-settings", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ref: conversation.ref, set, clear }),
@@ -525,7 +522,7 @@ function ConversationRow({
    * Every control writes through here: the draft updates immediately so the UI
    * stays responsive, and the change is coalesced into one PATCH per burst.
    */
-  function change(field: ConversationSettingField, value: unknown) {
+  function change(field: ChatSettingField, value: unknown) {
     const next = structuredClone(draftRef.current);
     setSettingValue(next, field, value);
     applyDraft(next);
@@ -540,7 +537,7 @@ function ConversationRow({
       className="overflow-hidden rounded-12 border border-border bg-surface px-4"
     >
       <header className="-mx-4 flex items-start gap-3 border-b border-border px-4 py-4">
-        <ConnectionBrandBadge connection={conversation.service} />
+        <ConnectionBrandBadge connection={conversation.connectionKind} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             {/* The container reads as the place the conversation lives, so it
@@ -571,7 +568,7 @@ function ConversationRow({
               list the service would otherwise be absent from the a11y tree. */}
           <p className="mt-1 truncate text-aux text-muted-foreground">
             {t(`channels.conversationSettings.kinds.${conversation.kind}`)}
-            <span className="sr-only">{` · ${serviceLabel(conversation.service)}`}</span>
+            <span className="sr-only">{` · ${serviceLabel(conversation.connectionKind)}`}</span>
           </p>
         </div>
         {saving && (
@@ -730,7 +727,7 @@ function agentLabel(name: string): string {
 }
 
 /** Whether the conversation has an agent choice of its own, a main pin included. */
-function overridesAgent(snapshot: ConversationSettingsSnapshot): boolean {
+function overridesAgent(snapshot: ChatSettingsSnapshot): boolean {
   return settingSource(snapshot, "routing.agentName") === "overridden";
 }
 
@@ -1022,7 +1019,7 @@ function settingOptions(t: TFunction<"settings">, values: string[]) {
   }));
 }
 
-function settingValue(settings: ConversationSettings, field: ConversationSettingField): unknown {
+function settingValue(settings: ChatSettings, field: ChatSettingField): unknown {
   switch (field) {
     case "enabled":
       return settings.enabled;
@@ -1045,27 +1042,23 @@ function settingValuesEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function setSettingValue(
-  settings: ConversationSettings,
-  field: ConversationSettingField,
-  value: unknown,
-): void {
+function setSettingValue(settings: ChatSettings, field: ChatSettingField, value: unknown): void {
   switch (field) {
     case "enabled":
       settings.enabled = value as boolean;
       return;
     case "activation.mode":
-      settings.activation.mode = value as ConversationSettings["activation"]["mode"];
+      settings.activation.mode = value as ChatSettings["activation"]["mode"];
       return;
     case "activation.botMessages":
-      settings.activation.botMessages = value as ConversationSettings["activation"]["botMessages"];
+      settings.activation.botMessages = value as ChatSettings["activation"]["botMessages"];
       return;
     case "activation.whenOthersMentioned":
       settings.activation.whenOthersMentioned =
-        value as ConversationSettings["activation"]["whenOthersMentioned"];
+        value as ChatSettings["activation"]["whenOthersMentioned"];
       return;
     case "replies.placement":
-      settings.replies.placement = value as ConversationSettings["replies"]["placement"];
+      settings.replies.placement = value as ChatSettings["replies"]["placement"];
       return;
     case "routing.agentName":
       settings.routing.agentName = value === "main" ? null : (value as string | null);
@@ -1076,8 +1069,8 @@ function setSettingValue(
 }
 
 function setPartialSettingValue(
-  settings: PartialConversationSettings,
-  field: ConversationSettingField,
+  settings: PartialChatSettings,
+  field: ChatSettingField,
   value: unknown,
 ): void {
   switch (field) {
@@ -1085,18 +1078,17 @@ function setPartialSettingValue(
       settings.enabled = value as boolean;
       return;
     case "activation.mode":
-      (settings.activation ??= {}).mode = value as ConversationSettings["activation"]["mode"];
+      (settings.activation ??= {}).mode = value as ChatSettings["activation"]["mode"];
       return;
     case "activation.botMessages":
-      (settings.activation ??= {}).botMessages =
-        value as ConversationSettings["activation"]["botMessages"];
+      (settings.activation ??= {}).botMessages = value as ChatSettings["activation"]["botMessages"];
       return;
     case "activation.whenOthersMentioned":
       (settings.activation ??= {}).whenOthersMentioned =
-        value as ConversationSettings["activation"]["whenOthersMentioned"];
+        value as ChatSettings["activation"]["whenOthersMentioned"];
       return;
     case "replies.placement":
-      (settings.replies ??= {}).placement = value as ConversationSettings["replies"]["placement"];
+      (settings.replies ??= {}).placement = value as ChatSettings["replies"]["placement"];
       return;
     case "routing.agentName":
       (settings.routing ??= {}).agentName = value === null ? "main" : (value as string);
@@ -1107,8 +1099,8 @@ function setPartialSettingValue(
 }
 
 function settingSource(
-  snapshot: ConversationSettingsSnapshot,
-  field: ConversationSettingField,
+  snapshot: ChatSettingsSnapshot,
+  field: ChatSettingField,
 ): "overridden" | "default" {
   const overrides = snapshot.overrides;
   const overridden =
@@ -1129,6 +1121,6 @@ function settingSource(
   return "default";
 }
 
-function hasOverrides(snapshot: ConversationSettingsSnapshot): boolean {
+function hasOverrides(snapshot: ChatSettingsSnapshot): boolean {
   return snapshot.supportedFields.some((field) => settingSource(snapshot, field) === "overridden");
 }

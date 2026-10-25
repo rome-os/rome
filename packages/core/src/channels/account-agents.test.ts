@@ -12,7 +12,7 @@ rs.mock("../logger.js", () => ({
 describe("accountAgentResolver", () => {
   let agent: string | null;
   let loaded: Set<string>;
-  let records: Map<string, { service: string; agent: string | null }>;
+  let records: Map<string, { connectionKind: string; agent: string | null }>;
   const repository = {
     byId: (id: string) => {
       const record = records.get(id);
@@ -31,7 +31,7 @@ describe("accountAgentResolver", () => {
 
   const link = (id: string, service: string) =>
     records.set(id, {
-      service,
+      connectionKind: service,
       get agent() {
         return agent;
       },
@@ -110,7 +110,7 @@ describe("accountAgentResolver", () => {
 });
 
 describe("AccountListening", () => {
-  const records = new Map<string, { service: string; agent: string | null }>();
+  const records = new Map<string, { connectionKind: string; agent: string | null }>();
   const repository = {
     byId: (id: string) => {
       const record = records.get(id);
@@ -122,14 +122,14 @@ describe("AccountListening", () => {
 
   it("listens to a linkable account only while its record names an agent", () => {
     const listening = new AccountListening(repository);
-    records.set("feishu-2", { service: "feishu", agent: "sales:agent" });
+    records.set("feishu-2", { connectionKind: "feishu", agent: "sales:agent" });
     expect(listening.listens("feishu-2")).toBe(true);
 
-    records.set("feishu-2", { service: "feishu", agent: null });
+    records.set("feishu-2", { connectionKind: "feishu", agent: null });
     expect(listening.listens("feishu-2")).toBe(false);
 
     // An agent that is not loaded still holds the account.
-    records.set("feishu-2", { service: "feishu", agent: "gone:agent" });
+    records.set("feishu-2", { connectionKind: "feishu", agent: "gone:agent" });
     expect(listening.listens("feishu-2")).toBe(true);
   });
 
@@ -154,7 +154,7 @@ describe("AccountListening", () => {
 
   it("always listens to an account of a service that takes no agent", () => {
     const listening = new AccountListening(repository);
-    records.set("email", { service: "email", agent: null });
+    records.set("email", { connectionKind: "email", agent: null });
 
     for (const name of ["email", "webchat", "agents", "whatsapp"]) {
       expect(listening.listens(name)).toBe(true);

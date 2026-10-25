@@ -1,5 +1,6 @@
 import type { Action, ActionRegistry } from "./types.js";
 import type { ArtifactMetadata } from "../apps/types.js";
+import { validateActionArgs } from "./validate-action-args.js";
 import {
   formatArtifactId,
   resolveArtifactId,
@@ -69,6 +70,15 @@ export class ActionRegistryImpl implements ActionRegistry {
 
   isExplicit(name: string): boolean {
     return this.get(name)?.config.visibility === "explicit";
+  }
+
+  /** Checks args against the named action's input schema. Returns an error
+   * message, or null when the args fit, the action declares no schema, or the
+   * action is unknown (`has()` answers that). */
+  validateArgs(name: string, args: Record<string, unknown>): string | null {
+    const action = this.get(name);
+    if (!action) return null;
+    return validateActionArgs(action.config.name, args, action.inputSchema);
   }
 
   getCanonicalName(name: string): string | undefined {

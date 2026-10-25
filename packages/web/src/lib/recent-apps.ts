@@ -5,7 +5,7 @@ import type { AppOrigin } from "@rome/api-types/apps";
 // map that lives in this browser (see hooks/use-recent-apps.ts). Everything
 // here takes `now` as an argument so the expiry edge is testable.
 
-/** Rows shown before "Show more". */
+/** Rail tiles shown before the More menu. */
 export const RECENT_APPS_VISIBLE = 3;
 /** An app leaves the zone after this long without being installed or opened.
  *  14 days, not 7: a weekly habit would otherwise expire an hour before its

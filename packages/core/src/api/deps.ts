@@ -1,4 +1,4 @@
-import type { PairingNotifier } from "../channels/pairing.js";
+import type { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
@@ -8,6 +8,7 @@ import type { OutboxRepository } from "../db/repositories/outbox.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { Channels } from "../channels/channel.js";
 import type { AccountNames } from "../channels/account-names.js";
+import type { ExternalAgents } from "../channels/agents-accounts.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -45,7 +46,7 @@ import type { BootVersionReport } from "../lib/boot-version-report.js";
 import type { SystemUpgradeService } from "../system-upgrade/service.js";
 import type {
   AppRuntimeRepositories,
-  ConversationSettingsControl,
+  ChatSettingsControl,
   ChannelsService,
 } from "@rome-os/app-runtime";
 import type { FavorService } from "../favors/types.js";
@@ -75,16 +76,15 @@ export interface ApiConfig {
  * exception is `appsRoot`, a genuine config override rather than a service.
  */
 export interface ApiDeps {
-  /** Tells a paired account that the guardian resolved its request, on the
-   *  Connection the request arrived through (channels/pairing.ts). */
-  notifyPairingResolution: PairingNotifier;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
-  conversationSettings: ConversationSettingsControl;
+  chatSettings: ChatSettingsControl;
   actionEngine: ActionEngine;
-  actionLoader: Pick<ActionLoader, "get">;
+  actionLoader: Pick<ActionLoader, "get" | "getRegistryLoadFailures">;
   db: DrizzleDb;
   personMappingRepo: PersonMappingRepository;
+  /** The guardian's link code, shown in People (channels/guardian-link-code.ts). */
+  guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route
    *  reads either store directly. */
@@ -93,6 +93,10 @@ export interface ApiDeps {
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */
   accountNames: AccountNames;
+  /** The agents Rome Cloud lists for this Rome. Each is an assistant with one
+   *  chat (docs/domains/chats.md#assistant), and the dashboard shows all but
+   *  other Romes. */
+  assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
   /** Messages Rome is still trying to deliver — the People surface's
    *  outbox. Separate from every message store on purpose: a row here is a
@@ -134,7 +138,10 @@ export interface ApiDeps {
   appsRoot?: string;
   settingsRepo: SettingsRepository;
   feedback: FeedbackRelay;
-  nodeDevices: Pick<ReturnType<typeof createNodeDevicesService>, "getStatus" | "start">;
+  nodeDevices: Pick<
+    ReturnType<typeof createNodeDevicesService>,
+    "getStatus" | "start" | "listFiles" | "listDevices" | "renameDevice" | "removeDevice"
+  >;
   provisionNodeCaller?: () => Promise<void>;
   /** Connects the Rome Cloud email inbox unless an email connection exists.
    *  Never rejects. */

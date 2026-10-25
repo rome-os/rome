@@ -1,5 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -37,6 +38,7 @@ interface MockSession {
   projectPath: string;
   archivedAt?: string | null;
   pinnedAt?: string | null;
+  deviceFolder?: { deviceId: string; deviceName: string; platform: string | null; path: string };
 }
 
 function mockSessions(sessions: MockSession[]) {
@@ -95,12 +97,23 @@ function mockSessions(sessions: MockSession[]) {
   return spy;
 }
 
-function renderRecentChats(initialEntry = "/chat", onSearch = () => {}, live?: LiveEventsClient) {
+function testQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+// A fresh cache per mount unless a test passes one in to remount against it.
+function renderRecentChats(
+  initialEntry = "/chat",
+  live?: LiveEventsClient,
+  queryClient = testQueryClient(),
+) {
   const routed = (
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <RecentChats onSearch={onSearch} />
-      <LocationProbe />
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <RecentChats />
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
   return render(
     live ? (
@@ -113,7 +126,12 @@ function renderRecentChats(initialEntry = "/chat", onSearch = () => {}, live?: L
 
 function LocationProbe() {
   const location = useLocation();
-  return <output data-testid="location-path">{location.pathname}</output>;
+  return (
+    <>
+      <output data-testid="location-path">{location.pathname}</output>
+      <output data-testid="location-state">{JSON.stringify(location.state)}</output>
+    </>
+  );
 }
 
 function textIndex(container: HTMLElement, text: string): number {
@@ -196,23 +214,82 @@ describe("RecentChats", () => {
     expect(screen.getByText("No chats yet")).toBeTruthy();
   });
 
-  it("keeps search and list settings visible together", async () => {
+  it("starts a new chat from the row at the top of the list", async () => {
     mockSessions([]);
-    const onSearch = rs.fn();
     const user = userEvent.setup();
 
-    renderRecentChats("/chat", onSearch);
+    renderRecentChats("/chat/session-1");
 
     await screen.findByText("No chats yet");
-    const searchButton = screen.getByRole("button", { name: "Search pages, apps, and chats" });
-    expect(searchButton).toBeTruthy();
-    expect(searchButton.getAttribute("title")).toMatch(
-      /^Search pages, apps, and chats \((⌘K|Ctrl K)\)$/,
-    );
-    expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
+    await user.click(screen.getByRole("link", { name: "New chat", exact: true }));
+    expect(screen.getByTestId("location-path").textContent).toBe("/chat");
+  });
 
-    await user.click(searchButton);
-    expect(onSearch).toHaveBeenCalledOnce();
+  it("leaves search to the rail and keeps the list settings in its header", async () => {
+    mockSessions([]);
+
+    renderRecentChats("/chat");
+
+    await screen.findByText("No chats yet");
+    expect(screen.queryByRole("button", { name: "Search pages, apps, and chats" })).toBeNull();
+    expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
+  });
+
+  it("shows the cached list at once on remount and refetches behind it", async () => {
+    const fetchSpy = mockSessions([
+      {
+        id: "cached",
+        name: "Cached chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-01T00:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "alpha",
+        projectPath: "alpha",
+      },
+    ]);
+    const listCalls = () =>
+      fetchSpy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions"))
+        .length;
+    const queryClient = testQueryClient();
+    const view = renderRecentChats("/chat", undefined, queryClient);
+    await screen.findByText("Cached chat");
+    view.unmount();
+    const before = listCalls();
+
+    renderRecentChats("/chat", undefined, queryClient);
+
+    // Synchronously, before any response: the rows, not the skeleton.
+    expect(screen.getByText("Cached chat")).toBeTruthy();
+    await waitFor(() => expect(listCalls()).toBe(before + 1));
+  });
+
+  it("still shows the cached list after a long time away", async () => {
+    mockSessions([
+      {
+        id: "cached",
+        name: "Cached chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-01T00:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "alpha",
+        projectPath: "alpha",
+      },
+    ]);
+    const queryClient = testQueryClient();
+    const view = renderRecentChats("/chat", undefined, queryClient);
+    await screen.findByText("Cached chat");
+    rs.useFakeTimers();
+    view.unmount();
+    // Past React Query's default five-minute garbage collection.
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(10 * 60_000);
+    });
+
+    renderRecentChats("/chat", undefined, queryClient);
+
+    expect(screen.getByText("Cached chat")).toBeTruthy();
   });
 
   it("offers a retry instead of claiming the guardian has no chats when the fetch fails", async () => {
@@ -400,6 +477,23 @@ describe("RecentChats", () => {
       expect(screen.queryByRole("img", { name: label })).toBeNull();
     });
 
+    it("drops a cached spinner on remount once the refetch says the turn stopped", async () => {
+      mockSessions([live]);
+      const queryClient = testQueryClient();
+      const view = renderRecentChats("/chat", undefined, queryClient);
+      await screen.findByText("Live chat");
+      send(true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      // The stop arrives while the list is unmounted, so only the refetch
+      // can tell the remounted list about it.
+      view.unmount();
+
+      renderRecentChats("/chat", undefined, queryClient);
+
+      expect(screen.getByText("Live chat")).toBeTruthy();
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
+    });
+
     it("keeps a start that arrives while the list is loading", async () => {
       let respond!: () => void;
       rs.spyOn(globalThis, "fetch").mockImplementation((async () => {
@@ -448,7 +542,7 @@ describe("RecentChats", () => {
 
     it("spins on start, refetches on stop, and starts over from the list after a reconnect", async () => {
       const fetchSpy = mockSessions([live]);
-      renderRecentChats("/chat", () => {}, fakeSocketLiveEventsClient());
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
       await screen.findByText("Live chat");
       let socket!: FakeWebSocket;
       act(() => {
@@ -644,7 +738,9 @@ describe("RecentChats", () => {
 
     renderRecentChats();
 
-    const pinnedSection = await screen.findByRole("region", { name: "Pinned" });
+    // The pinned project's section shows before the list lands, so wait for a row.
+    await screen.findByRole("link", { name: "Pinned standalone chat" });
+    const pinnedSection = screen.getByRole("region", { name: "Pinned" });
     const projectsSection = screen.getByRole("region", { name: "Projects" });
 
     expect(
@@ -686,6 +782,163 @@ describe("RecentChats", () => {
     await user.click(within(pinnedSection).getByRole("button", { name: "Pinned" }));
     expect(within(pinnedSection).queryByText("Pinned standalone chat")).toBeNull();
     expect(within(pinnedSection).queryByText("Pinned project child")).toBeNull();
+  });
+
+  it("pins and unpins a device-folder group without touching the pinned default project", async () => {
+    localStorage.setItem("rome-recent-chats-pinned-projects", JSON.stringify(["default"]));
+    const deviceFolder = {
+      deviceId: "dev-1",
+      deviceName: "devbox-dev",
+      platform: "linux",
+      path: "/home/ubuntu/device-folder",
+    };
+    mockSessions([
+      {
+        id: "default-chat",
+        name: "Default chat",
+        createdAt: "2026-07-02T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+      },
+      {
+        id: "device-chat",
+        name: "Device chat",
+        createdAt: "2026-07-03T00:00:00.000Z",
+        activityAt: "2026-07-09T11:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+        deviceFolder,
+      },
+    ]);
+    const user = userEvent.setup();
+    renderRecentChats();
+
+    const projectsSection = await screen.findByRole("region", { name: "Projects" });
+    const groupName = "device-folder on devbox-dev";
+    await user.click(within(projectsSection).getByRole("button", { name: "Project actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Pin" }));
+
+    const pinnedSection = screen.getByRole("region", { name: "Pinned" });
+    const pinnedGroup = within(pinnedSection).getByRole("button", { name: groupName });
+    expect(pinnedGroup.querySelector('[data-location-icon="device"]')).toBeTruthy();
+    expect(within(pinnedSection).getByRole("link", { name: "Device chat" })).toBeTruthy();
+    expect(within(pinnedSection).getByRole("link", { name: "Default chat" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Projects" })).toBeNull();
+    expect(JSON.parse(localStorage.getItem("rome-recent-chats-pinned-projects") ?? "[]")).toEqual([
+      "default",
+      "device:dev-1:/home/ubuntu/device-folder",
+    ]);
+
+    const actions = within(pinnedSection).getAllByRole("button", { name: "Project actions" });
+    await user.click(actions[1]);
+    await user.click(await screen.findByRole("menuitem", { name: "Unpin" }));
+    const regained = await screen.findByRole("region", { name: "Projects" });
+    expect(within(regained).getByRole("button", { name: groupName })).toBeTruthy();
+    expect(
+      within(screen.getByRole("region", { name: "Pinned" })).queryByRole("link", {
+        name: "Device chat",
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps project groups free of location icons while no chat is on a device", async () => {
+    mockSessions([
+      {
+        id: "default-chat",
+        name: "Default chat",
+        createdAt: "2026-07-02T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+      },
+    ]);
+    renderRecentChats();
+    const defaultGroup = await screen.findByRole("button", { name: "default" });
+    expect(defaultGroup.querySelector("[data-location-icon]")).toBeNull();
+  });
+
+  it("groups a device-folder chat under its folder, not under its default project", async () => {
+    // Pinning default must not pull the device chat into the pinned default group either.
+    localStorage.setItem("rome-recent-chats-pinned-projects", JSON.stringify(["default"]));
+    const deviceFolder = {
+      deviceId: "dev-1",
+      deviceName: "devbox-dev",
+      platform: "linux",
+      path: "/home/ubuntu/device-folder",
+    };
+    mockSessions([
+      {
+        id: "default-chat",
+        name: "Default chat",
+        createdAt: "2026-07-02T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+      },
+      {
+        id: "device-chat",
+        name: "Device chat",
+        createdAt: "2026-07-03T00:00:00.000Z",
+        activityAt: "2026-07-09T11:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+        deviceFolder,
+      },
+    ]);
+    const user = userEvent.setup();
+    renderRecentChats();
+
+    await screen.findByRole("link", { name: "Default chat" });
+    const pinnedSection = screen.getByRole("region", { name: "Pinned" });
+    expect(within(pinnedSection).getByRole("link", { name: "Default chat" })).toBeTruthy();
+    expect(within(pinnedSection).queryByRole("link", { name: "Device chat" })).toBeNull();
+
+    const projectsSection = screen.getByRole("region", { name: "Projects" });
+    const folderGroup = within(projectsSection).getByRole("button", {
+      name: "device-folder on devbox-dev",
+    });
+    // The folder icon still shows the open state; a laptop marks another computer.
+    expect(folderGroup.querySelector(".lucide-folder-open")).toBeTruthy();
+    expect(folderGroup.querySelector(".lucide-laptop")).toBeTruthy();
+    expect(folderGroup.textContent).toBe("device-folder");
+    const icon = folderGroup.querySelector('[data-location-icon="device"]') as HTMLElement;
+    await user.hover(icon);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip.textContent).toContain("devbox-dev");
+    expect(tooltip.textContent).toContain("/home/ubuntu/device-folder");
+    await user.unhover(icon);
+    expect(within(projectsSection).getByRole("link", { name: "Device chat" })).toBeTruthy();
+
+    // With a device chat in the list, Rome's projects mark their location too.
+    const defaultGroup = within(pinnedSection).getByRole("button", { name: "default" });
+    const cloud = defaultGroup.querySelector('[data-location-icon="rome"]') as HTMLElement;
+    expect(cloud.querySelector(".lucide-cloud")).toBeTruthy();
+    await user.hover(cloud);
+    expect((await screen.findByRole("tooltip")).textContent).toContain("Rome Cloud");
+    await user.unhover(cloud);
+
+    await user.click(
+      within(projectsSection).getByRole("button", { name: "New chat in this folder" }),
+    );
+    expect(JSON.parse(screen.getByTestId("location-state").textContent ?? "null")).toEqual({
+      deviceFolder: {
+        deviceId: "dev-1",
+        deviceName: "devbox-dev",
+        path: "/home/ubuntu/device-folder",
+        home: null,
+      },
+    });
   });
 
   it("does not render unread dots for the active session", async () => {
@@ -1017,8 +1270,7 @@ describe("RecentChats row menu shortcuts", () => {
   async function openRowMenu() {
     const user = userEvent.setup();
     renderRecentChats();
-    await screen.findByRole("link");
-    await user.click(screen.getByRole("button", { name: "Chat actions" }));
+    await user.click(await screen.findByRole("button", { name: "Chat actions" }));
     return user;
   }
 

@@ -1,3 +1,4 @@
+import type { DraftDeviceFolder } from "@/lib/device-folder";
 import {
   useCallback,
   useEffect,
@@ -30,6 +31,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import { SlotContent } from "@/components/slot";
 import "react-medium-image-zoom/dist/styles.css";
 import { cn } from "@/lib/utils";
 import { usePresentationMode } from "@/lib/presentation-mode";
@@ -40,8 +42,9 @@ import {
   traceDrawerContentInsetClass,
   type TraceDrawerTarget,
 } from "@/components/agent-trace/TraceDrawer";
-import { AgentAvatar } from "@/components/chat/AgentAvatar";
-import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
+import { SessionAvatar } from "@/components/chat/SessionAvatar";
+import { senderFromIdentity } from "@/components/chat/SenderAvatar";
+import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { prettyAgentName } from "@/lib/agent-name";
 import { artifactLocalName } from "@/lib/artifact-name";
@@ -66,7 +69,7 @@ import { useSmoothText } from "@/hooks/use-smooth-text";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
-import { useStreamingSessions } from "@/hooks/use-streaming-sessions";
+import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
@@ -192,7 +195,7 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   id: z.string(),
   sessionId: z.string(),
   turnId: z.string().nullable().optional(),
-  role: z.enum(["user", "assistant", "trace"]),
+  role: z.enum(["user", "assistant", "trace", "notification"]),
   content: z.string(),
   createdAt: z.string(),
   traceSummary: traceSummarySchema.nullable().optional(),
@@ -280,9 +283,15 @@ export interface ChatProps {
   centerDraftComposer?: boolean;
   /** Draft seeds for the composer, read when it mounts. */
   initialProjectName?: string;
+  initialDeviceFolder?: DraftDeviceFolder;
   initialAgentMention?: AgentMention | null;
   /** Receives the composer's handle, for a host that seeds or focuses the draft. */
   composerRef?: RefObject<ChatComposerHandle | null>;
+  /**
+   * A slot to draw the chat's bar into instead of a row above the transcript.
+   * The Mac app passes its title bar's, so the window has one row on top.
+   */
+  navbarSlot?: string;
 }
 
 export function Chat({
@@ -295,8 +304,10 @@ export function Chat({
   emptyState,
   centerDraftComposer = false,
   initialProjectName,
+  initialDeviceFolder,
   initialAgentMention,
   composerRef: hostComposerRef,
+  navbarSlot,
 }: ChatProps) {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
@@ -324,6 +335,7 @@ export function Chat({
   const mainSessionId = sessionId || createdSessionId;
   const mainSessionIdRef = useRef(mainSessionId);
   const [messages, setMessages] = useState<Map<string, ChatMessage[]>>(new Map());
+  const traceArchivedSessionsRef = useRef(new Set<string>());
   const [subagentIconByName, setSubagentIconByName] = useState<ReadonlyMap<string, string | null>>(
     () => new Map(),
   );
@@ -352,6 +364,7 @@ export function Chat({
     start: startSessionStream,
     update: updateSessionSnapshot,
     updateText: updateSessionAssistantText,
+    adoptAgentTurn: adoptSessionAgentTurn,
     end: endSessionStream,
   } = useStreamingSessions();
   const [streamError, setStreamError] = useState<string | ChatErrorNotice | null>(null);
@@ -568,6 +581,13 @@ export function Chat({
   useEffect(() => {
     floorSessionIdRef.current = floorSessionId;
   }, [floorSessionId]);
+  // A message shows its sender before the server has it, so the signed-in
+  // person's avatar appears on their bubble as they send.
+  const { data: viewer } = useDashboardIdentity();
+  const viewerSenderRef = useRef(senderFromIdentity(viewer));
+  useEffect(() => {
+    viewerSenderRef.current = senderFromIdentity(viewer);
+  }, [viewer]);
   const isReadVisibleSession = useCallback(
     (id: string) => id === mainSessionIdRef.current || id === floorSessionIdRef.current,
     [],
@@ -584,7 +604,11 @@ export function Chat({
   // Only the floor session streams (every shallower caller is suspended).
   const floorSessionStream = streamingSessions.get(floorSessionId) ?? null;
   const currentSnapshot = floorSessionStream?.snapshot ?? null;
-  const runningTurnId = floorSessionStream?.turnId ?? null;
+  // The `turnId` the stream was opened under addresses the follower and Stop.
+  // The transcript matches the turn by its runningTurnId, which differs for a
+  // backend task.
+  const floorStreamTurnId = floorSessionStream?.turnId ?? null;
+  const runningTurnId = runningTurnIdOf(floorSessionStream);
   const isActiveSessionStreaming = !!floorSessionStream;
   const awaitingGuardian = useMemo(
     () => isAwaitingGuardian(view, runningTurnId),
@@ -729,8 +753,8 @@ export function Chat({
   useEffect(() => {
     // The running turn lives in the floor session (the specialist during a
     // handoff), so report that — not main — to the host's turn-follow.
-    onSessionMessageRef.current?.({ sessionId: floorSessionId, turnId: runningTurnId });
-  }, [runningTurnId, floorSessionId]);
+    onSessionMessageRef.current?.({ sessionId: floorSessionId, turnId: floorStreamTurnId });
+  }, [floorStreamTurnId, floorSessionId]);
 
   // Fetch messages for a session
   const loadMessages = useCallback(
@@ -749,6 +773,9 @@ export function Chat({
           return;
         }
         const fetchedMessages = orderChatMessages(data);
+        if (fetchedMessages.some((message) => message.traceArchived))
+          traceArchivedSessionsRef.current.add(id);
+        else traceArchivedSessionsRef.current.delete(id);
         const dropMessageIds = options.dropLocalOptimistic
           ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
           : undefined;
@@ -773,6 +800,15 @@ export function Chat({
       }
     },
     [isReadVisibleSession, markSessionRead],
+  );
+
+  // A new message reactivates every turn's steps. Fetch server truth once,
+  // rather than waiting for the new turn to finish or guessing the cutoff here.
+  const refreshArchivedSession = useCallback(
+    (sid: string) => {
+      if (traceArchivedSessionsRef.current.delete(sid)) void loadMessages(sid, { force: true });
+    },
+    [loadMessages],
   );
 
   // Load messages when the main session changes (also covers initial mount).
@@ -807,10 +843,11 @@ export function Chat({
         next.set(sid, mergeChatMessage(existing, message));
         return next;
       });
+      refreshArchivedSession(sid);
       void markSessionRead(sid);
       onSessionMessageRef.current?.({ sessionId: sid, turnId: message.turnId ?? null });
     },
-    [markSessionRead],
+    [markSessionRead, refreshArchivedSession],
   );
   const handleSessionName = useCallback(
     (sid: string, event: z.infer<typeof sessionNameSchema>) => {
@@ -1015,6 +1052,18 @@ export function Chat({
             }
             continue;
           }
+          if (evt.event === "turn_id") {
+            // A backend task names the agent turn it runs. The entry keeps the
+            // `turnId` its stream was opened under; the transcript matches the
+            // turn by this id.
+            try {
+              const { turnId: agentTurnId } = JSON.parse(evt.data) as { turnId?: string };
+              if (agentTurnId) adoptSessionAgentTurn(sessionId, turnId, agentTurnId);
+            } catch {
+              // ignore parse errors
+            }
+            continue;
+          }
           if (evt.event === "session_status") {
             // SSE-driven status lets the UI flip the
             // Send/Stop button without polling /stream-status.
@@ -1050,7 +1099,13 @@ export function Chat({
 
       return shouldStop;
     },
-    [t, updateSessionSnapshot, updateSessionAssistantText, isReadVisibleSession],
+    [
+      t,
+      updateSessionSnapshot,
+      updateSessionAssistantText,
+      adoptSessionAgentTurn,
+      isReadVisibleSession,
+    ],
   );
 
   // Follow one turn to its end. A dropped SSE connection (mobile background,
@@ -1177,6 +1232,11 @@ export function Chat({
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
         startSessionStream(reattachSessionId, target.turnId);
+        // A backend turn already listed under its agent turn id hides its saved
+        // trace from the first render, before the replayed `turn_id` arrives.
+        if (target.agentTurnId) {
+          adoptSessionAgentTurn(reattachSessionId, target.turnId, target.agentTurnId);
+        }
         setStreamError(null);
         // Not cancelled with this effect: followTurn ends with its turn (or
         // on unmount), and the entry it holds keeps this poll from doubling up.
@@ -1197,7 +1257,13 @@ export function Chat({
       cancelled = true;
       if (pollTimer) clearTimeout(pollTimer);
     };
-  }, [floorSessionId, followTurn, streamReconnectRevision, startSessionStream]);
+  }, [
+    floorSessionId,
+    followTurn,
+    streamReconnectRevision,
+    startSessionStream,
+    adoptSessionAgentTurn,
+  ]);
 
   // Shared lifecycle for "post a turn → attach SSE → consume" so both the
   // composer send and the inline app-component submit go through the same
@@ -1262,6 +1328,7 @@ export function Chat({
           role: "user",
           content: optimisticUserContent,
           createdAt: sentAt,
+          sender: viewerSenderRef.current,
         });
       }
 
@@ -1301,6 +1368,7 @@ export function Chat({
         throw new Error(result.message || `post turn failed (${result.status})`);
       }
 
+      refreshArchivedSession(sendingSessionId);
       const createResp: CreateTurnResponse = result.data;
       const pendingTurnId = createResp.turnId;
       const turnsForSession = inflightTurnsRef.current.get(sendingSessionId) ?? new Set<string>();
@@ -1313,6 +1381,7 @@ export function Chat({
         role: "user",
         content: optimisticUserContent,
         createdAt: sentAt,
+        sender: viewerSenderRef.current,
       };
       putUserMessage(userMsg, immediateInputId);
 
@@ -1360,7 +1429,15 @@ export function Chat({
         }
       })();
     },
-    [followTurn, endSessionStream, startSessionStream, streamingSessionsRef, t, scrollToBottom],
+    [
+      followTurn,
+      endSessionStream,
+      startSessionStream,
+      streamingSessionsRef,
+      t,
+      scrollToBottom,
+      refreshArchivedSession,
+    ],
   );
 
   // Send a turn into the active session. The composer owns the input state
@@ -1385,13 +1462,21 @@ export function Chat({
             largeModelSelection: snapshot.largeModelSelection,
             reasoningEffort: snapshot.reasoningEffort,
             agentName: snapshot.agentMention?.agentName,
+            deviceFolder: snapshot.deviceFolder
+              ? { deviceId: snapshot.deviceFolder.deviceId, path: snapshot.deviceFolder.path }
+              : undefined,
           });
           sendingSessionId = created.id;
           controls.onSessionCreated?.();
         } catch (error) {
           setStreamError(
             error instanceof ChatApiError && error.message
-              ? error.message
+              ? snapshot.deviceFolder && error.status === 409
+                ? // Core answers a folder it could not check with a DeviceFilesErrorCode.
+                  t(`project.devices.errors.${error.message}`, {
+                    defaultValue: t("project.devices.errors.unavailable"),
+                  })
+                : error.message
               : t("stream.errors.createChatFallback"),
           );
           throw error;
@@ -1580,7 +1665,8 @@ export function Chat({
   const displayedStreaming = isActiveSessionStreaming;
 
   // The grouped speaker rows. Memoized so a streaming turn never rebuilds the
-  // transcript — runningTurnId/isStreaming only change at turn boundaries.
+  // transcript. runningTurnId and isStreaming change only at turn boundaries,
+  // and once more when a backend turn names its agent turn.
   const rows = useMemo(
     () =>
       buildRows(displayMessages, identityBySession, mainIdentity, {
@@ -1792,6 +1878,90 @@ export function Chat({
     setTraceDrawerTarget(null);
   }, [mainSessionId]);
 
+  const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
+
+  const navbar = (
+    <>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {untitledEmptyChat ? null : (
+          <>
+            <SessionAvatar
+              iconUrl={pinnedAgentMention?.iconUrl}
+              label={pinnedAgentMention?.appLabel}
+              model={model}
+              reasoningEffort={reasoningEffort}
+            />
+            <span className="truncate text-ui text-foreground">
+              {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
+            </span>
+            {sessionName?.trim() && pinnedAgentMention && (
+              <span className="shrink-0 truncate text-aux text-muted-foreground">
+                {pinnedAgentMention.appLabel}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+      {mainSessionId && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton
+              size="sm"
+              label={t("navbar.more")}
+              icon={<MoreHorizontal />}
+              className="text-muted-foreground hover:text-foreground"
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => void handlePin()}>
+              {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+              {pinnedAt ? t("navbar.unpin") : t("navbar.pin")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => enterShareMode()}>
+              <Share2 className="size-4" />
+              {t("share.title", "Share chat")}
+            </DropdownMenuItem>
+            {isArchived ? (
+              <DropdownMenuItem onSelect={() => void handleUnarchive()}>
+                <ArchiveRestore className="size-4" />
+                {t("navbar.unarchive")}
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onSelect={() => void handleArchive()}>
+                <Archive className="size-4" />
+                {t("navbar.archive")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
+              <Trash2 className="size-4" />
+              {t("navbar.delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {toolView.collapsed && (
+        <IconButton
+          size="sm"
+          data-coach="add-widget"
+          aria-expanded={false}
+          onClick={() => setToolsCollapsed(false)}
+          label={t("chat.expandTools", { ns: "common" })}
+          icon={
+            <span className="relative">
+              <PanelRightOpen />
+              {toolView.unreadIds.length > 0 && (
+                <span
+                  className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
+                  aria-label={t("chat.toolUpdated", { ns: "common" })}
+                />
+              )}
+            </span>
+          }
+        />
+      )}
+    </>
+  );
+
   return (
     <TooltipProvider delayDuration={150}>
       {sessionEventIds.map((sid) => (
@@ -1827,85 +1997,18 @@ export function Chat({
             </div>
           )}
 
-          <div className="z-20 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <AgentAvatar
-                iconUrl={pinnedAgentMention?.iconUrl}
-                label={pinnedAgentMention?.appLabel}
-                size="sm"
-                className="shrink-0"
-              />
-              <span className="truncate text-ui text-foreground">
-                {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
-              </span>
-              <SessionModelLabel model={model} reasoningEffort={reasoningEffort} />
-              {sessionName?.trim() && pinnedAgentMention && (
-                <span className="shrink-0 truncate text-aux text-muted-foreground">
-                  {pinnedAgentMention.appLabel}
-                </span>
-              )}
+          {/* No rule under the bar: the chat canvas runs up to the top. A new
+              chat with no app has nothing to name yet, since the welcome below
+              says it already, so the bar keeps only its height and controls
+              and the page does not move when the first message starts the
+              session. */}
+          {navbarSlot ? (
+            <SlotContent name={navbarSlot}>{navbar}</SlotContent>
+          ) : (
+            <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
+              {navbar}
             </div>
-            {mainSessionId && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <IconButton
-                    size="sm"
-                    label={t("navbar.more")}
-                    icon={<MoreHorizontal />}
-                    className="text-muted-foreground hover:text-foreground"
-                  />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => void handlePin()}>
-                    {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-                    {pinnedAt ? t("navbar.unpin") : t("navbar.pin")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => enterShareMode()}>
-                    <Share2 className="size-4" />
-                    {t("share.title", "Share chat")}
-                  </DropdownMenuItem>
-                  {isArchived ? (
-                    <DropdownMenuItem onSelect={() => void handleUnarchive()}>
-                      <ArchiveRestore className="size-4" />
-                      {t("navbar.unarchive")}
-                    </DropdownMenuItem>
-                  ) : (
-                    <DropdownMenuItem onSelect={() => void handleArchive()}>
-                      <Archive className="size-4" />
-                      {t("navbar.archive")}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onSelect={() => setDeleteConfirmOpen(true)}
-                  >
-                    <Trash2 className="size-4" />
-                    {t("navbar.delete")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            {toolView.collapsed && (
-              <IconButton
-                size="sm"
-                data-coach="add-widget"
-                aria-expanded={false}
-                onClick={() => setToolsCollapsed(false)}
-                label={t("chat.expandTools", { ns: "common" })}
-                icon={
-                  <span className="relative">
-                    <PanelRightOpen />
-                    {toolView.unreadIds.length > 0 && (
-                      <span
-                        className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
-                        aria-label={t("chat.toolUpdated", { ns: "common" })}
-                      />
-                    )}
-                  </span>
-                }
-              />
-            )}
-          </div>
+          )}
           {/* The message scroller — the ONLY scrolling node in the chat. It is
               bounded by the /chat viewport shell, so message reflow (mermaid,
               late media) stays inside here and never resizes the document or
@@ -1968,10 +2071,19 @@ export function Chat({
                 ("scroll under the composer") instead of stopping at a solid dock.
                 It talks to whoever holds the floor (the open handoff's specialist,
                 or the main agent). In share mode it's swapped for the ShareBar,
-                which configures + mints the link for the turns selected above. */}
+                which configures + mints the link for the turns selected above.
+
+                Below md the floor paints the canvas instead. Its side gutters
+                and bottom padding sit outside the box's blur, and on a phone a
+                transparent strip there shows table rows and text beside and
+                below the box, which reads as a second transcript. The floor
+                also takes pointer events there, so a tap on the canvas cannot
+                land on a link it hides. It stays inside the scroller, so the
+                scroll and keyboard geometry match the desktop layout. */}
               <div
+                data-chat-floor
                 className={cn(
-                  "pointer-events-none sticky bottom-0 z-10 px-3 md:px-6",
+                  "pointer-events-none sticky bottom-0 z-10 px-3 max-md:pointer-events-auto max-md:bg-chat-canvas md:px-6",
                   // Presentation mode gives the draft's bottom gap 5x its normal
                   // size so a recording framed on the empty state keeps the
                   // composer clear of the capture's lower edge.
@@ -2048,6 +2160,7 @@ export function Chat({
                       showProjectSelector={!mainSessionId}
                       showModelSelector={!mainSessionId}
                       initialProjectName={initialProjectName}
+                      initialDeviceFolder={initialDeviceFolder}
                       initialAgentMention={initialAgentMention}
                       isStreaming={displayedStreaming}
                       onStop={() => void stopMessage()}

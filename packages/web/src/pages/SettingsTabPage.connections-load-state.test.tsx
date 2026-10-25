@@ -79,7 +79,7 @@ describe("Settings connections request states", () => {
         connections: [
           {
             id: "conn-webchat",
-            service: "webchat",
+            connectionKind: "webchat",
             label: "Webchat",
             grants: {},
             display: {},

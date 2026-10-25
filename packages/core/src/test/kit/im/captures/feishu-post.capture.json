@@ -1,0 +1,186 @@
+{
+  "platform": "feishu",
+  "recordedOn": "2026-09-18",
+  "client": "@larksuiteoapi/node-sdk 1.68.0",
+  "notes": "A group chat with a dedicated test app: a post sent, a reply to it that opened a thread, an edit of the first post, a post holding one Markdown element, and a read of a message id that does not exist. IDs, the app and the tenant are synthetic. Ported from the capture in #439.",
+  "volatile": ["create_time", "update_time"],
+  "exchanges": [
+    {
+      "label": "create",
+      "request": {
+        "method": "POST",
+        "path": "/open-apis/im/v1/messages?receive_id_type=chat_id",
+        "body": {
+          "receive_id": "oc_fixture_chat",
+          "msg_type": "post",
+          "content": "{\"zh_cn\":{\"title\":\"Rome fixture capture\",\"content\":[[{\"tag\":\"text\",\"text\":\"Rich text 中文 \"},{\"tag\":\"a\",\"text\":\"Rome\",\"href\":\"https://example.com/\"}],[{\"tag\":\"text\",\"text\":\"Second paragraph\"}]]}}"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "code": 0,
+          "data": {
+            "body": {
+              "content": "{\"title\":\"Rome fixture capture\",\"content\":[[{\"tag\":\"text\",\"text\":\"Rich text 中文 \",\"style\":[]},{\"tag\":\"a\",\"href\":\"https://example.com/\",\"text\":\"Rome\",\"style\":[]}],[{\"tag\":\"text\",\"text\":\"Second paragraph\",\"style\":[]}]],\"content_v2\":[[{\"tag\":\"text\",\"text\":\"Rich text 中文 \",\"style\":[]},{\"tag\":\"a\",\"href\":\"https://example.com/\",\"text\":\"Rome\",\"style\":[]}],[{\"tag\":\"text\",\"text\":\"Second paragraph\",\"style\":[]}]]}"
+            },
+            "chat_id": "oc_fixture_chat",
+            "create_time": "1700000000000",
+            "deleted": false,
+            "message_id": "om_1",
+            "msg_type": "post",
+            "sender": {
+              "id": "cli_0123456789abcdef",
+              "id_type": "app_id",
+              "sender_type": "app",
+              "tenant_key": "fixture-tenant"
+            },
+            "update_time": "1700000000000",
+            "updated": false
+          },
+          "msg": "success"
+        }
+      }
+    },
+    {
+      "label": "reply-in-thread",
+      "request": {
+        "method": "POST",
+        "path": "/open-apis/im/v1/messages/om_1/reply",
+        "body": {
+          "msg_type": "post",
+          "content": "{\"zh_cn\":{\"title\":\"Rome fixture capture\",\"content\":[[{\"tag\":\"text\",\"text\":\"Rich text 中文 \"},{\"tag\":\"a\",\"text\":\"Rome\",\"href\":\"https://example.com/\"}],[{\"tag\":\"text\",\"text\":\"Second paragraph\"}]]}}",
+          "reply_in_thread": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "code": 0,
+          "data": {
+            "body": {
+              "content": "{\"title\":\"Rome fixture capture\",\"content\":[[{\"tag\":\"text\",\"text\":\"Rich text 中文 \",\"style\":[]},{\"tag\":\"a\",\"href\":\"https://example.com/\",\"text\":\"Rome\",\"style\":[]}],[{\"tag\":\"text\",\"text\":\"Second paragraph\",\"style\":[]}]],\"content_v2\":[[{\"tag\":\"text\",\"text\":\"Rich text 中文 \",\"style\":[]},{\"tag\":\"a\",\"href\":\"https://example.com/\",\"text\":\"Rome\",\"style\":[]}],[{\"tag\":\"text\",\"text\":\"Second paragraph\",\"style\":[]}]]}"
+            },
+            "chat_id": "oc_fixture_chat",
+            "create_time": "1700000000000",
+            "deleted": false,
+            "message_id": "om_2",
+            "msg_type": "post",
+            "parent_id": "om_1",
+            "root_id": "om_1",
+            "sender": {
+              "id": "cli_0123456789abcdef",
+              "id_type": "app_id",
+              "sender_type": "app",
+              "tenant_key": "fixture-tenant"
+            },
+            "thread_id": "omt_1",
+            "update_time": "1700000000000",
+            "updated": false
+          },
+          "msg": "success"
+        }
+      }
+    },
+    {
+      "label": "update",
+      "request": {
+        "method": "PUT",
+        "path": "/open-apis/im/v1/messages/om_1",
+        "body": {
+          "msg_type": "post",
+          "content": "{\"zh_cn\":{\"title\":\"Rome fixture capture\",\"content\":[[{\"tag\":\"text\",\"text\":\"Streaming preview 中文\"}]]}}"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "code": 0,
+          "data": {
+            "body": {
+              "content": "{\"title\":\"Rome fixture capture\",\"content\":[[{\"tag\":\"text\",\"text\":\"Streaming preview 中文\",\"style\":[]}]],\"content_v2\":[[{\"tag\":\"text\",\"text\":\"Streaming preview 中文\",\"style\":[]}]]}"
+            },
+            "chat_id": "oc_fixture_chat",
+            "create_time": "1700000000000",
+            "deleted": false,
+            "message_id": "om_1",
+            "msg_type": "post",
+            "sender": {
+              "id": "cli_0123456789abcdef",
+              "id_type": "app_id",
+              "sender_type": "app",
+              "tenant_key": "fixture-tenant"
+            },
+            "thread_id": "omt_1",
+            "update_time": "1700000000000",
+            "updated": true
+          },
+          "msg": "success"
+        }
+      }
+    },
+    {
+      "label": "create-markdown",
+      "request": {
+        "method": "POST",
+        "path": "/open-apis/im/v1/messages?receive_id_type=chat_id",
+        "body": {
+          "receive_id": "oc_fixture_chat",
+          "msg_type": "post",
+          "content": "{\"zh_cn\":{\"title\":\"\",\"content\":[[{\"tag\":\"md\",\"text\":\"Rome fixture capture: **Markdown** 中文\"}]]}}"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "code": 0,
+          "data": {
+            "body": {
+              "content": "{\"title\":\"\",\"content\":[[{\"tag\":\"text\",\"text\":\"Rome fixture capture: \",\"style\":[]},{\"tag\":\"text\",\"text\":\"Markdown\",\"style\":[\"bold\"]},{\"tag\":\"text\",\"text\":\" 中文\",\"style\":[]}]],\"content_v2\":[[{\"tag\":\"md\",\"text\":\"Rome fixture capture: **Markdown** 中文\"}]]}"
+            },
+            "chat_id": "oc_fixture_chat",
+            "create_time": "1700000000000",
+            "deleted": false,
+            "message_id": "om_1",
+            "msg_type": "post",
+            "sender": {
+              "id": "cli_0123456789abcdef",
+              "id_type": "app_id",
+              "sender_type": "app",
+              "tenant_key": "fixture-tenant"
+            },
+            "update_time": "1700000000000",
+            "updated": false
+          },
+          "msg": "success"
+        }
+      }
+    },
+    {
+      "label": "missing-message",
+      "request": {
+        "method": "GET",
+        "path": "/open-apis/im/v1/messages/om_00000000000000000000000000000000",
+        "body": {}
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "code": 99992354,
+          "msg": "The request you send is not a valid {open_message_id} or not exists, and the example value is {om_1****************dfe}. Invalid ids: [om_00000000000000000000000000000000] . Please see field_violations for details and refer to API documentation to correct accordingly and resubmit",
+          "error": {
+            "log_id": "redacted",
+            "troubleshooter": "redacted",
+            "field_violations": [
+              {
+                "field": "message_id",
+                "value": "om_00000000000000000000000000000000",
+                "description": "id not exist"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

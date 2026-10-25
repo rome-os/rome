@@ -206,7 +206,7 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
   botScheme.setup = makeTelegramSetup({ probeBotIdentity });
 
   return {
-    service: "telegram",
+    connectionKind: "telegram",
     severalAccounts: true,
     reviveProfile: (_grant, record) => reviveTelegramProfile(record),
     accountIdOf: (_grant, record) => (typeof record.botId === "string" && record.botId) || null,
@@ -256,9 +256,9 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
               // long-poll finish; relock teardown ignores the return value.
               return adapter.stop();
             },
-            async send(conversationId, msg) {
+            async send(chatId, msg) {
               try {
-                return await adapter.send(conversationId, msg);
+                return await adapter.send(chatId, msg);
               } catch (err) {
                 // A 401 from sendMessage is a refused credential,
                 // surfaced as CredentialRejected so the runtime renews/degrades.

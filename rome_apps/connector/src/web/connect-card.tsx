@@ -6,7 +6,13 @@ import {
   navigateRome,
   type AppComponentContext,
 } from "@rome-os/app-web-sdk";
-import { CATALOG_BY_SLUG, titleCase, type ConnectedAccount } from "@/lib/connections";
+import {
+  CATALOG_BY_SLUG,
+  isRomeSettingsLink,
+  romeManagedGrantsUsable,
+  titleCase,
+  type ConnectedAccount,
+} from "@/lib/connections";
 import { wasDismissed } from "@/lib/interaction";
 
 // The single inline "connect an app" card the connector_connect action renders
@@ -67,7 +73,9 @@ interface CredentialStatusAdapter {
 }
 
 interface ConnectionStatus {
-  service: string;
+  connectionKind?: string;
+  /** The kind of connection, as a host from before the rename names it. */
+  service?: string;
   grants: Record<string, string>;
   connect: { url: string | null; available: boolean; unavailableReason: string | null } | null;
 }
@@ -86,7 +94,7 @@ function createRomeManagedAdapter(slug: string, name: string): CredentialStatusA
       const res = await fetch("/api/connections", { credentials: "include", cache: "no-store" });
       if (!res.ok) return null;
       const body = (await res.json()) as { connections?: ConnectionStatus[] };
-      return body.connections?.find((c) => c.service === slug) ?? null;
+      return body.connections?.find((c) => (c.connectionKind ?? c.service) === slug) ?? null;
     } catch {
       return null;
     }
@@ -116,9 +124,7 @@ function createRomeManagedAdapter(slug: string, name: string): CredentialStatusA
     },
     async isConnected() {
       const status = await loadStatus();
-      // Conferred = any grant not unauthorized (a degraded grant is still a
-      // connected account on file — same reading as the dashboard).
-      return Object.values(status?.grants ?? {}).some((state) => state !== "unauthorized");
+      return romeManagedGrantsUsable(status?.grants);
     },
   };
 }
@@ -309,6 +315,13 @@ function ConnectCard({ ctx }: { ctx: AppComponentContext }) {
       }
       if (result.kind === "already_connected") {
         finish();
+        return;
+      }
+      if (isRomeSettingsLink(result.authorizationUrl)) {
+        // A Settings page needs the Rome session, so stay in this window; the
+        // card re-checks the connection when the guardian comes back to chat.
+        navigateRome({ path: "settings", tab: "connections" });
+        setPhase("authorizing");
         return;
       }
       // Authorize in a new tab (not a full navigation) so the chat transcript and

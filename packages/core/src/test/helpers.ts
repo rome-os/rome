@@ -1,4 +1,4 @@
-import { notifyPairingResolution } from "../channels/pairing.js";
+import type { ExternalAgents } from "../channels/agents-accounts.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -44,14 +44,15 @@ import { SystemUpgradeService } from "../system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type {
   ChannelMessage,
-  ConversationId,
-  ConversationSettingsControl,
+  ChatId,
+  ChatSettingsControl,
   MessageReceipt,
 } from "@rome-os/app-runtime";
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { OutboxRepository } from "../db/repositories/outbox.js";
@@ -67,7 +68,7 @@ import { channelList } from "../channels/channel-list.js";
 import { createChannelsService } from "../channels/channels-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
-import type { ServiceOfChannel } from "../db/repositories/channel-records.js";
+import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
@@ -136,13 +137,13 @@ function migratedSystemImage(): Buffer {
   return migratedImage;
 }
 
-/** Maps every channel to itself. Valid only where no service has a later channel. */
-export const identityServiceOf: ServiceOfChannel = (channel) => channel;
+/** Maps every channel to itself. Valid only where no connection kind has a later channel. */
+export const identityConnectionKindOf: ConnectionKindOfChannel = (channel) => channel;
 
-/** Maps a channel to its service through `db`'s channel records, as Rome does. */
-export function recordedServiceOf(db: DrizzleDb): ServiceOfChannel {
+/** Maps a channel to its connection kind through `db`'s channel records, as Rome does. */
+export function recordedConnectionKindOf(db: DrizzleDb): ConnectionKindOfChannel {
   const records = new ChannelRecordsRepository(db);
-  return (channel) => records.serviceOf(channel);
+  return (channel) => records.connectionKindOf(channel);
 }
 
 /** Opens a private in-memory database at the latest system schema. Each call
@@ -167,7 +168,7 @@ export function createActionEngineRepos(
 ): ActionEngineRepositories {
   return {
     executions: new ActionExecutionsRepository(db),
-    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, recordedServiceOf(db))),
+    approvals: new ApprovalsRepository(db),
     journal: new ExecutionJournalRepository(db),
   };
 }
@@ -234,7 +235,7 @@ let sentCount = 0;
 
 /** One message Rome sent on a fake transport. */
 export interface SentMessage {
-  conversationId: ConversationId;
+  chatId: ChatId;
   message: OutgoingMessage;
 }
 
@@ -253,12 +254,12 @@ export class FakeTransport {
 
   constructor(readonly channel = "test") {}
 
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
-    this.sentMessages.push({ conversationId, message });
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    this.sentMessages.push({ chatId, message });
     // A message id, the way every real talker answers with one. The outbox
     // recognizes a delivered message by it, so a Talk that named nothing
     // would make every send untrackable in tests and only in tests.
-    return { conversationId, messageId: `sent-${++sentCount}` };
+    return { chatId, messageId: `sent-${++sentCount}` };
   }
 
   /** What the Connection's talker delivers through. */
@@ -280,9 +281,9 @@ export class FakeTransport {
   }
 }
 
-/** Every Connection backs the channel named after its service, as when each
- *  service holds one Connection. */
-export const serviceChannelOf: ChannelOf = (connection) => connection.service;
+/** Every Connection backs the channel named after its connection kind, as when each
+ *  connection kind holds one Connection. */
+export const kindChannelOf: ChannelOf = (connection) => connection.connectionKind;
 
 /** What a test Connection's live talker offers: sending and its features. */
 export type TestTalker = Omit<Talker, "start" | "stop">;
@@ -293,22 +294,23 @@ export type TestConnections = ConnectionPortsDeps["registry"] &
   Pick<ConnectionRegistry, "get" | "all">;
 
 /**
- * Builds the test Connections. `talker` edits one service's talker, for a test
+ * Builds the test Connections. `talker` edits one connection kind's talker, for a test
  * that fakes what a Connection offers; the default talker addresses a direct
  * chat by the contact, like the two channels that ship with sending. Every
  * Connection hears its transport's deliveries.
  */
 export function createTestConnections(
   transports: ReadonlyMap<string, FakeTransport>,
-  talker: (service: string, talker: TestTalker) => TestTalker = (_service, talker) => talker,
+  talker: (connectionKind: string, talker: TestTalker) => TestTalker = (_connectionKind, talker) =>
+    talker,
 ): TestConnections {
   const connections = new Map<string, Connection>();
-  for (const [service, transport] of transports) {
-    const id = `test:${service}`;
-    const live = talker(service, talkerOver(transport));
+  for (const [connectionKind, transport] of transports) {
+    const id = `test:${connectionKind}`;
+    const live = talker(connectionKind, talkerOver(transport));
     connections.set(id, {
       id,
-      service,
+      connectionKind,
       withTalker: (call: (talker: TestTalker) => unknown) => call(live),
       hearTalker: (handler: (message: ChannelMessage) => Promise<void>) =>
         transport.listen(handler),
@@ -316,10 +318,10 @@ export function createTestConnections(
       status: () => ({ talk: { state: "unlocked" } }),
     } as unknown as Connection);
   }
-  const find = (service: string) => connections.get(`test:${service}`);
+  const find = (connectionKind: string) => connections.get(`test:${connectionKind}`);
   return {
-    find: (service) => {
-      const connection = find(service);
+    find: (connectionKind) => {
+      const connection = find(connectionKind);
       return connection ? [connection] : [];
     },
     get: (id) => {
@@ -328,26 +330,30 @@ export function createTestConnections(
       return connection;
     },
     all: () => [...connections.values()],
-    getDescriptor: (service) =>
-      find(service)
-        ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
+    getDescriptor: (connectionKind) =>
+      find(connectionKind)
+        ? ({
+            connectionKind,
+            auth: {},
+            capabilities: { talker: {} },
+          } as unknown as ConnectionDescriptor)
         : null,
     // Every test Connection is unlocked from the start, so a handler hears
     // each of them at once, as the registry's replay does.
     onUnlocked: (_capability, handler) => {
       for (const connection of connections.values()) handler(connection);
     },
-    registeredServices: () => [...transports.keys()],
+    registeredKinds: () => [...transports.keys()],
   };
 }
 
 /** A talker over a fake transport. */
 function talkerOver(transport: FakeTransport): TestTalker {
   return {
-    send: (conversationId, message) => transport.send(conversationId, message),
+    send: (chatId, message) => transport.send(chatId, message),
     directMessaging: {
-      async conversationFor(channelUserId: string) {
-        return channelUserId as ConversationId;
+      async chatFor(channelUserId: string) {
+        return channelUserId as ChatId;
       },
     },
   };
@@ -369,7 +375,7 @@ export function testChannels(
     db: deps.db,
     whatsAppAccounts: deps.whatsAppAccounts,
     linkedInAccounts: deps.linkedInAccounts,
-    connections: { registry: connections, channelOf: serviceChannelOf },
+    connections: { registry: connections, channelOf: kindChannelOf },
   });
 }
 
@@ -378,7 +384,7 @@ export function channelNamed(channels: Channels): (name: string) => Channel | nu
   return (name) => channels.find((channel) => channel.name === name) ?? null;
 }
 
-const emptyConversationSettings: ConversationSettingsControl = {
+const emptyChatSettings: ChatSettingsControl = {
   async list() {
     return { items: [] };
   },
@@ -420,7 +426,7 @@ export function buildMessage(overrides: Partial<ChannelMessage> = {}): ChannelMe
     channel: "telegram",
     direction: "inbound",
     messageId: "msg-001",
-    conversationId: "thread-001" as ConversationId,
+    chatId: "thread-001" as ChatId,
     senderId: "user-123",
     senderDisplayName: "Test User",
     text: "Hello, world!",
@@ -473,6 +479,8 @@ export interface TestDeps extends ApiDeps {
 
 export interface BuildTestDepsOptions {
   channels?: string[];
+  /** The agents Rome Cloud lists. Agents is not connected by default. */
+  assistants?: ExternalAgents;
 }
 
 const unavailableFavorService: FavorService = {
@@ -531,7 +539,7 @@ export async function buildTestDeps(
   }
 
   const sessionsRepo = new SessionsRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db, recordedServiceOf(db));
+  const personMappingRepo = new PersonMappingRepository(db, recordedConnectionKindOf(db));
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -541,7 +549,7 @@ export async function buildTestDeps(
   const connections = createTestConnections(transports);
   const channels = testChannels({ db, whatsAppAccounts, linkedInAccounts }, connections);
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
-  const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
+  const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
   // A private env object per deps bag: route tests exercise apply/remove
   // without touching the real process.env of the test runner.
@@ -684,7 +692,10 @@ export async function buildTestDeps(
   // Same provider set the daemon registers before the API comes up, so
   // routine trigger validation behaves identically here.
   routineEngine.registerProvider("schedule", new ScheduleTriggerProvider(routinesRepo));
-  routineEngine.registerProvider("event-bus", new EventBusTriggerProvider(new EventBus()));
+  routineEngine.registerProvider(
+    "event-bus",
+    new EventBusTriggerProvider(new EventBus(), routinesRepo),
+  );
 
   // Mirror daemon boot: the auth-edge snapshot is loaded from the persisted
   // `publicAccess` setting before serving (src/index.ts). Tests that change
@@ -699,19 +710,19 @@ export async function buildTestDeps(
   const channelsService = createChannelsService({
     channels: () => channels,
     registry: connections,
-    channelOf: serviceChannelOf,
+    channelOf: kindChannelOf,
   });
 
   return {
     connections,
-    notifyPairingResolution: (approval) => notifyPairingResolution(connections, approval),
     channelsService,
-    conversationSettings: emptyConversationSettings,
+    chatSettings: emptyChatSettings,
     actionEngine,
     actionLoader,
     db,
     sessionsRepo,
     personMappingRepo,
+    guardianLinkCodes: new GuardianLinkCodes(),
     outboxRepo,
     whatsAppStoreRepo,
     whatsAppAccounts,
@@ -719,6 +730,7 @@ export async function buildTestDeps(
     linkedInAccounts,
     channels,
     accountNames,
+    assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,
     approvalsRepo,
     approvalHandler,
@@ -766,6 +778,10 @@ export async function buildTestDeps(
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),
     nodeDevices: {
       start: async () => {},
+      listFiles: async () => ({ ok: false, code: "offline" }),
+      listDevices: async () => ({ devices: [] }),
+      renameDevice: async () => ({ ok: true }),
+      removeDevice: async () => ({ ok: true }),
       getStatus: async () => ({
         connection: "not_configured",
         checkedAt: new Date().toISOString(),

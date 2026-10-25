@@ -37,6 +37,8 @@ export interface AppView extends Omit<AppEntry, "state"> {
   iconAbsolutePath?: string;
   /** Passive manifest metadata. Never use this to decide whether the app can run. */
   includeSource?: boolean;
+  /** Passive manifest metadata: keep the app out of the launcher surfaces. */
+  hideInLauncher?: boolean;
 }
 
 export interface ResolvedArtifacts {
@@ -46,7 +48,10 @@ export interface ResolvedArtifacts {
   hook: readonly ArtifactRef[];
 }
 
-/** Fully resolved app: present only when `state === "installed"` and resolve succeeded. */
+/**
+ * App whose bundle is loaded: an enabled app in state `installed`, or one in
+ * state `installing` that keeps its previous bundle until the install ends.
+ */
 export interface ResolvedApp extends AppView {
   manifest: RomeAppManifest;
   /** Absolute path to the active bundle root (the directory the `active` symlink resolves to). */
@@ -63,7 +68,7 @@ export interface ResolvedApp extends AppView {
   db: ResolvedRomeAppDbMetadata | null;
 }
 
-/** Unresolved views (installing, broken, disabled) carry no `manifest`. */
+/** Unresolved views (first install, uninstalling, failed, broken, disabled) carry no `manifest`. */
 export function isResolvedApp(view: AppView | null | undefined): view is ResolvedApp {
   return view != null && "manifest" in view;
 }

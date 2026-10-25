@@ -787,9 +787,9 @@ async function activateRoutineDraft(
     return fallback("you are not permitted to create routines directly");
   }
 
-  // create_routine checks only that the target exists; run the same args check
-  // the card's "Turn it on" gets, so an auto-enabled routine can't be saved
-  // with args that fail on every fire.
+  // create_routine runs the same args check. This copy runs in-process against
+  // the session's registry, so a draft with bad args is rejected without
+  // starting a create_routine execution that would only record a failure.
   const argsError = deps.validateArgs(draft.actionName, draft.args);
   if (argsError) {
     return text(
@@ -1062,6 +1062,16 @@ const ASK_QUESTION_COMPONENT_ID = "question-card";
 const ASK_QUESTION_PARK_DIRECTIVE =
   "The question card has been shown to the guardian. Their answers will arrive as the next turn's prompt — do not call any further tools or send another message until then. When you reply, describe only what this step does; do not claim a later step has already happened.";
 
+/** Whether a valid `ask_question` call parks the turn on a question card.
+ * Otherwise it relays the questions as prose. Providers that tell their
+ * runtime a park ends the response read this, so they cannot drift from the
+ * handler. */
+export function askQuestionParksOnCard(
+  params: Pick<FacadeParams, "supportsInteractiveSurface" | "interactiveSurfaceDetached">,
+): boolean {
+  return params.supportsInteractiveSurface === true && params.interactiveSurfaceDetached !== true;
+}
+
 /** Shape the `ask_question` tool input into a `pendingInteraction` payload that
  * the webchat drain renders as the host built-in question-card component
  * (render.builtin = true, appId = "core"); the guardian's answer resumes the
@@ -1143,9 +1153,15 @@ function askQuestionsToPromptText(questions: Record<string, unknown>[]): string 
 const DEFER_DESCRIPTION =
   "Schedule a wake-up later in THIS SAME conversation, with full context intact — use it when you're " +
   "watching something that isn't ready yet (a CI run, a build, a reply) instead of ending the turn empty. " +
-  "Give a short `name` for what you're watching (it becomes the routine's name) and one of `afterMinutes` or `at`. " +
-  "When the time comes you're pinged back in this thread with the whole conversation still in context, so just " +
-  "re-evaluate and either finish or `defer` again to check later (minimum one minute, no limit on re-defers). " +
+  "Give a short `name` for what you're watching (it becomes the routine's name) and exactly one of " +
+  "`afterMinutes`, `at`, or `event`. Prefer `event` when something announces completion (CI finished, a PR " +
+  "merged, a reply): it wakes as soon as a matching event-bus event is published, once, on the first match, " +
+  "with no timeout. Look up the event name and payload fields with the search_event_catalog action first. " +
+  "For a `subscribable` type, filter on one of its `keys` (e.g. repository.full_name); defer then subscribes " +
+  "at the provider and fails with the reason if it can't. Events are not replayed and a new subscription " +
+  "only sees future events: after an event defer, check the current state once more, and if what you're " +
+  "waiting for already happened, handle it now. When you wake you're pinged back in this thread with the whole conversation still in context, so " +
+  "just re-evaluate and either finish or `defer` again (minimum one minute, no limit on re-defers). " +
   "After calling defer, write one short line confirming you'll keep watch, then end your turn.";
 
 function buildDeferFacadeTool(
@@ -1168,12 +1184,46 @@ function buildDeferFacadeTool(
           type: "integer",
           minimum: 1,
           description:
-            "Minutes from now until wakeup, e.g. 5 (five minutes) or 120 (two hours). Minimum 1. Provide exactly one of afterMinutes or at.",
+            "Minutes from now until wakeup, e.g. 5 (five minutes) or 120 (two hours). Minimum 1. Provide exactly one of afterMinutes, at, or event.",
         },
         at: {
           type: "string",
           description:
-            "Absolute wakeup time as an ISO 8601 instant, e.g. 2026-06-25T14:30:00Z. Provide exactly one of afterMinutes or at.",
+            "Absolute wakeup time as an ISO 8601 instant, e.g. 2026-06-25T14:30:00Z. Provide exactly one of afterMinutes, at, or event.",
+        },
+        event: {
+          type: "object",
+          description:
+            "Wake on the next event-bus event that matches. Provide exactly one of afterMinutes, at, or event.",
+          required: ["eventName"],
+          properties: {
+            eventName: {
+              type: "string",
+              description:
+                "The exact event type, from search_event_catalog, e.g. provider:event:github.workflow_run.",
+            },
+            sourcePattern: {
+              type: "string",
+              description:
+                "Optional: only match events from this source (an appId); a single * matches any run of characters.",
+            },
+            filter: {
+              type: "array",
+              description:
+                "Optional payload conditions, AND-ed together. Each compares the payload value at a dot-path, as a string, for equality.",
+              items: {
+                type: "object",
+                required: ["field", "equals"],
+                properties: {
+                  field: {
+                    type: "string",
+                    description: "Dot-path into the payload, e.g. pull_request.number",
+                  },
+                  equals: { type: "string", description: "Value the field must equal" },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -1257,7 +1307,7 @@ function buildInteractiveTools(
         // reply in the next turn, so a clarifying question never dead-ends.
         // Detached sessions (exact forks) advertise the card but have no
         // drain to mount it, so they take the same prose path.
-        if (!supportsInteractiveSurface || interactiveSurfaceDetached) {
+        if (!askQuestionParksOnCard({ supportsInteractiveSurface, interactiveSurfaceDetached })) {
           return {
             content: [
               {
@@ -1396,6 +1446,7 @@ function buildInteractiveTools(
         args: {
           type: "object",
           description: "A single argument object for the action. Not an array.",
+          additionalProperties: true,
         },
         activate: {
           type: "boolean",

@@ -13,7 +13,7 @@
 // agent id, so a rename or a reused name never moves a conversation or a
 // link. Cloud refuses a send to an agent no link allows as `not_reachable`.
 
-import type { ChannelMessage, ConversationId, OutgoingMessage } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, OutgoingMessage } from "@rome-os/app-runtime";
 import { z } from "zod";
 import {
   type AgentMessageEnvelope,
@@ -40,7 +40,7 @@ import type {
 
 const log = createLogger("agents-channel");
 
-export const AGENTS_SERVICE = "agents";
+export const AGENTS_KIND = "agents";
 const POLL_INTERVAL_MS = 10_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
 /** Cloud returns at most this many messages per poll; a full page polls again at once. */
@@ -81,10 +81,10 @@ export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMes
       ? `\n\nData:\n\`\`\`json\n${JSON.stringify(message.data, null, 2)}\n\`\`\``
       : "";
   return {
-    channel: AGENTS_SERVICE,
+    channel: AGENTS_KIND,
     direction: "inbound",
     messageId: message.messageId,
-    conversationId: sender as ConversationId,
+    chatId: sender as ChatId,
     senderId: sender,
     senderDisplayName: agentLabel(message.from),
     text: `${message.text}${data}`,
@@ -243,9 +243,9 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
   // a link left from before agent ids, offers nothing to write to.
   const features: TalkFeatures = {
     directMessaging: {
-      async conversationFor(channelUserId) {
+      async chatFor(channelUserId) {
         const address = channelUserId.trim();
-        return isAgentId(address) ? (address as ConversationId) : null;
+        return isAgentId(address) ? (address as ChatId) : null;
       },
     },
   };
@@ -258,24 +258,24 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       generation++;
       cancelWait?.();
     },
-    async send(conversationId, msg) {
+    async send(chatId, msg) {
       // Cloud carries text and data only. Refusing here keeps a partial send
       // from being reported, and recorded, as if the files went too.
       if (msg.attachments?.length) {
         throw new Error("Agent messages carry text only; send the files another way.");
       }
-      if (!isAgentId(conversationId)) {
+      if (!isAgentId(chatId)) {
         throw new Error("Address an agent by its agent id (a UUID), not its name.");
       }
       const text = outgoingText(msg);
       if (!text.trim()) throw new Error("An agent message needs text.");
       try {
         const sent = await client.send({
-          to: conversationId,
+          to: chatId,
           text,
           ...(msg.replyToMessageId ? { inReplyTo: msg.replyToMessageId } : {}),
         });
-        return { conversationId, messageId: sent.messageId };
+        return { chatId, messageId: sent.messageId };
       } catch (err) {
         if (!isNotReachable(err)) throw err;
         throw new Error(
@@ -292,7 +292,7 @@ export function makeAgentsDescriptor(
   client: AgentMessagingClient = createRomeCloudAgentsClient(),
 ): ConnectionDescriptor {
   return {
-    service: AGENTS_SERVICE,
+    connectionKind: AGENTS_KIND,
     reviveProfile: (_grant, record) => reviveAgentsProfile(record),
     auth: { cloud: agentsScheme(client) },
     capabilities: {

@@ -1,5 +1,7 @@
 # People: Guardian, Visitor, Persons, Accounts, Addresses, Links & Outbox
 
+What person, guardian, bond level, account, link and stranger mean is in the [People](../domains/people.md) domain language. This page holds the engineering contracts behind those words, and the words of its own: visitor, address and outbox.
+
 ## Guardian
 
 The guardian is the single human user that a Rome instance serves. They control all configuration, memory, and policies. The guardian's profile (name, timezone, preferences) is stored in [memory](data.md#memory).
@@ -26,6 +28,7 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 - A visitor reaches only the surfaces its email is allow-listed for: individual access-gated apps, or the full dashboard when the guardian keeps a dashboard allow-list. A visitor can never hold guardian privileges.
 - The visitor's email is authoritative from the Rome Cloud sign-in exchange. Nothing the browser supplies can set or change it.
 - Every request re-checks allow-list membership, so removing an email revokes access immediately rather than at the next sign-in. The email comparison is case-insensitive.
+- Each sign-in keeps the visitor's email and Rome Cloud picture in `visitor_profiles`, replacing the last one. Chat reads it to show who sent a message, so it is display only and never authenticates anyone.
 
 **Not to be confused with:**
 
@@ -34,7 +37,7 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 
 ## Person
 
-Rome tracks people the guardian knows. Each person carries a [bond level](#bond-levels) that determines how the system interacts with them. [Links](#link) to multiple [accounts](#account) let the system recognize the same person across [Rome's accounts](messaging.md#romes-accounts).
+Rome tracks people the guardian knows. Each person carries a [bond level](#bond-levels) that determines how the system interacts with them. [Links](#link) to multiple [accounts](#account) let the system recognize the same person across Rome's own [accounts](../domains/chats.md#account).
 
 **Contracts:**
 
@@ -63,7 +66,7 @@ An account is a party on an external messaging platform — a Telegram user, a W
 
 - **[Person](#person)** — Rome owns persons, and platforms own accounts. A person aggregates the accounts linked to them.
 - **[Address](#address)** — an account is the party. An address is one of the forms it is reachable at.
-- **[Rome's accounts](messaging.md#romes-accounts)** — one of Rome's accounts is an account Rome holds a connection to, which messages arrive through. An account here is one party Rome sees through it.
+- **[Account in Chats](../domains/chats.md#account)** — the domain language names every identity on a platform an account, Rome's own included. An account here is one party Rome sees through one of its own.
 - **Connection** — a connection joins the Rome instance to a service. An account belongs to a party on that service.
 
 ## Address
@@ -91,7 +94,7 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 - A link joins exactly one account to exactly one person. There is no ownerless or dangling link.
 - An account carries at most one link, so two persons can never hold the same account.
 - Sender attribution changes only by creating, destroying, or transferring a link, or by dismissing or restoring the account. A transfer between two persons is always an explicit operation, never a side effect of another one.
-- Rome never creates a link from what a sender says about itself, such as a display name. A sender sets its own name, so an unlinked account whose name matches a person stays unlinked until the guardian links it or approves its pairing.
+- Rome never creates a link from what a sender says about itself, such as a display name. A sender sets its own name, so an unlinked account whose name matches a person stays unlinked until the guardian links it.
 - Rome creates a link on its own only from a statement a platform makes about the guardian's own accounts. On the Agents channel, Rome Cloud marks a sender that is in this Rome's Cloud account, and Rome links that agent to the guardian when its first message arrives. Rome makes this link at most once per agent, and never over an existing link or a dismissal, so a guardian who unlinks or dismisses the agent keeps it that way.
 - A link applies retroactively: creating one attributes the account's entire message history to the person, and destroying one detaches that history.
 

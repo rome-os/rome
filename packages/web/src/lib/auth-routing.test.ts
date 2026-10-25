@@ -180,15 +180,13 @@ describe("resolveAuthRouting", () => {
   });
 
   describe("reserved app-route guards", () => {
-    it("does not treat the app store or inbox host routes as app ids", () => {
-      expect(getRoutedAppId("/apps/store")).toBeNull();
+    it("does not treat the inbox host route as an app id", () => {
       expect(getRoutedAppId("/apps/inbox")).toBeNull();
       expect(isPublicAppPath("/apps/inbox", ["inbox"])).toBe(false);
     });
 
     it("blocks percent-encoded spellings of reserved host routes", () => {
       expect(getRoutedAppId("/apps/%69nbox")).toBeNull();
-      expect(getRoutedAppId("/apps/%73tore")).toBeNull();
     });
   });
 });

@@ -6,16 +6,16 @@ import { backingConnection } from "../channels/channels-service.js";
 import type { ChannelOf } from "../channels/connection-ports.js";
 import type {
   BackendTurnRunner,
-  ConversationId,
-  ConversationRef,
-  ConversationSettingsControl,
+  ChatId,
+  ChatRef,
+  ChatSettingsControl,
   ChannelMessage,
   OutgoingMessage,
   ChannelsService,
   MessageReceipt,
-  UpdateConversationSettingsInput,
-  ResetConversationSettingsInput,
-  ListConversationSettingsInput,
+  UpdateChatSettingsInput,
+  ResetChatSettingsInput,
+  ListChatSettingsInput,
 } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { EventService } from "../events/event-service.js";
@@ -27,6 +27,7 @@ import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
 import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
 import type { AgentNamesService } from "../channels/agent-names.js";
+import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
@@ -35,7 +36,7 @@ const AppIdSchema = z.string().min(1);
 
 const ChannelsSendParams = z.object({
   channel: z.string().min(1),
-  conversationId: z.string(),
+  chatId: z.string(),
   message: z.custom<OutgoingMessage>((val) => typeof val === "object" && val !== null, {
     message: "message must be an object",
   }),
@@ -46,7 +47,7 @@ const ChannelsSendParams = z.object({
 const ChannelsQueryParams = z
   .object({
     channel: z.string().min(1),
-    conversationId: z.string().optional(),
+    chatId: z.string().optional(),
     since: z.string().datetime().optional(),
     limit: z.number().int().positive().optional(),
   })
@@ -54,11 +55,11 @@ const ChannelsQueryParams = z
 
 const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
 
-const ConversationRefParams = z.object({
-  ref: z.object({ connectionId: z.string().min(1), conversationId: z.string() }),
+const ChatRefParams = z.object({
+  ref: z.object({ connectionId: z.string().min(1), chatId: z.string() }),
 });
-const ConversationSettingsInput = z.custom<
-  UpdateConversationSettingsInput | ResetConversationSettingsInput | ListConversationSettingsInput
+const ChatSettingsInput = z.custom<
+  UpdateChatSettingsInput | ResetChatSettingsInput | ListChatSettingsInput
 >((value) => typeof value === "object" && value !== null);
 
 const EmailIngestInboundParams = z.object({
@@ -74,6 +75,10 @@ const RoutineIdParams = z.object({ routineId: z.string().min(1) });
 const NotifySendParams = z.object({ body: z.string().optional() }).strict();
 
 const ActionHasParams = z.object({ actionName: z.string().min(1) });
+const ActionValidateArgsParams = z.object({
+  actionName: z.string().min(1),
+  args: z.record(z.string(), z.unknown()),
+});
 const AgentHasAgentParams = z.object({ name: z.string().min(1) });
 const AgentHasActionParams = z.object({
   agentName: z.string().min(1),
@@ -152,6 +157,7 @@ const EventsPublishParams = z.object({
 const EventsSearchCatalogParams = z.object({
   query: z.string().default(""),
   limit: z.number().int().positive().max(50).default(10),
+  match: z.record(z.string(), z.string()).optional(),
 });
 
 const SessionContinueParams = z.object({
@@ -177,7 +183,7 @@ export interface WorkerRpcServices {
   channelsService: ChannelsService;
   connectionRegistry: ConnectionRegistry;
   channelOf: ChannelOf;
-  conversationSettings: ConversationSettingsControl;
+  chatSettings: ChatSettingsControl;
   /** Live routine engine + repo — the action worker has no in-process engine,
    * so it persists a routine then calls `routines.schedule` to activate it here. */
   routinesRepo: RoutinesRepository;
@@ -206,6 +212,10 @@ export interface WorkerRpcServices {
    * main registry whether an action is actually registered there. */
   hasRegisteredAction: (name: string) => boolean;
   isExplicitAction: (name: string) => boolean;
+  /** Checks args against the main registry's input schema for the action, the
+   * one worker-local lazy stubs lack. Returns an error message, or null when
+   * the args fit, the action declares no schema, or the action is unknown. */
+  validateActionArgs: (name: string, args: Record<string, unknown>) => string | null;
   /** Capability check bridged to the worker-side `RpcAgentRunner.hasAction`:
    * does the named agent's allow-list resolve the named action? Mirrors the
    * agent session's own gate so the inbox channel-control cue can match what
@@ -222,6 +232,8 @@ export interface WorkerRpcServices {
    * returns only the classified `SendOutcome`. */
   notify: NotifyService;
   feedback: FeedbackService;
+  /** System-only: what `system:get_guardian_cloud_profile` reads from Rome Cloud. */
+  cloudProfile: CloudProfileService;
   /** System-only: how `system:send_message` turns an agent's name into its id. */
   agentNames: AgentNamesService;
 }
@@ -239,37 +251,30 @@ export class WorkerRpcServer {
           const { name } = parseParams("agentNames.resolve", AgentNamesResolveParams, params);
           return this.services.agentNames.resolve(name);
         },
-        "conversationSettings.list": (params) =>
-          this.services.conversationSettings.list(
-            parseParams(
-              "conversationSettings.list",
-              ConversationSettingsInput,
-              params,
-            ) as ListConversationSettingsInput,
+        "chatSettings.list": (params) =>
+          this.services.chatSettings.list(
+            parseParams("chatSettings.list", ChatSettingsInput, params) as ListChatSettingsInput,
           ),
-        "conversationSettings.get": (params) => {
-          const { ref } = parseParams("conversationSettings.get", ConversationRefParams, params);
-          return this.services.conversationSettings.get(ref as ConversationRef);
+        "chatSettings.get": (params) => {
+          const { ref } = parseParams("chatSettings.get", ChatRefParams, params);
+          return this.services.chatSettings.get(ref as ChatRef);
         },
-        "conversationSettings.update": (params) =>
-          this.services.conversationSettings.update(
+        "chatSettings.update": (params) =>
+          this.services.chatSettings.update(
             parseParams(
-              "conversationSettings.update",
-              ConversationSettingsInput,
+              "chatSettings.update",
+              ChatSettingsInput,
               params,
-            ) as UpdateConversationSettingsInput,
+            ) as UpdateChatSettingsInput,
           ),
-        "conversationSettings.reset": (params) =>
-          this.services.conversationSettings.reset(
-            parseParams(
-              "conversationSettings.reset",
-              ConversationSettingsInput,
-              params,
-            ) as ResetConversationSettingsInput,
+        "chatSettings.reset": (params) =>
+          this.services.chatSettings.reset(
+            parseParams("chatSettings.reset", ChatSettingsInput, params) as ResetChatSettingsInput,
           ),
         "channels.email.ingestInbound": (params) => this.handleEmailIngestInbound(params),
         "actions.has": (params) => this.handleActionsHas(params),
         "actions.isExplicit": (params) => this.handleActionsIsExplicit(params),
+        "actions.validateArgs": (params) => this.handleActionsValidateArgs(params),
         "agent.hasAgent": (params) => this.handleAgentHasAgent(params),
         "agent.hasAction": (params) => this.handleAgentHasAction(params),
         "routines.schedule": (params) => this.handleRoutinesSchedule(params),
@@ -288,6 +293,7 @@ export class WorkerRpcServer {
         "session.continue": (params) => this.handleSessionContinue(params),
         "feedback.send": (params) =>
           this.services.feedback.send(parseParams("feedback.send", feedbackSendSchema, params)),
+        "cloudProfile.get": () => this.services.cloudProfile.get(),
         "notify.send": (params) => {
           // The sender reads token/origin from main-process state; the only wire
           // param is the optional body. Preserve the no-body call shape
@@ -381,26 +387,18 @@ export class WorkerRpcServer {
   }
 
   private async handleChannelsSend(params: unknown): Promise<MessageReceipt> {
-    const { channel, conversationId, message } = parseParams(
-      "channels.send",
-      ChannelsSendParams,
-      params,
-    );
-    return await this.services.channelsService.send(
-      channel,
-      conversationId as ConversationId,
-      message,
-    );
+    const { channel, chatId, message } = parseParams("channels.send", ChannelsSendParams, params);
+    return await this.services.channelsService.send(channel, chatId as ChatId, message);
   }
 
   private async handleChannelsQuery(params: unknown): Promise<ChannelMessage[]> {
-    const { channel, conversationId, since, limit } = parseParams(
+    const { channel, chatId, since, limit } = parseParams(
       "channels.query",
       ChannelsQueryParams,
       params,
     );
     return await this.services.channelsService.query(channel, {
-      ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
+      ...(chatId ? { chatId: chatId as ChatId } : {}),
       ...(since ? { since: new Date(since) } : {}),
       ...(limit ? { limit } : {}),
     });
@@ -438,6 +436,16 @@ export class WorkerRpcServer {
   private handleActionsIsExplicit(params: unknown): { explicit: boolean } {
     const { actionName } = parseParams("actions.isExplicit", ActionHasParams, params);
     return { explicit: this.services.isExplicitAction(actionName) };
+  }
+
+  /** Input-schema check for the worker-side create_routine args gate. */
+  private handleActionsValidateArgs(params: unknown): { error: string | null } {
+    const { actionName, args } = parseParams(
+      "actions.validateArgs",
+      ActionValidateArgsParams,
+      params,
+    );
+    return { error: this.services.validateActionArgs(actionName, args) };
   }
 
   /**
@@ -486,7 +494,11 @@ export class WorkerRpcServer {
   }
 
   private async handleEventsSearchCatalog(params: unknown): Promise<unknown> {
-    const { query, limit } = parseParams("events.searchCatalog", EventsSearchCatalogParams, params);
-    return await this.services.eventService.search(query, limit);
+    const { query, limit, match } = parseParams(
+      "events.searchCatalog",
+      EventsSearchCatalogParams,
+      params,
+    );
+    return await this.services.eventService.search(query, limit, match ? { match } : {});
   }
 }

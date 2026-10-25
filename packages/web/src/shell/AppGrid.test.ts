@@ -14,4 +14,18 @@ describe("sidebar pins", () => {
       { type: "builtin", id: "projects" },
     ]);
   });
+
+  it("moves Projects up to the fixed three ahead of an older pin list", () => {
+    expect(
+      normalizeSidebarPins([
+        { type: "app", id: "recipe-box" },
+        { type: "builtin", id: "projects" },
+      ]),
+    ).toEqual([
+      { type: "builtin", id: "apps" },
+      { type: "builtin", id: "chat" },
+      { type: "builtin", id: "projects" },
+      { type: "app", id: "recipe-box" },
+    ]);
+  });
 });

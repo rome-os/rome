@@ -54,6 +54,12 @@ function openAuthorizeUrl(url: string): void {
  *   with optional account detail, Disconnect + Reconnect.
  * - Degraded → the connected layout with an attention-toned "Access expired"
  *   subtitle and Reconnect promoted to the primary action.
+ *
+ * Shopify's connect hint is Shopify's install link, so its Connect and Reconnect
+ * open that link in a new tab instead of starting the setup. Shopify asks which
+ * store there, and the connection lands through Rome Cloud while this card
+ * refetches. The setup, which asks for the store, runs only for a guardian's own
+ * Shopify app.
  */
 export function OAuthConnectionSection({
   card,
@@ -72,11 +78,12 @@ export function OAuthConnectionSection({
   const [disconnecting, setDisconnecting] = useState(false);
 
   const label = card.label;
+  const shopifyInstallUrl = card.service === "shopify" ? (card.connect?.url ?? null) : null;
 
   // The setup addresses the connection by id, or by the bare service name when
   // the guardian has never connected (the terminal conferral mints the row).
   const setup = useSetup({
-    idOrService: slot.connectionId ?? card.service,
+    idOrKind: slot.connectionId ?? card.service,
     grant: slot.grant ?? "",
     activeCid: slot.activeSetupCid,
     onDone: () => {
@@ -93,6 +100,15 @@ export function OAuthConnectionSection({
   function beginConnect(force = false) {
     initiatedRef.current = true;
     setup.start(force);
+  }
+
+  // A setup that asks something before the hand-off (Shopify's store) parks at
+  // `awaiting-input`, which clears the initiation intent. Submitting the form is
+  // the guardian continuing the same connect, so re-arm it: the redirect that
+  // follows opens on its own.
+  function submitSetup(answers: Record<string, string>) {
+    initiatedRef.current = true;
+    return setup.submit(answers);
   }
 
   const redirectUrl = setup.state?.status === "awaiting-redirect" ? setup.state.url : null;
@@ -191,11 +207,28 @@ export function OAuthConnectionSection({
             state={setup.state}
             busy={setup.busy}
             error={setup.error}
-            onSubmit={setup.submit}
+            onSubmit={submitSetup}
             onCancel={setup.cancel}
             onRetry={() => beginConnect(true)}
             labels={{ continue: t("common.connect") }}
           />
+        ) : shopifyInstallUrl ? (
+          <div>
+            {setup.error && <p className="mb-2 text-ui text-destructive-fg">{setup.error}</p>}
+            <div className="flex flex-wrap gap-2">
+              <Button asChild>
+                <a href={shopifyInstallUrl} target="_blank" rel="noopener noreferrer">
+                  {t("connections.oauth.shopify.connect")}
+                </a>
+              </Button>
+              <Button variant="ghost" disabled={setup.busy} onClick={() => beginConnect()}>
+                {t("connections.oauth.shopify.ownApp")}
+              </Button>
+            </div>
+            <p className="mt-2 text-ui text-muted-foreground">
+              {t("connections.oauth.shopify.installNote")}
+            </p>
+          </div>
         ) : (
           <div>
             {setup.error && <p className="mb-2 text-ui text-destructive-fg">{setup.error}</p>}
@@ -262,23 +295,58 @@ export function OAuthConnectionSection({
         {expired && (
           <p className="text-ui text-warning-fg">{t("connections.oauth.accessExpired")}</p>
         )}
-        {pendingRedirectControls ?? (
-          <Button
-            variant={expired ? "default" : "outline"}
-            size="sm"
-            disabled={setup.busy}
-            aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
-            onClick={() => beginConnect(true)}
-          >
-            {setup.busy && (
-              <Spinner
-                data-icon="inline-start"
+        {setup.state?.status === "awaiting-input" ? (
+          // A reconnect whose setup asks something before the hand-off (Shopify
+          // asks which store) renders that form here, as the unconnected card does.
+          <SetupRenderer
+            state={setup.state}
+            busy={setup.busy}
+            error={setup.error}
+            onSubmit={submitSetup}
+            onCancel={setup.cancel}
+            onRetry={() => beginConnect(true)}
+            labels={{ continue: t("connections.oauth.reconnect") }}
+          />
+        ) : shopifyInstallUrl && !pendingRedirectControls ? (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant={expired ? "default" : "outline"} size="sm">
+                <a href={shopifyInstallUrl} target="_blank" rel="noopener noreferrer">
+                  {t("connections.oauth.reconnect")}
+                </a>
+              </Button>
+              <Button
+                variant="ghost"
                 size="sm"
-                label={t("connections.oauth.reconnecting")}
-              />
-            )}
-            {t("connections.oauth.reconnect")}
-          </Button>
+                disabled={setup.busy}
+                onClick={() => beginConnect(true)}
+              >
+                {t("connections.oauth.shopify.ownApp")}
+              </Button>
+            </div>
+            <p className="text-ui text-muted-foreground">
+              {t("connections.oauth.shopify.installNote")}
+            </p>
+          </>
+        ) : (
+          (pendingRedirectControls ?? (
+            <Button
+              variant={expired ? "default" : "outline"}
+              size="sm"
+              disabled={setup.busy}
+              aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
+              onClick={() => beginConnect(true)}
+            >
+              {setup.busy && (
+                <Spinner
+                  data-icon="inline-start"
+                  size="sm"
+                  label={t("connections.oauth.reconnecting")}
+                />
+              )}
+              {t("connections.oauth.reconnect")}
+            </Button>
+          ))
         )}
       </div>
     </ConnectionSlotCard>

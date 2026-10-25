@@ -11,6 +11,8 @@ Commands:
   device           List authorized devices (they may be offline).
   device describe  Query a device's platform and supported actions.
   device run       Execute an action on a device.
+  device rename    Rename a device in the account.
+  device remove    Revoke a device and delete it from the account.
   cp               Copy a file to or from a device.
   watch            Stream caller connection snapshots and changes as JSON lines.
   daemon           Manage the caller's background connection.
@@ -98,11 +100,14 @@ The token is never printed.
   rome-node device
   rome-node device describe <device-id>
   rome-node device run <device-id> <action> [--args <json>] [--input <file|->] [--output <file|->]
+  rome-node device rename <device-id> <name>
+  rome-node device remove <device-id>
 
 With no subcommand, list authorized devices as {"items":[...]}.
 Use an item's id for subsequent commands. Listed devices may be offline.
 describe queries the target's current platform and actions through Gateway.
 run invokes one of those actions. The caller daemon starts automatically.
+rename and remove change the account's device list in Rome Cloud.
 
 Examples:
   rome-node device
@@ -116,10 +121,38 @@ The result includes name, platform, and actions. Platform-specific commands and
 paths must match the target computer, which may differ from the caller.
 
 Example result:
-  {"type":"response","ok":true,"result":{"name":"My computer","platform":"macos","actions":["system.info","exec"]}}
+  {"type":"response","ok":true,"result":{"name":"My computer","platform":"macos","actions":["system.info","exec","fs.list"]}}
 
 Failures return {"type":"response","ok":false,"error":{"code":"...","message":"..."}}.
 The local exit status is 0 on success or 1 on failure.
+`,
+  "device rename": `Usage: rome-node device rename <device-id> <name>
+
+Rename a device in the account. Use an ID from rome-node device. The device can
+be offline. Rome Cloud trims the name and accepts 1 to 80 characters without
+control characters. Names need not be unique; routing uses the ID.
+
+Example:
+  rome-node device rename <device-id> "Build server"
+
+Prints {"type":"response","ok":true,"result":{}} on success. Failures print
+{"type":"response","ok":false,"error":{"code":"...","message":"..."}} with code
+device_not_found, invalid_device_name, invalid_device_session, or cloud_unavailable.
+The local exit status is 0 on success or 1 on failure.
+`,
+  "device remove": `Usage: rome-node device remove <device-id>
+
+Revoke a device and delete it from the account. Use an ID from rome-node device.
+The device can be offline. A connected device is disconnected and must run
+rome-node connect and be approved again to come back.
+
+Rome Cloud keeps a revoked device listed until the Gateway confirms the
+revocation. Until then remove fails with code revocation_pending: the device is
+already revoked, and running remove again later deletes it. Other failure codes
+are device_not_found, invalid_device_session, and cloud_unavailable.
+
+Prints {"type":"response","ok":true,"result":{}} on success. The local exit
+status is 0 on success or 1 on failure.
 `,
   "device run": `Usage:
   rome-node device run <device-id> <action> [--args <json>]
@@ -131,16 +164,25 @@ Use an ID from rome-node device. Run device describe first to discover actions.
 Computer actions:
   system.info  No arguments. Returns name, platform, and actions.
   exec         Run a program on the target computer.
+  fs.list      List one folder. Read-only. Older targets return unsupported_action.
 
 exec arguments:
   command      Required nonempty executable name or path.
   args         Optional array of string arguments (default: []).
   cwd          Optional working directory on the target (default: executor cwd).
 
+fs.list arguments:
+  path         Optional folder (default: the target user's home). Relative paths
+               start at home. ~ is not expanded.
+  Result: {path, parent, entries: [{name, type}], truncated}. path is the real
+  path; parent is null at the root; type is dir, file, symlink, or other.
+  At most 1000 entries, folders first.
+
 Programs receive no stdin unless --input is given. No shell is added automatically.
 Invoke a shell explicitly for pipelines, redirection, or shell builtins.
 Examples below use POSIX caller-shell quoting:
   rome-node device run <device-id> system.info
+  rome-node device run <device-id> fs.list --args '{"path":"/workspace"}'
   rome-node device run <device-id> exec --args '{"command":"git","args":["status"],"cwd":"/workspace"}'
   rome-node device run <device-id> exec --args '{"command":"cat","args":["/workspace/README.md"]}'
   rome-node device run <device-id> exec --args '{"command":"sh","args":["-c","ls /workspace | head"]}'

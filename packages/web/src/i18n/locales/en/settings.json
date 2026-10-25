@@ -75,7 +75,12 @@
       "accessExpired": "Access expired — reconnect to keep it working",
       "reconnect": "Reconnect",
       "reconnecting": "Reconnecting account…",
-      "resumePending": "You started connecting {{label}} but didn't finish. Continue on {{label}}, or cancel."
+      "resumePending": "You started connecting {{label}} but didn't finish. Continue on {{label}}, or cancel.",
+      "shopify": {
+        "connect": "Connect in Shopify",
+        "ownApp": "Use your own Shopify app",
+        "installNote": "Shopify opens in a new tab, where you pick the store and approve Rome OS."
+      }
     },
     "composio": {
       "unavailable": "Composio is not available on this host."
@@ -154,6 +159,19 @@
           }
         }
       },
+      "slack_bot": {
+        "bot": {
+          "titleFallback": "Your agent's Slack account",
+          "bullets": {
+            "reply": "Reply when people message {{identity}} or mention it in a channel",
+            "start": "Start a task when a new message arrives"
+          },
+          "bulletsFallback": {
+            "reply": "Reply when people message this account or mention it in a channel",
+            "start": "Start a task when a new message arrives"
+          }
+        }
+      },
       "feishu": {
         "bot": {
           "title": "Your agent's Feishu account",
@@ -216,6 +234,15 @@
             "work": "Send and read messages in your Slack workspace as you"
           },
           "privacyNote": "You approve access on Slack; you can disconnect here anytime."
+        }
+      },
+      "shopify": {
+        "user": {
+          "title": "Your Shopify store",
+          "bullets": {
+            "work": "Update products and inventory, and read orders, in your store"
+          },
+          "privacyNote": "You approve access on Shopify; you can disconnect here anytime."
         }
       },
       "composio": {
@@ -330,7 +357,7 @@
       },
       "loading": "Loading chats…",
       "emptyTitle": "No configurable chats found",
-      "emptyDescription": "Connect a supported chat service, or send a message so Rome can discover the chat.",
+      "emptyDescription": "Connect an account on a supported platform, or send a message so Rome can discover the chat.",
       "loadMore": "Load more",
       "overrideCount_one": "{{count}} override",
       "overrideCount_other": "{{count}} overrides",
@@ -698,17 +725,18 @@
       "description": "Features still being tried out. Each is off until switched on, and may change or be removed.",
       "replyStreaming": {
         "title": "Reply streaming",
-        "description": "Applies to the guardian's direct chats on Telegram. Replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
-        "toggleLabel": "Stream replies in Telegram"
+        "description": "Applies to the guardian's direct chats on Telegram and Feishu. On Telegram, replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
+        "toggleLabel": "Stream replies as they are written"
+      },
+      "feishuStreamingStyle": {
+        "title": "Feishu streaming style",
+        "description": "Messages take up to 20 edits each, then the reply goes on in a new one. Cards show the text as it is typed.",
+        "message": "Messages",
+        "card": "Cards"
       }
     },
     "developerSettings": {
       "title": "Developer Settings"
-    },
-    "fable": {
-      "title": "Fable",
-      "description": "Only applies when Claude is available.",
-      "toggleLabel": "Route large models to Fable"
     },
     "tierModelMappings": {
       "title": "Model ID mappings",
@@ -723,7 +751,6 @@
         "medium": "Claude medium model ID",
         "small": "Claude small model ID"
       },
-      "fableNote": "A Claude large mapping replaces Fable's model ID while Fable still prefers Claude for large tiers.",
       "save": "Save mappings"
     },
     "modelSelector": {
@@ -888,9 +915,7 @@
   },
   "devices": {
     "title": "Devices",
-    "description": "Devices linked to your Rome account. Connection checks refresh every 15 seconds.",
-    "refresh": "Refresh",
-    "loading": "Checking device connections…",
+    "description": "Devices linked to your Rome account.",
     "loadFailed": "Failed to load devices",
     "connectionLabel": "Rome connection",
     "connection": {
@@ -906,8 +931,8 @@
       "incompatible": "Restart required"
     },
     "help": {
-      "not_running": "Start the service on this Rome instance to check linked computers. Refresh only checks status; it does not start the service.",
-      "unavailable": "Device status is unavailable. Try refreshing.",
+      "not_running": "Start the service on this Rome instance to check linked computers.",
+      "unavailable": "Device status is unavailable. This page checks again on its own.",
       "not_configured": "Device access is not configured. Link this Rome instance to Rome Cloud to prepare access.",
       "incompatible": "On the Rome instance, run rome-node daemon stop, then rome-node daemon start. This restarts the shared service and interrupts device requests in progress."
     },

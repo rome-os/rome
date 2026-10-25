@@ -4,7 +4,7 @@
  * reach (`Accounts`, accounts.ts) and what was said to them (`Messages`,
  * messages.ts). So a caller reads one list of channels rather than naming each
  * provider's transport, address book and message store one at a time.
- * Vocabulary: docs/concepts/messaging.md. Invariants:
+ * Vocabulary: docs/domains/chats.md. Invariants:
  * docs/architecture/channels.md#channel-ports.
  *
  * A channel is not a Connection. A Connection may back a channel's `send` and
@@ -19,7 +19,7 @@ import type {
   Channel as AppChannel,
   ChannelInbound,
   ChannelSend as AppChannelSend,
-  ConversationDescriptor,
+  ChatDescriptor,
   ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
 import type { AddressBooks } from "./account-fold.js";
@@ -48,7 +48,7 @@ export interface ChannelSend extends AppChannelSend {
   /**
    * Reaching one account directly rather than replying in a conversation that
    * exists, or null where the channel cannot. When no Connection
-   * exists for the channel, `conversationFor` rejects with
+   * exists for the channel, `chatFor` rejects with
    * {@link ChannelNotConnected}, as `send` does. A Connection that exists but
    * has no live talker (locked, awaiting re-authorization) reads as null.
    */
@@ -57,7 +57,7 @@ export interface ChannelSend extends AppChannelSend {
 
 /**
  * The conversations a channel can see, for conversation settings. Each
- * descriptor carries its `ConversationRef`, so a caller addresses a
+ * descriptor carries its `ChatRef`, so a caller addresses a
  * conversation it found here the way it addresses one an inbound event named.
  */
 export interface ChannelDirectory {
@@ -71,7 +71,7 @@ export interface ChannelDirectory {
     limit: number;
     includeTopics?: boolean;
     connectionId?: string;
-  }): Promise<ConversationDescriptor[]>;
+  }): Promise<ChatDescriptor[]>;
 }
 
 /** A send, or a direct-conversation lookup, on a channel nothing backs now. */
@@ -91,7 +91,7 @@ export class ChannelNotConnected extends Error {
  *
  * - **C1 The name is the identity.** One channel per name, one name per
  *   channel, stable for the life of the deployment. A channel's name is its
- *   service's, and it is the `channel` written on every link, every stored
+ *   connection kind's, and it is the `channel` written on every link, every stored
  *   message and every sentinel row. The name is not a label a channel can
  *   restyle — changing it reassigns history.
  * - **C2 What a channel carries is the channel's.** No port reaches past this

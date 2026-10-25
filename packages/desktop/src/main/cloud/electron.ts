@@ -30,7 +30,7 @@ const windowCookies: InstanceCookieStore = {
 };
 
 // "Ray's MacBook Pro.local" names the same machine as "Ray's MacBook Pro".
-function deviceName(): string {
+export function deviceName(): string {
   return hostname().replace(/\.local$/i, "") || "Rome desktop";
 }
 

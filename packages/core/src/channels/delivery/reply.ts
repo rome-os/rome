@@ -3,7 +3,7 @@ import type { Clock, ClockTimer } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
 import { ReplyAssembler } from "./assembler.js";
 import { Outlasted, type Pacer, SKIPPED, SLOW_WRITE_MS } from "./pacer.js";
-import { endsMidPair, lastBreak, splitPoint, splitsPair } from "./split.js";
+import { endsMidPair, lastBreak, paragraphEnd, splitPoint, splitsPair } from "./split.js";
 import {
   asDeliveryFailure,
   DeliveryFailure,
@@ -12,6 +12,8 @@ import {
   type DeliveryTransport,
   effectiveMode,
   type PartReceipt,
+  partLength,
+  type TextCodec,
 } from "./types.js";
 
 const log = createLogger("reply-delivery");
@@ -20,7 +22,7 @@ const log = createLogger("reply-delivery");
 export interface DeliveryEvent {
   /** Epoch milliseconds when the write finished. */
   at: number;
-  write: "create" | "edit";
+  write: "create" | "edit" | "settle";
   block: number;
   part: number;
   text: string;
@@ -32,6 +34,11 @@ interface DeliveredPart {
   block: number;
   /** The text the platform shows, as far as Rome knows. */
   text: string;
+  /** The source text behind `text`, with any source after it that a split
+   *  passed over because nothing in it shows. A block's parts join into the
+   *  source the user was shown, where their renderings may not join into one
+   *  text. */
+  source: string;
   receipt?: PartReceipt;
   /**
    * `settled`: its text is final. `open`: a preview the reply never settled.
@@ -87,9 +94,13 @@ interface Part {
   /** The source range the part holds. `end` grows while the part is open. */
   start: number;
   end: number;
-  /** What the platform shows, and the source text behind it. */
+  /** What the platform shows, the source text behind it, and the block's
+   *  source before it, which the codec rendered it with. */
   sent: string;
   sentSource: string;
+  sentBefore: string;
+  /** Edits that were accepted or whose result is unknown. */
+  edits: number;
   receipt?: PartReceipt;
   settled: boolean;
   unknown?: true;
@@ -103,6 +114,8 @@ interface Part {
    *  it, so it counts as shown, though `sentSource` is what was acknowledged. */
   attempted?: string;
   diverged?: true;
+  /** The transport was asked to settle the message. */
+  finished?: true;
   lastWriteAt: number;
 }
 
@@ -116,8 +129,25 @@ interface BlockState {
 }
 
 type Plan =
-  | { write: "create"; block: number; start: number; end: number; source: string; settle: boolean }
-  | { write: "edit"; block: number; part: Part; end: number; source: string; settle: boolean }
+  | {
+      write: "create";
+      block: number;
+      start: number;
+      end: number;
+      before: string;
+      source: string;
+      settle: boolean;
+    }
+  | {
+      write: "edit";
+      block: number;
+      part: Part;
+      end: number;
+      before: string;
+      source: string;
+      settle: boolean;
+    }
+  | { write: "settle"; block: number; part: Part }
   | { waitUntil: number }
   | null;
 
@@ -179,9 +209,20 @@ class WriteTimedOut extends DeliveryFailure {
  *   so a preview that went stale while it waited is never sent. A write that
  *   nothing needs any more, or that waited past the reply's failure, is
  *   dropped.
+ * - A message holds at most the platform's limit, or the policy's when less.
+ *   Under `softPartLength`, a message that reaches it ends where the next
+ *   paragraph begins, outside fenced code, and a streamed message ends where
+ *   the complete text ends it.
  * - A message is never created for text with nothing visible in it, since a
  *   platform refuses one. The reply waits for visible text instead.
  * - A message never receives text older than what it shows.
+ * - Under `maxEditsPerMessage`, a message's last edit settles it and the
+ *   block goes on in a new message. While the block streams, that edit waits
+ *   for a readable break at or after the text the message shows, or for the
+ *   message to fill. A settled message with no edits left keeps what it
+ *   shows, and is reported as differing when the final text changes it.
+ * - The codec renders each message's source with the block's source before
+ *   it as context.
  * - An edit whose result is unknown leaves its part uncertain. The part is
  *   edited again to the text it should show, even when that matches the text
  *   last acknowledged, and only a successful edit settles it. The text that
@@ -204,6 +245,13 @@ class WriteTimedOut extends DeliveryFailure {
  *   write to it cannot overtake it.
  * - After `stop()`, nothing new is written. A write already running finishes
  *   and is reported, and a create whose result is unknown stays `unknown`.
+ * - A message whose receipt says `streaming` is settled through the
+ *   transport once. It is settled once its text is final and its last write
+ *   is done: before the next message of its block is made, or when its block
+ *   is complete, and before `finish()` resolves. When the reply stops or fails, what
+ *   is left is settled after `stop()` or `finish()` resolves, in the account's
+ *   queue, and that is the one write made after a stop. A settle that fails
+ *   changes nothing the reply reports.
  *
  * The run's events go to `accept()`. `finish()` closes the reply once the run
  * ends and resolves when every write has finished.
@@ -238,7 +286,7 @@ export class ReplyDelivery {
 
   constructor(private readonly options: ReplyOptions) {
     this.mode = effectiveMode(options.policy, options.transport.capabilities);
-    const longest = options.transport.capabilities.maxPartLength;
+    const longest = partLength(options.policy, options.transport.capabilities);
     // An open preview counts as unsent until the edit that settles it has run,
     // and that edit waits its turn while the text goes on arriving. A bound
     // that cannot hold one message fails every reply while its first message
@@ -284,12 +332,31 @@ export class ReplyDelivery {
    * unknown, and the text that would put it right is blank, which a platform
    * refuses. The reply ends `unknown`, and a caller does not send it again.
    */
-  private failUncertain(): null {
-    this.fail({
-      kind: "unknown",
-      message: "an edit's result is unknown and the block ended with nothing to put back",
-    });
+  private failUncertain(
+    message = "an edit's result is unknown and the block ended with nothing to put back",
+  ): null {
+    this.fail({ kind: "unknown", message });
     return null;
+  }
+
+  /** The transport's codec, rendering with `before` as the context. */
+  private codecAt(before: string): TextCodec {
+    const { codec } = this.options.transport;
+    const context = { before };
+    return {
+      render: (source, settled) => codec.render(source, settled, context),
+      measure: (rendered) => codec.measure(rendered),
+    };
+  }
+
+  private editsLeft(part: Part): number {
+    const max = part.receipt?.maxEdits ?? this.options.transport.capabilities.maxEditsPerMessage;
+    return max === undefined ? Number.POSITIVE_INFINITY : max - part.edits;
+  }
+
+  /** Whether `part`'s message is one the transport should still settle. */
+  private unfinished(part: Part): boolean {
+    return part.receipt?.streaming === true && !part.finished;
   }
 
   /**
@@ -357,7 +424,10 @@ export class ReplyDelivery {
     this.timer = undefined;
     const plan = this.failure || this.abort.signal.aborted ? null : this.planSafely(this.now());
     if (plan === null) {
-      if (this.closed) for (const done of this.idle.splice(0)) done();
+      if (this.closed) {
+        this.settleRest();
+        for (const done of this.idle.splice(0)) done();
+      }
       return;
     }
     if ("waitUntil" in plan) {
@@ -365,6 +435,7 @@ export class ReplyDelivery {
       return;
     }
     this.writing = true;
+    const settling = plan.write === "settle" ? plan.part : undefined;
     // A write waits in the account's queue behind whatever pauses it. A pause
     // that came from elsewhere is not this reply's to wait out for an hour.
     const queued = new AbortController();
@@ -406,6 +477,15 @@ export class ReplyDelivery {
         // The reply failed already, and this is the write it dropped or one
         // that failed after it. The reply's failure stays what it was.
         if (this.failure) return;
+        // A settle that never ran leaves the message showing its final text,
+        // so it changes nothing the reply reports, and it is not tried again.
+        if (settling) {
+          settling.finished = true;
+          log.warn("a message could not be settled", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return;
+        }
         if (error instanceof QueueWaitExceeded) {
           // A rate limit's pause in effect while the write waited, even one over
           // by now, is a limit the caller can wait out. With none, an earlier
@@ -456,8 +536,7 @@ export class ReplyDelivery {
   private plan(now: number): Plan {
     // Nothing is written before the reply finishes, so there is nothing to plan.
     if (this.mode === "final" && !this.closed) return null;
-    const { codec, capabilities } = this.options.transport;
-    const limit = capabilities.maxPartLength;
+    const limit = partLength(this.options.policy, this.options.transport.capabilities);
     for (const [index, block] of this.assembler.blocks.entries()) {
       const state = (this.blocks[index] ??= { parts: [] });
       const complete = block.complete || this.closed;
@@ -466,7 +545,10 @@ export class ReplyDelivery {
       for (const part of state.parts) {
         if (!part.settled || part.diverged || part.unknown) continue;
         const source = block.text.slice(part.start, part.end);
-        if (source === part.sentSource && !part.uncertain) continue;
+        const before = block.text.slice(0, part.start);
+        // The codec is pure, so the same source and context render the same.
+        if (source === part.sentSource && before === part.sentBefore && !part.uncertain) continue;
+        const codec = this.codecAt(before);
         const rendered = codec.render(source, true);
         // A platform refuses a blank edit, so a message whose place in the block
         // is now empty stays as it is, and the part is reported as differing.
@@ -481,7 +563,15 @@ export class ReplyDelivery {
           continue;
         }
         if (rendered === part.sent && !part.uncertain) {
-          part.sentSource = source;
+          Object.assign(part, { sentSource: source, sentBefore: before });
+          continue;
+        }
+        if (this.editsLeft(part) <= 0) {
+          if (part.uncertain)
+            return this.failUncertain(
+              "an edit's result is unknown and the message has no edits left",
+            );
+          part.diverged = true;
           continue;
         }
         const due = part.lastWriteAt + this.options.policy.editIntervalMs;
@@ -491,6 +581,7 @@ export class ReplyDelivery {
           block: index,
           part,
           end: part.end,
+          before,
           source,
           settle: true,
         };
@@ -500,6 +591,10 @@ export class ReplyDelivery {
         const last = state.parts.at(-1);
         if (last?.unknown) return null;
         const active = last && !last.settled ? last : undefined;
+        // A message whose text is final stops showing it as being written
+        // before the next message of its block is made.
+        if (last && !active && this.unfinished(last) && this.options.transport.settle)
+          return { write: "settle", block: index, part: last };
         const start = active ? active.start : Math.max(last?.end ?? 0, state.skipped ?? 0);
         // Offsets below are the block's, and `remaining` holds its text from
         // `start` on.
@@ -509,6 +604,8 @@ export class ReplyDelivery {
         // and is left out if the text ends without it.
         if (endsMidPair(remaining)) remaining = remaining.slice(0, -1);
         const textEnd = start + remaining.length;
+        const before = block.text.slice(0, start);
+        const codec = this.codecAt(before);
         // Nothing visible yet, or only a whitespace tail after a split. A
         // platform refuses a message with no visible text, and one refusal
         // ends the reply.
@@ -537,8 +634,16 @@ export class ReplyDelivery {
           end = Math.min(shown, textEnd);
         // What a preview showed can end inside a pair of the final text.
         if (end > start + 1 && splitsPair(remaining, end - start)) end -= 1;
-        const settle = complete || end < textEnd;
-        const source = remaining.slice(0, end - start);
+        // A message long enough to read on its own ends with its paragraph.
+        const { softPartLength } = this.options.policy;
+        if (softPartLength) {
+          const paragraph = paragraphEnd(block.text, start, end, shown, softPartLength, (at) =>
+            codec.measure(codec.render(block.text.slice(start, at), true)),
+          );
+          if (paragraph) end = paragraph;
+        }
+        let settle = complete || end < textEnd;
+        let source = remaining.slice(0, end - start);
         // The split can choose a prefix with nothing visible in it, such as a
         // long run of spaces. It is passed over without a message, and the
         // visible rest starts the next part.
@@ -557,12 +662,41 @@ export class ReplyDelivery {
         if (active) {
           if (codec.render(source, settle) === active.sent && !active.uncertain) {
             if (!settle) return null;
+            // The source can have grown by text that shows nothing more, such
+            // as a closing fence the message already closed.
+            Object.assign(active, { sentSource: source, sentBefore: before });
             this.settlePart(active, end);
             continue;
           }
+          const left = this.editsLeft(active);
+          // A successful last edit settles its part, so an open part with no
+          // edits left is one whose last edit's result is unknown.
+          if (left <= 0)
+            return this.failUncertain(
+              "an edit's result is unknown and the message has no edits left",
+            );
+          if (left === 1 && !settle) {
+            // The last edit settles the part, so while the block streams it
+            // waits for a readable break at or after what the part shows.
+            const kept = shown - start;
+            let cut = lastBreak(source);
+            if (cut < kept) {
+              const further = lastBreak(source.slice(kept));
+              cut = further && kept + further;
+            }
+            if (cut === 0) return null;
+            source = source.slice(0, cut);
+            end = start + cut;
+            settle = true;
+            if (codec.render(source, true) === active.sent && !active.uncertain) {
+              Object.assign(active, { sentSource: source, sentBefore: before });
+              this.settlePart(active, end);
+              continue;
+            }
+          }
           const due = active.lastWriteAt + this.options.policy.editIntervalMs;
           if (now < due) return { waitUntil: due };
-          return { write: "edit", block: index, part: active, end, source, settle };
+          return { write: "edit", block: index, part: active, end, before, source, settle };
         }
         // A message cannot be put in front of one that exists. Text a block
         // gained after a later block's message stays unsent, and that message
@@ -575,7 +709,7 @@ export class ReplyDelivery {
           break;
         }
         if (this.mode === "edit" || settle)
-          return { write: "create", block: index, start, end, source, settle };
+          return { write: "create", block: index, start, end, before, source, settle };
         state.waitingSince ??= now;
         const due = state.waitingSince + this.options.policy.blockWaitMs;
         if (now < due) return { waitUntil: due };
@@ -590,9 +724,16 @@ export class ReplyDelivery {
           block: index,
           start,
           end: start + cut,
+          before,
           source: source.slice(0, cut),
           settle: true,
         };
+      }
+
+      // The block is complete and every message of it has had its last write.
+      if (complete && this.options.transport.settle) {
+        const part = state.parts.find((part) => this.unfinished(part));
+        if (part) return { write: "settle", block: index, part };
       }
     }
     return null;
@@ -611,9 +752,9 @@ export class ReplyDelivery {
    * front of one that exists, so the message after it is reported as differing.
    */
   private reconcileLayout(text: string, state: BlockState): void {
-    const { codec } = this.options.transport;
     const visible = (from: number, to: number) =>
-      to > from && codec.render(text.slice(from, to), true).trim() !== "";
+      to > from &&
+      this.codecAt(text.slice(0, from)).render(text.slice(from, to), true).trim() !== "";
     let covered = 0;
     for (const part of state.parts) {
       if (splitsPair(text, part.start)) part.start -= 1;
@@ -626,27 +767,24 @@ export class ReplyDelivery {
     if (visible(covered, state.skipped)) state.skipped = undefined;
   }
 
+  private report(event: Omit<DeliveryEvent, "at">): void {
+    try {
+      this.options.observe?.({ at: this.now(), ...event });
+    } catch (error) {
+      // An observer is a diagnostic. It cannot change what a write did.
+      log.warn("delivery observer threw", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private async write(plan: Exclude<Plan, null | { waitUntil: number }>): Promise<void> {
-    const { transport, observe } = this.options;
+    if (plan.write === "settle") return this.finishMessage(plan.block, plan.part);
+    const { transport } = this.options;
     const state = this.blocks[plan.block]!;
-    const rendered = transport.codec.render(plan.source, plan.settle);
-    const report = (result: DeliveryEvent["result"], part: number) => {
-      try {
-        observe?.({
-          at: this.now(),
-          write: plan.write,
-          block: plan.block,
-          part,
-          text: rendered,
-          result,
-        });
-      } catch (error) {
-        // An observer is a diagnostic. It cannot change what a write did.
-        log.warn("delivery observer threw", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    };
+    const rendered = this.codecAt(plan.before).render(plan.source, plan.settle);
+    const report = (result: DeliveryEvent["result"], part: number) =>
+      this.report({ write: plan.write, block: plan.block, part, text: rendered, result });
 
     if (plan.write === "create") {
       // The text this part takes stops waiting, and what follows it waits afresh.
@@ -658,13 +796,15 @@ export class ReplyDelivery {
           transport.create(this.conversation, rendered, first ? this.options.replyTo : undefined),
         );
         // Later messages follow the first wherever it landed.
-        this.conversation = receipt.conversationId;
+        this.conversation = receipt.chatId;
         this.unavailableRetries = 0;
         const part: Part = {
           start: plan.start,
           end: plan.end,
           sent: rendered,
           sentSource: plan.source,
+          sentBefore: plan.before,
+          edits: 0,
           receipt,
           settled: false,
           lastWriteAt: this.now(),
@@ -675,12 +815,28 @@ export class ReplyDelivery {
       } catch (error) {
         const failure = asDeliveryFailure(error);
         report(failure.kind, partIndex);
+        const late = this.outlasting as Promise<PartReceipt> | undefined;
+        if (failure instanceof WriteTimedOut && late && transport.settle) {
+          // A create that answers after the deadline leaves the reply no part
+          // to settle its message with, so it is settled once the answer comes,
+          // while the call still holds the conversation.
+          this.outlasting = late.then(async (receipt) => {
+            if (!receipt.streaming) return;
+            await transport.settle!(receipt, rendered).catch((settleError: unknown) =>
+              log.warn("a message could not be settled", {
+                error: settleError instanceof Error ? settleError.message : String(settleError),
+              }),
+            );
+          });
+        }
         if (failure.kind === "unknown") {
           state.parts.push({
             start: plan.start,
             end: plan.end,
             sent: rendered,
             sentSource: plan.source,
+            sentBefore: plan.before,
+            edits: 0,
             settled: false,
             unknown: true,
             lastWriteAt: this.now(),
@@ -697,7 +853,13 @@ export class ReplyDelivery {
       if (!transport.edit)
         throw new DeliveryFailure("unsupported", "the transport declares edits but has no edit");
       await this.answered(transport.edit(part.receipt!, rendered));
-      Object.assign(part, { sent: rendered, sentSource: plan.source, lastWriteAt: this.now() });
+      Object.assign(part, {
+        sent: rendered,
+        sentSource: plan.source,
+        sentBefore: plan.before,
+        lastWriteAt: this.now(),
+      });
+      part.edits += 1;
       delete part.uncertain;
       delete part.attempted;
       if (!part.settled) part.end = plan.end;
@@ -712,6 +874,7 @@ export class ReplyDelivery {
       if (failure.kind === "unknown") {
         part.uncertain = true;
         part.attempted = plan.source;
+        part.edits += 1;
       }
       if (failure.kind === "unsupported" && !part.uncertain) {
         // The platform will not edit: keep what it shows and carry on in blocks.
@@ -791,11 +954,103 @@ export class ReplyDelivery {
     part.settled = true;
   }
 
+  /** Asks the transport to settle `part`'s message, once. What the message
+   *  shows is final whatever the answer, so a failure only pauses the account
+   *  when the platform asks it to. */
+  private async finishMessage(block: number, part: Part): Promise<void> {
+    part.finished = true;
+    const report = (result: DeliveryEvent["result"]) =>
+      this.report({
+        write: "settle",
+        block,
+        part: this.blocks[block]!.parts.indexOf(part),
+        text: part.sent,
+        result,
+      });
+    try {
+      await this.answered(this.options.transport.settle!(part.receipt!, part.sent));
+      report("accepted");
+    } catch (error) {
+      const failure = asDeliveryFailure(error);
+      report(failure.kind);
+      log.warn("a message could not be settled", { kind: failure.kind, error: failure.message });
+      if (failure.kind === "rate-limited")
+        this.options.pacer.pause(
+          Math.max(failure.retryAfterMs ?? 0, MIN_RATE_LIMIT_WAIT_MS),
+          "rate-limited",
+        );
+    }
+  }
+
+  /**
+   * Settles, in the account's queue, every message a stopped or failed reply
+   * left unsettled. It runs after the reply resolved, so a stop is not held by
+   * a full queue, and each write gives up as one of the reply's would.
+   */
+  private settleRest(): void {
+    if (!this.options.transport.settle) return;
+    const left = this.blocks.flatMap((state, block) =>
+      state.parts.filter((part) => this.unfinished(part)).map((part) => ({ block, part })),
+    );
+    if (left.length === 0) return;
+    for (const { part } of left) part.finished = true;
+    void (async () => {
+      for (const { block, part } of left) {
+        const queued = new AbortController();
+        const queueTimer = this.options.clock.setTimeout(
+          () => queued.abort(new QueueWaitExceeded()),
+          QUEUE_WAIT_MS,
+        );
+        try {
+          await this.options.pacer.run(
+            this.paceKey,
+            async () => {
+              this.options.clock.clearTimeout(queueTimer);
+              await this.finishMessage(block, part);
+              const late = this.outlasting;
+              this.outlasting = undefined;
+              return late ? new Outlasted(late) : undefined;
+            },
+            queued.signal,
+          );
+        } catch (error) {
+          log.warn("a message could not be settled", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          this.options.clock.clearTimeout(queueTimer);
+        }
+      }
+    })();
+  }
+
+  /**
+   * The source a split passed over right after a message because nothing in
+   * it shows, such as a closing fence the message already closed. It belongs
+   * to that message's source, so a block's sources join into its text.
+   */
+  private passedOverAfter(block: number, index: number): string {
+    const state = this.blocks[block]!;
+    const part = state.parts[index]!;
+    const end = part.start + part.sentSource.length;
+    if (part.unknown || part.uncertain || part.diverged || end !== part.end) return "";
+    const next = state.parts[index + 1]?.start ?? state.skipped;
+    if (next === undefined || next <= end) return "";
+    const text = this.assembler.blocks[block]?.text ?? "";
+    const gap = text.slice(end, next);
+    try {
+      return this.codecAt(text.slice(0, end)).render(gap, true).trim() ? "" : gap;
+    } catch {
+      return "";
+    }
+  }
+
   private outcome(): ReplyOutcome {
     const parts: DeliveredPart[] = this.blocks.flatMap((state, block) =>
-      state.parts.map((part) => ({
+      state.parts.map((part, index) => ({
         block,
         text: part.sent,
+        source: part.sentSource + this.passedOverAfter(block, index),
         ...(part.receipt ? { receipt: part.receipt } : {}),
         state: part.unknown ? "unknown" : part.settled ? "settled" : "open",
         ...(part.diverged ? { diverged: true as const } : {}),

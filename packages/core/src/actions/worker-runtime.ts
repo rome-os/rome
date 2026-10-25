@@ -23,7 +23,7 @@ import {
   ActionRegistryProxy,
   AppManagerProxy,
   AppStoreProxy,
-  ConversationSettingsControlProxy,
+  ChatSettingsControlProxy,
   EmailInboundControlProxy,
   BackendTurnRunnerProxy,
   EventBusProxy,
@@ -31,6 +31,7 @@ import {
   NotifyServiceProxy,
   AgentNamesProxy,
   FeedbackServiceProxy,
+  CloudProfileProxy,
   RoutineEngineProxy,
   SystemUpgradeServiceProxy,
   ChannelsServiceProxy,
@@ -57,6 +58,7 @@ import { createArtifactReferenceResolver } from "../apps/artifact-reference.js";
 import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
 import { resolveOneOffDate } from "../routines/schedule-trigger-provider.js";
 import type { Trigger } from "../routines/types.js";
+import { legacyChatIdChannelsService, legacyChatIdSettings } from "../apps/legacy-chat-id.js";
 
 const log = createLogger("action-worker");
 
@@ -105,10 +107,10 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   await skillCatalog.loadFromCatalog(appCatalog);
 
   const channelRecords = new ChannelRecordsRepository(db);
-  const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
-  const personMappingRepo = new PersonMappingRepository(db, serviceOfChannel);
+  const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
+  const personMappingRepo = new PersonMappingRepository(db, connectionKindOfChannel);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
+  const approvalsRepo = new ApprovalsRepository(db);
   const webchatRepo = new WebChatRepository(db);
   const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
   const policiesRepo = new PoliciesRepository(db);
@@ -117,8 +119,9 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const executionJournalRepo = new ExecutionJournalRepository(db);
 
   const channelsService = new ChannelsServiceProxy();
-  const conversationSettings = new ConversationSettingsControlProxy();
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, serviceOfChannel);
+  const chatSettings = new ChatSettingsControlProxy();
+  const appChatSettings = legacyChatIdSettings(chatSettings);
+  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
 
   const actionEngine = new ActionEngine(
     actionRegistry,
@@ -150,8 +153,10 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     {
       agentRunner,
       resolveArtifactReference,
-      channelsService,
-      conversationSettings,
+      channelsService: legacyChatIdChannelsService(channelsService),
+      chatSettings: appChatSettings,
+      // Apps built before the chat rename read `conversationSettings`.
+      conversationSettings: appChatSettings,
       capabilityDiscovery,
       personMappingRepo,
       sentinelLogRepo,
@@ -196,21 +201,25 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
         enabled: config.hostExecutionEnabled,
       }),
       feedback: new FeedbackServiceProxy(),
+      cloudProfile: new CloudProfileProxy(),
       agentNames: new AgentNamesProxy(),
     },
   );
+  // The main process warns about these once per change in the failures. Every
+  // worker process reloads the same apps, so a warn here would repeat it per
+  // worker.
   if (agentLoader.getRegistryLoadFailures().length > 0) {
-    log.warn("some app agents failed to load", {
+    log.debug("some app agents failed to load", {
       failures: agentLoader.getRegistryLoadFailures(),
     });
   }
   if (skillCatalog.getRegistryLoadFailures().length > 0) {
-    log.warn("some app skills failed to load", {
+    log.debug("some app skills failed to load", {
       failures: skillCatalog.getRegistryLoadFailures(),
     });
   }
   if (actionLoader.getRegistryLoadFailures().length > 0) {
-    log.warn("some app action configs failed to load", {
+    log.debug("some app action configs failed to load", {
       failures: actionLoader.getRegistryLoadFailures(),
     });
   }

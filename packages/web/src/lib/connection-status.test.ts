@@ -155,7 +155,7 @@ describe("connectionStatus — Telegram fold row states", () => {
   function telegramConn(state: GrantState): ApiConnection {
     return {
       id: "conn-tg",
-      service: "telegram",
+      connectionKind: "telegram",
       label: "Telegram",
       grants: { bot: state },
       display: {
@@ -177,7 +177,7 @@ describe("connectionStatus — Telegram fold row states", () => {
   function telegramUserConn(state: GrantState): ApiConnection {
     return {
       id: "conn-tg-user",
-      service: "telegram_user",
+      connectionKind: "telegram_user",
       label: "Telegram personal account",
       grants: { session: state },
       display: {

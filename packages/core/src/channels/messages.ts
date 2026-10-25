@@ -62,7 +62,7 @@ export function channelMessageDetail(message: ChannelMessage): MessageDetail {
   const detail: MessageDetail = {
     sender: { id: message.senderId || null, name: message.senderDisplayName || null },
     conversation: {
-      id: message.conversationId,
+      id: message.chatId,
       name: message.thread?.name ?? null,
       kind: message.thread?.kind ?? null,
     },

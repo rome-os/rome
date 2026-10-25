@@ -17,12 +17,11 @@ import { createHmac } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
-import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { connectionsRoutes } from "../../api/routes/connections.js";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
-import { createTestDb, identityServiceOf } from "../../test/helpers.js";
+import { createTestDb } from "../../test/helpers.js";
 import type { MailProvider, RomeMailEvent, RomeMailMessage } from "../../lib/rome-cloud-mail.js";
 import { ConnectionRegistry } from "../registry.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
@@ -248,7 +247,6 @@ function makeSetupApp() {
   const personMappingRepo = {
     findByChannelUser: async () => null,
     findByBondLevel: async () => [],
-    writeDeleteGuardianChannelMappings: rs.fn(),
   } as unknown as ApiDeps["personMappingRepo"];
   registry.register(
     makeEmailDescriptor({
@@ -264,10 +262,7 @@ function makeSetupApp() {
     connectionRegistry: registry,
     setupManager,
     db: testDb,
-    approvalsRepo: new ApprovalsRepository(
-      testDb,
-      new PersonMappingRepository(testDb, identityServiceOf),
-    ),
+    approvalsRepo: new ApprovalsRepository(testDb),
     personMappingRepo,
   } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
@@ -281,8 +276,8 @@ function makeSetupApp() {
 }
 
 /** Start (or restart) the email setup and poll it to a terminal state. */
-async function runSetup(app: Hono, idOrService = "email") {
-  const started = await app.request(`/connections/${idOrService}/grants/inbox/setup`, {
+async function runSetup(app: Hono, idOrKind = "email") {
+  const started = await app.request(`/connections/${idOrKind}/grants/inbox/setup`, {
     method: "POST",
     headers: { ...SAME_ORIGIN, "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -314,9 +309,12 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     // The provisioned address renders from the grant profile.
     const list = await app.request("/connections");
     const { connections } = (await list.json()) as {
-      connections: Array<{ service: string; display: Record<string, { email: string | null }> }>;
+      connections: Array<{
+        connectionKind: string;
+        display: Record<string, { email: string | null }>;
+      }>;
     };
-    const email = connections.find((c) => c.service === "email");
+    const email = connections.find((c) => c.connectionKind === "email");
     expect(email?.display.inbox?.email).toBe(EMAIL_ADDRESS);
 
     // The settings row is pure config — no credential fields ever landed there.
@@ -422,6 +420,39 @@ describe("autoConnectEmail", () => {
     expect(conn.auth.grants().inbox).toBe("unauthorized");
   });
 
+  it("never reconnects email the guardian removed, though no connection is left", async () => {
+    const { app, registry, settingsRepo } = makeSetupApp();
+    await runSetup(app);
+    const conn = registry.find("email")[0];
+    const del = await app.request(`/connections/${conn.id}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+    expect(del.status).toBe(200);
+    expect(registry.find("email")).toHaveLength(0);
+    const provision = rs.fn(async () => inbox);
+
+    expect(await autoConnectEmail({ registry, provision, settings: settingsRepo })).toBe(false);
+
+    expect(provision).not.toHaveBeenCalled();
+    expect(registry.find("email")).toHaveLength(0);
+  });
+
+  it("connects on a later call after a failed provision", async () => {
+    const { registry, settingsRepo } = makeSetupApp();
+    const failing = async (): Promise<typeof inbox> => {
+      throw new Error("Rome Cloud mail API /api/instance/mail/provision failed (502)");
+    };
+    await expect(
+      autoConnectEmail({ registry, provision: failing, settings: settingsRepo }),
+    ).rejects.toThrow("failed (502)");
+
+    expect(
+      await autoConnectEmail({ registry, provision: async () => inbox, settings: settingsRepo }),
+    ).toBe(true);
+    expect(registry.find("email")[0].auth.grants().inbox).toBe("authorized");
+  });
+
   it("yields to a Connect click that commits while the provision is in flight", async () => {
     const { app, registry, settingsRepo } = makeSetupApp();
     const provision = deferred<{ address: string; inboundSecret: string }>();
@@ -437,6 +468,28 @@ describe("autoConnectEmail", () => {
 
     expect(await auto).toBe(false);
     expect(registry.find("email")).toHaveLength(1);
+  });
+
+  it("never reconnects email the guardian connected and removed while the provision was in flight", async () => {
+    const { app, registry, settingsRepo } = makeSetupApp();
+    const provision = deferred<{ address: string; inboundSecret: string }>();
+    const auto = autoConnectEmail({
+      registry,
+      provision: () => provision.promise,
+      settings: settingsRepo,
+    });
+
+    await runSetup(app);
+    const conn = registry.find("email")[0];
+    const del = await app.request(`/connections/${conn.id}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+    expect(del.status).toBe(200);
+    provision.resolve(inbox);
+
+    expect(await auto).toBe(false);
+    expect(registry.find("email")).toHaveLength(0);
   });
 
   it("rejects on a provision error and leaves no connection behind", async () => {

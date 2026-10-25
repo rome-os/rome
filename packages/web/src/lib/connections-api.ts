@@ -56,7 +56,8 @@ export interface ApiConnection extends ConnectionAccountFields {
   /** Ledger connection id, or null for an offerable placeholder — a registered
    *  service the guardian has never connected. */
   id: string | null;
-  service: string;
+  /** The kind of connection, such as `telegram_user`. */
+  connectionKind: string;
   label: string;
   grants: Record<string, GrantState>;
   display: Record<string, GrantDisplay | null>;

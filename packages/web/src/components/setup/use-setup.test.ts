@@ -22,7 +22,7 @@ describe("useSetup stale-state handling", () => {
       }),
     );
     const { result } = renderHook(() =>
-      useSetup({ idOrService: "discord", grant: "bot", activeCid: "cid-1" }),
+      useSetup({ idOrKind: "discord", grant: "bot", activeCid: "cid-1" }),
     );
     // Adopted the discovered setup and polled its state.
     await waitFor(() => expect(result.current.state?.status).toBe("presenting"));
@@ -36,7 +36,7 @@ describe("useSetup stale-state handling", () => {
   it("clears itself when the polled setup has vanished (404)", async () => {
     rs.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 404 }));
     const { result } = renderHook(() =>
-      useSetup({ idOrService: "discord", grant: "bot", activeCid: "gone" }),
+      useSetup({ idOrKind: "discord", grant: "bot", activeCid: "gone" }),
     );
     // The immediate poll 404s → the hook resets so the card is not stuck.
     await waitFor(() => expect(result.current.cid).toBeNull());
@@ -62,7 +62,7 @@ describe("useSetup stale-state handling", () => {
     const onDone = rs.fn();
     const { result } = renderHook(() =>
       useSetup({
-        idOrService: "github",
+        idOrKind: "github",
         grant: "user",
         activeCid: "cid-parked",
         onDone,
@@ -89,7 +89,7 @@ describe("useSetup stale-state handling", () => {
     const fetchMock = rs.spyOn(globalThis, "fetch");
     fetchMock.mockImplementation(async () => new Response(started, { status: 200 }));
     const { result, unmount } = renderHook(() =>
-      useSetup({ idOrService: "feishu", grant: "bot", another: true }),
+      useSetup({ idOrKind: "feishu", grant: "bot", another: true }),
     );
     act(() => result.current.start());
     await waitFor(() => expect(result.current.cid).toBe("cid-new"));
@@ -109,7 +109,7 @@ describe("useSetup stale-state handling", () => {
       }),
     );
     const { result, unmount } = renderHook(() =>
-      useSetup({ idOrService: "discord", grant: "bot", activeCid: "cid-1" }),
+      useSetup({ idOrKind: "discord", grant: "bot", activeCid: "cid-1" }),
     );
     await waitFor(() => expect(result.current.state?.status).toBe("presenting"));
 
@@ -128,7 +128,7 @@ describe("useSetup stale-state handling", () => {
       });
     });
     const { result, unmount } = renderHook(() =>
-      useSetup({ idOrService: "feishu", grant: "bot", another: true }),
+      useSetup({ idOrKind: "feishu", grant: "bot", another: true }),
     );
     act(() => result.current.start());
 
@@ -153,7 +153,7 @@ describe("useSetup stale-state handling", () => {
     const fetchMock = rs.spyOn(globalThis, "fetch");
     fetchMock.mockImplementation(async () => new Response(started, { status: 200 }));
     const { result, unmount } = renderHook(() =>
-      useSetup({ idOrService: "feishu", grant: "bot", another: true }),
+      useSetup({ idOrKind: "feishu", grant: "bot", another: true }),
     );
     act(() => result.current.start());
     await waitFor(() => expect(result.current.cid).toBe("cid-other"));

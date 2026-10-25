@@ -6,18 +6,9 @@ type Plural = { one: string; other: string };
 /** Every string the device pages show. `{name}` placeholders are filled by `format`. */
 export interface NodeUiMessages {
   link: Record<"connecting" | NodeConsoleDaemonState, string>;
-  gateway: Record<NodeConnectionStatus, string>;
-  gatewayUp: string;
-  reconnects: Plural;
-  runningCount: string;
-  serviceStarted: string;
+  /** The Gateway connections that need attention. A healthy one shows no text. */
+  gateway: Record<Extract<NodeConnectionStatus, "retrying" | "revoked" | "superseded">, string>;
   title: string;
-  online: string;
-  onlineAtLeast: string;
-  commandsInDay: Plural;
-  checkedAgo: string;
-  checking: string;
-  checkNow: string;
   linkDevice: string;
   linkDialog: {
     title: string;
@@ -27,17 +18,12 @@ export interface NodeUiMessages {
     close: string;
   };
   status: Record<NodeDeviceStatus, string>;
-  activeDevices: string;
-  quietDevices: string;
   revokedDevices: string;
   noDevices: string;
   statsUnavailable: string;
   card: {
-    commands: string;
-    failed: string;
-    peak: string;
-    viewAll: string;
-    noCommands: string;
+    /** The name of a device's curve. */
+    chart: Plural;
   };
   chart: {
     label: string;
@@ -50,6 +36,35 @@ export interface NodeUiMessages {
     running: string;
   };
   back: string;
+  thisDevice: {
+    label: string;
+    connecting: string;
+    disabled: string;
+  };
+  manage: {
+    menu: string;
+    rename: string;
+    renameTitle: string;
+    nameLabel: string;
+    nameHint: string;
+    save: string;
+    cancel: string;
+    connect: string;
+    disconnect: string;
+    disconnectTitle: string;
+    disconnectSelf: string;
+    remove: string;
+    removeTitle: string;
+    /** The remove dialog's first line, then one point per consequence. */
+    removeLead: string;
+    removeActive: string[];
+    removeRevoked: string[];
+    removeOnCloud: string;
+    errors: Record<
+      "device_not_found" | "invalid_device_name" | "revocation_pending" | "unavailable",
+      string
+    >;
+  };
   detail: {
     commandsInDay: Plural;
     average: string;
@@ -100,24 +115,11 @@ const en: NodeUiMessages = {
     disconnected: "The device service stopped. Reconnecting…",
   },
   gateway: {
-    online: "Gateway connected",
-    stopped: "Gateway idle",
-    connecting: "Connecting to Gateway",
     retrying: "Reconnecting to Gateway",
     revoked: "Gateway access revoked",
     superseded: "Gateway connection replaced",
   },
-  gatewayUp: "up {duration}",
-  reconnects: { one: "{count} reconnect", other: "{count} reconnects" },
-  runningCount: "{count} running",
-  serviceStarted: "Device service {version}, started {time}",
   title: "Devices",
-  online: "{online} of {total} online",
-  onlineAtLeast: "at least {online} of {total} online",
-  commandsInDay: { one: "{count} command in 24 h", other: "{count} commands in 24 h" },
-  checkedAgo: "Checked {ago} ago",
-  checking: "Checking…",
-  checkNow: "Check connections now",
   linkDevice: "Link device",
   linkDialog: {
     title: "Link a computer",
@@ -134,17 +136,11 @@ const en: NodeUiMessages = {
     unknown: "Unknown",
     revoked: "Access revoked",
   },
-  activeDevices: "Active devices",
-  quietDevices: "No commands in 24 h",
   revokedDevices: "Revoked",
   noDevices: "No computers are linked to this account.",
   statsUnavailable: "Restart the device service to show command counts.",
   card: {
-    commands: "commands · 24 h",
-    failed: "{rate} failed",
-    peak: "peak {count}/10 min",
-    viewAll: "View all activity",
-    noCommands: "No commands in the last 24 h.",
+    chart: { one: "{count} command in 24 h", other: "{count} commands in 24 h" },
   },
   chart: {
     label: "Commands per 10 minutes over the last 24 hours",
@@ -157,6 +153,40 @@ const en: NodeUiMessages = {
     running: "{count} running",
   },
   back: "Devices",
+  thisDevice: {
+    label: "This device",
+    connecting: "Connecting",
+    disabled: "Turned off",
+  },
+  manage: {
+    menu: "Device actions",
+    rename: "Rename",
+    renameTitle: "Rename device",
+    nameLabel: "Name",
+    nameHint: "Up to 80 characters. Only the name changes; the device keeps its ID.",
+    save: "Save",
+    cancel: "Cancel",
+    connect: "Connect",
+    disconnect: "Disconnect",
+    disconnectTitle: "Disconnect {name}?",
+    disconnectSelf: "This is this computer, so you can connect it again here at any time.",
+    remove: "Remove",
+    removeTitle: "Remove {name}?",
+    removeLead: "This can't be undone.",
+    removeActive: [
+      "Your agent can't use {name} anymore.",
+      "To add it back, reconnect it. It returns as a new device.",
+    ],
+    removeRevoked: ["{name} is already revoked, so only its record is deleted."],
+    removeOnCloud: "Remove on Rome Cloud",
+    errors: {
+      device_not_found: "Rome Cloud has no such device in your account.",
+      invalid_device_name: "Use 1 to 80 characters without control characters.",
+      revocation_pending:
+        "The device is revoked, but Rome Cloud has not confirmed it yet. It stays under Revoked; remove it again in a moment.",
+      unavailable: "Rome Cloud could not be reached. Try again.",
+    },
+  },
   detail: {
     commandsInDay: {
       one: "command in the last 24 h",
@@ -216,24 +246,11 @@ const zhCN: NodeUiMessages = {
     disconnected: "设备服务已停止。正在重新连接…",
   },
   gateway: {
-    online: "Gateway 已连接",
-    stopped: "Gateway 空闲",
-    connecting: "正在连接 Gateway",
     retrying: "正在重连 Gateway",
     revoked: "Gateway 授权已撤销",
     superseded: "Gateway 连接已被替换",
   },
-  gatewayUp: "已连接 {duration}",
-  reconnects: { one: "重连 {count} 次", other: "重连 {count} 次" },
-  runningCount: "{count} 个运行中",
-  serviceStarted: "设备服务 {version}，启动于 {time}",
   title: "设备",
-  online: "{online}/{total} 台在线",
-  onlineAtLeast: "至少 {online}/{total} 台在线",
-  commandsInDay: { one: "24 小时内 {count} 条命令", other: "24 小时内 {count} 条命令" },
-  checkedAgo: "{ago}前检查",
-  checking: "正在检查…",
-  checkNow: "立即检查连接",
   linkDevice: "关联设备",
   linkDialog: {
     title: "关联电脑",
@@ -250,17 +267,11 @@ const zhCN: NodeUiMessages = {
     unknown: "未知",
     revoked: "授权已撤销",
   },
-  activeDevices: "活跃设备",
-  quietDevices: "24 小时内没有命令",
   revokedDevices: "已撤销",
   noDevices: "此账户尚未关联电脑。",
   statsUnavailable: "重启设备服务后即可显示命令统计。",
   card: {
-    commands: "条命令 · 24 小时",
-    failed: "{rate} 失败",
-    peak: "峰值 {count}/10 分钟",
-    viewAll: "查看全部活动",
-    noCommands: "最近 24 小时没有命令。",
+    chart: { one: "24 小时 {count} 条命令", other: "24 小时 {count} 条命令" },
   },
   chart: {
     label: "最近 24 小时每 10 分钟的命令数",
@@ -273,6 +284,40 @@ const zhCN: NodeUiMessages = {
     running: "{count} 运行中",
   },
   back: "设备",
+  thisDevice: {
+    label: "本机",
+    connecting: "连接中",
+    disabled: "已关闭",
+  },
+  manage: {
+    menu: "设备操作",
+    rename: "重命名",
+    renameTitle: "重命名设备",
+    nameLabel: "名称",
+    nameHint: "最多 80 个字符。只改名称，设备 ID 不变。",
+    save: "保存",
+    cancel: "取消",
+    connect: "连接",
+    disconnect: "断开",
+    disconnectTitle: "断开 {name}？",
+    disconnectSelf: "这是本机，断开后可以随时在这里重新连接。",
+    remove: "移除",
+    removeTitle: "移除 {name}？",
+    removeLead: "此操作无法撤销。",
+    removeActive: [
+      "你的 Agent 将不能再使用 {name}。",
+      "要加回来，需要重新连接，它会作为一台新设备出现。",
+    ],
+    removeRevoked: ["{name} 的授权已撤销，这里只删除它的记录。"],
+    removeOnCloud: "在 Rome Cloud 上移除",
+    errors: {
+      device_not_found: "你的账号中没有这台设备。",
+      invalid_device_name: "请使用 1 到 80 个字符，不含控制字符。",
+      revocation_pending:
+        "设备已撤销授权，但 Rome Cloud 还没确认，暂时留在“已撤销”中。请稍后再移除一次。",
+      unavailable: "无法连接 Rome Cloud，请重试。",
+    },
+  },
   detail: {
     commandsInDay: { one: "条命令（最近 24 小时）", other: "条命令（最近 24 小时）" },
     average: "平均 {rate}/分钟",

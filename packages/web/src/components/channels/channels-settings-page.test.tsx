@@ -55,7 +55,8 @@ function item(input: {
     source: input.overrides ? "configured" : "live",
     snapshot: {
       conversation: {
-        ref: { connectionId: `${service}-1`, conversationId: input.id },
+        ref: { connectionId: `${service}-1`, chatId: input.id },
+        connectionKind: service,
         service,
         kind: "channel",
         displayName: input.name,
@@ -94,8 +95,8 @@ function mockApi(options: { failPatch?: boolean; deferFirstPatch?: boolean } = {
     const url = String(input);
     if (url === "/api/connections") return ok({ connections: [] });
     if (url === "/api/agents") return ok({ agents: [] });
-    if (url.startsWith("/api/conversation-settings?") && !init?.method) return ok({ items: [row] });
-    if (url === "/api/conversation-settings" && init?.method === "PATCH") {
+    if (url.startsWith("/api/chat-settings?") && !init?.method) return ok({ items: [row] });
+    if (url === "/api/chat-settings" && init?.method === "PATCH") {
       patchBodies.push(JSON.parse(String(init.body)));
       if (options.deferFirstPatch && patchBodies.length === 1) {
         return new Promise<Response>((resolve, reject) => {
@@ -157,7 +158,7 @@ describe("ChannelsSettingsPage", () => {
           connections: [
             {
               id: "discord-1",
-              service: "discord",
+              connectionKind: "discord",
               label: "Discord · Rome",
               grants: {},
               display: {},
@@ -174,12 +175,12 @@ describe("ChannelsSettingsPage", () => {
       if (url === "/api/agents") {
         return ok({ agents: [{ name: "core:main" }, { name: "coding:build" }] });
       }
-      if (url.startsWith("/api/conversation-settings?") && !init?.method) {
+      if (url.startsWith("/api/chat-settings?") && !init?.method) {
         return url.includes("cursor=next")
           ? ok({ items: [item({ id: "releases", name: "releases" })] })
           : ok({ items: [parent], nextCursor: "next" });
       }
-      if (url === "/api/conversation-settings" && init?.method === "PATCH") {
+      if (url === "/api/chat-settings" && init?.method === "PATCH") {
         const body = JSON.parse(String(init.body));
         patchBodies.push(body);
         return ok({
@@ -231,7 +232,7 @@ describe("ChannelsSettingsPage", () => {
     // because they landed inside a single debounce window.
     await waitFor(() => expect(patchBodies).toHaveLength(1));
     expect(patchBodies[0]).toMatchObject({
-      ref: { connectionId: "discord-1", conversationId: "engineering" },
+      ref: { connectionId: "discord-1", chatId: "engineering" },
       set: {
         enabled: false,
         activation: { mode: "all" },
@@ -252,7 +253,7 @@ describe("ChannelsSettingsPage", () => {
   it("shows a silent account instead of the agent picker", async () => {
     const connection = (service: string, linked: { agent?: string | null }) => ({
       id: `${service}-1`,
-      service,
+      connectionKind: service,
       label: service,
       grants: {},
       display: {},
@@ -275,7 +276,7 @@ describe("ChannelsSettingsPage", () => {
         });
       }
       if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
-      if (url.startsWith("/api/conversation-settings?")) {
+      if (url.startsWith("/api/chat-settings?")) {
         return ok({
           items: [
             item({
@@ -322,7 +323,7 @@ describe("ChannelsSettingsPage", () => {
           connections: [
             {
               id: "discord-1",
-              service: "discord",
+              connectionKind: "discord",
               label: "Discord · Rome",
               grants: {},
               display: {},
@@ -338,8 +339,8 @@ describe("ChannelsSettingsPage", () => {
         });
       }
       if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
-      if (url.startsWith("/api/conversation-settings?")) return ok({ items: [row] });
-      if (url === "/api/conversation-settings" && init?.method === "PATCH") {
+      if (url.startsWith("/api/chat-settings?")) return ok({ items: [row] });
+      if (url === "/api/chat-settings" && init?.method === "PATCH") {
         const body = JSON.parse(String(init.body));
         patchBodies.push(body);
         return ok({
@@ -379,7 +380,7 @@ describe("ChannelsSettingsPage", () => {
           connections: [
             {
               id: "discord-1",
-              service: "discord",
+              connectionKind: "discord",
               label: "Discord · Rome",
               grants: {},
               display: {},
@@ -391,7 +392,7 @@ describe("ChannelsSettingsPage", () => {
         });
       }
       if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
-      if (url.startsWith("/api/conversation-settings?")) {
+      if (url.startsWith("/api/chat-settings?")) {
         return ok({ items: [item({ id: "engineering", name: "engineering" })] });
       }
       if (init?.method === "PATCH") throw new Error("network down");
@@ -501,7 +502,7 @@ describe("ChannelsSettingsPage", () => {
       const url = String(input);
       if (url === "/api/connections") return ok({ connections: [] });
       if (url === "/api/agents") return ok({ agents: [] });
-      if (url.startsWith("/api/conversation-settings?")) {
+      if (url.startsWith("/api/chat-settings?")) {
         settingsLoads += 1;
         if (settingsLoads === 1) {
           return {

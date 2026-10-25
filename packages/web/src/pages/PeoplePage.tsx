@@ -12,6 +12,7 @@ import { List } from "@/components/ui/list-row";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 import { DirectoryRow, StreamRow, levelLabelKey } from "./people/rows";
 import { DismissedEntry, UnknownEntry } from "./people/triage";
+import { LinkMyAccount } from "./people/link-code";
 import {
   directoryGroups,
   FILTER_ORDER,
@@ -198,15 +199,18 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
         <PageHeader
           title={tCommon("nav.people")}
           actions={
-            <SegmentedControl<PeopleView>
-              aria-label={t("views.label")}
-              value={view}
-              onValueChange={(next) => go({ view: next })}
-              options={[
-                { value: "latest", label: t("views.latest") },
-                { value: "directory", label: t("views.directory") },
-              ]}
-            />
+            <>
+              <LinkMyAccount />
+              <SegmentedControl<PeopleView>
+                aria-label={t("views.label")}
+                value={view}
+                onValueChange={(next) => go({ view: next })}
+                options={[
+                  { value: "latest", label: t("views.latest") },
+                  { value: "directory", label: t("views.directory") },
+                ]}
+              />
+            </>
           }
         />
 

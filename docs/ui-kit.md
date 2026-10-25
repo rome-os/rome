@@ -18,7 +18,7 @@ Add the `./<component>` entry to `exports` alongside the barrel re-export in `sr
 
 `react`, `react-dom`, and `lucide-react` are peers. `clsx` and `tailwind-merge` are regular deps. Radix primitives and `class-variance-authority` belong to that same tier. Install them only when the first component that needs them lands. Declaring a dep before it has a consumer is the same waste in reverse.
 
-Heavy libraries never become regular deps: `streamdown` with its code, math, and mermaid plugins, `katex`, `@dnd-kit/*`, `react-day-picker`, `cmdk`, and `sonner`. They arrive as optional-peer subpath exports, so an app that imports a button does not pay for a calendar. Mirror each optional peer into `devDependencies` as well, or `tsc` and vitest cannot resolve it in this workspace.
+Heavy libraries never become regular deps: `streamdown` with its code and math plugins, `pele` for diagrams, `katex`, `@dnd-kit/*`, `react-day-picker`, `cmdk`, and `sonner`. They arrive as optional-peer subpath exports, so an app that imports a button does not pay for a calendar. Mirror each optional peer into `devDependencies` as well, or `tsc` and vitest cannot resolve it in this workspace.
 
 ## A component's CSS is opt-in when the component is
 

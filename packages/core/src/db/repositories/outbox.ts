@@ -20,7 +20,7 @@ export interface OutboxRow {
   id: string;
   channel: string;
   channelUserId: string;
-  conversationId: string;
+  chatId: string;
   text: string;
   state: "sending" | "unconfirmed" | "failed";
   providerMessageId: string | null;
@@ -76,7 +76,7 @@ export class OutboxRepository {
   async open(input: {
     channel: string;
     channelUserId: string;
-    conversationId: string;
+    chatId: string;
     text: string;
   }): Promise<OutboxRow> {
     const claimed = await this.openOnce({ ...input, id: uuid() });
@@ -90,7 +90,7 @@ export class OutboxRepository {
     id: string;
     channel: string;
     channelUserId: string;
-    conversationId: string;
+    chatId: string;
     text: string;
   }): Promise<{ row: OutboxRow; created: true } | { message: OutboxMessage; created: false }> {
     const now = new Date();
@@ -287,7 +287,7 @@ export function outboxMessage(row: OutboxRow, now = new Date()): OutboxMessage {
     text: row.text,
     timestamp: Math.floor(row.createdAt.getTime() / 1000),
     state: row.state,
-    ref: row.providerMessageId ? `${row.conversationId}:${row.providerMessageId}` : null,
+    ref: row.providerMessageId ? `${row.chatId}:${row.providerMessageId}` : null,
     error: row.error,
     dismissable: isDismissable(row, now),
   };

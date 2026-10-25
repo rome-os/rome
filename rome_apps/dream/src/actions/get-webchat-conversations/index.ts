@@ -6,7 +6,7 @@ import {
   type ActionResult,
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
-import { inDashboardChat } from "../../lib/chat-activity.js";
+import { guardianOnlyChat, inDashboardChat } from "../../lib/chat-activity.js";
 import { extractText } from "../../lib/message-text.js";
 
 const log = createAppLogger("get_webchat_conversations");
@@ -97,6 +97,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               WHERE wm.session_id = ${sessionId}
                 AND wm.created_at >= ${cutoffSeconds}
                 AND ${inDashboardChat("ws")}
+                AND ${guardianOnlyChat("ws")}
               ORDER BY wm.created_at ASC
             `,
           ) as MessageRow[];
@@ -108,6 +109,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.created_at >= ${cutoffSeconds}
                 AND ${inDashboardChat("ws")}
+                AND ${guardianOnlyChat("ws")}
               ORDER BY wm.session_id, wm.created_at ASC
             `,
           ) as MessageRow[];

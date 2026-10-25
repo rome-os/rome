@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.22](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.21...rome-web-components-v0.1.22) (2026-10-21)
+
+
+### Features
+
+* **ui:** render Mermaid diagrams with Pele ([#1201](https://github.com/rome-os/rome/issues/1201)) ([ef4f645](https://github.com/rome-os/rome/commit/ef4f6458016f0e0aaf84010b7233d88aecad2316))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.3.6
+
 ## [0.1.21](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.20...rome-web-components-v0.1.21) (2026-10-12)
 
 

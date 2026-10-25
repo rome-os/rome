@@ -92,11 +92,13 @@ const SERVICE_ORDER = [
   "discord",
   "email",
   "feishu",
+  "slack_bot",
   "agents",
   "webchat",
   "github",
   "google",
   "slack",
+  "shopify",
 ];
 
 const LABELS: Record<string, string> = {
@@ -113,10 +115,12 @@ const LABELS: Record<string, string> = {
   github: "GitHub",
   google: "Google",
   slack: "Slack",
+  slack_bot: "Slack bot",
+  shopify: "Shopify",
   composio: "Composio",
 };
 
-const OAUTH_SERVICES = new Set(["github", "google", "slack"]);
+const OAUTH_SERVICES = new Set(["github", "google", "slack", "shopify"]);
 
 /** The copy slot key each registry grant renders under. A channel's single
  *  Talk grant is the generic `bot` slot whatever the grant is named; an OAuth
@@ -129,10 +133,12 @@ const SLOT_KEY_BY_GRANT: Record<string, Record<string, SlotKey>> = {
   discord: { bot: "bot" },
   email: { inbox: "bot" },
   feishu: { app: "bot" },
+  slack_bot: { bot: "bot" },
   agents: { cloud: "bot" },
   github: { user: "user" },
   google: { user: "user" },
   slack: { workspace: "user" },
+  shopify: { store: "user" },
 };
 
 function slotKeyFor(service: string, grant: string): SlotKey {
@@ -149,7 +155,7 @@ function toSlots(connection: ApiConnection, key?: SlotKey): ConnectionSlot[] {
   return Object.entries(connection.grants).map(([grant, state]) => {
     const display = connection.display[grant] ?? null;
     return {
-      key: key ?? slotKeyFor(connection.service, grant),
+      key: key ?? slotKeyFor(connection.connectionKind, grant),
       connectionId: connection.id,
       grant,
       state,
@@ -179,7 +185,7 @@ function runtimeDegradation(connection: ApiConnection): CapabilityDegradation | 
 /** The card route an account opens at: its channel id, else its service for a
  *  placeholder or a core that predates accounts. */
 export function connectionRoute(connection: ApiConnection): string {
-  return connection.channel || connection.service;
+  return connection.channel || connection.connectionKind;
 }
 
 /** The route of the card whose slots `connectionId` backs, or null when no
@@ -192,7 +198,7 @@ export function accountRoute(cards: ConnectionCard[], connectionId: string): str
 }
 
 function toCard(connection: ApiConnection): ConnectionCard {
-  const alwaysOn = connection.service === "webchat";
+  const alwaysOn = connection.connectionKind === "webchat";
   const slots = alwaysOn
     ? // Zero-grant: synthesize the single always-authorized presentation slot.
       [
@@ -209,11 +215,11 @@ function toCard(connection: ApiConnection): ConnectionCard {
     : toSlots(connection);
   return {
     route: connectionRoute(connection),
-    service: connection.service,
+    service: connection.connectionKind,
     // Several accounts of one service are told apart by name once the whole
     // list is known (`labelAccounts`).
-    label: serviceLabel(connection.service),
-    kind: OAUTH_SERVICES.has(connection.service) ? "oauth" : "channel",
+    label: serviceLabel(connection.connectionKind),
+    kind: OAUTH_SERVICES.has(connection.connectionKind) ? "oauth" : "channel",
     alwaysOn,
     degradation: runtimeDegradation(connection),
     slots,
@@ -276,8 +282,8 @@ export function buildConnectionCards(
   const folded = new Map<string, ApiConnection>();
 
   for (const connection of connections) {
-    if (FOLDED_ACCOUNT_SERVICES[connection.service]) {
-      folded.set(connection.service, connection);
+    if (FOLDED_ACCOUNT_SERVICES[connection.connectionKind]) {
+      folded.set(connection.connectionKind, connection);
       continue;
     }
     // One card per account, keyed by its route. Two connections claiming one

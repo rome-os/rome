@@ -30,7 +30,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { ConversationId, StreamFault, Talker } from "../types.js";
+import type { ChatId, StreamFault, Talker } from "../types.js";
 import { makeEmailDescriptor, type EmailDescriptorDeps, type EmailInboxMaterial } from "./email.js";
 
 const INBOUND_SECRET = "test-inbound-secret";
@@ -164,7 +164,7 @@ const validCred = (material: Partial<EmailInboxMaterial> = {}) => ({
 describe("email descriptor shape", () => {
   it("declares one `inbox` grant and a talker needing it", () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
-    expect(desc.service).toBe("email");
+    expect(desc.connectionKind).toBe("email");
     expect(Object.keys(desc.auth)).toEqual(["inbox"]);
     expect(desc.capabilities.talker?.needs).toEqual(["inbox"]);
     expect(desc.capabilities.actor).toBeUndefined();
@@ -323,7 +323,7 @@ describe("email Talker fault mapping", () => {
     const h = buildTalker(provider);
     h.start();
 
-    const receipt = await h.talker.send("" as ConversationId, {
+    const receipt = await h.talker.send("" as ChatId, {
       kind: "email",
       to: "someone@example.com",
       text: "hi there",
@@ -331,7 +331,7 @@ describe("email Talker fault mapping", () => {
 
     expect(provider.sent).toHaveLength(1);
     expect(provider.sent[0]).toMatchObject({ to: "someone@example.com", text: "hi there" });
-    expect(receipt).toStrictEqual({ conversationId: "t_out", messageId: "m_out" });
+    expect(receipt).toStrictEqual({ chatId: "t_out", messageId: "m_out" });
   });
 
   it("marks the lines this inbox sent as outbound, however its address is written", async () => {
@@ -443,7 +443,7 @@ describe("email inbound delivery", () => {
         channel: "email",
         direction: "inbound",
         messageId: "msg_1",
-        conversationId: "t1",
+        chatId: "t1",
         senderId: GUARDIAN,
         senderDisplayName: "Guardian",
         text: "hello from the full body",
@@ -485,7 +485,7 @@ describe("email inbound delivery", () => {
       channel: "email",
       direction: "inbound",
       messageId: "msg_unknown",
-      conversationId: "t1" as ConversationId,
+      chatId: "t1" as ChatId,
       senderId: GUARDIAN,
       text: "",
       attachments,

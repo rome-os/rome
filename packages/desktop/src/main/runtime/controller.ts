@@ -15,6 +15,11 @@ export interface RuntimeControllerDeps {
     onSelect: (ref: RemoteInstanceRef) => void,
   ): RemoteRuntime;
   relaunch(): void;
+  /**
+   * Opened for this whole launch instead of the saved target. A target picked
+   * meanwhile is still saved, and opens on the next launch without it.
+   */
+  override?: Runtime | null;
 }
 
 export type TargetChange = "switched" | "relaunching";
@@ -36,7 +41,7 @@ export class RuntimeController {
       deps.savedTarget.kind === "remote" && !deps.cloudAccount
         ? { kind: "local" }
         : deps.savedTarget;
-    this.runtime = new SwitchableRuntime(this.build(this.active));
+    this.runtime = new SwitchableRuntime(deps.override ?? this.build(this.active));
   }
 
   activeTarget(): RuntimeTarget {
@@ -70,6 +75,7 @@ export class RuntimeController {
   }
 
   private canSwitchInPlace(): boolean {
+    if (this.deps.override) return false;
     return this.active.kind === "remote" && !this.runtime.isReady();
   }
 

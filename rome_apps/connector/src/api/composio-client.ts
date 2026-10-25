@@ -317,8 +317,8 @@ export function selectReusableAuthConfig(
   const apiKeyConfig = enabledForToolkit.find((row) => row.auth_scheme === AUTH_SCHEME_API_KEY);
   if (apiKeyConfig) return apiKeyConfig.id;
 
-  // A bring-your-own OAuth provider (Shopify) has no config Rome can create, so
-  // the guardian's own dashboard config is the only path to a connection.
+  // A bring-your-own OAuth provider has no config Rome can create, so the
+  // guardian's own dashboard config is the only path to a connection.
   return enabledForToolkit[0]?.id ?? null;
 }
 
@@ -720,8 +720,8 @@ export class ComposioClient {
    * config: Composio registers the OAuth client itself, so it needs no app
    * credentials either.
    *
-   * BYO OAuth providers (Shopify) need an auth config the guardian creates in
-   * the Composio dashboard with their own app credentials; once it exists it is
+   * BYO OAuth providers need an auth config the guardian creates in the
+   * Composio dashboard with their own app credentials; once it exists it is
    * reused here. Until then, a toolkit with none of those schemes surfaces a
    * clear unsupported-auth error instead of trying the wrong auth mode.
    */

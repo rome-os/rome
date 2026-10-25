@@ -674,6 +674,44 @@ describe("WechatUserRuntime display", () => {
   });
 });
 
+describe("WechatUserRuntime.pressSignIn", () => {
+  const desktop = { display: ":100", vncPort: 5901, novncPort: 6081 };
+
+  it("clicks where the driver found the sign-in button", async () => {
+    const { run, calls } = scriptedRun({ python3: () => ok('{"ok": true, "x": 640, "y": 518}') });
+    const runtime = new WechatUserRuntime({ home: await tempHome(), run, desktop });
+    expect(await runtime.pressSignIn(":100")).toBe(true);
+    expect(calls[0]![0]).toBe("python3");
+    expect(calls[0]![1]).toMatch(/wechat-user-send-driver\.py$/);
+    expect(calls[0]![2]).toBe("sign-in-target");
+    // No --sync, which hangs when the pointer is already there.
+    expect(calls[1]).toEqual(["xdotool", "mousemove", "640", "518", "click", "1"]);
+  });
+
+  it("clicks nothing when the driver finds no button", async () => {
+    for (const stdout of [
+      '{"ok": false, "code": "not-found", "typed": false, "reason": "x"}',
+      "",
+    ]) {
+      const { run, calls } = scriptedRun({ python3: () => ok(stdout) });
+      const runtime = new WechatUserRuntime({ home: await tempHome(), run, desktop });
+      expect(await runtime.pressSignIn(":100")).toBe(false);
+      expect(calls.map(([file]) => file)).toEqual(["python3"]);
+    }
+  });
+
+  it("never clicks on the shared desktop, where Chrome can cover the button", async () => {
+    const { run, calls } = scriptedRun({ python3: () => ok('{"ok": true, "x": 640, "y": 518}') });
+    for (const runtime of [
+      new WechatUserRuntime({ home: await tempHome(), run, desktop }),
+      new WechatUserRuntime({ home: await tempHome(), run, desktop: null }),
+    ]) {
+      expect(await runtime.pressSignIn(":99")).toBe(false);
+    }
+    expect(calls).toEqual([]);
+  });
+});
+
 describe("WechatUserRuntime.captureLoginQr", () => {
   it("screenshots the login window as a PNG data URL", async () => {
     const tree = '  0x1000007 "Weixin": ("wechat" "wechat")  280x380+0+0  +500+210\n';
@@ -1043,6 +1081,31 @@ describe("WechatUserReader", () => {
     ]);
   });
 
+  it("answers every chat's last activity from one shared session-list read", async () => {
+    let sessions = SESSIONS;
+    const { reader, calls } = await readerWith(() => envelope(sessions));
+    const [first, again] = await Promise.all([reader.lastActivity(), reader.lastActivity()]);
+    expect(calls).toEqual([["sessions", "--include-hidden"]]);
+    expect(again).toBe(first);
+    expect([...first.keys()]).toEqual(["45357963768@chatroom", "wxid_friend", "wxid_quiet"]);
+    expect(first.get("wxid_quiet")).toBe("");
+
+    sessions = SESSIONS.map((session) =>
+      session.username === "wxid_friend"
+        ? { ...session, lastMessage: { content: "new", createdAt: "2026-10-01T11:00:00.000Z" } }
+        : session,
+    );
+    const now = rs.spyOn(Date, "now").mockReturnValue(Date.now() + 60_000);
+    try {
+      const later = await reader.lastActivity();
+      expect(calls).toHaveLength(2);
+      expect(later.get("wxid_friend")).not.toBe(first.get("wxid_friend"));
+      expect(later.get("45357963768@chatroom")).toBe(first.get("45357963768@chatroom"));
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("reads a preview the client stored as bytes, compressed or not", async () => {
     const asJson = (bytes: Buffer) => JSON.parse(JSON.stringify(new Uint8Array(bytes)));
     const { reader } = await readerWith(() =>
@@ -1082,12 +1145,12 @@ describe("WechatUserReader", () => {
     const { reader } = await readerWith((argv) =>
       argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
     );
-    const plain = await reader.messages({ conversationId: "wxid_friend", limit: 300 });
+    const plain = await reader.messages({ chatId: "wxid_friend", limit: 300 });
     expect(plain).toHaveLength(300);
     expect(plain[0]!.text).toBe("line 100");
     expect(plain.at(-1)!.text).toBe("line 399");
     const paged = await reader.messages({
-      conversationId: "wxid_friend",
+      chatId: "wxid_friend",
       before: new Date("2026-10-01T00:05:00Z"),
       limit: 250,
       includeBoundaryTies: true,
@@ -1153,7 +1216,7 @@ describe("WechatUserReader", () => {
           }),
     );
     const messages = await reader.messages({
-      conversationId: "wxid_friend",
+      chatId: "wxid_friend",
       since: new Date("2026-10-01T00:00:00.500Z"),
       before: new Date("2026-10-02T00:00:00Z"),
       limit: 10,
@@ -1171,7 +1234,7 @@ describe("WechatUserReader", () => {
     expect(messages).toEqual([
       {
         id: "wxid_friend:message/message_0.db:1",
-        conversationId: "wxid_friend",
+        chatId: "wxid_friend",
         conversationName: "A Friend",
         isGroup: false,
         senderId: "wxid_friend",
@@ -1204,7 +1267,7 @@ describe("WechatUserReader", () => {
       argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
     );
     const messages = await reader.messages({
-      conversationId: "wxid_friend",
+      chatId: "wxid_friend",
       limit: 2,
       includeBoundaryTies: true,
     });
@@ -1223,7 +1286,7 @@ describe("WechatUserReader", () => {
       argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
     );
     const messages = await reader.messages({
-      conversationId: "wxid_friend",
+      chatId: "wxid_friend",
       before: new Date(cursorSecond),
       limit: 50,
       includeBoundaryTies: true,
@@ -1261,7 +1324,7 @@ describe("WechatUserReader", () => {
       "wxid_quiet",
     ]);
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({ conversationId: "45357963768@chatroom", isGroup: true });
+    expect(messages[0]).toMatchObject({ chatId: "45357963768@chatroom", isGroup: true });
   });
 
   it("reads in smaller pages when a page overflows the output limit", async () => {
@@ -1271,7 +1334,7 @@ describe("WechatUserReader", () => {
     const { reader, calls } = await readerWith((argv) =>
       argv[0] === "sessions" ? envelope(SESSIONS) : queryOver(history, 200)(argv),
     );
-    const messages = await reader.messages({ conversationId: "wxid_friend", limit: 300 });
+    const messages = await reader.messages({ chatId: "wxid_friend", limit: 300 });
     expect(messages).toHaveLength(300);
     expect(messages[0]!.text).toBe("line 100");
     expect(calls.filter((argv) => argv[0] === "query").map((argv) => argv[3])).toContain("150");
@@ -1297,7 +1360,7 @@ describe("WechatUserReader", () => {
     const { reader } = await readerWith((argv) =>
       argv[0] === "sessions" ? envelope([]) : failure("SESSION_NOT_FOUND"),
     );
-    expect(await reader.messages({ conversationId: "wxid_gone", limit: 5 })).toEqual([]);
+    expect(await reader.messages({ chatId: "wxid_gone", limit: 5 })).toEqual([]);
     expect(await reader.count("wxid_gone")).toBe(0);
   });
 

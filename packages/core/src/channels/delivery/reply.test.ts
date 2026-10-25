@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { FakeClock } from "../../test/kit/clock.js";
-import { Outlasted, Pacer } from "./pacer.js";
+import { Outlasted, Pacer, SLOW_WRITE_MS } from "./pacer.js";
 import { type DeliveryEvent, ReplyDelivery } from "./reply.js";
+import { feishuMarkdown } from "./transports/feishu.js";
 import {
+  type DeliveryCapabilities,
   DeliveryFailure,
   type DeliveryPolicy,
   type DeliveryTransport,
@@ -33,7 +35,11 @@ class MemoryPlatform implements DeliveryTransport {
   readonly edit?: (receipt: PartReceipt, text: string) => Promise<void>;
 
   constructor(
-    readonly capabilities = { maxPartLength: 20, edit: true, budget: OPEN_BUDGET },
+    readonly capabilities: DeliveryCapabilities = {
+      maxPartLength: 20,
+      edit: true,
+      budget: OPEN_BUDGET,
+    },
     private readonly conversation = "c1",
   ) {
     if (capabilities.edit)
@@ -61,7 +67,7 @@ class MemoryPlatform implements DeliveryTransport {
     this.fail("create");
     const id = `m${this.messages.length + 1}`;
     this.messages.push({ id, ...(replyTo ? { replyTo } : {}), history: [text] });
-    return { messageId: id, conversationId: this.conversation };
+    return { messageId: id, chatId: this.conversation };
   }
 
   /** What each message shows now. */
@@ -302,6 +308,599 @@ describe("ReplyDelivery", () => {
     });
   });
 
+  describe("per-message edit cap", () => {
+    const capped = (maxEditsPerMessage: number, maxPartLength = 100) => {
+      platform = new MemoryPlatform({
+        maxPartLength,
+        maxEditsPerMessage,
+        edit: true,
+        budget: OPEN_BUDGET,
+      });
+      return reply();
+    };
+
+    it("settles at the last edit and keeps editing subsequent messages", async () => {
+      const delivery = capped(2);
+      await stream(delivery, "one two three four five six seven eight nine ", 1000);
+      const finished = delivery.finish();
+      await advance(1000);
+      const outcome = await finished;
+
+      expect(platform.messages.map((message) => message.history)).toEqual([
+        ["one ", "one two ", "one two three "],
+        ["four ", "four five ", "four five six "],
+        ["seven ", "seven eight ", "seven eight nine "],
+      ]);
+      expect(outcome.status).toBe("delivered");
+      expect(outcome.parts.every((part) => part.state === "settled")).toBe(true);
+    });
+
+    it("holds the last edit until a forward break without retracting shown text", async () => {
+      const delivery = capped(1);
+      delivery.accept(delta("one tw"));
+      await advance(1000);
+      delivery.accept(delta("o"));
+      await advance(1000);
+      expect(platform.messages[0]!.history).toEqual(["one tw"]);
+      delivery.accept(delta(" three"));
+      await advance(1000);
+      expect(platform.messages.map((message) => message.history)).toEqual([
+        ["one tw", "one two "],
+        ["three"],
+      ]);
+      await delivery.finish();
+      expect(platform.shown.join("")).toBe("one two three");
+    });
+
+    it("releases the last edit when the block completes without a forward break", async () => {
+      const delivery = capped(1, 10);
+      delivery.accept(delta("abc"));
+      await advance(1000);
+      delivery.accept(delta("def"));
+      await advance(1000);
+      expect(platform.messages[0]!.history).toEqual(["abc"]);
+      const finished = delivery.finish();
+      await advance(1000);
+      expect((await finished).status).toBe("delivered");
+      expect(platform.messages[0]!.history).toEqual(["abc", "abcdef"]);
+    });
+
+    it("releases the last edit when the message fills without a forward break", async () => {
+      const delivery = capped(1, 10);
+      delivery.accept(delta("abc"));
+      await advance(1000);
+      delivery.accept(delta("defghij"));
+      await advance(1000);
+      expect(platform.messages[0]!.history).toEqual(["abc"]);
+      delivery.accept(delta("k"));
+      await advance(1000);
+      expect(platform.messages.map((message) => message.history)).toEqual([
+        ["abc", "abcdefghij"],
+        ["k"],
+      ]);
+      await delivery.finish();
+    });
+
+    it("never edits when the cap is zero", async () => {
+      const delivery = capped(0);
+      await stream(delivery, "one two three ", 1000);
+      const outcome = await delivery.finish();
+      expect(events.filter((event) => event.write === "edit")).toEqual([]);
+      expect(platform.shown.join("")).toBe("one two three ");
+      expect(outcome.status).toBe("delivered");
+    });
+
+    it.each([
+      "rate-limited",
+      "unavailable",
+    ] as const)("does not charge a definite %s refusal", async (kind) => {
+      const delivery = capped(1);
+      delivery.accept(delta("one "));
+      await advance(1000);
+      platform.failures.push({ write: "edit", failure: new DeliveryFailure(kind, "try later") });
+      delivery.accept(delta("two "));
+      await advance(2000);
+      delivery.accept(delta("three "));
+      await advance(1000);
+      const outcome = await delivery.finish();
+      expect(events.filter((event) => event.write === "edit").map((event) => event.result)).toEqual(
+        [kind, "accepted"],
+      );
+      expect(platform.shown).toEqual(["one two ", "three "]);
+      expect(outcome.status).toBe("delivered");
+    });
+
+    it("charges an unknown edit and fails unknown when the cap leaves no reconciliation", async () => {
+      const delivery = capped(1);
+      delivery.accept(delta("one "));
+      await advance(1000);
+      platform.lostEditAnswers = 1;
+      delivery.accept(delta("two three"));
+      await advance(1000);
+      const outcome = await delivery.finish();
+      expect(outcome).toMatchObject({ status: "unknown", failure: { kind: "unknown" } });
+      expect(events.filter((event) => event.write === "edit")).toHaveLength(1);
+      expect(platform.shown).toEqual(["one two "]);
+    });
+
+    it("uses the remaining allowance to reconcile an unknown edit", async () => {
+      const delivery = capped(2);
+      delivery.accept(delta("one "));
+      await advance(1000);
+      platform.lostEditAnswers = 1;
+      delivery.accept(delta("two "));
+      await advance(2000);
+      delivery.accept(delta("three "));
+      await advance(1000);
+      const outcome = await delivery.finish();
+      expect(events.filter((event) => event.write === "edit").map((event) => event.result)).toEqual(
+        ["unknown", "accepted"],
+      );
+      expect(platform.shown).toEqual(["one two ", "three "]);
+      expect(outcome.status).toBe("delivered");
+    });
+
+    it("marks a rewritten capped part diverged without another edit", async () => {
+      const delivery = capped(1);
+      delivery.accept(delta("one ", "a"));
+      await advance(1000);
+      delivery.accept(delta("two ", "a"));
+      await advance(1000);
+      delivery.accept(text("ONE two three", "a"));
+      const outcome = await delivery.finish();
+      expect(platform.shown).toEqual(["one two ", "three"]);
+      expect(events.filter((event) => event.write === "edit")).toHaveLength(1);
+      expect(outcome).toMatchObject({ status: "delivered", diverged: true });
+      expect(outcome.parts[0]).toMatchObject({ state: "settled", diverged: true });
+    });
+
+    it("retains reply-wide blocks fallback for unsupported edits", async () => {
+      const delivery = capped(2);
+      delivery.accept(delta("one "));
+      await advance(1000);
+      platform.failures.push({
+        write: "edit",
+        failure: new DeliveryFailure("unsupported", "cannot edit"),
+      });
+      delivery.accept(delta("two "));
+      await advance(1000);
+      delivery.accept(delta("three "));
+      const finished = delivery.finish();
+      await advance(2000);
+      expect((await finished).status).toBe("delivered");
+      expect(platform.shown).toEqual(["one ", "two three "]);
+      expect(events.filter((event) => event.write === "edit").map((event) => event.result)).toEqual(
+        ["unsupported"],
+      );
+    });
+
+    it("keeps a closing fence that shows nothing in the source of the message before it", async () => {
+      platform = new (class extends MemoryPlatform {
+        override readonly codec = feishuMarkdown;
+      })({ maxPartLength: 100, maxEditsPerMessage: 1, edit: true, budget: OPEN_BUDGET });
+      const delivery = reply();
+      const code = "```\nabc\ndef\n```";
+      for (const piece of ["```\nabc\n", "def\n"]) {
+        delivery.accept(delta(piece, "a"));
+        await advance(1000);
+      }
+      // The message spent its last edit before the closing fence arrived.
+      expect(platform.messages).toHaveLength(1);
+      delivery.accept(delta("```", "a"));
+      delivery.accept(text(code, "a"));
+      await advance(1000);
+      delivery.accept(text("After.", "b"));
+      const finished = delivery.finish();
+      await advance(1000);
+      const outcome = await finished;
+
+      expect(platform.shown).toEqual(["```\nabc\ndef\n```", "After."]);
+      expect(
+        outcome.parts
+          .filter((part) => part.block === 0)
+          .map((part) => part.source)
+          .join(""),
+      ).toBe(code);
+    });
+
+    it("keeps a closing fence in the source of a message whose create answered after it arrived", async () => {
+      platform = new (class extends MemoryPlatform {
+        override readonly codec = feishuMarkdown;
+      })({ maxPartLength: 100, edit: true, budget: OPEN_BUDGET });
+      let release!: () => void;
+      platform.hold = new Promise((resolve) => {
+        release = resolve;
+      });
+      const delivery = reply();
+      const code = "```\nabc\n```";
+      delivery.accept(delta("```\nabc\n", "a"));
+      await advance(0);
+      // The closing fence and the final text arrive while the create is in flight.
+      delivery.accept(delta("```", "a"));
+      delivery.accept(text(code, "a"));
+      const finished = delivery.finish();
+      platform.hold = undefined;
+      release();
+      await advance(1000);
+      const outcome = await finished;
+
+      expect(platform.shown).toEqual([code]);
+      expect(outcome.parts.map((part) => part.source).join("")).toBe(code);
+    });
+
+    it("lets a message's receipt lift the platform's edit cap", async () => {
+      platform = new (class extends MemoryPlatform {
+        override async create(conversation: string, text: string, replyTo?: string) {
+          return { ...(await super.create(conversation, text, replyTo)), maxEdits: Infinity };
+        }
+      })({ maxPartLength: 100, maxEditsPerMessage: 2, edit: true, budget: OPEN_BUDGET });
+      const delivery = reply();
+      await stream(delivery, "one two three four five ", 1000);
+      const finished = delivery.finish();
+      await advance(1000);
+
+      expect((await finished).status).toBe("delivered");
+      expect(platform.messages.map((message) => message.history)).toEqual([
+        ["one ", "one two ", "one two three ", "one two three four ", "one two three four five "],
+      ]);
+    });
+  });
+
+  describe("settling messages", () => {
+    /** A platform that marks a message finished, as a streaming card does. */
+    class SettlingPlatform extends MemoryPlatform {
+      readonly settled: Array<{ id: string; text: string }> = [];
+      settleFailure?: DeliveryFailure;
+      /** Whether a new message shows as still being written. */
+      streaming = true;
+      override async create(conversation: string, text: string, replyTo?: string) {
+        const receipt = await super.create(conversation, text, replyTo);
+        return this.streaming ? { ...receipt, streaming: true as const } : receipt;
+      }
+      async settle(receipt: PartReceipt, text: string): Promise<void> {
+        if (this.settleFailure) throw this.settleFailure;
+        this.settled.push({ id: receipt.messageId, text });
+      }
+    }
+    let settling: SettlingPlatform;
+
+    beforeEach(() => {
+      settling = new SettlingPlatform();
+      platform = settling;
+    });
+
+    it("settles each message once, after its last write, as soon as its block is complete", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      await stream(delivery, "Looking it up.", 10, "c");
+      delivery.accept(text("Looking it up.", "c"));
+      await advance(0);
+      // The commentary is complete while the answer still streams.
+      await stream(delivery, "The answer", 10, "a");
+      expect(settling.settled).toEqual([{ id: "m1", text: "Looking it up." }]);
+
+      await stream(delivery, " is 42.", 10, "a");
+      delivery.accept(text("The answer is 42.", "a"));
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(settling.settled).toEqual([
+        { id: "m1", text: "Looking it up." },
+        { id: "m2", text: "The answer is 42." },
+      ]);
+      const writes = events.map(({ write, block }) => `${write} ${block}`);
+      expect(writes.filter((write) => write.startsWith("settle"))).toEqual([
+        "settle 0",
+        "settle 1",
+      ]);
+      // A message's settle follows its block's last write.
+      expect(writes.lastIndexOf("settle 1")).toBe(writes.length - 1);
+      expect(writes.indexOf("settle 0")).toBeGreaterThan(writes.lastIndexOf("edit 0"));
+    });
+
+    it("settles every message of a block split across several", async () => {
+      const delivery = reply();
+      const source = "one two three four five six seven eight nine ten eleven twelve";
+      await stream(delivery, source, 600);
+      delivery.accept(text(source));
+      const finished = delivery.finish();
+      await advance(10_000);
+      await finished;
+
+      expect(settling.settled.map(({ id }) => id)).toEqual(platform.messages.map(({ id }) => id));
+      expect(settling.settled.map(({ text }) => text)).toEqual(platform.shown);
+    });
+
+    it("settles what a stopped reply shows after the stop returns, and writes nothing else", async () => {
+      const delivery = reply({ editIntervalMs: 1000 });
+      delivery.accept(delta("Hello"));
+      await advance(0);
+      delivery.accept(delta(" more text"));
+      const outcome = await delivery.stop();
+      await advance(5000);
+
+      expect(outcome.status).toBe("stopped");
+      expect(platform.shown).toEqual(["Hello"]);
+      expect(settling.settled).toEqual([{ id: "m1", text: "Hello" }]);
+      expect(events.map(({ write }) => write)).toEqual(["create", "settle"]);
+    });
+
+    it("settles what a failed reply shows", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      await advance(0);
+      platform.failures.push({ write: "edit", failure: new DeliveryFailure("rejected", "no") });
+      delivery.accept(delta(" there"));
+      const outcome = await delivery.finish();
+      await advance(0);
+
+      expect(outcome.status).toBe("partial");
+      expect(settling.settled).toEqual([{ id: "m1", text: "Hello" }]);
+    });
+
+    it("reports a reply delivered when settling a message fails", async () => {
+      settling.settleFailure = new DeliveryFailure("rejected", "streaming already closed");
+      const delivery = reply({ editIntervalMs: 0 });
+      await stream(delivery, "The answer is 42.", 10);
+      delivery.accept(text("The answer is 42."));
+      const outcome = await delivery.finish();
+      await advance(0);
+
+      expect(outcome).toMatchObject({ status: "delivered" });
+      expect(outcome.failure).toBeUndefined();
+      expect(events.filter(({ write }) => write === "settle").map(({ result }) => result)).toEqual([
+        "rejected",
+      ]);
+    });
+
+    it("settles only the messages whose receipt says they are still streaming", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      await stream(delivery, "Looking it up.", 10, "c");
+      delivery.accept(text("Looking it up.", "c"));
+      await advance(0);
+      settling.streaming = false;
+      await stream(delivery, "The answer is 42.", 10, "a");
+      delivery.accept(text("The answer is 42.", "a"));
+      await delivery.finish();
+
+      expect(settling.settled).toEqual([{ id: "m1", text: "Looking it up." }]);
+      expect(events.filter(({ write }) => write === "settle")).toHaveLength(1);
+    });
+
+    it("reports a reply delivered when its settle waits out the account's queue", async () => {
+      const pacer = new Pacer(OPEN_BUDGET, clock);
+      const delivery = new ReplyDelivery({
+        transport: settling,
+        pacer,
+        policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+        conversation: "c1",
+        clock,
+        observe: (event) => events.push(event),
+      });
+      // Another conversation's rate limit pauses the account as the last write lands.
+      const create = settling.create.bind(settling);
+      settling.create = async (...args) => {
+        const receipt = await create(...args);
+        pacer.pause(120_000, "rate-limited");
+        return receipt;
+      };
+      delivery.accept(text("The answer is 42."));
+      const finished = delivery.finish();
+      await advance(70_000);
+      const outcome = await finished;
+
+      expect(platform.shown).toEqual(["The answer is 42."]);
+      expect(outcome.status).toBe("delivered");
+      expect(outcome.failure).toBeUndefined();
+      expect(settling.settled).toEqual([]);
+    });
+
+    it("does not settle a message whose create is unknown", async () => {
+      platform.failures.push({
+        write: "create",
+        failure: new DeliveryFailure("unknown", "the answer was lost"),
+      });
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      const outcome = await delivery.finish();
+      await advance(0);
+
+      expect(outcome.status).toBe("unknown");
+      expect(settling.settled).toEqual([]);
+    });
+
+    it("settles a message whose create answers after the reply stopped waiting", async () => {
+      let release!: () => void;
+      platform.hold = new Promise((resolve) => {
+        release = resolve;
+      });
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      const finished = delivery.finish();
+      await advance(SLOW_WRITE_MS);
+      const outcome = await finished;
+      expect(outcome.status).toBe("unknown");
+
+      release();
+      await advance(0);
+      expect(platform.shown).toEqual(["Hello"]);
+      expect(settling.settled).toEqual([{ id: "m1", text: "Hello" }]);
+    });
+
+    it("settles a message once its text is final, while its block still streams", async () => {
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12 });
+      await stream(delivery, "Para one is here.\n\nPara two is", 10);
+      expect(settling.settled).toEqual([{ id: "m1", text: "Para one is here.\n\n" }]);
+
+      await stream(delivery, " still going.", 10);
+      delivery.accept(text("Para one is here.\n\nPara two is still going."));
+      await delivery.finish();
+      expect(settling.settled.map(({ id }) => id)).toEqual(platform.messages.map(({ id }) => id));
+    });
+  });
+
+  describe("a soft part length", () => {
+    const roomy = () => new MemoryPlatform({ maxPartLength: 100, edit: true, budget: OPEN_BUDGET });
+    const SOURCE = "Para one is here.\n\nPara two.\n\nPara three is longer.";
+
+    it("ends a message with the paragraph that reaches it, and starts the next paragraph in a new one", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12 });
+      delivery.accept(text(SOURCE));
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(platform.shown).toEqual([
+        "Para one is here.\n\n",
+        "Para two.\n\nPara three is longer.",
+      ]);
+    });
+
+    it("ends each streamed message where the complete text ends it, and never shows the next paragraph in it", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12 });
+      await stream(delivery, SOURCE, 10);
+      delivery.accept(text(SOURCE));
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(outcome.parts.some((part) => part.diverged)).toBe(false);
+      expect(platform.shown).toEqual([
+        "Para one is here.\n\n",
+        "Para two.\n\nPara three is longer.",
+      ]);
+      expect(platform.messages[0]!.history.some((shown) => shown.includes("Para two"))).toBe(false);
+    });
+
+    it("keeps fenced code whole, though it holds a blank line", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 5 });
+      const source = "Intro text.\n\n```\nline one\n\nline two\n```\n\nAfter it.";
+      await stream(delivery, source, 10);
+      delivery.accept(text(source));
+      await delivery.finish();
+
+      expect(platform.shown).toEqual([
+        "Intro text.\n\n",
+        "```\nline one\n\nline two\n```\n\n",
+        "After it.",
+      ]);
+    });
+
+    it("cuts a streamed message where the whole text cuts it, when a delta ends in the next paragraph's indent", async () => {
+      const source = "Para one is here.\n\n  Para two is indented.\n\nPara three.";
+      platform = roomy();
+      const whole = reply({ editIntervalMs: 0, softPartLength: 12 });
+      whole.accept(text(source));
+      await whole.finish();
+      const expected = platform.shown;
+
+      platform = roomy();
+      const streamed = reply({ editIntervalMs: 0, softPartLength: 12 });
+      for (const piece of ["Para one is here.\n\n  ", "Para two is indented.\n\nPara three."]) {
+        streamed.accept(delta(piece));
+        await advance(0);
+      }
+      streamed.accept(text(source));
+      await streamed.finish();
+
+      expect(expected).toHaveLength(3);
+      expect(platform.shown).toEqual(expected);
+    });
+
+    it("keeps fenced code whole when a list item indents it four spaces or more", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 5 });
+      const source = "1. Step one:\n\n    ```bash\n    echo a\n\n    echo b\n    ```\n\nDone.";
+      delivery.accept(text(source));
+      await delivery.finish();
+
+      expect(platform.shown.join("")).toBe(source);
+      expect(
+        platform.shown.some((shown) => shown.includes("echo a") !== shown.includes("echo b")),
+      ).toBe(false);
+    });
+
+    it("keeps fenced code whole when a list marker opens it, streamed or whole", async () => {
+      const source = "Intro.\n\n1. ```python\n   a = 1\n\n   b = 2\n   ```\n\nDone.";
+      for (const streamed of [false, true]) {
+        platform = roomy();
+        const delivery = reply({ editIntervalMs: 0, softPartLength: 5 });
+        if (streamed) await stream(delivery, source, 10);
+        delivery.accept(text(source));
+        await delivery.finish();
+
+        expect(platform.shown.join("")).toBe(source);
+        expect(
+          platform.shown.some((shown) => shown.includes("a = 1") !== shown.includes("b = 2")),
+        ).toBe(false);
+      }
+    });
+
+    it("leaves a paragraph longer than the hard length to the hard split", async () => {
+      platform = roomy();
+      const delivery = reply({ editIntervalMs: 0, softPartLength: 12, maxPartLength: 30 });
+      const source = "one two three four five six seven eight nine ten eleven twelve";
+      delivery.accept(text(source));
+      await delivery.finish();
+
+      expect(platform.shown.join("")).toBe(source);
+      for (const shown of platform.shown) expect(shown.length).toBeLessThanOrEqual(30);
+      expect(platform.shown.length).toBeGreaterThan(2);
+    });
+  });
+
+  describe("codec context", () => {
+    /** Reopens a code span that the source before the message left open.
+     *  It requires context, so a render without it fails the reply. */
+    const spans: DeliveryTransport["codec"] = {
+      render: (source, _settled, context) => {
+        if (!context) throw new Error("render without context");
+        return (context.before.split("`").length - 1) % 2 ? `\`${source}` : source;
+      },
+      measure: (rendered) => rendered.length,
+    };
+    const withSpans = (capabilities: Partial<DeliveryCapabilities> = {}) => {
+      platform = new MemoryPlatform({
+        maxPartLength: 10,
+        edit: true,
+        budget: OPEN_BUDGET,
+        ...capabilities,
+      });
+      Object.assign(platform, { codec: spans });
+      return reply({ editIntervalMs: 0 });
+    };
+
+    it("fits a part that reopens a span in the limit", async () => {
+      const delivery = withSpans();
+      delivery.accept(text("ab `cdef ghijklmnop"));
+      const outcome = await delivery.finish();
+      expect(outcome.status).toBe("delivered");
+      expect(platform.shown).toEqual(["ab `cdef ", "`ghijklmno", "`p"]);
+    });
+
+    it("edits a settled part whose source is unchanged when the text before it changes", async () => {
+      const delivery = withSpans();
+      delivery.accept(text("abcd efgh ijkl", "a"));
+      await advance(0);
+      await advance(0);
+      expect(platform.shown).toEqual(["abcd efgh ", "ijkl"]);
+      delivery.accept(text("abc` efgh ijkl", "a"));
+      const outcome = await delivery.finish();
+      expect(platform.shown).toEqual(["abc` efgh ", "`ijkl"]);
+      expect(outcome.status).toBe("delivered");
+    });
+
+    it("gives the part after a capped one its context", async () => {
+      const delivery = withSpans({ maxPartLength: 100, maxEditsPerMessage: 1 });
+      delivery.accept(delta("`one "));
+      await advance(0);
+      delivery.accept(delta("two three"));
+      await advance(0);
+      await delivery.finish();
+      expect(platform.shown).toEqual(["`one two ", "`three"]);
+    });
+  });
+
   describe("blocks mode", () => {
     it("sends a waiting part after blockWaitMs, ending at a break, and the rest once the block completes", async () => {
       const delivery = reply({ mode: "blocks" });
@@ -434,7 +1033,7 @@ describe("ReplyDelivery", () => {
     expect(outcome.parts).toEqual([
       expect.objectContaining({
         state: "settled",
-        receipt: { messageId: "m1", conversationId: "c1" },
+        receipt: { messageId: "m1", chatId: "c1" },
       }),
     ]);
     expect(outcome.failure).toEqual({ kind: "rejected", message: "no" });

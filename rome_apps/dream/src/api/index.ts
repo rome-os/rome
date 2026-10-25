@@ -1,9 +1,8 @@
 import type { RomeAppApiHandler, RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
 import { createRunsRepository, type RunKind } from "../db/repositories/runs.js";
+import { DREAM_WINDOW_HOURS, findDreamRoutine } from "../lib/dream-routine.js";
 import { toDetail, toListItem, type DreamSchedule } from "../lib/run-view.js";
 
-/** Name `dream` registers its daily routine under. */
-const DREAM_ROUTINE_NAME = "daily-dream";
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
@@ -45,7 +44,7 @@ class DreamApiHandler implements RomeAppApiHandler {
       if (request.caller.kind !== "guardian") {
         return json({ error: "forbidden" }, { status: 403 });
       }
-      const reservation = runs.reserveDream(24, "queued");
+      const reservation = runs.reserveDream(DREAM_WINDOW_HOURS, "queued");
       if (!reservation.reserved) {
         return json({ error: "already_running", runId: reservation.id }, { status: 409 });
       }
@@ -67,10 +66,9 @@ class DreamApiHandler implements RomeAppApiHandler {
       return json({ run: toDetail(run, runs.changes(run.id), now) });
     }
 
-    // GET /schedule — when the next nightly dream runs.
+    // GET /schedule — when the next scheduled dream runs.
     if (request.method === "GET" && head === "schedule" && id === undefined) {
-      const routines = await this.ctx.listRoutines();
-      const routine = routines.find((r) => r.name === DREAM_ROUTINE_NAME);
+      const routine = findDreamRoutine(await this.ctx.listRoutines());
       const schedule: DreamSchedule = {
         enabled: routine?.enabled ?? false,
         nextRunAt:

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { countingDb, createTestDb, type TestDb } from "../test/helpers.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 import { waChats, waContacts, waMessages } from "../db/schema.js";
 import {
@@ -27,8 +27,8 @@ const GROUP = "1200000@g.us";
 const account = { channel: "whatsapp", addresses: [PHONE, LID] };
 const accounts = [account];
 const silent = [{ channel: "whatsapp", addresses: ["15554444@s.whatsapp.net"] }];
-const groupChat = GROUP as ConversationId;
-const emptyChat = "1299999@g.us" as ConversationId;
+const groupChat = GROUP as ChatId;
+const emptyChat = "1299999@g.us" as ChatId;
 
 /** The store's per-account reads, which every whatsApp store answers. */
 function accountReads(db: DrizzleDb): AccountMessages {
@@ -119,7 +119,7 @@ describe("whatsAppMessages", () => {
   // The chat is the conversation: a WhatsApp message hangs off it, and a group
   // chat is the one no account can name.
   it("queries a group chat, reactions and all", async () => {
-    const page = await whatsAppMessages(testDb.db).query({ conversationId: groupChat });
+    const page = await whatsAppMessages(testDb.db).query({ chatId: groupChat });
     // Newest first, and the tie at 700 in the mirror's own order.
     expect(page.map((entry) => entry.messageId)).toEqual(["gr", "g4", "g3", "g2", "g"]);
     expect(page.find((entry) => entry.messageId === "gr")?.text).toBe("Reacted 👍");
@@ -139,7 +139,7 @@ describe("whatsAppMessages", () => {
 
   it("queries a direct chat by the contact's address", async () => {
     const page = await whatsAppMessages(testDb.db).query({
-      conversationId: PHONE as ConversationId,
+      chatId: PHONE as ChatId,
     });
     expect(page.map((entry) => entry.messageId)).toEqual(["r", "e", "c", "a"]);
   });
@@ -157,7 +157,7 @@ describe("whatsAppMessages", () => {
     const queried = await store.query({});
     for (const entry of read) {
       const same = queried.find(
-        (message) => `${message.conversationId}:${message.messageId}` === entry.ref,
+        (message) => `${message.chatId}:${message.messageId}` === entry.ref,
       );
       expect(same).toBeDefined();
       expect({ sender: entry.sender, conversation: entry.conversation }).toEqual(
@@ -187,7 +187,7 @@ describe("whatsAppMessages", () => {
         createdAt: now,
       })
       .run();
-    const [line] = await whatsAppMessages(testDb.db).query({ conversationId: groupChat, limit: 1 });
+    const [line] = await whatsAppMessages(testDb.db).query({ chatId: groupChat, limit: 1 });
     // The chat's JID names the group, not whoever spoke in it.
     expect(line).toMatchObject({ messageId: "anon", senderId: "" });
     expect(line?.senderDisplayName).toBeUndefined();
@@ -195,7 +195,7 @@ describe("whatsAppMessages", () => {
 
   it("reads `since` as an instant, not as the second it falls in", async () => {
     const page = await whatsAppMessages(testDb.db).query({
-      conversationId: PHONE as ConversationId,
+      chatId: PHONE as ChatId,
       since: new Date(300_500),
     });
     expect(page.map((entry) => entry.messageId)).toEqual(["r", "e"]);
@@ -210,17 +210,17 @@ describe("whatsAppMessages", () => {
     testDb.db.insert(waChats).values({ jid: GROUP, name: "Book club", updatedAt: now }).run();
     const store = whatsAppMessages(testDb.db);
 
-    const [latest] = await store.query({ conversationId: PHONE as ConversationId, limit: 2 });
+    const [latest] = await store.query({ chatId: PHONE as ChatId, limit: 2 });
     expect(latest).toMatchObject({
       channel: "whatsapp",
       direction: "inbound",
-      conversationId: PHONE,
+      chatId: PHONE,
       senderId: PHONE,
       thread: { kind: "dm", name: "Ada" },
     });
     const [answered] = await store
       .query({
-        conversationId: PHONE as ConversationId,
+        chatId: PHONE as ChatId,
         since: new Date(300_000),
       })
       .then((page) => page.filter((entry) => entry.messageId === "c"));
@@ -229,7 +229,7 @@ describe("whatsAppMessages", () => {
     expect(answered).toMatchObject({ direction: "outbound", senderId: WHATSAPP_SELF_SENDER });
     // Nobody recorded a name for the guardian's line, so it carries none.
     expect(answered?.senderDisplayName).toBeUndefined();
-    const [group] = await store.query({ conversationId: groupChat, limit: 1 });
+    const [group] = await store.query({ chatId: groupChat, limit: 1 });
     expect(group?.thread).toEqual({ kind: "group", name: "Book club" });
 
     const read = await accountReads(testDb.db).latest(accounts);

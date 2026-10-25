@@ -2,10 +2,13 @@ import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { COOKIE_NAME, issueGuardianSession, verifySession } from "../../lib/auth.js";
 import { getGuardianAuthState } from "../../lib/guardian-auth-state.js";
+import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import {
   getEnabledOAuthProviders,
   isEnabledOAuthProvider,
+  normalizeShopifyShopDomain,
   OAUTH_PROVIDER_DESCRIPTORS,
+  SHOPIFY_INSTALL_URL,
 } from "../../lib/oauth-providers.js";
 import {
   createRomeCloudOAuthStartRedirect,
@@ -14,6 +17,9 @@ import {
 } from "../../lib/rome-cloud-oauth.js";
 import { importProviderBundle } from "../../connections/providers-import.js";
 import type { ApiDeps } from "../deps.js";
+
+/** The Shopify card, where a signed-out browser finishes a Shopify-initiated install. */
+const SHOPIFY_SETTINGS_PATH = "/settings/connections/shopify";
 
 export function oauthRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
@@ -46,10 +52,32 @@ export function oauthRoutes(deps: ApiDeps): Hono {
     if (!isEnabledOAuthProvider(provider)) {
       return c.json({ error: "Unsupported provider." }, 404);
     }
+    // Shopify authorizes per store. Rome Cloud's Shopify install page names the
+    // store here once Shopify has installed the app. A link without a valid
+    // store goes to Shopify's install link, where Shopify asks which store.
+    let shop: string | undefined;
+    if (provider === "shopify") {
+      const shopDomain = normalizeShopifyShopDomain(c.req.query("shop"));
+      if (!shopDomain) {
+        return c.redirect(SHOPIFY_INSTALL_URL, 303);
+      }
+      // `/api/oauth/*` is public so the sign-in providers can start here, and a
+      // redeem with no session signs the browser in. Connecting a store is the
+      // guardian's call, so a signed-out browser goes to the Shopify card
+      // instead: the dashboard sends it to sign in and returns it there with
+      // the store named.
+      if (!(await resolveGuardianSession(c, deps.db))) {
+        return c.redirect(`${SHOPIFY_SETTINGS_PATH}?shop=${encodeURIComponent(shopDomain)}`, 303);
+      }
+      shop = shopDomain;
+    }
 
     try {
       const reconnect = c.req.query("reconnect") === "1";
-      const redirectUrl = await createRomeCloudOAuthStartRedirect(deps.db, provider, { reconnect });
+      const redirectUrl = await createRomeCloudOAuthStartRedirect(deps.db, provider, {
+        reconnect,
+        ...(shop ? { shop } : {}),
+      });
       return c.redirect(redirectUrl, 303);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to start OAuth flow.";
@@ -61,6 +89,9 @@ export function oauthRoutes(deps: ApiDeps): Hono {
     const provider = c.req.param("provider");
     if (!isEnabledOAuthProvider(provider)) {
       return c.json({ error: "Unsupported provider." }, 404);
+    }
+    if (provider === "shopify") {
+      return c.json({ error: `Connect Shopify from Shopify: ${SHOPIFY_INSTALL_URL}` }, 400);
     }
 
     try {

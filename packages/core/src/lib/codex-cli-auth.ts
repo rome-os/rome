@@ -14,12 +14,14 @@
 //   }
 //
 // Revoked-credential signal: the codex binary owns token refresh, so a revoked
-// refresh token only surfaces at request time (see `codex-auth-revoked.ts`),
+// refresh token surfaces only through Codex (see `codex-auth-revoked.ts`),
 // never from reading auth.json — the file still looks "logged in". When a turn
-// fails that way we drop a Rome-owned marker (`.rome-auth-revoked.json`) next to
-// auth.json recording a fingerprint of the dead refresh token; this reader then
-// downgrades the status to `needsReauth` for as long as that exact token is
-// still in auth.json, and self-clears once a re-login rotates it.
+// fails that way, or Codex's account/read hides a saved ChatGPT login (see
+// `core/codex/account-service.ts`), we drop a Rome-owned marker
+// (`.rome-auth-revoked.json`) next to auth.json recording a fingerprint of the
+// dead refresh token; this reader then downgrades the status to `needsReauth`
+// for as long as that exact token is still in auth.json, and self-clears once a
+// re-login rotates it.
 
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { LINKABLE_SERVICES, agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS, agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
 import { useTranslation } from "react-i18next";
 import { Bot, ChevronRight, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -44,7 +44,7 @@ export function AccountControls({
   const [adding, setAdding] = useState(false);
   const connected = talkConnected(card);
   const showLink =
-    card.linkReported && card.channel !== null && connected && LINKABLE_SERVICES.has(card.service);
+    card.linkReported && card.channel !== null && connected && LINKABLE_KINDS.has(card.service);
   // A second account only makes sense next to a first one that exists.
   const showAdd =
     adding || (card.severalAccounts && connected && CHANNEL_CONFIGS[card.service] !== undefined);

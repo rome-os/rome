@@ -29,7 +29,7 @@ import {
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
 import { useAppsList } from "@/hooks/use-apps";
-import { isCarrierApp } from "@/lib/chat-helpers";
+import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import { filterAgentCatalog } from "@/lib/agent-catalog-filter";
 import { prettyAgentName } from "@/lib/agent-name";
 import { getHostAppRoute } from "@/lib/auth-routing";
@@ -76,10 +76,6 @@ interface PageSearchEntry {
   label: string;
 }
 
-/** Built-in pages the switcher can open. The App Store has no dashboard route
- * (it opens a sheet or Rome Cloud), so it stays with the sidebar and launcher. */
-const SEARCHABLE_PAGES = APP_NAV.filter((page) => page.id !== "store");
-
 /**
  * The agent filter while the query is a lone `@` token at its start, else
  * null. Only a leading token counts, so a search that merely contains `@` (an
@@ -106,7 +102,7 @@ function matchingOpenableApps(apps: InstalledAppCard[], normalizedQuery: string)
 
   return apps
     .map((app, originalIndex) => {
-      if (isCarrierApp(app.id)) return null;
+      if (isHiddenInLauncher(app)) return null;
       const href = openableAppHref(app);
       if (!href) return null;
       const name = normalizeSearchText(app.displayName);
@@ -389,7 +385,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
 
   const normalizedQuery = normalizeSearchText(searchQuery);
   const matchingPageEntries = useMemo(
-    () => matchingPages(SEARCHABLE_PAGES, (page) => t(page.labelKey), normalizedQuery),
+    () => matchingPages(APP_NAV, (page) => t(page.labelKey), normalizedQuery),
     [normalizedQuery, t],
   );
   const matchingApps = useMemo(

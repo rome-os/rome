@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Sends one text from the guardian's own WeChat account by driving the desktop
-client through its accessibility tree, for channels/wechat-user.ts.
+client through its accessibility tree, for channels/wechat-user.ts. Also locates a
+remembered account's sign-in button after a restart.
 
     send --chat <wxid> --name <display name> --text <body>
     check
+    sign-in-target
 
-`send` prints one JSON object: {"ok": true, "conversationId", "messageId"} or
+`send` prints one JSON object: {"ok": true, "chatId", "messageId"} or
 {"ok": false, "code", "typed", "reason"}. `typed` says whether any text reached
 a chat input. `check` prints {"ready", "reason"} and does not touch the client.
+`sign-in-target` prints {"ok": true, "x", "y"}, the screen point of the sign-in
+button, or the same failure object; it only reads, and the caller presses there.
 Every error after argument parsing is such a JSON answer with exit 0; argparse's
 own errors (a missing flag, an unknown command) exit 2.
 
@@ -36,6 +40,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SEARCH = ("Search", "搜索")
 CHATS = ("Chats", "聊天")
 TITLE = ("Weixin", "微信")  # the main window's X title; the Chinese one is not seen live yet
+# A remembered account's sign-in button. "Enter Weixin" is seen live; "Log In" is
+# the client's other English label for it. The same window holds "Switch Account"
+# and "Transfer files only", which must never be pressed.
+SIGN_IN = ("Enter Weixin", "Log In", "进入微信", "登录")
+LOGIN_SIZE = (280, 380)  # the login window, as channels/wechat-user.ts detects it
 # Search sections that hold no chat of the account's own (English only, verified live).
 NONLOCAL_HEADERS = ("Internet search results", "More")
 KEYS = ("Down", "Up", "Return")  # every key this driver can press
@@ -84,6 +93,7 @@ class Node:
         return self._call("org.a11y.atspi.Text", "GetText", "ii", (0, n))[0]
 
     def set_text(self, s): self._call("org.a11y.atspi.EditableText", "SetTextContents", "s", (s,))
+    def extents(self): return tuple(self._call("org.a11y.atspi.Component", "GetExtents", "u", (0,))[0])
     def grab_focus(self): self._call("org.a11y.atspi.Component", "GrabFocus")
 
 
@@ -169,6 +179,14 @@ class Desktop:
             raise ValueError(f"{name!r} is not a key this driver presses")
         self._run("xdotool", "key", "--clearmodifiers", name)
 
+    def login_window(self):
+        """The login window's screen position (x, y), or None without exactly one."""
+        w, h = LOGIN_SIZE
+        found = [(int(m.group(1)), int(m.group(2))) for m in (
+            re.search(rf'"(?:{"|".join(TITLE)})": \("wechat" "wechat"\)\s+{w}x{h}[+-]\d+[+-]\d+\s+\+(-?\d+)\+(-?\d+)', line)
+            for line in self._run("xwininfo", "-root", "-tree").stdout.splitlines()) if m]
+        return found[0] if len(found) == 1 else None
+
 
 class Store:
     """Reads through `wechat-cli` (the wechat-bridge package), against the keys
@@ -196,7 +214,7 @@ class Store:
         """One chat's messages in the shape the driver compares: the bridge's
         `content` cut the way the Rome reader cuts it."""
         page = self.call("query", chat_id, *args, timeout=timeout)
-        return [{"id": m["id"], "conversationId": m["session"], "conversationName": name,
+        return [{"id": m["id"], "chatId": m["session"], "conversationName": name,
                  "isSelf": m["isSelf"], "type": m["type"], "text": clean_text(m["content"])}
                 for m in page["messages"]]
 
@@ -470,19 +488,37 @@ class Driver:
                 # (the same text sent there from the phone) is not ours.
                 if not fresh:
                     stray = [m for m in self.store.recent(since, timeout=left(deadline)) if is_echo(m, body)
-                             and m["conversationId"] != chat_id and m["id"] not in elsewhere_before]
+                             and m["chatId"] != chat_id and m["id"] not in elsewhere_before]
             except Exception:  # noqa: BLE001 — a read that fails after Return is no echo yet
                 pass
             if fresh:
                 self.clear_leftover(name, body)
                 return fresh[-1]["id"]
-            elsewhere = elsewhere or (stray[0]["conversationId"] if stray else None)
+            elsewhere = elsewhere or (stray[0]["chatId"] if stray else None)
             if self.clock.time() > deadline:
                 self.clear_leftover(name, body)
                 if elsewhere:
                     raise Failure("misdelivered", f"the text landed in {elsewhere}, not the target", True)
                 raise Failure("no-echo", f"no copy in the store after {ECHO_TIMEOUT_S} s; check WeChat", True)
             self.clock.sleep(1.5)
+
+
+def sign_in_target(app, desk):
+    """The middle of the one sign-in button, found by accessible name, and only
+    where it lies inside WeChat's login window. Reads only."""
+    window = desk.login_window()
+    if window is None:
+        raise Failure("not-found", "WeChat's login window is not on the display")
+    buttons = [b for f in app.children() if f.role == "frame"
+               for b in find(f, lambda n, st: n.role == "push button" and n.name in SIGN_IN)]
+    if len(buttons) != 1:
+        raise Failure("not-found", f"expected one sign-in button, found {len(buttons)}")
+    x, y, w, h = buttons[0].extents()
+    cx, cy = x + w // 2, y + h // 2
+    (wx, wy), (ww, wh) = window, LOGIN_SIZE
+    if w <= 0 or h <= 0 or not (wx <= cx < wx + ww and wy <= cy < wy + wh):
+        raise Failure("not-ready", "the sign-in button is not inside WeChat's login window")
+    return cx, cy
 
 
 def ready_client():
@@ -503,9 +539,13 @@ def main():
     for flag in ("--chat", "--name", "--text"):
         send.add_argument(flag, required=True)
     sub.add_parser("check")
+    sub.add_parser("sign-in-target")
     args = parser.parse_args()
 
     try:
+        if args.command == "sign-in-target":
+            x, y = sign_in_target(wechat_app(), Desktop())
+            return print(json.dumps({"ok": True, "x": x, "y": y}))
         if args.command == "check":
             ready_client()
             return print(json.dumps({"ready": True, "reason": "ready"}))
@@ -516,7 +556,7 @@ def main():
                           f"--text 1 to {MAX_TEXT} characters, no {ENVELOPE_MARKERS}")
         app, desktop = ready_client()
         message_id = Driver(app, desktop, Store()).send(args.chat, args.name, args.text)
-        print(json.dumps({"ok": True, "conversationId": args.chat, "messageId": message_id}, ensure_ascii=False))
+        print(json.dumps({"ok": True, "chatId": args.chat, "messageId": message_id}, ensure_ascii=False))
     except Exception as e:  # noqa: BLE001 — every answer is one JSON object; Driver.send sets typed
         e = e if isinstance(e, Failure) else Failure("not-ready", f"{type(e).__name__}: {e}")
         answer = {"ready": False} if args.command == "check" else {"ok": False, "code": e.code, "typed": e.typed}

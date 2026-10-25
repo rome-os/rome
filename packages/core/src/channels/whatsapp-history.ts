@@ -1,7 +1,7 @@
 // A row of the WhatsApp mirror as the message it records, for the channel's
 // `query` and its account reads (whatsapp-messages.ts).
 
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { Attachment } from "./types.js";
 import type { WaHistoryMessage } from "./whatsapp-sync.js";
 
@@ -76,7 +76,7 @@ export function whatsAppHistoryMessage(row: WaHistoryMessage): ChannelMessage {
     channel: "whatsapp",
     direction: row.fromMe ? "outbound" : "inbound",
     messageId: row.id,
-    conversationId: row.chatJid as ConversationId,
+    chatId: row.chatJid as ChatId,
     senderId,
     ...(senderName ? { senderDisplayName: senderName } : {}),
     text: historyText(row),

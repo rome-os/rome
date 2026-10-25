@@ -57,7 +57,7 @@ export async function findUpgradeCandidates(
   const listings = opts.romeCloudListings;
 
   const probes = catalog.list().map(async (view) => {
-    if (!isResolvedApp(view)) return null;
+    if (!isResolvedApp(view) || view.state !== "installed") return null;
     // First-party apps upgrade at boot and reject user installs, so an
     // advertised candidate would be a control that can never succeed.
     if (view.firstParty) return null;

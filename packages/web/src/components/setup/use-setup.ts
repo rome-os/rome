@@ -17,9 +17,9 @@ import {
 
 export interface UseSetupOptions {
   /** Connection id, or the bare service name for a never-connected service. */
-  idOrService: string;
+  idOrKind: string;
   grant: string;
-  /** Connect a new account of the service `idOrService` names. */
+  /** Connect a new account of the service `idOrKind` names. */
   another?: boolean;
   /** Cancel the setup when the card unmounts. Defaults to `another`. */
   cancelOnLeave?: boolean;
@@ -50,7 +50,7 @@ export interface SetupRunner {
 }
 
 export function useSetup(options: UseSetupOptions): SetupRunner {
-  const { idOrService, grant, another, activeCid, onDone } = options;
+  const { idOrKind, grant, another, activeCid, onDone } = options;
   const cancelOnLeave = options.cancelOnLeave ?? another ?? false;
   const [cid, setCid] = useState<string | null>(activeCid ?? null);
   const [state, setState] = useState<SetupState | null>(null);
@@ -104,7 +104,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       setBusy(true);
       setError(null);
       void (async () => {
-        const result = await startSetup(idOrService, grant, { force, another });
+        const result = await startSetup(idOrKind, grant, { force, another });
         if (unmountedRef.current) {
           // The card that asked went away first, so nothing could finish this
           // new account's setup.
@@ -122,7 +122,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         settle(result.start.state);
       })();
     },
-    [idOrService, grant, another, cancelOnLeave, settle],
+    [idOrKind, grant, another, cancelOnLeave, settle],
   );
 
   const submit = useCallback(

@@ -13,9 +13,9 @@ import {
   channelNamed,
   createTestConnections,
   noAccounts,
-  serviceChannelOf,
+  kindChannelOf,
   type TestConnections,
-  recordedServiceOf,
+  recordedConnectionKindOf,
 } from "../helpers.js";
 import type { Channels } from "../../channels/channel.js";
 import { channelList } from "../../channels/channel-list.js";
@@ -208,10 +208,10 @@ async function buildHarness(
   const testDb = createTestDb();
   const db = testDb.db;
 
-  const personMapping = new PersonMappingRepository(db, recordedServiceOf(db));
+  const personMapping = new PersonMappingRepository(db, recordedConnectionKindOf(db));
   const repos: TestRomeRepos = {
     sessions: new SessionsRepository(db),
-    approvals: new ApprovalsRepository(db, personMapping),
+    approvals: new ApprovalsRepository(db),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
     settings: new SettingsRepository(db),
@@ -306,7 +306,7 @@ async function buildHarness(
     db,
     whatsAppAccounts: noAccounts,
     linkedInAccounts: noAccounts,
-    connections: { registry: connections, channelOf: serviceChannelOf },
+    connections: { registry: connections, channelOf: kindChannelOf },
   });
 
   const backendTurnRunner = createBackendTurnRunner({

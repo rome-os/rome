@@ -70,17 +70,87 @@ interface AccountLink {
  */
 export async function readAccountStream(deps: AccountDirectoryDeps): Promise<StreamAccount[]> {
   const accounts = await readAccountDirectory(deps);
-  const stores = personMessageStores(deps);
+  return streamRows(accounts, await readHeads(deps, accounts));
+}
 
-  const heads = new Map<DirectoryAccount, Message>();
-  for (const round of rounds(accounts)) {
-    for (const [account, owned] of await assignAccountHeads(stores, round)) {
-      heads.set(account, owned.head);
+/**
+ * {@link readAccountStream} for a caller that asks again before the last read
+ * finished. The People page polls the stream every 30 seconds and refetches
+ * every page it has loaded, and the head reads can take a while on a slow live
+ * store, so without sharing, reads pile up faster than they finish.
+ *
+ * Only the head reads are shared, never the directory. The directory carries
+ * every link and dismissal and is cheap to read, so each read takes it fresh:
+ * a refetch right after a write shows that write even while it joins heads a
+ * read started before it. Heads depend on nothing but an account's channel and
+ * addresses, so each one in flight is shared by that key: a read joins the
+ * heads already being read and starts one read for the rest, which later reads
+ * join in turn. Nothing is kept once a head read settles, failed or not.
+ */
+export function accountStreamReader(deps: AccountDirectoryDeps): () => Promise<StreamAccount[]> {
+  const inFlight = new Map<string, Promise<Message | undefined>>();
+
+  async function heads(accounts: readonly DirectoryAccount[]): Promise<Map<string, Message>> {
+    const keys = accounts.map(headKey);
+    const missing = accounts.filter((_, i) => !inFlight.has(keys[i]!));
+    if (missing.length > 0) {
+      const read = readHeads(deps, missing);
+      const started = missing.map((account) => {
+        const key = headKey(account);
+        const head = read.then((found) => found.get(key));
+        inFlight.set(key, head);
+        return [key, head] as const;
+      });
+      const settle = () => {
+        for (const [key, head] of started) if (inFlight.get(key) === head) inFlight.delete(key);
+      };
+      read.then(settle, settle);
     }
+    // Taken before any await, so a read that settles meanwhile cannot drop one.
+    const pending = keys.map((key) => inFlight.get(key)!);
+    const found = await Promise.all(pending);
+    return new Map(keys.flatMap((key, i) => (found[i] ? [[key, found[i]] as const] : [])));
   }
 
+  return async () => {
+    const accounts = await readAccountDirectory(deps);
+    return streamRows(accounts, await heads(accounts));
+  };
+}
+
+/** What a head read depends on: the channel and every address of the account. */
+function headKey(account: DirectoryAccount): string {
+  return JSON.stringify([account.channel, [...account.addresses].sort(compareCodePoints)]);
+}
+
+/**
+ * Each account's head, by {@link headKey}: the entry that claims it, through
+ * the same `assignAccountHeads` the person's own page and the people listing
+ * settle ownership with. Read in rounds rather than all at once — see
+ * {@link ADDRESSES_PER_ROUND}.
+ */
+async function readHeads(
+  deps: AccountDirectoryDeps,
+  accounts: readonly DirectoryAccount[],
+): Promise<Map<string, Message>> {
+  const stores = personMessageStores(deps);
+  const heads = new Map<string, Message>();
+  for (const round of rounds(accounts)) {
+    for (const [account, owned] of await assignAccountHeads(stores, round)) {
+      heads.set(headKey(account), owned.head);
+    }
+  }
+  return heads;
+}
+
+/** The directory as stream rows: each account with its head's dynamic, and
+ *  without the accounts that have none. */
+function streamRows(
+  accounts: readonly DirectoryAccount[],
+  heads: ReadonlyMap<string, Message>,
+): StreamAccount[] {
   return accounts.flatMap((account) => {
-    const head = heads.get(account);
+    const head = heads.get(headKey(account));
     const dynamic = latestDynamic(head ? [head] : []);
     return dynamic === null ? [] : [{ ...account, latest: dynamic }];
   });

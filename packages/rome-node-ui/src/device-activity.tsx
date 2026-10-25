@@ -14,7 +14,7 @@ import { FilterChipGroup } from "@rome-os/ui/filter-chip-group";
 import { IconButton } from "@rome-os/ui/icon-button";
 import { Input } from "@rome-os/ui/input";
 import { List, ListRow } from "@rome-os/ui/list-row";
-import { PageHeader, PageHeaderNav, PageHeading, PageTitle } from "@rome-os/ui/page";
+import { PageActions, PageHeader, PageHeaderNav, PageHeading, PageTitle } from "@rome-os/ui/page";
 import { Sheet, SheetDescription, SheetTitle } from "@rome-os/ui/sheet";
 import { Check, Copy, Search, X } from "lucide-react";
 import {
@@ -27,12 +27,13 @@ import {
   startOfDay,
   summarize,
 } from "./format.js";
+import { DeviceMenu } from "./device-manage.js";
 import { LoadChart } from "./load-chart.js";
 import { format, messagesFor, plural, type NodeUiMessages } from "./messages.js";
 import { DeviceIcon, ResultMark, resultPaint, useNow } from "./parts.js";
 import type { NodeActionResult, NodeActionRow } from "./protocol.js";
 import { BUCKET_MS, failureRate, statsByPeer, windowStart } from "./stats.js";
-import type { NodeDevice } from "./types.js";
+import type { NodeDevice, NodeDeviceManage, NodeThisDevice } from "./types.js";
 import {
   activeTextFilter,
   useAction,
@@ -55,6 +56,10 @@ export interface NodeDeviceActivityProps {
   /** The action shown in detail. The host keeps it in the URL. */
   selected?: number | null;
   onSelect?: (id: number | null) => void;
+  /** Rename, disconnect, and remove in the header menu. */
+  manage?: NodeDeviceManage;
+  /** Set when `device` is the computer the host page runs on. Its menu connects it. */
+  thisDevice?: NodeThisDevice;
 }
 
 type ResultFilter = NodeActionResult | "all";
@@ -144,7 +149,7 @@ function CommandDetail({
   if (row.transfer?.sha256) facts.push(["SHA-256", row.transfer.sha256]);
   return (
     <div className="flex flex-col gap-4">
-      <p className="flex items-center gap-2 font-mono text-aux text-muted-foreground">
+      <p className="flex items-center gap-2 text-aux text-muted-foreground">
         <ResultMark row={row} m={m} />
         <span aria-hidden>·</span>
         <span className="truncate">{device.name}</span>
@@ -234,6 +239,8 @@ export function NodeDeviceActivity({
   locale,
   selected: selectedProp,
   onSelect,
+  manage,
+  thisDevice,
 }: NodeDeviceActivityProps) {
   const m = messagesFor(locale);
   const bytes = useMemo(() => byteFormat(locale), [locale]);
@@ -336,13 +343,18 @@ export function NodeDeviceActivity({
           <DeviceIcon platform={device.platform} status={device.status} className="size-10" />
           <PageHeading className="min-w-0">
             <PageTitle className="break-words">{device.name}</PageTitle>
-            <p className="font-mono text-aux text-muted-foreground">
+            <p className="text-aux text-muted-foreground">
               {[platform, device.status ? m.status[device.status] : null]
                 .filter(Boolean)
                 .join(" · ")}
             </p>
           </PageHeading>
         </div>
+        {(manage || thisDevice) && (
+          <PageActions>
+            <DeviceMenu device={device} self={thisDevice} manage={manage} m={m} />
+          </PageActions>
+        )}
       </PageHeader>
 
       {socket.link !== "open" && (
@@ -355,7 +367,7 @@ export function NodeDeviceActivity({
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
           <div className="flex min-w-0 flex-col gap-1">
             <p className="flex flex-wrap items-baseline gap-x-2">
-              <span className="font-mono text-display tabular-nums text-foreground">
+              <span className="text-display tabular-nums text-foreground">
                 {(counts?.all ?? 0).toLocaleString(locale)}
               </span>
               <span className="text-ui text-muted-foreground">
@@ -363,7 +375,7 @@ export function NodeDeviceActivity({
               </span>
             </p>
             {counts && counts.all > 0 && (
-              <p className="font-mono text-aux text-muted-foreground tabular-nums">
+              <p className="text-aux text-muted-foreground tabular-nums">
                 {[
                   format(m.detail.average, {
                     rate: (counts.all / (24 * 60)).toLocaleString(locale, {
@@ -440,7 +452,7 @@ export function NodeDeviceActivity({
             </span>
           )}
           {scoped && !text && (
-            <span className="font-mono text-aux text-muted-foreground tabular-nums">
+            <span className="text-aux text-muted-foreground tabular-nums">
               {plural(m.detail.count, scoped[result], locale)}
             </span>
           )}

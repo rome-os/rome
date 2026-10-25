@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.5](https://github.com/rome-os/rome/compare/node-core-v0.1.4...node-core-v0.1.5) (2026-10-23)
+
+
+### Features
+
+* let a new chat work in a folder on a connected device ([#1267](https://github.com/rome-os/rome/issues/1267)) ([c327426](https://github.com/rome-os/rome/commit/c3274267262499ebb2a8a9354b962e74c6a00c36))
+* **node:** rename and remove devices from the Devices page ([#1286](https://github.com/rome-os/rome/issues/1286)) ([bb3385f](https://github.com/rome-os/rome/commit/bb3385fe2ba53c6ca353973af0c65e5fcf1a8470))
+
+## [0.1.4](https://github.com/rome-os/rome/compare/node-core-v0.1.3...node-core-v0.1.4) (2026-10-21)
+
+
+### Features
+
+* **desktop:** connect the Mac as a device when it signs in to Rome Cloud ([#1217](https://github.com/rome-os/rome/issues/1217)) ([1df1834](https://github.com/rome-os/rome/commit/1df1834d085d3d1d5b5106795056c6f0f931ae90))
+
 ## [0.1.3](https://github.com/rome-os/rome/compare/node-core-v0.1.2...node-core-v0.1.3) (2026-10-16)
 
 

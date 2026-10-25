@@ -7,6 +7,7 @@ import {
   setCurrentActionContextResolver,
   type ActionConfig,
   type ChannelsService,
+  type ChatRepository,
 } from "@rome-os/app-runtime";
 import { createSendMessageAction, executeSendMessage } from "./index.js";
 import type { AgentNamesService, SendMessageInput } from "./index.js";
@@ -19,7 +20,7 @@ let outsideRoot = "";
 function makeAdapter(service = "discord"): ChannelsService {
   return {
     list: rs.fn(async () => [{ name: service, sendable: true }]),
-    send: rs.fn(async (_channel, conversationId) => ({ conversationId })),
+    send: rs.fn(async (_channel, chatId) => ({ chatId })),
     query: async () => [],
   };
 }
@@ -102,7 +103,7 @@ describe("send_message email union", () => {
   function makeEmailAdapter(): ChannelsService {
     const adapter = makeAdapter("email");
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
-      conversationId: "t1",
+      chatId: "t1",
       messageId: "msg_1",
     });
     return adapter;
@@ -305,14 +306,102 @@ describe("send_message connection choice", () => {
   });
 });
 
+describe("send_message to an account with an opaque id", () => {
+  const FIRST = "6f1d2c3b-0000-4000-8000-000000000001";
+  const SECOND = "6f1d2c3b-0000-4000-8000-000000000002";
+
+  function accounts(...names: string[]): ChannelsService {
+    return {
+      list: rs.fn(async () => [
+        { name: "telegram", platform: "telegram", sendable: false },
+        ...names.map((name) => ({ name, platform: "telegram", sendable: true })),
+      ]),
+      send: rs.fn(async (_channel, chatId) => ({ chatId })),
+      query: async () => [],
+    };
+  }
+
+  it("sends as the account its id names", async () => {
+    const adapter = accounts(FIRST, SECOND);
+
+    await executeSendMessage(adapter, { channel: SECOND, threadId: "42", text: "hi" });
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      SECOND,
+      "42",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  it("refuses a platform name that is not an account's id", async () => {
+    const adapter = accounts(FIRST);
+
+    await expect(
+      executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" }),
+    ).rejects.toThrow('No Talk connection registered for "telegram"');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("resolves to: guardian through the link People keys by platform", async () => {
+    const adapter = accounts(FIRST);
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [
+        { channelMappings: [{ channel: "telegram", channelUserId: "1001" }] },
+      ]),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: FIRST, to: "guardian", text: "hi" },
+      { personMappingRepo },
+    );
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      FIRST,
+      "1001",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  // People files a signed-in Telegram's links under its own key, not under
+  // the platform, until links are keyed by platform.
+  it("resolves to: guardian under the key People files the account's links by", async () => {
+    const adapter = accounts(FIRST);
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [
+        {
+          channelMappings: [
+            { channel: "telegram", channelUserId: "1001" },
+            { channel: "telegram_user", channelUserId: "2002" },
+          ],
+        },
+      ]),
+      linkKeyOf: rs.fn(async () => "telegram_user"),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: FIRST, to: "guardian", text: "hi" },
+      { personMappingRepo },
+    );
+
+    expect(personMappingRepo.linkKeyOf).toHaveBeenCalledWith(FIRST);
+    expect(adapter.send).toHaveBeenCalledWith(
+      FIRST,
+      "2002",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+});
+
 describe("send_message conversation recording", () => {
   it("stores a confirmed out-of-band delivery as a pending notification", async () => {
     const adapter = makeAdapter();
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "platform-out-1",
-      conversationId: "thread-1",
+      chatId: "thread-1",
     });
-    const ensureChannelConversation = rs.fn(async () => ({
+    const ensureChannelChat = rs.fn(async () => ({
       id: "channel:discord:thread-1",
       agentName: null,
     }));
@@ -322,8 +411,8 @@ describe("send_message conversation recording", () => {
       adapter,
       { channel: "discord", threadId: "thread-1", text: "Background update" },
       {
-        conversations: {
-          ensureChannelConversation,
+        chats: {
+          ensureChannelChat,
           recordOutboundMessage,
           addMessage: rs.fn(),
           promoteMessageToUser: rs.fn(),
@@ -332,7 +421,7 @@ describe("send_message conversation recording", () => {
     );
 
     expect(result).toEqual({ status: "ok", data: { messageId: "platform-out-1" } });
-    expect(ensureChannelConversation).toHaveBeenCalledWith(
+    expect(ensureChannelChat).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: "discord",
         threadId: "thread-1",
@@ -350,21 +439,50 @@ describe("send_message conversation recording", () => {
     });
   });
 
+  it("records a delivery through a host that predates the chat names", async () => {
+    const adapter = makeAdapter();
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
+      messageId: "platform-out-1",
+      chatId: "thread-1",
+    });
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    // Only the old method, reading its own receiver as a host repository can.
+    const legacy = {
+      sessionId: "channel:discord:thread-1",
+      async ensureChannelConversation() {
+        return { id: this.sessionId, agentName: null };
+      },
+      recordOutboundMessage,
+      addMessage: rs.fn(),
+      promoteMessageToUser: rs.fn(),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: "discord", threadId: "thread-1", text: "Background update" },
+      { chats: legacy as unknown as ChatRepository },
+    );
+
+    expect(recordOutboundMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "channel:discord:thread-1" }),
+    );
+  });
+
   it("leaves a webchat send to the channel, which writes it into the chat", async () => {
     const adapter = makeAdapter("webchat");
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "webchat-out-1",
-      conversationId: "session-1",
+      chatId: "session-1",
     });
-    const ensureChannelConversation = rs.fn();
+    const ensureChannelChat = rs.fn();
     const recordOutboundMessage = rs.fn();
 
     const result = await executeSendMessage(
       adapter,
       { channel: "webchat", threadId: "session-1", text: "Background update" },
       {
-        conversations: {
-          ensureChannelConversation,
+        chats: {
+          ensureChannelChat,
           recordOutboundMessage,
           addMessage: rs.fn(),
           promoteMessageToUser: rs.fn(),
@@ -373,7 +491,7 @@ describe("send_message conversation recording", () => {
     );
 
     expect(result).toEqual({ status: "ok", data: { messageId: "webchat-out-1" } });
-    expect(ensureChannelConversation).not.toHaveBeenCalled();
+    expect(ensureChannelChat).not.toHaveBeenCalled();
     expect(recordOutboundMessage).not.toHaveBeenCalled();
   });
 
@@ -381,7 +499,7 @@ describe("send_message conversation recording", () => {
     const adapter = makeAdapter();
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "platform-out-2",
-      conversationId: "thread-2",
+      chatId: "thread-2",
     });
 
     await expect(
@@ -396,8 +514,8 @@ describe("send_message conversation recording", () => {
           turnId: "turn-2",
         },
         {
-          conversations: {
-            ensureChannelConversation: rs.fn(),
+          chats: {
+            ensureChannelChat: rs.fn(),
             recordOutboundMessage: rs.fn(async () => {
               throw new Error("database unavailable");
             }),

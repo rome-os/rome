@@ -66,7 +66,7 @@ describe("removeUnconnectedAccounts", () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     registry.register(makeZeroGrantTalk().descriptor);
     registry.register(makeRenewableAct().descriptor);
-    const zeroGrant = await registry.connect(makeZeroGrantTalk().descriptor.service);
+    const zeroGrant = await registry.connect(makeZeroGrantTalk().descriptor.connectionKind);
     await registry.connect("fake-github");
 
     expect(await removeUnconnectedAccounts(registry)).toEqual([]);

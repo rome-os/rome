@@ -9,7 +9,7 @@ import {
   sliceAccountStream,
   type AccountState,
 } from "@rome/api-types/people";
-import { readAccountDirectory, readAccountStream } from "../../people/account-directory.js";
+import { accountStreamReader, readAccountDirectory } from "../../people/account-directory.js";
 import type { ApiDeps } from "../deps.js";
 
 // The account reads: every account Rome has observed, and what the guardian has
@@ -30,6 +30,7 @@ import type { ApiDeps } from "../deps.js";
 
 export function accountsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
+  const readAccountStream = accountStreamReader(deps);
 
   /** The `?state=` both reads narrow by, or the 400 a value that names no state
    *  earns — answering it as the whole listing would silently show the wrong
@@ -80,7 +81,7 @@ export function accountsRoutes(deps: ApiDeps): Hono {
     }
 
     return c.json(
-      sliceAccountStream(await readAccountStream(deps), {
+      sliceAccountStream(await readAccountStream(), {
         query: c.req.query("q"),
         state: state.state,
         cursor,

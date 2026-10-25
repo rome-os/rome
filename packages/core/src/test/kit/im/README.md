@@ -25,6 +25,9 @@ A case no capture covers yet answers with `source: "synthetic"`, and the peer's 
 | `TelegramPeer` | grammy 1.40.0 | send, edit, reply, edit of a missing message | `getMe`, `getUpdates`, `deleteWebhook`, `sendChatAction`; every HTML send and edit, parsed as Telegram parses it; send to an unknown chat; empty or too-long text; reply to a missing message; edit with unchanged text; edit of a user's message |
 | `WechatPeer` | Rome's iLink adapter | send, send with a substituted context token, send to an unknown recipient | `getupdates` |
 | `DiscordPeer` | discord.js 14.26.2 | create, read, edit, reply, read of a missing message, all in a guild text channel | gateway frames; `GET /gateway/bot`, `/users/@me`, command registration, channel lookup, DM creation; edit of a missing message; empty or too-long content; reply to a message elsewhere; edit of a user's message |
+| `FeishuPeer` | @larksuiteoapi/node-sdk 1.68.0 | post create, reply that opens a thread, edit, a post with one Markdown element, read of a missing message, all in a group | the tenant token, and a refused one; a request without the token; reply to a recalled message; edit of a user's message; an edit past the 20th; content over 30 KB |
+
+The Feishu peer answers HTTP only and has no test channel yet: the adapter hears users over the SDK's WebSocket, which the peer does not model. Its tests drive the reply delivery transport and the SDK's client directly. A Markdown element shows its source: Feishu parses it into styled runs, which the peer does not.
 
 Known gap: the Discord peer's `MESSAGE_CREATE` frames are synthetic, and discord.js 14.26.2 builds no channel for a DM it has not cached from such a frame. So a test opens the DM first (`adapter.directConversationFor`), which caches the channel, before the user writes; whether a real first DM reaches the adapter without that is unverified. A recorded DM gateway event would close the gap.
 
@@ -75,7 +78,7 @@ When `ROME_CHANNEL_TRACES` names a directory, `runScenario` writes a **trace** o
 
 ## Streaming replies
 
-A test channel can carry `delivery`, the platform's reply delivery transport from `src/channels/delivery/transports/`. A scenario streams a scripted agent reply through `ReplyDelivery` and that transport, so the platform's real SDK writes the messages the peer shows. Only Telegram has a transport. The streaming scenario skips the other platforms and its table row says so.
+A test channel can carry `delivery`, the platform's reply delivery transport from `src/channels/delivery/transports/`. A scenario streams a scripted agent reply through `ReplyDelivery` and that transport, so the platform's real SDK writes the messages the peer shows. Of the test channels, only Telegram has a transport. The streaming scenario skips the other platforms and its table row says so. Feishu has a transport too, and `feishu.integration.test.ts` streams replies through it against `FeishuPeer` and checks the same invariants.
 
 A scenario fills the agent and Rome lanes of a trace with `note`: `note("agent", ...)` for each event the agent emits, and `note("rome", ...)` for each write the engine makes. `check(checkDelivery(...))` runs the rules in `invariants.ts`, records each verdict, and fails the step naming every rule that broke.
 

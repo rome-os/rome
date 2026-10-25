@@ -163,7 +163,10 @@ describe("dream API", () => {
     const { runId } = (await res.json()) as { runId: string };
 
     expect(res.status).toBe(202);
-    expect(createRunsRepository(appDb()).byId(runId)?.status).toBe("queued");
+    expect(createRunsRepository(appDb()).byId(runId)).toMatchObject({
+      status: "queued",
+      windowHours: 74,
+    });
     expect(runAction).toHaveBeenCalledWith("dream:dream", { runId }, { detached: true });
   });
 
@@ -208,10 +211,11 @@ describe("dream API", () => {
     }
   });
 
-  it("reads the next nightly dream from its routine", async () => {
+  it("reads the next scheduled dream from its routine", async () => {
     const nextRunAt = new Date("2026-10-07T03:00:00Z");
     const listRoutines = rs.fn().mockResolvedValue([
-      { name: "daily-dream", enabled: true, nextRunAt },
+      { name: "daily-dream", enabled: false },
+      { name: "dream", enabled: true, nextRunAt },
       { name: "other", enabled: true, nextRunAt: new Date() },
     ]);
 
@@ -220,5 +224,15 @@ describe("dream API", () => {
     );
 
     expect(await res.json()).toEqual({ enabled: true, nextRunAt: nextRunAt.toISOString() });
+  });
+
+  it("reads the daily routine until it is replaced", async () => {
+    const listRoutines = rs.fn().mockResolvedValue([{ name: "daily-dream", enabled: false }]);
+
+    const res = await handler({ listRoutines } as Partial<RomeAppContext>).handle(
+      request("GET", "schedule"),
+    );
+
+    expect(await res.json()).toEqual({ enabled: false, nextRunAt: null });
   });
 });

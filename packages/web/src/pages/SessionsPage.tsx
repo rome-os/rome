@@ -58,6 +58,7 @@ import {
 } from "@/lib/chat-api";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
+import { modelDisplayName } from "@/lib/model-display";
 import type {
   ChatMessage,
   RomeSessionExplorerRecord,
@@ -587,7 +588,7 @@ function SessionsIndexPage({
     model
       ? {
           key: "model",
-          label: `Model: ${model.kind === "unknown" ? "Unknown" : model.name}`,
+          label: `Model: ${model.kind === "unknown" ? "Unknown" : modelDisplayName(model.name)}`,
           clear: () => setModel(undefined),
         }
       : null,
@@ -1100,7 +1101,10 @@ function ReadOnlySessionChat({
     [view.interactionResults],
   );
   const loadStoredTrace = useCallback(
-    async (messageId: string, includeSubagentUsage: boolean): Promise<TraceSnapshot | null> => {
+    async (
+      messageId: string,
+      includeSubagentUsage: boolean,
+    ): Promise<TraceSnapshot | "archived" | null> => {
       const params = new URLSearchParams({
         includeSubagentUsage: String(includeSubagentUsage),
       });
@@ -1109,8 +1113,8 @@ function ReadOnlySessionChat({
         { credentials: "include" },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { trace: TraceSnapshot | null };
-      return data.trace;
+      const data = (await res.json()) as { trace: TraceSnapshot | null; traceArchived?: boolean };
+      return data.traceArchived ? "archived" : data.trace;
     },
     [],
   );
@@ -1431,10 +1435,14 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         invocationCounts: {},
       };
       let text = "";
+      // The stream is opened under `active.turnId`; the transcript knows a
+      // backend turn by its `agentTurnId`, which the listing may already carry
+      // or the stream may report after attaching.
+      let runningTurnId = active.agentTurnId ?? active.turnId;
       const publish = () => {
         if (!cancelled) {
           setLiveTurn({
-            turnId: active.turnId,
+            turnId: runningTurnId,
             snapshot: { segments: segments.slice(), summary },
             text,
           });
@@ -1481,6 +1489,10 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           } else if (event.event === "assistant_text") {
             const payload = JSON.parse(event.data) as { text?: string };
             text = payload.text ?? "";
+            publish();
+          } else if (event.event === "turn_id") {
+            const payload = JSON.parse(event.data) as { turnId?: string };
+            if (payload.turnId) runningTurnId = payload.turnId;
             publish();
           } else if (event.event === "done" || event.event === "stream_error") {
             finished = true;

@@ -12,7 +12,7 @@ import makeWASocket, {
   type Chat,
 } from "@whiskeysockets/baileys";
 
-import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage } from "./types.js";
 import type {
   WhatsAppSyncSink,
@@ -44,7 +44,6 @@ let cachedWaVersion: [number, number, number] | null = null;
 let cachedWaVersionAt = 0;
 
 export type WhatsAppConnectionStatus = "disconnected" | "connecting" | "open";
-type WhatsAppPairingState = "idle" | "registered" | "waiting-for-ready" | "ready";
 
 /**
  * A source of Baileys auth state for one socket generation. Returns the state
@@ -77,6 +76,7 @@ export class WhatsAppAdapter {
   private handler?: (msg: ChannelMessage) => Promise<void>;
   private connectedCallback?: (userId: string) => void;
   private faultCallback?: (fault: { kind: "loggedOut" | "terminal"; cause?: unknown }) => void;
+  private qrCallback?: (qr: string) => void;
   private syncSink?: WhatsAppSyncSink;
   private reconnectDelay = 1_000;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -85,7 +85,6 @@ export class WhatsAppAdapter {
   // Connection state for web login
   private connectionStatus: WhatsAppConnectionStatus = "disconnected";
   private currentQr: string | null = null;
-  private pairingState: WhatsAppPairingState = "idle";
   private connectedPhoneNumber: string | null = null;
   private socketGeneration = 0;
 
@@ -114,7 +113,6 @@ export class WhatsAppAdapter {
     this.stopped = false;
     this.connectionStatus = "connecting";
     this.currentQr = null;
-    this.pairingState = "idle";
     this.connectedPhoneNumber = null;
     const generation = ++this.socketGeneration;
     // Clean up any previous socket (e.g. during reconnection)
@@ -123,7 +121,6 @@ export class WhatsAppAdapter {
       this.sock = null;
     }
     const { state, saveCreds } = await this.authProvider();
-    this.pairingState = state.creds.registered ? "registered" : "waiting-for-ready";
 
     const waVersion = await this.fetchLatestWaWebVersion();
     this.sock = this.socketFactory({
@@ -159,17 +156,20 @@ export class WhatsAppAdapter {
 
       if (qr) {
         this.currentQr = qr;
-        if (this.pairingState === "waiting-for-ready") {
-          this.pairingState = "ready";
-        }
         this.connectionStatus = "connecting";
+        try {
+          this.qrCallback?.(qr);
+        } catch (err) {
+          log.error("onQr callback error", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       if (connection === "open") {
         this.reconnectDelay = 1_000; // reset on successful connection
         this.connectionStatus = "open";
         this.currentQr = null;
-        this.pairingState = "registered";
         log.info("connected");
 
         // Extract phone number from user ID (format: "1234567890:12@s.whatsapp.net")
@@ -200,7 +200,6 @@ export class WhatsAppAdapter {
       if (connection === "close") {
         this.connectionStatus = "disconnected";
         this.currentQr = null;
-        this.pairingState = "idle";
         this.connectedPhoneNumber = null;
         const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output
           ?.statusCode;
@@ -250,7 +249,7 @@ export class WhatsAppAdapter {
         if (!msg.text && msg.attachments.length === 0) continue;
         log.info("message received", {
           from: msg.senderId,
-          conversationId: msg.conversationId,
+          chatId: msg.chatId,
           threadKind: msg.thread?.kind,
         });
 
@@ -355,7 +354,6 @@ export class WhatsAppAdapter {
     this.socketGeneration += 1;
     this.connectionStatus = "disconnected";
     this.currentQr = null;
-    this.pairingState = "idle";
     this.connectedPhoneNumber = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -363,59 +361,6 @@ export class WhatsAppAdapter {
     }
     this.sock?.end(undefined);
     this.sock = null;
-  }
-
-  async requestPairingCode(phoneNumber: string): Promise<string> {
-    const normalizedPhoneNumber = phoneNumber.replace(/\D/g, "");
-    if (normalizedPhoneNumber.length < 8 || normalizedPhoneNumber.length > 15) {
-      throw new Error("Invalid phone number. Use country code + digits only.");
-    }
-
-    // Keep retrying through transient reconnect churn (common in Docker startup).
-    const deadline = Date.now() + 60_000;
-    let lastError: Error | null = null;
-    while (Date.now() < deadline) {
-      if (this.connectionStatus === "open") {
-        throw new Error("WhatsApp is already connected");
-      }
-      if (this.pairingState === "registered") {
-        throw new Error("This WhatsApp session is already paired; use the normal connection flow");
-      }
-      // Baileys' own pairing-code example waits for the first QR event before
-      // calling requestPairingCode(). `start()` returns as soon as the socket is
-      // constructed, so merely seeing `connecting` does not mean the
-      // registration handshake is ready yet. Calling earlier can still return
-      // a locally generated code, then have WhatsApp immediately close the
-      // half-initialized login with 401.
-      if (!this.sock || this.connectionStatus === "disconnected" || this.pairingState !== "ready") {
-        await new Promise((r) => setTimeout(r, 750));
-        continue;
-      }
-
-      try {
-        return await this.sock.requestPairingCode(normalizedPhoneNumber);
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        lastError = error;
-        const msg = error.message.toLowerCase();
-        // Socket can flap while Noise/auth is still settling; keep retrying.
-        if (
-          msg.includes("connection closed") ||
-          msg.includes("timed out") ||
-          msg.includes("not connected") ||
-          msg.includes("stream errored")
-        ) {
-          await new Promise((r) => setTimeout(r, 1_000));
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    if (lastError) {
-      throw new Error(`Timed out requesting pairing code: ${lastError.message}`);
-    }
-    throw new Error("Timed out waiting for WhatsApp pairing handshake to be ready");
   }
 
   getConnectionState(): {
@@ -471,9 +416,9 @@ export class WhatsAppAdapter {
     return normalized;
   }
 
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     if (!this.sock) throw new Error("WhatsApp not connected");
-    const threadId: string = conversationId;
+    const threadId: string = chatId;
     const jid = this.canonicalJid(threadId);
 
     try {
@@ -513,7 +458,7 @@ export class WhatsAppAdapter {
       }
 
       log.info("message sent", { threadId, jid });
-      return { conversationId, ...(messageId ? { messageId } : {}) };
+      return { chatId, ...(messageId ? { messageId } : {}) };
     } catch (err) {
       log.error("failed to send message", {
         threadId,
@@ -575,6 +520,13 @@ export class WhatsAppAdapter {
     this.connectedCallback = callback;
   }
 
+  /** Register a sink for each linking QR WhatsApp issues. An unlinked session
+   *  receives a fresh QR every ~20 s (and again after each reconnect) until a
+   *  phone scans one; a linked session never sees one. */
+  onQr(callback: (qr: string) => void): void {
+    this.qrCallback = callback;
+  }
+
   /**
    * Register a terminal-fault sink. The adapter owns transient reconnection
    * internally; only outcomes it cannot recover reach here — today that is
@@ -593,15 +545,15 @@ export class WhatsAppAdapter {
   private toChannelMessage(waMsg: WAMessage): ChannelMessage {
     const remoteJid = waMsg.key.remoteJid!;
     const isGroup = remoteJid.endsWith("@g.us");
-    const conversationId = this.canonicalJid(remoteJid);
+    const chatId = this.canonicalJid(remoteJid);
     const content = describeContent(waMsg.message);
 
     return {
       channel: "whatsapp",
       direction: "inbound",
       messageId: waMsg.key.id!,
-      conversationId: conversationId as ConversationId,
-      senderId: isGroup ? this.canonicalJid(waMsg.key.participant ?? remoteJid) : conversationId,
+      chatId: chatId as ChatId,
+      senderId: isGroup ? this.canonicalJid(waMsg.key.participant ?? remoteJid) : chatId,
       senderDisplayName: waMsg.pushName ?? "Unknown",
       text: content.text ?? "",
       attachments: this.extractAttachments(waMsg),

@@ -26,6 +26,9 @@ class FakeNode:
         self.client, self.role, self.name = client, role, name
         self.kids, self.editable = list(kids), editable
         self.shown, self.value, self.current = True, "", False
+        self.box = (0, 0, 0, 0)  # screen x, y, width, height
+
+    def extents(self): return self.box
 
     def states(self):
         c = self.client
@@ -170,6 +173,14 @@ class FakeDesktop:
         self.client.key(name)
 
 
+class FakeLoginDesktop:
+    """The X side of the login window: only its position."""
+    def __init__(self, window=(500, 210)):
+        self.window = window
+
+    def login_window(self): return self.window
+
+
 class FakeStore:
     """The store as the reader reports it: the client's deliveries become
     self-sent lines after `lag` polls, stamped `skew` seconds behind the host."""
@@ -186,14 +197,14 @@ class FakeStore:
                 return
             chat, text = self.client.sent[self.seen]
             conv = self.where.get(chat, chat)
-            self.lines.append({"id": f"{conv}:{len(self.lines) + 1}", "conversationId": conv,
+            self.lines.append({"id": f"{conv}:{len(self.lines) + 1}", "chatId": conv,
                                "conversationName": chat, "isSelf": True, "type": "text", "text": text,
                                "timestamp": int(self.clock.now) - self.skew})
             self.seen += 1
 
     def chat(self, chat_id, timeout):
         self._sync()
-        return [m for m in self.lines if m["conversationId"] == chat_id]
+        return [m for m in self.lines if m["chatId"] == chat_id]
 
     def recent(self, since, timeout):
         self._sync()
@@ -245,7 +256,7 @@ class SendTests(unittest.TestCase):
 
     def test_an_earlier_identical_line_is_not_the_confirmation(self):
         client, desk, store, clock = rig()
-        store.lines.append({"id": "filehelper:1", "conversationId": "filehelper", "isSelf": True,
+        store.lines.append({"id": "filehelper:1", "chatId": "filehelper", "isSelf": True,
                             "type": "text", "text": "rome test", "timestamp": 1})
         self.assertEqual(send(client, desk, store, clock), "filehelper:2")
 
@@ -431,12 +442,12 @@ class SendTests(unittest.TestCase):
         def return_and_same_text_elsewhere(name):
             key(name)
             if name == "Return" and client.sent:  # "ok" sent to another chat from the phone
-                store.lines.append({"id": "wxid_other:1", "conversationId": "wxid_other",
+                store.lines.append({"id": "wxid_other:1", "chatId": "wxid_other",
                                     "conversationName": "Li Wei", "isSelf": True, "type": "text",
                                     "text": "rome test", "createTime": int(clock.now)})
         client.key = return_and_same_text_elsewhere
         answer = send(client, desk, store, clock)
-        self.assertEqual(answer, [m["id"] for m in store.lines if m["conversationId"] == "filehelper"][-1])
+        self.assertEqual(answer, [m["id"] for m in store.lines if m["chatId"] == "filehelper"][-1])
 
     def test_a_copy_elsewhere_with_no_echo_is_a_misdelivery(self):
         client, desk, store, clock = rig()
@@ -635,14 +646,14 @@ class SendTests(unittest.TestCase):
 
     def test_a_chat_the_store_names_otherwise_is_refused_before_anything(self):
         client, desk, store, clock = rig()
-        store.lines.append({"id": "filehelper:1", "conversationId": "filehelper", "conversationName": "Li Wei",
+        store.lines.append({"id": "filehelper:1", "chatId": "filehelper", "conversationName": "Li Wei",
                             "isSelf": False, "type": "text", "text": "hi", "timestamp": 1})
         self.assertFails("not-found", False, lambda: send(client, desk, store, clock))
         self.assertEqual(desk.events, [])
 
     def test_a_chat_the_store_names_the_same_is_sent(self):
         client, desk, store, clock = rig()
-        store.lines.append({"id": "filehelper:1", "conversationId": "filehelper", "conversationName": "File Transfer",
+        store.lines.append({"id": "filehelper:1", "chatId": "filehelper", "conversationName": "File Transfer",
                             "isSelf": False, "type": "text", "text": "hi", "timestamp": 1})
         self.assertEqual(send(client, desk, store, clock), "filehelper:2")
 
@@ -686,6 +697,75 @@ class SendTests(unittest.TestCase):
         self.assertIsNone(send(client, desk, store, clock, press_return=False))
         self.assertEqual((client.sent, client.all_inputs()["File Transfer"]), ([], ""))
         self.assertEqual(desk.events, ["Down", "Up", "Return"])  # the Return opens the chat only
+
+
+class SignInTests(unittest.TestCase):
+    def login(self, *names):
+        """The login window at (500, 210): a hidden Back button, then `names` stacked
+        from y=500, each 160×36."""
+        client, _, _, _ = rig()
+        back = FakeNode(client, "push button", "Back")
+        back.shown = False
+        buttons = [FakeNode(client, "push button", n) for n in names]
+        for i, b in enumerate(buttons):
+            b.box = (560, 500 + 40 * i, 160, 36)
+        client.app.kids = [FakeNode(client, "frame", "Weixin", [FakeNode(client, "tool bar", kids=[back]), *buttons])]
+        return client, buttons
+
+    def refused(self, client, window=(500, 210)):
+        with self.assertRaises(d.Failure) as caught:
+            d.sign_in_target(client.app, FakeLoginDesktop(window))
+        return caught.exception.code
+
+    def test_it_finds_the_middle_of_the_sign_in_button(self):
+        client, _ = self.login("Switch Account", "Enter Weixin", "Transfer files only")
+        self.assertEqual(d.sign_in_target(client.app, FakeLoginDesktop()), (640, 558))
+
+    def test_no_other_button_is_a_target(self):
+        for names in (("Switch Account", "Transfer files only"), ()):
+            client, _ = self.login(*names)
+            self.assertEqual(self.refused(client), "not-found", names)
+
+    def test_two_sign_in_buttons_are_no_target(self):
+        client, _ = self.login("Enter Weixin", "Log In")
+        self.assertEqual(self.refused(client), "not-found")
+
+    def test_a_hidden_sign_in_button_is_no_target(self):
+        client, buttons = self.login("Enter Weixin")
+        buttons[0].shown = False
+        self.assertEqual(self.refused(client), "not-found")
+
+    def test_the_target_lies_inside_the_login_window(self):
+        client, buttons = self.login("Log In")
+        for box in ((100, 100, 160, 36), (560, 500, 0, 0)):
+            buttons[0].box = box
+            self.assertEqual(self.refused(client), "not-ready", box)
+
+    def test_there_is_no_target_without_one_login_window(self):
+        client, _ = self.login("Enter Weixin")
+        self.assertEqual(self.refused(client, window=None), "not-found")
+
+    def test_the_login_window_is_found_by_its_size(self):
+        tree = ('     0x1a "Weixin": ("wechat" "wechat")  1280x800+0+0  +0+0\n'
+                '        0x2b "{}": ("wechat" "wechat")  280x380+0+0  +500+210\n')
+        desk = d.Desktop()
+        for title in ("Weixin", "微信"):
+            desk._run = lambda *a, t=title: subprocess.CompletedProcess(a, 0, tree.format(t), "")
+            self.assertEqual(desk.login_window(), (500, 210), title)
+        desk._run = lambda *a: subprocess.CompletedProcess(a, 0, tree.splitlines()[0], "")
+        self.assertIsNone(desk.login_window())
+
+    def test_main_answers_the_target_as_json(self):
+        client, _ = self.login("Enter Weixin")
+        for app, answer in ((client.app, {"ok": True, "x": 640, "y": 518}),
+                            (LookupError("gone"), {"ok": False, "code": "not-ready", "typed": False,
+                                                   "reason": "LookupError: gone"})):
+            out = io.StringIO()
+            source = {"side_effect": app} if isinstance(app, Exception) else {"return_value": app}
+            with patch.object(d, "wechat_app", **source), patch.object(d, "Desktop", FakeLoginDesktop), \
+                    patch.object(sys, "argv", ["driver", "sign-in-target"]), redirect_stdout(out):
+                d.main()
+            self.assertEqual(json.loads(out.getvalue()), answer)
 
 
 class ReadinessTests(unittest.TestCase):

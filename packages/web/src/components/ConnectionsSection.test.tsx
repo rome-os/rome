@@ -35,11 +35,11 @@ function grantDisplay(overrides: Partial<GrantDisplay> = {}): GrantDisplay {
 }
 
 function connection(
-  overrides: Partial<ApiConnection> & Pick<ApiConnection, "service">,
+  overrides: Partial<ApiConnection> & Pick<ApiConnection, "connectionKind">,
 ): ApiConnection {
   return {
-    id: `conn-${overrides.service}`,
-    label: overrides.service,
+    id: `conn-${overrides.connectionKind}`,
+    label: overrides.connectionKind,
     grants: {},
     display: {},
     capabilities: {
@@ -58,7 +58,7 @@ function connection(
 
 function telegramBot(state: GrantState, handle: string | null = null): ApiConnection {
   return connection({
-    service: "telegram",
+    connectionKind: "telegram",
     grants: { bot: state },
     display: { bot: handle ? grantDisplay({ handle }) : null },
   });
@@ -66,7 +66,7 @@ function telegramBot(state: GrantState, handle: string | null = null): ApiConnec
 
 function telegramUser(state: GrantState): ApiConnection {
   return connection({
-    service: "telegram_user",
+    connectionKind: "telegram_user",
     grants: { session: state },
     display: { session: null },
   });
@@ -79,7 +79,7 @@ function oauth(
 ): ApiConnection {
   const grant = service === "slack" ? "workspace" : "user";
   return connection({
-    service,
+    connectionKind: service,
     grants: { [grant]: state },
     display: { [grant]: display },
     connect: { url: `https://oauth/${service}`, available: true, unavailableReason: null },
@@ -91,8 +91,8 @@ function oauth(
 function minimalConnections(): ApiConnection[] {
   return [
     telegramBot("unauthorized"),
-    connection({ service: "whatsapp", grants: { session: "unauthorized" }, display: {} }),
-    connection({ service: "webchat" }),
+    connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" }, display: {} }),
+    connection({ connectionKind: "webchat" }),
   ];
 }
 
@@ -167,7 +167,7 @@ describe("ConnectionsSection — list of rows", () => {
   it("shows the Rome mark for webchat and a mail glyph for email", () => {
     renderSection([
       ...minimalConnections(),
-      connection({ service: "email", grants: { inbox: "unauthorized" } }),
+      connection({ connectionKind: "email", grants: { inbox: "unauthorized" } }),
     ]);
 
     const webchatRow = screen.getByRole("button", { name: "Open Webchat" });
@@ -180,12 +180,11 @@ describe("ConnectionsSection — list of rows", () => {
     expect(emailRow.querySelector("svg.lucide-mail")).toBeTruthy();
   });
 
-  it("opens services in dialogs and links to pairing history and app keys", () => {
+  it("opens services in dialogs and links to app keys", () => {
     renderSection([...minimalConnections(), oauth("github")]);
 
     const links = screen.queryAllByRole("link");
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "/activity",
       "/settings/connections/app-keys",
     ]);
     expect(screen.getByRole("button", { name: "Open GitHub" })).toBeTruthy();
@@ -221,7 +220,7 @@ describe("ConnectionsSection — list of rows", () => {
     renderSection([
       ...minimalConnections(),
       connection({
-        service: "wechat",
+        connectionKind: "wechat",
         grants: { account: "authorized" },
         capabilities: {
           talk: {
@@ -320,7 +319,7 @@ describe("ConnectionsSection — several accounts", () => {
 
   function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
     return connection({
-      service: "feishu",
+      connectionKind: "feishu",
       channel: "feishu",
       grants: { app: "authorized" },
       severalAccounts: true,

@@ -7,6 +7,7 @@ Apps are the extension system. An app bundles related [agents](agents.md), [acti
 - Only manifest-declared artifacts are loaded. An artifact not listed in the manifest does not exist as far as the runtime is concerned.
 - Disabling an app removes its artifacts (agents, actions, skills, hooks) from the running registries. Enabling it puts them back.
 - First-party apps (shipped with Rome) are required and immutable to users: they cannot be uninstalled or replaced, and enable/disable is the only user control — except the system app, which cannot be disabled either ([boot convergence](../architecture/app-lifecycle.md#boot-convergence)).
+- `app.yaml#hideInLauncher: true` keeps an app off the dashboard's launcher surfaces: the Apps page, the sidebar, search, and the app picker. The app still loads, and its pages still open by URL or from a chat link.
 
 **Not to be confused with:**
 
@@ -139,8 +140,9 @@ The lifecycle operations apply apps to a profile: install, uninstall, and enable
 **Contracts:**
 
 - Install is a completion barrier: when the call returns success, the new bundle is live and the runtime has finished reloading it. The caller never polls.
+- A reinstall keeps the previous bundle live until the install ends. The app's agents, actions, skills, hooks, web pages and API answer while the new bundle materializes. A failed reinstall unloads the app until a later install succeeds, because only installed entries load.
 - An invalid local source is rejected before any state is written. The declared install mode must agree with the observed directory shape, and a bundle missing a manifest-declared output is rejected up front. A healthy installed app cannot be flipped to failed by a bad install attempt.
-- A failed install preserves the previous state: the live bundle and the recorded hash and version stay unchanged. Only the failure fields move.
+- A failed install keeps the recorded hash and version, and the previous bundle stays on disk. Only the state and the failure fields move.
 - Uninstall always drops the lockfile entry, even when disk cleanup fails part-way. A later install of the same id recovers the disk state.
 - Dependency installation applies no minimum release age, so a bundle can consume an SDK published in the same release window.
 
@@ -215,7 +217,7 @@ Each app gets a persistent data directory for files outside the database, plus d
 
 Hooks are event handlers that trigger behavior in response to system events. An app declares its hooks in its manifest.
 
-The primary hook type is **channel-message**, the entry point for all incoming messages. It fires when a message arrives through any of [Rome's accounts](messaging.md#romes-accounts) and triggers the message-handling [action](actions.md), which runs the [policy engine](messaging.md#policies) to decide routing. Its `createHook(deps)` receives `ChannelMessageHookDeps` from `@rome-os/app-runtime`, and the hook hears messages through `deps.channels`, one subscription per channel that can receive.
+The primary hook type is **channel-message**, the entry point for all incoming messages. It fires when a message arrives through any of Rome's [accounts](../domains/chats.md#account) and triggers the message-handling [action](actions.md), which runs the [policy engine](messaging.md#policies) to decide routing. Its `createHook(deps)` receives `ChannelMessageHookDeps` from `@rome-os/app-runtime`, and the hook hears messages through `deps.channels`, one subscription per channel that can receive.
 
 Apps can also observe the agent turn lifecycle with the **agent-turn-started** and **agent-turn-finished** hooks. Lifecycle payloads carry stable session and turn ids, agent name, channel thread context, timing, metrics, status, and final output text where available.
 
@@ -236,3 +238,20 @@ An app sets up the state it depends on, such as a routine it must always have, w
 
 - **[Action](actions.md)** — a hook reacts to a system event and routes into an action. The action is what runs.
 - **[Routine](data.md#routines)** — a routine is a guardian- or agent-authored trigger→action binding managed as data. A hook is app-owned code declared in the app's manifest.
+
+## Event sources
+
+An event source is an app's declaration, under `eventSources` in its manifest, that it delivers a family of event-bus events and can subscribe to them at the provider. Each entry names the event-name glob (`events`, one `*`), the event `types` that fill the `*`, the filter fields that pick the subscription target (`keys`), and the action that checks or creates the subscription (`ensureAction`). The connector app declares `provider:event:github.*`, keyed by `repository.full_name` or `organization.login`.
+
+**Contracts:**
+
+- A `defer` on a declared event calls the `ensureAction` before it creates the wait, and fails with the action's reason when the subscription cannot be made. The filter must cover every field of one `keys` entry.
+- A `defer` on an event no app declares always creates the wait. When nothing has emitted the event since Rome started, the result carries a warning, because the event catalog starts empty on every start and cannot tell a misspelled name from an event that has not happened yet.
+- Rome runs one subscribing call per event source at a time, because a provider subscription can be shared state that two concurrent calls would overwrite.
+- Rome never removes a subscription that a wait created, because other routines may depend on it.
+- `search_event_catalog` lists every declared type, even one not yet emitted, with `subscribable` and `keys`. Its `match` input calls the `ensureAction` in check-only mode (`dryRun`) and reports `active` per type. Without `match` it makes no provider calls.
+- The `ensureAction` takes `{ eventName, filter, dryRun }` and returns `subscription`: `existing` or `created`, or with `dryRun`, `active` or `inactive`.
+
+**Not to be confused with:**
+
+- **[Hook](#hooks)** — a hook is app code that reacts to a Rome event. An event source tells Rome which provider events an app can deliver onto the bus.

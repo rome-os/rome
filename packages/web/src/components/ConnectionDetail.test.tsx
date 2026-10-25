@@ -57,11 +57,11 @@ function grantDisplay(overrides: Partial<GrantDisplay> = {}): GrantDisplay {
 }
 
 function connection(
-  overrides: Partial<ApiConnection> & Pick<ApiConnection, "service">,
+  overrides: Partial<ApiConnection> & Pick<ApiConnection, "connectionKind">,
 ): ApiConnection {
   return {
-    id: `conn-${overrides.service}`,
-    label: overrides.service,
+    id: `conn-${overrides.connectionKind}`,
+    label: overrides.connectionKind,
     grants: {},
     display: {},
     capabilities: {
@@ -107,7 +107,7 @@ function renderBody(card: ConnectionCard, composio: ComposioCliStatus | null = n
 describe("ConnectionDetailBody — Telegram reference (bot slot)", () => {
   it("unconnected bot: bare sole slot with subtitle lead, + bullets under the primary heading, and the token ceremony", () => {
     const telegram = cardFor(
-      [connection({ service: "telegram", grants: { bot: "unauthorized" } })],
+      [connection({ connectionKind: "telegram", grants: { bot: "unauthorized" } })],
       "telegram",
     );
     const { container } = renderBody(telegram);
@@ -137,7 +137,7 @@ describe("ConnectionDetailBody — Telegram reference (bot slot)", () => {
     const telegram = cardFor(
       [
         connection({
-          service: "telegram",
+          connectionKind: "telegram",
           grants: { bot: "authorized" },
           display: { bot: grantDisplay({ handle: "@fujian_helper_bot" }) },
         }),
@@ -167,12 +167,12 @@ describe("ConnectionDetailBody — Telegram reference (personal-account slot)", 
     return cardFor(
       [
         connection({
-          service: "telegram",
+          connectionKind: "telegram",
           grants: { bot: "authorized" },
           display: { bot: grantDisplay({ handle: "@mybot" }) },
         }),
         connection({
-          service: "telegram_user",
+          connectionKind: "telegram_user",
           grants: { session: sessionState },
           ...(sessionDisplay ? { display: { session: grantDisplay(sessionDisplay) } } : {}),
         }),
@@ -184,8 +184,8 @@ describe("ConnectionDetailBody — Telegram reference (personal-account slot)", 
   it("keeps the personal-account slot secondary when neither Telegram slot is connected", () => {
     const telegram = cardFor(
       [
-        connection({ service: "telegram", grants: { bot: "unauthorized" } }),
-        connection({ service: "telegram_user", grants: { session: "unauthorized" } }),
+        connection({ connectionKind: "telegram", grants: { bot: "unauthorized" } }),
+        connection({ connectionKind: "telegram_user", grants: { session: "unauthorized" } }),
       ],
       "telegram",
     );
@@ -244,7 +244,7 @@ describe("ConnectionDetailBody — OAuth single-slot cards", () => {
     const github = cardFor(
       [
         connection({
-          service: "github",
+          connectionKind: "github",
           grants: { user: "unauthorized" },
           connect: oauthConnect("github"),
         }),
@@ -274,7 +274,7 @@ describe("ConnectionDetailBody — OAuth single-slot cards", () => {
     const google = cardFor(
       [
         connection({
-          service: "google",
+          connectionKind: "google",
           grants: { user: "unauthorized" },
           connect: oauthConnect("google"),
         }),
@@ -291,7 +291,7 @@ describe("ConnectionDetailBody — OAuth single-slot cards", () => {
     const github = cardFor(
       [
         connection({
-          service: "github",
+          connectionKind: "github",
           grants: { user: "authorized" },
           display: {
             user: grantDisplay({ displayName: "Ada Lovelace", email: "ada@example.com" }),
@@ -315,7 +315,7 @@ describe("ConnectionDetailBody — OAuth single-slot cards", () => {
 
 describe("ConnectionDetailBody — webchat and remaining channels", () => {
   it("always-on webchat: connected card with its chat bullet and the nothing-to-configure note", () => {
-    const webchat = cardFor([connection({ service: "webchat" })], "webchat");
+    const webchat = cardFor([connection({ connectionKind: "webchat" })], "webchat");
     renderBody(webchat);
 
     expect(screen.getByText("Chat with your agent right here in the dashboard")).toBeTruthy();
@@ -327,7 +327,7 @@ describe("ConnectionDetailBody — webchat and remaining channels", () => {
 
   it("whatsapp: bot-slot card with its bullets and the generic setup entry point", () => {
     const whatsapp = cardFor(
-      [connection({ service: "whatsapp", grants: { session: "unauthorized" } })],
+      [connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" } })],
       "whatsapp",
     );
     renderBody(whatsapp);
@@ -342,7 +342,7 @@ describe("ConnectionDetailBody — webchat and remaining channels", () => {
 
   it("discord: single bot-slot card, bullets, and the setup connect action", () => {
     const discord = cardFor(
-      [connection({ service: "discord", grants: { bot: "unauthorized" } })],
+      [connection({ connectionKind: "discord", grants: { bot: "unauthorized" } })],
       "discord",
     );
     renderBody(discord);
@@ -358,7 +358,7 @@ describe("ConnectionDetailBody — webchat and remaining channels", () => {
 
   it("email: bot-slot card with its bullets and the Connect setup", () => {
     const email = cardFor(
-      [connection({ service: "email", grants: { inbox: "unauthorized" } })],
+      [connection({ connectionKind: "email", grants: { inbox: "unauthorized" } })],
       "email",
     );
     renderBody(email);
@@ -371,7 +371,7 @@ describe("ConnectionDetailBody — webchat and remaining channels", () => {
     const telegram = cardFor(
       [
         connection({
-          service: "telegram",
+          connectionKind: "telegram",
           grants: { bot: "authorized" },
           display: { bot: grantDisplay({ handle: "@mybot" }) },
         }),
@@ -388,7 +388,7 @@ describe("ConnectionDetailBody — webchat and remaining channels", () => {
 describe("ConnectionDetailBody — accounts", () => {
   function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
     return connection({
-      service: "feishu",
+      connectionKind: "feishu",
       channel: "feishu",
       grants: { app: "authorized" },
       display: { app: grantDisplay({ displayName: "Support Bot" }) },

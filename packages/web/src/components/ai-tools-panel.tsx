@@ -884,97 +884,99 @@ export function AiToolsPanel({
               !usesApiKey && shouldShowAiToolUsage(showUsage, status, provider.available);
             return (
               <div key={provider.id} className="px-4 py-2">
-                <div className="flex items-center gap-2">
-                  <AiToolIcon icon={provider.icon} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <p className="text-ui text-foreground">{providerName}</p>
-                      {provider.available && !loadingStatus && (
-                        <span
-                          className={`inline-flex items-center gap-1 text-aux ${
-                            isLoggedIn
-                              ? "text-success-fg"
-                              : needsReauth
-                                ? "text-warning-fg"
-                                : "text-muted-foreground"
-                          }`}
-                        >
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+                  <div className="flex min-w-0 grow items-center gap-2">
+                    <AiToolIcon icon={provider.icon} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <p className="text-ui text-foreground">{providerName}</p>
+                        {provider.available && !loadingStatus && (
                           <span
-                            className={`size-1.5 rounded-full ${
+                            className={`inline-flex items-center gap-1 whitespace-nowrap text-aux ${
                               isLoggedIn
-                                ? "bg-success"
+                                ? "text-success-fg"
                                 : needsReauth
-                                  ? "bg-warning"
-                                  : "bg-muted-foreground/50"
+                                  ? "text-warning-fg"
+                                  : "text-muted-foreground"
                             }`}
-                          />
-                          {isLoggedIn
-                            ? usesApiKey
-                              ? t("aiTools.status.apiKeyActive")
-                              : t("aiTools.status.connected")
-                            : needsReauth
+                          >
+                            <span
+                              className={`size-1.5 rounded-full ${
+                                isLoggedIn
+                                  ? "bg-success"
+                                  : needsReauth
+                                    ? "bg-warning"
+                                    : "bg-muted-foreground/50"
+                              }`}
+                            />
+                            {isLoggedIn
                               ? usesApiKey
-                                ? t("aiTools.status.apiKeyNeedsUpdate")
-                                : t("aiTools.status.needsReauth")
-                              : t("aiTools.status.notConnected")}
-                        </span>
-                      )}
-                      {!provider.available && (
-                        <span className="text-aux text-muted-foreground">
-                          {t("aiTools.status.comingSoon")}
-                        </span>
-                      )}
-                    </div>
-                    {usesApiKey ? (
-                      usesManagedApiKey && configuredAnthropicProvider ? (
-                        <p className="flex items-center gap-2 text-aux text-muted-foreground">
-                          <AnthropicCompatibleProviderLogo
-                            providerId={configuredAnthropicProvider.provider}
-                          />
-                          <span className="text-foreground">{apiKeyProviderName}</span>
-                        </p>
-                      ) : (
-                        <p className="text-aux text-muted-foreground">
-                          {t("aiTools.authSource.environmentApiKey")}
-                        </p>
-                      )
-                    ) : isLoggedIn ? (
-                      <p className="truncate text-aux text-muted-foreground">
-                        {status.authMethod ? (
-                          <>
-                            <span className="hidden sm:inline">
-                              <Trans
-                                i18nKey="aiTools.status.signedInWith"
-                                t={t}
-                                values={{ method: status.authMethod }}
-                                components={{
-                                  1: <span className="text-foreground" />,
-                                }}
-                              />
-                            </span>
-                            <span className="sm:hidden">{status.authMethod}</span>
-                            {accountType && (
-                              <>
-                                <span className="mx-2">·</span>
-                                <span className="hidden sm:inline">
-                                  <Trans
-                                    i18nKey="aiTools.status.accountType"
-                                    t={t}
-                                    values={{ type: accountType }}
-                                    components={{
-                                      1: <span className="text-foreground" />,
-                                    }}
-                                  />
-                                </span>
-                                <span className="sm:hidden">{accountType}</span>
-                              </>
-                            )}
-                          </>
-                        ) : (
-                          t("aiTools.status.signedIn")
+                                ? t("aiTools.status.apiKeyActive")
+                                : t("aiTools.status.connected")
+                              : needsReauth
+                                ? usesApiKey
+                                  ? t("aiTools.status.apiKeyNeedsUpdate")
+                                  : t("aiTools.status.needsReauth")
+                                : t("aiTools.status.notConnected")}
+                          </span>
                         )}
-                      </p>
-                    ) : null}
+                        {!provider.available && (
+                          <span className="text-aux text-muted-foreground">
+                            {t("aiTools.status.comingSoon")}
+                          </span>
+                        )}
+                      </div>
+                      {usesApiKey ? (
+                        usesManagedApiKey && configuredAnthropicProvider ? (
+                          <p className="flex items-center gap-2 text-aux text-muted-foreground">
+                            <AnthropicCompatibleProviderLogo
+                              providerId={configuredAnthropicProvider.provider}
+                            />
+                            <span className="text-foreground">{apiKeyProviderName}</span>
+                          </p>
+                        ) : (
+                          <p className="text-aux text-muted-foreground">
+                            {t("aiTools.authSource.environmentApiKey")}
+                          </p>
+                        )
+                      ) : isLoggedIn ? (
+                        <p className="truncate text-aux text-muted-foreground">
+                          {status.authMethod ? (
+                            <>
+                              <span className="hidden sm:inline">
+                                <Trans
+                                  i18nKey="aiTools.status.signedInWith"
+                                  t={t}
+                                  values={{ method: status.authMethod }}
+                                  components={{
+                                    1: <span className="text-foreground" />,
+                                  }}
+                                />
+                              </span>
+                              <span className="sm:hidden">{status.authMethod}</span>
+                              {accountType && (
+                                <>
+                                  <span className="mx-2">·</span>
+                                  <span className="hidden sm:inline">
+                                    <Trans
+                                      i18nKey="aiTools.status.accountType"
+                                      t={t}
+                                      values={{ type: accountType }}
+                                      components={{
+                                        1: <span className="text-foreground" />,
+                                      }}
+                                    />
+                                  </span>
+                                  <span className="sm:hidden">{accountType}</span>
+                                </>
+                              )}
+                            </>
+                          ) : (
+                            t("aiTools.status.signedIn")
+                          )}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                   {provider.available && (
                     <div className="ml-auto flex shrink-0 items-center gap-2">

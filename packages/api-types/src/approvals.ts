@@ -31,10 +31,12 @@ export const APPROVAL_EXECUTION_STATES = [
   "failed",
 ] as const;
 
-export const PAIRING_CHANNELS = ["telegram", "discord", "feishu"] as const;
+const PAIRING_CHANNELS = ["telegram", "discord", "feishu", "slack_bot"] as const;
 export const PAIRING_HISTORY_PAGE_SIZE = 100;
 
-export const pairingPayloadSchema = z.object({
+/** A pairing request Rome stored before it stopped asking senders to pair
+ *  (docs/domains/people.md#stranger). Read only to show them as history. */
+const pairingPayloadSchema = z.object({
   action: z.literal("channel_pairing"),
   channel: z.enum(PAIRING_CHANNELS),
   connectionId: z.string().min(1),
@@ -44,6 +46,10 @@ export const pairingPayloadSchema = z.object({
   expiresAt: z.number().int(),
   failedAttempts: z.number().int().nonnegative(),
   lastGuidanceAt: z.number().int(),
+  /** The direct chat the request came from, where the outcome is sent. */
+  chatId: z.string().optional(),
+  /** The same chat, as requests stored before the chat rename name it.
+   *  `pairingPayload` reads it into `chatId`. */
   conversationId: z.string().optional(),
   resolution: z
     .enum(["web", "verification_code", "rejected", "expired", "account_linked", "superseded"])
@@ -57,5 +63,8 @@ export function pairingPayload(approval: {
 }): PairingPayload | null {
   if (approval.type !== "person_mapping") return null;
   const parsed = pairingPayloadSchema.safeParse(approval.payload);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) return null;
+  const { conversationId, ...payload } = parsed.data;
+  const chatId = payload.chatId ?? conversationId;
+  return chatId === undefined ? payload : { ...payload, chatId };
 }

@@ -1,0 +1,5 @@
+@import "@rome-os/app-web-sdk/styles";
+
+:host {
+  color-scheme: light dark;
+}

@@ -9,7 +9,7 @@
 
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { sendThrough } from "../../channels/connection-ports.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import {
   type CardActionEvent,
   LarkChannelError,
@@ -49,6 +49,23 @@ class FakeLarkChannel {
   addedReactions: Array<{ messageId: string; emojiType: string; reactionId: string }> = [];
   removedReactions: Array<{ messageId: string; reactionId: string }> = [];
   connected = false;
+  replies: unknown[] = [];
+  /** The SDK client a streamed reply writes through. */
+  rawClient = {
+    im: {
+      v1: {
+        message: {
+          reply: async (payload: unknown) => {
+            this.replies.push(payload);
+            return {
+              code: 0,
+              data: { message_id: "om_8", chat_id: "oc_chat", root_id: "om_7", thread_id: "omt_1" },
+            };
+          },
+        },
+      },
+    },
+  };
   botIdentity = { openId: "ou_bot", name: "Rome" };
   connectError: Error | null = null;
 
@@ -115,7 +132,7 @@ function fakePersonRepo(): PersonMappingRepository {
 
 function makeDescriptor(channel: FakeLarkChannel) {
   return createFeishuDescriptor({
-    conversationSettings: {
+    chatSettings: {
       observe: () => {},
       get: async () => ({
         effective: {
@@ -164,7 +181,7 @@ describe("isFeishuAuthError", () => {
 describe("feishu descriptor shape", () => {
   it("declares one `app` grant and a talker needing it", () => {
     const desc = makeDescriptor(new FakeLarkChannel());
-    expect(desc.service).toBe("feishu");
+    expect(desc.connectionKind).toBe("feishu");
     expect(Object.keys(desc.auth)).toEqual(["app"]);
     expect(desc.capabilities.talker?.needs).toEqual(["app"]);
     expect(desc.capabilities.actor).toBeUndefined();
@@ -216,28 +233,24 @@ describe("feishu talk lifecycle", () => {
 
     const received: string[] = [];
     conn.hearTalker(async (msg) => {
-      received.push(`${msg.senderId}/${msg.conversationId}:${msg.text}`);
+      received.push(`${msg.senderId}/${msg.chatId}:${msg.text}`);
       return;
     });
     await channel.emitMessage({ content: "hello there" });
     expect(received).toEqual(["ou_alice/oc_chat:hello there"]);
 
-    await expect(
-      sendThrough(conn, "oc_chat" as ConversationId, { text: "reply" }),
-    ).resolves.toEqual({
+    await expect(sendThrough(conn, "oc_chat" as ChatId, { text: "reply" })).resolves.toEqual({
       messageId: "om_sent",
-      conversationId: "oc_chat",
+      chatId: "oc_chat",
     });
 
-    const direct = await conn.withTalker((talker) =>
-      talker.directMessaging?.conversationFor("ou_alice"),
-    );
+    const direct = await conn.withTalker((talker) => talker.directMessaging?.chatFor("ou_alice"));
     expect(direct).toBe("ou_alice");
     await sendThrough(conn, direct!, { text: "paired" });
     expect(channel.sent.at(-1)).toMatchObject({ to: "ou_alice", input: { markdown: "paired" } });
     const session = await conn.withTalker((talker) =>
       talker.activity?.begin({
-        conversationId: "oc_chat" as ConversationId,
+        chatId: "oc_chat" as ChatId,
         messageId: "om_1",
       }),
     );
@@ -287,7 +300,7 @@ describe("feishu inbound delivery", () => {
         channel: "feishu",
         direction: "inbound",
         messageId: "om_7",
-        conversationId: "oc_chat",
+        chatId: "oc_chat",
         senderId: "ou_alice",
         senderDisplayName: "Alice",
         text: "Rome see this",
@@ -300,6 +313,39 @@ describe("feishu inbound delivery", () => {
       },
     ]);
     await talker.stop();
+  });
+});
+
+describe("feishu reply delivery", () => {
+  it("offers reply delivery over the channel's client, placing replies as the chat says", async () => {
+    const channel = new FakeLarkChannel();
+    const talker = makeDescriptor(channel).capabilities.talker!.build(
+      { app: validCred() },
+      {
+        connectionId: "feishu-test",
+        persist: async () => {},
+        registerIngress: () => () => {},
+      },
+    );
+
+    expect(talker.replyDelivery?.capabilities).toMatchObject({ maxPartLength: 3500, edit: true });
+    // The chat's settings put replies in a thread, so later messages join it.
+    await expect(talker.replyDelivery?.create("oc_chat", "hello", "om_7")).resolves.toEqual({
+      messageId: "om_8",
+      chatId: "oc_chat#thread:om_7",
+    });
+    expect(channel.replies).toEqual([
+      {
+        path: { message_id: "om_7" },
+        data: {
+          msg_type: "post",
+          content: JSON.stringify({
+            zh_cn: { title: "", content: [[{ tag: "md", text: "hello" }]] },
+          }),
+          reply_in_thread: true,
+        },
+      },
+    ]);
   });
 });
 

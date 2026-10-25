@@ -362,7 +362,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
   // is the single ledger write (credential material + identity profile).
   session.setup = makeTelegramUserSetup({ openLogin: deps.openLogin ?? openTelegramUserLogin });
   return {
-    service: "telegram_user",
+    connectionKind: "telegram_user",
     reviveProfile: (_grant, record) => reviveTelegramUserProfile(record),
     accountIdOf: (_grant, record) => (typeof record.userId === "string" && record.userId) || null,
     auth: {
@@ -429,8 +429,9 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
                 conversations: page.items.map((dialog) => ({
                   ref: {
                     connectionId: kit.connectionId,
-                    conversationId: dialog.id as import("@rome-os/app-runtime").ConversationId,
+                    chatId: dialog.id as import("@rome-os/app-runtime").ChatId,
                   },
+                  connectionKind: "telegram_user",
                   service: "telegram_user",
                   kind:
                     dialog.type === "private"
@@ -451,7 +452,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
             history: {
               async query(input) {
                 const lines = await adapter.fetchHistory(
-                  input.conversationId ?? null,
+                  input.chatId ?? null,
                   historyWindowHours(input.since),
                 );
                 return lines.slice(0, historyQueryLimit(input.limit)).map(
@@ -489,9 +490,9 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
               }
               return adapter.stop();
             },
-            async send(conversationId, msg) {
+            async send(chatId, msg) {
               try {
-                return await adapter.send(conversationId, msg);
+                return await adapter.send(chatId, msg);
               } catch (err) {
                 // A 401 / session-revoked from send() is a refused credential.
                 if (isTelegramUserSessionRejected(err)) {

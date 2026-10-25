@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ChannelType, MessageReferenceType, MessageType, type Message } from "discord.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId, MessageAddressing } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageAddressing } from "@rome-os/app-runtime";
 import { DiscordAdapter } from "./discord.js";
 
 // The gateway filters run before dispatchMessage. These tests call it directly
@@ -84,8 +84,8 @@ describe("DiscordAdapter inbound messages", () => {
         channel: "discord",
         direction: "inbound",
         messageId: "msg-7",
-        conversationId: "thread-1",
-        parentConversationId: "channel-1",
+        chatId: "thread-1",
+        parentChatId: "channel-1",
         senderId: "user-1",
         senderDisplayName: "Alice Smith",
         senderUsername: "alice",
@@ -126,13 +126,13 @@ describe("DiscordAdapter inbound messages", () => {
 
     expect(captured).toHaveLength(1);
     expect(captured[0]).toMatchObject({
-      conversationId: "dm-1",
+      chatId: "dm-1",
       senderDisplayName: "Alice",
       thread: { kind: "dm" },
       addressing: "direct",
     });
     expect(captured[0].thread).toStrictEqual({ kind: "dm" });
-    expect(captured[0]).not.toHaveProperty("parentConversationId");
+    expect(captured[0]).not.toHaveProperty("parentChatId");
     expect(captured[0]).not.toHaveProperty("replyTo");
   });
 
@@ -155,7 +155,7 @@ describe("DiscordAdapter inbound messages", () => {
     await dispatch(adapter, message, { isDm: false, isThread: false, addressing: "ambient" });
 
     expect(captured[0].thread).toStrictEqual({ kind: "group", name: "general" });
-    expect(captured[0]).not.toHaveProperty("parentConversationId");
+    expect(captured[0]).not.toHaveProperty("parentChatId");
   });
 });
 
@@ -186,7 +186,7 @@ describe("DiscordAdapter.saveIncomingAttachments", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "msg-7",
-      conversationId: "thread-1" as ConversationId,
+      chatId: "thread-1" as ChatId,
       senderId: "user-1",
       text: "",
       attachments: [{ type: "image", url: "https://cdn.discordapp.com/attachments/1/2/photo.png" }],
@@ -211,12 +211,53 @@ describe("DiscordAdapter.saveIncomingAttachments", () => {
         channel: "discord",
         direction: "inbound",
         messageId: "msg-8",
-        conversationId: "channel-1" as ConversationId,
+        chatId: "channel-1" as ChatId,
         senderId: "user-1",
         text: "",
         attachments,
         timestamp: new Date("2026-05-10T00:00:00Z"),
       }),
     ).resolves.toBe(attachments);
+  });
+});
+
+describe("DiscordAdapter gateway filters", () => {
+  it("passes a link code said in a guild channel to admission without a mention, so it is voided", async () => {
+    const handlers = new Map<string, (message: Message) => Promise<void>>();
+    const adapter = new DiscordAdapter({ botToken: "test-token" });
+    Object.assign(adapter, {
+      client: {
+        user: BOT,
+        on: (event: string, handler: (message: Message) => Promise<void>) =>
+          handlers.set(event, handler),
+        login: async () => "test-token",
+      },
+    });
+    const captured: ChannelMessage[] = [];
+    adapter.onInbound(async (msg) => {
+      captured.push(msg);
+    });
+    await adapter.start();
+    const guildMessage = (id: string, content: string) =>
+      ({
+        id,
+        channelId: "channel-1",
+        content,
+        createdAt: new Date("2026-05-10T00:00:00Z"),
+        type: MessageType.Default,
+        reference: null,
+        author: { id: "user-1", username: "alice", displayName: "Alice" },
+        member: { displayName: "Alice Smith" },
+        guild: { members: { me: { displayName: "Rome" } } },
+        channel: { type: ChannelType.GuildText, name: "general", isThread: () => false },
+        mentions: { users: new Map() },
+        attachments: new Map(),
+      }) as unknown as Message;
+
+    await handlers.get("messageCreate")!(guildMessage("msg-1", "ROME-7KQ2M9XA"));
+    await handlers.get("messageCreate")!(guildMessage("msg-2", "hi"));
+
+    expect(captured.map((m) => m.text)).toStrictEqual(["ROME-7KQ2M9XA"]);
+    expect(captured[0].thread?.kind).toBe("group");
   });
 });

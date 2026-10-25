@@ -39,8 +39,8 @@ import { whatsAppHistoryMessage } from "./whatsapp-history.js";
 export function whatsAppMessages(db: DrizzleDb): Messages {
   const mirror = new WhatsAppStoreRepository(db);
   return {
-    async query({ conversationId, since, limit }) {
-      const chat = conversationId ? canonicalChat(conversationId) : null;
+    async query({ chatId, since, limit }) {
+      const chat = chatId ? canonicalChat(chatId) : null;
       const rows = await mirror.fetchHistory(chat, querySince(since), queryLimit(limit));
       // The mirror answers oldest first; the port answers newest first.
       return rows.reverse().slice(0, queryLimit(limit)).map(whatsAppHistoryMessage);

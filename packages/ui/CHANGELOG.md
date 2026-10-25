@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/rome-os/rome/compare/ui-v0.3.5...ui-v0.3.6) (2026-10-21)
+
+
+### Features
+
+* **ui:** render Mermaid diagrams with Pele ([#1201](https://github.com/rome-os/rome/issues/1201)) ([ef4f645](https://github.com/rome-os/rome/commit/ef4f6458016f0e0aaf84010b7233d88aecad2316))
+
 ## [0.3.5](https://github.com/rome-os/rome/compare/ui-v0.3.4...ui-v0.3.5) (2026-10-12)
 
 

@@ -1,3 +1,4 @@
+import type { DeviceFilesResponse } from "@rome/api-types/devices";
 import type {
   AgentCatalogGroup,
   ApprovalRecord,
@@ -8,7 +9,7 @@ import type {
   ChatSearchMessageMatch,
   ChatSession,
   CreateTurnResponse,
-  ProjectCatalog,
+  ChatLocations,
   ProjectOption,
   ReasoningEffort,
   RomeSessionsPageResult,
@@ -288,6 +289,8 @@ export interface CreateSessionInput {
   // gets the guardian's stored preference.
   reasoningEffort?: ReasoningEffort;
   agentName?: string;
+  /** Folder on a rome-node device the chat works in. Core checks it before saving. */
+  deviceFolder?: { deviceId: string; path: string };
 }
 
 export async function listChatAgents(): Promise<AgentCatalogGroup[]> {
@@ -309,6 +312,29 @@ export async function createSession(input: CreateSessionInput): Promise<ChatSess
     body: JSON.stringify(input),
   });
   return jsonOrThrow<ChatSession>(res);
+}
+
+/** Projects and Cloud's devices for the new-chat location menu. Probes no device. */
+export async function listChatLocations(): Promise<ChatLocations> {
+  const res = await fetch("/api/chat/locations", { credentials: "include" });
+  return jsonOrThrow<ChatLocations>(res);
+}
+
+/**
+ * Lists one folder on a device; no path means the device user's home. A
+ * failure throws `ChatApiError` whose message is a `DeviceFilesErrorCode`.
+ */
+export async function listDeviceFiles(
+  deviceId: string,
+  path?: string,
+  signal?: AbortSignal,
+): Promise<DeviceFilesResponse> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/files${query}`, {
+    credentials: "include",
+    signal,
+  });
+  return jsonOrThrow<DeviceFilesResponse>(res);
 }
 
 export async function updateSessionProject(
@@ -341,11 +367,6 @@ export async function markSessionRead(
   return jsonOrThrow<{ sessionId: string; lastSeenActivityAt: string | null; unread: boolean }>(
     res,
   );
-}
-
-export async function listProjects(): Promise<ProjectCatalog> {
-  const res = await fetch("/api/chat/projects", { credentials: "include" });
-  return jsonOrThrow<ProjectCatalog>(res);
 }
 
 export async function createProject(name: string): Promise<ProjectOption> {

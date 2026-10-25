@@ -80,6 +80,7 @@ function makeServer(
     routinesRepo?: unknown;
     eventBus?: EventBus;
     eventCatalog?: EventCatalog;
+    eventService?: EventService;
     appManager?: { setEnabled: ReturnType<typeof rs.fn>; install?: ReturnType<typeof rs.fn> };
     appStore?: {
       listListings: ReturnType<typeof rs.fn>;
@@ -87,6 +88,7 @@ function makeServer(
     };
     hasRegisteredAction?: ReturnType<typeof rs.fn>;
     isExplicitAction?: ReturnType<typeof rs.fn>;
+    validateActionArgs?: ReturnType<typeof rs.fn>;
     notify?: { send: ReturnType<typeof rs.fn> };
     feedback?: { send: ReturnType<typeof rs.fn> };
     channelsService?: unknown;
@@ -111,7 +113,7 @@ function makeServer(
   const services = {
     routineEngine,
     routinesRepo: overrides.routinesRepo,
-    eventService: new EventService(eventBus, eventCatalog),
+    eventService: overrides.eventService ?? new EventService(eventBus, eventCatalog),
     // catalog/db are only touched by uninstall --purge, which these tests don't
     // exercise, so stub them.
     appLifecycle: new AppLifecycleService(appManager as never, {} as never, {} as never),
@@ -119,6 +121,7 @@ function makeServer(
     hasAgent: () => false,
     hasRegisteredAction: overrides.hasRegisteredAction ?? rs.fn(() => false),
     isExplicitAction: overrides.isExplicitAction ?? rs.fn(() => false),
+    validateActionArgs: overrides.validateActionArgs ?? rs.fn(() => null),
     hasAction: () => false,
     systemUpgrade: { checkAndOffer: rs.fn() },
     backendTurnRunner: { runAndDeliver: rs.fn() },
@@ -245,7 +248,7 @@ describe("WorkerRpcServer param validation", () => {
       const listed = await rpc(fake, "channels.list", {});
       const sent = await rpc(fake, "channels.send", {
         channel: "discord",
-        conversationId: "c1",
+        chatId: "c1",
         message: { text: "hi" },
       });
       await rpc(fake, "channels.query", {
@@ -479,6 +482,39 @@ describe("WorkerRpcServer param validation", () => {
     expect(response.error).toBeUndefined();
     expect(response.result).toEqual({ explicit: true });
     expect(isExplicitAction).toHaveBeenCalledWith("execute_root_script");
+  });
+
+  it("answers actions.validateArgs from the main action registry", async () => {
+    const validateActionArgs = rs.fn((_name: string, args: Record<string, unknown>) =>
+      typeof args.prompt === "string" ? null : "prompt is required",
+    );
+    const { server } = makeServer({ validateActionArgs });
+    const fake = connect(server);
+
+    const invalid = await rpc(fake, "actions.validateArgs", {
+      actionName: "coding_task",
+      args: {},
+    });
+    const valid = await rpc(fake, "actions.validateArgs", {
+      actionName: "coding_task",
+      args: { prompt: "fix the test" },
+    });
+
+    expect(invalid.error).toBeUndefined();
+    expect(invalid.result).toEqual({ error: "prompt is required" });
+    expect(valid.result).toEqual({ error: null });
+    expect(validateActionArgs).toHaveBeenCalledWith("coding_task", {});
+  });
+
+  it("rejects actions.validateArgs without an args object", async () => {
+    const validateActionArgs = rs.fn(() => null);
+    const { server } = makeServer({ validateActionArgs });
+    const fake = connect(server);
+
+    const response = await rpc(fake, "actions.validateArgs", { actionName: "coding_task" });
+
+    expect(response.error).toContain("actions.validateArgs: invalid params");
+    expect(validateActionArgs).not.toHaveBeenCalled();
   });
 
   it("forwards appStore.listListings when params are valid", async () => {
@@ -918,6 +954,25 @@ describe("WorkerRpcServer event discovery", () => {
       ],
       total: 1,
     });
+  });
+
+  it("passes events.searchCatalog's match through to the event service", async () => {
+    const eventService = new EventService(new EventBus(), new EventCatalog());
+    const search = rs
+      .spyOn(eventService, "search")
+      .mockResolvedValue({ entries: [], total: 0, matchError: "not connected" });
+    const { server } = makeServer({ eventService });
+    const fake = connect(server);
+
+    const response = await rpc(fake, "events.searchCatalog", {
+      query: "github",
+      match: { "repository.full_name": "acme/widgets" },
+    });
+
+    expect(search).toHaveBeenCalledWith("github", 10, {
+      match: { "repository.full_name": "acme/widgets" },
+    });
+    expect(response.result).toEqual({ entries: [], total: 0, matchError: "not connected" });
   });
 
   it("rejects events.searchCatalog with a non-positive limit", async () => {

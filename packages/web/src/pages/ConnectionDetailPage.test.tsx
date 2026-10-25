@@ -21,11 +21,11 @@ afterEach(() => {
 });
 
 function connection(
-  overrides: Partial<ApiConnection> & Pick<ApiConnection, "service">,
+  overrides: Partial<ApiConnection> & Pick<ApiConnection, "connectionKind">,
 ): ApiConnection {
   return {
-    id: `conn-${overrides.service}`,
-    label: overrides.service,
+    id: `conn-${overrides.connectionKind}`,
+    label: overrides.connectionKind,
     grants: {},
     display: {},
     capabilities: {
@@ -48,7 +48,7 @@ function oauth(
   display: GrantDisplay | null = null,
 ): ApiConnection {
   return connection({
-    service,
+    connectionKind: service,
     grants: { user: state },
     display: { user: display },
     connect: { url: `https://oauth/${service}`, available: true, unavailableReason: null },
@@ -59,9 +59,9 @@ function oauth(
  *  unconnected, webchat always on. */
 function minimalConnections(): ApiConnection[] {
   return [
-    connection({ service: "telegram", grants: { bot: "unauthorized" } }),
-    connection({ service: "whatsapp", grants: { session: "unauthorized" } }),
-    connection({ service: "webchat" }),
+    connection({ connectionKind: "telegram", grants: { bot: "unauthorized" } }),
+    connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" } }),
+    connection({ connectionKind: "webchat" }),
   ];
 }
 
@@ -152,8 +152,8 @@ describe("ConnectionDetailPage — unknown serviceId redirects", () => {
 
 it("redirects the retired telegram-user route to a Telegram card on an opaque channel", async () => {
   mockApi([
-    connection({ service: "telegram", grants: { bot: "authorized" }, channel: "chan-7" }),
-    connection({ service: "telegram_user", grants: { session: "authorized" } }),
+    connection({ connectionKind: "telegram", grants: { bot: "authorized" }, channel: "chan-7" }),
+    connection({ connectionKind: "telegram_user", grants: { session: "authorized" } }),
   ]);
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -292,7 +292,7 @@ describe("ConnectionDetailPage — enablement bullets", () => {
 describe("ConnectionDetailPage — several accounts", () => {
   function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
     return connection({
-      service: "feishu",
+      connectionKind: "feishu",
       channel: "feishu",
       grants: { app: "authorized" },
       capabilities: {
@@ -430,5 +430,37 @@ describe("ConnectionDetailPage — several accounts", () => {
     });
     expect(locations).not.toContain(`/settings/connections/${SECOND_FEISHU}`);
     expect(locations).not.toContain("/settings/connections");
+  });
+});
+
+describe("ConnectionDetailPage — Shopify install return", () => {
+  function shopify(): ApiConnection {
+    return connection({
+      connectionKind: "shopify",
+      grants: { store: "unauthorized" },
+      display: { store: null },
+      connect: {
+        url: "https://admin.shopify.com/oauth/install?client_id=c7248430857716e104a01db512ed40ed",
+        available: true,
+        unavailableReason: null,
+      },
+    });
+  }
+
+  it("offers to connect the store Shopify installed the app on", async () => {
+    mockApi([shopify()]);
+    renderDetail("shopify?shop=acme.myshopify.com");
+
+    const link = await screen.findByRole("link", { name: "Connect acme.myshopify.com" });
+    expect(link.getAttribute("href")).toBe("/api/oauth/shopify/start?shop=acme.myshopify.com");
+  });
+
+  it("ignores a value that is not a myshopify.com store", async () => {
+    mockApi([shopify()]);
+    renderDetail(`shopify?shop=${encodeURIComponent("evil.example.com")}`);
+
+    await screen.findByRole("heading", { name: "Shopify" });
+    expect(screen.queryByText(/Finish connecting/)).toBeNull();
+    expect(screen.queryByRole("link", { name: /evil\.example\.com/ })).toBeNull();
   });
 });

@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { zstdDecompressSync } from "node:zlib";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { DESKTOP_SCRIPT, type DesktopSlot, desktopSlot, startDesktopArgs } from "../desktops.js";
 import { createLogger } from "../logger.js";
@@ -38,6 +39,15 @@ export const WECHAT_CANONICAL_PREFIX = "/opt/wechat";
 
 /** The image's AT-SPI bus launcher (Debian `at-spi2-core`). */
 export const ACCESSIBILITY_LAUNCHER = "/usr/libexec/at-spi-bus-launcher";
+
+/** The desktop driver, a sibling asset (scripts/copy-build-assets.mjs). It also
+ *  locates the sign-in button, by reading the accessibility tree only. */
+const DESKTOP_DRIVER = fileURLToPath(new URL("./wechat-user-send-driver.py", import.meta.url));
+const signInTargetSchema = z.object({
+  ok: z.literal(true),
+  x: z.number().int(),
+  y: z.number().int(),
+});
 
 /**
  * Starts accessibility on the client's private session bus: $1 is the launcher.
@@ -207,11 +217,11 @@ export const wechatUserConversationSchema = z.object({
   lastMessageAt: z.number().int().nonnegative().nullish(),
   lastMessagePreview: z.string().nullish(),
 });
-export type WechatUserConversation = z.infer<typeof wechatUserConversationSchema>;
+export type WechatUserChat = z.infer<typeof wechatUserConversationSchema>;
 
 export const wechatUserMessageSchema = z.object({
   id: z.string().min(1),
-  conversationId: z.string().min(1),
+  chatId: z.string().min(1),
   conversationName: z.string().optional(),
   isGroup: z.boolean(),
   /** The sender's WeChat id. Empty for a system notice with no author. */
@@ -584,6 +594,52 @@ export class WechatUserRuntime {
     const encoded = shot?.stdout.trim();
     if (!shot || shot.code !== 0 || !encoded) return null;
     return `data:image/png;base64,${encoded}`;
+  }
+
+  /**
+   * Press a remembered account's sign-in button, which WeChat shows after a
+   * restart instead of a QR. The driver finds it by accessible name inside the
+   * login window, so "Switch Account" and "Transfer files only" are never
+   * pressed. Only on WeChat's own desktop: on the shared one, Chrome can cover
+   * the button and take the click. WeChat may still ask the phone to confirm.
+   * Resolves to whether it pressed; never throws, since the guardian can still
+   * sign in by hand.
+   */
+  async pressSignIn(display: string, signal?: AbortSignal): Promise<boolean> {
+    if (!this.desktop || display !== this.desktop.display) return false;
+    const opts = { env: this.clientEnv(display), timeoutMs: 15_000, ...(signal ? { signal } : {}) };
+    const found = await this.run("python3", [DESKTOP_DRIVER, "sign-in-target"], opts).catch(
+      () => null,
+    );
+    let answer: unknown = null;
+    try {
+      answer = JSON.parse(found?.stdout ?? "");
+    } catch {
+      // No JSON is no target.
+    }
+    const target = signInTargetSchema.safeParse(answer);
+    if (!target.success) {
+      log.info("wechat_user.sign_in_not_found", {
+        reason:
+          (answer as { reason?: unknown } | null)?.reason ?? found?.stderr.trim().slice(0, 300),
+      });
+      return false;
+    }
+    const { x, y } = target.data;
+    // No --sync: it waits for motion, and a pointer already at (x, y), as a
+    // press before the last restart leaves it, never moves, so it would hang.
+    // X applies the move before the click either way.
+    const pressed = await this.run(
+      "xdotool",
+      ["mousemove", String(x), String(y), "click", "1"],
+      opts,
+    ).catch(() => null);
+    if (pressed?.code !== 0) {
+      log.warn("wechat_user.sign_in_press_failed", { stderr: pressed?.stderr.trim() });
+      return false;
+    }
+    log.info("wechat_user.sign_in_pressed", { display });
+    return true;
   }
 
   private async hasLoginWindow(display: string): Promise<boolean> {
@@ -1125,6 +1181,11 @@ const RECENT_CONVERSATIONS = 20;
  *  is reused before the session list is read again. */
 const NAMES_TTL_MS = 60_000;
 
+/** How long one read of each chat's last activity is shared. Short, because it
+ *  is what tells a cached newest message from a stale one; long enough that a
+ *  burst of per-contact reads costs one session-list read rather than one each. */
+const ACTIVITY_TTL_MS = 5_000;
+
 /** The first page size for reading a whole second. A page whose answer
  *  overflows the output limit is retried at half the size. */
 const TIES_PAGE = 200;
@@ -1157,7 +1218,7 @@ function isChat(session: BridgeSession): boolean {
   return session.type !== "folded";
 }
 
-function toConversation(session: BridgeSession): WechatUserConversation {
+function toConversation(session: BridgeSession): WechatUserChat {
   // A group's preview is prefixed by its sender's id.
   const preview = session.lastMessage?.content ?? "";
   const createdAt = session.lastMessage?.createdAt;
@@ -1188,7 +1249,7 @@ function toMessage(
   const senderName = message.groupNickname || message.senderName;
   return wechatUserMessageSchema.parse({
     id: message.id,
-    conversationId: message.session,
+    chatId: message.session,
     ...(conversationName ? { conversationName } : {}),
     isGroup,
     senderId,
@@ -1204,6 +1265,7 @@ function toMessage(
  *  client's SQLite is the record, so a Rome-side copy would only add staleness. */
 export class WechatUserReader {
   private names: { at: number; byId: Promise<Map<string, string>> } | null = null;
+  private activity: { at: number; byId: Promise<Map<string, string>> } | null = null;
 
   constructor(private readonly runtime: WechatUserRuntime) {}
 
@@ -1227,7 +1289,7 @@ export class WechatUserReader {
   async conversations(
     input: { query?: string; limit: number },
     signal?: AbortSignal,
-  ): Promise<WechatUserConversation[]> {
+  ): Promise<WechatUserChat[]> {
     const needle = input.query?.toLowerCase();
     return (await this.sessions(signal))
       .filter((session) => session.lastMessage?.createdAt)
@@ -1255,12 +1317,40 @@ export class WechatUserReader {
     return this.names.byId;
   }
 
+  /**
+   * Each chat's last activity, as an opaque key that changes whenever a message
+   * arrives in it: the session list's last-message time and preview. One
+   * session-list read answers every chat, so a caller can tell which chats
+   * changed without asking each one. A chat with no last message keys as "".
+   */
+  lastActivity(): Promise<Map<string, string>> {
+    if (!this.activity || Date.now() - this.activity.at > ACTIVITY_TTL_MS) {
+      const byId = this.sessions().then(
+        (sessions) =>
+          new Map(
+            sessions.map((session) => [
+              session.username,
+              session.lastMessage
+                ? `${session.lastMessage.createdAt ?? ""}\n${session.lastMessage.content}`
+                : "",
+            ]),
+          ),
+      );
+      const entry = { at: Date.now(), byId };
+      byId.catch(() => {
+        if (this.activity === entry) this.activity = null;
+      });
+      this.activity = entry;
+    }
+    return this.activity.byId;
+  }
+
   private async page(
-    conversationId: string,
+    chatId: string,
     window: { since?: Date; until?: Date; limit: number; cursor?: string },
     signal?: AbortSignal,
   ): Promise<z.infer<typeof bridgePageSchema>> {
-    const args = ["query", conversationId, "-n", String(window.limit)];
+    const args = ["query", chatId, "-n", String(window.limit)];
     if (window.since) args.push("--since", isoSeconds(window.since));
     if (window.until) args.push("--until", isoSeconds(window.until));
     if (window.cursor) args.push("--cursor", window.cursor);
@@ -1280,7 +1370,7 @@ export class WechatUserReader {
    * slow a sweep down instead of failing it.
    */
   private async *pages(
-    conversationId: string,
+    chatId: string,
     window: { since?: Date; until?: Date },
     limit: number,
     signal?: AbortSignal,
@@ -1289,11 +1379,7 @@ export class WechatUserReader {
     for (;;) {
       let page: z.infer<typeof bridgePageSchema>;
       try {
-        page = await this.page(
-          conversationId,
-          { ...window, limit, ...(cursor ? { cursor } : {}) },
-          signal,
-        );
+        page = await this.page(chatId, { ...window, limit, ...(cursor ? { cursor } : {}) }, signal);
       } catch (error) {
         if (error instanceof WechatBridgeError && error.code === OUTPUT_TOO_LARGE && limit > 1) {
           limit = Math.ceil(limit / 2);
@@ -1313,14 +1399,14 @@ export class WechatUserReader {
    * says whether older messages remain.
    */
   private async newest(
-    conversationId: string,
+    chatId: string,
     window: { since?: Date; until?: Date },
     limit: number,
     signal?: AbortSignal,
   ): Promise<{ messages: BridgeMessage[]; more: boolean }> {
     const messages: BridgeMessage[] = [];
     let more = false;
-    for await (const page of this.pages(conversationId, window, limit, signal)) {
+    for await (const page of this.pages(chatId, window, limit, signal)) {
       messages.unshift(...page.messages);
       more = page.cursor !== null;
       if (messages.length >= limit) break;
@@ -1330,18 +1416,9 @@ export class WechatUserReader {
   }
 
   /** Every message a chat holds in the second starting at `at`, oldest first. */
-  private async second(
-    conversationId: string,
-    at: Date,
-    signal?: AbortSignal,
-  ): Promise<BridgeMessage[]> {
+  private async second(chatId: string, at: Date, signal?: AbortSignal): Promise<BridgeMessage[]> {
     const messages: BridgeMessage[] = [];
-    for await (const page of this.pages(
-      conversationId,
-      { since: at, until: at },
-      TIES_PAGE,
-      signal,
-    )) {
+    for await (const page of this.pages(chatId, { since: at, until: at }, TIES_PAGE, signal)) {
       messages.unshift(...page.messages);
     }
     return messages;
@@ -1357,14 +1434,14 @@ export class WechatUserReader {
    * `limit` messages then cannot stall the caller's paging on itself.
    */
   private async chatMessages(
-    conversationId: string,
+    chatId: string,
     input: { since?: Date; before?: Date; limit: number; includeBoundaryTies?: boolean },
     signal?: AbortSignal,
   ): Promise<BridgeMessage[]> {
     const since = input.since ? { since: input.since } : {};
     if (!input.includeBoundaryTies) {
       const window = { ...since, ...(input.before ? { until: input.before } : {}) };
-      return (await this.newest(conversationId, window, input.limit, signal)).messages;
+      return (await this.newest(chatId, window, input.limit, signal)).messages;
     }
 
     const sinceSecond = input.since ? toUnixSeconds(input.since.toISOString()) : null;
@@ -1372,28 +1449,28 @@ export class WechatUserReader {
     let older: BridgeMessage[] = [];
     if (beforeSecond === null || sinceSecond === null || beforeSecond - 1 >= sinceSecond) {
       const until = beforeSecond === null ? {} : { until: new Date((beforeSecond - 1) * 1000) };
-      const page = await this.newest(conversationId, { ...since, ...until }, input.limit, signal);
+      const page = await this.newest(chatId, { ...since, ...until }, input.limit, signal);
       older = page.messages;
       const edge = older[0];
       // With older history left, the oldest second may continue past the page.
       if (edge && page.more) {
         const edgeSecond = toUnixSeconds(edge.createdAt);
         older = [
-          ...(await this.second(conversationId, new Date(edgeSecond * 1000), signal)),
+          ...(await this.second(chatId, new Date(edgeSecond * 1000), signal)),
           ...older.filter((message) => toUnixSeconds(message.createdAt) !== edgeSecond),
         ];
       }
     }
     const atBefore =
       beforeSecond !== null && (sinceSecond === null || beforeSecond >= sinceSecond)
-        ? await this.second(conversationId, new Date(beforeSecond * 1000), signal)
+        ? await this.second(chatId, new Date(beforeSecond * 1000), signal)
         : [];
     return [...older, ...atBefore];
   }
 
   async messages(
     input: {
-      conversationId?: string;
+      chatId?: string;
       since?: Date;
       before?: Date;
       limit: number;
@@ -1402,8 +1479,8 @@ export class WechatUserReader {
     signal?: AbortSignal,
   ): Promise<WechatUserMessage[]> {
     const names = await this.conversationNames(signal).catch(() => new Map<string, string>());
-    if (input.conversationId) {
-      const messages = await this.chatMessages(input.conversationId, input, signal);
+    if (input.chatId) {
+      const messages = await this.chatMessages(input.chatId, input, signal);
       return messages.map((message) => toMessage(message, names.get(message.session)));
     }
     // No chat named: read across the most recently active ones.
@@ -1424,9 +1501,9 @@ export class WechatUserReader {
   }
 
   /** Total messages in a chat. The bridge counts rows without reading them. */
-  async count(conversationId: string, signal?: AbortSignal): Promise<number> {
+  async count(chatId: string, signal?: AbortSignal): Promise<number> {
     try {
-      const data = await this.runtime.bridgeCommand(["count", conversationId], signal);
+      const data = await this.runtime.bridgeCommand(["count", chatId], signal);
       return bridgeCountSchema.parse(data).count;
     } catch (error) {
       if (error instanceof WechatBridgeError && error.code === "SESSION_NOT_FOUND") return 0;

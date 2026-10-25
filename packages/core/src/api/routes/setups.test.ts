@@ -36,7 +36,7 @@ import {
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import { createTestDb, identityServiceOf } from "../../test/helpers.js";
+import { createTestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { setupsRoutes } from "./setups.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
@@ -80,7 +80,6 @@ function fakePersonRepo(): PersonMappingRepository {
     // write helpers enlisted in its transaction — not the async setters.
     writeChannelUserId: rs.fn(),
     writeChannelMapping: rs.fn(() => "id"),
-    writeDeleteGuardianChannelMappings: rs.fn(),
   } as unknown as PersonMappingRepository;
 }
 
@@ -89,14 +88,14 @@ function harness() {
   openDbs.push(close);
   const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
   const fixture = makePasteTalk();
-  fixture.descriptor.service = "fake-telegram";
+  fixture.descriptor.connectionKind = "fake-telegram";
   fixture.descriptor.auth.bot.setup = setupFn;
   registry.register(fixture.descriptor);
   const personMappingRepo = fakePersonRepo();
   const manager = new SetupManager({ registry, personMappingRepo });
   const deps = {
     db,
-    approvalsRepo: new ApprovalsRepository(db, new PersonMappingRepository(db, identityServiceOf)),
+    approvalsRepo: new ApprovalsRepository(db),
     connectionRegistry: registry,
     setupManager: manager,
     personMappingRepo,
@@ -299,7 +298,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       },
     };
     return createFeishuDescriptor({
-      conversationSettings: {} as never,
+      chatSettings: {} as never,
       personMappingRepo: personRepo as PersonMappingRepository,
       listAgents: () => [],
       createChannel: () => fakeLarkChannel as never,

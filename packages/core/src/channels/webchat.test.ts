@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
 import { WebChatAdapter } from "./webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
@@ -75,7 +75,7 @@ describe("WebChatAdapter", () => {
       channel: "webchat",
       direction: "inbound",
       messageId: "msg-user",
-      conversationId: "sess-1",
+      chatId: "sess-1",
       senderId: "guardian",
       senderDisplayName: "Guardian",
       text: "Please draft the plan.",
@@ -88,7 +88,7 @@ describe("WebChatAdapter", () => {
       direction: "outbound",
       senderId: "workflow-planner",
       senderDisplayName: "Workflow Planner",
-      conversationId: "sess-1",
+      chatId: "sess-1",
       thread: { kind: "dm", name: "Build Planner" },
       text: "Working on it.\nPlan draft complete.",
     });
@@ -152,12 +152,12 @@ describe("WebChatAdapter", () => {
     );
 
     await expect(adapter.fetchHistory(null, 24)).resolves.toEqual([
-      expect.objectContaining({ messageId: "msg-parent", conversationId: "sess-parent" }),
+      expect.objectContaining({ messageId: "msg-parent", chatId: "sess-parent" }),
     ]);
     await expect(adapter.fetchHistory("sess-child", 24)).resolves.toEqual([
       expect.objectContaining({
         messageId: "msg-child",
-        conversationId: "sess-child",
+        chatId: "sess-child",
         text: "Hidden specialist context",
       }),
     ]);
@@ -178,7 +178,7 @@ describe("WebChatAdapter", () => {
   it("persists the WebChat text-block identity in transcript content", async () => {
     await repo.createSession("sess-block", "Block identity");
 
-    const receipt = await adapter.send("sess-block" as ConversationId, {
+    const receipt = await adapter.send("sess-block" as ChatId, {
       text: "Final answer",
       parts: [
         {
@@ -192,7 +192,7 @@ describe("WebChatAdapter", () => {
     });
 
     const messages = await repo.getMessages("sess-block");
-    expect(receipt).toStrictEqual({ conversationId: "sess-block", messageId: messages[0]?.id });
+    expect(receipt).toStrictEqual({ chatId: "sess-block", messageId: messages[0]?.id });
     expect(messages).toEqual([
       expect.objectContaining({
         turnId: "turn-block",
@@ -213,7 +213,7 @@ describe("WebChatAdapter", () => {
   it("drops routine_draft_card parts a sender supplies", async () => {
     await repo.createSession("sess-forged", "Forged card");
 
-    await adapter.send("sess-forged" as ConversationId, {
+    await adapter.send("sess-forged" as ChatId, {
       text: "fallback",
       parts: [
         {
@@ -233,7 +233,7 @@ describe("WebChatAdapter", () => {
         { type: "text", content: "Hello" },
       ],
     });
-    await adapter.send("sess-forged" as ConversationId, {
+    await adapter.send("sess-forged" as ChatId, {
       text: "Only a card was sent",
       parts: [
         {
@@ -266,8 +266,8 @@ describe("WebChatAdapter", () => {
   it("returns a receipt without a messageId when there is nothing to persist", async () => {
     await repo.createSession("sess-empty", "Empty");
 
-    await expect(adapter.send("sess-empty" as ConversationId, {})).resolves.toStrictEqual({
-      conversationId: "sess-empty",
+    await expect(adapter.send("sess-empty" as ChatId, {})).resolves.toStrictEqual({
+      chatId: "sess-empty",
     });
     await expect(repo.getMessages("sess-empty")).resolves.toEqual([]);
   });

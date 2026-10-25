@@ -266,9 +266,11 @@ export function buildChatView(
 // turn's closing text and recap land after it under the same id. A card from
 // an earlier turn is no longer what the agent waits on, and a backend-initiated
 // turn (an approval continuation) starts a new id without a user message.
-// Pass the floor's running turn while one streams: a backend turn persists its
-// messages only when it ends, so until then the transcript still closes on the
-// previous turn, whose cards it has moved past.
+// Pass the floor's running turn while one streams. A backend task that runs no
+// recorded turn persists its messages only when it ends, so until then the
+// transcript still closes on the previous turn, whose cards it has moved past.
+// A recorded backend turn saves its cards mid-turn under its own id, which is
+// then the running turn id, so its cards count as they land.
 export function isAwaitingGuardian(
   view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
   runningTurnId: string | null = null,
@@ -340,7 +342,8 @@ export function buildRows(
   const tracesByTurn = new Map<string, ChatMessage>();
   const turnsWithAssistant = new Set<string>();
   for (const m of messages) {
-    if (m.role === "trace" && m.turnId && m.traceSummary) tracesByTurn.set(m.turnId, m);
+    if (m.role === "trace" && m.turnId && (m.traceSummary || m.traceArchived))
+      tracesByTurn.set(m.turnId, m);
     if (m.role === "assistant" && m.turnId) turnsWithAssistant.add(m.turnId);
   }
   const isRunningTurn = (turnId: string | null | undefined) =>
@@ -355,7 +358,7 @@ export function buildRows(
       continue;
     }
     if (msg.role === "trace") {
-      if (!msg.traceSummary) continue;
+      if (!msg.traceSummary && !msg.traceArchived) continue;
       // Merged into the turn's grouped row when it has assistant replies; only
       // stands alone for a reply-less turn. Never mid-stream for the running
       // turn (the live trace button carries it).

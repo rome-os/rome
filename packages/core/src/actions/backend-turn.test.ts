@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ConversationRepository } from "@rome-os/app-runtime";
+import type { ChatRepository } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
 import { createMockAgentRunner } from "../test/helpers.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
@@ -17,9 +17,9 @@ describe("backend turn delivery", () => {
         { type: "result", content: "The deferred check is complete." },
       ],
     ]);
-    const send = rs.fn(async (conversationId) => ({
+    const send = rs.fn(async (chatId) => ({
       messageId: "wechat-message-1",
-      conversationId,
+      chatId,
     }));
     const wechat: Channel = {
       name: "wechat",
@@ -29,19 +29,19 @@ describe("backend turn delivery", () => {
       messages: null,
       directory: null,
     };
-    const ensureChannelConversation = rs.fn(async () => ({
+    const ensureChannelChat = rs.fn(async () => ({
       id: "channel:wechat:wechat-thread-1",
       agentName: null,
     }));
     const recordOutboundMessage = rs.fn(async () => {});
-    const conversations = {
-      ensureChannelConversation,
+    const chats = {
+      ensureChannelChat,
       recordOutboundMessage,
-    } as unknown as ConversationRepository;
+    } as unknown as ChatRepository;
     const runner = createBackendTurnRunner({
       agentRunner,
       channel: (name) => (name === "wechat" ? wechat : null),
-      conversations,
+      chats,
     });
 
     await runner.runAndDeliver({
@@ -57,7 +57,7 @@ describe("backend turn delivery", () => {
       text: "The deferred check is complete.",
       turnId: "turn-1",
     });
-    expect(ensureChannelConversation).toHaveBeenCalledWith({
+    expect(ensureChannelChat).toHaveBeenCalledWith({
       channel: "wechat",
       threadId: "wechat-thread-1",
       agentName: "main",
@@ -80,9 +80,9 @@ describe("backend turn delivery", () => {
       ],
     ]);
     const order: string[] = [];
-    const send = rs.fn(async (conversationId: string) => {
+    const send = rs.fn(async (chatId: string) => {
       order.push("send");
-      return { messageId: "webchat-message-1", conversationId };
+      return { messageId: "webchat-message-1", chatId };
     });
     const webchat: Channel = {
       name: "webchat",
@@ -125,6 +125,41 @@ describe("backend turn delivery", () => {
     expect(send).toHaveBeenCalledWith("chat-1", {
       text: "The deferred check is complete.",
       turnId: "turn-1",
+    });
+  });
+
+  it("resumes a webchat continuation with the chat's device folder", async () => {
+    const agentRunner = createMockAgentRunner([[{ type: "result", content: "" }]]);
+    const folder = { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" };
+    const resolveDeviceFolder = rs.fn(async () => folder);
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: () =>
+        ({
+          name: "webchat",
+          send: { send: rs.fn(), direct: null, activity: null },
+        }) as unknown as Channel,
+      resolveDeviceFolder,
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (_sessionId, task) => {
+        await task({ emit: async () => {} });
+      },
+    });
+
+    await runner.runAndDeliver({
+      agentName: "main",
+      sessionId: "agent-session-1",
+      channel: "webchat",
+      threadId: "chat-1",
+      prompt: "⏰ Time's up: check deployment",
+    });
+
+    expect(resolveDeviceFolder).toHaveBeenCalledWith("webchat", "chat-1");
+    expect(agentRunner.calls[0].threadContext).toMatchObject({
+      channel: "webchat",
+      threadId: "chat-1",
+      deviceFolder: folder,
     });
   });
 

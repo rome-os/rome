@@ -6,7 +6,7 @@ import type { Approval } from "@/pages/ActivityPage";
 import { fetchJson } from "@/lib/fetch-json";
 import { emitSessionsChanged } from "@/lib/session-events";
 
-export const APPROVALS_QUERY_KEY = ["approvals"] as const;
+const APPROVALS_QUERY_KEY = ["approvals"] as const;
 
 export function useApprovals() {
   const { t } = useTranslation("activity");

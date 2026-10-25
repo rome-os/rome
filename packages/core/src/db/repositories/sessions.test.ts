@@ -217,12 +217,12 @@ describe("SessionsRepository", () => {
     const bound = await repo.create({
       agentName: "main",
       channelThreadKey: "webchat:conv-1:large-model:sel-a",
-      conversationId: "conv-1",
+      chatId: "conv-1",
     });
     const unbound = await repo.create({ agentName: "main", channelThreadKey: "main:adhoc" });
 
-    expect((await repo.findById(bound))?.conversationId).toBe("conv-1");
-    expect((await repo.findById(unbound))?.conversationId).toBeNull();
+    expect((await repo.findById(bound))?.chatId).toBe("conv-1");
+    expect((await repo.findById(unbound))?.chatId).toBeNull();
   });
 
   it("rotation takes the caller's conversation and keeps the retired row's otherwise", async () => {
@@ -230,7 +230,7 @@ describe("SessionsRepository", () => {
       id: "old",
       agentName: "main",
       channelThreadKey: "telegram:thread-1",
-      conversationId: "channel:telegram:thread-1",
+      chatId: "channel:telegram:thread-1",
     });
 
     const inherited = await repo.rotateProviderGeneration({
@@ -238,29 +238,29 @@ describe("SessionsRepository", () => {
       channelThreadKey: "telegram:thread-1",
       newSessionId: "gen-2",
     });
-    expect(inherited.conversationId).toBe("channel:telegram:thread-1");
+    expect(inherited.chatId).toBe("channel:telegram:thread-1");
 
     const named = await repo.rotateProviderGeneration({
       agentName: "main",
       channelThreadKey: "telegram:thread-1",
       newSessionId: "gen-3",
-      conversationId: "conv-renamed",
+      chatId: "conv-renamed",
     });
-    expect(named.conversationId).toBe("conv-renamed");
+    expect(named.chatId).toBe("conv-renamed");
   });
 
-  it("fillConversationId() fills a missing conversation and never overwrites one", async () => {
+  it("fillChatId() fills a missing conversation and never overwrites one", async () => {
     const legacy = await repo.create({ agentName: "main", channelThreadKey: "webchat:conv-1" });
     const bound = await repo.create({
       agentName: "main",
       channelThreadKey: "webchat:conv-2",
-      conversationId: "conv-2",
+      chatId: "conv-2",
     });
 
-    expect(await repo.fillConversationId(legacy, "conv-1")).toBe(true);
-    expect(await repo.fillConversationId(bound, "other")).toBe(false);
+    expect(await repo.fillChatId(legacy, "conv-1")).toBe(true);
+    expect(await repo.fillChatId(bound, "other")).toBe(false);
 
-    expect((await repo.findById(legacy))?.conversationId).toBe("conv-1");
-    expect((await repo.findById(bound))?.conversationId).toBe("conv-2");
+    expect((await repo.findById(legacy))?.chatId).toBe("conv-1");
+    expect((await repo.findById(bound))?.chatId).toBe("conv-2");
   });
 });

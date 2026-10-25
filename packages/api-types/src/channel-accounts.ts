@@ -1,6 +1,6 @@
 /**
  * The wire shapes of accounts and the agents linked to them. Screens call a
- * channel an account. Vocabulary: docs/concepts/messaging.md#romes-accounts.
+ * channel an account. Vocabulary: docs/domains/chats.md#account.
  */
 
 /**
@@ -28,6 +28,10 @@ export interface ConnectionAccountFields {
 export interface ChannelAccount {
   /** The channel's id. */
   id: string;
+  /** The kind of connection backing the account, such as `telegram_user`. */
+  connectionKind: string;
+  /** @deprecated The kind of connection under its old name. Read
+   *  `connectionKind`. */
   service: string;
   platform: string;
   /** The Connection backing the account, or null once it was deleted. */

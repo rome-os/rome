@@ -1,6 +1,6 @@
 # Sessions
 
-A Rome session is the durable product boundary around one continuous body of agent work. It can represent a guardian-authored chat, a chat on one of [Rome's accounts](messaging.md#romes-accounts), an automation, a delegated subagent, a handoff, or a fork. Sessions preserve transcript and trace evidence, so an agent does not restart from a blank slate on every message and background work remains inspectable after it finishes.
+A Rome session is the durable product boundary around one continuous body of agent work. It can represent a guardian-authored chat, a [chat](../domains/chats.md#chat) on one of Rome's accounts, an automation, a delegated subagent, a handoff, or a fork. Sessions preserve transcript and trace evidence, so an agent does not restart from a blank slate on every message and background work remains inspectable after it finishes.
 
 **Contracts:**
 
@@ -59,6 +59,32 @@ A turn is one request to an agent plus the agent work that follows until the age
 - **Step** — a single model call inside a turn. A turn that uses tools takes several steps, because each tool result feeds the next model call.
 - **Run** — an action run is one execution of an [action](actions.md), and a routine run is one fire of a [routine](data.md#routines). Neither is a turn.
 
+## Chat trace window
+
+A session's effective activity is the latest conversation message across itself and every ancestor reached through `parentSessionId`.
+The dashboard loads all of its traces while that time is less than seven days old.
+At exactly seven idle days, the session shows chat history only, with an archived-steps note on each turn.
+User messages, assistant replies, cards, and interaction results stay in the transcript.
+History, lazy trace reads, and raw downloads follow the same session-wide decision.
+
+Activity includes user, assistant, trace, and notification rows. Notifications record real out-of-band conversation messages.
+Reading, renaming, pinning, and unknown metadata roles do not count. A lineage with no conversation messages is not an archive candidate.
+Each read batches session and ancestor message times in one recursive query, without reading trace payloads.
+There are no session-type exceptions: an old subagent remains visible under an active ancestor, and a fork, promoted side chat, or channel thread can stay active on its own messages under an idle source.
+A new message reactivates the session and its descendants, not its ancestors or siblings.
+If every session in a tree is idle, all of its traces are archived.
+
+Handoffs have no `parentSessionId`. Their link lives in a transcript card. They use their own session activity.
+The chat view loads a handoff child's history separately and splices it into the visible transcript.
+The calling session's trace summaries and descendant cost rollups do not read handoff traces.
+A merged transcript can therefore contain archived child steps beside active parent steps, while keeping both sessions' replies and cards.
+
+This window changes dashboard reads, not storage. It deletes nothing and does not change sharing, usage accounting, or agent resume context.
+Reactivation reveals retained traces while their blocks remain in the database.
+The window and idle predicate live in `packages/core/src/webchat/trace-retention.ts`.
+The repository's `getTraceArchivedSessionIds` applies that predicate to explicitly requested sessions.
+Step 2 will add its own archival selection query and must account for handoff links before removing traces.
+
 ## Event
 
 An event is one item of a turn's stream, as Rome publishes it to its consumers. Events fall into four groups:
@@ -79,7 +105,7 @@ An event is one item of a turn's stream, as Rome publishes it to its consumers. 
 
 **Not to be confused with:**
 
-- **[Message](messaging.md#message)** — a message is a chat entry that a person or an agent sends. An event is an item of one turn's stream.
+- **[Message](../domains/chats.md#message)** — a message is a chat entry that a person or an agent sends. An event is an item of one turn's stream.
 - **[Block](#block)** — a block reaches consumers as a block event, except a subagent call's tool use and tool result, which normally reach them as subagent start and result events. A subagent call with no linked execution reaches them as a plain tool use and tool result. Results, errors, plan updates, and subagent reports are events that are not blocks.
 - **Event-bus event** — something that happens in Rome that a [routine](data.md#routines) or a hook can react to. It is not part of a turn's stream.
 - **[Routine](data.md#routines)** — surfaces that say "events" for scheduled automation mean routines, not turn events.
@@ -99,7 +125,7 @@ A block is one completed piece of model content inside a turn: text, thinking, a
 **Not to be confused with:**
 
 - **[Event](#event)** — a result, an error, a plan update, or a subagent report is an event, not a block.
-- **Message part** — a piece of a stored chat [message](messaging.md#message). A text part can hold the text of a text block, but parts belong to the chat and blocks belong to a turn.
+- **Message part** — a piece of a stored chat [message](../domains/chats.md#message). A text part can hold the text of a text block, but parts belong to the chat and blocks belong to a turn.
 - **Content block** (Anthropic) and **item** (Codex) — the providers' own units, which Rome translates into blocks and events.
 
 ## Delta

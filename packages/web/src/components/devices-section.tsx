@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { devicesStatusSchema } from "@rome/api-types/devices";
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
-import { NodeDevices, type NodeNavigation } from "@rome-os/node-ui";
+import { NodeDeviceCard, NodeDevices, type NodeNavigation } from "@rome-os/node-ui";
 import {
   Measure,
   Section,
@@ -9,14 +9,14 @@ import {
   SectionHeading,
   SectionTitle,
   SectionDescription,
-  SectionActions,
 } from "@rome-os/ui/page";
-import { RefreshCw } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useDeviceManage } from "@/hooks/use-device-manage";
+import { useThisDevice } from "@/hooks/use-this-device";
 import { StatusIndicator } from "@/lib/connection-status";
 import { fetchJson } from "@/lib/fetch-json";
 
@@ -64,23 +64,28 @@ export function DevicesSection() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["node-devices"] }),
   });
   const query = useDevicesQuery();
-  const data = query.isError ? undefined : query.data;
+  // A failed poll keeps the last answer, so the page changes only when the service does.
+  const data = query.data;
   const connection = data?.connection ?? "unavailable";
-  const unavailable = ["unavailable", "incompatible", "not_configured", "not_running"].includes(
-    connection,
-  );
+  const unavailable = data
+    ? ["unavailable", "incompatible", "not_configured", "not_running"].includes(connection)
+    : query.isError;
   const devices = data?.devices ?? [];
+  const thisDevice = useThisDevice(() => void query.refetch());
+  const manage = useDeviceManage();
 
-  if (data && !unavailable)
+  // While the first read is pending, the devices page holds its place without cards.
+  if (!unavailable)
     return (
       <NodeDevices
         url={nodeConsoleUrl()}
         devices={devices}
         navigation={navigation}
         locale={i18n.language}
-        checkedAt={Date.parse(data.checkedAt)}
-        refreshing={query.isFetching}
-        onRefresh={() => void query.refetch()}
+        thisDevice={thisDevice ?? undefined}
+        manage={manage}
+        // The order is set when the cards first draw, so they wait to learn which is this computer.
+        loading={!data || thisDevice === undefined}
       />
     );
 
@@ -88,67 +93,64 @@ export function DevicesSection() {
   // bring the service back and how to link a computer.
   return (
     <Measure className="space-y-6">
+      {/* The Mac app's computer works without Rome's device service. */}
+      {thisDevice && (
+        <NodeDeviceCard
+          device={
+            devices.find((device) => device.id === thisDevice.id) ?? {
+              id: thisDevice.id,
+              name: thisDevice.name,
+              platform: thisDevice.platform,
+            }
+          }
+          thisDevice={thisDevice}
+          locale={i18n.language}
+        />
+      )}
       <Section aria-labelledby="devices-title">
         <SectionHeader>
           <SectionHeading>
             <SectionTitle id="devices-title">{t("devices.title")}</SectionTitle>
             <SectionDescription>{t("devices.description")}</SectionDescription>
           </SectionHeading>
-          <SectionActions>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={query.isFetching || start.isPending}
-              onClick={() => void query.refetch()}
-            >
-              <RefreshCw data-icon="inline-start" aria-hidden="true" />
-              {t("devices.refresh")}
-            </Button>
-          </SectionActions>
         </SectionHeader>
-        {query.isPending ? (
-          <p role="status" className="text-ui text-muted-foreground">
-            {t("devices.loading")}
-          </p>
-        ) : (
-          <Card>
-            <CardContent>
-              <div className="space-y-2">
-                <p className="text-ui">{t("devices.connectionLabel")}</p>
-                <StatusIndicator
-                  status={{
-                    label: t(`devices.connection.${connection}`),
-                    tone: connection === "incompatible" ? "attention" : "muted",
-                  }}
-                />
+        <Card>
+          <CardContent>
+            <div className="space-y-2">
+              <p className="text-ui">{t("devices.connectionLabel")}</p>
+              <StatusIndicator
+                status={{
+                  label: t(`devices.connection.${connection}`),
+                  tone: connection === "incompatible" ? "attention" : "muted",
+                }}
+              />
+            </div>
+            <p
+              role={connection === "unavailable" ? "alert" : undefined}
+              className="mt-4 text-ui text-muted-foreground"
+            >
+              {t(
+                `devices.help.${connection as "unavailable" | "incompatible" | "not_configured" | "not_running"}`,
+              )}
+            </p>
+            {connection === "not_running" && (
+              <div className="mt-4">
+                <Button size="sm" disabled={start.isPending} onClick={() => start.mutate()}>
+                  {t(start.isPending ? "devices.starting" : "devices.start")}
+                </Button>
               </div>
-              <p
-                role={connection === "unavailable" ? "alert" : undefined}
-                className="mt-4 text-ui text-muted-foreground"
-              >
-                {t(
-                  `devices.help.${connection as "unavailable" | "incompatible" | "not_configured" | "not_running"}`,
-                )}
+            )}
+            {start.isError && (
+              <p role="alert" className="mt-4 text-ui text-destructive-fg">
+                {start.error.message === "not_configured"
+                  ? t("devices.help.not_configured")
+                  : start.error.message === "incompatible"
+                    ? t("devices.help.incompatible")
+                    : t("devices.startFailed")}
               </p>
-              {connection === "not_running" && (
-                <div className="mt-4">
-                  <Button size="sm" disabled={start.isPending} onClick={() => start.mutate()}>
-                    {t(start.isPending ? "devices.starting" : "devices.start")}
-                  </Button>
-                </div>
-              )}
-              {start.isError && (
-                <p role="alert" className="mt-4 text-ui text-destructive-fg">
-                  {start.error.message === "not_configured"
-                    ? t("devices.help.not_configured")
-                    : start.error.message === "incompatible"
-                      ? t("devices.help.incompatible")
-                      : t("devices.startFailed")}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        )}
+            )}
+          </CardContent>
+        </Card>
       </Section>
       <Section aria-labelledby="connect-computer-title">
         <SectionHeader>

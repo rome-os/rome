@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/ui",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Shared React component kit for the Rome dashboard and Rome apps",
   "repository": {
     "type": "git",
@@ -227,10 +227,10 @@
   "peerDependencies": {
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
-    "@streamdown/mermaid": "^1.0.2",
     "cmdk": "^1.1.1",
     "katex": "^0.16.27",
     "lucide-react": ">=0.468.0",
+    "pele": "^1.8.0",
     "react": ">=19",
     "react-day-picker": "^9.14.0",
     "react-dom": ">=19",
@@ -244,13 +244,13 @@
     "@streamdown/math": {
       "optional": true
     },
-    "@streamdown/mermaid": {
-      "optional": true
-    },
     "cmdk": {
       "optional": true
     },
     "katex": {
+      "optional": true
+    },
+    "pele": {
       "optional": true
     },
     "react-day-picker": {
@@ -268,7 +268,6 @@
     "@rstest/core": "^0.11.11",
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
-    "@streamdown/mermaid": "^1.0.2",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.1.0",
@@ -277,6 +276,7 @@
     "jsdom": "^29.1.1",
     "katex": "^0.16.27",
     "lucide-react": "^0.468.0",
+    "pele": "^1.8.0",
     "react": "^19.1.0",
     "react-day-picker": "^9.14.0",
     "react-dom": "^19.1.0",

@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { ConversationBuffers, type ConversationBufferLimits } from "./conversation-buffer.js";
+import { ChatBuffers, type ChatBufferLimits } from "./conversation-buffer.js";
 
 /** A handler that holds each item until the test releases it. */
 function heldHandler() {
@@ -12,12 +12,9 @@ function heldHandler() {
   return { started, handle, release: () => releases.shift()?.() };
 }
 
-function buffers(
-  handle: (item: string) => Promise<void>,
-  limits: Partial<ConversationBufferLimits>,
-) {
+function buffers(handle: (item: string) => Promise<void>, limits: Partial<ChatBufferLimits>) {
   const log = { warn: rs.fn(), error: rs.fn() };
-  const buffer = new ConversationBuffers<string>(handle, {
+  const buffer = new ChatBuffers<string>(handle, {
     log,
     describe: (item) => ({ item }),
     limits,
@@ -25,7 +22,7 @@ function buffers(
   return { buffer, log };
 }
 
-describe("ConversationBuffers", () => {
+describe("ChatBuffers", () => {
   it("starts no handler inside push", async () => {
     const held = heldHandler();
     const { buffer } = buffers(held.handle, {});

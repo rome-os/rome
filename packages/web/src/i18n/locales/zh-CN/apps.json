@@ -35,7 +35,6 @@
     "people": "守护者介绍过的联系人",
     "routines": "定时与周期性的智能体任务",
     "activity": "Rome 最近做了什么",
-    "store": "浏览并安装 Rome 应用",
     "desktop": "内嵌浏览器界面",
     "chat": "和你的智能体对话",
     "settings": "档案、通道与集成"
@@ -183,7 +182,7 @@
     "unpin": "从侧边栏移除",
     "pinNoUi": "App 不含 UI",
     "viewDetails": "查看详情",
-    "skillLoadFailed": "加载失败",
+    "artifactLoadFailed": "加载失败",
     "chatWithAgentTitle": "与 {{agent}} 对话",
     "chatWithAgentAria": "与 {{agent}} 对话",
     "noCapabilities": "未声明{{label}}。",

@@ -172,7 +172,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
 
       const connB = registryB.get(connAId);
       expect(connB).toBeDefined();
-      expect(connB.service).toBe("fake-telegram");
+      expect(connB.connectionKind).toBe("fake-telegram");
       expect(connB.label).toBe("my-telegram");
       expect(connB.isUnlocked("talk")).toBe(true);
       expect(connB.status().talk).toEqual({ state: "unlocked" });
@@ -340,7 +340,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
         },
       };
       // Need a fresh service name since "fake-telegram" is already registered
-      const desc2patched = { ...desc2, service: "fake-telegram-persist" };
+      const desc2patched = { ...desc2, connectionKind: "fake-telegram-persist" };
 
       const registry2 = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry2.register(desc2patched);

@@ -50,6 +50,7 @@ import {
   isAnthropicAuthRevokedError,
 } from "./anthropic-auth-revoked.js";
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
+import { askQuestionParksOnCard } from "./mcp-facade.js";
 import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
 import { anthropicFunding } from "../usage/funding.js";
@@ -87,6 +88,41 @@ export const CLAUDE_AGENT_SDK_ENV = {
   IS_SANDBOX: "1",
   CLAUDE_CODE_ENABLE_TASKS: "false",
 } as const;
+
+export const CLAUDE_AGENT_SDK_SETTINGS = {
+  attribution: {
+    commit: "Co-Authored-By: Rome OS <noreply@romeos.cc>",
+    pr: "🤖 Generated with [Rome OS](https://github.com/rome-os/rome)",
+  },
+} as const;
+
+// Tools that park the turn on a card the guardian answers next turn, so the
+// model correctly ends its response with no text after them. Claude Code
+// treats tools listed in CLAUDE_CODE_TERMINAL_MCP_TOOLS as terminal: its
+// no-visible-output guard skips a response whose last non-error tool results
+// came from one, instead of re-running the model to force a reply. The
+// CLI also counts a transcript ending in such a result as a finished turn, not
+// an interrupted one, on resume. Both behaviors are undocumented CLI internals
+// checked against agent SDK 0.3.293, so re-check them when bumping the SDK.
+// Names are `mcp__<server key>__<tool>` as registered by buildAnthropicMcpServers.
+const CLAUDE_TERMINAL_PARK_TOOLS = ["mcp__ask_user__ask_question"] as const;
+
+// Where ask_question asks in prose instead of parking on a card, the guard
+// stays on and still catches an empty reply.
+function terminalMcpToolsEnv(
+  inherited: string | undefined,
+  parksOnCard: boolean,
+): string | undefined {
+  if (!parksOnCard) return inherited;
+  const tools = new Set(
+    (inherited ?? "")
+      .split(",")
+      .map((tool) => tool.trim())
+      .filter(Boolean),
+  );
+  for (const tool of CLAUDE_TERMINAL_PARK_TOOLS) tools.add(tool);
+  return [...tools].join(",");
+}
 
 // Rome's efforts are a subset of Claude's, so Ultrathink (`xhigh`) maps to
 // Claude's `xhigh`, not `max`.
@@ -539,6 +575,10 @@ export class AnthropicProvider implements ModelProvider {
       CLAUDE_CODE_EFFORT_LEVEL: effort,
       // Set even when undefined, so a value Rome itself inherited never leaks in.
       ROME_CHANNEL: params.channel,
+      CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpToolsEnv(
+        queryContext.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS,
+        askQuestionParksOnCard(params),
+      ),
     };
     const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
     const authRevokedSource = queryContext.authRevokedSource;
@@ -610,6 +650,7 @@ export class AnthropicProvider implements ModelProvider {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         settingSources: ["project"],
+        settings: CLAUDE_AGENT_SDK_SETTINGS,
         ...(params.workingDir ? { cwd: params.workingDir } : {}),
         ...(params.fork
           ? {

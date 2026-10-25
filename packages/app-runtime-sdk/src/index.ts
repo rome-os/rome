@@ -1,11 +1,11 @@
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
-import type { ConversationSettingsControl } from "./conversation-settings.js";
+import type { ChatSettingsControl } from "./chat-settings.js";
 
 export { z };
 export type { JSONSchema };
-export * from "./conversation-settings.js";
+export * from "./chat-settings.js";
 
 // Browser-safe package entry point. Node-only CDP helpers live under the `/browser` subpath.
 
@@ -1186,6 +1186,17 @@ export interface ThreadContext {
   projectName?: string;
   projectPath?: string;
   /**
+   * Folder on a connected rome-node device that a chat works in. The agent
+   * still runs on Rome; it reaches the folder with `rome-node device run`.
+   * `deviceName` and `platform` are a snapshot from when the chat was created.
+   */
+  deviceFolder?: {
+    deviceId: string;
+    deviceName: string;
+    platform: string | null;
+    path: string;
+  };
+  /**
    * Bond level of the message sender, when known. Lets turn-level logic tell the
    * guardian apart from other trusted senders (inner-circle, acquaintance) who
    * reach the same `<channel>:<thread>` trusted path.
@@ -1673,21 +1684,24 @@ export interface MessageReplyReference {
   senderName?: string;
 }
 
-/** Opaque provider-owned conversation address. Callers may persist and
+/** Opaque provider-owned chat address. Callers may persist and
  * round-trip this value, but must never parse or construct one. */
-export type ConversationId = string & { readonly __brand: "ConversationId" };
+export type ChatId = string & { readonly __brand: "ChatId" };
 
-export interface ConversationRef {
+export interface ChatRef {
   connectionId: string;
-  conversationId: ConversationId;
+  chatId: ChatId;
 }
 
-export interface ConversationDescriptor {
-  ref: ConversationRef;
+export interface ChatDescriptor {
+  ref: ChatRef;
+  /** The kind of connection the chat is reached through, such as `telegram_user`. */
+  connectionKind: string;
+  /** @deprecated Read `connectionKind`, which carries the same value. */
   service: string;
   kind: "dm" | "group" | "channel" | "topic";
   displayName: string;
-  parent?: ConversationRef;
+  parent?: ChatRef;
   containerName?: string;
 }
 
@@ -1707,9 +1721,9 @@ export interface ChannelMessage {
   channel: string;
   direction: "inbound" | "outbound";
   messageId: string;
-  conversationId: ConversationId;
-  /** Parent conversation when this message belongs to a native thread. */
-  parentConversationId?: ConversationId;
+  chatId: ChatId;
+  /** Parent chat when this message belongs to a native thread. */
+  parentChatId?: ChatId;
   /** Who said it, as the channel addresses them. Empty when the channel
    *  recorded no sender for the line. */
   senderId: string;
@@ -1729,9 +1743,9 @@ export interface ChannelMessage {
  *  messages. A channel read live through its Connection reaches back a bounded
  *  default (the last day) when no `since` is named. */
 export interface ChannelMessageQuery {
-  /** One conversation, by the platform's own id for it. Absent for every
-   *  conversation the channel can read. */
-  conversationId?: ConversationId;
+  /** One chat, by the platform's own id for it. Absent for every chat the
+   *  channel can read. */
+  chatId?: ChatId;
   /** Only messages said at or after this instant. */
   since?: Date;
   /** At most this many, newest first. Defaults to 100, capped at 1,000. */
@@ -1742,6 +1756,12 @@ export interface ChannelMessageQuery {
 export interface ChannelSummary {
   /** The channel's name, as every stored row and link spells it. */
   name: string;
+  /** The platform the channel is an account on, such as `telegram`. Rome can
+   *  hold several accounts on one platform, each its own channel: a Telegram
+   *  bot and a signed-in Telegram are both on `telegram`. A channel named after
+   *  its platform is only one of them. Absent where Rome does not know the
+   *  platform. */
+  platform?: string;
   /** Whether a Connection backs the channel, so `send` has something to send
    *  through. A send can still fail while that Connection is locked or
    *  offline. */
@@ -1762,11 +1782,7 @@ export interface ChannelsService {
   list(): Promise<ChannelSummary[]>;
   /** Send on a channel, through the Connection backing it. Rejects when no
    *  Connection backs the channel. */
-  send(
-    channel: string,
-    conversationId: ConversationId,
-    message: OutgoingMessage,
-  ): Promise<MessageReceipt>;
+  send(channel: string, chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   /**
    * The channel's `messages.query`: its newest messages, newest first.
    *
@@ -1801,7 +1817,7 @@ export function chatStopReceipt(status: ChatStopStatus): string {
 }
 
 export interface ChatStopInput {
-  ref: ConversationRef;
+  ref: ChatRef;
   service: string;
   senderId: string;
 }
@@ -1811,7 +1827,7 @@ export type ChatStopHandler = (input: ChatStopInput) => Promise<ChatStopResult>;
 
 export interface MessageReceipt {
   messageId?: string;
-  conversationId: ConversationId;
+  chatId: ChatId;
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
@@ -1825,10 +1841,7 @@ export interface ChannelActivitySession {
 }
 
 export interface ChannelActivity {
-  begin(input: {
-    conversationId: ConversationId;
-    messageId?: string;
-  }): Promise<ChannelActivitySession | null>;
+  begin(input: { chatId: ChatId; messageId?: string }): Promise<ChannelActivitySession | null>;
 }
 
 /**
@@ -1863,12 +1876,14 @@ export interface ChannelDirectMessaging {
    * key a thread separately, it opens or looks up that thread, which is a
    * provider call: callers pricing a listing should treat it as one.
    */
-  conversationFor(channelUserId: string): Promise<ConversationId | null>;
+  chatFor(channelUserId: string): Promise<ChatId | null>;
+  /** @deprecated Use `chatFor`, which answers the same. */
+  conversationFor(channelUserId: string): Promise<ChatId | null>;
 }
 
 /** Sending on a channel. */
 export interface ChannelSend {
-  send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
+  send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   /** Showing the account that a reply is on its way (a typing indicator), or
    *  null or absent where the channel cannot. Cosmetic: a caller never waits
    *  on it to answer. */
@@ -1881,10 +1896,10 @@ export interface ChannelSend {
  * message, and a handler switching on `kind` keeps compiling.
  *
  * `ref` addresses the event's conversation for the APIs that take a
- * {@link ConversationRef} (conversation settings, stop), resolved by the
+ * {@link ChatRef} (conversation settings, stop), resolved by the
  * channel so a subscriber does not track what backs it.
  */
-export type InboundEvent = { kind: "message"; message: ChannelMessage; ref: ConversationRef };
+export type InboundEvent = { kind: "message"; message: ChannelMessage; ref: ChatRef };
 
 /**
  * Hearing what arrives on a channel. Every implementation owes all five:
@@ -1945,7 +1960,11 @@ export interface Channel {
  */
 export interface ChannelMessageHookDeps {
   actionEngine: ActionEngineLike;
-  conversationSettings: ConversationSettingsControl;
+  /** Each chat's settings. A host that predates the name passes only
+   *  `conversationSettings`, so read `chatSettings ?? conversationSettings`. */
+  chatSettings?: ChatSettingsControl;
+  /** @deprecated Use `chatSettings`, which is the same control. */
+  conversationSettings: ChatSettingsControl;
   chatStop: ChatStopHandler;
   /** A live array: the host appends a channel added later, such as a second
    *  bot, in place. Read it at each `register()` rather than keep a copy. */
@@ -2173,7 +2192,9 @@ export interface AppFavorCapability {
 export interface AppRuntimeRepositories {
   settings: AppSettingsRepository;
   webchatRecaps?: WebChatRecapRepository;
-  conversations?: ConversationRepository;
+  chats?: ChatRepository;
+  /** @deprecated Use `chats`, which is the same repository. */
+  conversations?: ChatRepository;
   guardianProfile?: GuardianProfileRepository;
 }
 
@@ -2198,22 +2219,27 @@ export interface AppSettingsRepository {
   set(key: string, value: unknown): Promise<void>;
 }
 
-export interface ConversationRecord {
+export interface ChatRecord {
   id: string;
   agentName: string | null;
 }
 
-export interface ConversationRepository {
-  ensureChannelConversation(input: {
-    channel: string;
-    threadId: string;
-    parentThreadId?: string;
-    threadName?: string;
-    threadType?: "private" | "group";
-    agentName: string;
-    projectName?: string;
-    projectPath?: string;
-  }): Promise<ConversationRecord>;
+/** The chat a channel thread opens, or the one already open for it. */
+export interface EnsureChannelChatInput {
+  channel: string;
+  threadId: string;
+  parentThreadId?: string;
+  threadName?: string;
+  threadType?: "private" | "group";
+  agentName: string;
+  projectName?: string;
+  projectPath?: string;
+}
+
+export interface ChatRepository {
+  ensureChannelChat(input: EnsureChannelChatInput): Promise<ChatRecord>;
+  /** @deprecated Use `ensureChannelChat`, which does the same. */
+  ensureChannelConversation(input: EnsureChannelChatInput): Promise<ChatRecord>;
   addMessage(input: {
     sessionId: string;
     role: "user" | "notification";
@@ -2658,6 +2684,8 @@ export interface EventBusTrigger {
   /** Payload conditions, AND-ed together. Absent or empty means fire on every
    * event of this name. */
   filter?: EventFilterCondition[];
+  /** Fire on the first matching event only, then disable the routine. */
+  once?: boolean;
 }
 
 /** A producer app's declaration that it can currently emit `eventType`.
@@ -2681,6 +2709,37 @@ export interface EventCatalogEntry {
    * (pre-registration); a declared schema is authoritative and is never
    * overwritten by an observed one. */
   schemaOrigin?: "observed" | "declared";
+  /** True when an installed app declares this type under `eventSources` in
+   * its app.yaml, so waiting on it can subscribe at the provider (`defer`
+   * does that). Absent for types that only show up by being emitted. */
+  subscribable?: boolean;
+  /** For a subscribable type: the equality-filter fields that pick where to
+   * subscribe. A wait must filter on every field of at least one inner list
+   * (e.g. `[["repository.full_name"], ["organization.login"]]`). Empty when
+   * the subscription follows the connected account. */
+  keys?: string[][];
+  /** Only present when the search was given `match`: whether the producer
+   * already delivers this type for that target. */
+  active?: boolean;
+}
+
+/** Result of {@link EventCatalogReader.search}. */
+export interface EventCatalogSearchResult {
+  entries: EventCatalogEntry[];
+  /** Full match count before `limit`. */
+  total: number;
+  /** Why `active` is missing on a subscribable entry when `match` was given,
+   * e.g. the provider is not connected or `match` names no target field. */
+  matchError?: string;
+}
+
+/** Options for {@link EventCatalogReader.search}. */
+export interface EventCatalogSearchOptions {
+  /** Payload field values that name a subscription target, e.g.
+   * `{ "repository.full_name": "acme/widgets" }`. When given, each
+   * subscribable match reports `active`; this asks the producer, so it costs
+   * one provider API call per returned type. */
+  match?: Record<string, string>;
 }
 
 export interface PollTrigger {
@@ -2776,7 +2835,11 @@ export interface EventPublisher {
 }
 
 export interface EventCatalogReader {
-  search(query: string, limit: number): Promise<{ entries: EventCatalogEntry[]; total: number }>;
+  search(
+    query: string,
+    limit: number,
+    options?: EventCatalogSearchOptions,
+  ): Promise<EventCatalogSearchResult>;
 }
 
 /** A system-initiated turn re-enters an established session rather than
@@ -2885,3 +2948,14 @@ export function createAppLogger(component: string): Logger {
     error: (message, data) => log("error", message, data),
   };
 }
+
+/** @deprecated Use `ChatId`. */
+export type ConversationId = ChatId;
+/** @deprecated Use `ChatRef`. */
+export type ConversationRef = ChatRef;
+/** @deprecated Use `ChatDescriptor`. */
+export type ConversationDescriptor = ChatDescriptor;
+/** @deprecated Use `ChatRecord`. */
+export type ConversationRecord = ChatRecord;
+/** @deprecated Use `ChatRepository`. */
+export type ConversationRepository = ChatRepository;

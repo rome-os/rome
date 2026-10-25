@@ -7,6 +7,11 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 rs.mock("@/components/logo", () => ({
   RomeLogo: (props: Record<string, unknown>) => <div data-testid="rome-logo" {...props} />,
 }));
+rs.mock("@/hooks/use-dashboard-identity", () => ({
+  useDashboardIdentity: () => ({
+    data: { kind: "guardian", userId: "seat", displayName: null, avatarUrl: null },
+  }),
+}));
 rs.mock("@/components/chat/TurnBranchButton", () => ({
   TurnBranchButton: () => <button type="button">side-chat-branch</button>,
 }));
@@ -218,6 +223,53 @@ function renderList(streaming: boolean) {
     ),
   };
 }
+
+describe("MessageList archived steps", () => {
+  it.each([true, false])("keeps replies and cards when assistant rows exist: %s", (hasReply) => {
+    const trace: ChatMessage = {
+      id: "archived-trace",
+      sessionId: "s-1",
+      turnId: "turn-1",
+      role: "trace",
+      content: "[]",
+      createdAt: "2026-06-13T00:00:00Z",
+      traceArchived: true,
+    };
+    const reply = questionCardTurn();
+    const finalReply = {
+      ...reply,
+      id: "final-reply",
+      content: JSON.stringify([{ type: "text", content: "The final answer" }]),
+    };
+    const messages = hasReply ? [humanReply("My question"), reply, finalReply, trace] : [trace];
+    const rows = buildRows(messages, new Map([["s-1", IDENTITY]]), IDENTITY, {
+      runningTurnId: null,
+      isStreaming: false,
+    });
+    const { live, actions } = renderList(false);
+    const onOpenStoredTrace = rs.fn();
+    render(
+      <ThemeProvider>
+        <MessageList
+          rows={rows}
+          live={{ ...live, runningTurnId: null }}
+          actions={actions}
+          contentRef={() => {}}
+          onOpenLiveTrace={() => {}}
+          onOpenStoredTrace={onOpenStoredTrace}
+        />
+      </ThemeProvider>,
+    );
+    expect(screen.getAllByText("Steps from this turn are archived.")).toHaveLength(1);
+    expect(onOpenStoredTrace).not.toHaveBeenCalled();
+    if (hasReply) {
+      expect(screen.getByText("My question")).toBeTruthy();
+      expect(screen.getByText("The final answer")).toBeTruthy();
+      expect(screen.getByPlaceholderText("Type your answer…")).toBeTruthy();
+    }
+    expect(screen.queryByRole("button", { name: /step/i })).toBeNull();
+  });
+});
 
 describe("MessageList inline-card state across streaming→settled", () => {
   it("keeps an inline question card's typed input when the turn finalizes", () => {

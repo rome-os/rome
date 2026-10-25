@@ -11,7 +11,7 @@
 //   3. The read surfaces map reader rows onto Talk's provider-neutral shapes.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-user.js";
 import { WechatUserStorePending } from "../../channels/wechat-user.js";
 import { CredentialRejected } from "../errors.js";
@@ -22,7 +22,7 @@ import { toWechatUserChannelMessage } from "../../channels/wechat-user-messages.
 import {
   createWechatUserDescriptor,
   makeWechatUserSetup,
-  WECHAT_USER_SERVICE,
+  WECHAT_USER_KIND,
   wechatUserGrantProfileSchema,
 } from "./wechat-user.js";
 
@@ -64,6 +64,7 @@ function fakeRuntime(opts: {
     ensureDesktop: rs.fn(async () => ":100"),
     ensureAccessibility: rs.fn(async () => {}),
     repairDesktop: rs.fn(async () => {}),
+    pressSignIn: rs.fn(async (_display: string, _signal?: AbortSignal) => false),
     captureLoginQr: rs.fn(async () => opts.qr ?? null),
     captures: 0,
     holdCapture: rs.fn(function (this: { captures: number }) {
@@ -349,7 +350,7 @@ describe("toWechatUserChannelMessage", () => {
   it("attributes an authorless notice to the chat it arrived in", () => {
     const message = toWechatUserChannelMessage({
       id: "notifymessage:44",
-      conversationId: "notifymessage",
+      chatId: "notifymessage",
       isGroup: false,
       senderId: "",
       isSelf: false,
@@ -364,7 +365,7 @@ describe("toWechatUserChannelMessage", () => {
   it("carries the group name and sender through", () => {
     const message = toWechatUserChannelMessage({
       id: "45357963768@chatroom:8123",
-      conversationId: "45357963768@chatroom",
+      chatId: "45357963768@chatroom",
       conversationName: "Karball",
       isGroup: true,
       senderId: "wxid_zhs",
@@ -386,7 +387,7 @@ describe("the WeChat personal Talker", () => {
     fault: (err: StreamFault) => void = () => {},
     probeIntervalMs = 60_000,
   ) {
-    const descriptor = createWechatUserDescriptor({ runtime, probeIntervalMs });
+    const descriptor = createWechatUserDescriptor({ runtime, probeIntervalMs, pollIntervalMs: 1 });
     const kit = {
       connectionId: "conn-wechat-user",
       persist: async () => {},
@@ -523,6 +524,57 @@ describe("the WeChat personal Talker", () => {
     }
   });
 
+  it("presses a remembered account's sign-in and stays silent once it signs in", async () => {
+    const runtime = fakeRuntime({ statuses: [{ ...READY, state: "awaiting-scan" }, READY] });
+    rs.mocked(runtime.pressSignIn).mockResolvedValue(true);
+    const fault = rs.fn();
+    const { talker, degradation } = buildTalker(runtime, fault);
+    try {
+      await rs.waitFor(() => expect(runtime.status).toHaveBeenCalledTimes(2));
+      expect(runtime.pressSignIn).toHaveBeenCalledTimes(1);
+      expect(rs.mocked(runtime.pressSignIn).mock.calls[0]![0]).toBe(":100");
+      expect(degradation()).toBeNull();
+      expect(fault).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("presses sign-in once per client process", async () => {
+    const waiting = { ...READY, state: "awaiting-scan" as const };
+    // pid 42 is pressed and signs in, then waits again (say the phone signed it
+    // out): it is not pressed a second time. A new process, pid 43, is.
+    const runtime = fakeRuntime({
+      statuses: [waiting, READY, waiting, waiting, { ...waiting, pid: 43 }, READY],
+    });
+    rs.mocked(runtime.pressSignIn).mockResolvedValue(true);
+    const { talker, degradation } = buildTalker(runtime, undefined, 5);
+    try {
+      await rs.waitFor(() => expect(runtime.pressSignIn).toHaveBeenCalledTimes(2));
+      await rs.waitFor(() => expect(degradation()).toBeNull());
+      const reads = rs.mocked(runtime.status).mock.calls.length;
+      await rs.waitFor(() =>
+        expect(rs.mocked(runtime.status).mock.calls.length).toBeGreaterThan(reads + 2),
+      );
+      expect(runtime.pressSignIn).toHaveBeenCalledTimes(2);
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("tries sign-in again on the next probe when no button was found", async () => {
+    const waiting = { ...READY, state: "awaiting-scan" as const };
+    const runtime = fakeRuntime({ statuses: [waiting, waiting, READY] });
+    rs.mocked(runtime.pressSignIn).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const { talker, degradation } = buildTalker(runtime, undefined, 5);
+    try {
+      await rs.waitFor(() => expect(degradation()).toBeNull());
+      expect(runtime.pressSignIn).toHaveBeenCalledTimes(2);
+    } finally {
+      await talker.stop();
+    }
+  });
+
   it("recovers a later crash and clears degradation after the client resumes", async () => {
     const runtime = fakeRuntime({ statuses: [READY, { ...READY, running: false }, READY] });
     const { talker, degradation } = buildTalker(runtime, undefined, 5);
@@ -560,9 +612,7 @@ describe("the WeChat personal Talker", () => {
   it("is read-only: send throws, direct messaging is absent, nothing delivered", async () => {
     const { talker, deliver } = buildTalker(fakeRuntime({ statuses: [READY] }));
 
-    await expect(talker.send("wxid_friend" as ConversationId, { text: "hi" })).rejects.toThrow(
-      /read-only/,
-    );
+    await expect(talker.send("wxid_friend" as ChatId, { text: "hi" })).rejects.toThrow(/read-only/);
     expect(talker.directMessaging).toBeUndefined();
     expect(deliver).not.toHaveBeenCalled();
 
@@ -596,14 +646,16 @@ describe("the WeChat personal Talker", () => {
     const page = await talker.directory!.listConversations({ limit: 10 });
     expect(page.conversations).toEqual([
       {
-        ref: { connectionId: "conn-wechat-user", conversationId: "45357963768@chatroom" },
-        service: WECHAT_USER_SERVICE,
+        ref: { connectionId: "conn-wechat-user", chatId: "45357963768@chatroom" },
+        connectionKind: WECHAT_USER_KIND,
+        service: WECHAT_USER_KIND,
         kind: "group",
         displayName: "Karball",
       },
       {
-        ref: { connectionId: "conn-wechat-user", conversationId: "wxid_friend" },
-        service: WECHAT_USER_SERVICE,
+        ref: { connectionId: "conn-wechat-user", chatId: "wxid_friend" },
+        connectionKind: WECHAT_USER_KIND,
+        service: WECHAT_USER_KIND,
         kind: "dm",
         displayName: "A Friend",
       },

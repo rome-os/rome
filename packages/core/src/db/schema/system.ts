@@ -9,7 +9,8 @@ import {
   type SQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-import type { AgentInputState, StoredConversationSettings } from "@rome-os/app-runtime";
+import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
+import type { DeviceFolder } from "@rome/api-types/devices";
 import type { OutboxMessage } from "@rome/api-types/people";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
@@ -28,11 +29,11 @@ export const sessions = sqliteTable(
     id: text("id").primaryKey(),
     agentName: text("agent_name").notNull(),
     channelThreadKey: text("channel_thread_key"),
-    /** The Rome conversation (`rome_sessions.id`) this session serves. Null for
-     *  rows written before the column existed and for sessions whose caller
-     *  named no conversation. No foreign key: channel, action and subagent
-     *  conversations are recorded after their first session is created. */
-    conversationId: text("conversation_id"),
+    /** The Rome chat (`rome_sessions.id`) this session serves. Null for rows
+     *  written before the column existed and for sessions whose caller named
+     *  no chat. No foreign key: channel, action and subagent chats are
+     *  recorded after their first session is created. */
+    chatId: text("chat_id"),
     /** Which provider produced this conversation's thread, so a resumed session
      *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
      *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
@@ -57,7 +58,7 @@ export const sessions = sqliteTable(
       enum: ["active", "completed", "error"],
     }).notNull(),
   },
-  (table) => [index("idx_sessions_conversation").on(table.conversationId)],
+  (table) => [index("idx_sessions_chat").on(table.chatId)],
 );
 
 // Provider-native history anchor for one successfully completed Rome turn.
@@ -172,9 +173,9 @@ export const outboundMessages = sqliteTable(
     id: text("id").primaryKey(),
     channel: text("channel").notNull(),
     channelUserId: text("channel_user_id").notNull(),
-    /** The conversation the channel resolved the address to, kept so a retry
-     *  does not have to ask again. */
-    conversationId: text("conversation_id").notNull(),
+    /** The chat the channel resolved the address to, kept so a retry does
+     *  not have to ask again. */
+    chatId: text("chat_id").notNull(),
     text: text("text").notNull(),
     state: text("state", { enum: ["sending", "unconfirmed", "failed"] }).notNull(),
     /** The channel's own id for the message, once it has taken it. Null while
@@ -428,6 +429,17 @@ export const guardianAuth = sqliteTable("guardian_auth", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+// The last Rome Cloud profile each visitor signed in with, kept so other
+// dashboard people see who sent a chat message. A visitor's own session holds
+// the same fields, but only in their cookie. Display only, never used for
+// authentication; a sign-in overwrites the row.
+export const visitorProfiles = sqliteTable("visitor_profiles", {
+  accountId: text("account_id").primaryKey(),
+  email: text("email").notNull(),
+  avatarUrl: text("avatar_url"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 export const oauthPendingAttempts = sqliteTable(
   "oauth_pending_attempts",
   {
@@ -489,6 +501,9 @@ export const romeSessions = sqliteTable(
     largeModelSelection: text("large_model_selection"),
     projectName: text("project_name").notNull().default(DEFAULT_WEBCHAT_PROJECT_NAME),
     projectPath: text("project_path"),
+    // Folder on a rome-node device the chat works in, set only when the chat
+    // is created. NULL for every chat without one and every other session type.
+    deviceFolder: text("device_folder", { mode: "json" }).$type<DeviceFolder>(),
     // Agent the session is bound to. NULL means the default "main" agent.
     // Locked on first turn so the session can't switch agents mid-thread.
     agentName: text("agent_name"),
@@ -501,7 +516,7 @@ export const romeSessions = sqliteTable(
     sourceThreadType: text("source_thread_type"),
     // Versioned policy overrides for channel conversations. Agent routing is
     // intentionally not duplicated here; agentName is its canonical column.
-    channelSettings: text("channel_settings", { mode: "json" }).$type<StoredConversationSettings>(),
+    channelSettings: text("channel_settings", { mode: "json" }).$type<StoredChatSettings>(),
     triggerKind: text("trigger_kind"),
     triggerName: text("trigger_name"),
     triggerActionName: text("trigger_action_name"),
@@ -725,6 +740,21 @@ export const romeAgentMessages = sqliteTable(
   ],
 );
 
+// The platform messages a message row stands for besides its own
+// platform_message_id. A reply the platform shows as several messages is one
+// row, and a quote of any of them reaches it. Not a FK, as with the trace
+// blocks below: session-scoped deletes remove these rows explicitly.
+export const romeAgentMessagePlatformIds = sqliteTable(
+  "rome_agent_message_platform_ids",
+  {
+    sessionId: text("session_id").notNull(),
+    platformMessageId: text("platform_message_id").notNull(),
+    // The rome_agent_messages row the platform message belongs to.
+    messageId: text("message_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.platformMessageId] })],
+);
+
 // Append-only storage for trace content, avoiding the O(N²) cost of storing
 // the whole trace as one JSON array on the role='trace' rome_agent_messages
 // row and re-serializing it after every agent event — that multi-megabyte
@@ -865,24 +895,24 @@ export const executionJournal = sqliteTable(
   ],
 );
 
-// One row per minted Connection. A Service may hold several. The many-to-many
+// One row per minted Connection. A connection kind may hold several. The many-to-many
 // grant ledger lives in `connection_grants` below, keyed by custody (the
 // connectionId).
 export const connections = sqliteTable("connections", {
   id: text("id").primaryKey(),
-  service: text("service").notNull(),
+  connectionKind: text("connection_kind").notNull(),
   label: text("label").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
 // One row per channel a Connection backs: Rome's presence on a platform, with
-// an id minted once and never changed. The first channel of a service takes
-// the service's name as its id, and later ones get an opaque id. A linkable
-// service's account connected through setup always gets an opaque id, and only
+// an id minted once and never changed. The first channel of a connection kind takes
+// the connection kind's name as its id, and later ones get an opaque id. A linkable
+// connection kind's account connected through setup always gets an opaque id, and only
 // its account from before channels were recorded keeps the name. A row
 // outlives its Connection, unbacked and unlinked, so its id is never minted
-// again: a linkable service's next Connection gets a channel of its own, and
-// another service's takes the row back. `agent` is the canonical id of the
+// again: a linkable connection kind's next Connection gets a channel of its own, and
+// another connection kind's takes the row back. `agent` is the canonical id of the
 // account's agent, and one agent may be the agent of any number of channels,
 // several on one platform included. `platform` is the platform the row was
 // minted on, and the row keeps it.
@@ -890,7 +920,7 @@ export const channels = sqliteTable(
   "channels",
   {
     id: text("id").primaryKey(),
-    service: text("service").notNull(),
+    connectionKind: text("connection_kind").notNull(),
     platform: text("platform").notNull(),
     connectionId: text("connection_id"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),

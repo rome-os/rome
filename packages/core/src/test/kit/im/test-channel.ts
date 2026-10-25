@@ -1,12 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  ChannelMessage,
-  ConversationId,
-  MessageReceipt,
-  OutgoingMessage,
-} from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import type { DeliveryTransport } from "../../../channels/delivery/types.js";
 import { DISCORD_USER, DiscordPeer } from "./discord.js";
 import type { Peer } from "./peer.js";
@@ -23,7 +18,7 @@ export type Platform = "telegram" | "wechat" | "discord";
 export interface TestChannel {
   readonly platform: Platform;
   readonly peer: Peer;
-  readonly conversation: ConversationId;
+  readonly conversation: ChatId;
   /** Rome sends into the conversation through the adapter. */
   send(message: OutgoingMessage): Promise<MessageReceipt>;
   /** The user writes `text`; resolves with the message the adapter delivers. */
@@ -36,7 +31,7 @@ export interface TestChannel {
 }
 
 interface Adapter {
-  send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
+  send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
   onInbound(handler: (message: ChannelMessage) => Promise<void>): void;
   stop(): Promise<void>;
 }
@@ -118,7 +113,7 @@ const telegram = () =>
     undo(() => adapter.stop());
     await adapter.start();
     await peer.untilPolling();
-    const conversation = String(TELEGRAM_CHAT) as ConversationId;
+    const conversation = String(TELEGRAM_CHAT) as ChatId;
     return {
       platform: "telegram",
       peer,
@@ -150,7 +145,7 @@ const wechat = () =>
     // Registered first, so an adapter that fails to start is still stopped.
     undo(() => adapter.stop());
     await adapter.start();
-    const conversation = WECHAT_USER as ConversationId;
+    const conversation = WECHAT_USER as ChatId;
     return {
       platform: "wechat",
       peer,
@@ -175,7 +170,7 @@ const discord = () =>
     // caches none. Opening the DM caches it, so the user's first message
     // reaches the adapter. Whether Discord's real DM events avoid this is
     // unverified.
-    const conversation = (await adapter.directConversationFor(DISCORD_USER)) as ConversationId;
+    const conversation = (await adapter.directConversationFor(DISCORD_USER)) as ChatId;
     return {
       platform: "discord",
       peer,

@@ -1,14 +1,14 @@
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { AppManagerError } from "./manager.js";
 import { PACKED_ARTIFACT_SENTINEL, packArtifact, packBundle } from "./packaging/index.js";
 import { remixApp } from "./remix.js";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
 import { AppLockfileSchema, APPS_LOCKFILE_SCHEMA_VERSION, type SpecSource } from "./lockfile.js";
-import type { ResolvedApp } from "./state.js";
+import { isResolvedApp, type ResolvedApp } from "./state.js";
 
 const SAMPLE_MANIFEST = `formatVersion: 1
 id: testapp
@@ -649,6 +649,94 @@ sideEffects: read-only
     const result = await install;
     expect(result.installedHash).toBe(activeHash);
     expect(installSettled).toBe(true);
+  });
+
+  describe("reinstall", () => {
+    const AGENT_MANIFEST = SAMPLE_MANIFEST.replace("agents: []", "agents:\n  - agents/helper.yaml");
+
+    async function agentBundle(label: string): Promise<SpecSource> {
+      const root = await makeWorkspace(join(harness.profileRoot, `agent-${label}`), AGENT_MANIFEST);
+      await mkdir(join(root, "agents"));
+      await writeFile(
+        join(root, "agents", "helper.yaml"),
+        `name: helper\ndescription: Helper ${label}.\ntier: small\npermissionMode: default\ntools: []\nsystemPromptPrefix: Help.\n`,
+        "utf-8",
+      );
+      return { mode: "bundle", path: await packWorkspace(root) };
+    }
+
+    function recordCatalogView() {
+      const seen: Array<{ state: string | undefined; bundle: string | null; agents: string[] }> =
+        [];
+      harness.catalog.subscribe(function recordView(event) {
+        const view = event.current;
+        seen.push({
+          state: view?.state,
+          bundle: isResolvedApp(view) ? basename(view.rootPath) : null,
+          agents: harness.catalog
+            .listArtifacts("agent")
+            .filter((ref) => ref.ownerId === "testapp")
+            .map((ref) => basename(dirname(dirname(ref.absolutePath)))),
+        });
+      });
+      return seen;
+    }
+
+    it("keeps the previous bundle and its agents loaded until the new bundle replaces it", async () => {
+      const firstSource = await agentBundle("one");
+      const first = await harness.appManager.install({ source: firstSource });
+      const seen = recordCatalogView();
+      const sources: unknown[] = [];
+      harness.catalog.subscribe(function recordSource(event) {
+        sources.push(event.current?.source);
+      });
+
+      const secondSource = await agentBundle("two");
+      const second = await harness.appManager.install({ source: secondSource });
+
+      expect(second.installedHash).not.toBe(first.installedHash);
+      expect(sources).toEqual([firstSource, secondSource]);
+      expect(seen).toEqual([
+        { state: "installing", bundle: first.installedHash, agents: [first.installedHash] },
+        { state: "installed", bundle: second.installedHash, agents: [second.installedHash] },
+      ]);
+    });
+
+    it("loads nothing for a first install until the bundle is in place", async () => {
+      const seen = recordCatalogView();
+
+      const result = await harness.appManager.install({ source: await agentBundle("one") });
+
+      expect(seen).toEqual([
+        { state: "installing", bundle: null, agents: [] },
+        { state: "installed", bundle: result.installedHash, agents: [result.installedHash] },
+      ]);
+    });
+
+    it("settles to the failed state when the reinstall fails", async () => {
+      await harness.appManager.install({ source: await agentBundle("one") });
+      const seen = recordCatalogView();
+      rs.spyOn(harness.installer, "materialize").mockRejectedValueOnce(new Error("disk full"));
+
+      const result = await harness.appManager.install({ source: await agentBundle("two") });
+
+      expect(result.state).toBe("failed");
+      expect(seen.at(-1)).toEqual({ state: "failed", bundle: null, agents: [] });
+    });
+
+    it("collects old bundles only after the catalog stops serving them", async () => {
+      await harness.appManager.install({ source: await agentBundle("one") });
+      const collect = harness.installer.gcInstalledCache.bind(harness.installer);
+      const servedAtCollection: Array<string | null | undefined> = [];
+      rs.spyOn(harness.installer, "gcInstalledCache").mockImplementation(async (appId, opts) => {
+        servedAtCollection.push(harness.catalog.get(appId)?.installedHash);
+        await collect(appId, opts);
+      });
+
+      const second = await harness.appManager.install({ source: await agentBundle("two") });
+
+      expect(servedAtCollection).toEqual([second.installedHash]);
+    });
   });
 
   it("boot probes active symlink and marks broken when hash drifts", async () => {

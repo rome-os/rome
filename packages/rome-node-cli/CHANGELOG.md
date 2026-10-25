@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.1.6](https://github.com/rome-os/rome/compare/node-v0.1.5...node-v0.1.6) (2026-10-23)
+
+
+### Features
+
+* let a new chat work in a folder on a connected device ([#1267](https://github.com/rome-os/rome/issues/1267)) ([c327426](https://github.com/rome-os/rome/commit/c3274267262499ebb2a8a9354b962e74c6a00c36))
+* **node:** rename and remove devices from the Devices page ([#1286](https://github.com/rome-os/rome/issues/1286)) ([bb3385f](https://github.com/rome-os/rome/commit/bb3385fe2ba53c6ca353973af0c65e5fcf1a8470))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/node-core bumped to 0.1.5
+
+## [0.1.5](https://github.com/rome-os/rome/compare/node-v0.1.4...node-v0.1.5) (2026-10-21)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/node-core bumped to 0.1.4
+
 ## [0.1.4](https://github.com/rome-os/rome/compare/node-v0.1.3...node-v0.1.4) (2026-10-16)
 
 

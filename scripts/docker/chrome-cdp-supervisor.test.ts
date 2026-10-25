@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -184,6 +185,291 @@ sleep 0.1
       "--disable-features=IgnoreDuplicateNavs",
     ]);
     expect(supervisor.exitCode).toBeNull();
+  });
+
+  it("clears leftover BrowserMetrics files before each launch", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-supervisor-"));
+    tempDirs.push(tempDir);
+
+    const binDir = join(tempDir, "bin");
+    const countFile = join(tempDir, "chrome-count");
+    const profileDir = join(tempDir, "profile");
+    const metricsDir = join(profileDir, "BrowserMetrics");
+    mkdirSync(binDir);
+    mkdirSync(metricsDir, { recursive: true });
+    writeFileSync(countFile, "0\n", "utf8");
+    writeFileSync(join(metricsDir, "BrowserMetrics-stale.pma"), "stale");
+    writeFileSync(join(profileDir, "BrowserMetrics-spare.pma"), "spare");
+
+    makeExecutable(
+      join(binDir, "curl"),
+      `#!/usr/bin/env bash
+printf '{"User-Agent":"FakeChrome"}\\n'
+`,
+    );
+    makeExecutable(
+      join(binDir, "socat"),
+      `#!/usr/bin/env bash
+trap 'exit 0' INT TERM
+while true; do sleep 1; done
+`,
+    );
+    makeExecutable(
+      join(tempDir, "fake-chrome"),
+      `#!/usr/bin/env bash
+count="$(cat "$FAKE_CHROME_COUNT_FILE")"
+count=$((count + 1))
+printf 'metrics' >"$FAKE_CHROME_METRICS_DIR/BrowserMetrics-$count.pma"
+printf '%s\\n' "$count" >"$FAKE_CHROME_COUNT_FILE"
+sleep 0.1
+`,
+    );
+
+    supervisor = spawn("bash", [SCRIPT_PATH], {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        FAKE_CHROME_COUNT_FILE: countFile,
+        FAKE_CHROME_METRICS_DIR: metricsDir,
+        ROME_CHROME_BINARY: join(tempDir, "fake-chrome"),
+        ROME_CHROME_ENABLE_STEALTH: "0",
+        ROME_CHROME_KEEP_ALIVE: "1",
+        ROME_CHROME_RESTART_DELAY: "0.05",
+        ROME_CHROME_MAX_RESTART_DELAY: "0.1",
+        ROME_CHROME_STARTUP_WAIT: "1",
+        ROME_CHROME_USER_AGENT: "FakeChrome",
+        ROME_CHROME_USER_DATA_DIR: profileDir,
+      },
+    });
+
+    const count = await waitForCount(countFile, 3);
+    const metricsFiles = readdirSync(metricsDir);
+
+    expect(count).toBeGreaterThanOrEqual(3);
+    expect(metricsFiles).not.toContain("BrowserMetrics-stale.pma");
+    expect(metricsFiles.length).toBeLessThanOrEqual(1);
+    expect(existsSync(join(profileDir, "BrowserMetrics-spare.pma"))).toBe(true);
+    expect(supervisor.exitCode).toBeNull();
+  });
+
+  it("backs off exponentially while Chrome keeps failing to start", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-supervisor-"));
+    tempDirs.push(tempDir);
+
+    const binDir = join(tempDir, "bin");
+    mkdirSync(binDir);
+
+    makeExecutable(join(binDir, "curl"), "#!/usr/bin/env bash\nexit 7\n");
+    makeExecutable(join(binDir, "socat"), "#!/usr/bin/env bash\nexec sleep 30\n");
+    makeExecutable(join(tempDir, "fake-chrome"), "#!/usr/bin/env bash\nexit 1\n");
+
+    supervisor = spawn("bash", [SCRIPT_PATH], {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        ROME_CHROME_BINARY: join(tempDir, "fake-chrome"),
+        ROME_CHROME_ENABLE_STEALTH: "0",
+        ROME_CHROME_KEEP_ALIVE: "1",
+        ROME_CHROME_RESTART_DELAY: "0.1",
+        ROME_CHROME_MAX_RESTART_DELAY: "0.4",
+        ROME_CHROME_STARTUP_WAIT: "1",
+        ROME_CHROME_USER_AGENT: "FakeChrome",
+        ROME_CHROME_USER_DATA_DIR: join(tempDir, "profile"),
+      },
+    });
+
+    let output = "";
+    supervisor.stdout.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    const retryDelays = () =>
+      [...output.matchAll(/retrying in ([\d.]+)s/g)].map((match) => match[1]);
+    const deadline = Date.now() + 5_000;
+    while (retryDelays().length < 4 && Date.now() < deadline) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+
+    expect(retryDelays().slice(0, 4)).toEqual(["0.1", "0.2", "0.4", "0.4"]);
+    expect(supervisor.exitCode).toBeNull();
+  });
+
+  it("clears a metrics backlog too large to pass as arguments", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-supervisor-"));
+    tempDirs.push(tempDir);
+
+    const binDir = join(tempDir, "bin");
+    const profileDir = join(tempDir, "profile");
+    const metricsDir = join(profileDir, "BrowserMetrics");
+    mkdirSync(binDir);
+    mkdirSync(metricsDir, { recursive: true });
+    // A crash loop leaves tens of thousands of these. Together their paths
+    // exceed the argument limit on Linux and macOS.
+    for (let i = 0; i < 25_000; i += 1)
+      writeFileSync(join(metricsDir, `BrowserMetrics-${"0".repeat(48)}-${i}.pma`), "");
+
+    makeExecutable(
+      join(binDir, "curl"),
+      `#!/usr/bin/env bash\nprintf '{"User-Agent":"FakeChrome"}\\n'\n`,
+    );
+    makeExecutable(join(binDir, "socat"), "#!/usr/bin/env bash\nexec sleep 30\n");
+    makeExecutable(join(tempDir, "fake-chrome"), "#!/usr/bin/env bash\nexec sleep 30\n");
+
+    supervisor = spawn("bash", [SCRIPT_PATH], {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        ROME_CHROME_BINARY: join(tempDir, "fake-chrome"),
+        ROME_CHROME_ENABLE_STEALTH: "0",
+        ROME_CHROME_KEEP_ALIVE: "1",
+        ROME_CHROME_STARTUP_WAIT: "1",
+        ROME_CHROME_USER_AGENT: "FakeChrome",
+        ROME_CHROME_USER_DATA_DIR: profileDir,
+      },
+    });
+    // The supervisor prints CDP's version once Chrome is up.
+    await new Promise<void>((resolveWait, reject) => {
+      supervisor!.stdout.on("data", (chunk: Buffer) => {
+        if (chunk.toString().includes("FakeChrome")) resolveWait();
+      });
+      supervisor!.once("exit", (code) => reject(new Error(`Chrome supervisor exited: ${code}`)));
+    });
+
+    expect(readdirSync(metricsDir)).toEqual([]);
+  }, 30_000);
+
+  it("stops at once when terminated during a backoff", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-supervisor-"));
+    tempDirs.push(tempDir);
+
+    const binDir = join(tempDir, "bin");
+    mkdirSync(binDir);
+    makeExecutable(join(binDir, "curl"), "#!/usr/bin/env bash\nexit 7\n");
+    makeExecutable(join(binDir, "socat"), "#!/usr/bin/env bash\nexec sleep 30\n");
+    makeExecutable(join(tempDir, "fake-chrome"), "#!/usr/bin/env bash\nexit 1\n");
+
+    supervisor = spawn("bash", [SCRIPT_PATH], {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        ROME_CHROME_BINARY: join(tempDir, "fake-chrome"),
+        ROME_CHROME_ENABLE_STEALTH: "0",
+        ROME_CHROME_KEEP_ALIVE: "1",
+        ROME_CHROME_RESTART_DELAY: "20",
+        ROME_CHROME_STARTUP_WAIT: "1",
+        ROME_CHROME_USER_AGENT: "FakeChrome",
+        ROME_CHROME_USER_DATA_DIR: join(tempDir, "profile"),
+      },
+    });
+    await new Promise<void>((resolveWait) => {
+      supervisor!.stdout.on("data", (chunk: Buffer) => {
+        if (chunk.toString().includes("retrying in 20s")) resolveWait();
+      });
+    });
+
+    const stoppedAt = Date.now();
+    supervisor.kill("SIGTERM");
+    await new Promise<void>((resolveWait) => supervisor!.once("exit", () => resolveWait()));
+
+    expect(Date.now() - stoppedAt).toBeLessThan(3_000);
+  });
+
+  it("restarts Chrome after a clean exit without backing off", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-supervisor-"));
+    tempDirs.push(tempDir);
+
+    const binDir = join(tempDir, "bin");
+    mkdirSync(binDir);
+    makeExecutable(
+      join(binDir, "curl"),
+      `#!/usr/bin/env bash\nprintf '{"User-Agent":"FakeChrome"}\\n'\n`,
+    );
+    makeExecutable(join(binDir, "socat"), "#!/usr/bin/env bash\nexec sleep 30\n");
+    makeExecutable(join(tempDir, "fake-chrome"), "#!/usr/bin/env bash\nsleep 0.1\n");
+
+    supervisor = spawn("bash", [SCRIPT_PATH], {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        ROME_CHROME_BINARY: join(tempDir, "fake-chrome"),
+        ROME_CHROME_ENABLE_STEALTH: "0",
+        ROME_CHROME_KEEP_ALIVE: "1",
+        ROME_CHROME_RESTART_DELAY: "0.1",
+        ROME_CHROME_MAX_RESTART_DELAY: "10",
+        ROME_CHROME_STARTUP_WAIT: "1",
+        ROME_CHROME_USER_AGENT: "FakeChrome",
+        ROME_CHROME_USER_DATA_DIR: join(tempDir, "profile"),
+      },
+    });
+
+    let output = "";
+    supervisor.stdout.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    const restartDelays = () =>
+      [...output.matchAll(/status 0 after \d+s; restarting in ([\d.]+)s/g)].map(
+        (match) => match[1],
+      );
+    const deadline = Date.now() + 5_000;
+    while (restartDelays().length < 3 && Date.now() < deadline) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+
+    expect(restartDelays().slice(0, 3)).toEqual(["0.1", "0.1", "0.1"]);
+  });
+
+  it.each([
+    // A cap below the restart delay is raised to it, never to no wait at all.
+    ["0", ["0.1", "0.1", "0.1"]],
+    // A cap that is not a number falls back to the default.
+    ["soon", ["0.1", "0.2", "0.4"]],
+  ] as const)("names and replaces a delay cap of %s", async (cap, expected) => {
+    const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-supervisor-"));
+    tempDirs.push(tempDir);
+
+    const binDir = join(tempDir, "bin");
+    mkdirSync(binDir);
+    makeExecutable(join(binDir, "curl"), "#!/usr/bin/env bash\nexit 7\n");
+    makeExecutable(join(binDir, "socat"), "#!/usr/bin/env bash\nexec sleep 30\n");
+    makeExecutable(join(tempDir, "fake-chrome"), "#!/usr/bin/env bash\nexit 1\n");
+
+    supervisor = spawn("bash", [SCRIPT_PATH], {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        ROME_CHROME_BINARY: join(tempDir, "fake-chrome"),
+        ROME_CHROME_ENABLE_STEALTH: "0",
+        ROME_CHROME_KEEP_ALIVE: "1",
+        ROME_CHROME_RESTART_DELAY: "0.1",
+        ROME_CHROME_MAX_RESTART_DELAY: cap,
+        ROME_CHROME_STARTUP_WAIT: "1",
+        ROME_CHROME_USER_AGENT: "FakeChrome",
+        ROME_CHROME_USER_DATA_DIR: join(tempDir, "profile"),
+      },
+    });
+
+    let output = "";
+    let errors = "";
+    supervisor.stdout.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    supervisor.stderr.on("data", (chunk: Buffer) => {
+      errors += chunk.toString();
+    });
+    const retryDelays = () =>
+      [...output.matchAll(/retrying in ([\d.]+)s/g)].map((match) => match[1]);
+    const deadline = Date.now() + 5_000;
+    while (retryDelays().length < 3 && Date.now() < deadline) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+
+    expect(retryDelays().slice(0, 3)).toEqual(expected);
+    expect(errors).toContain(`ROME_CHROME_MAX_RESTART_DELAY=${cap}`);
   });
 
   it("bypasses the Debian Chromium wrapper and strips Google OAuth env vars", async () => {

@@ -28,7 +28,8 @@ import {
   type NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import type { ConversationSettingsService } from "../../conversation-settings/service.js";
+import type { ChatSettingsService } from "../../chat-settings/service.js";
+import type { FeishuStreamingStyle } from "../../channels/delivery/streaming-switch.js";
 import {
   type CreateLarkChannel,
   FeishuAdapter,
@@ -131,7 +132,7 @@ export function feishuProfileFromSettings(
  * card offers. `createChannel` is injectable so tests drive a fake LarkChannel.
  */
 export interface FeishuDescriptorDeps {
-  conversationSettings: ConversationSettingsService;
+  chatSettings: ChatSettingsService;
   personMappingRepo: PersonMappingRepository;
   listAgents: () => string[];
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
@@ -139,6 +140,8 @@ export interface FeishuDescriptorDeps {
   accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
+  /** How a streamed reply shows, read for each message it creates. */
+  replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
   createChannel?: CreateLarkChannel;
   /** Injectable setup seams so tests drive the ceremony without the
    *  network / SDK long connection. Production uses the defaults below. */
@@ -527,7 +530,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
   });
 
   return {
-    service: "feishu",
+    connectionKind: "feishu",
     severalAccounts: true,
     reviveProfile: (_grant, record) => reviveFeishuProfile(record),
     accountIdOf: (_grant, record) => (typeof record.appId === "string" && record.appId) || null,
@@ -555,11 +558,12 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             appSecret: app.appSecret,
             domain: app.domain,
             connectionId: kit.connectionId,
-            conversationSettings: deps.conversationSettings,
+            chatSettings: deps.chatSettings,
             personMappingRepo: deps.personMappingRepo,
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,
+            replyStreamingStyle: deps.replyStreamingStyle,
             onFault: routeFault,
           };
           const adapter = new FeishuAdapter(config, createChannel);
@@ -597,9 +601,9 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
                 conversations: page.items.map((conversation) => ({
                   ref: {
                     connectionId: kit.connectionId,
-                    conversationId:
-                      conversation.id as import("@rome-os/app-runtime").ConversationId,
+                    chatId: conversation.id as import("@rome-os/app-runtime").ChatId,
                   },
+                  connectionKind: "feishu",
                   service: "feishu",
                   kind: conversation.kind,
                   displayName: conversation.displayName,
@@ -612,6 +616,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             directMessaging: addressIsConversationFeature(),
             activity,
             directory,
+            replyDelivery: adapter.replyDelivery(),
           };
           return {
             start(deliver, fault): void {
@@ -625,9 +630,9 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             stop(): Promise<void> {
               return adapter.stop();
             },
-            async send(conversationId, msg) {
+            async send(chatId, msg) {
               try {
-                return await adapter.send(conversationId, msg);
+                return await adapter.send(chatId, msg);
               } catch (err) {
                 // A tenant-access-token failure from send is a refused credential.
                 if (isFeishuAuthError(err)) {

@@ -32,7 +32,7 @@ function row(overrides: Record<string, unknown>) {
     session_name: "Chat",
     thread_name: null,
     channel: "telegram",
-    service: "telegram",
+    connection_kind: "telegram",
     platform: "telegram",
     role: "user",
     agent_name: null,
@@ -61,7 +61,7 @@ describe("get_account_chats", () => {
       row({
         session_id: "s2",
         channel: "c7f3a1",
-        service: "discord",
+        connection_kind: "discord",
         platform: "discord",
         thread_name: "general",
         sender_name: "Bob",
@@ -82,8 +82,8 @@ describe("get_account_chats", () => {
     expect(data.content).toContain('**Person "Bob"**:\n> from the second account');
   });
 
-  it("names the service when it differs from the platform", async () => {
-    const rows = [row({ channel: "telegram_user", service: "telegram_user" })];
+  it("names the connection kind when it differs from the platform", async () => {
+    const rows = [row({ channel: "telegram_user", connection_kind: "telegram_user" })];
 
     const result = await createAction(actionConfig, makeDeps(rows)).execute({});
 
@@ -238,10 +238,10 @@ describe("get_account_chats against the system schema", () => {
     return { appContext: { db: { connection: testDb.db } } } as unknown as AppActionRuntimeDeps;
   }
 
-  function seedChannel(id: string, service: string, platform: string, agent?: string): void {
+  function seedChannel(id: string, kind: string, platform: string, agent?: string): void {
     testDb.db.run(sql`
-      INSERT INTO channels (id, service, platform, agent, created_at)
-      VALUES (${id}, ${service}, ${platform}, ${agent ?? null}, ${Math.floor(Date.now() / 1000)})
+      INSERT INTO channels (id, connection_kind, platform, agent, created_at)
+      VALUES (${id}, ${kind}, ${platform}, ${agent ?? null}, ${Math.floor(Date.now() / 1000)})
     `);
   }
 

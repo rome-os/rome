@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { REST, type RequestMethod, Routes } from "discord.js";
 import type { DiscordAdapter } from "../../../channels/discord.js";
 import { comparable, loadCapture } from "./capture.js";
@@ -8,7 +8,7 @@ import { DISCORD_DM, DISCORD_TOKEN, DiscordPeer } from "./discord.js";
 import { deferred } from "./peer.js";
 
 const capture = loadCapture(textCapture);
-const dm = DISCORD_DM as ConversationId;
+const dm = DISCORD_DM as ChatId;
 
 describe("DiscordPeer", () => {
   let peer: DiscordPeer;
@@ -87,8 +87,8 @@ describe("DiscordAdapter.send against the peer", () => {
     const receipt = await adapter.send(dm, { text: "hi there" });
     const inbound = await receive("hello");
 
-    expect(receipt).toEqual({ conversationId: dm, messageId: expect.any(String) });
-    expect(inbound).toMatchObject({ conversationId: dm, text: "hello" });
+    expect(receipt).toEqual({ chatId: dm, messageId: expect.any(String) });
+    expect(inbound).toMatchObject({ chatId: dm, text: "hello" });
     expect(peer.visible()).toEqual([
       expect.objectContaining({ id: receipt.messageId, from: "rome", text: "hi there" }),
       expect.objectContaining({ id: inbound.messageId, from: "user", text: "hello" }),

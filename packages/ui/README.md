@@ -316,7 +316,8 @@ The one prose renderer, so agent output reads the same in the dashboard, in a
 first-party app, and in an app someone scaffolded this morning. Built on
 [Streamdown](https://streamdown.ai) — a streaming-safe Markdown renderer that
 handles a half-written fence mid-token, which is what a live agent turn is —
-with Shiki syntax highlighting, KaTeX math, and Mermaid diagrams.
+with Shiki syntax highlighting, KaTeX math, and Mermaid diagrams drawn by
+[Pele](https://pele.run).
 
 ```tsx
 import { Markdown } from "@rome-os/ui/markdown";
@@ -335,13 +336,16 @@ import { Markdown } from "@rome-os/ui/markdown";
   a Shadow DOM needs the import in its *own* stylesheet — the host document's
   copy does not cross the shadow boundary.
 - **Install the peers.** `streamdown`, `@streamdown/code`, `@streamdown/math`,
-  `@streamdown/mermaid`, and `katex` are optional peers, so `pnpm add
-  @rome-os/ui` alone does not pull them; add them where you import this.
+  `pele`, and `katex` are optional peers, so `pnpm add @rome-os/ui` alone does
+  not pull them; add them where you import this.
 - **Theme comes from the host, like every other kit component.** The prose
   paints from inherited semantic tokens, so it follows the live theme and its
-  `.dark` half in a shadow root with nothing injected. Mermaid is the exception
-  — its color parser cannot consume OKLCH — so a host on OKLCH primitives
-  passes explicit sRGB values through the `theme` prop.
+  `.dark` half in a shadow root with nothing injected. Diagrams are the
+  exception: the palette is resolved to sRGB hex and written into each SVG, so
+  a downloaded diagram keeps its colors, and that conversion cannot read OKLCH.
+  A host on OKLCH primitives passes explicit sRGB values through the `theme`
+  prop. The `theme.mermaid` config still takes Mermaid's `themeVariables`,
+  which the renderer maps onto Pele's `--pele-*` palette.
 - `compact` rebinds Markdown's own typography and rhythm tokens to their dense
   values. The rendered semantic roles do not change, and hosts use `className`
   for color or layout rather than substituting a generic typography role.
@@ -410,7 +414,7 @@ kit's API to surfaces it does not serve.
   exactly, and two copies of that package fight over
   `document.body.style.pointerEvents`.
 - **Never a dependency** — heavy tails such as `streamdown` + its
-  code/math/mermaid plugins, `katex`, `@dnd-kit/*`, `react-day-picker`, `cmdk`,
+  code/math plugins, `pele`, `katex`, `@dnd-kit/*`, `react-day-picker`, `cmdk`,
   and `sonner`. Components that need them arrive as subpath exports with the
   library declared as an *optional* peer, so an app that imports a button never
   pays for a calendar. [`Calendar`](#calendar), [`Command`](#command), and

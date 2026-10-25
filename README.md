@@ -123,8 +123,9 @@ default; set `ROME_DEV_PANTHEON_ORIGIN` to use another Rome Cloud deployment.
 The script prints the local URLs and development credentials when startup completes.
 
 This is the contributor development path, not the final production self-hosting
-distribution. See [`CLAUDE.md`](CLAUDE.md) for the complete development loop,
-container commands, and validation requirements.
+distribution. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to report issues,
+open pull requests, and get through code review, and [`CLAUDE.md`](CLAUDE.md) for
+the complete development loop, container commands, and validation requirements.
 
 ## Rome Apps
 

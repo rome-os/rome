@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { Api } from "telegram";
 import { returnBigInt } from "telegram/Helpers.js";
 import { openTelegramUserLogin, TelegramUserAdapter } from "./telegram-user.js";
@@ -127,7 +127,7 @@ describe("TelegramUserAdapter", () => {
         channel: "telegram_user",
         direction: "inbound",
         messageId: "7",
-        conversationId: "-100555",
+        chatId: "-100555",
         senderId: "111",
         senderDisplayName: "111",
         text: "see this",
@@ -145,8 +145,8 @@ describe("TelegramUserAdapter", () => {
     const sendMessage = rs.fn().mockResolvedValue({ id: 99 });
     internals.client = { sendMessage };
 
-    await expect(adapter.send("123" as ConversationId, { text: "hi" })).resolves.toStrictEqual({
-      conversationId: "123",
+    await expect(adapter.send("123" as ChatId, { text: "hi" })).resolves.toStrictEqual({
+      chatId: "123",
       messageId: "99",
     });
     expect(sendMessage).toHaveBeenCalledWith(123, { message: "hi", replyTo: undefined });
@@ -156,10 +156,10 @@ describe("TelegramUserAdapter", () => {
     internals.client = { sendMessage: rs.fn().mockResolvedValue({ id: 1 }) };
 
     await expect(
-      adapter.send("123" as ConversationId, {
+      adapter.send("123" as ChatId, {
         attachments: [{ type: "document", source: "/tmp/a.pdf" }],
       }),
-    ).resolves.toStrictEqual({ conversationId: "123" });
+    ).resolves.toStrictEqual({ chatId: "123" });
   });
 
   it("reads each dialog's history with its kind and name, own lines carrying `out`", async () => {
@@ -177,7 +177,7 @@ describe("TelegramUserAdapter", () => {
         channel: "telegram_user",
         direction: "inbound",
         messageId: "7",
-        conversationId: "111",
+        chatId: "111",
         senderId: "42",
         senderDisplayName: "Me",
         text: "see this",
@@ -196,7 +196,7 @@ describe("TelegramUserAdapter", () => {
         channel: "telegram_user",
         direction: "inbound",
         messageId: "7",
-        conversationId: "-100555" as ConversationId,
+        chatId: "-100555" as ChatId,
         senderId: "111",
         text: "",
         attachments: [{ type: "document" }],

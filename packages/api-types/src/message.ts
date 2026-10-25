@@ -1,6 +1,6 @@
 // The one thing Rome renders whenever it shows what was said: a line, which way
 // it went, when it was said, and a stable id for it. That is a message
-// (docs/concepts/messaging.md#message).
+// (docs/domains/chats.md#message).
 //
 // It lives on its own, not inside any one surface's contract, because more than
 // one surface reads it. A person's timeline pages messages, and a conversation
@@ -37,7 +37,7 @@ export interface Message {
   /** Who said it, where the store recorded them. Absent when it did not. */
   sender?: MessageSender;
   /** The conversation it was said in, where the store recorded it. */
-  conversation?: MessageConversationInfo;
+  conversation?: MessageChatInfo;
   /** What came attached, as pointers. Absent when nothing did or the store
    *  kept no record of it. */
   attachments?: MessageAttachment[];
@@ -51,7 +51,7 @@ export interface MessageSender {
 }
 
 /** The conversation a message was said in, named by the platform's own id. */
-export interface MessageConversationInfo {
+export interface MessageChatInfo {
   id: string;
   name: string | null;
   kind: "dm" | "group" | "topic" | null;

@@ -30,7 +30,8 @@ import type {
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
-import { webchatProjects, romeAgentMessages } from "../../db/schema.js";
+import { guardianAuth, webchatProjects, romeAgentMessages } from "../../db/schema.js";
+import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
@@ -99,6 +100,60 @@ describe("Webchat API", () => {
     const all = [guardianId, visitorId, otherId, "legacy"].sort();
     expect(await list(visitor)).toEqual(all);
     expect(await list(visitor, "all")).toEqual(all);
+  });
+
+  it("names each user message's sender with their current picture", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const sessionId = "people";
+    await deps.webchatRepo.createSession(sessionId, "People");
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const ada = { kind: "visitor" as const, accountId: "acct-ada", email: "ada@example.com" };
+    const lin = { kind: "visitor" as const, accountId: "acct-lin", email: "lin@example.com" };
+    await deps.webchatRepo.recordUserInput("from-guardian", sessionId, "[]", guardian);
+    await deps.webchatRepo.recordUserInput("from-ada", sessionId, "[]", ada);
+    await deps.webchatRepo.recordUserInput("from-lin", sessionId, "[]", lin);
+    await deps.webchatRepo.recordUserInput("unattributed", sessionId, "[]");
+    // Pictures recorded after the messages still show on them.
+    await testDb.db.insert(guardianAuth).values({
+      id: "seat-row",
+      userId: "seat",
+      passwordHash: "x",
+      email: "ray@example.com",
+      avatarUrl: "https://example.com/ray.png",
+      createdAt: new Date(),
+    });
+    await deps.settingsRepo.set("guardianName", "Ray");
+    await new VisitorProfilesRepository(testDb.db).record("acct-ada", {
+      email: "ada@new.example.com",
+      avatarUrl: "https://example.com/ada.png",
+    });
+
+    const response = await app.request(`/chat/sessions/${sessionId}/messages`);
+
+    expect(response.status).toBe(200);
+    const senders = Object.fromEntries(
+      ((await response.json()) as { id: string; sender?: unknown }[]).map((message) => [
+        message.id,
+        message.sender,
+      ]),
+    );
+    expect(senders).toEqual({
+      "from-guardian": { kind: "guardian", name: "Ray", avatarUrl: "https://example.com/ray.png" },
+      "from-ada": {
+        kind: "visitor",
+        accountId: "acct-ada",
+        name: "ada@new.example.com",
+        avatarUrl: "https://example.com/ada.png",
+      },
+      // Signed in before profiles were kept: the email the message recorded.
+      "from-lin": {
+        kind: "visitor",
+        accountId: "acct-lin",
+        name: "lin@example.com",
+        avatarUrl: null,
+      },
+      unattributed: undefined,
+    });
   });
 
   it("persists appended inputs once and keeps one stream owner", async () => {
@@ -318,7 +373,157 @@ describe("Webchat API", () => {
     ]);
   });
 
-  it("aggregates completed child trace summaries without duplicating them in storage", async () => {
+  it.each([
+    "webchat",
+    "action",
+    "subagent",
+    "fork",
+    "promoted-fork",
+  ] as const)("uses session inactivity for all %s history, lazy reads, and downloads", async (variant) => {
+    const type = variant === "promoted-fork" ? "fork" : variant;
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
+    const sessionId = `retention-${variant}`;
+    await deps.webchatRepo.createSession("idle-source", "Idle source");
+    await deps.webchatRepo.addMessage("source-message", "idle-source", "user", "Old source");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-10T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "source-message"));
+    await deps.webchatRepo.ensureRomeSession({
+      id: sessionId,
+      parentSessionId: "idle-source",
+      type,
+      name: "Retention",
+      agentName: "main",
+    });
+    if (variant === "promoted-fork") {
+      await deps.webchatRepo.promoteForkToChat(sessionId);
+      expect(await deps.webchatRepo.getSession(sessionId)).toMatchObject({
+        type: "webchat",
+        parentSessionId: "idle-source",
+      });
+    }
+    const isWebchat = type === "webchat" || variant === "promoted-fork";
+    const reply = JSON.stringify([
+      { type: "text", content: "The final reply" },
+      {
+        type: "pending_interaction",
+        toolUseId: "question",
+        appId: "questions",
+        render: { type: "text", text: "Pick one" },
+      },
+    ]);
+    for (const turnId of ["old", "older"]) {
+      await deps.webchatRepo.addMessage(
+        `${sessionId}-${turnId}-user`,
+        sessionId,
+        "user",
+        "My question",
+        turnId,
+      );
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: `${sessionId}-${turnId}`,
+        sessionId,
+        turnId,
+        startSeq: 0,
+        blocks: [
+          { type: "thinking", content: "Private thinking" },
+          { type: "tool_use", id: "read", tool: "Read", input: {} },
+          { type: "tool_result", toolUseId: "read", tool: "Read", output: "Heavy output" },
+          { type: "result", content: "The final reply" },
+          { type: "turn_end", turnId, status: "completed", durationMs: 1000 },
+        ],
+      });
+      await deps.webchatRepo.addMessage(
+        `${sessionId}-${turnId}-reply`,
+        sessionId,
+        "assistant",
+        reply,
+        turnId,
+      );
+    }
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-09-24T12:00:00Z") })
+      .where(eq(romeAgentMessages.sessionId, sessionId));
+    await deps.webchatRepo.addMessage(
+      `${sessionId}-latest`,
+      sessionId,
+      "user",
+      "Continue",
+      "latest",
+    );
+    const app = createWebchatRuntime(deps).routes;
+    for (const [lastMessageAt, archived] of [
+      ["2026-10-18T12:00:00Z", false],
+      ["2026-10-16T12:00:00Z", true],
+      ["2026-10-17T12:00:00Z", true],
+      ["2026-10-17T12:00:01Z", false],
+    ] as const) {
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ createdAt: new Date(lastMessageAt) })
+        .where(eq(romeAgentMessages.id, `${sessionId}-latest`));
+      const activityQuery = rs.spyOn(deps.webchatRepo, "getTraceArchivedSessionIds");
+      const response = await app.request(`/sessions/${sessionId}/messages`);
+      expect(activityQuery).toHaveBeenCalledTimes(1);
+      activityQuery.mockRestore();
+      const messages = (await response.json()) as Array<{
+        id: string;
+        content: string;
+        traceArchived?: boolean;
+        traceSummary?: unknown;
+      }>;
+      for (const turnId of ["old", "older"]) {
+        const trace = messages.find((m) => m.id === `${sessionId}-${turnId}`);
+        expect(trace?.content).toBe("[]");
+        expect(trace?.traceArchived).toBe(archived ? true : undefined);
+        expect(Boolean(trace?.traceSummary)).toBe(!archived);
+      }
+      expect(messages.find((m) => m.id === `${sessionId}-old-reply`)?.content).toBe(reply);
+      expect(messages.find((m) => m.id === `${sessionId}-old-user`)?.content).toBe("My question");
+      for (const endpoint of [
+        `/sessions/messages/${sessionId}-old/content`,
+        `/chat/messages/${sessionId}-old/content`,
+        `/sessions/${sessionId}/turns/old/trace`,
+        `/sessions/${sessionId}/turns/old/trace.json`,
+        ...(isWebchat ? [`/chat/sessions/${sessionId}/turns/old/trace.json`] : []),
+      ]) {
+        const result = await app.request(endpoint);
+        expect(result.status).toBe(200);
+        const payload = await result.json();
+        if (archived) expect(payload).toEqual({ trace: null, traceArchived: true });
+        else expect(JSON.stringify(payload)).toContain("Heavy output");
+      }
+      expect(await deps.webchatRepo.getMessageContent(`${sessionId}-old`)).toContain(
+        "Heavy output",
+      );
+      if (isWebchat)
+        expect(await (await app.request(`/chat/sessions/${sessionId}/messages`)).json()).toEqual(
+          messages,
+        );
+    }
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, `${sessionId}-latest`));
+    expect(await (await app.request(`/chat/messages/${sessionId}-old/content`)).json()).toEqual({
+      trace: null,
+      traceArchived: true,
+    });
+    await deps.webchatRepo.addMessage(`${sessionId}-reactivate`, sessionId, "user", "New message");
+    const restored = await (await app.request(`/chat/messages/${sessionId}-old/content`)).json();
+    expect(JSON.stringify(restored)).toContain("Heavy output");
+    const history = JSON.stringify(
+      await (await app.request(`/sessions/${sessionId}/messages`)).json(),
+    );
+    expect(history).not.toContain('"traceArchived":true');
+  });
+
+  it("keeps 30-day-old child summaries while their root is active, and hides the tree when idle", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
     const parentSessionId = "parent-summary-session";
     const parentTurnId = "parent-summary-turn";
     const childSessionId = "child-summary-session";
@@ -430,6 +635,12 @@ describe("Webchat API", () => {
       ]),
       parentTurnId,
     );
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "root-latest"));
     const app = createWebchatRuntime(deps).routes;
     const getTraceContentsByTurns = rs.spyOn(deps.webchatRepo, "getTraceContentsByTurns");
     const getTraceContentByTurn = rs.spyOn(deps.webchatRepo, "getTraceContentByTurn");
@@ -455,17 +666,35 @@ describe("Webchat API", () => {
       ],
     });
     expect(getTraceContentsByTurns).toHaveBeenCalledTimes(1);
-    expect(getTraceContentsByTurns).toHaveBeenCalledWith([
-      { sessionId: childSessionId, turnId: childTurnId },
-      { sessionId: secondChildSessionId, turnId: secondChildTurnId },
-    ]);
+    expect(getTraceContentsByTurns).toHaveBeenCalledWith(
+      [
+        { sessionId: childSessionId, turnId: childTurnId },
+        { sessionId: secondChildSessionId, turnId: secondChildTurnId },
+      ],
+      { sessionActivityCutoff: expect.any(Date) },
+    );
     expect(getTraceContentByTurn).not.toHaveBeenCalled();
     expect(await deps.webchatRepo.getMessageContent("parent-summary-trace")).not.toContain(
       "traceSummary",
     );
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "root-latest"));
+    for (const sessionId of [parentSessionId, childSessionId, secondChildSessionId]) {
+      const history = (await (
+        await app.request(`/sessions/${sessionId}/messages`)
+      ).json()) as Array<{ role: string; traceArchived?: boolean; traceSummary?: unknown }>;
+      const traces = history.filter((row) => row.role === "trace");
+      expect(traces).toHaveLength(1);
+      expect(traces[0]?.traceArchived).toBe(true);
+      expect(traces[0]?.traceSummary).toBeUndefined();
+    }
   });
 
-  it("aggregates descendant token usage only on trace reads", async () => {
+  it("keeps complete cost and usage from 30-day-old descendants while their root is active", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
     const parentSessionId = "parent-usage-session";
     const parentTurnId = "parent-usage-turn";
     const childSessionId = "child-usage-session";
@@ -577,6 +806,12 @@ describe("Webchat API", () => {
       ]),
       parentTurnId,
     );
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "root-latest"));
     const app = createWebchatRuntime(deps).routes;
     const readAccounting = async (path: string) => {
       const response = await app.request(path);
@@ -652,6 +887,54 @@ describe("Webchat API", () => {
     expect(await deps.webchatRepo.getMessageContent("parent-usage-trace")).not.toContain(
       "usageByModel",
     );
+  });
+
+  describe("chat locations", () => {
+    const mac = { id: "mac-1", name: "macbook", platform: "macos" };
+
+    it("answers the projects and Cloud's devices together", async () => {
+      deps.nodeDevices = { ...deps.nodeDevices, listDevices: async () => ({ devices: [mac] }) };
+      const res = await createWebchatRuntime(deps).routes.request("/chat/locations");
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        projects: { rootPath: string; projects: Array<{ name: string }> };
+        devices: unknown;
+      };
+      expect(body.projects.rootPath).toBe(projectsRoot);
+      expect(body.projects.projects.map((project) => project.name)).toEqual(["default"]);
+      expect(body.devices).toEqual([mac]);
+    });
+
+    it("answers without devices when Cloud's list is unavailable", async () => {
+      deps.nodeDevices = { ...deps.nodeDevices, listDevices: async () => null };
+      const res = await createWebchatRuntime(deps).routes.request("/chat/locations");
+      expect(await res.json()).toMatchObject({ devices: null });
+
+      deps.nodeDevices = {
+        ...deps.nodeDevices,
+        listDevices: async () => {
+          throw new Error("daemon gone");
+        },
+      };
+      const failed = await createWebchatRuntime(deps).routes.request("/chat/locations");
+      expect(failed.status).toBe(200);
+      expect(await failed.json()).toMatchObject({ devices: null });
+    });
+
+    it("does not wait past its budget for a slow device list", async () => {
+      rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        deps.nodeDevices = { ...deps.nodeDevices, listDevices: () => new Promise(() => {}) };
+        const pending = createWebchatRuntime(deps).routes.request("/chat/locations");
+        await rs.advanceTimersByTimeAsync(3_000);
+        const res = await pending;
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({ devices: null });
+      } finally {
+        rs.useRealTimers();
+      }
+    });
   });
 
   describe("project routes", () => {
@@ -1661,6 +1944,178 @@ describe("Webchat API", () => {
     expect(sentOptions).toMatchObject({
       romeSessionId: session.id,
       romeSessionType: "webchat",
+    });
+  });
+
+  describe("device folder", () => {
+    const folder = {
+      path: "/Users/ray/code/foo",
+      parent: "/Users/ray/code",
+      entries: [],
+      truncated: false,
+    };
+    const mockDevices = (listFiles: TestDeps["nodeDevices"]["listFiles"]) => {
+      deps.nodeDevices = {
+        ...deps.nodeDevices,
+        listFiles: rs.fn(listFiles),
+        listDevices: async () => ({
+          devices: [{ id: "mac-1", name: "macbook", platform: "macos" }],
+        }),
+        // Creating a chat must not probe every device.
+        getStatus: rs.fn(async () => {
+          throw new Error("getStatus probes every device");
+        }),
+      };
+      return deps.nodeDevices.listFiles;
+    };
+
+    it("stores the real path with a device snapshot and passes it to every turn", async () => {
+      const listFiles = mockDevices(async () => ({ ok: true, folder }));
+      let acquiredInit: AgentSessionInit | undefined;
+      let sentOptions: SendTurnOptions | undefined;
+      deps.agentSessionManager = fakeSessionManager(async (_key, init) => {
+        acquiredInit = init;
+        return {
+          key: { agentName: "main", channelThreadKey: "webchat:test" },
+          sessionId: "agent-session",
+          status: "idle",
+          sendTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+            sentOptions = options;
+            return {
+              turnId: "turn-1",
+              events: (async function* () {
+                yield { type: "result", content: "" };
+              })(),
+              turnContext: otelContext.active(),
+            };
+          },
+          subscribe: () => () => undefined,
+          onStatusChange: () => () => undefined,
+          interrupt: async () => undefined,
+          close: async () => undefined,
+        } satisfies FakeSession;
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const expected = {
+        deviceId: "mac-1",
+        deviceName: "macbook",
+        platform: "macos",
+        path: "/Users/ray/code/foo",
+      };
+
+      const res = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceFolder: { deviceId: "mac-1", path: "~/code/foo" } }),
+      });
+      expect(res.status).toBe(200);
+      const session = (await res.json()) as {
+        id: string;
+        deviceFolder: unknown;
+        projectPath: string;
+      };
+      expect(listFiles).toHaveBeenCalledWith("mac-1", "~/code/foo");
+      expect(session.deviceFolder).toEqual(expected);
+      expect(session.projectPath).toBe("default");
+      expect((await deps.webchatRepo.getSession(session.id))?.deviceFolder).toEqual(expected);
+      expect(deps.nodeDevices.getStatus).not.toHaveBeenCalled();
+
+      const sendRes = await app.request(`/chat/sessions/${session.id}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "hello" }),
+      });
+      expect(sendRes.status).toBe(200);
+      expect(acquiredInit?.workingDir).toBe(join(projectsRoot, "default"));
+      expect(acquiredInit?.threadContext?.deviceFolder).toEqual(expected);
+      expect(sentOptions?.threadContext?.deviceFolder).toEqual(expected);
+    });
+
+    it("creates no session when the device cannot list the folder", async () => {
+      mockDevices(async () => ({ ok: false, code: "offline" }));
+      const app = createWebchatRuntime(deps).routes;
+      const res = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceFolder: { deviceId: "mac-1", path: "/gone" } }),
+      });
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toEqual({ error: "offline" });
+      expect(await (await app.request("/chat/sessions")).json()).toEqual([]);
+    });
+
+    it("rejects a device folder without a device or a path", async () => {
+      const listFiles = mockDevices(async () => ({ ok: true, folder }));
+      const app = createWebchatRuntime(deps).routes;
+      for (const deviceFolder of [
+        { deviceId: "mac-1" },
+        { path: "/x" },
+        { deviceId: 1, path: "/x" },
+      ]) {
+        const res = await app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deviceFolder }),
+        });
+        expect(res.status).toBe(400);
+      }
+      expect(listFiles).not.toHaveBeenCalled();
+    });
+
+    it("rejects a device folder together with a project", async () => {
+      const listFiles = mockDevices(async () => ({ ok: true, folder }));
+      const app = createWebchatRuntime(deps).routes;
+      const res = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectPath: "alpha",
+          deviceFolder: { deviceId: "mac-1", path: "/x" },
+        }),
+      });
+      expect(res.status).toBe(400);
+      expect(listFiles).not.toHaveBeenCalled();
+      expect(await (await app.request("/chat/sessions")).json()).toEqual([]);
+      const withDefault = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectPath: "default",
+          deviceFolder: { deviceId: "mac-1", path: "/x" },
+        }),
+      });
+      expect(withDefault.status).toBe(200);
+    });
+
+    it("lists chats with their device folder", async () => {
+      mockDevices(async () => ({ ok: true, folder }));
+      const app = createWebchatRuntime(deps).routes;
+      await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceFolder: { deviceId: "mac-1", path: "/x" } }),
+      });
+      const list = (await (await app.request("/chat/sessions")).json()) as {
+        deviceFolder: unknown;
+      }[];
+      expect(list.map((session) => session.deviceFolder)).toEqual([
+        {
+          deviceId: "mac-1",
+          deviceName: "macbook",
+          platform: "macos",
+          path: "/Users/ray/code/foo",
+        },
+      ]);
+    });
+
+    it("returns null for chats without a device folder", async () => {
+      const app = createWebchatRuntime(deps).routes;
+      const res = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Plain" }),
+      });
+      await expect(res.json()).resolves.toMatchObject({ deviceFolder: null });
     });
   });
 
@@ -2907,27 +3362,98 @@ describe("Webchat API", () => {
       });
     });
 
-    it("mints a child handoff session locked to the specialist agent and links it via the card", async () => {
+    it("keeps real handoff history on its own clock without including it in parent summaries or cost reads", async () => {
+      rs.useFakeTimers({ toFake: ["Date"] });
+      rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
       const ctl = mockScriptedManager();
       ctl.setEvents(handoffEvents("tu-child-1"));
       const app = createWebchatRuntime(deps).routes;
       const sessionId = await newSession(app);
 
-      await app.request(`/chat/sessions/${sessionId}/turns`, {
+      const send = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "design a workflow" }),
+      });
+      await drainTurn(app, send);
+      const card = await findCard(sessionId, "tu-child-1");
+      const childSessionId = card?.childSessionId as string;
+      expect(typeof childSessionId).toBe("string");
+      expect(childSessionId).not.toBe(sessionId);
+      expect(await deps.webchatRepo.getSession(childSessionId)).toMatchObject({
+        type: "webchat_handoff",
+        parentSessionId: null,
+        agentName: "workflow-studio:workflow-planner",
+      });
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: "handoff-child-trace",
+        sessionId: childSessionId,
+        turnId: "child-turn",
+        startSeq: 0,
+        blocks: [{ type: "thinking", content: "Child-only trace payload" }],
+      });
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ createdAt: new Date("2026-09-24T12:00:00Z") })
+        .where(eq(romeAgentMessages.sessionId, childSessionId));
+
+      const traceReads = rs.spyOn(deps.webchatRepo, "getTraceContents");
+      const descendantReads = rs.spyOn(deps.webchatRepo, "getTraceContentsByTurns");
+      const history = (await (
+        await app.request(`/chat/sessions/${sessionId}/messages`)
+      ).json()) as Array<{ id: string; role: string; content: string }>;
+      expect(JSON.stringify(history)).toContain(childSessionId);
+      expect(traceReads.mock.calls.map(([id]) => id)).toEqual([sessionId]);
+      const parentTrace = history.find((row) => row.role === "trace");
+      expect(parentTrace).toBeDefined();
+      await app.request(`/chat/messages/${parentTrace!.id}/content?includeSubagentUsage=true`);
+      expect(descendantReads.mock.calls.flatMap(([refs]) => refs)).toEqual([]);
+      traceReads.mockRestore();
+      descendantReads.mockRestore();
+
+      const childHistory = await (
+        await app.request(`/chat/sessions/${childSessionId}/messages`)
+      ).json();
+      expect(childHistory).toContainEqual(
+        expect.objectContaining({
+          id: "handoff-child-trace",
+          traceArchived: true,
+        }),
+      );
+      expect(
+        await (await app.request("/chat/messages/handoff-child-trace/content")).json(),
+      ).toEqual({ trace: null, traceArchived: true });
+    });
+
+    it("gives the handoff child the parent chat's device folder", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(handoffEvents("tu-folder-child"));
+      const app = createWebchatRuntime(deps).routes;
+      const folder = { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" };
+      await deps.webchatRepo.createSession(
+        "folder-parent",
+        "Folder chat",
+        undefined,
+        "default",
+        null,
+        "default",
+        null,
+        "webchat",
+        null,
+        {},
+        folder,
+      );
+
+      await app.request("/chat/sessions/folder-parent/turns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: "design a workflow" }),
       });
 
-      const card = await findCard(sessionId, "tu-child-1");
-      const childSessionId = card?.childSessionId;
-      // The design conversation gets its own session — never the parent's.
-      expect(typeof childSessionId).toBe("string");
-      expect(childSessionId).not.toBe(sessionId);
-
-      const child = await deps.webchatRepo.getSession(childSessionId as string);
+      const card = await findCard("folder-parent", "tu-folder-child");
+      const child = await deps.webchatRepo.getSession(card?.childSessionId as string);
       expect(child?.type).toBe("webchat_handoff");
-      expect(child?.agentName).toBe("workflow-studio:workflow-planner");
+      expect(child?.deviceFolder).toEqual(folder);
     });
 
     it("inherits handoff ownership without branch lineage and accepts its first send with a model selection", async () => {
@@ -4896,6 +5422,75 @@ describe("Webchat API", () => {
         ["assistant", "turn-r"],
         ["assistant", "turn-r"],
       ]);
+    });
+
+    it("addresses a recorded continuation by its own turn id while it runs", async () => {
+      // A defer wake-up saves its trace under the agent's turn id. The chat
+      // reattaches through the listing, so the listing and the stream must
+      // name that id too, or the chat shows the turn twice.
+      const sessionId = "sess-recorded-turn-id";
+      await deps.webchatRepo.createSession(sessionId, "Recorded Turn Id");
+      const owner = { currentTurnId: "turn-real", interrupt: rs.fn(async () => {}) };
+      rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
+      const { routes, runtime } = createWebchatRuntime(deps);
+      const recorded = { recorded: true };
+      let markStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const task = runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        await emit(
+          { type: "turn_start", turnId: "turn-real", sessionId: "agent-1", userPrompt: "Wake" },
+          recorded,
+        );
+        markStarted();
+        await gate;
+        await emit(
+          { type: "turn_end", turnId: "turn-real", status: "completed", durationMs: 1 },
+          recorded,
+        );
+      });
+      await started;
+
+      const turns = (await (await routes.request(`/chat/sessions/${sessionId}/turns`)).json()) as {
+        turnId: string;
+        agentTurnId?: string;
+        status: string;
+      }[];
+      expect(turns).toEqual([
+        expect.objectContaining({ agentTurnId: "turn-real", status: "running" }),
+      ]);
+      const streamKey = turns[0]!.turnId;
+      expect(streamKey).toMatch(/^backend:/);
+
+      const res = await routes.request("/chat/turns/turn-real/stream");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/event-stream");
+      const reader = res.body!.getReader();
+      let streamed = "";
+      while (!streamed.includes("event: turn_id")) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        streamed += new TextDecoder().decode(chunk.value);
+      }
+      expect(streamed).toContain('event: turn_id\ndata: {"turnId":"turn-real"}');
+      await reader.cancel();
+
+      const stop = await routes.request("/chat/turns/turn-real/interrupt", { method: "POST" });
+      expect(stop.status).toBe(202);
+      expect(owner.interrupt).toHaveBeenCalledTimes(1);
+
+      rs.useFakeTimers();
+      release();
+      await task;
+      await rs.advanceTimersByTimeAsync(30_000);
+      for (const turnId of [streamKey, "turn-real"]) {
+        expect((await routes.request(`/chat/turns/${turnId}/stream`)).status).toBe(404);
+      }
     });
 
     // The connect-AI card is the second host-owned card. Only its own tool may

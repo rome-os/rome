@@ -28,7 +28,8 @@ function reply({
     parts: sent.map((text, index) => ({
       block: 0,
       text,
-      receipt: { messageId: String(index + 1), conversationId: CONVERSATION },
+      source: text,
+      receipt: { messageId: String(index + 1), chatId: CONVERSATION },
       state: "settled",
     })),
   };
@@ -115,7 +116,7 @@ describe("checkDelivery", () => {
     const { input } = reply({ source: "one.", sent: ["one."], shown: ["one.", "one."] });
     const unknown: ReplyOutcome = {
       status: "unknown",
-      parts: [...input.outcome.parts, { block: 0, text: "one.", state: "unknown" }],
+      parts: [...input.outcome.parts, { block: 0, text: "one.", source: "one.", state: "unknown" }],
     };
     expect(verdicts({ ...input, outcome: unknown })["one-message-per-part"]).toBe(true);
   });

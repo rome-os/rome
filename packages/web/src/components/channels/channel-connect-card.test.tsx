@@ -5,7 +5,7 @@
 // (`/api/connections/:id/grants/:name/setup` + `/api/setups/:cid/input`); the
 // bespoke `/api/channels/*` connect/verify-status routes are gone. These tests
 // cover the shared frame once (via Discord) plus the per-service config
-// variations, the generic conversation-settings link, and Feishu's registered
+// variations, the generic chat settings link, and Feishu's registered
 // QR renderer.
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";

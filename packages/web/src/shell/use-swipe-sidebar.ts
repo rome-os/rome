@@ -20,8 +20,8 @@ import { flushSync } from "react-dom";
  * there a swipe starts a little way in.
  */
 
-/** The sidebar's `w-64`. */
-const WIDTH = 256;
+/** Fallback width, the rail's `w-16`, for a sidebar not yet laid out. */
+const FALLBACK_WIDTH = 64;
 /** Travel before the gesture commits to an axis. */
 const LOCK = 10;
 /** Share of the width past which a release opens the sidebar. */
@@ -94,6 +94,9 @@ export function useSwipeSidebar({
     let progress = 0;
     let last = { x: 0, t: 0 };
     let velocity = 0;
+    /** The sidebar's width when the gesture started. It is the rail alone, or
+     *  the rail and the chat list on Chat. */
+    let width = FALLBACK_WIDTH;
     /** A released gesture still settling, and where it settles. */
     let settling: { timer: number; next: boolean } | null = null;
 
@@ -107,7 +110,7 @@ export function useSwipeSidebar({
           : "none";
       for (const [el, style] of [
         [sidebar.current, { translate: `${(p - 1) * 100}% 0` }],
-        [page.current, { translate: p > 0 ? `${p * WIDTH}px 0` : "none" }],
+        [page.current, { translate: p > 0 ? `${p * width}px 0` : "none" }],
         [scrim.current, { opacity: String(p) }],
       ] as const) {
         if (!el) continue;
@@ -155,6 +158,7 @@ export function useSwipeSidebar({
       axis = null;
       progress = from ? 1 : 0;
       velocity = 0;
+      width = sidebar.current?.offsetWidth || FALLBACK_WIDTH;
     };
 
     const onMove = (event: TouchEvent) => {
@@ -182,7 +186,7 @@ export function useSwipeSidebar({
       event.preventDefault();
       velocity = (touch.clientX - last.x) / Math.max(event.timeStamp - last.t, 1);
       last = { x: touch.clientX, t: event.timeStamp };
-      progress = Math.min(Math.max((from ? 1 : 0) + dx / WIDTH, 0), 1);
+      progress = Math.min(Math.max((from ? 1 : 0) + dx / width, 0), 1);
       paint(progress, false);
     };
 

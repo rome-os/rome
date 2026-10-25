@@ -3,7 +3,7 @@
 // Both confer through a headless `GuardianInteraction` fake that echoes canned
 // form answers, and both answer "re-confer" from renew().
 
-import { describe, expect, it } from "@rstest/core";
+import { describe, expect, it, rs } from "@rstest/core";
 import { credentialsPaste, romeCloudOAuth, tokenPaste } from "./schemes.js";
 import type { GuardianInteraction } from "./types.js";
 
@@ -147,7 +147,7 @@ describe("romeCloudOAuth", () => {
     await expect(scheme.confer(fakeInteract2)).rejects.toThrow(provider);
   });
 
-  it("answers re-confer from renew (no Rome Cloud refresh exchange yet)", async () => {
+  it("answers re-confer from renew when no refresh is wired", async () => {
     const scheme = romeCloudOAuth({ provider: "github" });
     await expect(
       scheme.renew({
@@ -155,5 +155,29 @@ describe("romeCloudOAuth", () => {
         expiresAt: "never",
       }),
     ).resolves.toBe("re-confer");
+  });
+
+  it("renews through the wired refresh with the credential's refresh token", async () => {
+    const next = { material: { accessToken: "shpat_new" }, expiresAt: new Date(0) };
+    const refresh = rs.fn(async () => next);
+    const scheme = romeCloudOAuth({ provider: "shopify", refresh });
+
+    await expect(
+      scheme.renew({
+        material: { accessToken: "shpat_old", refreshToken: "shprt_old" },
+        expiresAt: new Date(0),
+      }),
+    ).resolves.toBe(next);
+    expect(refresh).toHaveBeenCalledWith("shprt_old");
+  });
+
+  it("answers re-confer when the credential carries no refresh token", async () => {
+    const refresh = rs.fn(async () => ({ material: {}, expiresAt: "never" as const }));
+    const scheme = romeCloudOAuth({ provider: "shopify", refresh });
+
+    await expect(
+      scheme.renew({ material: { accessToken: "shpat_old" }, expiresAt: new Date(0) }),
+    ).resolves.toBe("re-confer");
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

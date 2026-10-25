@@ -34,6 +34,8 @@ export interface NodeSocket {
   running: NodeActionRow[];
   /** Counts subscribed connections. Each new one means a gap to refill. */
   generation: number;
+  /** Counts connections that closed, opened or not. Without WebSocket it is 1 from the start. */
+  closed: number;
   request(method: string, params: unknown): Promise<unknown>;
   onAction(listener: ActionListener): () => void;
 }
@@ -129,12 +131,16 @@ export function useNodeSocket(url: string): NodeSocket {
   const [status, setStatus] = useState<NodeStatus | null>(null);
   const [running, setRunning] = useState<Map<number, NodeActionRow>>(new Map());
   const [generation, setGeneration] = useState(0);
+  const [closed, setClosed] = useState(0);
   const socketRef = useRef<ConsoleSocket | null>(null);
   const listeners = useRef(new Set<ActionListener>());
 
   useEffect(() => {
     // Every supported browser has WebSocket. Test DOMs and embedded views may not.
-    if (typeof WebSocket === "undefined") return;
+    if (typeof WebSocket === "undefined") {
+      setClosed(1);
+      return;
+    }
     let disposed = false;
     let attempt = 0;
     let retry: number | undefined;
@@ -196,6 +202,7 @@ export function useNodeSocket(url: string): NodeSocket {
           if (disposed) return;
           if (socketRef.current === socket) socketRef.current = null;
           setLink(daemonState ?? "connecting");
+          setClosed((value) => value + 1);
           setRunning(new Map());
           const delay = RECONNECT_DELAYS_MS[Math.min(attempt++, RECONNECT_DELAYS_MS.length - 1)];
           retry = window.setTimeout(connect, delay);
@@ -227,7 +234,7 @@ export function useNodeSocket(url: string): NodeSocket {
     () => [...running.values()].sort((a, b) => a.startedAt - b.startedAt),
     [running],
   );
-  return { link, status, running: runningList, generation, request, onAction };
+  return { link, status, running: runningList, generation, closed, request, onAction };
 }
 
 export interface ActionFilters {
@@ -390,6 +397,8 @@ export interface StatsState {
   stats: NodeStats | null;
   /** False when the daemon predates `log.stats`. */
   supported: boolean;
+  /** False until the first counts arrive, the request fails, or a connection closes. */
+  settled: boolean;
 }
 
 /**
@@ -397,7 +406,7 @@ export interface StatsState {
  * actions run. `query.since` moves with the clock, so callers round it to a bucket.
  */
 export function useStats(socket: NodeSocket, query: NodeStatsQuery): StatsState {
-  const [state, setState] = useState<StatsState>({ stats: null, supported: true });
+  const [state, setState] = useState<StatsState>({ stats: null, supported: true, settled: false });
   const [tick, setTick] = useState(0);
   const key = JSON.stringify(query);
   const { generation, request, onAction } = socket;
@@ -422,15 +431,18 @@ export function useStats(socket: NodeSocket, query: NodeStatsQuery): StatsState 
     request("log.stats", JSON.parse(key))
       .then((value) => {
         const parsed = nodeStatsSchema.safeParse(value);
-        if (live && parsed.success) setState({ stats: parsed.data, supported: true });
+        if (live && parsed.success)
+          setState({ stats: parsed.data, supported: true, settled: true });
       })
       .catch((error: { code?: unknown }) => {
-        if (live && error?.code === -32601) setState({ stats: null, supported: false });
+        if (!live) return;
+        if (error?.code === -32601) setState({ stats: null, supported: false, settled: true });
+        else setState((current) => ({ ...current, settled: true }));
       });
     return () => {
       live = false;
     };
   }, [generation, key, request, tick]);
 
-  return state;
+  return socket.closed > 0 && !state.settled ? { ...state, settled: true } : state;
 }

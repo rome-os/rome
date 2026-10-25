@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
-import { createTestDb, serviceChannelOf, type TestDb } from "../test/helpers.js";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
+import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
@@ -22,7 +22,7 @@ describe("a channel's Connection across epochs", () => {
       epoch: number;
     }> = [];
     const descriptor: ConnectionDescriptor = {
-      service: "discord",
+      connectionKind: "discord",
       auth: {
         bot: tokenPaste({ label: "token", validate: async () => {} }),
       },
@@ -40,9 +40,9 @@ describe("a channel's Connection across epochs", () => {
                 state.deliver = deliver;
               },
               stop() {},
-              async send(conversationId, message) {
+              async send(chatId, message) {
                 state.sends.push(message.text ?? "");
-                return { conversationId, messageId: `sent-${state.epoch}` };
+                return { chatId, messageId: `sent-${state.epoch}` };
               },
               history: {
                 query: async () => [
@@ -50,7 +50,7 @@ describe("a channel's Connection across epochs", () => {
                     channel: "discord",
                     direction: "inbound",
                     messageId: `history-${state.epoch}`,
-                    conversationId: "general" as ConversationId,
+                    chatId: "general" as ChatId,
                     senderId: "guardian",
                     text: `epoch ${state.epoch}`,
                     attachments: [],
@@ -71,7 +71,7 @@ describe("a channel's Connection across epochs", () => {
         message.senderId === "guardian",
     );
     const ports = connectionPorts(
-      { registry, channelOf: serviceChannelOf, ...(gated ? { admit } : {}) },
+      { registry, channelOf: kindChannelOf, ...(gated ? { admit } : {}) },
       "discord",
     )!;
     const sibling: string[] = [];
@@ -91,7 +91,7 @@ describe("a channel's Connection across epochs", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "inbound-1",
-      conversationId: "general" as ConversationId,
+      chatId: "general" as ChatId,
       senderId: "guardian",
       text: "hello",
       attachments: [],
@@ -105,7 +105,7 @@ describe("a channel's Connection across epochs", () => {
     const history = await connection.withTalker((talker) => talker.history?.query({ limit: 10 }));
     expect(history?.[0]?.messageId).toBe("history-1");
     await expect(
-      ports.send!.send("general" as ConversationId, { text: "first reply" }),
+      ports.send!.send("general" as ChatId, { text: "first reply" }),
     ).resolves.toMatchObject({ messageId: "sent-1" });
 
     // Past its epoch nothing reaches the stopped talker.
@@ -120,7 +120,7 @@ describe("a channel's Connection across epochs", () => {
       channel: "discord",
       direction: "inbound",
       messageId: "inbound-2",
-      conversationId: "general" as ConversationId,
+      chatId: "general" as ChatId,
       senderId: "guardian",
       text: "hello again",
       attachments: [],
@@ -134,7 +134,7 @@ describe("a channel's Connection across epochs", () => {
         channel: "discord",
         direction: "inbound",
         messageId: "blocked",
-        conversationId: "general" as ConversationId,
+        chatId: "general" as ChatId,
         senderId: "unknown",
         text: "not authorized",
         attachments: [],
@@ -147,7 +147,7 @@ describe("a channel's Connection across epochs", () => {
     const current = await connection.withTalker((talker) => talker.history?.query({ limit: 10 }));
     expect(current?.[0]?.messageId).toBe("history-2");
     await expect(
-      ports.send!.send("general" as ConversationId, { text: "second reply" }),
+      ports.send!.send("general" as ChatId, { text: "second reply" }),
     ).resolves.toMatchObject({ messageId: "sent-2" });
   });
 
@@ -156,7 +156,7 @@ describe("a channel's Connection across epochs", () => {
     let deliver: ((message: ChannelMessage) => void) | undefined;
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     registry.register({
-      service: "telegram",
+      connectionKind: "telegram",
       auth: { bot: tokenPaste({ label: "token", validate: async () => {} }) },
       capabilities: {
         talker: {
@@ -166,27 +166,27 @@ describe("a channel's Connection across epochs", () => {
               deliver = next;
             },
             stop() {},
-            send: async (conversationId) => ({ conversationId }),
+            send: async (chatId) => ({ chatId }),
           }),
         },
       },
     });
     const admit = rs.fn(async () => false);
-    connectionPorts({ registry, admit, channelOf: serviceChannelOf }, "telegram");
+    connectionPorts({ registry, admit, channelOf: kindChannelOf }, "telegram");
     const connection = await registry.connect("telegram");
     await registry.importCredential(connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
 
-    // Pairing answers a pairing code before the inbox hears the channel.
+    // Admission runs before the inbox hears the channel.
     deliver?.({
       channel: "telegram",
       direction: "inbound",
       messageId: "code",
-      conversationId: "dm" as ConversationId,
+      chatId: "dm" as ChatId,
       senderId: "stranger",
-      text: "PAIR-123",
+      text: "hello",
       attachments: [],
       timestamp: new Date(0),
     });

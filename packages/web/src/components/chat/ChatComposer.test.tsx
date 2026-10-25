@@ -78,6 +78,16 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
       return Response.json({ guardianName: "Ada", ...settings });
     }
     if (url === "/api/people") return Response.json(peopleList(options.people ?? []));
+    if (url === "/api/chat/locations") {
+      return Response.json({
+        projects: {
+          rootPath: "/projects",
+          defaultPath: "/projects/default",
+          projects: [{ name: "alpha", path: "alpha" }],
+        },
+        devices: [{ id: "mac", name: "macbook", platform: "macos" }],
+      });
+    }
     if (url === "/api/skills") {
       return Response.json({
         skills: [
@@ -113,6 +123,51 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
 // The people the composer offers to speak as. The listing is the curated
 // people read (`GET /api/people`); the guardian is dropped because speaking as
 // the guardian is what the composer already does by default.
+describe("text-only composer", () => {
+  afterEach(() => {
+    cleanup();
+    rs.restoreAllMocks();
+  });
+
+  it("offers text and Send only, under the placeholder it is given", async () => {
+    const onSend = rs.fn();
+    renderComposer({ textOnly: true, placeholder: "Message Muse", onSend });
+
+    const box = await screen.findByPlaceholderText("Message Muse");
+    expect(screen.queryByRole("button", { name: "Upload files" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reasoning effort" })).toBeNull();
+
+    // A leading slash is text here, not a skill.
+    await userEvent.type(box, "/status please{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(onSend.mock.calls[0]![0].text).toBe("/status please");
+  });
+});
+
+describe("placeholder hints", () => {
+  it("shows a different hint after each send", async () => {
+    stubCoarsePointer(false);
+    rs.spyOn(Math, "random").mockReturnValue(0);
+    const onSend = rs.fn();
+    renderComposer({ showProjectSelector: true, onSend });
+
+    const box = await screen.findByPlaceholderText("How can I help you today?");
+    await userEvent.type(box, "hi{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(await screen.findByPlaceholderText("Type / to use a skill")).toBe(box);
+  });
+
+  it("offers neither @ nor keyboard hints in an open chat on a phone", async () => {
+    stubCoarsePointer(true);
+    rs.spyOn(Math, "random").mockReturnValue(0.99);
+    renderComposer({ lockAgentMention: true });
+
+    expect(
+      await screen.findByPlaceholderText("Send anytime, even while the agent is working"),
+    ).toBeTruthy();
+  });
+});
+
 describe("composer mention list", () => {
   const GUARDIAN = person("mock-guardian", "Mock Guardian", "guardian");
   const RAY = person("ray-oster", "Ray Oster", "inner-circle");
@@ -800,6 +855,69 @@ describe("New chat draft", () => {
     else act(() => composerRef.current?.submit("Quick entry"));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(onSend.mock.calls[0][0].personaId).toBe(draft.personaId);
+  });
+
+  it("restores a draft device folder and sends it with the first turn", async () => {
+    const deviceFolder = {
+      deviceId: "mac",
+      deviceName: "macbook",
+      path: "/Users/ray/code",
+      home: "/Users/ray",
+    };
+    saveNewChatDraft({ ...empty, text: "run tests", deviceFolder });
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({ persistNewChatDraft: true, showProjectSelector: true, onSend });
+    expect(screen.getByRole("button", { name: "Project" }).textContent).toContain("macbook:~/code");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0]).toMatchObject({ projectPath: "default", deviceFolder });
+  });
+
+  it("opens on the device folder a sidebar folder group passes in", async () => {
+    saveNewChatDraft({ ...empty, text: "run tests", projectPath: "research" });
+    const deviceFolder = { deviceId: "mac", deviceName: "macbook", path: "/w", home: null };
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({
+      persistNewChatDraft: true,
+      showProjectSelector: true,
+      onSend,
+      initialDeviceFolder: deviceFolder,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0]).toMatchObject({ projectPath: "default", deviceFolder });
+  });
+
+  it("reads the menu's projects and devices in one request before the menu opens", async () => {
+    const { fetchSpy } = renderComposer({ showProjectSelector: true });
+    const reads = () =>
+      fetchSpy.mock.calls
+        .map(([input]) => String(input))
+        .filter((url) => /\/api\/(chat\/locations|chat\/projects|devices)/.test(url));
+    await waitFor(() => expect(reads()).toEqual(["/api/chat/locations"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Project" }));
+    // The cached answer draws the first level at once; opening only refreshes it.
+    expect(screen.getByRole("option", { name: /Rome Cloud/ })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /macbook/ })).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    await waitFor(() => expect(reads()).toEqual(["/api/chat/locations", "/api/chat/locations"]));
+  });
+
+  it("drops a saved device folder when the composer opens with a project", async () => {
+    const deviceFolder = { deviceId: "mac", deviceName: "macbook", path: "/w", home: null };
+    saveNewChatDraft({ ...empty, text: "run tests", deviceFolder });
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({
+      persistNewChatDraft: true,
+      showProjectSelector: true,
+      onSend,
+      initialProjectName: "research",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0].projectPath).toBe("research");
+    expect(onSend.mock.calls[0][0].deviceFolder).toBeUndefined();
   });
 
   it("focuses without moving the current selection after restoring the end caret", () => {

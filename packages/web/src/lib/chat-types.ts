@@ -1,4 +1,5 @@
-import type { TranscriptPart } from "@rome/api-types/chat";
+import type { DeviceFolder, DeviceList } from "@rome/api-types/devices";
+import type { ChatMessageSender, TranscriptPart } from "@rome/api-types/chat";
 import type { TraceErrorEvent, TraceEventDto, TraceSummary } from "@rome/api-types/trace-segments";
 import type {
   RomeSessionDetail,
@@ -28,6 +29,8 @@ export interface ChatSession {
   reasoningEffort?: string | null;
   projectName: string;
   projectPath?: string | null;
+  /** Folder on a rome-node device the chat works in, set when the chat was created. */
+  deviceFolder?: DeviceFolder | null;
   agentName?: string | null;
   /** ISO timestamp when the chat was archived (soft-hidden), or null. */
   archivedAt?: string | null;
@@ -127,6 +130,11 @@ export interface DoneEventData {
 // A single in-flight turn returned by GET /chat/sessions/:id/turns.
 export interface TurnInfo {
   turnId: string;
+  /**
+   * The agent's own turn id, when a backend task streams it under a synthetic
+   * `turnId`. The turn's saved trace and reply carry this id.
+   */
+  agentTurnId?: string;
   streamId: string;
   startedAt: string;
   status: "running" | "queued";
@@ -151,6 +159,9 @@ export interface ChatMessage {
   content: string; // JSON array of blocks
   createdAt: string;
   traceSummary?: TraceSummary | null;
+  traceArchived?: boolean;
+  /** Who sent a user message. Absent when the message recorded no sender. */
+  sender?: ChatMessageSender;
 }
 
 export interface ProjectOption {
@@ -164,6 +175,15 @@ export interface ProjectCatalog {
   rootPath: string;
   defaultPath: string;
   projects: ProjectOption[];
+}
+
+/**
+ * What the new-chat location menu shows. `devices` is null when Rome could not
+ * read Cloud's device list in time.
+ */
+export interface ChatLocations {
+  projects: ProjectCatalog;
+  devices: DeviceList["devices"] | null;
 }
 
 export interface PendingUpload {

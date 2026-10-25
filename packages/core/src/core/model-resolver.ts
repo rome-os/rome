@@ -15,7 +15,6 @@ import type { RomeCreditsPayer } from "./rome-credits-payer.js";
 
 const log = createLogger("model-resolver");
 
-export const ENABLE_FABLE_SETTING_KEY = "enableFable";
 /** Per-provider overrides for the concrete model a capability tier resolves to. */
 export const TIER_MODEL_MAPPINGS_SETTING_KEY = "tierModelMappings";
 
@@ -80,7 +79,7 @@ export interface TierModelResolutionRequest {
 
 /**
  * Resolve exactly this provider/model (a session model pin, ADR 0001). Tier
- * maps, entitlement upgrades, and the Fable setting do not apply: the resolver
+ * maps and entitlement upgrades do not apply: the resolver
  * returns exactly the requested model or fails closed with a structured
  * ModelResolutionError — no substitution.
  *
@@ -126,8 +125,6 @@ const TEST_TIER_TO_MODEL: Record<ModelTier, string> = {
   small: "claude-haiku-5-5",
 };
 
-const FABLE_MODEL = "claude-fable-5-1[1m]";
-
 const CODEX_SOL_MODEL = "gpt-6.1-sol";
 const CODEX_LUNA_MODEL = "gpt-6-luna";
 const CODEX_TERRA_MODEL = "gpt-5.6-terra";
@@ -143,10 +140,6 @@ function providerUsable(providerId: ProviderId, state: ProviderState): boolean {
 function codexModel(tier: ModelTier, state: AIToolStateValue["codex"]): string {
   if (tier === "small") return state.lunaAccess ? CODEX_LUNA_MODEL : CODEX_TERRA_MODEL;
   return state.solAccess ? CODEX_SOL_MODEL : CODEX_TERRA_MODEL;
-}
-
-function claudeModel(tier: ModelTier, enableFable: boolean): string {
-  return tier === "large" && enableFable ? FABLE_MODEL : CLAUDE_TIER_TO_MODEL[tier];
 }
 
 /**
@@ -174,6 +167,16 @@ function configuredTierModel(
   return typeof model === "string" && model.trim() ? model.trim() : null;
 }
 
+// Agents, apps, and logs see only the message, not the reason field, so the
+// message itself names the cause and when a usage limit ends.
+function unavailableCause(provider: ModelProvider, availability: ProviderState): string {
+  if (availability.loggedIn === false) return `${provider.displayName} is not signed in`;
+  const until = availability.quotaExhaustedUntil;
+  return until
+    ? `${provider.displayName} has reached its usage limit until ${until}`
+    : `${provider.displayName} has reached its usage limit`;
+}
+
 function providerState(state: AIToolStateValue, providerId: ProviderId): ProviderState | null {
   if (providerId === "openai") return state.codex;
   if (providerId === "anthropic") return state.claude;
@@ -199,7 +202,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     const providerId = provider.id as AIToolProviderId;
     refreshAfterFailure(providerId);
     throw new ModelResolutionError(
-      `Selected model provider is unavailable: ${provider.displayName}`,
+      `Selected model provider is unavailable: ${unavailableCause(provider, availability)}`,
       {
         code: "model_provider_unavailable",
         provider: providerId,
@@ -300,9 +303,6 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         return { modelProvider: provider, model: selection.model };
       }
 
-      const fableEnabled =
-        request.tier === "large" &&
-        (await options.settingsRepo?.get<unknown>(ENABLE_FABLE_SETTING_KEY)) === true;
       const tierModelMappings = await options.settingsRepo?.get<unknown>(
         TIER_MODEL_MAPPINGS_SETTING_KEY,
       );
@@ -322,7 +322,6 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       const creditsPay = usingRomeCredits();
       const state = resolutionState(accountState);
       const creditsServed = creditsServedModels();
-      const useFable = state.claude.authMethod !== "stored-compatible" && fableEnabled;
 
       const resolveTierModel = (
         provider: ModelProvider,
@@ -335,7 +334,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
           (provider.id === "openai"
             ? codexModel(request.tier, providerState.codex)
             : provider.id === "anthropic"
-              ? claudeModel(request.tier, useFable)
+              ? CLAUDE_TIER_TO_MODEL[request.tier]
               : TEST_TIER_TO_MODEL[request.tier]);
         // A configured model is intentional, but known Codex entitlement
         // restrictions still fail with the same recoverable error as an exact
@@ -358,9 +357,6 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       }
 
       const claude = providers.get("anthropic");
-      if (useFable && claude && providerUsable("anthropic", state.claude)) {
-        return { modelProvider: claude, model: resolveTierModel(claude) };
-      }
       const codex = providers.get("openai");
       if (codex && providerUsable("openai", accountState.codex)) {
         return { modelProvider: codex, model: resolveTierModel(codex) };

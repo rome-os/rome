@@ -18,7 +18,9 @@ function deps(routineNames: string[]) {
     appContext: {
       listRoutines: rs
         .fn()
-        .mockResolvedValue(routineNames.map((name) => ({ name, actionName: "dream" }))),
+        .mockResolvedValue(
+          routineNames.map((name) => ({ id: name, name, actionName: "dream", enabled: true })),
+        ),
       runAction,
     },
   } as unknown as AppStartedHookDeps;
@@ -26,24 +28,33 @@ function deps(routineNames: string[]) {
 }
 
 describe("dream app-started hook", () => {
-  it("registers the daily routine on first start", async () => {
+  it("registers the dream routine on first start", async () => {
     const { hookDeps, runAction, info } = deps([]);
 
     await createHook(hookDeps).onAppStarted(event);
 
     expect(runAction).toHaveBeenCalledWith(
       "create_routine",
-      expect.objectContaining({ name: "daily-dream", actionName: "dream" }),
+      expect.objectContaining({ name: "dream", actionName: "dream" }),
     );
-    expect(info).toHaveBeenCalledWith("registered the daily dream routine");
+    expect(info).toHaveBeenCalledWith("registered the dream routine");
   });
 
   it("does nothing on a later start", async () => {
-    const { hookDeps, runAction, info } = deps(["daily-dream"]);
+    const { hookDeps, runAction, info } = deps(["dream"]);
 
     await createHook(hookDeps).onAppStarted(event);
 
     expect(runAction).not.toHaveBeenCalled();
     expect(info).not.toHaveBeenCalled();
+  });
+
+  it("replaces the daily routine on the first start after an upgrade", async () => {
+    const { hookDeps, runAction, info } = deps(["daily-dream"]);
+
+    await createHook(hookDeps).onAppStarted(event);
+
+    expect(runAction).toHaveBeenCalledWith("delete_routine", { routineId: "daily-dream" });
+    expect(info).toHaveBeenCalledWith("replaced the daily dream routine");
   });
 });

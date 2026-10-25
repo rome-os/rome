@@ -199,13 +199,13 @@ describe("AgentSessionManager working dirs", () => {
       romeSessionId: "conv-1",
     });
     await original.close("idle");
-    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("conv-1");
+    expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBe("conv-1");
 
     await rm(projectDir, { recursive: true });
     const replacement = await manager.acquire(key);
 
     expect(replacement.sessionId).not.toBe(original.sessionId);
-    expect((await sessionsRepo.findById(replacement.sessionId))?.conversationId).toBe("conv-1");
+    expect((await sessionsRepo.findById(replacement.sessionId))?.chatId).toBe("conv-1");
     expect(replacement.conversation).toMatchObject({ origin: "recorded", id: "conv-1" });
   });
 
@@ -274,12 +274,12 @@ describe("AgentSessionManager working dirs", () => {
     const key = { agentName: AGENT, channelThreadKey: "webchat:legacy" };
     const original = await manager.acquire(key);
     await original.close("idle");
-    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBeNull();
+    expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBeNull();
 
     const reused = await manager.acquire(key, { romeSessionId: "legacy" });
 
     expect(reused.sessionId).toBe(original.sessionId);
-    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("legacy");
+    expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBe("legacy");
   });
 
   it("keeps a reused row's conversation when the caller names another", async () => {
@@ -291,7 +291,7 @@ describe("AgentSessionManager working dirs", () => {
 
     expect(reused.sessionId).toBe(original.sessionId);
     expect(reused.conversation).toEqual({ origin: "named", id: "other" });
-    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("kept");
+    expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBe("kept");
   });
 
   it("records a conversation learned after acquire, without overwriting it", async () => {
@@ -299,12 +299,12 @@ describe("AgentSessionManager working dirs", () => {
       agentName: AGENT,
       channelThreadKey: "main:subagent:1",
     });
-    expect((await sessionsRepo.findById(child.sessionId))?.conversationId).toBeNull();
+    expect((await sessionsRepo.findById(child.sessionId))?.chatId).toBeNull();
 
     await manager.recordConversation(child.sessionId, child.sessionId);
     await manager.recordConversation(child.sessionId, "other");
 
-    expect((await sessionsRepo.findById(child.sessionId))?.conversationId).toBe(child.sessionId);
+    expect((await sessionsRepo.findById(child.sessionId))?.chatId).toBe(child.sessionId);
   });
 
   it("fills a row with no conversation when a resume names one", async () => {
@@ -318,9 +318,7 @@ describe("AgentSessionManager working dirs", () => {
       romeSessionId: original.sessionId,
     });
 
-    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe(
-      original.sessionId,
-    );
+    expect((await sessionsRepo.findById(original.sessionId))?.chatId).toBe(original.sessionId);
   });
 
   it("records the dir a resume or a keyed reuse was moved to, once the provider opens", async () => {

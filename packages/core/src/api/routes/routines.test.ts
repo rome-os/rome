@@ -878,7 +878,10 @@ async function buildFireHarness(testDb: TestDb, retryDelayMs = 0): Promise<FireH
   );
   routineEngine.registerProvider("schedule", manualProvider);
   const eventBus = new EventBus();
-  routineEngine.registerProvider("event-bus", new EventBusTriggerProvider(eventBus));
+  routineEngine.registerProvider(
+    "event-bus",
+    new EventBusTriggerProvider(eventBus, baseDeps.routinesRepo),
+  );
   routineEngine.registerProvider("manual", new RealManualTriggerProvider());
 
   const deps: ApiDeps = {
@@ -1660,6 +1663,34 @@ describe("Routines fire path", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toContain("eventName");
+  });
+
+  it("fires a once event-bus routine on the first match only and disables it", async () => {
+    const stub = registerStubAction(harness.actionRegistry, "handle_once");
+    const { id } = await createRoutineViaApi(harness.app, {
+      name: "once-order",
+      trigger: {
+        type: "event-bus",
+        eventName: "order.created",
+        once: true,
+      },
+      actionName: "handle_once",
+    });
+
+    for (const orderId of [1, 2]) {
+      harness.eventBus.publish({
+        name: "order.created",
+        source: "connector.shop",
+        payload: { orderId },
+        emittedAt: new Date().toISOString(),
+      });
+    }
+
+    const runs = await waitForRuns(harness.app, id, 1);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runs[0].payload).toEqual({ orderId: 1 });
+    expect(stub.calls).toHaveLength(1);
+    expect((await harness.routinesRepo.findById(id))!.enabled).toBe(false);
   });
 });
 

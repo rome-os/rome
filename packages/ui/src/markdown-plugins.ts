@@ -1,6 +1,6 @@
 import type { CodeHighlighterPlugin, DiagramPlugin, MathPlugin, PluginConfig } from "streamdown";
 
-// Mermaid, KaTeX and Shiki are most of the Markdown renderer's weight, and
+// Pele, KaTeX and Shiki are most of the Markdown renderer's weight, and
 // most messages use none of them. Each plugin is fetched the first time a
 // message needs it, so a page of plain prose never downloads them.
 
@@ -17,8 +17,8 @@ const loaders: {
 let mermaidPlugin: Promise<DiagramPlugin> | null = null;
 
 function loadMermaidPlugin(): Promise<DiagramPlugin> {
-  mermaidPlugin ??= import("@streamdown/mermaid")
-    .then((module) => module.mermaid)
+  mermaidPlugin ??= import("./diagram-renderer.js")
+    .then((module) => module.diagram)
     .catch((error: unknown) => {
       // The next diagram retries, so a dropped chunk request is not permanent.
       mermaidPlugin = null;

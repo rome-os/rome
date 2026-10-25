@@ -10,12 +10,12 @@ const transport: DeliveryTransport = {
   codec: plainText,
   create: async (conversation, text) => ({
     messageId: `id-${text.trim()}`,
-    conversationId: conversation,
+    chatId: conversation,
   }),
 };
 const target = {
   channel: "telegram",
-  conversationId: "chat-1",
+  chatId: "chat-1",
   replyToMessageId: "msg-1",
   romeSessionId: "conversation-1",
   turnId: "turn-1",
@@ -58,13 +58,13 @@ describe("ReplyStreams", () => {
   });
 
   it("records the delivered reply once, as the text the user was shown", async () => {
-    const recordOutboundMessage = rs.fn(async () => undefined);
-    const conversations = { recordOutboundMessage };
+    const recordOutboundConversationMessage = rs.fn(async () => undefined);
+    const chats = { recordOutboundConversationMessage };
     const streams = new ReplyStreams({
       streaming: async () => true,
       replies,
       clock: systemClock,
-      conversations,
+      chats,
     });
     const stream = (await streams.open(target))!;
 
@@ -72,8 +72,8 @@ describe("ReplyStreams", () => {
     const outcome = await stream.settle(false);
 
     expect(outcome.status).toBe("delivered");
-    expect(recordOutboundMessage).toHaveBeenCalledTimes(1);
-    expect(recordOutboundMessage).toHaveBeenCalledWith(
+    expect(recordOutboundConversationMessage).toHaveBeenCalledTimes(1);
+    expect(recordOutboundConversationMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "conversation-1",
         content: JSON.stringify([{ type: "text", content: "one two" }]),
@@ -84,14 +84,36 @@ describe("ReplyStreams", () => {
     );
   });
 
+  it("records the source the messages show, not the codec's rendering of each", async () => {
+    const recordOutboundConversationMessage = rs.fn(async () => undefined);
+    const wrapped: DeliveryTransport = {
+      ...transport,
+      codec: { ...plainText, render: (s) => `[${s}]` },
+    };
+    const streams = new ReplyStreams({
+      streaming: async () => true,
+      replies: () => ({ transport: wrapped, pacer: new Pacer(budget, systemClock) }),
+      clock: systemClock,
+      chats: { recordOutboundConversationMessage },
+    });
+    const stream = (await streams.open(target))!;
+
+    stream.accept({ type: "result", content: "a b c" });
+    await stream.settle(false);
+
+    expect(recordOutboundConversationMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: JSON.stringify([{ type: "text", content: "a b c" }]) }),
+    );
+  });
+
   it("records each block as its own paragraph, under the first message of the last block", async () => {
-    const recordOutboundMessage = rs.fn(async () => undefined);
-    const conversations = { recordOutboundMessage };
+    const recordOutboundConversationMessage = rs.fn(async () => undefined);
+    const chats = { recordOutboundConversationMessage };
     const streams = new ReplyStreams({
       streaming: async () => true,
       replies,
       clock: systemClock,
-      conversations,
+      chats,
     });
     const stream = (await streams.open(target))!;
 
@@ -100,7 +122,7 @@ describe("ReplyStreams", () => {
     stream.accept({ type: "result", content: "six" });
     await stream.settle(false);
 
-    expect(recordOutboundMessage).toHaveBeenCalledWith(
+    expect(recordOutboundConversationMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         content: JSON.stringify([{ type: "text", content: "one two\n\nsix" }]),
         platformMessageId: "id-six",
@@ -109,20 +131,20 @@ describe("ReplyStreams", () => {
   });
 
   it("records the reply under the last block with a message id, when the answer's create is unknown", async () => {
-    const recordOutboundMessage = rs.fn(async () => undefined);
-    const conversations = { recordOutboundMessage };
+    const recordOutboundConversationMessage = rs.fn(async () => undefined);
+    const chats = { recordOutboundConversationMessage };
     const answerUnknown: DeliveryTransport = {
       ...transport,
       create: async (conversation, text) => {
         if (text === "six") throw new DeliveryFailure("unknown", "no answer");
-        return { messageId: `id-${text.trim()}`, conversationId: conversation };
+        return { messageId: `id-${text.trim()}`, chatId: conversation };
       },
     };
     const streams = new ReplyStreams({
       streaming: async () => true,
       replies: () => ({ transport: answerUnknown, pacer: new Pacer(budget, systemClock) }),
       clock: systemClock,
-      conversations,
+      chats,
     });
     const stream = (await streams.open(target))!;
 
@@ -131,7 +153,7 @@ describe("ReplyStreams", () => {
     stream.accept({ type: "result", content: "six" });
     expect((await stream.settle(false)).status).toBe("unknown");
 
-    expect(recordOutboundMessage).toHaveBeenCalledWith(
+    expect(recordOutboundConversationMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         content: JSON.stringify([{ type: "text", content: "one two\n\nsix" }]),
         platformMessageId: "id-one",
@@ -140,16 +162,16 @@ describe("ReplyStreams", () => {
   });
 
   it("shows the answer WebChat shows, for a structured result and for a turn that ends mid-block", async () => {
-    const recordOutboundMessage = rs.fn(async () => undefined);
-    const conversations = { recordOutboundMessage };
+    const recordOutboundConversationMessage = rs.fn(async () => undefined);
+    const chats = { recordOutboundConversationMessage };
     const streams = new ReplyStreams({
       streaming: async () => true,
       replies,
       clock: systemClock,
-      conversations,
+      chats,
     });
     const shown = () =>
-      recordOutboundMessage.mock.calls.map(
+      recordOutboundConversationMessage.mock.calls.map(
         (call) =>
           (
             JSON.parse((call as unknown as [{ content: string }])[0].content) as [
@@ -176,8 +198,8 @@ describe("ReplyStreams", () => {
   });
 
   it("records nothing when no message was written, so a failed stream leaves no history", async () => {
-    const recordOutboundMessage = rs.fn(async () => undefined);
-    const conversations = { recordOutboundMessage };
+    const recordOutboundConversationMessage = rs.fn(async () => undefined);
+    const chats = { recordOutboundConversationMessage };
     const refusing: DeliveryTransport = {
       ...transport,
       create: async () => {
@@ -188,18 +210,18 @@ describe("ReplyStreams", () => {
       streaming: async () => true,
       replies: () => ({ transport: refusing, pacer: new Pacer(budget, systemClock) }),
       clock: systemClock,
-      conversations,
+      chats,
     });
     const stream = (await streams.open(target))!;
 
     stream.accept({ type: "result", content: "one" });
     expect((await stream.settle(false)).status).toBe("failed");
-    expect(recordOutboundMessage).not.toHaveBeenCalled();
+    expect(recordOutboundConversationMessage).not.toHaveBeenCalled();
   });
 
   it("records a message whose create may have landed, since nothing sends it again", async () => {
-    const recordOutboundMessage = rs.fn(async () => undefined);
-    const conversations = { recordOutboundMessage };
+    const recordOutboundConversationMessage = rs.fn(async () => undefined);
+    const chats = { recordOutboundConversationMessage };
     const unanswered: DeliveryTransport = {
       ...transport,
       create: async () => {
@@ -210,14 +232,16 @@ describe("ReplyStreams", () => {
       streaming: async () => true,
       replies: () => ({ transport: unanswered, pacer: new Pacer(budget, systemClock) }),
       clock: systemClock,
-      conversations,
+      chats,
     });
     const stream = (await streams.open(target))!;
 
     stream.accept({ type: "result", content: "one" });
     expect((await stream.settle(false)).status).toBe("unknown");
-    expect(recordOutboundMessage).toHaveBeenCalledTimes(1);
-    const [recorded] = recordOutboundMessage.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(recordOutboundConversationMessage).toHaveBeenCalledTimes(1);
+    const [recorded] = recordOutboundConversationMessage.mock.calls[0] as unknown as [
+      Record<string, unknown>,
+    ];
     expect(recorded).toMatchObject({
       content: JSON.stringify([{ type: "text", content: "one" }]),
       turnId: "turn-1",

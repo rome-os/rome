@@ -18,6 +18,7 @@
 import { callMain, isTransportUncertain } from "./worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../lib/feedback-client.js";
+import type { CloudProfileOutcome, CloudProfileService } from "../lib/cloud-profile.js";
 import type { AgentNameResolution, AgentNamesService } from "../channels/agent-names.js";
 import type { NotifyContent, NotifyService, SendOutcome } from "../lib/notify-client.js";
 import type {
@@ -37,13 +38,14 @@ import type {
   AppLifecycleCreateParams,
   BackendTurnParams,
   BackendTurnRunner,
-  ConversationId,
-  ConversationRef,
-  ConversationSettingsControl,
-  ConversationSettingsPage,
-  ConversationSettingsSnapshot,
-  EventCatalogEntry,
+  ChatId,
+  ChatRef,
+  ChatSettingsControl,
+  ChatSettingsPage,
+  ChatSettingsSnapshot,
   EventCatalogReader,
+  EventCatalogSearchOptions,
+  EventCatalogSearchResult,
   EventPublisher,
   Routine,
   RoutineEngine,
@@ -53,9 +55,9 @@ import type {
   ChannelsService,
   MessageReceipt,
   OutgoingMessage,
-  ListConversationSettingsInput,
-  ResetConversationSettingsInput,
-  UpdateConversationSettingsInput,
+  ListChatSettingsInput,
+  ResetChatSettingsInput,
+  UpdateChatSettingsInput,
 } from "@rome-os/app-runtime";
 
 /** apps.* operations install/pack on the main process — minutes, not seconds. */
@@ -91,10 +93,10 @@ export class RoutineEngineProxy implements RoutineEngine {
 }
 
 /**
- * Worker-side action existence checker backed by the main process's eager
- * ActionRegistry. The worker registry may contain lazy stubs whose modules have
- * not loaded yet, so validation paths should not treat local stub presence as
- * executable truth.
+ * Worker-side action existence and args checker backed by the main process's
+ * eager ActionRegistry. The worker registry may contain lazy stubs whose modules
+ * have not loaded yet, so validation paths should not treat local stub presence
+ * or a stub's missing input schema as executable truth.
  */
 export class ActionRegistryProxy {
   async has(actionName: string): Promise<boolean> {
@@ -105,6 +107,15 @@ export class ActionRegistryProxy {
   async isExplicit(actionName: string): Promise<boolean> {
     const result = await callMain<{ explicit: boolean }>("actions.isExplicit", { actionName });
     return result.explicit;
+  }
+
+  /** Returns an error message when args fail the action's input schema, else null. */
+  async validateArgs(actionName: string, args: Record<string, unknown>): Promise<string | null> {
+    const result = await callMain<{ error: string | null }>("actions.validateArgs", {
+      actionName,
+      args,
+    });
+    return result.error;
   }
 }
 
@@ -137,10 +148,12 @@ export class EventCatalogProxy implements EventCatalogReader {
   async search(
     query: string,
     limit: number,
-  ): Promise<{ entries: EventCatalogEntry[]; total: number }> {
-    return await callMain<{ entries: EventCatalogEntry[]; total: number }>("events.searchCatalog", {
+    options: EventCatalogSearchOptions = {},
+  ): Promise<EventCatalogSearchResult> {
+    return await callMain<EventCatalogSearchResult>("events.searchCatalog", {
       query,
       limit,
+      ...(options.match ? { match: options.match } : {}),
     });
   }
 }
@@ -228,14 +241,10 @@ export class ChannelsServiceProxy implements ChannelsService {
     return summaries.map((summary) => withRemovedMembers(summary, REMOVED_SUMMARY_MEMBERS));
   }
 
-  send(
-    channel: string,
-    conversationId: ConversationId,
-    message: OutgoingMessage,
-  ): Promise<MessageReceipt> {
+  send(channel: string, chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     return callMain<MessageReceipt>("channels.send", {
       channel,
-      conversationId,
+      chatId,
       message,
     });
   }
@@ -251,21 +260,21 @@ export class ChannelsServiceProxy implements ChannelsService {
   }
 }
 
-export class ConversationSettingsControlProxy implements ConversationSettingsControl {
-  list(input: ListConversationSettingsInput): Promise<ConversationSettingsPage> {
-    return callMain("conversationSettings.list", input);
+export class ChatSettingsControlProxy implements ChatSettingsControl {
+  list(input: ListChatSettingsInput): Promise<ChatSettingsPage> {
+    return callMain("chatSettings.list", input);
   }
 
-  get(ref: ConversationRef): Promise<ConversationSettingsSnapshot> {
-    return callMain("conversationSettings.get", { ref });
+  get(ref: ChatRef): Promise<ChatSettingsSnapshot> {
+    return callMain("chatSettings.get", { ref });
   }
 
-  update(input: UpdateConversationSettingsInput): Promise<ConversationSettingsSnapshot> {
-    return callMain("conversationSettings.update", input);
+  update(input: UpdateChatSettingsInput): Promise<ChatSettingsSnapshot> {
+    return callMain("chatSettings.update", input);
   }
 
-  reset(input: ResetConversationSettingsInput): Promise<ConversationSettingsSnapshot> {
-    return callMain("conversationSettings.reset", input);
+  reset(input: ResetChatSettingsInput): Promise<ChatSettingsSnapshot> {
+    return callMain("chatSettings.reset", input);
   }
 }
 
@@ -332,6 +341,13 @@ export class EmailInboundControlProxy implements EmailInboundControl {
 export class AgentNamesProxy implements AgentNamesService {
   resolve(name: string): Promise<AgentNameResolution> {
     return callMain<AgentNameResolution>("agentNames.resolve", { name });
+  }
+}
+
+/** The instance token that reads the guardian's profile stays in main. */
+export class CloudProfileProxy implements CloudProfileService {
+  get(): Promise<CloudProfileOutcome> {
+    return callMain<CloudProfileOutcome>("cloudProfile.get", {});
   }
 }
 

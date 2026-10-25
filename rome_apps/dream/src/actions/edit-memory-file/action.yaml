@@ -1,0 +1,9 @@
+name: edit_memory_file
+type: custom
+description: Replace one exact, unique piece of text in a file in the guardian's memory directory. Refuses any path outside the memory directory, and text that is missing or appears more than once.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write
+visibility: explicit

@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import type { Cron } from "croner";
-import { nextDateForLocalTime, ScheduleTriggerProvider } from "./schedule-trigger-provider.js";
+import {
+  daysToOccurrence,
+  localDayNumber,
+  nextDateForLocalTime,
+  ScheduleTriggerProvider,
+} from "./schedule-trigger-provider.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import type { SessionActor } from "../lib/session-actor.js";
@@ -130,6 +135,297 @@ describe("ScheduleTriggerProvider", () => {
       // Recurring routines stay enabled and active
       expect(after?.enabled).toBe(true);
       expect(provider.isActive(id)).toBe(true);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every two days: fires two calendar days apart across a month end", async () => {
+    // A day-of-month step (*/2) matches both Oct 31 and Nov 1. The interval
+    // counts from the creation date instead: Oct 29, Oct 31, Nov 2.
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-10-30T23:59:00Z"));
+      const id = await repo.create({
+        name: "every-two-days",
+        trigger: {
+          type: "schedule",
+          tzid: "UTC",
+          tzMode: "fixed",
+          localTime: "00:00",
+          rrule: "FREQ=DAILY;INTERVAL=2",
+        },
+        actionName: "noop",
+        args: {},
+        enabled: true,
+      });
+      const row = await repo.findById(id);
+      const routine = buildRoutine({
+        id,
+        trigger: row!.trigger as Trigger,
+        createdAt: new Date("2026-10-29T12:00:00Z"),
+      });
+
+      const fire = rs.fn(async () => {});
+      await provider.activate(routine, fire);
+      expect((await repo.findById(id))!.nextRunAt!.toISOString()).toBe("2026-10-31T00:00:00.000Z");
+
+      rs.setSystemTime(new Date("2026-10-31T00:00:01Z"));
+      await jobFor(provider, id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+      expect((await repo.findById(id))!.nextRunAt!.toISOString()).toBe("2026-11-02T00:00:00.000Z");
+
+      // The plain daily cron still wakes on Nov 1; the provider skips it.
+      rs.setSystemTime(new Date("2026-11-01T00:00:01Z"));
+      await jobFor(provider, id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+      expect((await repo.findById(id))!.nextRunAt!.toISOString()).toBe("2026-11-02T00:00:00.000Z");
+
+      rs.setSystemTime(new Date("2026-11-02T00:00:01Z"));
+      await jobFor(provider, id).trigger();
+      expect(fire).toHaveBeenCalledTimes(2);
+      expect((await repo.findById(id))!.nextRunAt!.toISOString()).toBe("2026-11-04T00:00:00.000Z");
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every two days: a fire delayed past midnight still counts as the day it was due", async () => {
+    // A host asleep through the 23:30 fire runs it once on wake, the next day.
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-10-31T12:00:00Z"));
+      const id = await repo.create({
+        name: "late-fire",
+        trigger: {
+          type: "schedule",
+          tzid: "UTC",
+          tzMode: "fixed",
+          localTime: "23:30",
+          rrule: "FREQ=DAILY;INTERVAL=2",
+        },
+        actionName: "noop",
+        args: {},
+        enabled: true,
+      });
+      const row = await repo.findById(id);
+      const routine = buildRoutine({
+        id,
+        trigger: row!.trigger as Trigger,
+        createdAt: new Date("2026-10-29T12:00:00Z"),
+      });
+
+      const fire = rs.fn(async () => {});
+      await provider.activate(routine, fire);
+      expect((await repo.findById(id))!.nextRunAt!.toISOString()).toBe("2026-10-31T23:30:00.000Z");
+
+      rs.setSystemTime(new Date("2026-11-01T00:10:00Z"));
+      await jobFor(provider, id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+      expect((await repo.findById(id))!.nextRunAt!.toISOString()).toBe("2026-11-02T23:30:00.000Z");
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every two days, floating: counts from the creation date in the guardian's current zone", async () => {
+    // 2026-10-29T02:00Z is Oct 29 in UTC but Oct 28 in New York, so moving
+    // the guardian between those zones shifts which days are occurrences.
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    let zone = "UTC";
+    const floatingProvider = new ScheduleTriggerProvider(repo, async () => zone);
+    try {
+      rs.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+      const id = await repo.create({
+        name: "floating-every-two-days",
+        trigger: {
+          type: "schedule",
+          tzid: "UTC",
+          tzMode: "floating",
+          localTime: "09:00",
+          rrule: "FREQ=DAILY;INTERVAL=2",
+        },
+        actionName: "noop",
+        args: {},
+        enabled: true,
+      });
+      const row = await repo.findById(id);
+      const routine = buildRoutine({
+        id,
+        trigger: row!.trigger as Trigger,
+        createdAt: new Date("2026-10-29T02:00:00Z"),
+      });
+
+      await floatingProvider.activate(routine, async () => {});
+      // UTC anchor Oct 29: Oct 31 09:00 UTC.
+      expect((await repo.findById(id))!.nextRunAt!.toISOString()).toBe("2026-10-31T09:00:00.000Z");
+
+      zone = "America/New_York";
+      await floatingProvider.activate(routine, async () => {});
+      // New York anchor Oct 28: Oct 30 09:00 EDT.
+      expect((await repo.findById(id))!.nextRunAt!.toISOString()).toBe("2026-10-30T13:00:00.000Z");
+    } finally {
+      floatingProvider.stop();
+      rs.useRealTimers();
+    }
+  });
+
+  async function everyDaysRoutine(
+    rrule: string,
+    localTime: string,
+    tzid = "UTC",
+    createdAt = new Date("2026-10-29T12:00:00Z"),
+  ): Promise<Routine> {
+    const id = await repo.create({
+      name: "every-n-days",
+      trigger: { type: "schedule", tzid, tzMode: "fixed", localTime, rrule },
+      actionName: "noop",
+      args: {},
+      enabled: true,
+    });
+    const row = await repo.findById(id);
+    return buildRoutine({ id, trigger: row!.trigger as Trigger, createdAt });
+  }
+
+  it("every two days: a fire that throws does not fire again on the off day", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-10-30T23:59:00Z"));
+      const routine = await everyDaysRoutine("FREQ=DAILY;INTERVAL=2", "00:00");
+      const fire = rs.fn(async () => {});
+      fire.mockRejectedValueOnce(new Error("disk I/O error"));
+      await provider.activate(routine, fire);
+
+      rs.setSystemTime(new Date("2026-10-31T00:00:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        "2026-11-02T00:00:00.000Z",
+      );
+
+      rs.setSystemTime(new Date("2026-11-01T00:00:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+
+      rs.setSystemTime(new Date("2026-11-02T00:00:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(2);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every two days: a fire still running at the next wake does not fire on the off day", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-10-30T23:59:00Z"));
+      const routine = await everyDaysRoutine("FREQ=DAILY;INTERVAL=2", "00:00");
+      let finish = () => {};
+      const fire = rs.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await provider.activate(routine, fire);
+
+      rs.setSystemTime(new Date("2026-10-31T00:00:01Z"));
+      const running = jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+
+      rs.setSystemTime(new Date("2026-11-01T00:00:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+
+      finish();
+      await running;
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        "2026-11-02T00:00:00.000Z",
+      );
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every three days: keeps an occurrence on a fall-back day east of UTC", async () => {
+    // Sydney falls back at 03:00 on 2027-04-04, and Apr 4 is an occurrence
+    // (456 days after Jan 3 2026). A jump that lands after 00:30 that day
+    // would skip to Apr 7.
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2027-03-31T13:31:00Z")); // Apr 1, 00:31 AEDT
+      const routine = await everyDaysRoutine(
+        "FREQ=DAILY;INTERVAL=3",
+        "00:30",
+        "Australia/Sydney",
+        new Date("2026-01-03T01:00:00Z"),
+      );
+      await provider.activate(routine, async () => {});
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        "2027-04-03T13:30:00.000Z",
+      );
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every three days: counts a wake moved past midnight by a DST gap on the day it was due", async () => {
+    // Nuuk springs forward at 23:00 on 2026-03-28, an occurrence, so croner
+    // moves its 23:30 wake to 00:30 on Mar 29. Read by the day it lands on,
+    // that wake looks like an off day and Mar 28 would be dropped.
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-03-26T01:31:00Z")); // Mar 25, 23:31 local
+      const routine = await everyDaysRoutine(
+        "FREQ=DAILY;INTERVAL=3",
+        "23:30",
+        "America/Godthab",
+        new Date("2026-01-03T12:00:00Z"),
+      );
+      const fire = rs.fn(async () => {});
+      await provider.activate(routine, fire);
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        "2026-03-29T01:30:00.000Z",
+      );
+
+      rs.setSystemTime(new Date("2026-03-29T01:30:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).toHaveBeenCalledTimes(1);
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        "2026-04-01T00:30:00.000Z",
+      );
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every 100,000 days: stores the next run 100,000 days after the start day", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+      const routine = await everyDaysRoutine("FREQ=DAILY;INTERVAL=100000", "09:00");
+      await provider.activate(routine, async () => {});
+      const expected = new Date(Date.UTC(2026, 9, 29 + 100_000, 9));
+      expect((await repo.findById(routine.id))!.nextRunAt!.toISOString()).toBe(
+        expected.toISOString(),
+      );
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("every N days past croner's year cap: never fires", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+      const routine = await everyDaysRoutine("FREQ=DAILY;INTERVAL=400000", "09:00");
+      const fire = rs.fn(async () => {});
+      await provider.activate(routine, fire);
+      expect((await repo.findById(routine.id))!.nextRunAt).toBeFalsy();
+
+      rs.setSystemTime(new Date("2026-10-31T09:00:01Z"));
+      await jobFor(provider, routine.id).trigger();
+      expect(fire).not.toHaveBeenCalled();
     } finally {
       rs.useRealTimers();
     }
@@ -331,5 +627,38 @@ describe("nextDateForLocalTime", () => {
     const now = new Date("2026-06-23T08:59:58Z");
     expect(nextDateForLocalTime("09:00", "UTC", now)).toBe("2026-06-24");
     expect(nextDateForLocalTime("09:01", "UTC", now)).toBe("2026-06-23");
+  });
+});
+
+describe("daysToOccurrence", () => {
+  const tz = "America/New_York";
+  const ahead = (at: string, anchor: string, interval: number, zone = "UTC") =>
+    daysToOccurrence(
+      localDayNumber(new Date(at), zone),
+      localDayNumber(new Date(anchor), zone),
+      interval,
+    );
+
+  it("keeps every-other-day parity across the November DST change", () => {
+    const anchor = "2026-10-30T13:00:00Z"; // Oct 30, 09:00 EDT
+    // Nov 1 is the fall-back day; Nov 3 09:00 is EST.
+    expect(ahead("2026-11-01T13:00:00Z", anchor, 2, tz)).toBe(0);
+    expect(ahead("2026-11-02T14:00:00Z", anchor, 2, tz)).toBe(1);
+    expect(ahead("2026-11-03T14:00:00Z", anchor, 2, tz)).toBe(0);
+  });
+
+  it("counts a leap day", () => {
+    const anchor = "2028-02-27T09:00:00Z";
+    expect(ahead("2028-02-29T09:00:00Z", anchor, 2)).toBe(0);
+    expect(ahead("2028-03-01T09:00:00Z", anchor, 2)).toBe(1);
+    expect(ahead("2028-03-02T09:00:00Z", anchor, 3)).toBe(2);
+    expect(ahead("2028-03-01T09:00:00Z", anchor, 3)).toBe(0);
+  });
+
+  it("treats days before the anchor by the same spacing", () => {
+    const anchor = "2026-10-29T12:00:00Z";
+    expect(ahead("2026-10-27T00:00:00Z", anchor, 2)).toBe(0);
+    expect(ahead("2026-10-28T00:00:00Z", anchor, 2)).toBe(1);
+    expect(ahead("2026-10-28T00:00:00Z", anchor, 5)).toBe(1);
   });
 });

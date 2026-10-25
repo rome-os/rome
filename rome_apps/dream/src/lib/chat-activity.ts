@@ -1,16 +1,16 @@
 import { type SQL, sql } from "drizzle-orm";
 import type { AppDbContext } from "@rome-os/app-runtime";
 
-// The services an agent can be linked to (`LINKABLE_SERVICES` in
+// The connection kinds an agent can be linked to (`LINKABLE_KINDS` in
 // @rome/api-types, which an app cannot import), less the guardian's own
 // signed-in Telegram. A test keeps the two in step. Every other channel
 // carries the guardian's own accounts (a linked WhatsApp, a WeChat login) or
 // Rome's own traffic, and stays out of Dream.
-export const ACCOUNT_SERVICES = ["feishu", "telegram", "discord"];
+export const ACCOUNT_KINDS = ["feishu", "telegram", "discord", "slack_bot"];
 
-/** Linkable services that are the guardian's own account, which Dream
+/** Linkable connection kinds that are the guardian's own account, which Dream
  *  leaves alone as it does their other personal accounts. */
-export const GUARDIAN_OWN_SERVICES = ["telegram_user"];
+export const GUARDIAN_OWN_KINDS = ["telegram_user"];
 
 /** A dashboard chat, over the `rome_sessions` row named `session`. The
  *  webchat read and the start check both use it. */
@@ -21,13 +21,32 @@ export function inDashboardChat(session: string): SQL {
 }
 
 /**
+ * A chat only the guardian wrote in, over the `rome_sessions` row named
+ * `session`. A chat a visitor owns, or one with any request a visitor or an
+ * anonymous viewer sent, is left out whole, so Dream never takes someone
+ * else's request for the guardian's. Rows from before owners and actors were
+ * recorded have neither, and count as the guardian's.
+ */
+export function guardianOnlyChat(session: string): SQL {
+  const s = sql.raw(session);
+  // Uncorrelated, so SQLite builds the excluded set once rather than
+  // rescanning a chat for every row it reads.
+  return sql`(coalesce(${s}.owner_key, 'guardian') = 'guardian'
+    AND ${s}.id NOT IN (
+      SELECT session_id FROM rome_agent_messages
+      WHERE role = 'user'
+        AND coalesce(json_extract(actor, '$.kind'), 'guardian') <> 'guardian'
+    ))`;
+}
+
+/**
  * A channel session on one of Rome's accounts, over `rome_sessions s` and
  * `channels c` LEFT JOINed on `c.id = s.source_channel`. A session whose
- * channel record is gone is judged by its channel id, which names the service
- * for a service's first account.
+ * channel record is gone is judged by its channel id, which names the
+ * connection kind for a connection kind's first account.
  */
-export const onRomeAccount: SQL = sql`s.type = 'channel' AND coalesce(c.service, s.source_channel) IN (${sql.join(
-  ACCOUNT_SERVICES.map((service) => sql`${service}`),
+export const onRomeAccount: SQL = sql`s.type = 'channel' AND coalesce(c.connection_kind, s.source_channel) IN (${sql.join(
+  ACCOUNT_KINDS.map((kind) => sql`${kind}`),
   sql`, `,
 )})`;
 

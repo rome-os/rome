@@ -7,6 +7,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InstalledAppCard, SpecSource } from "@rome/api-types/apps";
 import { toast } from "sonner";
 import i18n from "@/i18n";
+import { SlotOutlet, SlotProvider } from "@/components/slot";
+import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 import AppsIndexPage from "./AppsIndexPage";
 
 // Lifecycle failures surface as toasts (the launcher tiles have no room for
@@ -37,6 +39,7 @@ rs.mock("@/shell/builtin-nav", () => ({
     { id: "apps", href: "/apps", labelKey: "nav.apps", Icon: () => null },
     { id: "chat", href: "/chat", labelKey: "nav.chat", Icon: () => null },
     { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: () => null },
+    { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: () => null },
   ],
 }));
 rs.mock("@/shell/AppGrid", () => ({
@@ -46,12 +49,14 @@ rs.mock("@/shell/AppGrid", () => ({
     { type: "builtin" as const, id: "projects" },
   ],
   STORAGE_KEY: "rome-sidebar-pins",
+  isRequiredBuiltinPin: (id: string) => ["apps", "chat", "projects"].includes(id),
   normalizeSidebarPins: (
     pins: Array<{ type: "builtin" | "app"; id: string }>,
   ): Array<{ type: "builtin" | "app"; id: string }> => {
     const required = [
       { type: "builtin" as const, id: "apps" },
       { type: "builtin" as const, id: "chat" },
+      { type: "builtin" as const, id: "projects" },
     ];
     const requiredIds = new Set(required.map((pin) => pin.id));
     return [
@@ -475,6 +480,31 @@ describe("AppsIndexPage reactivity", () => {
     expect(screen.queryByText("User Skills")).toBeNull();
   });
 
+  it("hides an app that sets hideInLauncher: no tile, not counted, not searchable", async () => {
+    const user = userEvent.setup();
+    mockBackend({
+      installed: [
+        installedCard({ id: "weather", displayName: "Weather", origin: "local" }),
+        installedCard({
+          id: "quiet",
+          displayName: "Quiet App",
+          origin: "local",
+          hideInLauncher: true,
+        }),
+      ],
+    });
+
+    renderPage();
+
+    await screen.findByText("Weather");
+    const mySection = screen.getByRole("region", { name: "My apps" });
+    expect(within(mySection).getByText("1")).toBeTruthy();
+    expect(screen.queryByText("Quiet App")).toBeNull();
+
+    await user.type(screen.getByLabelText("Search apps"), "quiet");
+    expect(screen.queryByText("Quiet App")).toBeNull();
+  });
+
   it("hides a section that has no matches while searching", async () => {
     const user = userEvent.setup();
     mockBackend({
@@ -806,19 +836,28 @@ describe("AppsIndexPage tile interactions", () => {
   });
 
   it("toggles a built-in surface's sidebar pin from its tile menu", async () => {
-    // Projects starts pinned (it's in DEFAULT_SIDEBAR_PINS), so the menu
-    // offers Unpin; activating it drops the entry from the stored pins.
+    // Memory starts unpinned, so the menu offers Pin; activating it adds the
+    // entry to the stored pins after the fixed three.
     const user = userEvent.setup();
     mockBackend({ installed: [] });
 
     renderPage();
 
-    await user.click(await screen.findByLabelText("More actions for Projects"));
-    await user.click(await screen.findByRole("menuitem", { name: "Unpin from sidebar" }));
+    await user.click(await screen.findByLabelText("More actions for Memory"));
+    await user.click(await screen.findByRole("menuitem", { name: "Pin to sidebar" }));
 
     const stored = JSON.parse(localStorage.getItem("rome-sidebar-pins") ?? "[]");
-    expect(stored).not.toContainEqual({ type: "builtin", id: "projects" });
-    expect(stored).toContainEqual({ type: "builtin", id: "apps" });
+    expect(stored.at(-1)).toEqual({ type: "builtin", id: "memory" });
+    expect(stored).toContainEqual({ type: "builtin", id: "projects" });
+  });
+
+  it("offers no actions menu on Projects, which the sidebar always shows", async () => {
+    mockBackend({ installed: [] });
+
+    renderPage();
+
+    expect(await screen.findByLabelText("Projects")).toBeTruthy();
+    expect(screen.queryByLabelText("More actions for Projects")).toBeNull();
   });
 });
 
@@ -1018,7 +1057,7 @@ describe("AppsIndexPage ghost tiles", () => {
     expect(within(mySection).queryByText("0")).toBeNull();
     expect(within(storeSection).queryByText("0")).toBeNull();
     const builtinSection = screen.getByRole("region", { name: "Built-in apps" });
-    expect(within(builtinSection).getByText("1")).toBeTruthy();
+    expect(within(builtinSection).getByText("2")).toBeTruthy();
   });
 
   it("seeds a chat draft from the New app ghost tile", async () => {
@@ -1064,5 +1103,31 @@ describe("AppsIndexPage ghost tiles", () => {
     expect(screen.getByText("Weather")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "New app" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Browse store" })).toBeNull();
+  });
+});
+
+describe("AppsIndexPage in the Mac app's title bar", () => {
+  it("moves its title and actions into the title bar instead of a header row", async () => {
+    mockBackend({ installed: [installedCard({ id: "weather", displayName: "Weather" })] });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SlotProvider>
+          <div data-testid="titlebar">
+            <SlotOutlet name={TITLEBAR_SLOT} />
+          </div>
+          <MemoryRouter>
+            <AppsIndexPage />
+          </MemoryRouter>
+        </SlotProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Weather");
+    const bar = within(screen.getByTestId("titlebar"));
+    expect(bar.getByRole("heading", { level: 1, name: "Apps" })).toBeTruthy();
+    expect(bar.getByRole("button", { name: "App store" })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(document.querySelector('[data-slot="page-header"]')).toBeNull();
   });
 });

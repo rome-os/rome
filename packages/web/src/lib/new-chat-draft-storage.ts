@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
+import { draftDeviceFolderSchema } from "@/lib/device-folder";
 import { randomUUID } from "./random-uuid";
 
 const KEY = "rome:new-chat-draft";
@@ -25,6 +26,8 @@ const schema = z.object({
     })
     .nullable(),
   personaId: z.string(),
+  // Optional, so drafts saved before device folders existed still load.
+  deviceFolder: draftDeviceFolderSchema.nullable().optional(),
 });
 const recordSchema = schema.extend({ authEpoch: z.string().default("") });
 export type NewChatDraft = z.infer<typeof schema>;
@@ -58,7 +61,8 @@ export function saveNewChatDraft(draft: NewChatDraft, authEpoch = currentAuthEpo
     draft.projectPath === DEFAULT_PROJECT_NAME &&
     !draft.agentMention &&
     !draft.skill &&
-    !draft.personaId
+    !draft.personaId &&
+    !draft.deviceFolder
   ) {
     clearNewChatDraft();
     return;

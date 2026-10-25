@@ -126,7 +126,10 @@ describe("AppStartedDispatcher", () => {
     await flush();
     expect(calls()).toEqual([]);
 
-    catalog.set([app("app.reinstalling", [dir])]);
+    // The same bundle settles with a hook that records nothing, so the call
+    // below can only come from the start queued before the install.
+    const silent = await hookDir("reinstalled", "return { onAppStarted() {} };");
+    catalog.set([app("app.reinstalling", [silent])]);
     await settle(dispatcher, catalog);
     await flush();
     expect(calledAppIds()).toEqual(["app.reinstalling"]);
@@ -369,8 +372,8 @@ describe("AppStartedDispatcher through the app manager", () => {
       await flush();
       expect(calls().map((call) => call.event.appVersion)).toEqual(["0.0.1"]);
 
-      // A re-install of identical content passes through the `installing`
-      // overlay, which drops the app from the resolved set until it finishes.
+      // A re-install of identical content keeps the app in the resolved set,
+      // in state `installing`, on the same bundle until it finishes.
       await harness.appManager.install({ source: { mode: "bundle", path: v1 } });
       await flush();
       expect(calls()).toHaveLength(1);
@@ -605,7 +608,11 @@ function fakeCatalog(initial: ResolvedApp[]): FakeCatalog {
       return apps.find((candidate) => candidate.appId === appId) ?? null;
     },
     listResolved() {
-      return apps.filter((candidate) => candidate.state === "installed" && candidate.enabled);
+      return apps.filter(
+        (candidate) =>
+          (candidate.state === "installed" || candidate.state === "installing") &&
+          candidate.enabled,
+      );
     },
   } as unknown as FakeCatalog;
 }

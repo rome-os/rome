@@ -35,7 +35,6 @@
     "people": "Persons the guardian has introduced",
     "routines": "Scheduled and recurring agent actions",
     "activity": "What Rome has been doing, in order",
-    "store": "Browse and install Rome apps",
     "desktop": "Embedded browser surface",
     "chat": "Talk to your agents",
     "settings": "Profile, channels, and integrations"
@@ -183,7 +182,7 @@
     "unpin": "Unpin from sidebar",
     "pinNoUi": "App has no UI",
     "viewDetails": "View details",
-    "skillLoadFailed": "Failed to load",
+    "artifactLoadFailed": "Failed to load",
     "chatWithAgentTitle": "Chat with {{agent}}",
     "chatWithAgentAria": "Chat with {{agent}}",
     "noCapabilities": "No {{label}} declared.",

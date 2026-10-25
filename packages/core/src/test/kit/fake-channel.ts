@@ -1,5 +1,5 @@
 import { FakeTransport, type SentMessage } from "../helpers.js";
-import type { ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { OutgoingMessage } from "../../types.js";
 
 // FakeChannelEndpoint — drive a conversation from the user's side.
@@ -19,11 +19,8 @@ export class FakeChannelEndpoint extends FakeTransport {
   private waiters: ReplyWaiter[] = [];
   private readCursor = 0;
 
-  override async send(
-    conversationId: ConversationId,
-    message: OutgoingMessage,
-  ): Promise<MessageReceipt> {
-    const receipt = await super.send(conversationId, message);
+  override async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const receipt = await super.send(chatId, message);
     this.drainWaiters();
     return receipt;
   }

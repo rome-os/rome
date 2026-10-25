@@ -32,7 +32,7 @@ describe("parseSessionKey", () => {
   it("names a webchat chat's own key", () => {
     expect(parseSessionKey("webchat:chat-1")).toEqual({
       kind: "webchat",
-      conversationId: "chat-1",
+      chatId: "chat-1",
     });
     expect(webchatConversationOfKey("webchat:chat-1")).toBe("chat-1");
   });
@@ -45,7 +45,7 @@ describe("parseSessionKey", () => {
       parent: {
         kind: "fork",
         forkSessionId: "fork-1",
-        parent: { kind: "webchat", conversationId: "chat-1" },
+        parent: { kind: "webchat", chatId: "chat-1" },
       },
     });
     expect(webchatConversationOfKey(key)).toBeUndefined();

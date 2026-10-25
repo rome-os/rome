@@ -157,7 +157,7 @@ describe("CallbackPage return-leg routing", () => {
           JSON.stringify({
             matched: true,
             cid: "setup-gh",
-            service: "github",
+            connectionKind: "github",
             accepted: true,
             state: { status: "presenting", view: { progress: true } },
           }),
@@ -172,7 +172,7 @@ describe("CallbackPage return-leg routing", () => {
     expect(landed.textContent).toBe("/settings/connections/github");
   });
 
-  it("lands on the connections list when the matched setup names no service", async () => {
+  it("lands on the connections list when the matched setup names no connection kind", async () => {
     stubFetch({
       setupReturn: () =>
         new Response(
@@ -236,7 +236,7 @@ describe("CallbackPage return-leg routing", () => {
           JSON.stringify({
             matched: true,
             cid: "setup-cancelled",
-            service: "github",
+            connectionKind: "github",
             accepted: false,
             state: { status: "cancelled" },
           }),
@@ -305,7 +305,7 @@ describe("CallbackPage identity routing", () => {
       JSON.stringify({
         matched: true,
         cid: "setup-gh",
-        service: "github",
+        connectionKind: "github",
         accepted: true,
         state: { status: "presenting", view: { progress: true } },
       }),
@@ -352,7 +352,7 @@ describe("CallbackPage identity routing", () => {
       JSON.stringify({
         matched: true,
         cid: "setup-gh",
-        service: "github",
+        connectionKind: "github",
         accepted: true,
         state: { status: "failed", reason: "Authorization was declined." },
       }),

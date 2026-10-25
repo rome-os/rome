@@ -73,7 +73,7 @@ export function PageHeader({
       data-slot="page-header"
       className={cn("flex flex-wrap items-center justify-between gap-x-6 gap-y-3", className)}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex min-w-0 flex-1 basis-40 items-center gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <PageTitle>{title}</PageTitle>
