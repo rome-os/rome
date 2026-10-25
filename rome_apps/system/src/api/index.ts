@@ -20,6 +20,10 @@ class SystemApiHandler implements RomeAppApiHandler {
   constructor(private readonly ctx: RomeAppContext) {}
 
   async handle(request: RomeAppApiRequest): Promise<Response> {
+    if (request.caller?.kind !== "guardian") {
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    }
+
     const route = request.path.join("/");
 
     if (request.method === "GET" && request.path.length === 0) {
