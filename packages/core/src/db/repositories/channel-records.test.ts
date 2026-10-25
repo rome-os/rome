@@ -188,15 +188,15 @@ describe("ChannelRecordsRepository", () => {
   it("answers a link again once an account connects, with no stale answer cached", () => {
     const records = repository();
     const db = testDb!.db;
-    records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW);
-    expect(records.channelOfLink("telegram")).toBe("telegram");
-    expect(records.channelOfLink("telegram")).toBe("telegram");
+    const only = records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW).id;
+    expect(records.channelOfLink("telegram")).toBe(only);
+    expect(records.channelOfLink("telegram")).toBe(only);
 
     records.claim(db, { id: "c2", connectionKind: "telegram" }, NOW);
     expect(records.channelOfLink("telegram")).toBeNull();
 
     records.vacate(db, "c2");
-    expect(records.channelOfLink("telegram")).toBe("telegram");
+    expect(records.channelOfLink("telegram")).toBe(only);
   });
 
   it("lists the accounts a send to a link may go out from", () => {
@@ -221,8 +221,8 @@ describe("ChannelRecordsRepository", () => {
   it("reaches the service's own channel from a link while it is the only account", () => {
     const records = repository();
     const db = testDb!.db;
-    records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW);
-    expect(records.channelOfLink("telegram")).toBe("telegram");
+    const only = records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW).id;
+    expect(records.channelOfLink("telegram")).toBe(only);
 
     records.claim(db, { id: "c2", connectionKind: "telegram" }, NOW);
     expect(records.channelOfLink("telegram")).toBeNull();
