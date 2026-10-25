@@ -642,6 +642,36 @@ transfers and replies `busy` to more. Each transfer accepts frames only from the
 peer that opened it. Host frames from an earlier connection never go out on a
 replacement connection.
 
+## Screen control on macOS
+
+The host offers no screen action. On a macOS device, a caller controls the
+screen by running the system tools through `exec` and copying the screenshot
+back with `rome-node cp`.
+
+```json
+{"command":"screencapture","args":["-x","/tmp/rome-screen.png"]}
+{"command":"cliclick","args":["c:640,400"]}
+{"command":"cliclick","args":["t:hello"]}
+{"command":"osascript","args":["-e","tell application \"System Events\" to keystroke \"hello\""]}
+```
+
+`screencapture -x` saves the screen without the shutter sound. Copy the file
+with `rome-node cp <device-id>:/tmp/rome-screen.png ./screen.png` to read it.
+`cliclick` clicks and types at screen coordinates, and Homebrew installs it.
+`osascript` with System Events types into the frontmost app without extra installs.
+
+A screenshot of a Retina display has twice as many pixels as the screen has
+points. `cliclick` and System Events take points, so divide the image
+coordinates by the display's scale factor before clicking.
+
+macOS grants Screen Recording and Accessibility to the app that started the
+host, either the terminal running `rome-node connect` or the Rome desktop app.
+Grant both in System Settings → Privacy & Security on the Mac itself. Without
+Screen Recording, the screenshot leaves out other apps' windows. Without
+Accessibility, clicks and keystrokes fail. The first `osascript` call to System
+Events also asks for Automation permission. The Mac must stay awake and unlocked,
+because a locked screen shows only the lock screen.
+
 ## Failure and shutdown
 
 The CLI daemon waits up to 60 seconds for an action response. Timeout and connection loss
