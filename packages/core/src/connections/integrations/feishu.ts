@@ -534,6 +534,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
     severalAccounts: true,
     reviveProfile: (_grant, record) => reviveFeishuProfile(record),
     accountIdOf: (_grant, record) => (typeof record.appId === "string" && record.appId) || null,
+    takesAgent: true,
     auth: {
       app: appScheme,
     },

@@ -304,6 +304,7 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
   return {
     connectionKind: "whatsapp",
     reviveProfile: (_grant, record) => reviveWhatsAppProfile(record),
+    accountIdOf: (_grant, record) => (typeof record.jid === "string" && record.jid) || null,
     auth: {
       session: sessionScheme,
     },

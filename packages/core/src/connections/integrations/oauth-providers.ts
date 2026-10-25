@@ -371,6 +371,9 @@ export function makeOAuthProviderDescriptor(
       [OAUTH_PROVIDER_GRANTS[provider]]: scheme,
     },
     reviveProfile: (_grant, record) => OAUTH_PROVIDER_REVIVERS[provider](record),
+    // The provider's own id for the signed-in identity: the user, or for Slack
+    // the installer in its workspace, and for Shopify the store.
+    accountIdOf: (_grant, record) => (typeof record.subject === "string" && record.subject) || null,
     custody: makeOAuthProviderCustody(provider),
     capabilities: {},
   };

@@ -230,6 +230,7 @@ import { AGENTS_KIND } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
+import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
 import { ensureZeroGrantConnections } from "./connections/zero-grant.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
@@ -1438,6 +1439,9 @@ async function main() {
   // An account exists only while connected, so one an earlier version left
   // unconnected goes before any channel is recorded for it.
   await removeUnconnectedAccounts(connectionRegistry);
+  // A grant from before grants named their account learns it now, so the next
+  // connect of that account is refused.
+  await recordGrantAccounts(connectionRegistry);
   // Connections minted before channels were recorded get theirs now. Each
   // connection kind held one, so each takes its connection kind's name.
   await claimChannels(

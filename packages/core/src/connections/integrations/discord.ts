@@ -240,6 +240,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
     severalAccounts: true,
     reviveProfile: (_grant, record) => reviveDiscordProfile(record),
     accountIdOf: (_grant, record) => (typeof record.botId === "string" && record.botId) || null,
+    takesAgent: true,
     auth: {
       bot: botScheme,
     },

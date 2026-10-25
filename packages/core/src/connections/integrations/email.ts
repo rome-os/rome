@@ -275,6 +275,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
   return {
     connectionKind: "email",
     reviveProfile: (_grant, record) => reviveEmailProfile(record),
+    accountIdOf: (_grant, record) => (typeof record.address === "string" && record.address) || null,
     auth: {
       inbox: inboxScheme,
     },

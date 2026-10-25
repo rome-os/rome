@@ -8,8 +8,8 @@ import type { Connection } from "./types.js";
 const log = createLogger("connections");
 
 /** Whether `conn` is an account no grant connects. An account here is a
- *  Connection of a connection kind with a Talk that names its accounts (an app's or a
- *  user's id), and it is removed, along with its channel, once every grant is
+ *  Connection of a connection kind with a Talk whose accounts take an agent, and it
+ *  is removed, along with its channel, once every grant is
  *  unauthorized. Any other Connection (email, a zero-grant channel, a connection kind
  *  without a Talk) stays after its last grant goes. Each such connection kind holds a
  *  single grant, so a disconnect's grant section covers every grant read here. */
@@ -18,7 +18,7 @@ export async function isUnconnectedAccount(
   conn: Pick<Connection, "id" | "connectionKind">,
 ): Promise<boolean> {
   const descriptor = registry.getDescriptor(conn.connectionKind);
-  if (!descriptor?.capabilities.talker || !descriptor.accountIdOf) return false;
+  if (!descriptor?.capabilities.talker || !descriptor.takesAgent) return false;
   const grants = await registry.getLedger().listGrants(conn.id);
   return grants.length > 0 && grants.every((grant) => grant.state === "unauthorized");
 }

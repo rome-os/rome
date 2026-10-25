@@ -944,6 +944,19 @@ export const connectionGrants = sqliteTable(
     lastRenewedAt: integer("last_renewed_at", { mode: "timestamp" }),
     degradedAt: integer("degraded_at", { mode: "timestamp" }),
     degradedReason: text("degraded_reason"),
+    // The account the grant reaches, read from its profile: the platform and
+    // the platform's own id for the account. Null when the profile names none.
+    platform: text("platform"),
+    accountId: text("account_id"),
   },
-  (table) => [primaryKey({ columns: [table.custody, table.name] })],
+  (table) => [
+    primaryKey({ columns: [table.custody, table.name] }),
+    // At most one connection reaches an account at a time, across every kind of
+    // connection on its platform. A broken (degraded) grant still counts, so a
+    // broken connection keeps its account. Vocabulary:
+    // docs/domains/connections.md#connection.
+    uniqueIndex("uq_connection_grants_account")
+      .on(table.platform, table.accountId)
+      .where(sql`${table.accountId} IS NOT NULL AND ${table.state} != 'unauthorized'`),
+  ],
 );

@@ -40,9 +40,9 @@ describe("removeUnconnectedAccounts", () => {
     expect((await ledger.listConnections()).map((record) => record.id)).toEqual([connected.id]);
   });
 
-  it("keeps a Connection whose service names no account", async () => {
+  it("keeps a Connection whose accounts take no agent", async () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
-    const { accountIdOf: _unnamed, ...descriptor } = makePasteTalk().descriptor;
+    const { takesAgent: _noAgent, ...descriptor } = makePasteTalk().descriptor;
     registry.register(descriptor);
     await registry.connect("fake-telegram");
 
@@ -53,8 +53,8 @@ describe("removeUnconnectedAccounts", () => {
   it("keeps an account while any of its grants is held", async () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     const discord = makeTwoGrant();
-    // Named accounts, so only the held grant keeps it.
-    registry.register({ ...discord.descriptor, accountIdOf: () => "account-1" });
+    // Accounts that take an agent, so only the held grant keeps it.
+    registry.register({ ...discord.descriptor, takesAgent: true });
     const conn = await registry.connect("fake-discord");
     await registry.importCredential(conn.id, "user", discord.userCredential());
 

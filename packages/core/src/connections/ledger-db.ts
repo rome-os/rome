@@ -12,6 +12,7 @@ import { connectionGrants, connections } from "../db/schema/system.js";
 import type { ConnectionId, GrantName, ProfileRecord } from "./types.js";
 import type {
   ConnectionRecord,
+  GrantAccount,
   GrantLedger,
   GrantPatch,
   GrantRecord,
@@ -39,6 +40,9 @@ function rowToGrant(row: GrantRow): GrantRecord {
   };
   if (row.credential !== null) rec.credential = reviveCredential(row.credential);
   if (row.profile !== null) rec.profile = row.profile as ProfileRecord;
+  if (row.platform !== null && row.accountId !== null) {
+    rec.account = { platform: row.platform, accountId: row.accountId };
+  }
   if (row.conferredAt !== null) rec.conferredAt = row.conferredAt;
   if (row.lastRenewedAt !== null) rec.lastRenewedAt = row.lastRenewedAt;
   if (row.degradedAt !== null) {
@@ -128,6 +132,10 @@ export class DrizzleGrantLedger implements GrantLedger {
     if ("state" in patch) set.state = patch.state as string;
     if ("credential" in patch) set.credential = patch.credential ?? null;
     if ("profile" in patch) set.profile = patch.profile ?? null;
+    if ("account" in patch) {
+      set.platform = patch.account?.platform ?? null;
+      set.accountId = patch.account?.accountId ?? null;
+    }
     if ("conferredAt" in patch) set.conferredAt = patch.conferredAt ?? null;
     if ("lastRenewedAt" in patch) set.lastRenewedAt = patch.lastRenewedAt ?? null;
     if ("degraded" in patch) {
@@ -144,6 +152,25 @@ export class DrizzleGrantLedger implements GrantLedger {
 
   async updateGrant(custody: string, name: GrantName, patch: GrantPatch): Promise<void> {
     this.writeGrant(this.db, custody, name, patch);
+  }
+
+  async connectionReaching(
+    account: GrantAccount,
+    exceptId: ConnectionId,
+  ): Promise<ConnectionId | null> {
+    const rows = await this.db
+      .select({ id: connectionGrants.custody })
+      .from(connectionGrants)
+      .where(
+        and(
+          eq(connectionGrants.platform, account.platform),
+          eq(connectionGrants.accountId, account.accountId),
+          ne(connectionGrants.state, "unauthorized"),
+          ne(connectionGrants.custody, exceptId),
+        ),
+      )
+      .limit(1);
+    return rows[0]?.id ?? null;
   }
 
   connectionsHoldingIn(

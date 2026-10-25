@@ -410,6 +410,7 @@ export function createWechatUserDescriptor(
   return {
     connectionKind: WECHAT_USER_KIND,
     reviveProfile: (_grant, record) => reviveWechatUserProfile(record),
+    accountIdOf: (_grant, record) => (typeof record.wxid === "string" && record.wxid) || null,
     auth: {
       session: sessionScheme,
     },

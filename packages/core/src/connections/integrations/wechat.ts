@@ -298,6 +298,8 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
   return {
     connectionKind: "wechat",
     reviveProfile: (_grant, record) => reviveWechatProfile(record),
+    accountIdOf: (_grant, record) =>
+      (typeof record.accountId === "string" && record.accountId) || null,
     auth: {
       account: accountScheme,
     },

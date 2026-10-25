@@ -178,4 +178,67 @@ describe("ConnectionRegistry.confer account guard", () => {
       close();
     }
   });
+
+  it("records the account a grant reaches, and clears it on disconnect", async () => {
+    const { ledger, registry, close } = setupRegistry();
+    try {
+      const first = await registry.connect(SERVICE);
+      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      expect((await ledger.getGrant(first.id, "bot"))?.account).toEqual({
+        platform: SERVICE,
+        accountId: "100",
+      });
+
+      await registry.revoke(first.id, "bot");
+
+      expect((await ledger.getGrant(first.id, "bot"))?.account).toBeUndefined();
+    } finally {
+      close();
+    }
+  });
+
+  it("refuses an account a connection of another kind on its platform reaches", async () => {
+    const db = createTestDb();
+    try {
+      const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db.db) });
+      const { descriptor } = makePasteTalk();
+      registry.register({ ...descriptor, connectionKind: "telegram" });
+      registry.register({ ...descriptor, connectionKind: "telegram_user" });
+      const bot = await registry.connect("telegram");
+      await registry.confer("telegram", bot.id, "bot", credentialFor("t-1"), { botId: "100" });
+      const user = await registry.connect("telegram_user");
+
+      const refused = registry.confer("telegram_user", user.id, "bot", credentialFor("s-1"), {
+        botId: "100",
+      });
+
+      await expect(refused).rejects.toMatchObject({
+        name: "AccountAlreadyConnectedError",
+        connectionId: bot.id,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets the same id on another platform connect", async () => {
+    const db = createTestDb();
+    try {
+      const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db.db) });
+      const { descriptor } = makePasteTalk();
+      registry.register({ ...descriptor, connectionKind: "feishu", severalAccounts: true });
+      const feishu = await registry.connect("feishu");
+      await registry.confer("feishu", feishu.id, "bot", credentialFor("t-1"), { botId: "100" });
+      const lark = await registry.connectAnother("feishu");
+
+      await registry.confer("feishu", lark.id, "bot", credentialFor("t-2"), {
+        botId: "100",
+        domain: "lark",
+      });
+
+      expect(lark.state()).toBe("working");
+    } finally {
+      db.close();
+    }
+  });
 });
