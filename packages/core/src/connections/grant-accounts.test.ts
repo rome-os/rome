@@ -58,4 +58,29 @@ describe("recordGrantAccounts", () => {
       close();
     }
   });
+
+  it("keeps refusing an account the newer connection still reaches once the older one goes", async () => {
+    const { registry, ids, close } = await earlierGrants(["100", "100"]);
+    try {
+      await recordGrantAccounts(registry);
+      await registry.load();
+      await registry.revoke(ids[0]!, "bot");
+      const third = await registry.connectAnother(SERVICE);
+
+      const refused = registry.confer(
+        SERVICE,
+        third.id,
+        "bot",
+        { material: { token: "t-3" }, expiresAt: "never" },
+        { botId: "100" },
+      );
+
+      await expect(refused).rejects.toMatchObject({
+        name: "AccountAlreadyConnectedError",
+        connectionId: ids[1],
+      });
+    } finally {
+      close();
+    }
+  });
 });

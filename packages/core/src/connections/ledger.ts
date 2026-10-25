@@ -86,6 +86,9 @@ export interface GrantLedger {
   /** The Connection, other than `exceptId`, holding a grant in any state but
    *  "unauthorized" that reaches `account`, or null. */
   connectionReaching(account: GrantAccount, exceptId: ConnectionId): Promise<ConnectionId | null>;
+  /** The grants, outside `exceptId`, held in any state but "unauthorized" with
+   *  a profile and no stored account: those the boot pass left without one. */
+  heldGrantsWithoutAccount(exceptId: ConnectionId): Promise<GrantRecord[]>;
   /** Ids of the Connections of `connectionKind`, other than `exceptId`, that hold
    *  every grant in `needs` in a state other than "unauthorized". Reads
    *  through `tx`, so the answer holds for the rest of that transaction. */

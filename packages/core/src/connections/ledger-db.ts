@@ -6,7 +6,7 @@
 // (encryption was deliberately dropped). The envelope shape is kept so
 // encryption can return later. The runtime never reads inside `material`.
 
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx, SqliteExec } from "../db/index.js";
 import { connectionGrants, connections } from "../db/schema/system.js";
 import type { ConnectionId, GrantName, ProfileRecord } from "./types.js";
@@ -171,6 +171,21 @@ export class DrizzleGrantLedger implements GrantLedger {
       )
       .limit(1);
     return rows[0]?.id ?? null;
+  }
+
+  async heldGrantsWithoutAccount(exceptId: ConnectionId): Promise<GrantRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(connectionGrants)
+      .where(
+        and(
+          isNull(connectionGrants.accountId),
+          isNotNull(connectionGrants.profile),
+          ne(connectionGrants.state, "unauthorized"),
+          ne(connectionGrants.custody, exceptId),
+        ),
+      );
+    return rows.map(rowToGrant);
   }
 
   connectionsHoldingIn(

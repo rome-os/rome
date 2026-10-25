@@ -604,10 +604,31 @@ export class ConnectionRegistry {
     connectionId: ConnectionId,
     account: GrantAccount,
   ): Promise<void> {
-    const other = await this.ledger.connectionReaching(account, connectionId);
+    const other =
+      (await this.ledger.connectionReaching(account, connectionId)) ??
+      (await this.unrecordedReaching(account, connectionId));
     if (other) {
       throw new AccountAlreadyConnectedError(descriptor.connectionKind, account.accountId, other);
     }
+  }
+
+  /** The Connection, other than `exceptId`, whose held grant has no stored
+   *  account but whose profile names `account`. The boot pass leaves such a
+   *  grant when an older connection reached the same account, and it still
+   *  reaches that account once the older one is disconnected. */
+  private async unrecordedReaching(
+    account: GrantAccount,
+    exceptId: ConnectionId,
+  ): Promise<ConnectionId | null> {
+    for (const record of await this.ledger.heldGrantsWithoutAccount(exceptId)) {
+      const kind = this.connections.get(record.custody)?.connectionKind;
+      const descriptor = kind ? this.descriptors.get(kind)?.descriptor : undefined;
+      const held = descriptor ? reachedAccount(descriptor, record) : undefined;
+      if (held?.platform === account.platform && held.accountId === account.accountId) {
+        return record.custody;
+      }
+    }
+    return null;
   }
 
   /** Headless conferral: skip confer(), inject a caller-supplied credential.
