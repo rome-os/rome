@@ -5,7 +5,6 @@ import type { EmailAdapter } from "../../channels/email.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
 import type { WechatUserRuntime } from "../../channels/wechat-user.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
@@ -31,7 +30,6 @@ import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { makeSlackBotDescriptor } from "./slack-bot.js";
 import { createWechatDescriptor } from "./wechat.js";
 import { createWechatUserDescriptor } from "./wechat-user.js";
-import { makeWebchatDescriptor } from "./webchat.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
 
 export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
@@ -42,7 +40,6 @@ export { createWechatUserDescriptor, WECHAT_USER_KIND } from "./wechat-user.js";
 export { createFeishuDescriptor } from "./feishu.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeAgentsDescriptor } from "./agents.js";
-export { makeWebchatDescriptor } from "./webchat.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
 export { createLinkedInDescriptor } from "./linkedin.js";
 export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-providers.js";
@@ -58,7 +55,6 @@ export interface BuiltinConnectionDeps {
   chatSettings: ChatSettingsService;
   chatStop: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
-  webchatRepo: WebChatRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
   /** The LinkedIn inbox mirror (linkedin_threads/linkedin_messages). */
   linkedInSyncSink: LinkedInSyncSink;
@@ -140,7 +136,6 @@ export function registerBuiltinConnections(
       onAdapterBuilt: deps.onEmailAdapterBuilt,
     }),
   );
-  registry.register(makeWebchatDescriptor({ webchatRepo: deps.webchatRepo }));
   // Messages with other agents in the Rome Cloud account (dots). Offered on
   // every instance; it does nothing until the guardian connects it.
   registry.register(makeAgentsDescriptor());

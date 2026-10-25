@@ -166,7 +166,6 @@ const emptyConnections: ApiConnection[] = [
   apiConnection("discord", { bot: { state: "unauthorized" } }, { placeholder: true }),
   apiConnection("email", { inbox: { state: "unauthorized" } }, { placeholder: true }),
   apiConnection("feishu", { app: { state: "unauthorized" } }, { placeholder: true }),
-  apiConnection("webchat", {}, { placeholder: true }),
   apiConnection(
     "github",
     { user: { state: "unauthorized" } },
@@ -212,7 +211,6 @@ const connectedConnections: ApiConnection[] = [
   apiConnection("feishu", {
     app: { state: "authorized", display: { handle: "cli_a1b2c3" } },
   }),
-  apiConnection("webchat", {}),
   apiConnection(
     "github",
     {

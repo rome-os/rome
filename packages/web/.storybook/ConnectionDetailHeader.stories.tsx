@@ -8,7 +8,6 @@ const notConnected: ConnectionCard = {
   service: "discord",
   label: "Discord",
   kind: "channel",
-  alwaysOn: false,
   degradation: null,
   slots: [
     {

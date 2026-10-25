@@ -210,7 +210,6 @@ describe("buildConnectionCards — Composio card", () => {
     expect(last.service).toBe("composio");
     expect(last.kind).toBe("composio");
     expect(last.label).toBe("Composio");
-    expect(last.alwaysOn).toBe(false);
   });
 
   it("maps the CLI login state onto the synthetic slot's state", () => {
@@ -237,7 +236,6 @@ describe("buildConnectionCards — ordering", () => {
     const cards = buildConnectionCards([
       conn({ connectionKind: "slack" }),
       conn({ connectionKind: "google" }),
-      conn({ connectionKind: "webchat" }),
       conn({ connectionKind: "github" }),
       conn({ connectionKind: "email" }),
       conn({ connectionKind: "discord" }),
@@ -253,7 +251,6 @@ describe("buildConnectionCards — ordering", () => {
       "discord",
       "email",
       "feishu",
-      "webchat",
       "github",
       "google",
       "slack",
@@ -297,25 +294,6 @@ describe("buildConnectionCards — slot mapping", () => {
     const slack = cards.find((c) => c.service === "slack");
     expect(slack?.slots[0]).toMatchObject({ key: "user", grant: "workspace" });
     expect(cards.find((c) => c.service === "github")?.slots[0].key).toBe("user");
-  });
-
-  it("webchat is alwaysOn with one synthesized working slot (zero-grant service)", () => {
-    const cards = buildConnectionCards([conn({ connectionKind: "webchat", id: "conn-webchat" })]);
-    expect(cards).toHaveLength(1);
-    const webchat = cards[0];
-    expect(webchat.alwaysOn).toBe(true);
-    expect(webchat.kind).toBe("channel");
-    expect(webchat.slots).toEqual([
-      {
-        key: "bot",
-        connectionId: "conn-webchat",
-        grant: null,
-        state: "working",
-        display: null,
-        identity: null,
-        activeSetupCid: null,
-      },
-    ]);
   });
 
   it("folds the slot identity as displayName || handle || email", () => {

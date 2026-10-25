@@ -315,18 +315,7 @@ describe("ConnectionDetailBody — OAuth single-slot cards", () => {
   });
 });
 
-describe("ConnectionDetailBody — webchat and remaining channels", () => {
-  it("always-on webchat: connected card with its chat bullet and the nothing-to-configure note", () => {
-    const webchat = cardFor([connection({ connectionKind: "webchat" })], "webchat");
-    renderBody(webchat);
-
-    expect(screen.getByText("Chat with your agent right here in the dashboard")).toBeTruthy();
-    expect(screen.getByText("Always on — nothing to configure.")).toBeTruthy();
-    // The internal Talk/Act/Watch taxonomy is never surfaced.
-    expect(screen.queryByText("Talk")).toBeNull();
-    expect(screen.queryByText("Capabilities")).toBeNull();
-  });
-
+describe("ConnectionDetailBody — remaining channels", () => {
   it("whatsapp: bot-slot card with its bullets and the generic setup entry point", () => {
     const whatsapp = cardFor(
       [connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" } })],

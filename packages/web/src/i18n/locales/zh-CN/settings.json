@@ -199,15 +199,6 @@
           }
         }
       },
-      "webchat": {
-        "bot": {
-          "title": "面板聊天",
-          "bullets": {
-            "chat": "在这个面板里直接和你的 agent 聊天"
-          },
-          "alwaysOn": "始终开启 — 无需配置。"
-        }
-      },
       "github": {
         "user": {
           "title": "你的 GitHub 账号",

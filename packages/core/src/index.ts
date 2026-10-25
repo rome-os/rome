@@ -88,6 +88,7 @@ import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
+import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./channels/webchat-channel.js";
 import { claimChannels } from "./channels/claim-channels.js";
 import { domainOf, domainOfGrants } from "./channels/platform.js";
 import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
@@ -232,7 +233,6 @@ import { registerBuiltinConnections } from "./connections/integrations/index.js"
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
-import { ensureZeroGrantConnections } from "./connections/zero-grant.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
 import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
 import { createOgImageStore } from "./apps/og/store.js";
@@ -429,8 +429,11 @@ async function main() {
     clock: systemClock,
     chats: webchatRepo,
   });
+  // The dashboard chat is Rome's own channel, which no Connection backs.
+  const webchat = webchatChannel(webchatRepo);
   const channelsService = createChannelsService({
     channels: () => builtChannels,
+    own: [webchat],
     registry: connectionRegistry,
     channelOf,
     platformOf: (name: string) => channelRecords.platformOf(name),
@@ -887,6 +890,7 @@ async function main() {
         (await chatSettings.get(ref)).effective.session.reset,
       usageRecorder,
       channelSurface: (channel) => {
+        if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
         const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))
           ?.capabilities.talker;
         return talker ? talkerChannelSurface(talker) : null;
@@ -1232,9 +1236,9 @@ async function main() {
   }
 
   // NO channel adapter is constructed here. Every Talk channel
-  // (telegram, whatsapp, discord, wechat, feishu, email, telegram_user, webchat)
+  // (telegram, whatsapp, discord, wechat, feishu, email, telegram_user)
   // is a ConnectionDescriptor and exposes its provider-neutral Talk capability
-  // to the channel ports.
+  // to the channel ports. Webchat is Rome's own channel, built above.
   //
   // Register every built-in descriptor now (before load()/import), threading the
   // runtime deps the factories need from here where the repos/adapters exist.
@@ -1246,7 +1250,6 @@ async function main() {
     chatSettings,
     chatStop,
     personMappingRepo,
-    webchatRepo,
     whatsAppSyncSink: whatsAppStoreRepo,
     linkedInSyncSink: linkedInStoreRepo,
     linkedinPoll: {
@@ -1311,6 +1314,7 @@ async function main() {
           talks(record.connectionKind),
       )
       .map((record) => ({ name: record.id, connectionKind: record.connectionKind })),
+    own: [webchat],
   });
   builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
@@ -1452,7 +1456,6 @@ async function main() {
     connectionRegistry.all().filter((c) => talks(c.connectionKind)),
     async (id) => domainOfGrants(await connectionRegistry.getLedger().listGrants(id)),
   );
-  await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();
   // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
   // token the connector reads from its custody file as rejected.

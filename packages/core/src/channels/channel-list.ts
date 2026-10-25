@@ -59,6 +59,8 @@ export function channelList(deps: {
    *  Feishu bot. Each connection kind's first channel is named after it and is built
    *  whether or not anything backs it yet. */
   laterChannels?: ReadonlyArray<{ name: string; connectionKind: string }>;
+  /** Channels Rome serves itself, which no Connection backs, such as webchat. */
+  own?: readonly Channel[];
 }): Channel[] {
   const reads: Array<Pick<Channel, "name" | "accounts" | "messages">> = [
     { name: "whatsapp", accounts: deps.whatsAppAccounts, messages: whatsAppMessages(deps.db) },
@@ -86,6 +88,7 @@ export function channelList(deps: {
     inbound: ports.get(read.name)?.inbound ?? null,
     directory: ports.get(read.name)?.directory ?? null,
   }));
+  channels.push(...(deps.own ?? []));
   for (const [name, backed] of ports) {
     if (reads.some((read) => read.name === name)) continue;
     if (!backed.send && !backed.inbound && !backed.messages) continue;

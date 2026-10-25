@@ -148,3 +148,11 @@ A linkable service's account that connects through setup gets an opaque id, even
 ### Alternatives
 
 - **Name a service's first channel after the service, as before.** Rejected because the name then depends on whether an earlier account's row is still stored, which ties every later account to that row.
+
+## Amendment (2026-10-25): the dashboard chat is not a connection
+
+A connection is Rome's access to one external account ([connections.md](../domains/connections.md#connection)). The dashboard chat reaches no external account and holds no grant, so it is not one. Rome serves the webchat channel itself: it sends by storing the reply in its chat and reads what was said from the same records. Migration `0090` removes its Connection and that Connection's channel record. The Connections page does not list it. A visitor who signs in to the dashboard chat proves who they are, which gives Rome no access to act as anyone, so visitor chat would not make it a connection either.
+
+### Alternatives
+
+- **Keep webchat as the one connection with no grant.** Rejected because the rule that a connection holds exactly one grant would need an exception, and the guardian could neither fix nor disconnect it.

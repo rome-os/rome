@@ -67,6 +67,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - Connecting through a setup flow is one step: the connection exists only once setup succeeds.
 - What a connection lets Rome do is fixed by its kind.
 - Working and broken are states of the connection, and the dashboard shows them.
+- The dashboard chat is Rome's own channel, not a connection.
 
 Diffs still owed to the model, each a change of its own:
 

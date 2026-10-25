@@ -20,7 +20,7 @@ import type {
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { platformOf } from "./platform.js";
 import type { Connection } from "../connections/types.js";
-import type { Channels } from "./channel.js";
+import type { Channel, Channels } from "./channel.js";
 import { sendThrough, type ChannelOf } from "./connection-ports.js";
 import type { ConnectionPacing } from "./delivery/connection-pacing.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
@@ -51,6 +51,9 @@ export interface ChannelsServiceDeps {
   platformOf?: (channel: string) => string | null;
   /** Paces a send while reply streaming is on. */
   pacing?: ConnectionPacing;
+  /** Channels Rome serves itself, which no Connection backs, such as webchat.
+   *  Each sends through its own port, before the channel list is built too. */
+  own?: readonly Channel[];
 }
 
 /** Every Connection that can talk, whether or not it is unlocked now. */
@@ -87,6 +90,10 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
           const platform = deps.platformOf?.(name) ?? platformOf(connection.connectionKind);
           summaries.set(name, { name, platform, sendable: true });
         }
+        for (const channel of deps.own ?? []) {
+          const platform = deps.platformOf?.(channel.name) ?? platformOf(channel.name);
+          summaries.set(channel.name, { name: channel.name, platform, sendable: !!channel.send });
+        }
         for (const channel of deps.channels() ?? []) {
           if (!summaries.has(channel.name)) {
             const platform = deps.platformOf?.(channel.name) ?? undefined;
@@ -107,6 +114,8 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
         chatId: ChatId,
         message: OutgoingMessage,
       ): Promise<MessageReceipt> {
+        const own = deps.own?.find((candidate) => candidate.name === channel)?.send;
+        if (own) return own.send(chatId, message);
         const backing = backingConnection(deps.registry, channel, deps.channelOf);
         if (!backing) throw new Error(`No Talk connection registered for "${channel}"`);
         return sendThrough(backing, chatId, message, deps.pacing);

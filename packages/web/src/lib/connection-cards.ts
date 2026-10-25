@@ -13,11 +13,10 @@
  * `/api/channels/status` + `/api/integrations` and its
  * `UnifiedConnection`/`CredentialSlot` vocabulary are gone.
  *
- * Two presentation rules carried over from the old fold:
- *   - Always-on — webchat has no ceremony and always reads Connected.
- *   - Unavailable ≠ disconnected — an OAuth service whose connect hint reports
- *     `available: false` renders as "Unavailable" with the reason, not as a
- *     plain "Not connected".
+ * One presentation rule carried over from the old fold: unavailable is not
+ * disconnected. An OAuth service whose connect hint reports
+ * `available: false` renders as "Unavailable" with the reason, not as a plain
+ * "Not connected".
  */
 
 import type {
@@ -61,8 +60,6 @@ export interface ConnectionCard {
   service: string;
   label: string;
   kind: "channel" | "oauth" | "composio";
-  /** Webchat: boot-wired, no ceremony, always Connected. */
-  alwaysOn: boolean;
   /** Transient runtime impairment. The underlying grant can remain authorized
    *  and recover automatically while this warning is present. */
   degradation: CapabilityDegradation | null;
@@ -82,7 +79,7 @@ export interface ConnectionCard {
   severalAccounts: boolean;
 }
 
-/** Fixed dashboard ordering: Talk channels, webchat, OAuth services; services
+/** Fixed dashboard ordering: Talk channels, then OAuth services; services
  *  the registry reports that we have no order for follow alphabetically, and
  *  the Composio broker card always closes the list. */
 const SERVICE_ORDER = [
@@ -95,7 +92,6 @@ const SERVICE_ORDER = [
   "feishu",
   "slack_bot",
   "agents",
-  "webchat",
   "github",
   "google",
   "slack",
@@ -199,21 +195,7 @@ export function accountRoute(cards: ConnectionCard[], connectionId: string): str
 }
 
 function toCard(connection: ApiConnection): ConnectionCard {
-  const alwaysOn = connection.connectionKind === "webchat";
-  const slots = alwaysOn
-    ? // Zero-grant: synthesize the single always-working presentation slot.
-      [
-        {
-          key: "bot" as const,
-          connectionId: connection.id,
-          grant: null,
-          state: "working" as const,
-          display: null,
-          identity: null,
-          activeSetupCid: null,
-        },
-      ]
-    : toSlots(connection);
+  const slots = toSlots(connection);
   return {
     route: connectionRoute(connection),
     service: connection.connectionKind,
@@ -221,7 +203,6 @@ function toCard(connection: ApiConnection): ConnectionCard {
     // list is known (`labelAccounts`).
     label: serviceLabel(connection.connectionKind),
     kind: OAUTH_SERVICES.has(connection.connectionKind) ? "oauth" : "channel",
-    alwaysOn,
     degradation: runtimeDegradation(connection),
     slots,
     connect: connection.connect,
@@ -245,7 +226,6 @@ function composioCard(status: ComposioCliStatus): ConnectionCard {
     service: "composio",
     label: serviceLabel("composio"),
     kind: "composio",
-    alwaysOn: false,
     degradation: null,
     slots: [
       {
@@ -317,7 +297,6 @@ export function buildConnectionCards(
         service: brand,
         label: serviceLabel(brand),
         kind: "channel",
-        alwaysOn: false,
         degradation: runtimeDegradation(connection),
         slots: sessionSlots,
         connect: null,

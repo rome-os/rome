@@ -207,3 +207,34 @@ describe("createChannelsService", () => {
     });
   });
 });
+
+describe("ChannelsService — a channel Rome serves itself", () => {
+  it("sends through its own port and lists it as sendable, with no Connection behind it", async () => {
+    const own = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
+    const webchat = {
+      name: "webchat",
+      send: {
+        send: (chatId: ChatId, message: Parameters<ChannelsService["send"]>[2]) =>
+          own("webchat", chatId, message),
+      },
+      inbound: null,
+      accounts: null,
+      directory: null,
+      messages: null,
+    };
+    const channelsService = createChannelsService({
+      channels: () => undefined,
+      registry: { all: () => [] },
+      channelOf: () => null,
+      own: [webchat as unknown as Channels[number]],
+    });
+
+    await expect(
+      channelsService.send("webchat", "sess-1" as ChatId, { text: "hi" }),
+    ).resolves.toEqual(RECEIPT);
+    expect(own).toHaveBeenCalledWith("webchat", "sess-1", { text: "hi" });
+    expect(await channelsService.list()).toEqual([
+      { name: "webchat", platform: "webchat", sendable: true },
+    ]);
+  });
+});

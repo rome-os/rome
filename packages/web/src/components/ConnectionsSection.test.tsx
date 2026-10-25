@@ -89,12 +89,11 @@ function oauth(
 }
 
 /** Mirrors the old minimal channel-status fold: telegram + whatsapp offered but
- *  unconnected, webchat always on (zero grants). */
+ *  unconnected. */
 function minimalConnections(): ApiConnection[] {
   return [
     telegramBot("unauthorized"),
     connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" }, display: {} }),
-    connection({ connectionKind: "webchat" }),
   ];
 }
 
@@ -157,28 +156,27 @@ function sectionWith(
 }
 
 describe("ConnectionsSection — list of rows", () => {
-  it("renders a row for every connection the registry reports including webchat", () => {
+  it("renders a row for every connection the registry reports", () => {
     renderSection([...minimalConnections(), oauth("github"), oauth("google")]);
 
-    // telegram and whatsapp from minimalConnections, webchat always-on
-    for (const label of ["Telegram", "WhatsApp", "Webchat", "GitHub", "Google"]) {
+    for (const label of ["Telegram", "WhatsApp", "GitHub", "Google"]) {
       expect(screen.getByRole("button", { name: `Open ${label}` })).toBeTruthy();
     }
   });
 
-  it("shows the Rome mark for webchat and a mail glyph for email", () => {
+  it("shows a brand mark for GitHub and a mail glyph for email", () => {
     renderSection([
       ...minimalConnections(),
+      oauth("github"),
       connection({ connectionKind: "email", grants: { inbox: "unauthorized" } }),
     ]);
 
-    const webchatRow = screen.getByRole("button", { name: "Open Webchat" });
+    const githubRow = screen.getByRole("button", { name: "Open GitHub" });
     const emailRow = screen.getByRole("button", { name: "Open Email" });
 
-    // The Rome mark is the only non-Lucide glyph a row can carry.
-    const webchatLogo = webchatRow.querySelector("svg");
-    expect(webchatLogo).toBeTruthy();
-    expect(webchatLogo?.classList.contains("lucide")).toBe(false);
+    const githubLogo = githubRow.querySelector("svg");
+    expect(githubLogo).toBeTruthy();
+    expect(githubLogo?.classList.contains("lucide")).toBe(false);
     expect(emailRow.querySelector("svg.lucide-mail")).toBeTruthy();
   });
 

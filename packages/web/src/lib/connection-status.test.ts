@@ -33,7 +33,6 @@ function card(overrides: Partial<ConnectionCard> = {}): ConnectionCard {
     service: "telegram",
     label: "Telegram",
     kind: "channel",
-    alwaysOn: false,
     degradation: null,
     slots: [],
     connect: null,
@@ -42,13 +41,6 @@ function card(overrides: Partial<ConnectionCard> = {}): ConnectionCard {
 }
 
 describe("connectionStatus — status vocabulary", () => {
-  it("alwaysOn (webchat) ⇒ green Working, regardless of slots", () => {
-    expect(connectionStatus(card({ service: "webchat", alwaysOn: true, slots: [] }))).toEqual({
-      label: "Working",
-      tone: "success",
-    });
-  });
-
   it("a working slot ⇒ green Working", () => {
     expect(connectionStatus(card({ slots: [slot("working")] }))).toEqual({
       label: "Working",

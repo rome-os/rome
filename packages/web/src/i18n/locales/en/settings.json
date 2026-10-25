@@ -199,15 +199,6 @@
           }
         }
       },
-      "webchat": {
-        "bot": {
-          "title": "Dashboard chat",
-          "bullets": {
-            "chat": "Chat with your agent right here in the dashboard"
-          },
-          "alwaysOn": "Always on — nothing to configure."
-        }
-      },
       "github": {
         "user": {
           "title": "Your GitHub account",

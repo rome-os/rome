@@ -20,7 +20,6 @@
  * platform still accepts its grant and recovery may happen automatically.
  *
  * Mapping over the card's slot states:
- *   alwaysOn (webchat)                     → green dot, "Working"
  *   any slot broken                        → amber dot, "Broken"
  *   transient runtime degradation          → amber dot, "Working" (reason tooltip)
  *   any slot working                       → green dot, "Working"
@@ -43,9 +42,6 @@ export interface ConnectionStatus {
 
 /** Maps a card's slot states onto the dot+text status vocabulary. */
 export function connectionStatus(card: ConnectionCard): ConnectionStatus {
-  if (card.alwaysOn) {
-    return { label: "Working", tone: "success" };
-  }
   const states = new Set(card.slots.map((slot) => slot.state));
   // A broken connection surfaces even when a sibling slot still works, since
   // it needs the guardian's attention more than "1 of 2 works".
