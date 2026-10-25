@@ -7,10 +7,9 @@
 # per-worktree identity; the worktree-root basename is the fallback for a
 # detached HEAD (no branch to name the stack after).
 #
-# A non-empty ROME_DEV_SLUG replaces the branch, under the same rule. It suits a
-# developer who works in one checkout and switches branches in it: the stack,
-# its data, and its <slug>.rome.localhost address stay the same across
-# branches.
+# A non-empty ROME_DEV_SLUG replaces the branch, under the same rule, so one
+# checkout keeps one stack and one <slug>.rome.localhost address across
+# branches. Pass it per command (DEVELOPMENT.md).
 #
 # Consumers:
 #   - scripts/dev-up.sh  → Compose project name + Traefik subdomain.
@@ -25,24 +24,14 @@ slugify() {
     cut -c1-63
 }
 
-# An override that sanitizes to nothing would name no stack at all, and
-# dev-up.sh would then mount the whole ~/.rome-worktrees as this stack's home.
 if [ -n "${ROME_DEV_SLUG:-}" ]; then
   slug="$(slugify "$ROME_DEV_SLUG")"
+  # An empty slug names no stack, and dev-up.sh would then mount the whole
+  # ~/.rome-worktrees as this stack's home.
   if [ -z "$slug" ]; then
-    echo "worktree-slug: ROME_DEV_SLUG=\"$ROME_DEV_SLUG\" has no letters or digits, so it names no stack." >&2
+    echo "worktree-slug: ROME_DEV_SLUG=\"$ROME_DEV_SLUG\" has no letters or digits." >&2
     exit 1
   fi
-  # The shared singletons' compose projects (infra/traefik, infra/observability)
-  # and the hostnames the obs singleton routes. A stack under one of these
-  # names would merge into a singleton or race it for a <slug>.rome.localhost
-  # router.
-  case "$slug" in
-    rome-traefik | rome-obs | obs | clickhouse | otlp)
-      echo "worktree-slug: ROME_DEV_SLUG=\"$ROME_DEV_SLUG\" is the name of a shared Rome stack. Pick another." >&2
-      exit 1
-      ;;
-  esac
   printf '%s\n' "$slug"
   exit 0
 fi
