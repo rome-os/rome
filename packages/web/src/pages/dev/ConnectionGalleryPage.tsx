@@ -261,8 +261,8 @@ const SCENARIOS: GalleryScenario[] = [
     composio: composioStatus({ loggedIn: true }),
   },
   {
-    title: "Degraded (needs attention)",
-    note: "The ledger knows these grants are broken (degraded): the Telegram personal-account session was revoked upstream, GitHub renders as needs-reconnect (still connected). Google: provider unavailable on this host. Composio: login in flight. (Guardian-verification ceremony states — codes, polling — live in the pure-view section above; they are ceremony state, not grant state.)",
+    title: "Broken (needs attention)",
+    note: "The platform stopped accepting these grants, so their connections are broken: the Telegram personal-account session was revoked upstream, and GitHub needs its access given again. Google: provider unavailable on this host. Composio: login in flight. (Guardian-verification ceremony states — codes, polling — live in the pure-view section above; they are ceremony state, not grant state.)",
     connections: [
       apiConnection("telegram", {
         bot: { state: "authorized", display: { handle: "rome_dev_bot" } },
