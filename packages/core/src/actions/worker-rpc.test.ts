@@ -268,9 +268,12 @@ describe("WorkerRpcServer param validation", () => {
 
     it("ingests inbound email through the email Connection, and skips without one", async () => {
       const ingest = rs.fn(async () => ({ status: "accepted" }));
+      // Its record has an opaque id, as for an account connected after
+      // another was removed, so it is found by its connection kind.
       const email = {
         id: "email-1",
-        service: "email",
+        service: "4f1c",
+        connectionKind: "email",
         status: () => ({ talk: { state: "unlocked" } }),
       };
       const withEmail = makeServer({ connectionRegistry: { all: () => [email], ingest } });

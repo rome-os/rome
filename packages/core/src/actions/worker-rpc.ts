@@ -2,7 +2,7 @@ import type { IpcRpc } from "./ipc.js";
 import { z } from "zod";
 import { runWithHookInvocationContext } from "../core/hook-recursion.js";
 import type { EmailInboundResult } from "../channels/email-control.js";
-import { backingConnection } from "../channels/channels-service.js";
+import { emailConnection } from "../channels/channels-service.js";
 import type { ChannelOf } from "../channels/connection-ports.js";
 import type {
   BackendTurnRunner,
@@ -410,11 +410,7 @@ export class WorkerRpcServer {
       EmailIngestInboundParams,
       params,
     );
-    const email = backingConnection(
-      this.services.connectionRegistry,
-      "email",
-      this.services.channelOf,
-    );
+    const email = emailConnection(this.services.connectionRegistry, this.services.channelOf);
     if (!email) return { status: "skipped", reason: "channel_inactive" };
     return (await this.services.connectionRegistry.ingest(email.id, {
       rawBody,

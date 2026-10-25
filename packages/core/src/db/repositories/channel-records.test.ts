@@ -185,18 +185,59 @@ describe("ChannelRecordsRepository", () => {
     expect(again.platformAccountId).toBe("bot-1");
   });
 
-  it("records an account a later grant reports, and keeps the one it knows", () => {
+  it("records an account a later grant reports", () => {
     const records = repository();
     const db = testDb!.db;
     const record = records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW);
 
     records.recordAccount(db, "c1", "bot-1");
     expect(records.byId(record.id)?.platformAccountId).toBe("bot-1");
-    records.recordAccount(db, "c1", "bot-2");
-    expect(records.byId(record.id)?.platformAccountId).toBe("bot-1");
+    records.recordAccount(db, "c1", "bot-1");
+    expect(records.all()).toHaveLength(1);
     // No channel backed by the Connection: nothing to record.
     records.recordAccount(db, "missing", "bot-3");
     expect(records.all()).toHaveLength(1);
+  });
+
+  it("gives a kept Connection that reaches another account that account's record", () => {
+    const records = repository();
+    const db = testDb!.db;
+    const a = records.claim(db, { id: "c1", connectionKind: "whatsapp", accountId: "a" }, NOW);
+
+    // The grant was revoked and given again for account b, on the same Connection.
+    records.recordAccount(db, "c1", "b", NOW);
+    const b = records.byConnection("c1");
+    expect(b?.id).not.toBe(a.id);
+    expect(b?.platformAccountId).toBe("b");
+    expect(records.idOf("c1")).toBe(b?.id);
+    expect(records.byId(a.id)).toMatchObject({ connectionId: null, platformAccountId: "a" });
+
+    // Back to account a: its kept record, with its history.
+    records.recordAccount(db, "c1", "a", NOW);
+    expect(records.byConnection("c1")?.id).toBe(a.id);
+    expect(records.byId(b!.id)).toMatchObject({ connectionId: null, platformAccountId: "b" });
+  });
+
+  it("gives a kept Connection that takes an agent a fresh record for another account", () => {
+    const records = repository();
+    const db = testDb!.db;
+    const first = records.claim(
+      db,
+      { id: "c1", connectionKind: "telegram", accountId: "bot-1" },
+      NOW,
+      { agent: "core:main" },
+    );
+    records.link(first.id, "core:main");
+
+    records.recordAccount(db, "c1", "bot-2", NOW);
+    const next = records.byConnection("c1");
+    expect(next).toMatchObject({ platformAccountId: "bot-2", agent: null });
+    expect(next?.id).not.toBe(first.id);
+    expect(records.byId(first.id)).toMatchObject({
+      connectionId: null,
+      agent: null,
+      platformAccountId: null,
+    });
   });
 
   it("moves a Connection to the record its account kept when a later grant names it", () => {

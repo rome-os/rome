@@ -71,6 +71,18 @@ export function backingConnection(
   return talking(registry).find((connection) => channelOf(connection) === channel);
 }
 
+/** The email Connection inbound mail goes to: the one backing the `email`
+ *  channel, or else the oldest email Connection that can talk. An email
+ *  account connected after another was removed has its own record, under an
+ *  opaque id, so it is found by its connection kind, not by the channel name. */
+export function emailConnection(
+  registry: Pick<ConnectionRegistry, "all">,
+  channelOf: ChannelOf,
+): Connection | undefined {
+  const emails = talking(registry).filter((connection) => connection.connectionKind === "email");
+  return emails.find((connection) => channelOf(connection) === "email") ?? emails[0];
+}
+
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
   const find = (name: string) => deps.channels()?.find((channel) => channel.name === name);
 

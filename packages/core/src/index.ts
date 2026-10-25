@@ -98,7 +98,7 @@ import { ConnectionPacing } from "./channels/delivery/connection-pacing.js";
 import { ReplyStreams } from "./channels/delivery/streams.js";
 import { replyStreamingSwitch } from "./channels/delivery/streaming-switch.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
-import { backingConnection, createChannelsService } from "./channels/channels-service.js";
+import { createChannelsService, emailConnection } from "./channels/channels-service.js";
 import { createAgentNames } from "./channels/agent-names.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
 import { WechatApp } from "./desktop-apps/wechat-app.js";
@@ -1033,7 +1033,7 @@ async function main() {
     // runs in the main process or a worker (where it gets the RPC proxy instead).
     emailInbound: {
       async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {
-        const email = backingConnection(connectionRegistry, "email", channelOf);
+        const email = emailConnection(connectionRegistry, channelOf);
         if (!email) return { status: "skipped", reason: "channel_inactive" };
         return (await connectionRegistry.ingest(email.id, {
           rawBody,

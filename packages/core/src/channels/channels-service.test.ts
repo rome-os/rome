@@ -3,6 +3,7 @@ import type { ChannelMessage, ChannelsService, ChatId, MessageReceipt } from "@r
 import type { Channels } from "./channel.js";
 import {
   backingConnection,
+  emailConnection,
   createChannelsService,
   type ChannelsServiceDeps,
 } from "./channels-service.js";
@@ -236,5 +237,40 @@ describe("ChannelsService — a channel Rome serves itself", () => {
     expect(await channelsService.list()).toEqual([
       { name: "webchat", platform: "webchat", sendable: true },
     ]);
+  });
+
+  it("sends inbound mail to the email account, whatever its record is called", () => {
+    const registry = registryOf(
+      [
+        { connectionId: "discord-1", service: "discord" },
+        { connectionId: "mail-b", service: "email" },
+      ],
+      () => RECEIPT,
+    );
+    // Account B connected after A was removed, so its record has an opaque id.
+    const opaque = recordedChannelOf(
+      { idOf: (id) => (id === "mail-b" ? "4f1c" : null) },
+      () => true,
+    );
+    expect(emailConnection(registry, opaque)?.id).toBe("mail-b");
+
+    const both = registryOf(
+      [
+        { connectionId: "mail-b", service: "email" },
+        { connectionId: "mail-a", service: "email" },
+      ],
+      () => RECEIPT,
+    );
+    const named = recordedChannelOf(
+      { idOf: (id) => (id === "mail-a" ? "email" : "4f1c") },
+      () => true,
+    );
+    expect(emailConnection(both, named)?.id).toBe("mail-a");
+    expect(
+      emailConnection(
+        registryOf(CONNECTIONS, () => RECEIPT),
+        named,
+      ),
+    ).toBeUndefined();
   });
 });

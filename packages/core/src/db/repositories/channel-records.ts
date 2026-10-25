@@ -282,18 +282,23 @@ export class ChannelRecordsRepository {
 
   /**
    * Record that the channel `connectionId` backs is the account the platform
-   * knows as `accountId`, once a grant reports it. A channel that already
-   * knows its account keeps it, since a fix that reaches another account is
-   * refused before this. When an unbacked channel of the same connection kind that takes
-   * no agent holds the account, the Connection moves to it, so the account
-   * keeps its history, and the channel it leaves is released.
+   * knows as `accountId`, once a grant reports it. A channel holds one account
+   * for good: when a Connection kept across a revoke is given access to
+   * another account, its channel is released, as on a disconnect, and the
+   * Connection takes the new account's record. That record is an unbacked
+   * channel of the same connection kind that takes no agent and holds the
+   * account, so the account keeps its history, or else a fresh one. A
+   * channel that knows no account yet takes this one, unless such a kept
+   * record exists, in which case the Connection moves to it and the channel
+   * it leaves is released.
    */
-  recordAccount(exec: Exec, connectionId: string, accountId: string): void {
+  recordAccount(exec: Exec, connectionId: string, accountId: string, now = new Date()): void {
     const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
-    if (!row || row.platformAccountId !== null) return;
+    if (!row || row.platformAccountId === accountId) return;
     this.ids.clear();
     this.links.clear();
-    const kept = LINKABLE_KINDS.has(row.connectionKind)
+    const linkable = LINKABLE_KINDS.has(row.connectionKind);
+    const kept = linkable
       ? undefined
       : exec
           .select()
@@ -307,8 +312,27 @@ export class ChannelRecordsRepository {
             ),
           )
           .get();
+    if (row.platformAccountId === null && !kept) {
+      releaseAccount(exec, row.platform, accountId, row.id);
+      exec
+        .update(channels)
+        .set({ platformAccountId: accountId })
+        .where(eq(channels.id, row.id))
+        .run();
+      return;
+    }
+    // The channel this Connection leaves keeps its own account, unless its
+    // kind takes an agent, as `vacate` does.
+    exec
+      .update(channels)
+      .set({
+        connectionId: null,
+        agent: null,
+        platformAccountId: linkable ? null : row.platformAccountId,
+      })
+      .where(eq(channels.id, row.id))
+      .run();
     if (kept) {
-      exec.update(channels).set({ connectionId: null }).where(eq(channels.id, row.id)).run();
       exec
         .update(channels)
         .set({ connectionId, agent: null })
@@ -316,11 +340,19 @@ export class ChannelRecordsRepository {
         .run();
       return;
     }
-    releaseAccount(exec, row.platform, accountId, row.id);
+    const id = randomUUID();
+    releaseAccount(exec, row.platform, accountId, id);
     exec
-      .update(channels)
-      .set({ platformAccountId: accountId })
-      .where(eq(channels.id, row.id))
+      .insert(channels)
+      .values({
+        id,
+        connectionKind: row.connectionKind,
+        platform: row.platform,
+        platformAccountId: accountId,
+        connectionId,
+        agent: null,
+        createdAt: now,
+      })
       .run();
   }
 

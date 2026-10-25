@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "@rstest/core";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb } from "../test/helpers.js";
 import { AccountAlreadyConnectedError, DifferentAccountError } from "./errors.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
@@ -285,6 +286,42 @@ describe("ConnectionRegistry account participants", () => {
         { kind: SERVICE, accountId: undefined },
       ]);
       expect(recorded).toEqual([{ id: placeholder.id, accountId: "200" }]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("ConnectionRegistry account records", () => {
+  it("moves a Connection kept across a revoke to the record of the account it reaches next", async () => {
+    const db = createTestDb();
+    const records = new ChannelRecordsRepository(db.db);
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(db.db),
+      onMint: (tx, record, _profile, account) =>
+        records.claim(tx, { ...record, accountId: account?.accountId }, record.createdAt),
+      onAccount: (tx, id, account) => records.recordAccount(tx, id, account.accountId),
+      onRemove: (tx, id) => records.vacate(tx, id),
+    });
+    registry.register(botIdDescriptor());
+    try {
+      const conn = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
+        botId: "100",
+      });
+      const first = records.byConnection(conn.id);
+      expect(first?.platformAccountId).toBe("100");
+
+      await registry.revoke(conn.id, "bot");
+      await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-2"), { botId: "200" });
+      expect(records.byConnection(conn.id)?.platformAccountId).toBe("200");
+      expect(records.byId(first!.id)).toMatchObject({
+        connectionId: null,
+        platformAccountId: "100",
+      });
+
+      await registry.revoke(conn.id, "bot");
+      await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-3"), { botId: "100" });
+      expect(records.byConnection(conn.id)?.id).toBe(first!.id);
     } finally {
       db.close();
     }
