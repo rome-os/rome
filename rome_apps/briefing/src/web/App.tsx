@@ -1,8 +1,7 @@
 import "./styles.css";
 import { useCallback, useEffect, useState } from "react";
 import { fetchAppApi, type RomeAppBootstrap } from "@rome-os/app-web-sdk";
-import { ScrollText, Radar, FileText, Settings2, X, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ScrollText, Radar, FileText, Settings2, X } from "lucide-react";
 import { ScoutsPanel } from "./components/ScoutsPanel";
 import { BriefsPanel } from "./components/BriefsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -34,7 +33,6 @@ export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBoots
   const [connectivity, setConnectivity] = useState<ChannelConnectivity | null>(null);
   const [tab, setTab] = useState<Tab>("briefs");
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyScoutId, setBusyScoutId] = useState<string | null>(null);
   const [creatingScout, setCreatingScout] = useState(false);
@@ -46,18 +44,6 @@ export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBoots
     if (!res.ok) throw new Error(await readError(res));
     setState((await res.json()) as StateDto);
   }, []);
-
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await loadState();
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRefreshing(false);
-    }
-  }, [loadState]);
 
   useEffect(() => {
     (async () => {
@@ -181,14 +167,9 @@ export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBoots
         tab === "briefs" ? "max-w-5xl" : "max-w-3xl",
       )}
     >
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <ScrollText className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Briefing</h1>
-        </div>
-        <Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={refreshing}>
-          <RefreshCw className={refreshing ? "animate-spin" : undefined} /> Refresh
-        </Button>
+      <header className="flex items-center gap-2">
+        <ScrollText className="size-5 text-primary" />
+        <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Briefing</h1>
       </header>
       <p className="mt-1 text-sm text-muted-foreground">
         Scheduled morning and evening briefings, woven from your calendar, recent messages, and
