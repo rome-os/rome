@@ -145,4 +145,5 @@ The account's history is encrypted at rest with a key the client derives only at
 - Recovering the store key is the only privileged step, and it produces database keys, not standing access. The ledger records where the authority lives, never the key itself.
 - Recovery launches the client under gdb rather than attaching to a running one. The key is derived once, at the first login, so owning the client from its first instruction lets a single login both sign the guardian in and yield the key — attaching after it is up would miss that derivation and demand a second login.
 - A signed-out account and a client that is merely not running are different answers. Only the first invalidates the connection.
+- One bridge process reads the client's store at a time. A history read never waits behind People's lookups for every contact. Those background lookups hold only a couple of places in the bridge's line, and a history read takes its turn between them.
 - A connect ceremony asks for the confirmations the client demands and no more. Retrying a login the client has already remembered invalidates it, which costs the guardian the whole ceremony again.

@@ -43,6 +43,11 @@ export const WECHAT_USER_CHANNEL = "wechat_user";
  *  bargain the connection's own directory read makes. */
 const WINDOW_CAP = 500;
 
+/** Background lookups (heads and counts) let into the reader's queue at once.
+ *  The reader runs one bridge process at a time, so two keep it busy while each
+ *  command of a history read waits behind at most two of them, not the directory. */
+const BACKGROUND_LOOKUPS = 2;
+
 function windowSize(limit: number): number {
   return Math.min(Math.max(limit, 1) * 4, WINDOW_CAP);
 }
@@ -125,6 +130,24 @@ export function wechatUserMessages(reader: WechatUserReader): Messages {
 }
 
 function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
+  // A FIFO semaphore over the background lookups. A sweep of every contact
+  // would otherwise put a command per chat on the reader's serial queue at
+  // once, and a history read, which takes no slot, would queue behind them all.
+  let free = BACKGROUND_LOOKUPS;
+  const waiting: Array<() => void> = [];
+  async function background<T>(lookup: () => Promise<T>): Promise<T> {
+    if (free > 0) free -= 1;
+    else await new Promise<void>((resolve) => waiting.push(resolve));
+    try {
+      return await lookup();
+    } finally {
+      // Hand the slot straight to the next waiter, or return it.
+      const next = waiting.shift();
+      if (next) next();
+      else free += 1;
+    }
+  }
+
   async function windowFor(
     addresses: readonly string[],
     opts: { before?: Message | null; limit: number },
@@ -153,8 +176,10 @@ function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
    * A chat's newest message, read again only when the session list shows new
    * activity in it. The people surfaces ask this of every contact on a timer,
    * and the reader runs one query at a time, so reading every chat every time
-   * keeps it busy for minutes and starves every other read. A chat the session
-   * list does not know is read live; a failed read answers null and is not kept.
+   * keeps it busy for minutes and starves every other read. On a cold cache
+   * every chat misses, so a miss takes a background slot, and `query` and
+   * `read`, which take none, run between the lookups. A chat the session list
+   * does not know is read live; a failed read answers null and is not kept.
    */
   async function newestIn(
     chatId: string,
@@ -165,7 +190,9 @@ function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
     if (key !== undefined && cached?.key === key) return cached.head;
     let head: Message | null;
     try {
-      const newest = await reader.messages({ chatId, limit: 1, includeBoundaryTies: true });
+      const newest = await background(() =>
+        reader.messages({ chatId, limit: 1, includeBoundaryTies: true }),
+      );
       head = newest.map(toMessage).sort(compareMessages)[0] ?? null;
     } catch {
       return null;
@@ -191,7 +218,7 @@ function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
       const addresses = directAddresses(accounts);
       if (addresses.length === 0) return 0;
       const counts = await Promise.all(
-        addresses.map((chatId) => reader.count(chatId).catch(() => 0)),
+        addresses.map((chatId) => background(() => reader.count(chatId)).catch(() => 0)),
       );
       return counts.reduce((total, n) => total + n, 0);
     },
