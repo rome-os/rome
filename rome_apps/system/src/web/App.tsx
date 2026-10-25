@@ -3,6 +3,7 @@ import { Button } from "@rome-os/ui/button";
 import { Card, CardContent } from "@rome-os/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@rome-os/ui/select";
 import { Switch } from "@rome-os/ui/switch";
+import { UiScaleProvider } from "@rome-os/ui/ui-scale";
 import {
   QueryClient,
   QueryClientProvider,
@@ -39,7 +40,9 @@ export default function App() {
   const [client] = useState(() => new QueryClient());
   return (
     <QueryClientProvider client={client}>
-      <SystemSettings />
+      <UiScaleProvider>
+        <SystemSettings />
+      </UiScaleProvider>
     </QueryClientProvider>
   );
 }
@@ -74,16 +77,10 @@ function SystemSettings() {
         <section aria-labelledby="recaps-heading">
           <Card>
             <CardContent className="space-y-4">
-              <div className="flex items-start justify-between gap-6">
-                <div className="min-w-0 space-y-2">
-                  <h2 id="recaps-heading" className="text-section">
-                    Spoken recaps
-                  </h2>
-                  <p id="recaps-description" className="text-ui text-muted-foreground">
-                    A short summary after substantial chat turns, with optional audio to listen
-                    hands-free. Recaps appear in the chat.
-                  </p>
-                </div>
+              <div className="flex items-center justify-between gap-6">
+                <h2 id="recaps-heading" className="text-section">
+                  Spoken recaps
+                </h2>
                 <div className="flex shrink-0 items-center gap-3 py-2">
                   <span aria-hidden="true" className="text-aux text-muted-foreground">
                     {settings?.enabled ? "On" : "Off"}
@@ -97,6 +94,10 @@ function SystemSettings() {
                   />
                 </div>
               </div>
+              <p id="recaps-description" className="text-ui text-muted-foreground">
+                A short summary after substantial chat turns, with optional audio to listen
+                hands-free. Recaps appear in the chat.
+              </p>
               <p
                 id="recaps-cost"
                 className="rounded-8 bg-surface-muted p-3 text-ui text-muted-foreground"
