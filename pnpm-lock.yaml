@@ -994,6 +994,9 @@ importers:
         specifier: ^5.0.2
         version: 5.0.14(@types/react@19.2.15)(immer@11.1.15)(react@19.2.6)(use-sync-external-store@1.6.0(react@19.2.6))
     devDependencies:
+      '@rome-os/app-web-sdk':
+        specifier: workspace:*
+        version: link:../app-web-sdk
       '@mdx-js/loader':
         specifier: ^3.1.1
         version: 3.1.1(webpack@5.110.3(esbuild@0.25.12))
@@ -1328,40 +1331,6 @@ importers:
         specifier: 19.2.15
         version: 19.2.15
 
-  rome_apps/recap:
-    dependencies:
-      '@rome-os/app-runtime':
-        specifier: ^0.7.0
-        version: link:../../packages/app-runtime-sdk
-      '@rome-os/app-web-sdk':
-        specifier: ^0.3.0
-        version: link:../../packages/app-web-sdk
-      '@rome-os/ui':
-        specifier: ^0.3.0
-        version: link:../../packages/ui
-      lucide-react:
-        specifier: ^0.468.0
-        version: 0.468.0(react@19.2.6)
-      node-edge-tts:
-        specifier: ^1.2.10
-        version: 1.2.10(bufferutil@4.1.0)(utf-8-validate@5.0.10)
-      react:
-        specifier: 19.2.6
-        version: 19.2.6
-      react-dom:
-        specifier: 19.2.6
-        version: 19.2.6(react@19.2.6)
-    devDependencies:
-      '@types/react':
-        specifier: 19.2.15
-        version: 19.2.15
-      '@types/react-dom':
-        specifier: 19.2.3
-        version: 19.2.3(@types/react@19.2.15)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-
   rome_apps/showcases:
     dependencies:
       '@rome-os/app-runtime':
@@ -1453,9 +1422,21 @@ importers:
       '@rome-os/app-web-sdk':
         specifier: ^0.3.0
         version: link:../../packages/app-web-sdk
+      '@rome-os/ui':
+        specifier: ^0.3.0
+        version: link:../../packages/ui
+      '@tanstack/react-query':
+        specifier: ^5.62.0
+        version: 5.101.0(react@19.2.6)
+      node-edge-tts:
+        specifier: ^1.2.10
+        version: 1.2.10(bufferutil@4.1.0)(utf-8-validate@5.0.10)
       react:
         specifier: 19.2.6
         version: 19.2.6
+      react-dom:
+        specifier: 19.2.6
+        version: 19.2.6(react@19.2.6)
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13

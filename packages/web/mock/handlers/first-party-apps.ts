@@ -10,7 +10,6 @@ import codingIcon from "../../../../rome_apps/coding/assets/icon.svg";
 import connectorIcon from "../../../../rome_apps/connector/assets/icon.svg";
 import dreamIcon from "../../../../rome_apps/dream/assets/icon.svg";
 import inboxIcon from "../../../../rome_apps/inbox/assets/icon.svg";
-import recapIcon from "../../../../rome_apps/recap/assets/icon.svg";
 import showcasesIcon from "../../../../rome_apps/showcases/src/assets/icon.svg";
 import skillsIcon from "../../../../rome_apps/skills/assets/icon.svg";
 import systemIcon from "../../../../rome_apps/system/assets/icon.svg";
@@ -89,14 +88,6 @@ const definitions = [
     iconUrl: inboxIcon,
   },
   {
-    id: "recap",
-    displayName: "Recap",
-    version: "0.1.1",
-    description: "Spoken recaps for completed WebChat turns",
-    hasFrontend: true,
-    iconUrl: recapIcon,
-  },
-  {
     id: "showcases",
     displayName: "Showcases",
     version: "0.1.0",
@@ -116,7 +107,7 @@ const definitions = [
   {
     id: "system",
     displayName: "System",
-    version: "0.2.20",
+    version: "0.2.21",
     description:
       "Core system actions for scheduling, messaging, approvals, app store access, and subagent orchestration. In Rome context, 'store' / 'app store' usually means the Rome App Store. Reach here first for app_store_search (search/read Rome Store listings), app_management (install from the Rome Store with source.mode='appstore', install / uninstall / enable / disable a Rome app, or scaffold a new dev app — first-party apps ship with Rome, so only enable/disable applies to them), send_message (send a message through any registered channel adapter), send_user_message (start or continue a webchat conversation on the guardian's behalf), and generate_image (generate an image from a text prompt via the connected image provider).",
     hasFrontend: true,

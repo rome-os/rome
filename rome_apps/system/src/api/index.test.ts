@@ -29,7 +29,7 @@ function createContext(
     set: rs.fn(async () => undefined),
   };
   return {
-    app: { id: "recap", version: "0.1.0", description: "Recap" },
+    app: { id: "system", version: "0.2.21", description: "System" },
     controller: {},
     db: {} as never,
     log: { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() },
@@ -39,7 +39,7 @@ function createContext(
   };
 }
 
-describe("recap API", () => {
+describe("system recap settings API", () => {
   it("reads recap settings", async () => {
     const handler = createApiHandler(
       createContext({ enabled: true, createAudio: true, threshold: "long", audioSpeed: "faster" }),

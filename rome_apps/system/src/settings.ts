@@ -1,5 +1,6 @@
 import type { SettingsRepository } from "@rome-os/app-runtime";
 
+// These keys live in the global settings repository, independent of the owning app id.
 export const RECAP_ENABLED_SETTING = "recap.enabled";
 export const RECAP_CREATE_AUDIO_SETTING = "recap.createAudio";
 export const RECAP_THRESHOLD_SETTING = "recap.threshold";
