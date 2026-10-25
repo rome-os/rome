@@ -540,6 +540,7 @@ export async function buildTestDeps(
 
   const sessionsRepo = new SessionsRepository(db);
   const personMappingRepo = new PersonMappingRepository(db, recordedConnectionKindOf(db));
+  const channelRecords = new ChannelRecordsRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -729,6 +730,8 @@ export async function buildTestDeps(
     linkedInStoreRepo,
     linkedInAccounts,
     channels,
+    channelOfLink: (link: string) => channelRecords.channelOfLink(link),
+    sendersOfLink: (link: string) => channelRecords.sendersOfLink(link),
     accountNames,
     assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,

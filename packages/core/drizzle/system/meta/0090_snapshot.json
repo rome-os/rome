@@ -1,8 +1,8 @@
 {
-  "id": "cc9a688a-f9b0-4192-a2dd-9b1a9037dc1e",
-  "prevId": "7ebb96df-df48-4974-8ae4-0261c0455b90",
   "version": "6",
   "dialect": "sqlite",
+  "id": "49ace517-9f82-408f-a167-c272f99aee14",
+  "prevId": "7ebb96df-df48-4974-8ae4-0261c0455b90",
   "tables": {
     "action_executions": {
       "name": "action_executions",
@@ -328,15 +328,15 @@
         "channel_mappings_person_id_persons_id_fk": {
           "name": "channel_mappings_person_id_persons_id_fk",
           "tableFrom": "channel_mappings",
+          "tableTo": "persons",
           "columnsFrom": [
             "person_id"
           ],
-          "tableTo": "persons",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -491,8 +491,8 @@
             "platform",
             "account_id"
           ],
-          "where": "\"connection_grants\".\"account_id\" IS NOT NULL AND \"connection_grants\".\"state\" != 'unauthorized'",
-          "isUnique": true
+          "isUnique": true,
+          "where": "\"connection_grants\".\"account_id\" IS NOT NULL AND \"connection_grants\".\"state\" != 'unauthorized'"
         }
       },
       "foreignKeys": {},
@@ -1240,6 +1240,13 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "from_channel": {
+          "name": "from_channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1701,8 +1708,8 @@
             "session_id",
             "created_at"
           ],
-          "where": "\"rome_agent_messages\".\"role\" = 'trace'",
-          "isUnique": false
+          "isUnique": false,
+          "where": "\"rome_agent_messages\".\"role\" = 'trace'"
         },
         "idx_rome_agent_messages_platform_message": {
           "name": "idx_rome_agent_messages_platform_message",
@@ -1710,8 +1717,8 @@
             "session_id",
             "platform_message_id"
           ],
-          "where": "\"rome_agent_messages\".\"platform_message_id\" IS NOT NULL",
-          "isUnique": false
+          "isUnique": false,
+          "where": "\"rome_agent_messages\".\"platform_message_id\" IS NOT NULL"
         }
       },
       "foreignKeys": {},
@@ -1764,16 +1771,16 @@
           "columns": [
             "message_id"
           ],
-          "where": "json_extract(\"rome_agent_trace_blocks\".\"content\", '$.type') IN ('result', 'error')",
-          "isUnique": false
+          "isUnique": false,
+          "where": "json_extract(\"rome_agent_trace_blocks\".\"content\", '$.type') IN ('result', 'error')"
         },
         "idx_rome_agent_trace_blocks_turn_end_message": {
           "name": "idx_rome_agent_trace_blocks_turn_end_message",
           "columns": [
             "message_id"
           ],
-          "where": "json_extract(\"rome_agent_trace_blocks\".\"content\", '$.type') = 'turn_end'",
-          "isUnique": false
+          "isUnique": false,
+          "where": "json_extract(\"rome_agent_trace_blocks\".\"content\", '$.type') = 'turn_end'"
         }
       },
       "foreignKeys": {},
@@ -2020,8 +2027,8 @@
             "created_at",
             "id"
           ],
-          "where": "(\"rome_sessions\".\"type\" = 'channel' and +\"rome_sessions\".\"source_channel\" = 'webchat')",
-          "isUnique": false
+          "isUnique": false,
+          "where": "(\"rome_sessions\".\"type\" = 'channel' and +\"rome_sessions\".\"source_channel\" = 'webchat')"
         },
         "idx_rome_sessions_chat_project_activity": {
           "name": "idx_rome_sessions_chat_project_activity",
@@ -2031,8 +2038,8 @@
             "created_at",
             "id"
           ],
-          "where": "(\"rome_sessions\".\"type\" = 'channel' and +\"rome_sessions\".\"source_channel\" = 'webchat')",
-          "isUnique": false
+          "isUnique": false,
+          "where": "(\"rome_sessions\".\"type\" = 'channel' and +\"rome_sessions\".\"source_channel\" = 'webchat')"
         },
         "idx_rome_sessions_source_channel": {
           "name": "idx_rome_sessions_source_channel",
@@ -2055,8 +2062,8 @@
             "source_channel",
             "source_thread_id"
           ],
-          "where": "\"rome_sessions\".\"type\" = 'channel' AND \"rome_sessions\".\"source_channel\" IS NOT NULL AND \"rome_sessions\".\"source_thread_id\" IS NOT NULL",
-          "isUnique": false
+          "isUnique": false,
+          "where": "\"rome_sessions\".\"type\" = 'channel' AND \"rome_sessions\".\"source_channel\" IS NOT NULL AND \"rome_sessions\".\"source_thread_id\" IS NOT NULL"
         },
         "idx_rome_sessions_parent_session": {
           "name": "idx_rome_sessions_parent_session",
@@ -2172,15 +2179,15 @@
         "routine_runs_routine_id_routines_id_fk": {
           "name": "routine_runs_routine_id_routines_id_fk",
           "tableFrom": "routine_runs",
+          "tableTo": "routines",
           "columnsFrom": [
             "routine_id"
           ],
-          "tableTo": "routines",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2422,15 +2429,15 @@
         "session_turn_checkpoints_session_id_sessions_id_fk": {
           "name": "session_turn_checkpoints_session_id_sessions_id_fk",
           "tableFrom": "session_turn_checkpoints",
+          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -3104,15 +3111,15 @@
         "webchat_turn_feedback_session_id_rome_sessions_id_fk": {
           "name": "webchat_turn_feedback_session_id_rome_sessions_id_fk",
           "tableFrom": "webchat_turn_feedback",
+          "tableTo": "rome_sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "rome_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -3157,15 +3164,15 @@
         "webchat_workspace_layouts_session_id_rome_sessions_id_fk": {
           "name": "webchat_workspace_layouts_session_id_rome_sessions_id_fk",
           "tableFrom": "webchat_workspace_layouts",
+          "tableTo": "rome_sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "rome_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3306,9 +3313,9 @@
   "views": {},
   "enums": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
+    "tables": {},
+    "columns": {}
   },
   "internal": {
     "indexes": {}

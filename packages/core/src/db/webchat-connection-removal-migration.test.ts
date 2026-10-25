@@ -6,7 +6,7 @@ import { describe, expect, it } from "@rstest/core";
 
 const migrationPath = (name: string) =>
   resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system", name);
-const REMOVAL = readFileSync(migrationPath("0090_webchat_is_not_a_connection.sql"), "utf8");
+const REMOVAL = readFileSync(migrationPath("0091_webchat_is_not_a_connection.sql"), "utf8");
 
 function run(sqlite: Database.Database, migration: string): void {
   for (const statement of migration.split("--> statement-breakpoint")) sqlite.exec(statement);

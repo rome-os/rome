@@ -102,6 +102,7 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
     if ("error" in parsed) return c.json({ error: parsed.error }, 400);
 
     const result = await sendToAccount(deps, address, parsed.request.text, parsed.request.id);
+    if (!result.ok && "invalid" in result) return c.json({ error: result.invalid }, 400);
     if (!result.ok && "error" in result) return c.json({ error: result.error }, 409);
     if (result.ok && result.message.state === "failed") {
       await discardSend(deps, [address], result.message.id);

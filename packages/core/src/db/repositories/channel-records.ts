@@ -52,6 +52,14 @@ type Exec = DrizzleDb | DrizzleTx;
  *  connection kind's name, so a name with no record answers for itself. */
 export type ConnectionKindOfChannel = (channel: string) => string;
 
+/** The one channel a person's link reaches, or null when it reaches none.
+ *  `ChannelRecordsRepository.channelOfLink` states the rule. */
+export type ChannelOfLink = (link: string) => string | null;
+
+/** The ids of Rome's accounts a send to a person's link may go out from.
+ *  `ChannelRecordsRepository.sendersOfLink` states the rule. */
+export type SendersOfLink = (link: string) => string[];
+
 function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
   return {
     id: row.id,
@@ -81,6 +89,10 @@ export class ChannelRecordsRepository {
    *  moves a Connection empties it (a link moves none), and nothing is cached
    *  while a transaction is open, so a rolled-back write leaves no id behind. */
   private readonly ids = new Map<string, string | null>();
+  /** `channelOfLink` by link, read for every link on every People read. It
+   *  empties with `ids`, since only a write that moves a Connection changes
+   *  which channels are backed. */
+  private readonly links = new Map<string, string | null>();
 
   constructor(private readonly db: DrizzleDb) {}
 
@@ -103,6 +115,49 @@ export class ChannelRecordsRepository {
    *  records it. */
   platformOf(id: string): string | null {
     return this.byId(id)?.platform ?? null;
+  }
+
+  /**
+   * The channel a person's link keyed by `link` reaches. People keys a link by
+   * connection kind, and Rome never picks among a connection kind's accounts, so:
+   *
+   * - A link naming a channel whose connection kind is another name (an opaque id)
+   *   reaches that channel.
+   * - A link naming a connection kind reaches the connection kind's one account: the one
+   *   channel of it a Connection backs. With none backed it reaches the
+   *   channel carrying the connection kind's name, as for a connection kind no record names.
+   * - With several backed, it reaches none, so null.
+   *
+   * Backed channels are counted rather than recorded ones, since a released
+   * row stays after its account is removed and is not an account.
+   */
+  channelOfLink(link: string): string | null {
+    const cached = this.links.get(link);
+    if (cached !== undefined) return cached;
+    const senders = this.sendersOfLink(link);
+    const reached =
+      senders.length === 0 ? link : senders.length === 1 ? (senders[0] ?? null) : null;
+    if (!inTransaction(this.db)) this.links.set(link, reached);
+    return reached;
+  }
+
+  /**
+   * The ids of Rome's accounts a send to a person's link keyed by `link` may
+   * name to go out from, oldest first. A link naming a channel's own opaque id
+   * answers that channel while a Connection backs it. A link naming a connection kind
+   * answers each channel of the connection kind a Connection backs, or the channel
+   * carrying the connection kind's name when none is, as for a connection kind no record names.
+   */
+  sendersOfLink(link: string): string[] {
+    const own = this.byId(link);
+    if (own && own.connectionKind !== link) return own.connectionId === null ? [] : [link];
+    const backed = this.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(and(eq(channels.connectionKind, link), isNotNull(channels.connectionId)))
+      .orderBy(asc(channels.createdAt))
+      .all();
+    return backed.length === 0 ? [link] : backed.map((row) => row.id);
   }
 
   /** The id of the channel `connectionId` backs, or null for none. */
@@ -146,6 +201,7 @@ export class ChannelRecordsRepository {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
     this.ids.clear();
+    this.links.clear();
 
     const connectionKind = connection.connectionKind;
     const vacant = LINKABLE_KINDS.has(connectionKind)
@@ -192,6 +248,7 @@ export class ChannelRecordsRepository {
    *  its link goes: an agent stays linked only where it can still answer. */
   vacate(exec: Exec, connectionId: string): void {
     this.ids.clear();
+    this.links.clear();
     exec
       .update(channels)
       .set({ connectionId: null, agent: null })
