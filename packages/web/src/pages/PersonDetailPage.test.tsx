@@ -49,6 +49,7 @@ const PERSON: PersonResource = {
   accounts: [
     {
       channel: "whatsapp",
+      readThrough: ["whatsapp"],
       channelUserId: "6591881123@s.whatsapp.net",
       displayName: "Wei",
       send: "yes",
@@ -56,6 +57,7 @@ const PERSON: PersonResource = {
     },
     {
       channel: "telegram",
+      readThrough: ["telegram"],
       channelUserId: "418820113",
       displayName: "wei_c",
       send: "yes",
@@ -76,6 +78,7 @@ const READ_ONLY_PERSON: PersonResource = {
   accounts: [
     {
       channel: "linkedin",
+      readThrough: ["linkedin"],
       channelUserId: "ACoAAB1",
       displayName: "Arvind",
       send: "unsupported",

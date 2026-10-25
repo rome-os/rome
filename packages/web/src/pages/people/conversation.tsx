@@ -14,13 +14,7 @@ import { ChannelGlyph, ChannelPill, channelLabel } from "./channel-meta";
 import { Composer } from "./composer";
 import { clockTime, dayLabel, navigatorLocale, startOfDay } from "./format";
 import { Outbox } from "./outbox";
-import {
-  ALL_ACCOUNTS,
-  accountSegments,
-  segmentAccount,
-  segmentEntries,
-  segmentOutbox,
-} from "./send-model";
+import { ALL_ACCOUNTS, accountSegments, segmentAccount, segmentOutbox } from "./send-model";
 import { usePersonOutbox, usePersonTimeline } from "./use-roster";
 import { useConversationSends } from "./use-conversation-sends";
 
@@ -40,7 +34,6 @@ import { useConversationSends } from "./use-conversation-sends";
  */
 export function PersonConversation({ person }: { person: PersonResource }) {
   const { t } = useTranslation("people");
-  const timeline = usePersonTimeline(person.id);
   const outbox = usePersonOutbox(person.id);
   const sends = useConversationSends(person.id, outbox.messages);
 
@@ -50,6 +43,10 @@ export function PersonConversation({ person }: { person: PersonResource }) {
   // lookup answers null and the view falls back to the merged one rather than
   // scoping to an account this person no longer holds.
   const scoped = segmentAccount(segments, segment);
+  // An account segment reads that account's own history from the server, which
+  // reads by address: an entry names only its channel, and two of the person's
+  // accounts can share one.
+  const timeline = usePersonTimeline(person.id, scoped);
 
   // Only in the merged view, and only until the guardian picks: an account view
   // has no override to hold, and the default is the contract's answer to which
@@ -59,7 +56,7 @@ export function PersonConversation({ person }: { person: PersonResource }) {
     override && person.accounts.some((a) => sameAccount(a, override)) ? override : null;
   const target = scoped ?? chosen ?? defaultSendAccount(person.accounts);
 
-  const entries = segmentEntries(timeline.entries, scoped);
+  const entries = timeline.entries;
   const days = useMemo(() => groupByDay(entries), [entries]);
 
   return (

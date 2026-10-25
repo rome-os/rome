@@ -10,6 +10,7 @@ import type {
   AccountDirectory,
   AccountState,
   AccountStream,
+  LinkedAccount,
   OutboxPage,
   PeopleList,
   PersonResource,
@@ -284,19 +285,29 @@ export function usePerson(id: string | undefined) {
  * it — and a refetch here re-reads every page the reader has opened, so an
  * interval charges the deepest reader the most for the least.
  */
-export function usePersonTimeline(id: string | undefined) {
+export function usePersonTimeline(id: string | undefined, account: LinkedAccount | null = null) {
   const { t } = useTranslation("people");
   const query = useInfiniteQuery<TimelinePage>({
-    queryKey: [TIMELINE_KEY, id],
+    // Under the person's key, so invalidating the person's timeline reaches
+    // every account's page of it too.
+    queryKey: [TIMELINE_KEY, id, account?.channel, account?.channelUserId],
     enabled: id != null,
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
     queryFn: ({ signal, pageParam }) => {
       // The cursor names an exact entry (time, direction, source, ref), so it
-      // carries separators of its own and has to be escaped rather than pasted
-      // into the query string.
-      const search = pageParam ? `?cursor=${encodeURIComponent(String(pageParam))}` : "";
-      return fetchJson<TimelinePage>(`/api/people/${encodeURIComponent(id!)}/messages${search}`, {
+      // carries separators of its own and has to be escaped, which
+      // URLSearchParams does.
+      const search = new URLSearchParams();
+      if (pageParam) search.set("cursor", String(pageParam));
+      // One account's own history is the server's to narrow: an entry names its
+      // channel and not its address, so the merged page cannot be split here.
+      if (account) {
+        search.set("channel", account.channel);
+        search.set("channelUserId", account.channelUserId);
+      }
+      const query = search.size > 0 ? `?${search}` : "";
+      return fetchJson<TimelinePage>(`/api/people/${encodeURIComponent(id!)}/messages${query}`, {
         signal,
         fallback: t("errors.loadFailedFallback"),
       });
