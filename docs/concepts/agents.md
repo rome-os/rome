@@ -54,6 +54,7 @@ Both providers use one set of names: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `G
 - Codex offers its patch tool on every thread. An agent with no `Write`, `Edit`, or shell name runs in Codex's read-only sandbox, which rejects every patch.
 - Some Codex models carry collaboration tools that spawn Codex agents, and no setting removes them. A spawned Codex agent gets the same builtin tools as the agent that spawned it.
 - Codex's plan tool stays on for every agent, because Rome renders plan updates from it. `WebFetch` and `TodoWrite` grant nothing on Codex.
+- Codex's bundled skills are off, so an agent sees only Rome's [skills](skills.md). The exception is `imagegen`, Codex's guide to its image tool, which an agent that declares `ImageGeneration` gets too.
 
 | Declared on Codex | Codex capability |
 |---|---|
@@ -62,7 +63,7 @@ Both providers use one set of names: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `G
 | `Write`, `Edit`, `Read`, `Glob`, `Grep`, or `Bash` | Patches that write files |
 | `WebSearch` | Web search |
 | `Task` | Codex's multi-agent tools, on models without collaboration tools |
-| `ImageGeneration` | Image generation |
+| `ImageGeneration` | Image generation, and Codex's `imagegen` skill |
 
 ## Structured output
 

@@ -145,6 +145,16 @@ const CODEX_TOOL_SWITCHES: ReadonlyArray<
   ["web_search", "disabled", ["WebSearch"]],
 ];
 
+// The app-server turns Codex's bundled skills off (codexAppServerConfigArgs).
+// An agent with the native image tool gets back only `imagegen`, Codex's guide
+// to that tool; the others would compete with Rome's own skill catalog.
+const IMAGEGEN_SKILL_ONLY = {
+  "skills.bundled.enabled": true,
+  "skills.config": ["openai-docs", "review-agent", "skill-creator", "skill-installer"].map(
+    (name) => ({ name, enabled: false }),
+  ),
+};
+
 /**
  * The thread sandbox and config that limit Codex's own tools to an agent's
  * declared builtins (docs/concepts/agents.md#builtin-tools). The config only
@@ -152,7 +162,7 @@ const CODEX_TOOL_SWITCHES: ReadonlyArray<
  * removes apply_patch, so an agent with no Write, Edit, or shell builtin gets
  * the read-only sandbox, where Codex rejects every patch.
  */
-function codexToolOverrides(
+export function codexToolOverrides(
   builtinTools: readonly string[] | undefined,
 ): Required<Pick<ThreadConfigurationOverrides, "sandbox" | "config">> {
   const declared = new Set(builtinTools);
@@ -161,6 +171,7 @@ function codexToolOverrides(
   for (const [key, off, keptBy] of CODEX_TOOL_SWITCHES) {
     if (!keeps(keptBy)) config[key] = off;
   }
+  if (declared.has("ImageGeneration")) Object.assign(config, IMAGEGEN_SKILL_ONLY);
   const writes = keeps([...SHELL_BUILTINS, "Write", "Edit"]);
   return { sandbox: writes ? "danger-full-access" : "read-only", config };
 }

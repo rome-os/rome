@@ -325,6 +325,10 @@ describe("CodexAppServerProvider", () => {
       ),
     );
     expect(start.config).toMatchObject({ "tools.update_plan.enabled": true });
+    // Bundled Codex skills are off server-wide; only the image tool brings back imagegen.
+    expect(start.config["skills.bundled.enabled"]).toBe(
+      builtinTools.includes("ImageGeneration") ? true : undefined,
+    );
   });
 
   it.each([
