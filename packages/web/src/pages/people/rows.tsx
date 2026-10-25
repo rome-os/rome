@@ -227,15 +227,20 @@ function GuardianAccounts({ accounts }: { accounts: PeopleRow["accounts"] }) {
   const { t } = useTranslation("people");
   if (accounts.length === 0) return <>{t("guardian.noAccounts")}</>;
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+    // `whitespace-normal` undoes the `truncate` this line sits in, so a handle
+    // longer than the row, such as a work email on a phone, breaks rather than
+    // being clipped.
+    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 whitespace-normal">
       <span className="shrink-0">{t("guardian.you")}</span>
       {accounts.map((account) => (
         <span
           key={`${account.channel}:${account.channelUserId}`}
-          className="inline-flex shrink-0 items-center gap-1"
+          className="inline-flex min-w-0 max-w-full items-center gap-1"
         >
-          <ChannelGlyph channel={account.channel} />
-          <span className="font-mono tabular-nums">{accountHandle(account)}</span>
+          <span className="shrink-0">
+            <ChannelGlyph channel={account.channel} />
+          </span>
+          <span className="min-w-0 break-all font-mono tabular-nums">{accountHandle(account)}</span>
         </span>
       ))}
     </span>
