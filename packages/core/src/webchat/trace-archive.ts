@@ -97,6 +97,8 @@ export class TraceArchiver {
   private readonly storage: TraceArchiveStorage;
   private serial: Promise<unknown> = Promise.resolve();
   private stopped = false;
+  private cleanupQueued?: Promise<void>;
+  private cleanupRequested = false;
   private exporter = new ArchiveWorkerClient();
   constructor(
     private readonly options: {
@@ -120,14 +122,28 @@ export class TraceArchiver {
     this.serial = next.catch(() => {});
     return next;
   }
-  stop() {
+  stop(): Promise<void> {
     this.stopped = true;
-    return this.serial;
+    this.storage.stop();
+    // Stored state resumes after restart. A native SQLite read must not delay shutdown.
+    void this.exporter.close().catch(() => {});
+    return Promise.resolve();
   }
   cleanupDeletedChats(): Promise<void> {
-    return this.enqueue(async () => {
-      await this.cleanup();
+    this.cleanupRequested = true;
+    if (this.cleanupQueued) return this.cleanupQueued;
+    this.cleanupQueued = this.enqueue(async () => {
+      const attempted = new Set<string>();
+      do {
+        this.cleanupRequested = false;
+        await this.cleanup(attempted);
+      } while (this.cleanupRequested && !this.stopped);
+    }).finally(() => {
+      this.cleanupQueued = undefined;
+      if (this.cleanupRequested && !this.stopped)
+        void this.cleanupDeletedChats().catch(() => log.warn("trace archive cleanup will retry"));
     });
+    return this.cleanupQueued;
   }
   private now() {
     return this.options.now?.() ?? new Date();
@@ -139,10 +155,13 @@ export class TraceArchiver {
     return traceArchiveFile(this.root, row.sessionId, row.id);
   }
 
-  private async cleanup() {
+  private async cleanup(attempted = new Set<string>()) {
     const repo = this.options.repo;
     let failures = 0;
     for (const sessionId of repo.deletes()) {
+      if (this.stopped) break;
+      if (attempted.has(sessionId)) continue;
+      attempted.add(sessionId);
       try {
         // Validate ids before recursive removal. Archives only occupy this dedicated directory.
         const file = traceArchiveFile(this.root, sessionId, "cleanup");
@@ -280,7 +299,7 @@ export class TraceArchiver {
           }
         }
         for (const candidate of repo.candidates(this.now())) {
-          if (this.stopped || repo.pendingBytes() >= PENDING_LIMIT) break;
+          if (this.stopped || failedSessions.size || repo.pendingBytes() >= PENDING_LIMIT) break;
           if (
             failedSessions.has(candidate.sessionId) ||
             this.options.isRunning?.(candidate.sessionId)
@@ -333,6 +352,7 @@ export class TraceArchiver {
               break;
             }
             log.warn("trace archive will retry", { archiveId: id, reason: failureReason(error) });
+            break;
           }
           await setImmediate();
         }

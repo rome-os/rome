@@ -498,12 +498,18 @@ async function cloud(status = 200, error = "", putStatus = 200) {
     headers: import("node:http").IncomingHttpHeaders;
   }[] = [];
   let origin = "";
+  let onPut!: () => void;
+  const putStarted = new Promise<void>((resolve) => {
+    onPut = resolve;
+  });
   server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const body = Buffer.concat(chunks);
     requests.push({ method: req.method!, path: req.url!, body, headers: req.headers });
     if (req.method === "PUT") {
+      onPut();
+      if (!putStatus) return;
       res.writeHead(putStatus).end();
       return;
     }
@@ -537,6 +543,7 @@ async function cloud(status = 200, error = "", putStatus = 200) {
   origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   return {
     requests,
+    putStarted,
     succeed: () => {
       status = 200;
       putStatus = 200;
@@ -607,15 +614,17 @@ describe("Pantheon + signed PUT contract", () => {
     seed();
     await archiver().runPass();
     const file = traceArchiveFile(root, "session", archiveRows()[0].id);
+    repo.update(archiveRows()[0].id, { location: "s3:key" });
     await webchat.deleteSession("session");
     expect(repo.deletes()).toEqual(["session"]);
-    const { requests, storage } = await cloud(503, "archive_storage_unconfigured");
+    const { requests, storage, succeed } = await cloud(503, "archive_storage_unconfigured");
     await archiver({ storage }).cleanupDeletedChats();
     expect(existsSync(file)).toBe(false);
     expect(repo.deletes()).toEqual(["session"]);
     expect(requests[0].method).toBe("DELETE");
     expect(JSON.parse(requests[0].body.toString())).toEqual({ sessionId: "session" });
-    await archiver().cleanupDeletedChats();
+    succeed();
+    await archiver({ storage }).cleanupDeletedChats();
     expect(repo.deletes()).toEqual([]);
   });
   it("reactivation discards the new upload without erasing earlier valid archives", async () => {
@@ -646,6 +655,41 @@ describe("Pantheon + signed PUT contract", () => {
     await webchat.deleteSession("session");
     await archiver({ storage }).cleanupDeletedChats();
     expect(requests.filter((r) => r.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("shutdown aborts a hanging PUT without waiting for the archive queue", async () => {
+    seed();
+    const { storage, putStarted } = await cloud(200, "", 0);
+    const job = archiver({ storage });
+    const pass = job.runPass();
+    await putStarted;
+    const start = performance.now();
+    await job.stop();
+    expect(performance.now() - start).toBeLessThan(1000);
+    await pass;
+    expect(count()).toBe(6);
+    expect(archiveRows()[0].status).toBe("exported");
+  });
+
+  it("does not export more staging files after an upload failure", async () => {
+    seed("one");
+    seed("two");
+    const { storage } = await cloud(503, "archive_storage_unconfigured");
+    await archiver({ storage }).runPass();
+    expect(archiveRows()).toHaveLength(1);
+    expect(count()).toBe(12);
+  });
+
+  it("coalesces cleanup requests and never calls Cloud for chats without remote archives", async () => {
+    seed("local");
+    await webchat.deleteSession("local");
+    const { requests, storage } = await cloud(503, "archive_storage_unconfigured");
+    const job = archiver({ storage });
+    const first = job.cleanupDeletedChats();
+    expect(job.cleanupDeletedChats()).toBe(first);
+    await first;
+    expect(requests).toHaveLength(0);
+    expect(repo.deletes()).toEqual([]);
   });
 
   it("a delete during a PUT cannot leave an object uploaded after the remote deletion", async () => {

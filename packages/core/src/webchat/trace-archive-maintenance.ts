@@ -66,6 +66,7 @@ export function vacuumTraceDatabase(
     return false;
   const before = statSync(db.name).size;
   const start = performance.now();
+  log.info("trace archive quiet-window vacuum starting", { beforeBytes: before });
   db.exec("VACUUM");
   db.pragma("wal_checkpoint(TRUNCATE)");
   log.info("trace archive quiet-window vacuum completed", {

@@ -16,6 +16,11 @@ const uploadResponse = z.object({
 
 export class TraceArchiveStorage {
   private notHosted = false;
+  private abort = new AbortController();
+
+  stop() {
+    this.abort.abort();
+  }
   constructor(
     private readonly options: {
       fetch?: typeof fetch;
@@ -35,7 +40,7 @@ export class TraceArchiveStorage {
         method,
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(30_000)]),
         redirect: "error",
       },
     );
@@ -81,7 +86,7 @@ export class TraceArchiveStorage {
         body: Readable.toWeb(stream) as ReadableStream<Uint8Array>,
         duplex: "half",
         redirect: "error",
-        signal: AbortSignal.timeout(15 * 60_000),
+        signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(15 * 60_000)]),
       } as RequestInit);
       if (!put.ok) throw new Error(`Trace archive PUT failed (${put.status})`);
       await put.body?.cancel();
@@ -93,8 +98,12 @@ export class TraceArchiveStorage {
 
   /** A missing token cannot confirm deletion of an object uploaded with an earlier token. */
   async deleteSession(sessionId: string, remoteRequired: boolean): Promise<void> {
-    if (remoteRequired && !(this.options.token ?? getInstanceToken)())
+    if (!remoteRequired) return;
+    if (!(this.options.token ?? getInstanceToken)())
       throw new Error("Trace archive deletion awaits instance token");
-    await this.request("DELETE", "", { sessionId: traceArchiveSessionKey(sessionId) });
+    const response = await this.request("DELETE", "", {
+      sessionId: traceArchiveSessionKey(sessionId),
+    });
+    await response?.body?.cancel();
   }
 }
