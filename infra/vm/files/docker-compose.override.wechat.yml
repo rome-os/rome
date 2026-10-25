@@ -1,0 +1,13 @@
+# Personal WeChat (docs/wechat-personal.md): the container reaches the host
+# helper socket, runs as root, and gets 1 GB of shared memory. Written by
+# 40-wechat.sh only on a host where WeChat is enabled.
+services:
+  rome:
+    shm_size: 1gb
+    environment:
+      WECHAT_USER_ENABLED: "true"
+      ROME_HOST_EXECUTION_ENABLED: "true"
+      ROME_HOST_EXECUTION_SOCKET: /run/rome-host/control.sock
+      ROME_DOCKER_USER_MODE: root
+    volumes:
+      - /run/rome-host:/run/rome-host
