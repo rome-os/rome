@@ -241,4 +241,22 @@ describe("ConnectionRegistry.confer account guard", () => {
       db.close();
     }
   });
+
+  it("refuses a different bot on a Connection the boot pass left without an account", async () => {
+    const { ledger, registry, close } = setupRegistry();
+    try {
+      const first = await registry.connect(SERVICE);
+      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      // As for the later of two connections that reached one account.
+      await ledger.updateGrant(first.id, "bot", { account: undefined });
+
+      const refused = registry.confer(SERVICE, first.id, "bot", credentialFor("t-9"), {
+        botId: "900",
+      });
+
+      await expect(refused).rejects.toBeInstanceOf(DifferentAccountError);
+    } finally {
+      close();
+    }
+  });
 });

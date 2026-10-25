@@ -5,7 +5,7 @@ import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
 import { isUnconnectedAccount } from "./unconnected-accounts.js";
-import { domainOf, platformOf } from "../channels/platform.js";
+import { domainOf, domainOfGrants, platformOf } from "../channels/platform.js";
 import type {
   ConnectionRecord,
   GrantAccount,
@@ -99,15 +99,29 @@ export function toPersisted(cred: Credential): PersistedCredential {
 }
 
 /** The account `profile` names for `grant`: the platform and the platform's own
- *  id for it, or undefined when the connection kind names none. */
+ *  id for it, or undefined when the connection kind names none. `domain` is the
+ *  Feishu app's domain, which `platformOf` reads. */
 export function accountOf(
   descriptor: ConnectionDescriptor,
   grant: GrantName,
   profile: ProfileRecord,
+  domain: string | undefined = domainOf(profile),
 ): GrantAccount | undefined {
   const accountId = descriptor.accountIdOf?.(grant, profile);
   if (!accountId) return undefined;
-  return { platform: platformOf(descriptor.connectionKind, domainOf(profile)), accountId };
+  return { platform: platformOf(descriptor.connectionKind, domain), accountId };
+}
+
+/** The account `record` reaches: the stored one, or the one its profile names
+ *  when none was stored, as for a grant the boot pass left without one. A
+ *  Feishu grant from before profiles names its domain only in its material. */
+export function reachedAccount(
+  descriptor: ConnectionDescriptor,
+  record: GrantRecord,
+): GrantAccount | undefined {
+  if (record.account) return record.account;
+  if (!record.profile) return undefined;
+  return accountOf(descriptor, record.name, record.profile, domainOfGrants([record]));
 }
 
 /** The ledger patch that authorizes a grant with a freshly conferred credential
@@ -560,14 +574,16 @@ export class ConnectionRegistry {
 
   /** Throws DifferentAccountError when `connectionId`'s grant still reaches an
    *  account and `account` is another. A disconnected grant reaches none, so it
-   *  never refuses there. */
+   *  never refuses there. A held grant with no stored account still reaches the
+   *  one its profile names. */
   private async refuseDifferentAccount(
     descriptor: ConnectionDescriptor,
     connectionId: ConnectionId,
     grant: GrantName,
     account: GrantAccount,
   ): Promise<void> {
-    const held = (await this.ledger.getGrant(connectionId, grant))?.account;
+    const record = await this.ledger.getGrant(connectionId, grant);
+    const held = record ? reachedAccount(descriptor, record) : undefined;
     if (held && (held.platform !== account.platform || held.accountId !== account.accountId)) {
       throw new DifferentAccountError(
         descriptor.connectionKind,

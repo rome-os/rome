@@ -1,10 +1,8 @@
 // A grant names the account it reaches. Model:
 // docs/domains/connections.md#grant.
 
-import { domainOfGrants, platformOf } from "../channels/platform.js";
 import { createLogger } from "../logger.js";
-import type { GrantAccount } from "./ledger.js";
-import type { ConnectionRegistry } from "./registry.js";
+import { type ConnectionRegistry, reachedAccount } from "./registry.js";
 
 const log = createLogger("connections");
 
@@ -24,17 +22,12 @@ export async function recordGrantAccounts(
   );
   let recorded = 0;
   for (const conn of connections) {
-    const accountIdOf = registry.getDescriptor(conn.connectionKind)?.accountIdOf;
-    if (!accountIdOf) continue;
+    const descriptor = registry.getDescriptor(conn.connectionKind);
+    if (!descriptor) continue;
     for (const grant of await ledger.listGrants(conn.id)) {
-      if (grant.account || !grant.profile || grant.state === "unauthorized") continue;
-      const accountId = accountIdOf(grant.name, grant.profile);
-      if (!accountId) continue;
-      // A Feishu grant from before profiles names its domain only in its material.
-      const account: GrantAccount = {
-        platform: platformOf(conn.connectionKind, domainOfGrants([grant])),
-        accountId,
-      };
+      if (grant.account || grant.state === "unauthorized") continue;
+      const account = reachedAccount(descriptor, grant);
+      if (!account) continue;
       try {
         const other = await ledger.connectionReaching(account, conn.id);
         if (other) {
