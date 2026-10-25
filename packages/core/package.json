@@ -20,6 +20,7 @@
     "test:ci": "../../scripts/test-env.sh env RSTEST_JUNIT=1 rstest --coverage --pool.maxWorkers=8",
     "db:generate:system": "drizzle-kit generate --config drizzle.system.config.ts",
     "db:generate:app": "drizzle-kit generate --config drizzle.authoring.config.ts",
+    "db:check:destructive": "tsx src/bin/check-destructive-migrations.ts",
     "db:migrate": "if [ \"${ROME_DOCKER_APP_CODE_MODE:-source}\" = \"compiled\" ]; then node dist/db/migrate.js; else tsx src/db/migrate.ts; fi",
     "db:push:system": "mkdir -p ~/.rome/${ROME_PROFILE:-default} && drizzle-kit push --config drizzle.system.config.ts",
     "db:push:app": "mkdir -p ~/.rome/${ROME_PROFILE:-default} && drizzle-kit push --config drizzle.authoring.config.ts",

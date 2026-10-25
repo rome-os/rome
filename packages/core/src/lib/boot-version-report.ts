@@ -1,3 +1,4 @@
+import { lt as semverLt, valid as semverValid } from "semver";
 import type { BuildInfo } from "../build-info.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
@@ -8,7 +9,10 @@ const log = createLogger("boot-version-report");
 export const LAST_BOOTED_VERSION_KEY = "system.lastBootedVersion";
 
 export interface BootVersionReport {
-  /** True when this boot's release version differs from the previously stored one. */
+  /**
+   * True when this boot's release version differs from the previously stored
+   * one, a downgrade included. Compare `previousVersion` to tell them apart.
+   */
   upgradedSinceLastBoot: boolean;
   /** The version stored by the previous versioned boot, or null on first boot. */
   previousVersion: string | null;
@@ -48,13 +52,23 @@ export async function reportBootVersion(
     return { upgradedSinceLastBoot: false, previousVersion: null };
   }
   const upgradedSinceLastBoot = previousVersion !== null && previousVersion !== buildInfo.version;
-  if (upgradedSinceLastBoot) {
-    log.info("rome upgraded since last boot", {
-      from: previousVersion,
-      to: buildInfo.version,
-    });
+  if (previousVersion !== null && upgradedSinceLastBoot) {
+    const transition = { from: previousVersion, to: buildInfo.version };
+    // A rollback onto a newer release's database is the case worth an operator's
+    // attention, so it logs apart from an upgrade.
+    if (isOlderRelease(buildInfo.version, previousVersion)) {
+      log.warn("rome downgraded since last boot", transition);
+    } else {
+      log.info("rome upgraded since last boot", transition);
+    }
   }
   return { upgradedSinceLastBoot, previousVersion };
+}
+
+function isOlderRelease(version: string, than: string): boolean {
+  const current = semverValid(version);
+  const previous = semverValid(than);
+  return current !== null && previous !== null && semverLt(current, previous);
 }
 
 /**

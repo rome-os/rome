@@ -1,4 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
+import * as loggerModule from "../logger.js" with { rstest: "importActual" };
+
+// Spy on this module's own logger only. Every other module the test DB pulls in
+// keeps the real one.
+const logInfo = rs.hoisted(() => rs.fn());
+const logWarn = rs.hoisted(() => rs.fn());
+rs.mock("../logger.js", () => ({
+  ...loggerModule,
+  createLogger: (component: string, ...rest: unknown[]) =>
+    component === "boot-version-report"
+      ? { info: logInfo, warn: logWarn, error: rs.fn(), debug: rs.fn() }
+      : loggerModule.createLogger(component, ...(rest as [])),
+}));
+
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import {
@@ -26,9 +40,36 @@ describe("boot version report", () => {
   beforeEach(() => {
     testDb = createTestDb();
     settingsRepo = new SettingsRepository(testDb.db);
+    logInfo.mockClear();
+    logWarn.mockClear();
   });
 
   afterEach(() => testDb.close());
+
+  it("logs a rollback to an older release as a downgrade, not an upgrade", async () => {
+    await settingsRepo.set(LAST_BOOTED_VERSION_KEY, "1.1.148");
+
+    const report = await reportBootVersion(settingsRepo, build("1.1.147"));
+
+    expect(report).toEqual({ upgradedSinceLastBoot: true, previousVersion: "1.1.148" });
+    expect(logWarn).toHaveBeenCalledWith("rome downgraded since last boot", {
+      from: "1.1.148",
+      to: "1.1.147",
+    });
+    expect(logInfo).not.toHaveBeenCalled();
+  });
+
+  it("compares release versions numerically, not as strings", async () => {
+    await settingsRepo.set(LAST_BOOTED_VERSION_KEY, "1.1.99");
+
+    await reportBootVersion(settingsRepo, build("1.1.100"));
+
+    expect(logInfo).toHaveBeenCalledWith("rome upgraded since last boot", {
+      from: "1.1.99",
+      to: "1.1.100",
+    });
+    expect(logWarn).not.toHaveBeenCalled();
+  });
 
   it("reports no upgrade on first boot and leaves the store to commitBootVersion", async () => {
     const report = await reportBootVersion(settingsRepo, build("1.2.0"));
