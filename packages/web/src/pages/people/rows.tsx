@@ -227,7 +227,7 @@ function GuardianAccounts({ accounts }: { accounts: PeopleRow["accounts"] }) {
   const { t } = useTranslation("people");
   if (accounts.length === 0) return <>{t("guardian.noAccounts")}</>;
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
       <span className="shrink-0">{t("guardian.you")}</span>
       {accounts.map((account) => (
         <span
