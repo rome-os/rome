@@ -110,7 +110,8 @@ async function exportFile(
       (SELECT 1 FROM rome_agent_trace_blocks b WHERE b.message_id = m.id)`)
       .get(input.sessionId) as { bytes: number };
     const disk = await statfs(dirname(input.file));
-    if (disk.bavail * disk.bsize < 2 * (raw.bytes + legacyBytes.bytes)) return null;
+    if (disk.bavail * disk.bsize < 2 * (raw.bytes + legacyBytes.bytes))
+      throw new Error("Trace archive low disk");
     const last = db
       .prepare("SELECT max(created_at) AS at FROM rome_agent_messages WHERE session_id = ?")
       .get(input.sessionId) as { at: number | null };

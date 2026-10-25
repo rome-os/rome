@@ -996,7 +996,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const collectDescendantUsage = async (
     blocks: TraceEventDto[],
     visited: Set<string>,
-    sessionActivityCutoff?: Date,
   ): Promise<DescendantUsage> => {
     const refs = blocks
       .filter((block) => block.type === "subagent_start")
@@ -1022,7 +1021,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
         const childEvents = parseStoredTraceEvents(row.content);
         const accounting = terminalAccounting(childEvents);
-        const nested = await collectDescendantUsage(childEvents, visited, sessionActivityCutoff);
+        const nested = await collectDescendantUsage(childEvents, visited);
         return {
           usage: accounting ? addTokenUsage(accounting.usage, nested.usage) : nested.usage,
           costUsd: (accounting?.costUsd ?? 0) + nested.costUsd,
@@ -1053,10 +1052,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       },
     );
   };
-  const includeSubagentUsage = async (
-    blocks: TraceEventDto[],
-    sessionActivityCutoff?: Date,
-  ): Promise<TraceEventDto[]> => {
+  const includeSubagentUsage = async (blocks: TraceEventDto[]): Promise<TraceEventDto[]> => {
     let terminalIndex = -1;
     for (let index = blocks.length - 1; index >= 0; index -= 1) {
       const block = blocks[index];
@@ -1070,7 +1066,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (terminal.type !== "result" && terminal.type !== "error") return blocks;
     const accounting = terminal.accounting;
     if (!accounting) return blocks;
-    const descendants = await collectDescendantUsage(blocks, new Set(), sessionActivityCutoff);
+    const descendants = await collectDescendantUsage(blocks, new Set());
     if (descendants.count === 0) return blocks;
     const nextAccounting: TraceAccounting = {
       ...accounting,
@@ -1092,11 +1088,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const buildStoredTraceSnapshot = async (
     idPrefix: string,
     content: string,
-    options: { includeSubagentUsage?: boolean; sessionActivityCutoff?: Date } = {},
+    options: { includeSubagentUsage?: boolean } = {},
   ): Promise<TraceSnapshot> => {
     let blocks = parseStoredTraceEvents(content);
-    if (options.includeSubagentUsage)
-      blocks = await includeSubagentUsage(blocks, options.sessionActivityCutoff);
+    if (options.includeSubagentUsage) blocks = await includeSubagentUsage(blocks);
     return buildTraceSnapshot({
       idPrefix,
       blocks,
@@ -2007,7 +2002,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (row === null) return c.json({ error: "Message not found" }, 404);
     if (row.traceArchived) return c.json({ trace: null, traceArchived: true });
     const snapshot = await buildStoredTraceSnapshot(`msg-${messageId}`, row.content, {
-      sessionActivityCutoff,
       includeSubagentUsage: c.req.query("includeSubagentUsage") !== "false",
     });
     return c.json({ trace: snapshot });
@@ -2025,7 +2019,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (row?.traceArchived) return c.json({ trace: null, traceArchived: true });
     if (!row) return c.json({ error: "Trace not found" }, 404);
     const snapshot = await buildStoredTraceSnapshot(`msg-${row.id}`, row.content, {
-      sessionActivityCutoff,
       includeSubagentUsage: c.req.query("includeSubagentUsage") !== "false",
     });
     return c.json({ trace: snapshot });
@@ -2665,7 +2658,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (row === null) return c.json({ error: "Message not found" }, 404);
     if (row.traceArchived) return c.json({ trace: null, traceArchived: true });
     const snapshot = await buildStoredTraceSnapshot(`msg-${messageId}`, row.content, {
-      sessionActivityCutoff,
       includeSubagentUsage: c.req.query("includeSubagentUsage") !== "false",
     });
     return c.json({ trace: snapshot });

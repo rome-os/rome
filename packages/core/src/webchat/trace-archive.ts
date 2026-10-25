@@ -166,9 +166,7 @@ export class TraceArchiver {
       if (this.options.repo.hasRetainedArchives(row.sessionId)) return;
       await this.storage.deleteSession(row.sessionId, true);
     }
-    this.options.repo.update(row.id, {
-      location: `local:${traceArchiveRelativePath(row.sessionId, row.id)}`,
-    });
+    this.options.repo.remove(row.id);
   }
 
   private async resume(row: TraceArchive, stats: ArchivePassStats, exported?: ArchiveFile) {
@@ -329,6 +327,11 @@ export class TraceArchiver {
             await this.resume(row, stats, data);
           } catch (error) {
             stats.failures++;
+            if (error instanceof Error && error.message === "Trace archive low disk") {
+              await this.discard(repo.get(id)!);
+              log.warn("trace archive pass paused for low disk");
+              break;
+            }
             log.warn("trace archive will retry", { archiveId: id, reason: failureReason(error) });
           }
           await setImmediate();

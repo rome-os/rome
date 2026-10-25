@@ -68,6 +68,9 @@ export class TraceArchivesRepository {
   update(id: string, values: Partial<typeof romeTraceArchives.$inferInsert>) {
     this.db.update(romeTraceArchives).set(values).where(eq(romeTraceArchives.id, id)).run();
   }
+  remove(id: string) {
+    this.db.delete(romeTraceArchives).where(eq(romeTraceArchives.id, id)).run();
+  }
   hasRemoteArchives(sessionId: string): boolean {
     return Boolean(
       this.sqlite

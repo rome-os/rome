@@ -2537,12 +2537,17 @@ export class WebChatRepository {
       .where(and(eq(romeAgentMessages.sessionId, sessionId), eq(romeAgentMessages.role, "trace")));
     if (stubs.length === 0 || archivedSessionIds.length > 0) return stubs.map(traceContentResult);
 
-    const visibleIds = stubs.filter((stub) => !stub.traceArchived).map((stub) => stub.id);
-    if (!visibleIds.length) return stubs.map(traceContentResult);
+    if (!stubs.some((stub) => !stub.traceArchived)) return stubs.map(traceContentResult);
     const blockRows = await this.db
       .select({ messageId: romeAgentTraceBlocks.messageId, content: romeAgentTraceBlocks.content })
       .from(romeAgentTraceBlocks)
-      .where(inArray(romeAgentTraceBlocks.messageId, visibleIds))
+      .innerJoin(romeAgentMessages, eq(romeAgentMessages.id, romeAgentTraceBlocks.messageId))
+      .where(
+        and(
+          eq(romeAgentTraceBlocks.sessionId, sessionId),
+          isNull(romeAgentMessages.traceArchiveId),
+        ),
+      )
       .orderBy(asc(romeAgentTraceBlocks.messageId), asc(romeAgentTraceBlocks.seq));
     if (blockRows.length === 0) return stubs.map(traceContentResult);
 

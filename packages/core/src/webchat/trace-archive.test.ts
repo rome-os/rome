@@ -335,9 +335,12 @@ describe("trace archives (real SQLite and worker)", () => {
     seed();
     const data = await exportOnly();
     seed("session", [{ type: "tool_result", content: "new" }], Math.floor(now.getTime() / 1000));
+    repo.update("archive", { status: "stored" });
+    expect(repo.mark("archive", data.manifest, now)).toBe(false);
+    expect(archiveRows()[0].status).toBe("discarded");
     const stats = await archiver().runPass();
     expect(stats.rowsDeleted).toBe(0);
-    expect(archiveRows()[0].status).toBe("discarded");
+    expect(archiveRows()).toEqual([]);
     expect(count()).toBe(7);
     expect(existsSync(traceArchiveFile(root, "session", data.manifest.archiveId))).toBe(false);
   });
@@ -354,7 +357,7 @@ describe("trace archives (real SQLite and worker)", () => {
     const stats = await archiver({ isRunning: () => true }).runPass();
     expect(stats.rowsDeleted).toBe(0);
     expect(count()).toBe(7);
-    expect(archiveRows()[0].status).toBe("discarded");
+    expect(archiveRows()).toEqual([]);
   });
 
   it("resumes exported, stored-unmarked and stored-partially-pruned archives idempotently", async () => {
@@ -403,6 +406,42 @@ describe("trace archives (real SQLite and worker)", () => {
     expect(count()).toBe(12);
   });
 
+  it("pauses once on low disk without adding a discarded record for every candidate", async () => {
+    seed("one");
+    seed("two");
+    let exports = 0;
+    const worker = async (_input: ArchiveWorkerInput): Promise<ArchiveFile | null> => {
+      exports++;
+      throw new Error("Trace archive low disk");
+    };
+    await archiver({ worker }).runPass();
+    await archiver({ worker }).runPass();
+    expect(exports).toBe(2);
+    expect(archiveRows()).toEqual([]);
+    expect(count()).toBe(12);
+  });
+
+  it("loads history past SQLite's variable limit without fetching archived blocks", async () => {
+    const archivedId = seed("long-lived", [
+      { type: "result", content: "retained accounting, not full steps" },
+    ]);
+    sqlite
+      .prepare("UPDATE rome_agent_messages SET trace_archive_id = 'archive' WHERE id = ?")
+      .run(archivedId);
+    const insert = sqlite.prepare(
+      "INSERT INTO rome_agent_messages(id,session_id,turn_id,role,content,created_at) VALUES (?, 'long-lived', ?, 'trace', '[]', ?)",
+    );
+    sqlite.transaction(() => {
+      for (let i = 0; i < 32767; i++) insert.run(`message-${i}`, `turn-${i}`, old);
+    })();
+    const rows = await webchat.getTraceContents("long-lived");
+    expect(rows).toHaveLength(32768);
+    expect(rows.find((r) => r.id === archivedId)).toMatchObject({
+      content: "[]",
+      traceArchived: true,
+    });
+  }, 30000);
+
   it("message deletion and project deletion queue archive cleanup in their own transactions", async () => {
     seed("messages");
     seed("project");
@@ -427,7 +466,7 @@ describe("trace archives (real SQLite and worker)", () => {
       archiveRows()
         .map((r) => r.status)
         .sort(),
-    ).toEqual(["discarded", "pruned"]);
+    ).toEqual(["pruned"]);
   });
 
   it("caps deletes by bytes and rows, yields, and excludes post-snapshot seqs", async () => {
