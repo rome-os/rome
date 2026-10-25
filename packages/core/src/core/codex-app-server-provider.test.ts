@@ -326,9 +326,7 @@ describe("CodexAppServerProvider", () => {
     );
     expect(start.config).toMatchObject({ "tools.update_plan.enabled": true });
     // Bundled Codex skills are off server-wide; only the image tool brings back imagegen.
-    expect(start.config["skills.bundled.enabled"]).toBe(
-      builtinTools.includes("ImageGeneration") ? true : undefined,
-    );
+    expect(start.config["skills.bundled.enabled"]).toBe(builtinTools.includes("ImageGeneration"));
   });
 
   it.each([
@@ -620,6 +618,29 @@ describe("CodexAppServerProvider", () => {
       "thread/resume",
       expect.objectContaining({ threadId: "fork-thread" }),
     );
+
+    await forkSession.close();
+    await source.close();
+  });
+
+  it("drops the imagegen skill with the image tool in an isolated fork of an image agent", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
+      }
+      if (method === "thread/fork") return { thread: { id: "fork-thread" } };
+      return {};
+    });
+    const source = await new CodexAppServerProvider().openSession(
+      buildParams({ sessionId: "source-session", builtinTools: ["ImageGeneration"] }),
+    );
+    const fork = await source.fork({ sessionId: "fork-session", mode: "ephemeral" });
+    const forkSession = await fork.open(buildForkOpenParams({ builtinTools: ["ImageGeneration"] }));
+
+    expect(threadRequest("thread/fork")?.config).toMatchObject({
+      "features.image_generation": false,
+      "skills.bundled.enabled": false,
+    });
 
     await forkSession.close();
     await source.close();

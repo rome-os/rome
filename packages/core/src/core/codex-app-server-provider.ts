@@ -173,7 +173,9 @@ export function codexToolOverrides(
   for (const [key, off, keptBy] of CODEX_TOOL_SWITCHES) {
     if (!keeps(keptBy)) config[key] = off;
   }
+  // Written either way, so an isolated fork's no-builtins config overrides it.
   if (declared.has("ImageGeneration")) Object.assign(config, IMAGEGEN_SKILL_ONLY);
+  else config["skills.bundled.enabled"] = false;
   const writes = keeps([...SHELL_BUILTINS, "Write", "Edit"]);
   return { sandbox: writes ? "danger-full-access" : "read-only", config };
 }
