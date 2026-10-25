@@ -61,6 +61,9 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - What the guardian writes in an assistant's chat goes to the assistant and wakes no agent.
 - A code People shows, sent in a direct message to any of Rome's accounts on any platform, links the account it came from to the guardian.
 - Disconnecting the last of Rome's accounts on a platform keeps every link on it.
+- A fix that reaches another account is refused.
+- Connecting is one step: a connection exists only once its setup succeeds.
+- What a connection lets Rome do is fixed by its kind.
 
 Diffs still owed to the model, each a change of its own:
 
@@ -84,3 +87,9 @@ Diffs still owed to the model, each a change of its own:
 - The guardian can delete a person.
 - A delegate link is stored and shown as the agent of its person.
 - People's labels and docs say platform where they say channel.
+- At most one connection reaches an account across every kind of connection on its platform. The code checks only within one kind, and only for some kinds.
+- The grant names the account it reaches, and an account's connection is found by its platform and the platform's own id. Neither the account record nor the connection names the other.
+- A connection holds one grant, and renewing or fixing replaces it whole.
+- Working and broken are states of the connection, and the dashboard shows them.
+- Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
+- The code says chat, act and watch for what a connection lets Rome do.
