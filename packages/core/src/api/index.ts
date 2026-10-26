@@ -28,7 +28,7 @@ import { skillsRoutes } from "./routes/skills.js";
 import { discordCliRoutes } from "./routes/discord-cli.js";
 import { chatSettingsRoutes } from "./routes/chat-settings.js";
 import { connectionsRoutes } from "./routes/connections.js";
-import { channelAccountsRoutes } from "./routes/channel-accounts.js";
+import { connectedAccountsRoutes } from "./routes/connected-accounts.js";
 import { setupsRoutes } from "./routes/setups.js";
 import { approvalsRoutes } from "./routes/approvals.js";
 import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
@@ -166,7 +166,7 @@ export function buildApp(
   api.route("/", appApiPublicRoutes(deps));
   api.route("/", integrationsRoutes(deps));
   api.route("/", connectionsRoutes(deps));
-  api.route("/", channelAccountsRoutes(deps));
+  api.route("/", connectedAccountsRoutes(deps));
   api.route("/", setupsRoutes(deps));
   api.route("/", capabilityDiscoveryRoutes(hostCapabilityDiscoverySource));
   api.route("/", desktopRoutes());

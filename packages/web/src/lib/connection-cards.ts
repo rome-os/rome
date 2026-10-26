@@ -69,9 +69,6 @@ export interface ConnectionCard {
   degradation: CapabilityDegradation | null;
   slots: ConnectionSlot[];
   connect: ConnectHint | null;
-  /** The account's channel id; null for placeholders and services without a
-   *  Talk. Never shown on screens. */
-  channel: string | null;
   /** Canonical id of the account's agent, or null when it has none and Rome
    *  does not listen to it. */
   agent: string | null;
@@ -214,8 +211,6 @@ function toCard(connection: ApiConnection): ConnectionCard {
     degradation: runtimeDegradation(connection),
     slots,
     connect: connection.connect,
-    // Read defensively: a core that predates accounts omits these fields.
-    channel: connection.channel ?? null,
     // The bot's link only. A folded personal account (`telegram_user`) keeps
     // its own link, which this card does not show or set yet.
     agent: connection.agent ?? null,
@@ -249,7 +244,6 @@ function composioCard(status: ComposioCliStatus): ConnectionCard {
       },
     ],
     connect: null,
-    channel: null,
     agent: null,
     linkReported: false,
     link: null,
@@ -311,7 +305,6 @@ export function buildConnectionCards(
         degradation: runtimeDegradation(connection),
         slots: sessionSlots,
         connect: null,
-        channel: null,
         agent: null,
         linkReported: false,
         link: null,

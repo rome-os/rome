@@ -112,6 +112,7 @@ describe("GET /connections", () => {
       setups: {},
       channel: null,
       platform: null,
+      account: null,
       // The fake bot declares itself a kind whose accounts take an agent.
       agent: null,
       link: "own_account",
@@ -215,6 +216,7 @@ describe("GET /connections", () => {
       setups: {},
       channel: null,
       platform: null,
+      account: null,
       link: null,
       severalAccounts: false,
     });
@@ -554,6 +556,76 @@ describe("GET /connections accounts", () => {
     expect(listed.channel).toBe("whatsapp");
     expect("agent" in listed).toBe(false);
     expect(listed.link).toBeNull();
+  });
+});
+
+describe("GET /connections by account", () => {
+  const telegram = makePasteTalk();
+
+  async function setup() {
+    const { db, close } = createTestDb();
+    openDbs.push(close);
+    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    registry.register({
+      ...telegram.descriptor,
+      connectionKind: "telegram",
+      severalAccounts: true,
+      accountIdOf: (profile) => String(profile.id),
+    });
+    const { link: _takesNone, ...descriptor } = telegram.descriptor;
+    registry.register({ ...descriptor, connectionKind: "whatsapp" });
+    const first = await registry.confer("telegram", undefined, "bot", telegram.validCredential(), {
+      id: 41,
+    });
+    const second = await registry.confer(
+      "telegram",
+      undefined,
+      "bot",
+      telegram.validCredential(),
+      { id: 42 },
+      { another: true },
+    );
+    const list = async (query = "") => {
+      const res = await makeApp(registry, { db }).request(`/connections${query}`);
+      return { status: res.status, body: await res.json() };
+    };
+    return { first, second, list };
+  }
+
+  it("reports the account each connection's grant reaches", async () => {
+    const { first, list } = await setup();
+
+    const { body } = await list();
+
+    expect(body.connections.find((each: { id: string }) => each.id === first.id).account).toEqual({
+      platform: "telegram",
+      id: "41",
+    });
+    expect(
+      body.connections.find(
+        (each: { connectionKind: string }) => each.connectionKind === "whatsapp",
+      ).account,
+    ).toBeNull();
+  });
+
+  it("finds the connection that reaches an account, and lists no placeholder", async () => {
+    const { first, second, list } = await setup();
+
+    const found = await list("?platform=telegram&accountId=42");
+    expect(found.body.connections.map((each: { id: string }) => each.id)).toEqual([second.id]);
+
+    const onPlatform = await list("?platform=telegram");
+    expect(onPlatform.body.connections.map((each: { id: string }) => each.id).sort()).toEqual(
+      [first.id, second.id].sort(),
+    );
+
+    expect((await list("?platform=lark&accountId=42")).body.connections).toEqual([]);
+  });
+
+  it("refuses an account id without its platform", async () => {
+    const { list } = await setup();
+
+    expect((await list("?accountId=42")).status).toBe(400);
   });
 });
 

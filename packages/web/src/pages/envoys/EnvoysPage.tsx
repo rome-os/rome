@@ -167,7 +167,7 @@ function AccountPills({ accounts }: { accounts: EnvoyAccount[] }) {
       {accounts.map((account) => {
         const Icon = PLATFORM_ICONS[account.platform];
         return (
-          <Badge key={account.channel} variant="outline">
+          <Badge key={account.connectionId} variant="outline">
             {Icon && <Icon aria-hidden="true" />}
             {account.name}
           </Badge>
@@ -379,7 +379,7 @@ function UnlinkedAccounts({ data }: { data: EnvoysData }) {
         <CardContent className="divide-y divide-border-subtle">
           {data.unlinked.map((account) => (
             <AccountAgentRow
-              key={account.channel}
+              key={account.connectionId}
               account={account}
               data={data}
               onChanged={(agent) => agent && navigate(envoyPath(agent))}
@@ -460,7 +460,7 @@ function Overview({ envoy }: { envoy: Envoy }) {
       <CardContent className="flex flex-col gap-3">
         <List>
           {envoy.accounts.map((account) => (
-            <AccountRow key={account.channel} account={account} />
+            <AccountRow key={account.connectionId} account={account} />
           ))}
         </List>
         <div className="flex flex-wrap gap-2">
@@ -491,7 +491,7 @@ function Settings({ envoy, data }: { envoy: Envoy; data: EnvoysData }) {
         <AgentsFailed data={data} />
         {envoy.accounts.map((account) => (
           <AccountAgentRow
-            key={account.channel}
+            key={account.connectionId}
             account={account}
             data={data}
             onChanged={(agent) => {

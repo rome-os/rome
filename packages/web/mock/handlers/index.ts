@@ -1314,41 +1314,27 @@ export const handlers = [
     HttpResponse.json({ agents: mockAgentNames.map((name) => ({ name })) }),
   ),
   http.get("/api/connections", () => HttpResponse.json(connections)),
-  // Link an agent to an account. Only this account changes: an agent may be
-  // linked to any number of accounts, several on one platform included.
-  http.put("/api/channels/accounts/:id/agent", async ({ params, request }) => {
+  // Link an agent to a connected account, named by its connection's id. Only
+  // this account changes: an agent may be linked to any number of accounts,
+  // several on one platform included.
+  http.put("/api/accounts/:id/agent", async ({ params, request }) => {
     const id = String(params.id);
     const body = (await request.json()) as { agent: string | null };
     // Core stores main by its canonical id and accepts the short name.
     const agent = body.agent === "main" ? MAIN_AGENT_ID : body.agent;
-    const target = connections.connections.find((candidate) => candidate.channel === id);
+    const target = connections.connections.find((candidate) => candidate.id === id);
     if (!target) return HttpResponse.json({ error: "Unknown account." }, { status: 404 });
     if (agent !== null && !mockAgentNames.includes(agent)) {
       return HttpResponse.json({ error: `Agent ${agent} is not loaded.` }, { status: 400 });
     }
-    if (!target.link) {
+    if (agent !== null && !target.link) {
       return HttpResponse.json(
         { error: `${target.connectionKind} accounts do not take an agent.` },
         { status: 400 },
       );
     }
-    if (target.state === null) {
-      return HttpResponse.json(
-        { error: "This account does not receive messages." },
-        { status: 409 },
-      );
-    }
     target.agent = agent;
-    return HttpResponse.json({
-      account: {
-        id,
-        service: target.connectionKind,
-        platform: target.platform ?? platformOf(target.connectionKind),
-        connectionId: target.id,
-        agent,
-        link: target.link,
-      },
-    });
+    return HttpResponse.json({ account: { id, agent, link: target.link ?? null } });
   }),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
   // above without this would make every one of those buttons fail locally.

@@ -1,19 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import type { ChannelRecord } from "../db/repositories/channel-records.js";
 import {
-  ChannelNotLinkable,
-  ChannelRecordNotFound,
-  ChannelRecordsRepository,
-  ChannelUnbacked,
-  type ChannelRecord,
-} from "../db/repositories/channel-records.js";
-import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
+  ConnectedAccountNotFound,
+  ConnectedAccountsRepository,
+} from "../db/repositories/connected-accounts.js";
 import { createTestDb, type TestDb, testAccountLinkOf } from "../test/helpers.js";
 import {
   AccountListening,
+  AccountNotLinkable,
   answeringAgentOf,
   accountAgentResolver,
-  linkChannelAgent,
+  linkAccountAgent,
   type ChannelAgents,
 } from "./account-agents.js";
 
@@ -223,7 +221,7 @@ describe("answeringAgentOf", () => {
   });
 });
 
-describe("linkChannelAgent", () => {
+describe("linkAccountAgent", () => {
   const NOW = new Date("2026-10-26T00:00:00.000Z");
   let testDb: TestDb | undefined;
   afterEach(() => {
@@ -234,52 +232,45 @@ describe("linkChannelAgent", () => {
   function setup() {
     testDb = createTestDb();
     const db = testDb.db;
-    const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const accounts = new ConnectedAccountsRepository(db);
     const ledger = new DrizzleGrantLedger(db);
-    const connect = (id: string, connectionKind: string, channel?: string) => {
+    const kinds = new Map<string, string>();
+    const connect = (id: string, connectionKind: string) => {
       ledger.writeConnection(db, { id, connectionKind, label: connectionKind, createdAt: NOW });
       accounts.add(db, id);
-      return records.claim(db, { id, connectionKind }, NOW, channel ? { id: channel } : {}).id;
+      kinds.set(id, connectionKind);
     };
-    return { db, records, accounts, connect };
+    const link = (id: string, agent: string | null) =>
+      linkAccountAgent((c) => kinds.get(c) ?? null, testAccountLinkOf, accounts, id, agent);
+    return { accounts, connect, link };
   }
 
-  it("stores the link on the connected account behind the channel", () => {
-    const { records, accounts, connect } = setup();
-    const feishu = connect("c1", "feishu", "feishu");
-    const later = connect("c2", "feishu");
+  it("stores the link on the connected account and changes no other", () => {
+    const { accounts, connect, link } = setup();
+    connect("c1", "feishu");
+    connect("c2", "telegram_user");
 
-    expect(linkChannelAgent(records, accounts, later, "sales:agent")).toMatchObject({
-      channel: { id: later, connectionId: "c2" },
+    expect(link("c2", "sales:agent")).toEqual({
+      connectionId: "c2",
       agent: "sales:agent",
+      link: "delegate",
     });
-    expect(accounts.agentOf("c2")).toBe("sales:agent");
     expect(accounts.agentOf("c1")).toBeNull();
-    expect(linkChannelAgent(records, accounts, feishu, "main").agent).toBe("core:main");
+    expect(link("c1", "main")).toMatchObject({ agent: "core:main", link: "own_account" });
   });
 
-  it("refuses a link to a missing or unbacked channel, and unlinks an unbacked one", () => {
-    const { db, records, accounts, connect } = setup();
-    connect("c1", "feishu", "feishu");
-    records.vacate(db, "c1");
+  it("refuses a link to a connection Rome does not hold", () => {
+    const { link } = setup();
 
-    expect(() => linkChannelAgent(records, accounts, "nope", "sales:agent")).toThrow(
-      ChannelRecordNotFound,
-    );
-    expect(() => linkChannelAgent(records, accounts, "feishu", "sales:agent")).toThrow(
-      ChannelUnbacked,
-    );
-    expect(linkChannelAgent(records, accounts, "feishu", null).agent).toBeNull();
+    expect(() => link("nope", "sales:agent")).toThrow(ConnectedAccountNotFound);
+    expect(() => link("nope", null)).toThrow(ConnectedAccountNotFound);
   });
 
-  it("refuses a link to a channel whose connection kind takes none, and unlinks it", () => {
-    const { records, accounts, connect } = setup();
+  it("refuses a link to an account whose kind of connection takes none, and unlinks it", () => {
+    const { connect, link } = setup();
     connect("c1", "agents");
 
-    expect(() => linkChannelAgent(records, accounts, "agents", "sales:agent")).toThrow(
-      ChannelNotLinkable,
-    );
-    expect(linkChannelAgent(records, accounts, "agents", null).agent).toBeNull();
+    expect(() => link("c1", "sales:agent")).toThrow(AccountNotLinkable);
+    expect(link("c1", null)).toEqual({ connectionId: "c1", agent: null, link: null });
   });
 });

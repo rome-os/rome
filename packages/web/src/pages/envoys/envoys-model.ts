@@ -14,9 +14,8 @@ import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
 // connection has. Vocabulary: docs/domains/chats.md#connected-account.
 
 export interface EnvoyAccount {
-  /** The account's channel id, which the link route addresses. */
-  channel: string;
-  /** The connection and grant that disconnecting the account revokes. */
+  /** The connection's id, which names its connected account: the link route
+   *  addresses it, and disconnecting revokes its grant. */
   connectionId: string;
   grant: string;
   service: string;
@@ -62,15 +61,14 @@ function toAccount(connection: ApiConnection): EnvoyAccount | null {
   const kind = connection.link;
   if (!kind) return null;
   // A core that predates agent links omits `agent`, and a placeholder has no
-  // channel, so neither is an account that can carry an agent.
-  if (connection.id === null || !connection.channel || connection.agent === undefined) return null;
+  // connection, so neither is an account that can carry an agent.
+  if (connection.id === null || connection.agent === undefined) return null;
   const grant = connectedGrant(connection);
   if (!grant) return null;
   // A core that predates `platform` omits it, and the service alone cannot
   // tell a Lark app from a Feishu one, so such an app reads as Feishu.
   const platform = connection.platform ?? platformOf(connection.connectionKind);
   return {
-    channel: connection.channel,
     connectionId: connection.id,
     grant,
     service: connection.connectionKind,

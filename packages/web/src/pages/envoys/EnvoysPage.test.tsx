@@ -52,11 +52,11 @@ function mockServer(
       return Response.json({ agents: [{ name: "main" }, { name: "sales:agent" }] });
     }
     if (url === "/api/connections") return Response.json({ connections });
-    const link = url.match(/^\/api\/channels\/accounts\/(.+)\/agent$/);
+    const link = url.match(/^\/api\/accounts\/(.+)\/agent$/);
     if (link && init?.method === "PUT") {
       await beforeLink();
       const { agent } = JSON.parse(String(init.body)) as { agent: string | null };
-      const account = connections.find((c) => c.channel === decodeURIComponent(link[1]!))!;
+      const account = connections.find((c) => c.id === decodeURIComponent(link[1]!))!;
       account.agent = agent;
       return Response.json({ account: {} });
     }
