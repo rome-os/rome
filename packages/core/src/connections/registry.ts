@@ -13,6 +13,7 @@ import {
   NO_GRANT,
   type PersistedCredential,
 } from "./grant.js";
+import type { ConnectionEventHandler } from "./events.js";
 import type { ConnectionRecord, ConnectionsRepository } from "./repository.js";
 import {
   AccountAlreadyConnectedError,
@@ -74,30 +75,8 @@ export interface ConnectionRegistryDeps {
   backoff?: { baseMs: number; maxMs: number };
   /** Injectable sleep for Disconnected backoff waits; defaults to real timers. */
   sleep?: (ms: number) => Promise<void>;
-  /** Runs inside the transaction that mints a Connection, so whatever the
-   *  caller records for it (the channel it backs) commits or rolls back with
-   *  the row. `profile` is the profile of the grant whose conferral mints the
-   *  Connection, and undefined for a mint with no grant held. `account` is the
-   *  account that grant reaches, when its profile names one. */
-  onMint?: (
-    tx: DrizzleTx,
-    record: ConnectionRecord,
-    profile?: ProfileRecord,
-    account?: GrantAccount,
-  ) => void;
-  /** Runs inside the transaction that confers a grant on a Connection that
-   *  already exists, when the grant names the account it reaches. */
-  onAccount?: (
-    tx: DrizzleTx,
-    connection: { id: ConnectionId; connectionKind: string },
-    account: GrantAccount,
-  ) => void;
-  /** Runs once a grant's revoke is written: the Connection no longer reaches
-   *  the account the grant did. */
-  onRevoke?: (id: ConnectionId) => void;
-  /** Runs inside the transaction that deletes a Connection, before any
-   *  caller participant. */
-  onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
+  /** Hears every connection event, inside the transaction that raised it. */
+  onEvent?: ConnectionEventHandler;
 }
 
 const DEFAULT_BACKOFF = { baseMs: 1_000, maxMs: 60_000 };
@@ -227,10 +206,9 @@ export class ConnectionRegistry {
   private readonly clock: () => Date;
   private readonly backoff: { baseMs: number; maxMs: number };
   private readonly sleep: (ms: number) => Promise<void>;
-  private readonly onMint?: ConnectionRegistryDeps["onMint"];
-  private readonly onAccount?: ConnectionRegistryDeps["onAccount"];
-  private readonly onRevoke?: ConnectionRegistryDeps["onRevoke"];
-  private readonly onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
+  /** Raise a connection event to the subscriber. Called by the Connection,
+   *  inside the transaction that saved it. */
+  readonly raise: ConnectionEventHandler;
 
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
   private readonly connections = new Map<ConnectionId, ConnectionImpl>();
@@ -259,10 +237,7 @@ export class ConnectionRegistry {
     this.clock = deps.clock ?? (() => new Date());
     this.backoff = deps.backoff ?? DEFAULT_BACKOFF;
     this.sleep = deps.sleep ?? defaultSleep;
-    this.onMint = deps.onMint;
-    this.onAccount = deps.onAccount;
-    this.onRevoke = deps.onRevoke;
-    this.onRemove = deps.onRemove;
+    this.raise = deps.onEvent ?? (() => {});
   }
 
   /** Declare a connection kind. Boot-time only. Validates that the connection
@@ -376,7 +351,7 @@ export class ConnectionRegistry {
   private createConnectionWithGrant(record: ConnectionRecord): void {
     this.store.transaction((tx) => {
       this.store.save(tx, { ...record, grant: NO_GRANT });
-      this.onMint?.(tx, record);
+      this.raise(tx, { kind: "connected", connection: record });
     });
   }
 
@@ -424,7 +399,10 @@ export class ConnectionRegistry {
       if (!current) throw new Error(`unknown connection "${id}"`);
       this.store.transaction((tx) => {
         this.store.remove(tx, id);
-        this.onRemove?.(tx, id);
+        this.raise(tx, {
+          kind: "disconnected",
+          connection: { id, connectionKind: current.connectionKind },
+        });
         opts.inTx?.(tx);
       });
       current.teardownAll();
@@ -453,12 +431,6 @@ export class ConnectionRegistry {
       }
       return true;
     });
-  }
-
-  /** Tell the caller a revoke of one of `id`'s grants was written. Called by
-   *  the Connection, under the grant's lock. */
-  revoked(id: ConnectionId): void {
-    this.onRevoke?.(id);
   }
 
   /** Commit grant revocation and the caller's cleanup together before stopping capabilities. */
@@ -555,8 +527,12 @@ export class ConnectionRegistry {
     const commit = () =>
       this.store.transaction((tx) => {
         this.store.save(tx, { ...record, grant: grantValue });
-        if (minting) this.onMint?.(tx, record, profile, account);
-        if (!minting && account) this.onAccount?.(tx, { id, connectionKind }, account);
+        this.raise(
+          tx,
+          minting
+            ? { kind: "connected", connection: record, profile, account }
+            : { kind: "fixed", connection: { id, connectionKind }, account },
+        );
         opts.inTx?.(tx);
       });
     const logActivationFailure = (err: unknown) => {
@@ -1461,15 +1437,15 @@ class ConnectionImpl implements Connection {
     // write propagates to the caller with nothing revoked in memory — the grant
     // stays authorized and its epoch alive.
     // A revoked grant holds nothing, so it carries no stale identity.
-    if (opts.inTx) {
-      this.store.transaction((tx) => {
-        this.store.save(tx, { ...this.record, grant: NO_GRANT });
-        opts.inTx!(tx);
-      });
-    } else {
-      await this.replaceGrant(() => NO_GRANT);
-    }
-    this.registry.revoked(this.id);
+    const connection = { id: this.id, connectionKind: this.connectionKind };
+    await this.store.update(
+      this.id,
+      (current) => ({ ...current, grant: NO_GRANT }),
+      (tx) => {
+        this.registry.raise(tx, { kind: "revoked", connection });
+        opts.inTx?.(tx);
+      },
+    );
     this.grantState.set(grant, "unauthorized");
     this.liveCreds.delete(grant);
     this.renewedSinceLastConfer.delete(grant);

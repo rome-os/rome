@@ -50,7 +50,12 @@ export interface ConnectionsRepository {
   remove(exec: SqliteExec, id: ConnectionId): void;
   /** Replace connection `id` with `next` of the one kept, read and saved in
    *  one transaction. `next` is pure: it reads the clock or anything else
-   *  outside the connection before the call, not inside it. Does nothing when
-   *  no connection `id` is kept. */
-  update(id: ConnectionId, next: (current: StoredConnection) => StoredConnection): Promise<void>;
+   *  outside the connection before the call, not inside it. `inTx` runs in the
+   *  same transaction once the save is written. Does nothing when no
+   *  connection `id` is kept. */
+  update(
+    id: ConnectionId,
+    next: (current: StoredConnection) => StoredConnection,
+    inTx?: (tx: DrizzleTx) => void,
+  ): Promise<void>;
 }

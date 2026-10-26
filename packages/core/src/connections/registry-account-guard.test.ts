@@ -296,9 +296,15 @@ describe("ConnectionRegistry account participants", () => {
     const recorded: Array<{ id: string; accountId: string }> = [];
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(db.db),
-      onMint: (_tx, record, _profile, account) =>
-        minted.push({ kind: record.connectionKind, accountId: account?.accountId }),
-      onAccount: (_tx, { id }, account) => recorded.push({ id, accountId: account.accountId }),
+      onEvent: (_tx, event) => {
+        if (event.kind === "connected") {
+          const { connectionKind } = event.connection;
+          minted.push({ kind: connectionKind, accountId: event.account?.accountId });
+        }
+        if (event.kind === "fixed" && event.account) {
+          recorded.push({ id: event.connection.id, accountId: event.account.accountId });
+        }
+      },
     });
     registry.register(botIdDescriptor());
     try {
@@ -325,12 +331,18 @@ describe("ConnectionRegistry account records", () => {
     const records = new ChannelRecordsRepository(db.db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(db.db),
-      onMint: (tx, record, _profile, account) =>
-        records.claim(tx, { ...record, account }, record.createdAt),
-      onAccount: (tx, connection, account) =>
-        records.ensureAccount(tx, connection, account, new Date()),
-      onRemove: (tx, id) => records.vacate(tx, id),
-      onRevoke: () => records.forget(),
+      onEvent: (tx, event) => {
+        const { connection } = event;
+        if (event.kind === "connected") {
+          const record = event.connection;
+          records.claim(tx, { ...record, account: event.account }, record.createdAt);
+        }
+        if (event.kind === "fixed" && event.account) {
+          records.ensureAccount(tx, connection, event.account, new Date());
+        }
+        if (event.kind === "revoked") records.forget();
+        if (event.kind === "disconnected") records.vacate(tx, connection.id);
+      },
     });
     registry.register(botIdDescriptor());
     return { ...db, records, registry };

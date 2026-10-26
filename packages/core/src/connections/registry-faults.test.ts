@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
-import type { SqliteExec } from "../db/index.js";
+import type { DrizzleTx, SqliteExec } from "../db/index.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import type { GrantValue } from "./grant.js";
@@ -849,13 +849,14 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
       override async update(
         id: ConnectionId,
         next: (current: StoredConnection) => StoredConnection,
+        inTx?: (tx: DrizzleTx) => void,
       ) {
         const current = await this.get(id);
         if (current && !gatedOnce && shouldGate(next(current).grant)) {
           gatedOnce = true;
           await gate;
         }
-        return super.update(id, next);
+        return super.update(id, next, inTx);
       }
     }
     return { ledger: new GatedLedger(createTestDb().db), release };

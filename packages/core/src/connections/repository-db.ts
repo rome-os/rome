@@ -126,10 +126,13 @@ export class DrizzleConnectionsRepository implements ConnectionsRepository {
   async update(
     id: ConnectionId,
     next: (current: StoredConnection) => StoredConnection,
+    inTx?: (tx: DrizzleTx) => void,
   ): Promise<void> {
     this.transaction((tx) => {
       const current = this.read(tx, id);
-      if (current) this.save(tx, next(current));
+      if (!current) return;
+      this.save(tx, next(current));
+      inTx?.(tx);
     });
   }
 

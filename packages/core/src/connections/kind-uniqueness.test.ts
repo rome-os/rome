@@ -70,7 +70,7 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
     }
   });
 
-  it("runs the mint participant in the mint transaction and rolls back with it", async () => {
+  it("raises connected in the mint transaction and rolls back with its subscriber", async () => {
     const { db, close } = createTestDb();
     try {
       const ledger = new DrizzleConnectionsRepository(db);
@@ -78,10 +78,12 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
       let fail = true;
       const registry = new ConnectionRegistry({
         repository: ledger,
-        onMint: (_tx, record) => {
+        onEvent: (_tx, event) => {
+          if (event.kind !== "connected") return;
+          const record = event.connection;
           if (fail) {
             fail = false;
-            throw new Error("injected participant failure");
+            throw new Error("injected subscriber failure");
           }
           minted.push(record.connectionKind);
         },
@@ -89,7 +91,7 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
       registry.register(makePasteTalk().descriptor);
 
       await expect(registry.connect("fake-telegram")).rejects.toThrow(
-        "injected participant failure",
+        "injected subscriber failure",
       );
       await expect(ledger.all()).resolves.toEqual([]);
 
@@ -100,13 +102,15 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
     }
   });
 
-  it("runs the remove participant in the delete transaction", async () => {
+  it("raises disconnected in the delete transaction", async () => {
     const { db, close } = createTestDb();
     try {
       const removed: string[] = [];
       const registry = new ConnectionRegistry({
         repository: new DrizzleConnectionsRepository(db),
-        onRemove: (_tx, id) => removed.push(id),
+        onEvent: (_tx, event) => {
+          if (event.kind === "disconnected") removed.push(event.connection.id);
+        },
       });
       registry.register(makePasteTalk().descriptor);
       const connection = await registry.connect("fake-telegram");
