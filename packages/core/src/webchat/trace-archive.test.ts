@@ -752,6 +752,26 @@ describe("Pantheon + signed PUT contract", () => {
     expect(repo.deletes()).toEqual([]);
   });
 
+  it("does not retry an offline remote-delete backlog on every subsequent chat deletion", async () => {
+    seed("one");
+    seed("two");
+    await archiver().runPass();
+    for (const row of archiveRows()) repo.update(row.id, { location: "s3:key" });
+    const { requests, storage, succeed } = await cloud(503, "archive_storage_unconfigured");
+    const job = archiver({ storage });
+    for (const id of ["one", "two"]) {
+      await webchat.deleteSession(id);
+      await job.cleanupDeletedChats();
+    }
+    await job.cleanupDeletedChats();
+    expect(requests).toHaveLength(2);
+    expect(repo.deletes()).toHaveLength(2);
+    succeed();
+    await job.runPass();
+    expect(requests).toHaveLength(4);
+    expect(repo.deletes()).toEqual([]);
+  });
+
   it("a delete during a PUT cannot leave an object uploaded after the remote deletion", async () => {
     seed();
     const { requests, storage } = await cloud();

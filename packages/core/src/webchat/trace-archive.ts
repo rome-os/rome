@@ -99,6 +99,7 @@ export class TraceArchiver {
   private stopped = false;
   private cleanupQueued?: Promise<void>;
   private cleanupRequested = false;
+  private deleteAttempts = new Set<string>();
   private exporter = new ArchiveWorkerClient();
   constructor(
     private readonly options: {
@@ -133,7 +134,7 @@ export class TraceArchiver {
     this.cleanupRequested = true;
     if (this.cleanupQueued) return this.cleanupQueued;
     this.cleanupQueued = this.enqueue(async () => {
-      const attempted = new Set<string>();
+      const attempted = this.deleteAttempts;
       do {
         this.cleanupRequested = false;
         await this.cleanup(attempted);
@@ -155,7 +156,7 @@ export class TraceArchiver {
     return traceArchiveFile(this.root, row.sessionId, row.id);
   }
 
-  private async cleanup(attempted = new Set<string>()) {
+  private async cleanup(attempted = this.deleteAttempts) {
     const repo = this.options.repo;
     let failures = 0;
     for (const sessionId of repo.deletes()) {
@@ -169,6 +170,7 @@ export class TraceArchiver {
         const remoteRequired = repo.hasRemoteArchives(sessionId);
         await this.storage.deleteSession(sessionId, remoteRequired);
         repo.finishDelete(sessionId);
+        attempted.delete(sessionId);
       } catch (error) {
         failures++;
         log.warn("chat archive deletion will retry", { sessionId, reason: failureReason(error) });
@@ -294,6 +296,7 @@ export class TraceArchiver {
         const started = performance.now();
         const repo = this.options.repo;
         await mkdir(this.root, { recursive: true, mode: 0o700 });
+        this.deleteAttempts.clear();
         stats.failures += await this.cleanup();
         const failedSessions = new Set<string>();
         for (const row of repo.listPending()) {

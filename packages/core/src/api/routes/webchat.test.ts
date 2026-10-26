@@ -713,7 +713,7 @@ describe("Webchat API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ turnIds: ["old"] }),
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(201);
     const shares = await deps.webchatRepo.listSharedChatsBySession(sessionId);
     const share = await deps.webchatRepo.getSharedChat(shares[0].id);
     expect(JSON.stringify(share?.snapshot)).not.toContain("private archived inline steps");
