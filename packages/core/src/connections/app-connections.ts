@@ -599,7 +599,15 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       expectedStatus,
       expectedApproval ? "required" : "not_required",
     );
-    if (!claimed) return failure("access_denied", "The connection invocation is not runnable.");
+    if (!claimed) {
+      return await this.failUnclaimedInvocation(
+        invocation,
+        expectedStatus,
+        executionApproval,
+        "access_denied",
+        "Connection access changed before execution.",
+      );
+    }
     const fail = (code: AppConnectionErrorBody["code"], retryable = false) =>
       this.failInvocation(invocation, code, retryable, executionApproval);
     const validation = this.validateInput(descriptor, invocation.input);

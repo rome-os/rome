@@ -668,6 +668,25 @@ describe("App connection broker", () => {
         }),
       ).rejects.toMatchObject({ detail: { code: "access_denied" } });
       expect(h.invocations).toHaveLength(0);
+      const [stored] = await h.db.select().from(appConnectionInvocations);
+      expect(stored).toMatchObject({ status: "failed", errorCode: "access_denied", input: null });
+      expect(await h.access.listAuditForApp("app-a")).toContainEqual(
+        expect.objectContaining({ executionId: stored!.id, status: "access_denied" }),
+      );
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+      });
+      await expect(
+        h.broker.forApp("app-a").invoke({
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.create",
+          requestId: "request-revoked-before-claim",
+          input: { workspaceId: "one", title: "Must not claim", body: "private" },
+        }),
+      ).resolves.toMatchObject({ status: "duplicate", outcome: "failed" });
     } finally {
       h.close();
     }
