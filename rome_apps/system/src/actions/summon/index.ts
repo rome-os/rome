@@ -124,6 +124,9 @@ export function createSummonAction(config: ActionConfig, deps: SummonDeps): Acti
           ? { ...handback, validate: resolvedValidatorName }
           : handback;
 
+      const selfSummonError = await selfSummonRefusal(deps, resolvedAgentName);
+      if (selfSummonError) return { status: "error", error: selfSummonError };
+
       if (interactive) {
         // The caller suspends on this directive; the host mints the child session
         // and seeds `prompt` as the opening turn (payload.summary). No surface is
@@ -160,6 +163,55 @@ export function createSummonAction(config: ActionConfig, deps: SummonDeps): Acti
       summary: prompt,
     }),
   });
+}
+
+/**
+ * Refuses a summon that would start the agent that is making the call. An agent
+ * that hands its own work to a second copy of itself doubles the cost and hides
+ * the second copy's progress from the chat, so the error tells the model to do
+ * the work itself.
+ *
+ * The caller is the agent whose tool call started this chain (the engine
+ * context's `agentName`, set per tool call, so it is the nearest agent even
+ * when that agent was itself summoned). The refusal covers two hops:
+ * - the agent calls `system:summon` itself (`callerAppId` is unset, because
+ *   only an app's `runAction` sets it);
+ * - the agent calls an action of the target agent's own app that wraps summon,
+ *   as `coding:coding_task` does (`callerAppId` is the target's app).
+ *
+ * Every other chain stays open: a routine, hook or app-initiated run has no
+ * calling agent, and an action of another app that starts the same agent as a
+ * step of its own work (such as `briefing:run_brief` starting `assistant`) is a
+ * different job from handing the work over.
+ */
+async function selfSummonRefusal(
+  deps: SummonDeps,
+  resolvedTarget: string,
+): Promise<string | undefined> {
+  const ctx = getCurrentActionContext();
+  if (!ctx?.agentName) return undefined;
+
+  const throughApp = ctx.callerAppId !== undefined;
+  if (throughApp && ctx.callerAppId !== agentOwnerId(resolvedTarget)) return undefined;
+
+  let resolvedCaller: string;
+  try {
+    resolvedCaller = await deps.resolveArtifactReference({ kind: "agent", value: ctx.agentName });
+  } catch {
+    return undefined;
+  }
+  if (resolvedCaller !== resolvedTarget) return undefined;
+
+  return (
+    `You are already the "${resolvedTarget}" agent. Do this work yourself instead of ` +
+    `starting another "${resolvedTarget}" agent.`
+  );
+}
+
+/** The app that owns a canonical agent id (`coding:coding` -> `coding`). */
+function agentOwnerId(canonicalAgentName: string): string | undefined {
+  const colon = canonicalAgentName.indexOf(":");
+  return colon > 0 ? canonicalAgentName.slice(0, colon) : undefined;
 }
 
 export function createAction(config: ActionConfig, deps: SummonDeps): Action {
