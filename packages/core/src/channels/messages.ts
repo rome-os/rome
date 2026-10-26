@@ -155,6 +155,30 @@ export function queryPage(
   return older.slice(0, queryLimit(read.limit));
 }
 
+/**
+ * What a store keeping a copy reads for one page after a cursor, newest first:
+ * every message of the cursor's second, so the page settles the ties there,
+ * and the newest `limit` older ones. Without a cursor, the newest `limit`.
+ * `read` answers oldest first, at most `limit` messages at or after `since`
+ * and at or before `until`.
+ */
+export async function readQueryWindow<T>(
+  read: (since: Date, limit: number, until?: Date) => Promise<T[]>,
+  query: Pick<MessageQuery, "since" | "after" | "limit">,
+): Promise<T[]> {
+  const from = querySince(query.since);
+  const after = query.after;
+  if (!after) return (await read(from, queryLimit(query.limit))).reverse();
+  const second = new Date(after.timestamp * 1000);
+  const ties = await read(
+    new Date(Math.max(from.getTime(), second.getTime())),
+    MAX_QUERY_LIMIT,
+    second,
+  );
+  const older = await read(from, queryLimit(query.limit), new Date(second.getTime() - 1000));
+  return [...ties.reverse(), ...older.reverse()];
+}
+
 /** The number of messages a query asks for, defaulted and capped. */
 export function queryLimit(limit: number | undefined): number {
   if (limit === undefined || !Number.isFinite(limit)) return DEFAULT_QUERY_LIMIT;

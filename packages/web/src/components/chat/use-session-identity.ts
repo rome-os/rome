@@ -12,6 +12,8 @@ export interface SessionIdentity {
   model: string | null;
   /** The model picked for this chat, or null when it follows its pin. */
   largeModelSelection: string | null;
+  /** A side chat promoted to a chat: it still runs on its branch. */
+  isSideChat: boolean;
   /** Provider-reported effort of the session's last successful turn, or null when unknown. */
   reasoningEffort: string | null;
   /** The session's locked agent, resolved to its owning app's label + icon. */
@@ -39,6 +41,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   const sessionGeneration = useRef(0);
   const [model, setModel] = useState<string | null>(null);
   const [largeModelSelection, setLargeModelSelection] = useState<string | null>(null);
+  const [isSideChat, setIsSideChat] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [pinnedAgentMention, setPinnedAgentMention] = useState<AgentMention | null>(null);
@@ -51,6 +54,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
       setPinnedAgentMention(null);
       setModel(null);
       setLargeModelSelection(null);
+      setIsSideChat(false);
       setReasoningEffort(null);
       setSessionName(null);
       setArchivedAt(null);
@@ -59,6 +63,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     }
     setModel(null);
     setLargeModelSelection(null);
+    setIsSideChat(false);
     setReasoningEffort(null);
     let cancelled = false;
     (async () => {
@@ -71,6 +76,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setSessionName(session?.name ?? null);
         setModel(session?.model ?? null);
         setLargeModelSelection(session?.largeModelSelection ?? null);
+        setIsSideChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
         setPinnedAt(session?.pinnedAt ?? null);
@@ -95,6 +101,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         if (!cancelled) {
           setModel(null);
           setLargeModelSelection(null);
+          setIsSideChat(false);
           setReasoningEffort(null);
           setSessionName(null);
           setPinnedAgentMention(null);
@@ -125,6 +132,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setSessionName(session?.name ?? null);
         setModel(session?.model ?? null);
         setLargeModelSelection(session?.largeModelSelection ?? null);
+        setIsSideChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
         setPinnedAt(session?.pinnedAt ?? null);
@@ -138,6 +146,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     sessionName,
     model,
     largeModelSelection,
+    isSideChat,
     reasoningEffort,
     pinnedAgentMention: presentationMode ? null : pinnedAgentMention,
     archivedAt,

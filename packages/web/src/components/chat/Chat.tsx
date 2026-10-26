@@ -51,6 +51,7 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
   buildRows,
+  canPickChatModel,
   isAwaitingGuardian,
   isLastTurnFailed,
   type AgentIdentity,
@@ -390,6 +391,7 @@ export function Chat({
     sessionName,
     model,
     largeModelSelection: storedModelSelection,
+    isSideChat,
     reasoningEffort,
     pinnedAgentMention: identityAgentMention,
     archivedAt,
@@ -506,6 +508,8 @@ export function Chat({
   );
   const { displayMessages, handoffList, floorSessionId, identityBySession, interactionResults } =
     view;
+  const chatModelPickable =
+    !!mainSessionId && canPickChatModel({ mainSessionId, floorSessionId, isSideChat });
 
   // Ordered, unique turn ids of the MAIN session — the selectable share unit.
   // Handoff child turns aren't listed here; they ride along with their parent.
@@ -2183,9 +2187,9 @@ export function Chat({
                       // A session keeps its project and agent, and its model
                       // can change from the next turn.
                       showProjectSelector={!mainSessionId}
-                      showModelSelector
+                      showModelSelector={!mainSessionId || chatModelPickable}
                       chatModelSelection={
-                        mainSessionId
+                        chatModelPickable
                           ? { value: chatModelValue, onChange: pickChatModel }
                           : undefined
                       }

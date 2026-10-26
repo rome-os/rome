@@ -159,7 +159,7 @@ export function createAction(
           minimum: 1,
           maximum: 1000,
           description:
-            "How many of the newest messages to return (default 100). Use with cursor to page back a few messages at a time.",
+            "How many of the newest messages to return (default 100). Use with cursor to page back a few messages at a time. Paging needs threadId.",
         },
         cursor: {
           type: "string",
@@ -181,6 +181,10 @@ export function createAction(
       const limit = args.limit as number | undefined;
       const cursor = args.cursor as string | undefined;
       const paging = limit !== undefined || cursor !== undefined;
+      // Paging walks back through one chat; across every chat it has no use.
+      if (paging && !threadId) {
+        return { status: "error", error: "Paging with limit or cursor needs a threadId." };
+      }
       const windowHours = (args.windowHours as number | undefined) ?? (paging ? undefined : 24);
       const since =
         windowHours === undefined ? undefined : new Date(Date.now() - windowHours * 60 * 60 * 1000);
@@ -203,10 +207,14 @@ export function createAction(
           // the last day.
           since: since ?? new Date(0),
           ...(cursor ? { after: cursor } : {}),
-          ...(limit !== undefined ? { limit } : {}),
+          // Named whenever paging, so the page and the full-page check below
+          // agree on its size.
+          ...(paging ? { limit: limit ?? DEFAULT_LIMIT } : {}),
         });
         // A full page may have older messages behind it; a short one does not.
-        if (page.length >= (limit ?? DEFAULT_LIMIT)) nextCursor = page.at(-1)?.cursor ?? null;
+        if (paging && page.length >= (limit ?? DEFAULT_LIMIT)) {
+          nextCursor = page.at(-1)?.cursor ?? null;
+        }
         // `query` answers newest first; the transcript reads oldest first.
         messages = page.reverse();
       } catch (err) {

@@ -6,7 +6,8 @@ description: >
   threads (supported by Discord: returns messages from all guild channels).
   Returns the newest messages as a markdown-formatted summary grouped by
   thread. To page back a few at a time, pass limit, then pass the returned
-  nextCursor as cursor to read the messages before that page. Pass
+  nextCursor as cursor to read the messages before that page; paging needs
+  threadId. Pass
   includeMessages=true to additionally receive a structured `messages` array
   with per-message attachment metadata (url, fileName, mimeType, localPath).
 complexity: moderate

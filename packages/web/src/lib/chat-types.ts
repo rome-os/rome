@@ -32,6 +32,8 @@ export interface ChatSession {
   /** Folder on a rome-node device the chat works in, set when the chat was created. */
   deviceFolder?: DeviceFolder | null;
   agentName?: string | null;
+  /** The chat a side chat branched from, kept once it is promoted to a chat. */
+  parentSessionId?: string | null;
   /** ISO timestamp when the chat was archived (soft-hidden), or null. */
   archivedAt?: string | null;
   /** ISO timestamp when this chat was pinned by the guardian, or null. */

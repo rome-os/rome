@@ -218,6 +218,19 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
   return map;
 }
 
+/**
+ * Whether the open chat's model picker shows. A side chat promoted to a chat
+ * still runs on its branch (#1384), and during an open handoff the composer
+ * talks to the specialist, whose model the picker does not hold.
+ */
+export function canPickChatModel(chat: {
+  mainSessionId: string;
+  floorSessionId: string;
+  isSideChat: boolean;
+}): boolean {
+  return !chat.isSideChat && chat.floorSessionId === chat.mainSessionId;
+}
+
 export function buildChatView(
   messages: Map<string, ChatMessage[]>,
   mainSessionId: string,

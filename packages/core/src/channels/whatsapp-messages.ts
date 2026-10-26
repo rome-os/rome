@@ -7,14 +7,7 @@ import {
   waHistoryJson,
   waHistoryRow,
 } from "../db/repositories/whatsapp-store.js";
-import {
-  channelMessageDetail,
-  MAX_QUERY_LIMIT,
-  queryLimit,
-  queryPage,
-  querySince,
-  type Messages,
-} from "./messages.js";
+import { channelMessageDetail, queryPage, readQueryWindow, type Messages } from "./messages.js";
 import { inList, keysIn, sqlMessages } from "./messages-sql.js";
 import { whatsAppHistoryMessage } from "./whatsapp-history.js";
 
@@ -48,30 +41,10 @@ export function whatsAppMessages(db: DrizzleDb): Messages {
   return {
     async query({ chatId, since, after, limit }) {
       const chat = chatId ? canonicalChat(chatId) : null;
-      const from = querySince(since);
-      // After a cursor: every message of its second, so the page settles the
-      // ties there, and the newest `limit` of the older ones.
-      // The mirror answers each read oldest first; the port answers newest first.
-      const rows = after
-        ? [
-            ...(
-              await mirror.fetchHistory(
-                chat,
-                new Date(Math.max(from.getTime(), after.timestamp * 1000)),
-                MAX_QUERY_LIMIT,
-                new Date(after.timestamp * 1000),
-              )
-            ).reverse(),
-            ...(
-              await mirror.fetchHistory(
-                chat,
-                from,
-                queryLimit(limit),
-                new Date((after.timestamp - 1) * 1000),
-              )
-            ).reverse(),
-          ]
-        : (await mirror.fetchHistory(chat, from, queryLimit(limit))).reverse();
+      const rows = await readQueryWindow(
+        (from, count, until) => mirror.fetchHistory(chat, from, count, until),
+        { since, after, limit },
+      );
       return queryPage(rows.map(whatsAppHistoryMessage), { after, limit });
     },
     byAccount: sqlMessages({

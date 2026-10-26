@@ -77,6 +77,11 @@ function xmlEscape(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** {@link xmlEscape} for a value inside a double-quoted attribute. */
+function xmlAttr(value: string): string {
+  return xmlEscape(value).replace(/"/g, "&quot;");
+}
+
 /**
  * Render a workspace-context snapshot into a `<workspace_context>` XML block
  * suitable for prepending to a user message. Returns null when the snapshot
@@ -221,7 +226,7 @@ export function buildContinuationBlock(input: {
   canReadHistory: boolean;
 }): string {
   const open = input.previousModel
-    ? `<continuation previous_model="${xmlEscape(input.previousModel)}">`
+    ? `<continuation previous_model="${xmlAttr(input.previousModel)}">`
     : "<continuation>";
   const lines = [
     "This conversation started before your current context, so its earlier messages are not in your context.",

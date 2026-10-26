@@ -3365,6 +3365,25 @@ describe("Webchat API", () => {
       expect(await deps.webchatRepo.getSession(sessionId)).toMatchObject({
         largeModelSelection: null,
       });
+      // A side chat promoted to a chat keeps the model it branched with.
+      await deps.settingsRepo.set("enableModelSelector", true);
+      await deps.webchatRepo.ensureRomeSession({
+        id: "promoted-side-chat",
+        parentSessionId: sessionId,
+        type: "fork",
+        name: "Side chat",
+        agentName: "main",
+      });
+      await deps.webchatRepo.promoteForkToChat("promoted-side-chat");
+      const sideChat = await app.request("/chat/sessions/promoted-side-chat/model", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ largeModelSelection: "gpt-6-luna" }),
+      });
+      expect(sideChat.status).toBe(409);
+      await expect(sideChat.json()).resolves.toEqual({
+        error: "A side chat keeps the model it branched with",
+      });
       const missing = await app.request("/chat/sessions/does-not-exist/model", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

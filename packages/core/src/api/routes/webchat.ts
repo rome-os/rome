@@ -2501,6 +2501,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
+    // A side chat promoted to a chat runs on its branch's thread; picking a
+    // model for it waits on the side-chat review (#1384).
+    if (lookup.session.parentSessionId) {
+      return c.json({ error: "A side chat keeps the model it branched with" }, 409);
+    }
     const body = await c.req.json<unknown>().catch(() => undefined);
     const requested =
       typeof body === "object" && body !== null

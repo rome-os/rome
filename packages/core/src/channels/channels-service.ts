@@ -92,6 +92,9 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     const messages = find(channel)?.messages;
     if (!messages) throw new Error(`Channel "${channel}" reads no messages`);
     const { after: cursor, ...rest } = read;
+    // Paging walks back through one chat; across every chat it has no use.
+    if (cursor !== undefined && !rest.chatId)
+      throw new Error("A query after a cursor names a chat");
     const after = cursor === undefined ? undefined : parseMessageCursor(cursor);
     if (after === null) throw new Error(`Invalid message cursor: ${cursor}`);
     const page = await messages.query({ ...rest, ...(after ? { after } : {}) });

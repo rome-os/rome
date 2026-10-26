@@ -1901,6 +1901,9 @@ interface ImplArgs {
 
 interface TurnSink {
   turnId: string;
+  /** The turn's prompt carries the `<continuation>` notice, which stays due
+   *  until the turn returns a result. */
+  carriesContinuation?: boolean;
   /** Prompt that opened the turn; carried on the turn_start event. */
   userPrompt: string;
   /** Guards the one-turn_start-per-stream invariant across error paths. */
@@ -2137,8 +2140,9 @@ class AgentSessionImpl implements AgentSession {
    */
   private threadFresh: boolean;
   /**
-   * The current thread replaced one that held this chat, so its next turn
-   * carries a one-time `<continuation>` notice to read the earlier messages.
+   * The current thread replaced one that held this chat, so its turns carry a
+   * `<continuation>` notice to read the earlier messages until one returns a
+   * result: a turn that fails may never have reached the thread.
    */
   private continuationPending: boolean;
   /** The model the chat ran on before the current thread started. */
@@ -2462,6 +2466,7 @@ class AgentSessionImpl implements AgentSession {
               sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
             if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
             await this.maybePersistProviderInfo();
+            if (sink.carriesContinuation) this.continuationPending = false;
             await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
           }
           // Use `outbound` (not `msg`) so provider-output validation is
@@ -3572,7 +3577,7 @@ class AgentSessionImpl implements AgentSession {
         userPrompt = `${deviceFolderBlock}\n\n${userPrompt}`;
       }
       if (!this.isSubagent && this.continuationPending) {
-        this.continuationPending = false;
+        sink.carriesContinuation = true;
         const previousModel =
           this.previousModel && this.previousModel !== this.modelSession.model
             ? this.previousModel

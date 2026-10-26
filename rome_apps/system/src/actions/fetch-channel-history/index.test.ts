@@ -280,6 +280,27 @@ describe("fetch_channel_history", () => {
       expect(data.content.indexOf("m2")).toBeLessThan(data.content.indexOf("m3"));
     });
 
+    it("names the default page size when only a cursor is given", async () => {
+      const { query, action } = pagedDeps([]);
+      await action.execute({ channel: "webchat", threadId: "chat-1", cursor: "c2" });
+      expect(query).toHaveBeenCalledWith("webchat", {
+        chatId: "chat-1",
+        since: new Date(0),
+        after: "c2",
+        limit: 100,
+      });
+    });
+
+    it("refuses to page without a threadId", async () => {
+      const { query, action } = pagedDeps([]);
+      const result = await action.execute({ channel: "webchat", limit: 5 });
+      expect(result).toEqual({
+        status: "error",
+        error: "Paging with limit or cursor needs a threadId.",
+      });
+      expect(query).not.toHaveBeenCalled();
+    });
+
     it("resumes after a cursor, and ends with no cursor on a short page", async () => {
       const { query, action } = pagedDeps([at("m1", 1, "c1")]);
       const result = await action.execute({

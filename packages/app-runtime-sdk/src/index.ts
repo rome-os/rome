@@ -1754,7 +1754,7 @@ export interface ChannelMessageQuery {
   since?: Date;
   /** Only messages older than the one whose {@link ChannelMessage.cursor}
    *  this is: the next page back. Paging this way neither repeats nor skips a
-   *  message, also among several said in one second. */
+   *  message, also among several said in one second. Needs `chatId`. */
   after?: string;
   /** At most this many, newest first. Defaults to 100, capped at 1,000. */
   limit?: number;

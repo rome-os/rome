@@ -746,6 +746,12 @@ describe("buildContinuationBlock", () => {
     );
   });
 
+  it("escapes a quote in the previous model's attribute", () => {
+    expect(buildContinuationBlock({ previousModel: 'x" y="z', canReadHistory: false })).toContain(
+      '<continuation previous_model="x&quot; y=&quot;z">',
+    );
+  });
+
   it("leaves out the read hint for an agent that may not call the action", () => {
     const block = buildContinuationBlock({ canReadHistory: false });
     expect(block.startsWith("<continuation>\n")).toBe(true);

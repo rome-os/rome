@@ -50,12 +50,19 @@ const START = Date.parse("2026-10-26T00:00:00Z");
 function createProvider(id: ProviderId) {
   const calls: ModelRunParams[] = [];
   const opened: ModelSessionParams[] = [];
+  /** How many of the next turns fail before reaching the thread. */
+  const failing = { next: 0 };
   const openSession = rs.fn(async (params: ModelSessionParams) => {
     opened.push(params);
     const session = createSessionFromRun(
       id,
       async function* (input): AsyncIterable<AgentEvent> {
         calls.push(input);
+        if (failing.next > 0) {
+          failing.next -= 1;
+          yield { type: "error", error: "quota exhausted" };
+          return;
+        }
         yield { type: "result", content: "done" };
       },
       params,
@@ -69,7 +76,7 @@ function createProvider(id: ProviderId) {
     builtinTools: new Set<string>(),
     openSession,
   };
-  return { provider, openSession, calls, opened };
+  return { provider, openSession, calls, opened, failing };
 }
 
 function healthyState() {
@@ -241,6 +248,22 @@ describe("continuation notice through AgentSessionManager", () => {
       provider: "openai",
       model: "gpt-6-luna",
     });
+  });
+
+  it("keeps the notice due until a turn on the new thread returns a result", async () => {
+    const manager = createManager();
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "first");
+    await acquire(manager, "gpt-6-luna");
+    openai.failing.next = 1;
+    await chatTurn(session, "where were we?");
+    await chatTurn(session, "where were we?");
+    await chatTurn(session, "thanks");
+
+    expect(continuationOf(openai.calls[0]?.prompt)).not.toBeNull();
+    // The failed turn may never have reached the thread, so the retry carries it again.
+    expect(continuationOf(openai.calls[1]?.prompt)).not.toBeNull();
+    expect(continuationOf(openai.calls[2]?.prompt)).toBeNull();
   });
 
   it("continues the same provider's thread on another model without a notice", async () => {

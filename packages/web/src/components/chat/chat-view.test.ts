@@ -3,6 +3,7 @@ import type { ChatMessage } from "@/lib/chat-types";
 import {
   buildChatView,
   buildRows,
+  canPickChatModel,
   interactionResultKey,
   isAwaitingGuardian,
   isLastTurnFailed,
@@ -313,6 +314,23 @@ describe("buildRows model switch notice", () => {
   it("shows no notice for the first turn or the running turn", () => {
     const messages = [...turn(MAIN, "t1", "claude-sonnet-5-5"), ...turn(MAIN, "t2")];
     expect(rowsOf(messages, "t2").some((r) => r.kind === "model_switch")).toBe(false);
+  });
+});
+
+describe("canPickChatModel", () => {
+  it("shows the picker in an open chat with no handoff", () => {
+    expect(canPickChatModel({ mainSessionId: MAIN, floorSessionId: MAIN, isSideChat: false })).toBe(
+      true,
+    );
+  });
+
+  it("hides it during an open handoff and in a promoted side chat", () => {
+    expect(
+      canPickChatModel({ mainSessionId: MAIN, floorSessionId: CHILD, isSideChat: false }),
+    ).toBe(false);
+    expect(canPickChatModel({ mainSessionId: MAIN, floorSessionId: MAIN, isSideChat: true })).toBe(
+      false,
+    );
   });
 });
 
