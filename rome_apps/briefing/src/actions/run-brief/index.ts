@@ -103,7 +103,7 @@ function previousBriefsInstructions(
   return [
     "CONTINUITY — the guardian already received the briefs below from the past day. Use them to follow through and to avoid repeating yourself:",
     "   - Do not repeat anything those briefs already covered unless it changed or still needs action.",
-    "   - Carry an Action Item forward only if it still looks open, and mark it as still open. Drop it if it now looks done (e.g. they replied).",
+    "   - Raise each Action Item once. If any brief below already listed it and the guardian has not acted on it, assume they saw it and chose not to: leave it out rather than reminding them. Bring it back only when something new happened, such as a fresh follow-up from the person or a deadline that is now due.",
     "   - Point out what changed since then, such as a moved meeting or a new reply in a thread.",
     "",
     "--- PREVIOUS BRIEFS (past day, oldest first) ---",
