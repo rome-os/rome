@@ -100,9 +100,9 @@ describe("connector actions when not logged in to Composio", () => {
     });
     if (result.status !== "pending_interaction") throw new Error(`got ${result.status}`);
     expect(result.interaction.promptText).toContain("click Connect on the card");
-    expect(result.interaction.promptText).toContain("If this surface does not display cards");
+    expect(result.interaction.promptText).toContain("If no card is shown");
     expect(result.interaction.promptText).not.toMatch(
-      /connector_login|can.t be connected from here/,
+      /connector_login|can.t be connected from here|A connect card|Ask the guardian/,
     );
   });
 
@@ -119,9 +119,9 @@ describe("connector actions when not logged in to Composio", () => {
     });
     if (result.status !== "pending_interaction") throw new Error(`got ${result.status}`);
     expect(result.interaction.promptText).toContain("click Connect on the card");
-    expect(result.interaction.promptText).toContain("If this surface does not display cards");
+    expect(result.interaction.promptText).toContain("If no card is shown");
     expect(result.interaction.promptText).not.toMatch(
-      /connector_login|can.t be connected from here/,
+      /connector_login|can.t be connected from here|A connect card|Ask the guardian/,
     );
   });
 

@@ -202,6 +202,9 @@ describe("connector_event_ensure action", () => {
       filter: repoFilter,
     });
     expect(result.status).toBe("error");
-    if (result.status === "error") expect(result.error).toMatch(/connect github/i);
+    if (result.status === "error") {
+      expect(result.error).toContain('connector_connect({"toolkit":"github"})');
+      expect(result.error).not.toMatch(/can.t be connected from here/);
+    }
   });
 });

@@ -252,20 +252,29 @@ describe("subscribeTriggerFeed", () => {
     expect(result).toMatchObject({ ok: false, code: "no_connected_account" });
   });
 
-  it("routes an unlinked Rome-managed toolkit to Settings, not connector_connect", async () => {
+  it.each([
+    "github",
+    "shopify",
+    "slack",
+  ])("routes an unlinked %s trigger to its supported connection flow", async (toolkit) => {
     const client = fakeClient({
-      triggerType: { slug: "GITHUB_STAR_ADDED", toolkit: { slug: "github" } },
+      triggerType: { slug: "NEW_EVENT", toolkit: { slug: toolkit } },
       account: { kind: "none" },
     });
     const result = await subscribeTriggerFeed(client, {
-      slug: "GITHUB_STAR_ADDED",
+      slug: "NEW_EVENT",
       config: {},
-      expectedToolkit: "github",
+      expectedToolkit: toolkit,
     });
     expect(result).toMatchObject({ ok: false, code: "no_connected_account" });
     if (result.ok) throw new Error("expected failure");
-    expect(result.message).toMatch(/settings/i);
-    expect(result.message).not.toMatch(/connector_connect/);
+    expect(result.message).toContain("Settings → Connections");
+    if (toolkit === "slack") {
+      expect(result.message).not.toContain("connector_connect");
+    } else {
+      expect(result.message).toContain(`connector_connect(${JSON.stringify({ toolkit })})`);
+      expect(result.message).not.toMatch(/can.t be connected from here/);
+    }
   });
 
   it("rejects an ambiguous account rather than guessing which to subscribe", async () => {
