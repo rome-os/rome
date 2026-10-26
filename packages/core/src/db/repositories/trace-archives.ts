@@ -148,9 +148,9 @@ export class TraceArchivesRepository {
     return this.sqlite.transaction(() => {
       const rows = this.sqlite
         .prepare(`SELECT b.rowid AS rowid, length(cast(b.content AS blob)) AS bytes
-        FROM rome_agent_messages m JOIN rome_agent_trace_blocks b ON b.message_id = m.id
-        JOIN json_each(?) snapshot ON json_extract(snapshot.value, '$.id') = m.id
-        WHERE b.seq <= json_extract(snapshot.value, '$.maxSeq') AND m.trace_archive_id = ? AND coalesce(json_extract(b.content, '$.type'), '') NOT IN (${ARCHIVE_KEEP_BLOCK_TYPES.map(() => "?").join(",")})
+        FROM json_each(?) snapshot CROSS JOIN rome_agent_messages m CROSS JOIN rome_agent_trace_blocks b
+        WHERE m.id = json_extract(snapshot.value, '$.id') AND m.trace_archive_id = ?
+          AND b.message_id = m.id AND b.seq <= json_extract(snapshot.value, '$.maxSeq') AND coalesce(json_extract(b.content, '$.type'), '') NOT IN (${ARCHIVE_KEEP_BLOCK_TYPES.map(() => "?").join(",")})
         LIMIT 200`)
         .iterate(JSON.stringify(manifest.messages), id, ...ARCHIVE_KEEP_BLOCK_TYPES) as Iterable<{
         rowid: number;

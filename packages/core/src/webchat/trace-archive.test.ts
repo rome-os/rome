@@ -1,8 +1,8 @@
 import { traceArchiveSessionKey } from "./trace-archive-paths.js";
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -389,6 +389,66 @@ describe("trace archives (real SQLite and worker)", () => {
     expect((await archiver().runPass()).rowsDeleted).toBe(1);
     expect(archiveRows()[0].status).toBe("pruned");
     expect(data.manifest.messageIds).toHaveLength(1);
+  });
+
+  for (const failure of ["missing", "corrupt"] as const) {
+    it(`does not resume pruning a ${failure} stored local archive`, async () => {
+      seed();
+      await exportOnly();
+      repo.update("archive", { status: "stored", storedAt: now });
+      const file = traceArchiveFile(root, "session", "archive");
+      const original = readFileSync(file);
+      if (failure === "missing") await rm(file);
+      else await writeFile(file, "corrupt");
+      expect((await archiver().runPass()).rowsDeleted).toBe(0);
+      expect(count()).toBe(6);
+      expect(archiveRows()[0].status).toBe("stored");
+      await writeFile(file, original);
+      expect((await archiver().runPass()).rowsDeleted).toBe(1);
+    });
+  }
+
+  it("drives large-snapshot pruning from indexed snapshot lookups", async () => {
+    seed("session", []);
+    const insert = sqlite.prepare(
+      "INSERT INTO rome_agent_messages(id,session_id,turn_id,role,content,created_at) VALUES (?, 'session', ?, 'trace', '[]', ?)",
+    );
+    const block = sqlite.prepare(
+      'INSERT INTO rome_agent_trace_blocks(message_id,session_id,seq,content) VALUES (?, \'session\', 0, \'{"type":"tool_result","content":"x"}\')',
+    );
+    sqlite.transaction(() => {
+      for (let i = 0; i < 3000; i++) {
+        insert.run(`message-${i}`, `turn-${i}`, old);
+        block.run(`message-${i}`);
+      }
+    })();
+    const data = await exportOnly();
+    repo.update("archive", { status: "stored" });
+    expect(repo.mark("archive", data.manifest, now)).toBe(true);
+    const prepare = sqlite.prepare.bind(sqlite);
+    let plan: string[] = [];
+    const spy = rs.spyOn(sqlite, "prepare").mockImplementation((query: string) => {
+      if (query.startsWith("SELECT b.rowid AS rowid"))
+        plan = (
+          prepare("EXPLAIN QUERY PLAN " + query).all(
+            JSON.stringify(data.manifest.messages),
+            "archive",
+            ...ARCHIVE_KEEP_BLOCK_TYPES,
+          ) as { detail: string }[]
+        ).map((r) => r.detail);
+      return prepare(query);
+    });
+    try {
+      expect(repo.pruneBatch("archive").rows).toBe(200);
+    } finally {
+      spy.mockRestore();
+    }
+    const scan = plan.findIndex((p) => p.includes("SCAN snapshot"));
+    const message = plan.findIndex((p) => p.includes("SEARCH m "));
+    const blocks = plan.findIndex((p) => p.includes("SEARCH b "));
+    expect(scan).toBeGreaterThanOrEqual(0);
+    expect(message).toBeGreaterThan(scan);
+    expect(blocks).toBeGreaterThan(message);
   });
 
   it("stops new exports at 5 GiB of pending uploads", async () => {

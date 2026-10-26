@@ -1792,7 +1792,9 @@ async function main() {
       traceArchiveIdentity?.token === getInstanceToken() && traceArchiveIdentity
         ? { accountId: traceArchiveIdentity.accountId, instanceId: traceArchiveIdentity.instanceId }
         : undefined,
-    isRunning: (sessionId) => agentTurnStreamRegistry.listBySession(sessionId).length > 0,
+    isRunning: (sessionId) =>
+      (internalApi?.hasActiveTurns(sessionId) ?? false) ||
+      agentTurnStreamRegistry.listBySession(sessionId).length > 0,
   });
   const unsubscribeArchiveDelete = webchatRepo.onTraceArchiveDelete(() => {
     void traceArchiver.cleanupDeletedChats().catch(() => log.warn("trace archive cleanup failed"));
@@ -1803,7 +1805,8 @@ async function main() {
       const timezone = await resolveGuardianTimezone(settingsRepo);
       vacuumTraceDatabase(traceArchivesRepo, {
         timezone,
-        turnRunning: agentTurnStreamRegistry.hasActiveTurns(),
+        turnRunning:
+          (internalApi?.hasActiveTurns() ?? false) || agentTurnStreamRegistry.hasActiveTurns(),
       });
     },
   });

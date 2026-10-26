@@ -690,6 +690,7 @@ export interface WebchatRuntime {
    * their predecessor's `onFinish` before starting work.
    */
   activeStreams: Map<string, ActiveWebchatStream[]>;
+  hasActiveTurns(sessionId?: string): boolean;
   flushAll(): Promise<void>;
   /**
    * Run a backend-initiated agent task on a webchat session. If a stream is
@@ -1340,7 +1341,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let threadContext: ThreadContext;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
     try {
-      const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
+      const [traceRow] = await deps.webchatRepo.getTraceAccountingByTurns([
+        { sessionId: input.session.id, turnId: input.turnId },
+      ]);
       const turnStatus = traceRow
         ? parseStoredTraceEvents(traceRow.content)
             .filter(
@@ -4179,6 +4182,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   const runtime: WebchatRuntime = {
     activeStreams,
+    hasActiveTurns(sessionId) {
+      return sessionId
+        ? isSessionRunning(sessionId)
+        : deps.agentTurnStreamRegistry.hasActiveTurns() ||
+            [...activeStreams.values()].some((streams) =>
+              streams.some((stream) => !stream.finished),
+            );
+    },
     async flushAll(): Promise<void> {
       const allStreams = [...activeStreams.values()].flat();
       await Promise.all(allStreams.map((stream) => persistTrace(stream)));

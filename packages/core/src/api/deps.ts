@@ -221,5 +221,6 @@ export interface ApiDeps {
 
 export interface ApiHandle {
   port: number;
+  hasActiveTurns(sessionId?: string): boolean;
   close(): Promise<void>;
 }

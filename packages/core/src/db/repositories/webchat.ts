@@ -2575,7 +2575,7 @@ export class WebChatRepository {
     return this.readTraceTurns(refs, options);
   }
 
-  /** Accounting only: retained blocks are never a displayable trace. Includes archived turns. */
+  /** Accounting/lifecycle only: retained blocks are never a displayable trace. Includes archived turns. */
   async getTraceAccountingByTurns(refs: readonly { sessionId: string; turnId: string }[]) {
     return this.readTraceTurns(refs, {}, true);
   }

@@ -246,6 +246,17 @@ export class TraceArchiver {
     } else {
       if (!row.manifest) throw new Error("Stored archive missing manifest");
       manifest = JSON.parse(row.manifest) as ArchiveManifest;
+      if (row.location.startsWith("local:")) {
+        const verified = await this.worker({ action: "verify", file: this.file(row) });
+        if (
+          !verified ||
+          verified.sha256 !== row.sha256 ||
+          verified.manifest.archiveId !== row.id ||
+          verified.manifest.sessionId !== row.sessionId
+        ) {
+          throw new Error("Trace archive stored local verification failed");
+        }
+      }
     }
     if (!repo.mark(row.id, manifest, this.now(), this.options.isRunning?.(row.sessionId))) {
       const current = repo.get(row.id);
