@@ -271,7 +271,7 @@ describe("ConnectionRegistry account participants", () => {
       ledger: new DrizzleGrantLedger(db.db),
       onMint: (_tx, record, _profile, account) =>
         minted.push({ kind: record.connectionKind, accountId: account?.accountId }),
-      onAccount: (_tx, id, account) => recorded.push({ id, accountId: account.accountId }),
+      onAccount: (_tx, { id }, account) => recorded.push({ id, accountId: account.accountId }),
     });
     registry.register(botIdDescriptor());
     try {
@@ -300,7 +300,8 @@ describe("ConnectionRegistry account records", () => {
       ledger: new DrizzleGrantLedger(db.db),
       onMint: (tx, record, _profile, account) =>
         records.claim(tx, { ...record, account }, record.createdAt),
-      onAccount: (tx, id, account) => records.recordAccount(tx, id, account),
+      onAccount: (tx, connection, account) =>
+        records.ensureAccount(tx, connection, account, new Date()),
       onRemove: (tx, id) => records.vacate(tx, id),
       onRevoke: () => records.forget(),
     });
@@ -326,6 +327,34 @@ describe("ConnectionRegistry account records", () => {
       await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-2"), { botId: "100" });
       expect(records.idOf(conn.id)).toBe(account?.id);
       expect(records.byId(account!.id)?.connectionId).toBe(conn.id);
+    } finally {
+      close();
+    }
+  });
+
+  it("gives a kept Connection a record again once its old account went elsewhere", async () => {
+    const { records, registry, close } = recordingRegistry();
+    try {
+      const c1 = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
+        botId: "100",
+      });
+      await registry.revoke(c1.id, "bot");
+      await registry.confer(
+        SERVICE,
+        undefined,
+        "bot",
+        credentialFor("t-2"),
+        { botId: "100" },
+        { another: true },
+      );
+      expect(records.idOf(c1.id)).toBeNull();
+
+      await registry.confer(SERVICE, c1.id, "bot", credentialFor("t-3"), { botId: "300" });
+      expect(records.byConnection(c1.id)).toMatchObject({
+        platformAccountId: "300",
+        connectionId: c1.id,
+      });
+      expect(records.idOf(c1.id)).not.toBeNull();
     } finally {
       close();
     }

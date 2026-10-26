@@ -86,7 +86,11 @@ export interface ConnectionRegistryDeps {
   ) => void;
   /** Runs inside the transaction that confers a grant on a Connection that
    *  already exists, when the grant names the account it reaches. */
-  onAccount?: (tx: DrizzleTx, id: ConnectionId, account: GrantAccount) => void;
+  onAccount?: (
+    tx: DrizzleTx,
+    connection: { id: ConnectionId; connectionKind: string },
+    account: GrantAccount,
+  ) => void;
   /** Runs once a grant's revoke is written: the Connection no longer reaches
    *  the account the grant did. */
   onRevoke?: (id: ConnectionId) => void;
@@ -562,7 +566,7 @@ export class ConnectionRegistry {
           this.onMint?.(tx, record, profile, account);
         }
         ledger.writeGrant(tx, id, grant, patch);
-        if (!minting && account) this.onAccount?.(tx, id, account);
+        if (!minting && account) this.onAccount?.(tx, { id, connectionKind }, account);
         opts.inTx?.(tx);
       });
     const logActivationFailure = (err: unknown) => {

@@ -349,6 +349,27 @@ export class ChannelRecordsRepository {
       .run();
   }
 
+  /**
+   * Record `account` on the channel `connection` backs, or claim one for it
+   * when it backs none: a Connection kept across a revoke whose account went
+   * to another Connection let its channel go, and a grant given to it again
+   * needs one to talk through.
+   */
+  ensureAccount(
+    exec: Exec,
+    connection: { id: string; connectionKind: string },
+    account: GrantAccount,
+    now: Date,
+  ): void {
+    const held = exec
+      .select({ id: channels.id })
+      .from(channels)
+      .where(eq(channels.connectionId, connection.id))
+      .get();
+    if (held) this.recordAccount(exec, connection.id, account);
+    else this.claim(exec, { ...connection, account }, now);
+  }
+
   /** Release the channel `connectionId` backs. The row and its id stay, and
    *  its link goes: an agent stays linked only where it can still answer. A
    *  channel of a connection kind that takes an agent also lets go of its
