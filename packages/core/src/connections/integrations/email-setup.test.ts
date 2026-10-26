@@ -335,7 +335,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     expect(received).toHaveLength(1);
   });
 
-  it("registry-native DELETE tears down the grant while guardianEmail config survives; a fresh setup re-provisions", async () => {
+  it("disconnecting ends the connection while guardianEmail config survives; a fresh setup re-provisions", async () => {
     const { app, registry, settingsRepo, provisionMock } = makeSetupApp();
     // A configured guardian address predates the connect (e.g. adapter
     // self-heal) — the lifecycle rule says it must ride out revoke.
@@ -350,7 +350,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
       headers: SAME_ORIGIN,
     });
     expect(del.status).toBe(200);
-    expect(conn.auth.grants().inbox).toBe("unauthorized");
+    expect(registry.find("email")).toHaveLength(0);
     expect(conn.isUnlocked("talk")).toBe(false);
     // guardianEmail rides the settings row, which the teardown never touches.
     expect(await settingsRepo.get("email")).toEqual({
@@ -358,13 +358,15 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
       guardianEmail: "g@example.com",
     });
 
-    // Re-enable → provision runs AGAIN → a fresh working inbox on the SAME row.
-    const { state } = await runSetup(app, conn.id);
+    // Connect again → provision runs AGAIN → a fresh working inbox on a new
+    // connection.
+    const { state } = await runSetup(app);
     expect(state.status).toBe("done");
     expect(provisionMock).toHaveBeenCalledTimes(2);
-    expect(registry.find("email")).toHaveLength(1);
-    expect(conn.auth.grants().inbox).toBe("authorized");
-    expect(conn.isUnlocked("talk")).toBe(true);
+    const [again] = registry.find("email");
+    expect(again.id).not.toBe(conn.id);
+    expect(again.auth.grants().inbox).toBe("authorized");
+    expect(again.isUnlocked("talk")).toBe(true);
   });
 
   it("a failed conferral fails the setup (grant stays unauthorized); a retry converges", async () => {
@@ -403,7 +405,7 @@ describe("autoConnectEmail", () => {
     expect(await settingsRepo.get("email")).toEqual({ enabled: true });
   });
 
-  it("leaves a revoked connection alone and provisions nothing", async () => {
+  it("never reconnects email the guardian disconnected", async () => {
     const { app, registry, settingsRepo } = makeSetupApp();
     await runSetup(app);
     const conn = registry.find("email")[0];
@@ -416,8 +418,7 @@ describe("autoConnectEmail", () => {
     expect(await autoConnectEmail({ registry, provision, settings: settingsRepo })).toBe(false);
 
     expect(provision).not.toHaveBeenCalled();
-    expect(registry.find("email")).toHaveLength(1);
-    expect(conn.auth.grants().inbox).toBe("unauthorized");
+    expect(registry.find("email")).toHaveLength(0);
   });
 
   it("never reconnects email the guardian removed, though no connection is left", async () => {

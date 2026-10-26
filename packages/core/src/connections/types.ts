@@ -220,8 +220,8 @@ export interface Connection {
   readonly auth: AuthState;
   /**
    * Broken when the grant is degraded, working when it is authorized. Null
-   * while it is unauthorized: a disconnect that keeps the connection leaves no
-   * access behind, so it is neither.
+   * while it is unauthorized: a disconnect ends the connection, so only one
+   * whose removal failed, or one not yet conferred, is neither.
    */
   state(): ConnectionState | null;
   /** Discovery with reasons — drives the dashboard and connect hints. */
@@ -342,10 +342,8 @@ export interface ConnectionDescriptor {
    *  (docs/domains/connections.md#connection). A connection kind that leaves it
    *  unset, or a profile it answers null for, is never refused. */
   accountIdOf?(profile: ProfileRecord): string | null;
-  /** True when this kind's accounts take an agent. Such an account exists only
-   *  while connected: the last grant's disconnect removes the Connection
-   *  (`isUnconnectedAccount`). Declare it exactly for the kinds in
-   *  `LINKABLE_KINDS`, whose channels start fresh. */
+  /** True when this kind's accounts take an agent. Declare it exactly for the
+   *  kinds in `LINKABLE_KINDS`, whose channels start fresh. */
   takesAgent?: boolean;
   capabilities: Partial<{
     talker: {

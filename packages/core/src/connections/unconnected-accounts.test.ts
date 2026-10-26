@@ -35,23 +35,23 @@ describe("removeUnconnectedAccounts", () => {
     expect((await ledger.listConnections()).map((record) => record.id)).toEqual([connected.id]);
   });
 
-  it("keeps a Connection whose accounts take no agent", async () => {
+  it("removes a disconnected connection whose accounts take no agent", async () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     const { takesAgent: _noAgent, ...descriptor } = makePasteTalk().descriptor;
     registry.register(descriptor);
-    await registry.connect("fake-telegram");
+    const conn = await registry.connect("fake-telegram");
 
-    expect(await removeUnconnectedAccounts(registry)).toEqual([]);
-    expect(registry.find("fake-telegram")).toHaveLength(1);
+    expect(await removeUnconnectedAccounts(registry)).toEqual([conn.id]);
+    expect(registry.find("fake-telegram")).toHaveLength(0);
   });
 
-  it("keeps a connection outside chats", async () => {
+  it("removes a disconnected connection outside chats", async () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     registry.register(makeRenewableAct().descriptor);
-    await registry.connect("fake-github");
+    const conn = await registry.connect("fake-github");
 
-    expect(await removeUnconnectedAccounts(registry)).toEqual([]);
-    expect(registry.find("fake-github")).toHaveLength(1);
+    expect(await removeUnconnectedAccounts(registry)).toEqual([conn.id]);
+    expect(registry.find("fake-github")).toHaveLength(0);
   });
 
   it("keeps an account it cannot remove, and removes the rest", async () => {
@@ -62,7 +62,6 @@ describe("removeUnconnectedAccounts", () => {
     const other = await registry.connectAnother("fake-telegram");
     const failing: Parameters<typeof removeUnconnectedAccounts>[0] = {
       all: () => registry.all(),
-      getDescriptor: (service) => registry.getDescriptor(service),
       getLedger: () => registry.getLedger(),
       remove: (id, opts) => {
         if (id === stuck.id) return Promise.reject(new Error("ledger unavailable"));

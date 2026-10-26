@@ -230,8 +230,8 @@ export interface EmailAutoConnectRegistry {
  * Resolves `false` and provisions nothing when the instance has ever had email:
  * an email connection exists in any grant state, or the email settings row
  * exists. Every conferral writes that row and nothing deletes it, so it outlives
- * a connection the guardian removed, and a removed or revoked connection is
- * never reconnected. Resolves `true` once the grant is conferred. Rejects when
+ * a connection the guardian disconnected, and a disconnected one is never
+ * reconnected. Resolves `true` once the grant is conferred. Rejects when
  * the provision or the conferral fails. A failed provision writes nothing, so a
  * later call retries; a failed conferral has already written the row, so only
  * the guardian's Connect click retries it.

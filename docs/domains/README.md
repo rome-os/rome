@@ -72,6 +72,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - An account's connection is found by its platform and the platform's own id: the connection whose live grant reaches them.
 - Every kind of connection declares one grant, and everything a connection lets Rome do needs that grant.
 - The ledger keeps one grant per connection.
+- Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
 
 Diffs still owed to the model, each a change of its own:
 
@@ -101,5 +102,4 @@ Diffs still owed to the model, each a change of its own:
 - A fix that reaches another account is refused for the sign-ins such as GitHub too.
 - Connecting through a sign-in such as GitHub is one step too. A sign-in Rome rejects leaves no connection behind.
 - Renewing or fixing replaces a connection's grant whole.
-- Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
 - The code says chat, act and watch for what a connection lets Rome do.

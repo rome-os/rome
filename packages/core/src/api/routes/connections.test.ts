@@ -326,7 +326,7 @@ describe("GET /connections/:id", () => {
 });
 
 describe("DELETE /connections/:id/grants/:name", () => {
-  it("revokes the grant and relocks every capability", async () => {
+  it("revokes the grant, stops its capabilities and ends the connection", async () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     const fixture = makeBotAll();
     registry.register(fixture.descriptor);
@@ -338,12 +338,9 @@ describe("DELETE /connections/:id/grants/:name", () => {
       headers: SAME_ORIGIN,
     });
     expect(res.status).toBe(200);
-    const { connection } = await res.json();
-
-    expect(connection.grants).toEqual({ bot: "unauthorized" });
-    expect(connection.capabilities.act).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
-    expect(connection.capabilities.talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
+    expect((await res.json()).connection).toBeNull();
     expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(1);
+    expect(registry.find("fake-discord")).toHaveLength(0);
   });
 
   it("removes an account once it holds no grant, and releases its channel", async () => {
@@ -392,7 +389,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
     expect(registry.find("fake-telegram")).toEqual([]);
   });
 
-  it("keeps a connection whose service has no Talk when its last grant goes", async () => {
+  it("ends a sign-in connection too, which has no Talk", async () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     const fixture = makeRenewableAct();
     registry.register(fixture.descriptor);
@@ -405,8 +402,8 @@ describe("DELETE /connections/:id/grants/:name", () => {
     });
 
     expect(res.status).toBe(200);
-    expect((await res.json()).connection.grants).toEqual({ user: "unauthorized" });
-    expect(registry.find("fake-github")).toHaveLength(1);
+    expect((await res.json()).connection).toBeNull();
+    expect(registry.find("fake-github")).toHaveLength(0);
   });
 
   it("404s an unknown grant name and an unknown connection", async () => {

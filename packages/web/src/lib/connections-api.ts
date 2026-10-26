@@ -88,10 +88,9 @@ export async function fetchConnections(): Promise<ApiConnection[]> {
 /** Structured, non-throwing result from a teardown call. */
 export type TeardownResult = { ok: true } | { ok: false; error: string };
 
-/** Revoke one grant — the registry-native disconnect. The transport relocks
- *  and custody artifacts clear off the transition. A channel account whose
- *  last grant this was is removed with it; any other connection row persists
- *  so a later reconnect re-confers in place. */
+/** Revoke the grant — the registry-native disconnect. The transport relocks
+ *  and custody artifacts clear off the transition. The connection ends with
+ *  it, whatever its kind, and a later connect makes a new one. */
 export async function revokeConnectionGrant(
   connectionId: string,
   grant: string,

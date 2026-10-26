@@ -28,7 +28,6 @@ import type {
   GrantState,
 } from "../../connections/types.js";
 import type { SetupManager } from "../../connections/setup/manager.js";
-import { isUnconnectedAccount } from "../../connections/unconnected-accounts.js";
 import {
   ChannelRecordsRepository,
   type ChannelRecord,
@@ -333,21 +332,19 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     // per-(connection kind, grant) critical section the setup's terminal write uses, so
     // the two can never interleave.
     await deps.setupManager?.cancelActive(conn.id, name);
-    // An account exists only while it is connected, so revoking the last grant
-    // a channel's Connection holds removes the Connection, and its channel with
-    // it. The revoke runs first either way, since it is what clears the
-    // grant's custody artifacts.
+    // Disconnecting ends the connection, whatever its kind, and its channel
+    // goes with it. The revoke runs first, since it is what clears the grant's
+    // custody artifacts.
     const removed = await registry.withGrantSection(conn.connectionKind, name, async () => {
       // A disconnect that ran while this one waited may have removed it.
       if (!registry.all().some((held) => held.id === conn.id)) return true;
       await registry.revoke(conn.id, name);
-      if (!(await isUnconnectedAccount(registry, conn))) return false;
       try {
         await registry.remove(conn.id);
       } catch (error) {
         // The revoke committed, so the disconnect stands. The boot pass
-        // removes the account this left behind.
-        log.warn("could not remove a disconnected account", { id: conn.id, error });
+        // removes the connection this left behind.
+        log.warn("could not remove a disconnected connection", { id: conn.id, error });
         return false;
       }
       return true;

@@ -97,7 +97,7 @@ describe("OAuth teardown via /connections DELETE routes", () => {
     ["github", "user"],
     ["slack", "workspace"],
     ["google", "user"],
-  ] as const)("grant revoke relocks the %s grant, and custody clears off the transition", async (provider, grant) => {
+  ] as const)("disconnecting %s ends the connection, and custody clears off the revoke", async (provider, grant) => {
     const registry = await makeAuthorizedRegistry(provider);
     const conn = registry.find(provider)[0];
     expect(conn.auth.grants()[grant]).toBe("authorized");
@@ -110,8 +110,7 @@ describe("OAuth teardown via /connections DELETE routes", () => {
     );
 
     expect(res.status).toBe(200);
-    // Ledger grant relocked.
-    expect(registry.find(provider)[0].auth.grants()[grant]).toBe("unauthorized");
+    expect(registry.find(provider)).toHaveLength(0);
     // Custody cleared off the revoke transition (not the route directly).
     expect(clearProviderTokenFile).toHaveBeenCalledWith(provider);
     expect(clearGithubShellIntegrationForProvider).toHaveBeenCalledWith(provider);
@@ -141,8 +140,8 @@ describe("OAuth teardown via /connections DELETE routes", () => {
     );
 
     expect(res.status).toBe(200);
-    // The revoke wrote the ledger before firing custody, so the grant relocked
-    // despite the custody-clear failure (which the registry swallows).
-    expect(registry.find("github")[0].auth.grants().user).toBe("unauthorized");
+    // The revoke wrote the ledger before firing custody, so the disconnect
+    // stands despite the custody-clear failure (which the registry swallows).
+    expect(registry.find("github")).toHaveLength(0);
   });
 });
