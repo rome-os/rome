@@ -116,6 +116,7 @@ async function bootstrap() {
         : null,
     });
     runtimeManager = controller.runtime;
+    const keepAwake = new KeepAwake(powerSaveBlocker);
     // The credential file is shared by every build on this computer, so a dev
     // window would connect as the same device and take over its connection.
     const deviceHost =
@@ -130,6 +131,7 @@ async function bootstrap() {
             },
             prepare: process.platform === "darwin" ? adoptLoginShellPath : undefined,
             onStatus: (status) => {
+              keepAwake.sync(status);
               // Only the app's own pages and the open Rome hear it, as with device:get.
               const target = controller.activeTarget();
               const origin = target.kind === "remote" ? target.instance?.origin : null;
@@ -145,12 +147,10 @@ async function bootstrap() {
         : null;
     // Only a Rome Cloud launch connects this computer. Switching to the VM
     // restarts the app, so a VM launch never connects it or changes its PATH.
-    const keepAwake = new KeepAwake(powerSaveBlocker);
     const device = {
       status: (): DeviceStatus => deviceHost?.status() ?? { state: "off" },
       start: async () => {
         if (controller.activeTarget().kind === "remote") await deviceHost?.start();
-        keepAwake.sync(device.status());
       },
       stop: async () => {
         await deviceHost?.stop();

@@ -419,9 +419,12 @@ card's requests only from the top frame of that Rome's origin. Other pages in it
 window, and the Rome in a browser, cannot read or change the device.
 
 While the computer is on as a device, the app keeps its display from sleeping,
-and macOS does not idle-sleep while the display stays on. The hold lasts through
-reconnects. Turning the device off, signing out, or quitting the app releases
-it. Closing the lid or choosing Sleep still sleeps the computer.
+and macOS does not idle-sleep while the display stays on. A lost connection keeps
+the hold for 30 minutes, because a computer that sleeps during an outage does not
+reconnect on its own. After that the app releases the hold and takes it again
+once the device reconnects. Turning the device off, signing out, Rome Cloud
+revoking the device, or quitting the app releases it at once. Closing the lid or
+choosing Sleep still sleeps the computer.
 
 The app keeps its credential in its own encrypted store and never reads the CLI's
 configuration directory. `rome-node connect` on the same computer is a separate
