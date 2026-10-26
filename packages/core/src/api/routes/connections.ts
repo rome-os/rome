@@ -13,7 +13,6 @@ import type { ConnectionAccountFields } from "@rome/api-types/channel-accounts";
 import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { createLogger } from "../../logger.js";
 import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
@@ -34,8 +33,6 @@ import {
 } from "../../db/repositories/channel-records.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
-
-const log = createLogger("api:connections");
 
 /** Per-grant active-setup ids for a connection.
  *  `idOrKind` is the connection id for a real connection, or the connection kind
@@ -324,31 +321,13 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const name = c.req.param("name");
     if (!(name in conn.auth.grants())) return c.json({ error: "Unknown grant." }, 404);
 
-    // Serialize teardown with any in-flight setup on this grant. First
-    // cancel a live setup OUTSIDE the section so it cannot re-import the
-    // credential after we revoke (a setup waiting at its guardian-link unwinds
-    // with no write; one already committing runs to `done` first, then our
-    // revoke below wins as the final state). Then run the revoke INSIDE the same
-    // per-(connection kind, grant) critical section the setup's terminal write uses, so
-    // the two can never interleave.
+    // Cancel a live setup first, OUTSIDE the grant's section, so it cannot
+    // re-import the credential after the revoke (a setup waiting at its
+    // guardian-link unwinds with no write; one already committing runs to
+    // `done` first, then the disconnect wins as the final state). The
+    // disconnect itself runs inside that section.
     await deps.setupManager?.cancelActive(conn.id, name);
-    // Disconnecting ends the connection, whatever its kind, and its channel
-    // goes with it. The revoke runs first, since it is what clears the grant's
-    // custody artifacts.
-    const removed = await registry.withGrantSection(conn.connectionKind, name, async () => {
-      // A disconnect that ran while this one waited may have removed it.
-      if (!registry.all().some((held) => held.id === conn.id)) return true;
-      await registry.revoke(conn.id, name);
-      try {
-        await registry.remove(conn.id);
-      } catch (error) {
-        // The revoke committed, so the disconnect stands. The boot pass
-        // removes the connection this left behind.
-        log.warn("could not remove a disconnected connection", { id: conn.id, error });
-        return false;
-      }
-      return true;
-    });
+    const removed = await registry.disconnect(conn.id);
     c.header("Cache-Control", "no-store");
     return c.json({
       ok: true,

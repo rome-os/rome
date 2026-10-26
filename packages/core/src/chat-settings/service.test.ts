@@ -51,7 +51,7 @@ function directoryDescriptor(
 /** Connects `kind` and gives it access, so its Talk is live. */
 async function connectLive(registry: ConnectionRegistry, kind: string) {
   const connection = await registry.connect(kind);
-  await registry.importCredential(connection.id, "bot", {
+  await registry.confer(connection.connectionKind, connection.id, "bot", {
     material: { token: "token" },
     expiresAt: "never",
   });

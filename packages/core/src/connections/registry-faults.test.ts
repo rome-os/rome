@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
+import type { SqliteExec } from "../db/index.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { type GrantLedger, type GrantValue, grantValueOf } from "./ledger.js";
@@ -38,14 +39,14 @@ function makeLedger(): GrantLedger {
   return new DrizzleGrantLedger(createTestDb().db);
 }
 
-/** A ledger whose `updateGrant` rejects (a transient DB error) whenever
- *  `shouldFail` matches the grant the write would leave. */
+/** A ledger whose grant writes throw (a transient DB error) whenever
+ *  `shouldFail` matches the grant the write would leave. Every grant write,
+ *  a conferral's and an update's alike, goes through `writeGrant`. */
 function makeFailingLedger(shouldFail: (grant: GrantValue) => boolean): GrantLedger {
   class FailingLedger extends DrizzleGrantLedger {
-    override async updateGrant(custody: string, next: (current: GrantValue) => GrantValue) {
-      const grant = next(grantValueOf(await this.getGrant(custody)));
-      if (shouldFail(grant)) throw new Error("LEDGER_WRITE_FAILED");
-      return super.updateGrant(custody, next);
+    override writeGrant(exec: SqliteExec, custody: string, value: GrantValue) {
+      if (shouldFail(value)) throw new Error("LEDGER_WRITE_FAILED");
+      super.writeGrant(exec, custody, value);
     }
   }
   return new FailingLedger(createTestDb().db);
@@ -60,7 +61,7 @@ describe("registry faults", () => {
       const fx = makeBotAll();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-discord");
-      await registry.importCredential(conn.id, "bot", fx.botCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.botCredential());
 
       expect(conn.act).not.toBeNull();
       expect(conn.isUnlocked("talk")).toBe(true);
@@ -98,7 +99,7 @@ describe("registry faults", () => {
       const fx = makeRenewableAct({ successCount: 1 });
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-github");
-      await registry.importCredential(conn.id, "user", fx.userCredential());
+      await registry.confer(conn.connectionKind, conn.id, "user", fx.userCredential());
 
       expect(conn.act).not.toBeNull();
       const act = conn.act as Act;
@@ -173,7 +174,7 @@ describe("registry faults", () => {
       const fx = makeRenewableAct({ successCount: 0 });
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-github");
-      await registry.importCredential(conn.id, "user", fx.userCredential());
+      await registry.confer(conn.connectionKind, conn.id, "user", fx.userCredential());
 
       const act = conn.act as Act;
       const actor = fx.actorFactory.instances.at(-1);
@@ -227,10 +228,10 @@ describe("registry faults", () => {
     });
 
     // Regression (ledger-first invariant): a ledger write failure during
-    // importCredential must reject the call and leave the mirror untouched —
+    // a conferral must reject the call and leave the mirror untouched —
     // the grant stays in its PRIOR state with no split-brain (status(), the
     // capability handle, and the ledger row all agree), and no rebuild happens.
-    it("a ledger write failure during importCredential rejects and leaves the prior state coherent", async () => {
+    it("a ledger write failure during a conferral rejects and leaves the prior state coherent", async () => {
       let failImport = false;
       const failing = makeFailingLedger((grant) => grant.state === "authorized" && failImport);
       const registry = new ConnectionRegistry({ ledger: failing });
@@ -245,9 +246,9 @@ describe("registry faults", () => {
 
       // The import's authorize write throws → the call rejects.
       failImport = true;
-      await expect(registry.importCredential(conn.id, "bot", fx.validCredential())).rejects.toThrow(
-        /LEDGER_WRITE_FAILED/,
-      );
+      await expect(
+        registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential()),
+      ).rejects.toThrow(/LEDGER_WRITE_FAILED/);
 
       // Mirror untouched: grant still unauthorized, no epoch built, status agrees,
       // and the ledger row is unchanged (still unauthorized).
@@ -261,7 +262,7 @@ describe("registry faults", () => {
 
       // With the ledger healthy, the same import now succeeds and unlocks talk.
       failImport = false;
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
       expect(conn.auth.grants().bot).toBe("authorized");
       expect(conn.isUnlocked("talk")).toBe(true);
     });
@@ -280,7 +281,7 @@ describe("registry faults", () => {
       const unlocks: Connection[] = [];
       registry.onUnlocked("act", (c) => unlocks.push(c));
 
-      await registry.importCredential(conn.id, "user", fx.userCredential());
+      await registry.confer(conn.connectionKind, conn.id, "user", fx.userCredential());
       expect(unlocks.length).toBe(1); // initial unlock
 
       const actor1 = fx.actorFactory.instances.at(-1);
@@ -305,9 +306,9 @@ describe("registry faults", () => {
       expect(conn.auth.grants().user).toBe("degraded");
       expect(conn.act).toBeNull();
 
-      // Re-authorize via importCredential (new material clears the flag + re-unlocks).
+      // Re-authorize via confer (new material clears the flag + re-unlocks).
       const unlocksBeforeReauth = unlocks.length;
-      await registry.importCredential(conn.id, "user", {
+      await registry.confer(conn.connectionKind, conn.id, "user", {
         material: { token: "reauthorized-token" },
         expiresAt: "never",
       });
@@ -338,7 +339,7 @@ describe("registry faults", () => {
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
 
       expect(conn.isUnlocked("talk")).toBe(true);
       const heard: ChannelMessage[] = [];
@@ -357,7 +358,7 @@ describe("registry faults", () => {
       expect(conn.hearTalker(async () => {})).toBeNull();
 
       // Re-import → a NEW talker, which the old epoch's listener does not hear.
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
       expect(conn.isUnlocked("talk")).toBe(true);
       const newTalker = fx.talkerFactory.instances.at(-1);
       if (!newTalker) throw new Error("talker not rebuilt");
@@ -380,7 +381,7 @@ describe("registry faults", () => {
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
       const talker = fx.talkerFactory.instances.at(-1);
       if (!talker) throw new Error("talker not built");
       return { registry, fx, conn, talker };
@@ -429,7 +430,7 @@ describe("registry faults", () => {
       const pending = conn.withTalker((live) => live.history?.query({}));
 
       await conn.auth.revoke("bot");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
       reject(new CredentialRejected({ grant: "bot" }));
       await expect(pending).rejects.toBeInstanceOf(CredentialRejected);
       await flush();
@@ -450,7 +451,7 @@ describe("registry faults", () => {
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
 
       // Capture the OLD instance's fault callback, then revoke (epoch dies).
       const oldFault = fx.talkerFactory.instances[0].state.fault;
@@ -472,11 +473,11 @@ describe("registry faults", () => {
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
       const oldFault = fx.talkerFactory.instances[0].state.fault;
 
       // New material → new epoch; the old instance was discarded.
-      await registry.importCredential(conn.id, "bot", {
+      await registry.confer(conn.connectionKind, conn.id, "bot", {
         material: { token: "rotated-token" },
         expiresAt: "never",
       });
@@ -519,11 +520,11 @@ describe("registry faults", () => {
       };
 
       // First authorize builds instance 0.
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
       expect(order).toEqual(["build:0"]);
 
       // Re-authorize with DIFFERENT material → epoch rebuild: stop old, build new.
-      await registry.importCredential(conn.id, "bot", {
+      await registry.confer(conn.connectionKind, conn.id, "bot", {
         material: { token: "different-token" },
         expiresAt: "never",
       });
@@ -553,7 +554,7 @@ describe("registry faults", () => {
       const unlocks: Connection[] = [];
       registry.onUnlocked("talk", (c) => unlocks.push(c));
 
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
       expect(unlocks.length).toBe(1); // initial unlock only
 
       const instance0 = fx.talkerFactory.instances.at(-1);
@@ -617,7 +618,7 @@ describe("registry faults", () => {
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
 
       const inst0 = fx.talkerFactory.instances.at(-1);
       if (!inst0) throw new Error("inst0 not built");
@@ -675,7 +676,7 @@ describe("registry faults", () => {
       };
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
       expect(capturedKit).not.toBeNull();
 
       const instance0 = fx.talkerFactory.instances.at(-1);
@@ -705,7 +706,7 @@ describe("registry faults", () => {
       const fx = makePasteTalk();
       // The Talker will synchronously flush one buffered inbound message the
       // instant its start() runs. Arm the flush on the fake talker the factory
-      // produces (build() runs synchronously inside importCredential, before
+      // produces (build() runs synchronously inside the conferral, before
       // start(), so the knob is set in time).
       const flushed = makeInboundMessage({
         messageId: "buffered-1",
@@ -732,7 +733,7 @@ describe("registry faults", () => {
 
       // Authorize → buildEpoch fires onUnlocked (handler registers) → start()
       // (flushes the buffered message into the now-wired handler).
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
       await flush();
 
       // Before the fix (start before onUnlocked) the buffered message dropped
@@ -781,7 +782,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     };
     registry.register(descriptor);
     const conn = await registry.connect("fake-session-svc");
-    await registry.importCredential(conn.id, "session", {
+    await registry.confer(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-old" },
       expiresAt: "never",
     });
@@ -796,7 +797,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     expect(conn.auth.grants().session).toBe("authorized"); // not yet degraded
 
     // A re-login completes mid-flow: fresh credential, fresh epoch (A torn down).
-    await registry.importCredential(conn.id, "session", {
+    await registry.confer(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-fresh" },
       expiresAt: "never",
     });
@@ -876,7 +877,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     const talkerFactory = makeFakeTalkerFactory();
     registry.register(makeSessionDescriptor(talkerFactory, async () => "re-confer"));
     const conn = await registry.connect("fake-session-svc");
-    await registry.importCredential(conn.id, "session", {
+    await registry.confer(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-old" },
       expiresAt: "never",
     });
@@ -890,7 +891,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     expect(conn.auth.grants().session).toBe("authorized"); // write parked, nothing applied
 
     // A re-login completes during the parked write.
-    await registry.importCredential(conn.id, "session", {
+    await registry.confer(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-fresh" },
       expiresAt: "never",
     });
@@ -926,7 +927,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
       })),
     );
     const conn = await registry.connect("fake-session-svc");
-    await registry.importCredential(conn.id, "session", {
+    await registry.confer(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-old" },
       expiresAt: "never",
     });
@@ -938,7 +939,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     await flush();
 
     // A re-login completes during the parked write.
-    await registry.importCredential(conn.id, "session", {
+    await registry.confer(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-fresh" },
       expiresAt: "never",
     });

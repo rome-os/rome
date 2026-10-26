@@ -45,7 +45,7 @@ describe("scenario 1: talk unlocked by its grant", () => {
 
     const conn = await reg.connect("fake-telegram");
     expect(conn.isUnlocked("talk")).toBe(false);
-    await reg.importCredential(conn.id, "bot", validCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", validCredential());
 
     expect(conn.isUnlocked("talk")).toBe(true);
     expect(conn.act).toBeNull();
@@ -60,7 +60,7 @@ describe("scenario 1: talk unlocked by its grant", () => {
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-telegram");
-    await reg.importCredential(conn.id, "bot", validCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", validCredential());
     const s = conn.status();
 
     expect(s.talk).toEqual({ state: "unlocked" });
@@ -78,7 +78,7 @@ describe("scenario 1: talk unlocked by its grant", () => {
     reg.onUnlocked("talk", (c) => fired.push(c));
 
     const conn = await reg.connect("fake-telegram");
-    await reg.importCredential(conn.id, "bot", validCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", validCredential());
 
     expect(fired).toHaveLength(1);
     expect(fired[0].id).toBe(conn.id);
@@ -91,7 +91,7 @@ describe("scenario 1: talk unlocked by its grant", () => {
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-telegram");
-    await reg.importCredential(conn.id, "bot", validCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", validCredential());
     const received: unknown[] = [];
     conn.hearTalker(async (msg) => {
       received.push(msg);
@@ -111,7 +111,7 @@ describe("scenario 1: talk unlocked by its grant", () => {
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-telegram");
-    await reg.importCredential(conn.id, "bot", validCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", validCredential());
     await sendThrough(conn, "thread-1" as ChatId, { text: "reply" });
 
     expect(talkerFactory.instances[0].state.sends).toHaveLength(1);
@@ -165,7 +165,7 @@ describe("scenario 2: needs-auth precision", () => {
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", botCredential());
 
     const s = conn.status();
 
@@ -181,7 +181,7 @@ describe("scenario 2: needs-auth precision", () => {
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", botCredential());
 
     expect(conn.isUnlocked("talk")).toBe(true);
     expect(conn.watch).not.toBeNull();
@@ -189,10 +189,10 @@ describe("scenario 2: needs-auth precision", () => {
   });
 });
 
-// Scenario 3 — authorize via importCredential unlocks + fires onUnlocked once per cap
+// Scenario 3 — authorize via confer unlocks + fires onUnlocked once per cap
 
 describe("scenario 3: import unlocks + fires onUnlocked", () => {
-  it("importCredential transitions grants() to authorized", async () => {
+  it("confer transitions grants() to authorized", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
     const { descriptor, botCredential } = makeBotAll();
@@ -201,7 +201,7 @@ describe("scenario 3: import unlocks + fires onUnlocked", () => {
     const conn = await reg.connect("fake-discord");
     expect(conn.auth.grants()["bot"]).toBe("unauthorized");
 
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", botCredential());
 
     expect(conn.auth.grants()["bot"]).toBe("authorized");
   });
@@ -218,7 +218,7 @@ describe("scenario 3: import unlocks + fires onUnlocked", () => {
     reg.onUnlocked("watch", (c) => watchFired.push(c));
 
     const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", botCredential());
 
     expect(talkFired).toHaveLength(1);
     expect(talkFired[0].id).toBe(conn.id);
@@ -236,7 +236,7 @@ describe("scenario 3: import unlocks + fires onUnlocked", () => {
     reg.onUnlocked("talk", () => count++);
 
     const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", botCredential());
 
     expect(count).toBe(1);
   });
@@ -244,8 +244,8 @@ describe("scenario 3: import unlocks + fires onUnlocked", () => {
 
 // Scenario 4 — idempotent import: same material → no new epoch, no re-fire
 
-describe("scenario 4: idempotent import", () => {
-  it("re-importing same material does not call stop() on the talker", async () => {
+describe("scenario 4: idempotent conferral", () => {
+  it("re-conferring same material does not call stop() on the talker", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
     const { descriptor, botCredential, talkerFactory } = makeBotAll();
@@ -253,20 +253,20 @@ describe("scenario 4: idempotent import", () => {
 
     const conn = await reg.connect("fake-discord");
     const cred = botCredential();
-    await reg.importCredential(conn.id, "bot", cred);
+    await reg.confer(conn.connectionKind, conn.id, "bot", cred);
 
     const firstInstance = talkerFactory.instances[0];
     expect(firstInstance.state.stopCount).toBe(0);
 
     // Re-import identical material.
-    await reg.importCredential(conn.id, "bot", { ...cred });
+    await reg.confer(conn.connectionKind, conn.id, "bot", { ...cred });
 
     // No new stop() call, same instance count.
     expect(firstInstance.state.stopCount).toBe(0);
     expect(talkerFactory.instances).toHaveLength(1);
   });
 
-  it("re-importing same material does not re-fire onUnlocked", async () => {
+  it("re-conferring same material does not re-fire onUnlocked", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
     const { descriptor, botCredential } = makeBotAll();
@@ -277,29 +277,29 @@ describe("scenario 4: idempotent import", () => {
 
     const conn = await reg.connect("fake-discord");
     const cred = botCredential();
-    await reg.importCredential(conn.id, "bot", cred);
+    await reg.confer(conn.connectionKind, conn.id, "bot", cred);
     expect(count).toBe(1);
 
     // Re-import identical material.
-    await reg.importCredential(conn.id, "bot", { ...cred });
+    await reg.confer(conn.connectionKind, conn.id, "bot", { ...cred });
 
     // Still exactly 1.
     expect(count).toBe(1);
   });
 
-  it("importing different material DOES trigger a new epoch", async () => {
+  it("conferring different material DOES trigger a new epoch", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
     const { descriptor, botCredential, talkerFactory } = makeBotAll();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", botCredential());
 
     const firstInstance = talkerFactory.instances[0];
 
     // Import a credential with different material.
-    await reg.importCredential(conn.id, "bot", {
+    await reg.confer(conn.connectionKind, conn.id, "bot", {
       material: { token: "different-token" },
       expiresAt: "never",
     });
@@ -346,7 +346,7 @@ describe("scenario 14: ledger invariants", () => {
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
-    await reg.importCredential(conn.id, "bot", botCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", botCredential());
 
     const botRow = await ledger.getGrant(conn.id);
     expect(botRow!.state).toBe("authorized");
@@ -383,7 +383,7 @@ describe("scenario 16: late onUnlocked registration", () => {
 
     // Connect and give access first, so talk is unlocked.
     const conn = await reg.connect("fake-telegram");
-    await reg.importCredential(conn.id, "bot", validCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", validCredential());
 
     // Register the handler AFTER the connection is already unlocked.
     const fired: Connection[] = [];
@@ -403,8 +403,8 @@ describe("scenario 16: late onUnlocked registration", () => {
 
     const connA = await reg.connect("fake-telegram");
     const connB = await reg.connect("fake-signal");
-    await reg.importCredential(connA.id, "bot", validCredential());
-    await reg.importCredential(connB.id, "bot", validCredential());
+    await reg.confer(connA.connectionKind, connA.id, "bot", validCredential());
+    await reg.confer(connB.connectionKind, connB.id, "bot", validCredential());
 
     const fired: Connection[] = [];
     reg.onUnlocked("talk", (c) => fired.push(c));
@@ -485,7 +485,7 @@ describe("scenario 18: load() with unregistered service rows", () => {
 
     // Also mint a real connection through the registry (goes through ledger).
     const conn = await reg.connect("fake-telegram");
-    await reg.importCredential(conn.id, "bot", validCredential());
+    await reg.confer(conn.connectionKind, conn.id, "bot", validCredential());
     expect(conn.isUnlocked("talk")).toBe(true);
 
     // Create a new registry over the same ledger and load.
@@ -526,7 +526,7 @@ describe("startup capability activation barrier", () => {
     const before = makeRegistry(ledger);
     before.register(first.descriptor);
     const { id } = await before.connect("fake-telegram", "Telegram");
-    await before.importCredential(id, "bot", first.validCredential());
+    await before.confer("fake-telegram", id, "bot", first.validCredential());
 
     const reg = makeRegistry(ledger);
     const { descriptor, talkerFactory } = makePasteTalk();

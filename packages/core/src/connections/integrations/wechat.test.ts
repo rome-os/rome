@@ -144,7 +144,7 @@ describe("wechat descriptor shape", () => {
   it("unlocks talk and forwards attachments + typing once the grant is imported", async () => {
     const { registry, adapters } = setup();
     const conn = await registry.connect("wechat");
-    await registry.importCredential(conn.id, "account", validCred());
+    await registry.confer(conn.connectionKind, conn.id, "account", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     expect(conn.isUnlocked("talk")).toBe(true);
@@ -173,7 +173,7 @@ describe("wechat descriptor shape", () => {
   it("reports transient adapter degradation without relocking the talk capability", async () => {
     const { registry, adapters } = setup();
     const conn = await registry.connect("wechat");
-    await registry.importCredential(conn.id, "account", validCred());
+    await registry.confer(conn.connectionKind, conn.id, "account", validCred());
 
     adapters[0].degradation = {
       reason: "WeChat reported a stale session.",
@@ -236,7 +236,7 @@ describe("wechat account-401 drives renew-once-then-degrade", () => {
   it("relocks talk after a terminal auth fault (route-driven renew answers re-confer)", async () => {
     const { registry, adapters } = setup();
     const conn = await registry.connect("wechat");
-    await registry.importCredential(conn.id, "account", validCred());
+    await registry.confer(conn.connectionKind, conn.id, "account", validCred());
     expect(conn.status().talk).toEqual({ state: "unlocked" });
 
     adapters[0].fault(new Error("HTTP 401: unauthorized"));
@@ -251,7 +251,7 @@ describe("wechat account-401 drives renew-once-then-degrade", () => {
     registry.onUnlocked("talk", (c) => {
       reUnlocked = c;
     });
-    await registry.importCredential(conn.id, "account", validCred());
+    await registry.confer(conn.connectionKind, conn.id, "account", validCred());
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     expect(reUnlocked).not.toBeNull();
   });

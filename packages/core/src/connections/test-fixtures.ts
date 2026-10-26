@@ -365,7 +365,7 @@ export function makeWatchEvent(overrides?: Partial<WatchEvent>): WatchEvent {
 export interface PasteTalkFixture {
   descriptor: ConnectionDescriptor;
   talkerFactory: FakeTalkerFactory;
-  /** Call this inside an importCredential call to supply a valid token. */
+  /** Call this inside a confer call to supply a valid token. */
   validCredential: () => Credential;
 }
 

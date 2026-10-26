@@ -173,7 +173,12 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
       const registry = new ConnectionRegistry({ ledger });
       registry.register(fixture.descriptor);
       const connection = await registry.connect("fake-telegram");
-      await registry.importCredential(connection.id, "bot", fixture.validCredential());
+      await registry.confer(
+        connection.connectionKind,
+        connection.id,
+        "bot",
+        fixture.validCredential(),
+      );
       expect(connection.isUnlocked("talk")).toBe(true);
 
       await expect(registry.remove(connection.id)).rejects.toThrow(

@@ -1,10 +1,10 @@
 // Per-grant lock (#1592): registry lifecycle mutations serialize.
 //
 // The connection registry serializes every guardian-facing grant lifecycle
-// mutation — conferral (importCredential), revoke, and profile backfill —
+// mutation — conferral, revoke, and profile backfill —
 // through a promise-chain mutex keyed per (connection, grant). These tests pin
 // the interleavings entirely through the registry's PUBLIC surface: a gated
-// ledger parks one mutation mid-write, a competitor is fired through the same
+// custody sync parks one mutation inside its lock, a competitor is fired through the same
 // API, the gate is released, and the final grant state + ledger row are
 // asserted. The lock and the chain map themselves have no direct tests.
 //
@@ -15,9 +15,10 @@
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
-import { type GrantLedger, type GrantValue, grantValueOf } from "./ledger.js";
+import type { GrantLedger } from "./ledger.js";
 import { ConnectionRegistry } from "./registry.js";
 import { makePasteTalk } from "./test-fixtures.js";
+import type { GrantCustody } from "./types.js";
 
 // A macrotask flush: lets the queued mutation bodies (which run on microtasks
 // off the promise chain) reach their first awaited ledger write before we act.
@@ -25,32 +26,29 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-/** Wrap a ledger so the FIRST `updateGrant` whose (custody, grant it leaves) matches
- *  `shouldGate` parks on a test-controlled gate before delegating. Every other
- *  call — including the competitor's writes and any later write from the parked
- *  flow itself — passes straight through. Models a single slow durable write so
- *  a competing mutation can complete INSIDE the gated one's awaited ledger call
- *  (the exact window the per-grant lock closes). */
-function makeGatedLedger(shouldGate: (custody: string, grant: GrantValue) => boolean): {
-  ledger: GrantLedger;
-  release: () => void;
-} {
+/** Custody whose FIRST sync parks on a test-controlled gate. A conferral syncs
+ *  custody while it holds the grant's lock, after its write committed, so a
+ *  parked sync holds a conferral mid-flight inside the lock: the window a
+ *  competing mutation must wait out. Every later sync passes straight through. */
+function makeGatedCustody(): { custody: GrantCustody; release: () => void } {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
   let gatedOnce = false;
-  class GatedLedger extends DrizzleGrantLedger {
-    override async updateGrant(custody: string, next: (current: GrantValue) => GrantValue) {
-      const grant = next(grantValueOf(await this.getGrant(custody)));
-      if (!gatedOnce && shouldGate(custody, grant)) {
-        gatedOnce = true;
-        await gate;
-      }
-      return super.updateGrant(custody, next);
-    }
-  }
-  return { ledger: new GatedLedger(createTestDb().db), release };
+  const custody: GrantCustody = {
+    async sync() {
+      if (gatedOnce) return;
+      gatedOnce = true;
+      await gate;
+    },
+    async clear() {},
+  };
+  return { custody, release };
+}
+
+function makeLedger(): GrantLedger {
+  return new DrizzleGrantLedger(createTestDb().db);
 }
 
 describe("per-grant lock: same-grant mutations serialize", () => {
@@ -58,22 +56,23 @@ describe("per-grant lock: same-grant mutations serialize", () => {
   // later-issued operation (revoke) wins; the grant ends in that operation's
   // state with a consistent ledger row.
   it("conferral then revoke: the later-issued revoke wins with a consistent ledger row", async () => {
-    // Park the conferral's authorize write. Without the lock the revoke runs to
-    // completion during the park, then the released conferral write lands LAST
-    // and the grant ends (wrongly) authorized. With the lock the revoke is
-    // queued behind the conferral and applies last — revoke wins.
-    const { ledger, release } = makeGatedLedger((_c, grant) => grant.state === "authorized");
+    // Park the conferral inside its grant lock. Without the lock the revoke
+    // runs to completion during the park, then the conferral's activation
+    // finishes LAST and the grant ends (wrongly) live. With the lock the revoke
+    // is queued behind the conferral and applies last — revoke wins.
+    const { custody, release } = makeGatedCustody();
+    const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
     const fx = makePasteTalk();
-    registry.register(fx.descriptor);
+    registry.register({ ...fx.descriptor, custody });
     const conn = await registry.connect("fake-telegram");
 
-    const conferral = registry.importCredential(conn.id, "bot", fx.validCredential());
-    const revoke = conn.auth.revoke("bot");
-
-    // Let the conferral reach and park on its authorize write.
+    const conferral = registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
+    // Let the conferral reach and park inside its lock.
     await flush();
-    expect(conn.auth.grants().bot).toBe("unauthorized"); // conferral parked, revoke queued
+    const revoke = conn.auth.revoke("bot");
+    await flush();
+    expect(conn.auth.grants().bot).toBe("authorized"); // conferral parked, revoke queued
 
     release();
     await Promise.all([conferral, revoke]);
@@ -91,29 +90,33 @@ describe("per-grant lock: same-grant mutations serialize", () => {
   // conferral's complete outcome (the later-issued one), with no field mixing
   // and no split between the ledger row and the live in-memory credential.
   it("two conferrals: the later-issued one's complete outcome wins, no field mixing", async () => {
-    const { ledger, release } = makeGatedLedger((_c, grant) => grant.state === "authorized");
+    const { custody, release } = makeGatedCustody();
+    const ledger = makeLedger();
     // Monotonic clock so the two conferrals stamp distinct conferredAt values:
-    // connect() takes tick 1 (createdAt), conferral #1 tick 2, conferral #2 tick 3.
+    // connect() takes tick 1 (createdAt); each conferral takes two (a createdAt
+    // for a mint, then its conferredAt), so #1 stamps tick 3 and #2 tick 5.
     let tick = 0;
     const registry = new ConnectionRegistry({ ledger, clock: () => new Date(1000 * ++tick) });
     const fx = makePasteTalk();
-    registry.register(fx.descriptor);
+    registry.register({ ...fx.descriptor, custody });
     const conn = await registry.connect("fake-telegram");
 
-    const first = registry.importCredential(
+    const first = registry.confer(
+      conn.connectionKind,
       conn.id,
       "bot",
       { material: { token: "tok1" }, expiresAt: "never" },
       { login: "one" },
     );
-    const second = registry.importCredential(
+    const second = registry.confer(
+      conn.connectionKind,
       conn.id,
       "bot",
       { material: { token: "tok2" }, expiresAt: "never" },
       { login: "two" },
     );
 
-    await flush(); // first conferral parks on its authorize write
+    await flush(); // first conferral parks inside its lock
     release();
     await Promise.all([first, second]);
 
@@ -122,8 +125,8 @@ describe("per-grant lock: same-grant mutations serialize", () => {
     expect(rec?.state).toBe("authorized");
     expect(rec?.credential?.material).toEqual({ kind: "inline", record: { token: "tok2" } });
     expect(rec?.profile).toEqual({ login: "two" });
-    // conferredAt is the later conferral's stamp (tick 3), never mixed with #1's.
-    expect((rec?.conferredAt as Date).getTime()).toBe(3000);
+    // conferredAt is the later conferral's stamp (tick 5), never mixed with #1's.
+    expect((rec?.conferredAt as Date).getTime()).toBe(5000);
 
     // No split-brain: the live capability was built with the SAME credential the
     // ledger row records (tok2), not the earlier conferral's tok1.
@@ -138,25 +141,26 @@ describe("per-connection lock: independent connections do not serialize", () => 
   // each ConnectionImpl owns its own per-grant chains.
   it("a parked conferral on one connection does not block another connection's conferral", async () => {
     const fx = makePasteTalk();
-    // Gate only connection A's authorize write.
-    let connAId = "";
-    const { ledger, release } = makeGatedLedger(
-      (custody, grant) => custody === connAId && grant.state === "authorized",
-    );
-    const registry = new ConnectionRegistry({ ledger });
-    registry.register(fx.descriptor);
+    // Gate only connection A's conferral.
+    const { custody, release } = makeGatedCustody();
+    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    registry.register({ ...fx.descriptor, custody });
     registry.register({ ...fx.descriptor, connectionKind: "fake-signal" });
     const connA = await registry.connect("fake-telegram");
     const connB = await registry.connect("fake-signal");
-    connAId = connA.id;
 
-    const aConferral = registry.importCredential(connA.id, "bot", fx.validCredential());
-    const bConferral = registry.importCredential(connB.id, "bot", fx.validCredential());
+    const aConferral = registry.confer(connA.connectionKind, connA.id, "bot", fx.validCredential());
+    const bConferral = registry.confer(connB.connectionKind, connB.id, "bot", fx.validCredential());
 
     // Connection B's conferral completes while A's is still parked.
     await bConferral;
     expect(connB.auth.grants().bot).toBe("authorized");
-    expect(connA.auth.grants().bot).toBe("unauthorized");
+    let aSettled = false;
+    void aConferral.then(() => {
+      aSettled = true;
+    });
+    await flush();
+    expect(aSettled).toBe(false);
 
     release();
     await aConferral;

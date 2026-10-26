@@ -139,14 +139,15 @@ export function grantProfileFromBundle(
 }
 
 /**
- * Make sure a provider's connection exists and import the bundle into its grant.
- * Mints the connection on first import (fresh install / first redeem after
- * upgrade); subsequent imports reuse the existing connection —
- * `importCredential`'s material comparison makes an unchanged re-import a no-op.
+ * Confer the bundle on the provider's connection, making the connection on the
+ * first redeem; later redeems fix the one that exists. Like every conferral, it
+ * refuses an account other than the one the connection reaches
+ * (`DifferentAccountError`) and an account another connection holds
+ * (`AccountAlreadyConnectedError`).
  *
  * A no-op (returns `false`) when the bundle has no usable token, or when the
  * registry doesn't declare the provider's descriptor (a test wiring a subset of
- * connection kinds). Returns `true` when a credential was imported.
+ * connection kinds). Returns `true` when a credential was conferred.
  *
  * `account` is the redeem side's non-secret identity as a RAW JSON object.
  * When supplied (live conferral), the connection kind parses it against its own schema
@@ -164,10 +165,8 @@ export async function importProviderBundle(
   const credential = credentialFromBundle(provider, bundle);
   if (!credential) return false;
 
-  const existing = registry.find(provider)[0];
-  const conn = existing ?? (await registry.connect(provider));
   const profile =
     account !== undefined ? grantProfileFromBundle(provider, bundle, account) : undefined;
-  await registry.importCredential(conn.id, OAUTH_PROVIDER_GRANTS[provider], credential, profile);
+  await registry.confer(provider, undefined, OAUTH_PROVIDER_GRANTS[provider], credential, profile);
   return true;
 }
