@@ -17,7 +17,7 @@
     "accounts": "Accounts"
   },
   "kinds": {
-    "own": "Own account",
+    "own_account": "Own account",
     "delegate": "Delegate",
     "yours": "your account"
   },

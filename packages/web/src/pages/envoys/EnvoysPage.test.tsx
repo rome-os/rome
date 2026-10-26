@@ -147,6 +147,17 @@ describe("EnvoysPage", () => {
     expect(link.getAttribute("href")).toBe("/settings/connections/discord");
   });
 
+  it("marks each account with its kind of link", async () => {
+    mockServer([
+      connection("discord", "Sales", "sales:agent"),
+      connection("telegram_user", "Me", "sales:agent"),
+    ]);
+    renderAt("/envoys/sales:agent");
+
+    expect(await screen.findByText("Own account")).toBeTruthy();
+    expect(screen.getByText("Delegate")).toBeTruthy();
+  });
+
   it("stays on Settings while the agent keeps other accounts", async () => {
     mockServer([
       connection("discord", "Sales", "sales:agent"),

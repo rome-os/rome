@@ -17,7 +17,7 @@
     "accounts": "账号"
   },
   "kinds": {
-    "own": "自有账号",
+    "own_account": "自有账号",
     "delegate": "代理",
     "yours": "你的账号"
   },
