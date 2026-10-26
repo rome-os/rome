@@ -577,14 +577,19 @@ export function createSendMessageAction(
     // deliberately omits the raw threadId/channelUserId recipient, which would
     // need a lookup to humanize and must never reach the UI as an internal id.
     preview(args: Record<string, unknown>): PreviewPayload {
-      const input = args as Partial<SendMessageInput>;
+      const input = args as Partial<SendMessageInput> & AccountSelector;
       const channel = typeof input.channel === "string" ? input.channel : undefined;
+      // A platform names where the message goes as plainly as a channel does.
+      const platform = typeof input.platform === "string" ? input.platform : undefined;
+      const destination = channel ?? platform;
       // An agent's name given as `to` is already readable, so the card names
       // the agent. An id stays off the card, as every recipient id does.
       const recipient = agentRecipient(channel, input.to);
       const agentName = recipient && !AGENT_ID.test(recipient) ? recipient : undefined;
       const fields = [
-        ...(channel ? [{ label: "Channel", value: CHANNEL_LABELS[channel] ?? channel }] : []),
+        ...(destination
+          ? [{ label: "Channel", value: CHANNEL_LABELS[destination] ?? destination }]
+          : []),
         ...(agentName ? [{ label: "To", value: agentName }] : []),
       ];
       return {

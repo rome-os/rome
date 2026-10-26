@@ -633,6 +633,17 @@ describe("send_message preview", () => {
     expect(JSON.stringify(payload)).not.toContain("918273645");
   });
 
+  it("names the platform a message goes to when it names no channel", () => {
+    const action = createSendMessageAction(config, makeAdapter());
+
+    expect(action.preview!({ platform: "whatsapp", to: "guardian", text: "hi" })).toMatchObject({
+      fields: [{ label: "Channel", value: "WhatsApp" }],
+    });
+    expect(action.preview!({ platform: "email", to: "a@b.com", text: "hi" })).toMatchObject({
+      fields: [{ label: "Channel", value: "Email" }],
+    });
+  });
+
   it("falls back to the raw channel name for an unmapped adapter", () => {
     const action = createSendMessageAction(config, makeAdapter());
     const payload = action.preview!({ channel: "matrix", threadId: "t1", text: "hi" });
