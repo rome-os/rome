@@ -253,6 +253,27 @@
   --border-strong: color-mix(in oklab, var(--primary-foreground) 45%, transparent);
 }
 
+/* A fenced block inside the sent bubble keeps the page's light `--surface` for
+   its card (the remap above leaves `--surface` and the Streamdown frame's
+   tokens alone), so the remapped white ink reads near-white on that card: the
+   language label, a fence no highlighter covers, and the action buttons all
+   disappear. The ink tokens a surface carries (`--surface-foreground` and
+   `--surface-muted-foreground`) are theme-scoped and never remapped, so they
+   restore the card's own ink in both halves of every theme. `color` is set
+   outright because the markdown root's `text-foreground` already resolved the
+   remapped token there and flows down as a computed value; borders are
+   re-mixed from the surface ink the way the remap mixes from the primary's,
+   and `--muted` (the action buttons' hover tint, the highlight skeleton)
+   returns to the surface's own. */
+.rome-bubble-on-primary [data-chat-code-block] {
+  color: var(--surface-foreground);
+  --foreground: var(--surface-foreground);
+  --muted-foreground: var(--surface-muted-foreground);
+  --muted: var(--surface-muted);
+  --border: color-mix(in oklab, var(--surface-foreground) 15%, transparent);
+  --border-strong: color-mix(in oklab, var(--surface-foreground) 25%, transparent);
+}
+
 /* Typing bubble (chat TypingBubble): three dots rising in turn while the agent
    works and has no text to show. Under reduced motion the dots rest. */
 .rome-typing-dot {
