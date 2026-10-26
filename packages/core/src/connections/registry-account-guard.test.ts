@@ -299,8 +299,8 @@ describe("ConnectionRegistry account records", () => {
     const registry = new ConnectionRegistry({
       ledger: new DrizzleGrantLedger(db.db),
       onMint: (tx, record, _profile, account) =>
-        records.claim(tx, { ...record, accountId: account?.accountId }, record.createdAt),
-      onAccount: (tx, id, account) => records.recordAccount(tx, id, account.accountId),
+        records.claim(tx, { ...record, account }, record.createdAt),
+      onAccount: (tx, id, account) => records.recordAccount(tx, id, account),
       onRemove: (tx, id) => records.vacate(tx, id),
       onRevoke: () => records.forget(),
     });
@@ -365,7 +365,11 @@ describe("ConnectionRegistry account records", () => {
       );
       expect(next.id).not.toBe(old.id);
       expect(records.byConnection(next.id)?.platformAccountId).toBe("100");
-      expect(records.byConnection(old.id)?.platformAccountId).toBeNull();
+      // The revoked Connection backs nothing, so the kind's one link reaches
+      // the new account alone.
+      expect(records.byConnection(old.id)).toBeNull();
+      expect(records.idOf(old.id)).toBeNull();
+      expect(records.channelOfLink(SERVICE)).toBe(records.idOf(next.id));
     } finally {
       close();
     }

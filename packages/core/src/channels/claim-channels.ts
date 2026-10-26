@@ -61,7 +61,7 @@ export async function recordChannelAccounts(
   db.transaction((tx) => {
     for (const [i, record] of unknown.entries()) {
       const account = accounts[i];
-      if (account) records.recordAccount(tx, record.connectionId!, account.accountId);
+      if (account) records.recordAccount(tx, record.connectionId!, account);
     }
   });
 }

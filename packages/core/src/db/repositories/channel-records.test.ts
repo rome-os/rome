@@ -141,7 +141,15 @@ describe("ChannelRecordsRepository", () => {
     const db = testDb!.db;
 
     expect(
-      records.claim(db, { id: "c1", connectionKind: "email", accountId: "a@x.test" }, NOW),
+      records.claim(
+        db,
+        {
+          id: "c1",
+          connectionKind: "email",
+          account: { platform: "email", accountId: "a@x.test" },
+        },
+        NOW,
+      ),
     ).toMatchObject({ platform: "email", platformAccountId: "a@x.test" });
     expect(records.claim(db, { id: "c2", connectionKind: "telegram" }, NOW).platformAccountId).toBe(
       null,
@@ -151,13 +159,21 @@ describe("ChannelRecordsRepository", () => {
   it("takes back a released channel for the next account, which replaces the account it held", () => {
     const records = repository();
     const db = testDb!.db;
-    const a = records.claim(db, { id: "c1", connectionKind: "email", accountId: "a@x.test" }, NOW);
+    const a = records.claim(
+      db,
+      { id: "c1", connectionKind: "email", account: { platform: "email", accountId: "a@x.test" } },
+      NOW,
+    );
     records.vacate(db, "c1");
     expect(records.byId(a.id)?.platformAccountId).toBe("a@x.test");
 
     // Names such as `email` still reach a connection kind's one channel, so
     // the next account takes it back, as before channels knew their account.
-    const b = records.claim(db, { id: "c2", connectionKind: "email", accountId: "b@x.test" }, NOW);
+    const b = records.claim(
+      db,
+      { id: "c2", connectionKind: "email", account: { platform: "email", accountId: "b@x.test" } },
+      NOW,
+    );
     expect(b).toMatchObject({ id: a.id, platformAccountId: "b@x.test" });
   });
 
@@ -166,7 +182,11 @@ describe("ChannelRecordsRepository", () => {
     const db = testDb!.db;
     const first = records.claim(
       db,
-      { id: "c1", connectionKind: "telegram", accountId: "bot-1" },
+      {
+        id: "c1",
+        connectionKind: "telegram",
+        account: { platform: "telegram", accountId: "bot-1" },
+      },
       NOW,
     );
     records.vacate(db, "c1");
@@ -174,7 +194,11 @@ describe("ChannelRecordsRepository", () => {
 
     const again = records.claim(
       db,
-      { id: "c2", connectionKind: "telegram", accountId: "bot-1" },
+      {
+        id: "c2",
+        connectionKind: "telegram",
+        account: { platform: "telegram", accountId: "bot-1" },
+      },
       NOW,
     );
     expect(again.id).not.toBe(first.id);
@@ -186,37 +210,40 @@ describe("ChannelRecordsRepository", () => {
     const db = testDb!.db;
     const record = records.claim(db, { id: "c1", connectionKind: "whatsapp" }, NOW);
 
-    records.recordAccount(db, "c1", "a");
+    records.recordAccount(db, "c1", { platform: "whatsapp", accountId: "a" });
     expect(records.byId(record.id)?.platformAccountId).toBe("a");
     // The grant was revoked and given again for account b, on the same Connection.
-    records.recordAccount(db, "c1", "b");
+    records.recordAccount(db, "c1", { platform: "whatsapp", accountId: "b" });
     expect(records.byId(record.id)?.platformAccountId).toBe("b");
     // No channel backed by the Connection: nothing to record.
-    records.recordAccount(db, "missing", "c");
+    records.recordAccount(db, "missing", { platform: "whatsapp", accountId: "c" });
     expect(records.all()).toHaveLength(1);
   });
 
   it("takes an account from a record whose Connection no longer reaches it", () => {
     const records = repository();
     const db = testDb!.db;
+    const account = { platform: "telegram", accountId: "42" };
     // A Connection kept after its grant was revoked still backs its record.
-    const old = records.claim(
-      db,
-      { id: "c1", connectionKind: "telegram_user", accountId: "42" },
-      NOW,
-    );
+    const old = records.claim(db, { id: "c1", connectionKind: "telegram_user", account }, NOW);
 
-    const next = records.claim(
-      db,
-      { id: "c2", connectionKind: "telegram_user", accountId: "42" },
-      NOW,
-    );
+    const next = records.claim(db, { id: "c2", connectionKind: "telegram_user", account }, NOW);
     expect(next.platformAccountId).toBe("42");
-    expect(records.byId(old.id)).toMatchObject({ connectionId: "c1", platformAccountId: null });
+    // The old record lets go of the Connection with the account, so it does
+    // not fall back to it as a record that never knew its account.
+    expect(records.byId(old.id)).toMatchObject({ connectionId: null, platformAccountId: null });
+    expect(records.idOf("c1")).toBeNull();
+  });
 
-    records.recordAccount(db, "c1", "42");
-    expect(records.byId(old.id)?.platformAccountId).toBe("42");
-    expect(records.byId(next.id)?.platformAccountId).toBeNull();
+  it("moves a record to the platform its account is on", () => {
+    const records = repository();
+    const db = testDb!.db;
+    // A Feishu app claimed before its profile named a domain.
+    const record = records.claim(db, { id: "c1", connectionKind: "feishu" }, NOW);
+    expect(record.platform).toBe("feishu");
+
+    records.recordAccount(db, "c1", { platform: "lark", accountId: "app-1" });
+    expect(records.byId(record.id)).toMatchObject({ platform: "lark", platformAccountId: "app-1" });
   });
 
   it("names the service behind a channel, and passes an unrecorded name through", () => {
