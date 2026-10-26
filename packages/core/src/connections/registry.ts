@@ -1440,12 +1440,15 @@ class ConnectionImpl implements Connection {
     return this.withGrantLock(grant, async () => {
       commit();
       try {
-        // Identical inline material over an authorized grant rebuilds nothing,
-        // but the profile may have changed (renamed login, moved workspace), so
-        // custody re-syncs a profile-derived artifact such as Slack's teamId.
+        // Identical inline material over an authorized grant rebuilds nothing.
+        // The live credential still takes the committed one, whose expiry may
+        // have moved, and custody re-syncs, since the profile may have changed
+        // (renamed login, moved workspace) under a profile-derived artifact such
+        // as Slack's teamId.
         const current = this.liveCreds.get(grant);
         if (this.grantState.get(grant) === "authorized" && current && sameMaterial(current, cred)) {
-          await this.syncCustody(grant, current);
+          this.liveCreds.set(grant, cred);
+          await this.syncCustody(grant, cred);
         } else {
           await this.activateGrantInMemory(grant, cred);
         }
