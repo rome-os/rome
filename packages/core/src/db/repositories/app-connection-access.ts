@@ -532,53 +532,77 @@ export class AppConnectionAccessRepository {
     now = new Date(),
   ): Promise<number> {
     return this.db.transaction((tx) => {
-      const unstarted = tx
-        .update(appConnectionInvocations)
-        .set({
-          status: "failed",
-          errorCode: "capability_unavailable",
-          input: null,
-          updatedAt: now,
-        })
-        .where(eq(appConnectionInvocations.status, "ready"))
-        .run();
-      const uncertain = tx
-        .update(appConnectionInvocations)
-        .set({
-          status: "outcome_unknown",
-          errorCode: "outcome_unknown",
-          input: null,
-          updatedAt: now,
-        })
-        .where(eq(appConnectionInvocations.status, "running"))
-        .run();
       const activeApprovals = new Set(activeApprovalInvocationIds);
-      const orphanedApprovals = tx
-        .select({ id: appConnectionInvocations.id })
+      const interrupted = tx
+        .select()
         .from(appConnectionInvocations)
-        .where(eq(appConnectionInvocations.status, "pending_approval"))
-        .all()
-        .filter(({ id }) => !activeApprovals.has(id));
-      let orphaned = 0;
-      for (const { id } of orphanedApprovals) {
+        .where(
+          inArray(appConnectionInvocations.status, ["ready", "pending_approval", "running"]),
+        )
+        .all();
+      let recovered = 0;
+      for (const invocation of interrupted) {
+        if (invocation.status === "pending_approval" && activeApprovals.has(invocation.id)) {
+          continue;
+        }
+        const outcomeUnknown = invocation.status === "running";
+        const errorCode = outcomeUnknown ? "outcome_unknown" : "capability_unavailable";
         const result = tx
           .update(appConnectionInvocations)
           .set({
-            status: "failed",
-            errorCode: "capability_unavailable",
+            status: outcomeUnknown ? "outcome_unknown" : "failed",
+            errorCode,
             input: null,
             updatedAt: now,
           })
           .where(
             and(
-              eq(appConnectionInvocations.id, id),
-              eq(appConnectionInvocations.status, "pending_approval"),
+              eq(appConnectionInvocations.id, invocation.id),
+              eq(appConnectionInvocations.status, invocation.status),
             ),
           )
           .run();
-        orphaned += Number(result.changes ?? 0);
+        if (Number(result.changes ?? 0) === 0) continue;
+
+        const requiredApproval =
+          invocation.status === "running" &&
+          invocation.sideEffects === "write" &&
+          Boolean(
+            tx
+              .select({ seq: appConnectionAudit.seq })
+              .from(appConnectionAudit)
+              .where(
+                and(
+                  eq(appConnectionAudit.appId, invocation.appId),
+                  eq(appConnectionAudit.executionId, invocation.id),
+                  eq(appConnectionAudit.approval, "pending"),
+                ),
+              )
+              .limit(1)
+              .get(),
+          );
+        tx.insert(appConnectionAudit)
+          .values({
+            appId: invocation.appId,
+            connectionId: invocation.connectionId,
+            identity: invocation.identity,
+            operation: invocation.operation,
+            accessRevision: invocation.accessRevision,
+            approval:
+              invocation.status === "pending_approval"
+                ? "pending"
+                : requiredApproval
+                  ? "approved"
+                  : "not_required",
+            executionId: invocation.id,
+            requestIdHash: invocation.requestIdHash,
+            status: errorCode,
+            createdAt: now,
+          })
+          .run();
+        recovered += 1;
       }
-      return Number(unstarted.changes ?? 0) + Number(uncertain.changes ?? 0) + orphaned;
+      return recovered;
     });
   }
 

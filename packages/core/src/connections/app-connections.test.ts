@@ -1263,6 +1263,37 @@ describe("App connection broker", () => {
         errorCode: "capability_unavailable",
         input: null,
       });
+      const recoveryAudit = (await h.access.listAuditForApp("app-a")).map((entry) => ({
+        approval: entry.approval,
+        executionId: entry.executionId,
+        requestIdHash: entry.requestIdHash,
+        status: entry.status,
+      }));
+      expect(recoveryAudit).toHaveLength(3);
+      expect(recoveryAudit).toEqual(
+        expect.arrayContaining([
+          {
+            approval: "not_required",
+            executionId: "running-write",
+            requestIdHash: createHash("sha256").update(requestId).digest("hex"),
+            status: "outcome_unknown",
+          },
+          {
+            approval: "not_required",
+            executionId: "ready-write",
+            requestIdHash: createHash("sha256").update(readyRequestId).digest("hex"),
+            status: "capability_unavailable",
+          },
+          {
+            approval: "pending",
+            executionId: "orphaned-pending-write",
+            requestIdHash: createHash("sha256")
+              .update("orphaned-pending-write")
+              .digest("hex"),
+            status: "capability_unavailable",
+          },
+        ]),
+      );
     } finally {
       h.close();
     }
