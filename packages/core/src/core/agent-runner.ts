@@ -1,7 +1,7 @@
 import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../types.js";
 import type { ActionConfig, ActionRegistry } from "../actions/types.js";
 import type { DeferInput } from "./defer.js";
-import type { RoutineActivationGate } from "./mcp-facade.js";
+import type { FacadeToolDef, RoutineActivationGate } from "./mcp-facade.js";
 import type { UsageFunding } from "../usage/events.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
 import type { AgentSessionManager } from "./agent-session.js";
@@ -183,6 +183,8 @@ export interface ModelSessionParams {
    * one-off wakeup back into this same thread. Absent for sessions with no
    * live thread to wake. */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
+  /** See FacadeParams.sessionTools. */
+  sessionTools?: FacadeToolDef[];
   /** See FacadeParams.routineActivation. */
   routineActivation?: RoutineActivationGate;
   /**

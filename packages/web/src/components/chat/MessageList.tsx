@@ -8,19 +8,17 @@ import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
-import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
+import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
+import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
+import { TurnActions, turnCopyText } from "@/components/chat/TurnActions";
 import { DelegatedSubagentGroup } from "@/components/chat/DelegatedSubagentGroup";
 import { MessageRow } from "@/components/chat/MessageRow";
 import { LiveTurnActivity } from "@/components/chat/LiveTurnActivity";
 import { TurnSummaryGroup } from "@/components/chat/TurnSummaryGroup";
-import { TurnBranchButton } from "@/components/chat/TurnBranchButton";
-import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
 import { TraceTrigger } from "@/components/chat/TraceTrigger";
 import { UserMessage } from "@/components/chat/UserMessage";
 import type { AgentIdentity, ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
-import { formatMessageTimestamp } from "@/lib/message-timestamp";
-import { modelDisplayName } from "@/lib/model-display";
 
 // The block-level callbacks + resolved-interaction map threaded into
 // renderFlatEntries — a single bag instead of six loose props.
@@ -82,7 +80,12 @@ export interface MessageListProps {
   // button under settled agent turns. Guardian-only, so the live chat opts in
   // while read-only surfaces (public share, sessions viewer) omit them.
   feedback?: boolean;
+  /** `concierge` shows a texting transcript (see ConciergeTranscript). Defaults to `default`. */
+  variant?: ChatVariant;
 }
+
+/** How a chat presents itself. `concierge` is the texting-style Concierge chat. */
+export type ChatVariant = "default" | "concierge";
 
 // Submission helpers — read a handoff child's messages to drive the composer's
 // Approve affordance. Exported for Chat; pure over a message list.
@@ -189,31 +192,6 @@ function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
   return index;
 }
 
-// The raw text a copy button puts on the clipboard for an agent turn: every
-// text block (commentary + final answer) across the turn's messages, joined as
-// the markdown source — not the rendered HTML.
-function turnCopyText(messages: ChatMessage[]): string {
-  const parts: string[] = [];
-  for (const m of messages) {
-    for (const b of parseMessageEntries(m)) {
-      if (b.type === "text" && b.content.trim()) {
-        parts.push(b.content);
-      }
-    }
-  }
-  return parts.join("\n\n");
-}
-
-// A small centered line where the chat moved to another model.
-function ModelSwitchNotice({ model }: { model: string }) {
-  const { t } = useTranslation("chat");
-  return (
-    <p role="note" className="mb-4 text-center text-aux text-muted-foreground">
-      {t("modelSwitch.notice", { model: modelDisplayName(model) })}
-    </p>
-  );
-}
-
 // Stable row keys preserve inline-card drafts when the live block moves on or
 // the turn ends. Memoization keeps token updates out of the historical rows.
 const RowView = memo(function RowView({
@@ -273,7 +251,6 @@ const RowView = memo(function RowView({
   const copyText = live ? "" : turnCopyText(row.messages);
   // A row can group commentary and a final answer, so use its last saved message.
   const createdAt = live ? undefined : row.messages.at(-1)?.createdAt;
-  const timestamp = createdAt ? formatMessageTimestamp(createdAt) : "";
   // Feedback rides the same settled action row; it needs the turn identity.
   const feedbackTurn = feedback && !live ? rowTurnRef(row) : null;
   const showFeedback = !!feedbackTurn?.turnId && !!feedbackTurn.sessionId;
@@ -296,35 +273,16 @@ const RowView = memo(function RowView({
       )}
       className="group"
       footer={
-        copyText || showFeedback || timestamp ? (
-          // Hover-revealed on pointer devices, always visible on touch — mirrors the affordance
-          // under the guardian's own bubbles. `has-[[aria-pressed=true]]` keeps
-          // the row visible while the feedback draft is open (its popover is
-          // portaled, so group-focus-within can't see it) and once a rating is
-          // recorded.
-          <div className="-ml-[var(--control-action-offset)] mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
-            {copyText ? <CopyMessageButton text={copyText} /> : null}
-            {showFeedback && feedbackTurn?.turnId ? (
-              <TurnFeedbackButtons
-                key={`${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
-                sessionId={feedbackTurn.sessionId}
-                turnId={feedbackTurn.turnId}
-              />
-            ) : null}
-            {showBranch && feedbackTurn?.turnId ? (
-              <TurnBranchButton
-                key={`branch:${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
-                sessionId={feedbackTurn.sessionId}
-                turnId={feedbackTurn.turnId}
-              />
-            ) : null}
-            {timestamp ? (
-              <time dateTime={createdAt} className="ml-2 text-aux text-muted-foreground">
-                {timestamp}
-              </time>
-            ) : null}
-          </div>
-        ) : null
+        <TurnActions
+          copyText={copyText}
+          feedbackTurn={
+            showFeedback && feedbackTurn?.turnId
+              ? { sessionId: feedbackTurn.sessionId, turnId: feedbackTurn.turnId }
+              : null
+          }
+          showBranch={showBranch}
+          createdAt={createdAt}
+        />
       }
     >
       {!live && row.trace?.traceArchived ? <ArchivedTraceNote /> : null}
@@ -522,7 +480,49 @@ export function MessageList({
   subagentIconByName,
   actions,
   feedback,
+  variant = "default",
 }: MessageListProps) {
+  if (variant === "concierge") {
+    return (
+      <ConciergeTranscript
+        rows={rows}
+        live={live}
+        actions={actions}
+        contentRef={contentRef}
+        feedback={feedback}
+      />
+    );
+  }
+  return (
+    <TranscriptMessageList
+      rows={rows}
+      live={live}
+      selection={selection}
+      contentRef={contentRef}
+      onOpenLiveTrace={onOpenLiveTrace}
+      onOpenStoredTrace={onOpenStoredTrace}
+      onOpenSubagentTrace={onOpenSubagentTrace}
+      activeTraceTarget={activeTraceTarget}
+      subagentIconByName={subagentIconByName}
+      actions={actions}
+      feedback={feedback}
+    />
+  );
+}
+
+function TranscriptMessageList({
+  rows,
+  live,
+  selection,
+  contentRef,
+  onOpenLiveTrace,
+  onOpenStoredTrace,
+  onOpenSubagentTrace,
+  activeTraceTarget,
+  subagentIconByName,
+  actions,
+  feedback,
+}: Omit<MessageListProps, "variant">) {
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;

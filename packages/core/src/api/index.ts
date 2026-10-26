@@ -34,6 +34,7 @@ import { approvalsRoutes } from "./routes/approvals.js";
 import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
 import { webhookRoutes } from "./routes/webhooks.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
+import { conciergeRoutes } from "./routes/concierge.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { appKeysRoutes } from "./routes/app-keys.js";
 import { uptimeRoutes } from "./routes/uptime.js";
@@ -178,6 +179,7 @@ export function buildApp(
   api.route("/", chatSettingsRoutes(deps));
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
+  api.route("/", conciergeRoutes(deps));
   api.route("/", devicesRoutes(deps));
   api.route("/", appKeysRoutes(deps));
   api.route("/", routinesRoutes(deps));

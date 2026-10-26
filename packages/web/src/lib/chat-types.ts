@@ -34,6 +34,8 @@ export interface ChatSession {
   agentName?: string | null;
   /** The chat a side chat branched from, kept once it is promoted to a chat. */
   parentSessionId?: string | null;
+  /** Why the chat exists, when something other than the guardian started it, e.g. `concierge`. */
+  triggerKind?: string | null;
   /** ISO timestamp when the chat was archived (soft-hidden), or null. */
   archivedAt?: string | null;
   /** ISO timestamp when this chat was pinned by the guardian, or null. */

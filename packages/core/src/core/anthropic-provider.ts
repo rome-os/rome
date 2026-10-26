@@ -565,6 +565,7 @@ export class AnthropicProvider implements ModelProvider {
       supportsInteractiveSurface: params.supportsInteractiveSurface,
       interactiveSurfaceDetached: params.interactiveSurfaceDetached,
       executeDefer,
+      sessionTools: params.sessionTools,
       routineActivation,
     });
 

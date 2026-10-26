@@ -719,6 +719,11 @@
         "description": "Applies to the guardian's direct chats on Telegram and Feishu. On Telegram, replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
         "toggleLabel": "Stream replies as they are written"
       },
+      "concierge": {
+        "title": "Concierge",
+        "description": "Adds one chat under Chats where your agent texts with you in short messages and hands longer work to task chats you can open.",
+        "toggleLabel": "Show Concierge in Chats"
+      },
       "feishuStreamingStyle": {
         "title": "Feishu streaming style",
         "description": "Messages take up to 20 edits each, then the reply goes on in a new one. Cards show the text as it is typed.",

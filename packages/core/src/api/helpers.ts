@@ -109,6 +109,7 @@ export function toWebchatSessionResponse(
     deviceFolder?: DeviceFolder | null;
     agentName?: string | null;
     parentSessionId?: string | null;
+    triggerKind?: string | null;
     archivedAt?: Date | null;
     pinnedAt?: Date | null;
     createdAt: Date;
@@ -132,6 +133,7 @@ export function toWebchatSessionResponse(
     deviceFolder: session.deviceFolder ?? null,
     agentName: session.agentName ?? null,
     parentSessionId: session.parentSessionId ?? null,
+    triggerKind: session.triggerKind ?? null,
     archivedAt: session.archivedAt ? session.archivedAt.toISOString() : null,
     pinnedAt: session.pinnedAt ? session.pinnedAt.toISOString() : null,
     createdAt: session.createdAt.toISOString(),

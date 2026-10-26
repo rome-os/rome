@@ -77,6 +77,7 @@ import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries"
 import {
   MessageList,
   type BlockActions,
+  type ChatVariant,
   findActiveSubmission,
   findLastSubmission,
   hasPendingApprovalConfirmation,
@@ -87,6 +88,7 @@ import {
   type ChatComposerSendControls,
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
+import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import type {
   AgentMention,
   ChatErrorNotice,
@@ -296,6 +298,12 @@ export interface ChatProps {
    * The Mac app passes its title bar's, so the window has one row on top.
    */
   navbarSlot?: string;
+  /**
+   * `concierge` makes this the texting-style Concierge chat: a new message
+   * interrupts the running turn, and the transcript and composer drop the
+   * trace, turn summary, pickers, and Stop.
+   */
+  variant?: ChatVariant;
 }
 
 export function Chat({
@@ -312,7 +320,9 @@ export function Chat({
   initialAgentMention,
   composerRef: hostComposerRef,
   navbarSlot,
+  variant = "default",
 }: ChatProps) {
+  const concierge = variant === "concierge";
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
   const presentationMode = usePresentationMode();
@@ -1541,10 +1551,12 @@ export function Chat({
           if (snapshot.largeModelSelection)
             formData.set("largeModelSelection", snapshot.largeModelSelection);
           formData.set("reasoningEffort", snapshot.reasoningEffort);
+          if (concierge) formData.set("priority", "now");
           for (const upload of snapshot.uploads) {
             formData.append("files", upload.file);
           }
-          const ws = snapshotWorkspaceForSend(workspaceContextRegistry);
+          // Concierge hands work to task chats, which see their own workspace.
+          const ws = concierge ? null : snapshotWorkspaceForSend(workspaceContextRegistry);
           if (ws) formData.set("workspace", JSON.stringify(ws));
           // POST returns JSON `{ turnId }`. SSE lives on a
           // separate GET keyed by turnId.
@@ -1559,7 +1571,14 @@ export function Chat({
         snapshot.uploads.length === 0 ? snapshot.inputId : undefined,
       );
     },
-    [runTurnLifecycle, workspaceContextRegistry, t, onSessionCreated, notifySessionsChanged],
+    [
+      runTurnLifecycle,
+      workspaceContextRegistry,
+      t,
+      onSessionCreated,
+      notifySessionsChanged,
+      concierge,
+    ],
   );
 
   // An inline app component submitted its result. Posts an `interaction_result`
@@ -2057,7 +2076,11 @@ export function Chat({
                 query MUST match ChatTimelineRail's visibility gate. */}
             <div
               ref={attachScroller}
-              className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain @min-[48rem]/transcript:pl-8"
+              className={cn(
+                "relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
+                // Concierge has no timeline rail, so no lane for it.
+                !concierge && "@min-[48rem]/transcript:pl-8",
+              )}
             >
               {mainSessionId ? (
                 <MessageList
@@ -2089,6 +2112,7 @@ export function Chat({
                   subagentIconByName={subagentIconByName}
                   actions={blockActions}
                   feedback
+                  variant={variant}
                 />
               ) : (
                 emptyState
@@ -2175,6 +2199,20 @@ export function Chat({
                         {t("archived.unarchive")}
                       </Button>
                     </div>
+                  ) : concierge ? (
+                    <ConciergeComposer
+                      ref={composerRef}
+                      boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                      onSend={handleComposerSend}
+                      // No Stop: the next message interrupts.
+                      isStreaming={displayedStreaming}
+                      streamError={streamError}
+                      modelSelection={
+                        chatModelPickable
+                          ? { value: chatModelValue, onChange: pickChatModel }
+                          : undefined
+                      }
+                    />
                   ) : (
                     <ChatComposer
                       persistNewChatDraft={!mainSessionId}
@@ -2236,12 +2274,14 @@ export function Chat({
                 <div aria-hidden data-draft-center-spacer className="hidden flex-auto md:block" />
               ) : null}
             </div>
-            <ChatTimelineRail
-              scroller={scrollerEl}
-              content={contentEl}
-              questions={timelineQuestions}
-              onJump={jumpToQuestion}
-            />
+            {concierge ? null : (
+              <ChatTimelineRail
+                scroller={scrollerEl}
+                content={contentEl}
+                questions={timelineQuestions}
+                onJump={jumpToQuestion}
+              />
+            )}
           </div>
         </div>
         <TraceDrawer

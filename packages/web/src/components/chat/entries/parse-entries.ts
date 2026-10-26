@@ -33,6 +33,7 @@ const REQUIRED_FIELDS = {
   interaction_result: { toolUseId: "string" },
   handback_approved: {},
   error: { error: "string" },
+  task_chat: { chatId: "string", title: "string" },
 } satisfies {
   [K in TranscriptPart["type"]]: Partial<
     Record<Exclude<keyof Extract<TranscriptPart, { type: K }>, "type">, "string" | "object">

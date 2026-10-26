@@ -12,7 +12,16 @@ import {
   FakeWebSocket,
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
+import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
 import { RecentChats } from "./RecentChats";
+
+// Concierge's chat id comes from its own query, which these tests do not
+// serve; each test that needs the entry sets the id here.
+const concierge = rs.hoisted(() => ({ chatId: null as string | null }));
+rs.mock("@/hooks/use-concierge", () => ({
+  ...conciergeModule,
+  useConciergeChatId: () => concierge.chatId,
+}));
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -23,6 +32,7 @@ afterEach(() => {
   rs.useRealTimers();
   localStorage.clear();
   rs.restoreAllMocks();
+  concierge.chatId = null;
 });
 
 interface MockSession {
@@ -139,6 +149,31 @@ function textIndex(container: HTMLElement, text: string): number {
 }
 
 describe("RecentChats", () => {
+  it("lists Concierge as its own entry and marks the task chats it started", async () => {
+    concierge.chatId = "concierge";
+    const row = (id: string, name: string) => ({
+      id,
+      name,
+      createdAt: new Date().toISOString(),
+      activityAt: new Date().toISOString(),
+      lastSeenActivityAt: null,
+      unread: false,
+      projectName: "default",
+      projectPath: "default",
+    });
+    mockSessions([
+      { ...row("concierge", "Concierge"), agentName: "core:concierge" } as MockSession,
+      { ...row("task-1", "Find flights"), triggerKind: "concierge" } as MockSession,
+    ]);
+    renderRecentChats();
+    const entry = await screen.findByRole("link", { name: "Concierge" });
+    expect(entry.getAttribute("href")).toBe("/chat/concierge");
+    const task = await screen.findByRole("link", { name: /Find flights/ });
+    expect(within(task).getByRole("img", { name: "Started by Concierge" })).toBeTruthy();
+    // The Concierge chat itself stays out of the list.
+    expect(screen.getAllByRole("link", { name: "Concierge" })).toHaveLength(1);
+  });
+
   it("defaults to All chats and persists a scope toggle across remounts", async () => {
     const fetchSpy = mockSessions([]);
     const user = userEvent.setup();

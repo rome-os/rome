@@ -2,10 +2,22 @@ import type { AgentInputState, InputStatusEvent } from "@rome-os/app-runtime";
 import type { AgentTurnHandle, AgentTurnInput, SendTurnOptions } from "./agent-session.js";
 import type { ModelSession } from "./agent-runner.js";
 
+/**
+ * How an input that arrives during a running turn is handled. `next` steers it
+ * into that turn when the provider can, else queues it. `now` ends that turn
+ * and starts a new one with it. Either starts a turn when none runs.
+ */
+export type InputPriority = "now" | "next";
+
+/** The interrupt reason a `now` input ends the running turn with. */
+export const SUPERSEDED_INTERRUPT_REASON = "superseded";
+
 export interface SubmitInputOptions extends SendTurnOptions {
   /** Called once per actual run, including a late input's follow-up run. */
   onTurn(handle: AgentTurnHandle): void;
   onInputStatus?(status: InputStatusEvent): Promise<void> | void;
+  /** Defaults to `next`. */
+  priority?: InputPriority;
 }
 
 export interface AgentInputReceipt {
@@ -25,9 +37,15 @@ interface Entry {
 interface ActiveInputTurn {
   handle: AgentTurnHandle;
   first: Entry;
+  /** Inputs folded into `first`'s prompt when the turn started. Their status follows `first`. */
+  bound: Entry[];
+  /** Inputs steered into the turn, in dispatch order. */
+  steered: Entry[];
   ready: boolean;
   pending?: Entry;
   sealed: boolean;
+  /** A `now` input ended this turn. */
+  superseded: boolean;
   dispatch?: Promise<void>;
 }
 
@@ -35,6 +53,8 @@ interface ActiveInputTurn {
 export class AgentInputQueue {
   private active?: ActiveInputTurn;
   private queued: Entry[] = [];
+  /** Inputs of a superseded turn that the provider never consumed, for the next turn. */
+  private carried: Entry[] = [];
   private entries = new Map<string, Entry>();
   private closed = false;
 
@@ -48,7 +68,7 @@ export class AgentInputQueue {
   ) {}
 
   get busy(): boolean {
-    return !!this.active || this.queued.length > 0;
+    return !!this.active || this.queued.length > 0 || this.carried.length > 0;
   }
 
   submit(
@@ -67,22 +87,77 @@ export class AgentInputQueue {
     entry.turnId = this.active.handle.turnId;
     this.queued.push(entry);
     void this.update(entry, "queued").catch(this.reportError);
+    if (options.priority === "now") {
+      this.supersede(this.active);
+      return { inputId: input.inputId, turnId: entry.turnId, disposition: "queued" };
+    }
     const disposition = this.active.ready && !this.active.sealed ? "steering" : "queued";
     this.flush();
     return { inputId: input.inputId, turnId: entry.turnId, disposition };
   }
 
+  /** Whether `turnId` is a turn this queue started. */
+  owns(turnId: string): boolean {
+    return this.active?.handle.turnId === turnId;
+  }
+
+  // Sealing first keeps the new input from steering into the turn it ends.
+  private supersede(active: ActiveInputTurn): void {
+    if (active.superseded) return;
+    active.superseded = true;
+    active.sealed = true;
+    void active.handle.interrupt?.(SUPERSEDED_INTERRUPT_REASON).catch(this.reportError);
+  }
+
+  // A turn that starts after a superseded one also takes that turn's
+  // unconsumed inputs (in front, in order) and every other queued `now` input,
+  // which would only supersede it again. They ride as one prompt, so the model
+  // answers the burst once.
   private start(entry: Entry): void {
-    const handle = this.startTurn(entry.input, entry.options);
-    entry.turnId = handle.turnId;
-    this.active = { handle, first: entry, ready: false, sealed: false };
-    void this.update(entry, "queued").catch(this.reportError);
+    const carried = this.carried;
+    this.carried = [];
+    const absorbed: Entry[] = [];
+    if (entry.options.priority === "now") {
+      const rest: Entry[] = [];
+      for (const queued of this.queued) {
+        if (queued.options.priority === "now") absorbed.push(queued);
+        else rest.push(queued);
+      }
+      this.queued = rest;
+    }
+    const parts = [...carried, entry, ...absorbed];
+    const input =
+      parts.length === 1
+        ? entry.input
+        : {
+            ...entry.input,
+            prompt: parts.map((part) => part.input.prompt).join("\n\n"),
+            images: parts.flatMap((part) => part.input.images ?? []),
+          };
+    const handle = this.startTurn(input, entry.options);
+    const bound = [...carried, ...absorbed];
+    this.active = {
+      handle,
+      first: entry,
+      bound,
+      steered: [],
+      ready: false,
+      sealed: false,
+      superseded: false,
+    };
+    for (const part of parts) {
+      part.turnId = handle.turnId;
+      void this.update(part, "queued").catch(this.reportError);
+    }
     entry.options.onTurn(handle);
   }
 
   async beforeSend(turnId: string): Promise<void> {
     const active = this.active;
-    if (active?.handle.turnId === turnId) await this.update(active.first, "submitted");
+    if (active?.handle.turnId !== turnId) return;
+    await Promise.all(
+      [active.first, ...active.bound].map((entry) => this.update(entry, "submitted")),
+    );
   }
 
   ready(turnId: string): void {
@@ -108,6 +183,10 @@ export class AgentInputQueue {
       active.pending = undefined;
       this.flush();
     }
+    // Bound inputs reached the provider inside `first`'s prompt.
+    if (entry === active.first && (event.state === "consumed" || event.state === "failed")) {
+      await Promise.all(active.bound.map((bound) => this.update(bound, event.state)));
+    }
   }
 
   private flush(): void {
@@ -117,6 +196,7 @@ export class AgentInputQueue {
     const entry = this.queued.shift();
     if (!entry) return;
     active.pending = entry;
+    active.steered.push(entry);
     entry.turnId = active.handle.turnId;
     active.dispatch = (async () => {
       try {
@@ -168,13 +248,25 @@ export class AgentInputQueue {
     if (active?.handle.turnId !== turnId) return;
     active.sealed = true;
     this.active = undefined;
-    for (const entry of [active.first, active.pending]) {
-      if (entry && (entry.state === "accepted" || entry.state === "submitted")) {
-        void this.update(entry, "unknown").catch(this.reportError);
+    if (active.superseded) {
+      // The provider never saw these, or saw them only in a turn it dropped
+      // (Claude resumes from its transcript, which lacks an input it had not
+      // read yet). An input the provider retained is already queued again.
+      this.carried = [active.first, ...active.bound, ...active.steered].filter(
+        (entry) =>
+          entry.state !== "consumed" && entry.state !== "cancelled" && !this.queued.includes(entry),
+      );
+    } else {
+      for (const entry of [active.first, ...active.bound, active.pending]) {
+        if (entry && (entry.state === "accepted" || entry.state === "submitted")) {
+          void this.update(entry, "unknown").catch(this.reportError);
+        }
       }
-    }
-    if (active.first.state === "queued" && !this.queued.includes(active.first)) {
-      void this.update(active.first, "failed").catch(this.reportError);
+      for (const entry of [active.first, ...active.bound]) {
+        if (entry.state === "queued" && !this.queued.includes(entry)) {
+          void this.update(entry, "failed").catch(this.reportError);
+        }
+      }
     }
     this.startNext();
     // Retain a bounded deduplication window; durable identities live in the repository.
@@ -189,7 +281,7 @@ export class AgentInputQueue {
 
   private startNext(): void {
     if (this.active || this.closed) return;
-    const next = this.queued.shift();
+    const next = this.queued.shift() ?? this.carried.shift();
     if (next) this.start(next);
   }
 
@@ -197,10 +289,11 @@ export class AgentInputQueue {
     const active = this.active;
     if (active?.handle.turnId !== turnId) return;
     active.sealed = true;
-    for (const entry of [active.pending, ...this.queued]) {
+    for (const entry of [active.pending, ...this.queued, ...this.carried]) {
       if (entry) void this.update(entry, "cancelled").catch(this.reportError);
     }
     this.queued = [];
+    this.carried = [];
   }
 
   close(): void {

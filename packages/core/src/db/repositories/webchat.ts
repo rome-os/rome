@@ -1,4 +1,5 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
+import type { TranscriptPart } from "@rome/api-types/chat";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -337,6 +338,7 @@ const sessionSelectFields = {
   // The sidebar groups a device-folder chat under its folder, not its project.
   deviceFolder: romeSessions.deviceFolder,
   agentName: romeSessions.agentName,
+  triggerKind: romeSessions.triggerKind,
   archivedAt: romeSessions.archivedAt,
   pinnedAt: romeSessions.pinnedAt,
   createdAt: romeSessions.createdAt,
@@ -1824,6 +1826,17 @@ export class WebChatRepository {
       .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "fork")));
   }
 
+  /** Marks why a chat exists. Read by the sessions explorer and the chat list. */
+  async setSessionTrigger(
+    id: string,
+    trigger: { triggerKind: string; triggerName: string | null },
+  ): Promise<void> {
+    await this.db
+      .update(romeSessions)
+      .set({ triggerKind: trigger.triggerKind, triggerName: trigger.triggerName })
+      .where(eq(romeSessions.id, id));
+  }
+
   async updateSessionName(id: string, name: string) {
     const rows = await this.db
       .update(romeSessions)
@@ -2107,7 +2120,7 @@ export class WebChatRepository {
     sessionId: string,
     turnId: string | null,
     role: string,
-    parts: MessagePart[],
+    parts: TranscriptPart[],
     id: string = randomUUID(),
   ): Promise<StoredWebchatMessage> {
     const message = await this.db.transaction((tx) => {
@@ -2217,7 +2230,7 @@ export class WebChatRepository {
   async addBackendMessage(
     sessionId: string,
     turnId: string,
-    parts: MessagePart[],
+    parts: TranscriptPart[],
   ): Promise<StoredWebchatMessage> {
     return this.insertBackendMessage(sessionId, turnId, "assistant", parts);
   }

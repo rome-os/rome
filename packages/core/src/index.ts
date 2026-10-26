@@ -138,6 +138,11 @@ import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
+import { resolveSessionPolicy } from "./core/session-policy.js";
+import { ConciergeService } from "./concierge/service.js";
+import { buildConciergeTools } from "./concierge/tools.js";
+import { startConciergeEvents } from "./concierge/events.js";
+import { createLoopbackChatApi } from "./concierge/chat-api.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
@@ -876,6 +881,16 @@ async function main() {
       return access ? credentialFingerprint(access.token) : null;
     },
   });
+  // Concierge (rome-os/rome#1344). Its backend turns run through the runner
+  // created below, by the time any turn finishes.
+  const concierge = new ConciergeService({
+    settingsRepo,
+    webchatRepo,
+    sessionManager,
+    aiToolState,
+    chatApi: createLoopbackChatApi(),
+    runBackendTurn: (params) => backendTurnRunner.runAndDeliver(params),
+  });
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
@@ -904,6 +919,7 @@ async function main() {
       },
       connectionKindOfChannel,
       eventSources,
+      sessionTools: (context) => buildConciergeTools(concierge, context),
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
@@ -970,7 +986,12 @@ async function main() {
     resolveDeviceFolder: (channel, threadId) =>
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
+    isTextPrivate: (agentName) =>
+      agentLoader.has(agentName) &&
+      resolveSessionPolicy(agentLoader.get(agentName)).finalText === "private",
   });
+
+  startConciergeEvents(concierge, lifecycleDispatcher);
 
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
@@ -1643,6 +1664,7 @@ async function main() {
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      concierge,
       feedback: feedbackClient,
       provisionNodeCaller,
       autoConnectEmail: () => connectEmailWithoutClick("seat-created"),

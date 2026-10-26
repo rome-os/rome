@@ -16,6 +16,7 @@ import {
 } from "../paths.js";
 import { getInternalApiBaseUrl } from "../internal-api-url.js";
 import { getWebchatProjectsRoot, resolveWebchatProjectPath } from "../webchat/projects.js";
+import { resolveSessionPolicy } from "./session-policy.js";
 
 // Workspace context injection.
 //
@@ -469,7 +470,7 @@ export class PromptBuilder {
   }
 
   private buildRuntimeContextSection(config: AgentConfig): string | null {
-    if (config.name !== "main") {
+    if (!resolveSessionPolicy(config).loadMemory) {
       return null;
     }
 
@@ -556,7 +557,7 @@ export class PromptBuilder {
   }
 
   private buildMemorySection(config: AgentConfig): string | null {
-    if (config.name !== "main") {
+    if (!resolveSessionPolicy(config).loadMemory) {
       return null;
     }
 
@@ -569,7 +570,7 @@ export class PromptBuilder {
   }
 
   private buildProjectSummariesSection(config: AgentConfig): string | null {
-    if (config.name !== "main") {
+    if (!resolveSessionPolicy(config).loadMemory) {
       return null;
     }
 

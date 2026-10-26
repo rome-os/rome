@@ -135,3 +135,107 @@ describe("conversational input lane", () => {
     expect(() => s.submit("c")).toThrow("closed");
   });
 });
+
+function prioritySetup() {
+  const started: AgentTurnInput[] = [];
+  const statuses: InputStatusEvent[] = [];
+  const interrupts: Array<{ turnId: string; reason?: string }> = [];
+  const steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolvedValue("accepted");
+  const queue = new AgentInputQueue(
+    (input) => {
+      started.push(input);
+      const turnId = `turn-${started.length}`;
+      return {
+        turnId,
+        events: { async *[Symbol.asyncIterator]() {} },
+        turnContext: context.active(),
+        interrupt: async (reason) => {
+          interrupts.push({ turnId, reason });
+        },
+      };
+    },
+    () => ({ steerUserInput: steer }),
+    rs.fn(),
+  );
+  const submit = (inputId: string, priority?: "now" | "next") =>
+    queue.submit(
+      { inputId, prompt: inputId },
+      {
+        priority,
+        onTurn: () => {},
+        onInputStatus: (status) => {
+          statuses.push(status);
+        },
+      },
+    );
+  const lastState = (inputId: string) =>
+    statuses.filter((status) => status.inputId === inputId).at(-1)?.state;
+  return { queue, submit, started, statuses, interrupts, steer, lastState };
+}
+
+describe("input priority", () => {
+  it("ends the running turn for a now input and never steers it in", async () => {
+    const s = prioritySetup();
+    s.submit("a");
+    await s.queue.beforeSend("turn-1");
+    s.queue.ready("turn-1");
+    await s.queue.observe({ type: "input_status", inputId: "a", state: "consumed" }, "turn-1");
+    const b = s.submit("b", "now");
+    await tick();
+    expect(b.disposition).toBe("queued");
+    expect(s.steer).not.toHaveBeenCalled();
+    expect(s.interrupts).toEqual([{ turnId: "turn-1", reason: "superseded" }]);
+    s.queue.finish("turn-1");
+    // `a` was consumed, so it is in the provider's history and is not repeated.
+    expect(s.started.map((input) => input.prompt)).toEqual(["a", "b"]);
+  });
+
+  it("carries an input the provider never consumed into the next turn", async () => {
+    const s = prioritySetup();
+    s.submit("a");
+    await s.queue.beforeSend("turn-1");
+    s.submit("b", "now");
+    s.queue.finish("turn-1");
+    expect(s.started.at(-1)).toMatchObject({ inputId: "b", prompt: "a\n\nb" });
+    await s.queue.observe({ type: "input_status", inputId: "b", state: "consumed" }, "turn-2");
+    expect(s.lastState("a")).toBe("consumed");
+    expect(s.statuses.filter((status) => status.inputId === "a").at(-1)?.turnId).toBe("turn-2");
+  });
+
+  it("answers a burst of now inputs in one turn", async () => {
+    const s = prioritySetup();
+    s.submit("a", "now");
+    s.submit("b", "now");
+    s.submit("c", "now");
+    expect(s.interrupts).toHaveLength(1);
+    s.queue.finish("turn-1");
+    expect(s.started.map((input) => input.prompt)).toEqual(["a", "a\n\nb\n\nc"]);
+  });
+
+  it("carries an accepted steer that the superseded turn never consumed", async () => {
+    const s = prioritySetup();
+    s.submit("a");
+    s.queue.ready("turn-1");
+    await s.queue.observe({ type: "input_status", inputId: "a", state: "consumed" }, "turn-1");
+    s.submit("b");
+    await tick();
+    expect(s.lastState("b")).toBe("accepted");
+    s.submit("c", "now");
+    s.queue.finish("turn-1");
+    expect(s.started.at(-1)?.prompt).toBe("b\n\nc");
+  });
+
+  it("keeps a guardian stop from replaying anything", async () => {
+    const s = prioritySetup();
+    s.submit("a");
+    await s.queue.beforeSend("turn-1");
+    s.queue.ready("turn-1");
+    s.submit("b");
+    await tick();
+    await s.queue.seal("turn-1");
+    s.queue.finish("turn-1");
+    await tick();
+    expect(s.started).toHaveLength(1);
+    expect(s.lastState("a")).toBe("unknown");
+  });
+});

@@ -86,8 +86,25 @@ import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import type { BackendEmitOptions, BackendSessionTask } from "../../actions/backend-turn.js";
+import { z } from "zod";
+import { resolveSessionPolicy } from "../../core/session-policy.js";
 
 const log = createLogger("api:webchat");
+
+const inputPrioritySchema = z.enum(["now", "next"]).optional();
+
+// The agent's config when the loader has it. An agent the loader cannot
+// resolve gets the default policy; the turn reports the missing agent itself.
+function agentPolicySource(
+  agentLoader: ApiDeps["agentLoader"],
+  agentName: string,
+): Parameters<typeof resolveSessionPolicy>[0] {
+  try {
+    return agentLoader.get(agentName);
+  } catch {
+    return { name: agentName };
+  }
+}
 const ENABLE_IMPERSONATION_SETTING_KEY = "enableImpersonation";
 const SESSIONS_HOST_APP_ID = "sessions";
 
@@ -3116,6 +3133,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
      * turn only; never persisted.
      */
     workspace?: WorkspaceContextSnapshot;
+    /** How the input treats a running turn. See `InputPriority`. */
+    priority?: unknown;
   };
 
   const parseChatSendBody = async (c: Context): Promise<SendBody> => {
@@ -3158,6 +3177,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         skillName: getString("skillName"),
         files,
         workspace,
+        priority: getString("priority"),
       };
     }
     return await c.req.json<SendBody>().catch(() => ({}) as SendBody);
@@ -3176,6 +3196,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     const inputId = body.inputId ?? randomUUID();
     const uploadedFiles = Array.isArray(body.files) ? body.files : [];
+    const priority = inputPrioritySchema.safeParse(body.priority);
+    if (!priority.success) {
+      return c.json({ error: 'priority must be "now" or "next"' }, 400);
+    }
 
     // A resolution from an app interaction surface is a valid turn trigger even
     // with no typed text: it re-drives the calling agent with the artifact.
@@ -3404,6 +3428,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
 
+    const policy = resolveSessionPolicy(agentPolicySource(deps.agentLoader, agentName));
+
     // A handoff child session minted with a handback contract exposes the
     // conversational `submit_output` tool on every turn (interactive summon).
     // Re-derived from the row on every acquire, so it survives backend restarts.
@@ -3487,7 +3513,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
         const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
         enqueueStream(sessionId, stream);
-        void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
+        if (policy.autoTitle) {
+          void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
+        }
         await deps.webchatRepo.addMessage(
           randomUUID(),
           sessionId,
@@ -3544,7 +3572,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
       stream.interrupt = handle.interrupt;
       enqueueStream(sessionId, stream);
-      void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
+      if (policy.autoTitle) {
+        void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
+      }
 
       const unsubscribeStatus = agentSess.onStatusChange((evt) => {
         emitToStream(
@@ -3639,7 +3669,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 // ordered with any cards) as the turn streams. The final answer
                 // goes out once at turn end via send_message.
                 const isCommentary =
-                  msg.turnPhase === "commentary" && msg.content.trim().length > 0;
+                  policy.finalText === "deliver" &&
+                  msg.turnPhase === "commentary" &&
+                  msg.content.trim().length > 0;
                 if (isCommentary) {
                   try {
                     await deps.webchatRepo.addBackendMessage(sessionId, turnId, [
@@ -3929,6 +3961,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             ) {
               resultContent = lastCompletedText.content;
             }
+            // A private turn's text stays in its trace.
+            if (policy.finalText === "private") resultContent = "";
             if (resultContent) {
               const reusableResultBlockIx =
                 lastCompletedText?.turnPhase === undefined &&
@@ -4034,6 +4068,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let started: ReturnType<typeof attachTurn> | undefined;
     const options = {
       links: turnLinks,
+      priority: priority.data,
       threadContext,
       romeSessionId: sessionId,
       romeSessionType: session.type as RomeSessionType,
