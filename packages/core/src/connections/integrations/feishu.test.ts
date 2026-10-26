@@ -1,7 +1,7 @@
 // The Feishu descriptor. Layers under test:
 //   1. isFeishuAuthError / descriptor shape — pure, no transport.
-//   2. credentialsPaste confer: a transient connect validates the pasted app
-//      credentials (bad creds → connect rejects → confer refuses).
+//   2. credentialsPaste grant: a transient connect validates the pasted app
+//      credentials (bad creds → connect rejects → grant refuses).
 //   3. Talker fault mapping via a fake LarkChannel (injected through
 //      createChannel): a bad-credential connect at start → CredentialRejected,
 //      an `error` event → CredentialRejected (auth) or Disconnected (transport).
@@ -196,7 +196,7 @@ describe("feishu descriptor shape", () => {
     channel.connectError = new LarkChannelError("permission_denied", "bad app secret");
     const scheme = makeDescriptor(channel).auth;
     await expect(
-      scheme.confer({
+      scheme.obtain({
         prompt: async () => ({ appId: "cli_x", appSecret: "wrong", domain: "feishu" }),
       }),
     ).rejects.toBeInstanceOf(LarkChannelError);
@@ -204,10 +204,10 @@ describe("feishu descriptor shape", () => {
     expect(channel.connected).toBe(false);
   });
 
-  it("confers a non-expiring credential from a good connect", async () => {
+  it("grants a non-expiring credential from a good connect", async () => {
     const channel = new FakeLarkChannel();
     const scheme = makeDescriptor(channel).auth;
-    const cred = await scheme.confer({
+    const cred = await scheme.obtain({
       prompt: async () => ({ appId: "cli_x", appSecret: "s3cr3t", domain: "feishu" }),
     });
     expect(cred).toEqual({
@@ -225,7 +225,7 @@ describe("feishu talk lifecycle", () => {
     const conn = await registry.connect("feishu");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["app"] });
 
-    await registry.confer(conn.connectionKind, conn.id, "app", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "app", validCred());
     await flush();
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     expect(channel.connected).toBe(true);
@@ -390,12 +390,12 @@ describe("feishu Talker fault mapping", () => {
 });
 
 describe("feishu app-auth fault drives renew-once-then-degrade", () => {
-  it("relocks talk after an auth error (credentialsPaste renew answers re-confer)", async () => {
+  it("relocks talk after an auth error (credentialsPaste renew answers fix)", async () => {
     const channel = new FakeLarkChannel();
     const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeDescriptor(channel));
     const conn = await registry.connect("feishu");
-    await registry.confer(conn.connectionKind, conn.id, "app", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "app", validCred());
     await flush();
     expect(conn.status().talk).toEqual({ state: "unlocked" });
 
@@ -411,7 +411,7 @@ describe("feishu app-auth fault drives renew-once-then-degrade", () => {
       reUnlocked = c;
     });
     channel.connectError = null;
-    await registry.confer(conn.connectionKind, conn.id, "app", {
+    await registry.giveGrant(conn.connectionKind, conn.id, "app", {
       material: { appId: "cli_x", appSecret: "fresh", domain: "feishu" },
       expiresAt: "never",
     });

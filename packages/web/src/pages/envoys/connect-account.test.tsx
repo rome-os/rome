@@ -90,7 +90,7 @@ function mockServer(
       }
       return Response.json({
         cid: "cid-new",
-        state: { status: "done", conferral: added ? { connectionId: added.id } : {} },
+        state: { status: "done", grant: added ? { connectionId: added.id } : {} },
         reattached: false,
       });
     }

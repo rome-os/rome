@@ -190,7 +190,7 @@ describe("grantProfileFromBundle", () => {
     });
   });
 
-  it("shopify: fails the conferral when Rome Cloud doesn't name the store's domain", () => {
+  it("shopify: fails the grant when Rome Cloud doesn't name the store's domain", () => {
     const bundle: OAuthTokenBundle = { accessToken: "shpat_live", raw: {} };
     expect(() => grantProfileFromBundle("shopify", bundle, { displayName: "Acme" })).toThrow(
       /myshopify\.com/,
@@ -234,7 +234,7 @@ describe("grantProfileFromBundle", () => {
   });
 });
 
-describe("a malformed conferral fails loudly and stores nothing", () => {
+describe("a malformed grant fails loudly and stores nothing", () => {
   it("importProviderBundle rejects and leaves no connection behind", async () => {
     const registry = makeRegistry(freshDb());
     await expect(
@@ -250,7 +250,7 @@ async function grantProfile(registry: ConnectionRegistry, provider: OAuthProvide
   return rec;
 }
 
-describe("importProviderBundle records the conferral profile", () => {
+describe("importProviderBundle records the grant profile", () => {
   it("writes the typed profile on the grant in the same import as the credential", async () => {
     const registry = makeRegistry(freshDb());
     await importProviderBundle(
@@ -281,7 +281,7 @@ describe("importProviderBundle records the conferral profile", () => {
     expect(rec?.profile).toBeUndefined();
   });
 
-  it("re-conferral replaces both the profile and the credential", async () => {
+  it("fix replaces both the profile and the credential", async () => {
     const registry = makeRegistry(freshDb());
     await importProviderBundle(
       registry,
@@ -304,7 +304,7 @@ describe("importProviderBundle records the conferral profile", () => {
     expect(rec?.credential?.material).toEqual({ kind: "inline", record: { accessToken: "gho_2" } });
   });
 
-  it("refreshes the profile on re-conferral even when the token is byte-identical", async () => {
+  it("refreshes the profile on fix even when the token is byte-identical", async () => {
     const registry = makeRegistry(freshDb());
     // Same access token both times, but the identity changed (renamed login,
     // broader scopes) — the profile must still land, or the grant keeps a stale one.
@@ -328,10 +328,10 @@ describe("importProviderBundle records the conferral profile", () => {
     });
   });
 
-  it("keeps the profile of the conferral that degraded — no wipe on degrade", async () => {
+  it("keeps the profile of the grant that degraded — no wipe on degrade", async () => {
     const db = freshDb();
     const registry = makeRegistry(db);
-    // A google token that has already expired, conferred with an identity.
+    // A google token that has already expired, granted with an identity.
     await importProviderBundle(
       registry,
       "google",
@@ -342,7 +342,7 @@ describe("importProviderBundle records the conferral profile", () => {
       },
       { displayName: "u", email: "u@g.com" },
     );
-    // Boot: load() renews-once (romeCloudOAuth answers "re-confer") → the grant degrades.
+    // Boot: load() renews-once (romeCloudOAuth answers "needs-fix") → the grant degrades.
     const registry2 = makeRegistry(db);
     await registry2.load();
     expect(registry2.find("google")[0].auth.grants().user).toBe("degraded");
@@ -351,7 +351,7 @@ describe("importProviderBundle records the conferral profile", () => {
     expect(rec?.profile).toEqual({ displayName: "u", email: "u@g.com", scopes: ["email"] });
   });
 
-  it("revoke clears the profile — an unauthorized grant records no conferral outcome", async () => {
+  it("revoke clears the profile — an unauthorized grant records no grant outcome", async () => {
     const registry = makeRegistry(freshDb());
     await importProviderBundle(registry, "github", { accessToken: "gho" }, { login: "octo" });
     const conn = registry.find("github")[0];

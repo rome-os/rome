@@ -98,17 +98,17 @@ export type GuardianMappingPlan =
 /**
  * Read-only half of the guardian auto-map: decide whether (and how) to map the
  * channel user, without writing. Mirrors {@link mapGuardianToChannel}'s branching
- * so the transactional conferral path (`ConnectionRegistry.confer`) reaches the
+ * so the transactional grant path (`ConnectionRegistry.giveGrant`) reaches the
  * same decision, then applies it inside the credential-write transaction. Safe to
- * run before the transaction: the terminal conferral already holds the registry's
- * per-(connection kind, grant) section, so no competing conferral can change the guardian
+ * run before the transaction: the terminal grant already holds the registry's
+ * per-(connection kind, grant) section, so no competing grant can change the guardian
  * between plan and apply.
  *
- * An account another writer claimed in that window does not abort the conferral,
+ * An account another writer claimed in that window does not abort the grant,
  * on either branch: the add upserts and the re-point takes `to` from its holder,
  * so both commit. That settles the right way round here — the channel handed this
  * account over as the guardian's own, so a competing claim on it is the one
- * mistaken about whose it is. The conferral aborting would cost the guardian the
+ * mistaken about whose it is. The grant aborting would cost the guardian the
  * credential in the same transaction, to preserve a claim that is wrong.
  */
 export async function planGuardianMapping(
@@ -126,7 +126,7 @@ export async function planGuardianMapping(
   const stale = staleAddress(guardian.channelMappings, channel);
   // The plan names the row it re-points, so an account placed between this read
   // and the apply — a link write runs outside the grant section that holds
-  // competing conferrals off — is left where it is rather than swept onto
+  // competing grants off — is left where it is rather than swept onto
   // `channelUserId` with it.
   return stale
     ? { op: "update", guardianId: guardian.id, from: stale }
@@ -136,14 +136,14 @@ export async function planGuardianMapping(
 /**
  * Write half of the guardian auto-map: apply a {@link GuardianMappingPlan} as one
  * synchronous statement enlisted in the caller's transaction. A throw here aborts
- * the whole conferral transaction (credential + placeholder + mapping), leaving
+ * the whole grant transaction (credential + placeholder + mapping), leaving
  * zero residual state.
  *
  * A planned re-point whose `from` is gone by now — a link write moved or
  * removed that account in the window — writes nothing and leaves the incoming
  * account unmapped, which the log below records. Deliberate: the guardian
  * decided where that account belongs more recently than the plan did, and
- * failing the conferral over it would cost them the credential too. The next
+ * failing the grant over it would cost them the credential too. The next
  * connect maps the incoming account.
  */
 export function applyGuardianMappingWithinTx(

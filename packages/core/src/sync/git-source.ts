@@ -425,9 +425,9 @@ async function fetchCheckout(dir: string, url: string, branch: string): Promise<
 }
 
 /** Read the GitHub grant's non-secret profile from the connections store — the
- * conferral outcome (login/display name/email) recorded alongside the credential.
+ * grant outcome (login/display name/email) recorded alongside the credential.
  * Null when no GitHub connection exists or the grant carries no profile. A
- * degraded grant keeps the profile of the conferral that degraded, so the last
+ * degraded grant keeps the profile of the grant that degraded, so the last
  * known identity survives. */
 async function readGithubGrantProfile(db: DrizzleDb): Promise<GithubGrantProfile | null> {
   const github = (await new DrizzleConnectionsRepository(db).all()).filter(

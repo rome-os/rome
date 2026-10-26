@@ -4,7 +4,7 @@
 // Fake descriptors mirror the canonical connection kinds. Each holds one grant:
 //   pasteTalk       — telegram-like: one tokenPaste grant → Talker
 //   botAll          — discord-like: one tokenPaste grant → talker+watcher+actor
-//   renewableAct    — github-like: one renewable grant → Actor (N renewals, then re-confer)
+//   renewableAct    — github-like: one renewable grant → Actor (N renewals, then fix)
 //   gatedWatch      — github-like: one grant → Watcher with subscriptionGated:true
 //   externalCustody — Composio-like: scheme with resolveExternal; no secrets in ledger
 //
@@ -276,15 +276,15 @@ export function makeFakeWatcherFactory(): FakeWatcherFactory {
 
 /**
  * A headless AuthScheme that:
- * - confer(): immediately returns a credential without interaction.
+ * - obtain(): immediately returns a credential without interaction.
  * - renew(): returns fresh credentials `successCount` times (decrements each
- *   call), then returns "re-confer" forever. Pass Infinity to always renew.
+ *   call), then returns "needs-fix" forever. Pass Infinity to always renew.
  * - resolveExternal: optional, enables external-custody tests.
  */
 export interface FakeRenewableScheme extends AuthScheme {
   /** Number of remaining successful renewals (starts at the configured value). */
   renewsRemaining: number;
-  /** Materials handed out by confer() and each successful renew(). */
+  /** Materials handed out by obtain() and each successful renew(). */
   readonly materialHistory: SecretRecord[];
 }
 
@@ -306,10 +306,10 @@ export function makeFakeRenewableScheme(opts?: {
       successCount = n;
     },
 
-    async confer(_interact): Promise<Credential> {
-      const material: SecretRecord = { token: `conferred-${materialHistory.length}` };
+    async obtain(_interact): Promise<Credential> {
+      const material: SecretRecord = { token: `granted-${materialHistory.length}` };
       if (materialHistory.length === 0) {
-        // First confer returns the configured initial material.
+        // The first obtain returns the configured initial material.
         Object.assign(material, initialMaterial);
         materialHistory.push(material);
       } else {
@@ -318,8 +318,8 @@ export function makeFakeRenewableScheme(opts?: {
       return { material, expiresAt: "never" };
     },
 
-    async renew(_cred): Promise<Credential | "re-confer"> {
-      if (successCount <= 0) return "re-confer";
+    async renew(_cred): Promise<Credential | "needs-fix"> {
+      if (successCount <= 0) return "needs-fix";
       successCount--;
       const material: SecretRecord = { token: `renewed-${materialHistory.length}` };
       materialHistory.push(material);
@@ -367,7 +367,7 @@ export function makeWatchEvent(overrides?: Partial<WatchEvent>): WatchEvent {
 export interface PasteTalkFixture {
   descriptor: ConnectionDescriptor;
   talkerFactory: FakeTalkerFactory;
-  /** Call this inside a confer call to supply a valid token. */
+  /** Call this inside an obtain call to supply a valid token. */
   validCredential: () => Credential;
 }
 
@@ -412,7 +412,7 @@ export interface BotAllFixture {
   talkerFactory: FakeTalkerFactory;
   watcherFactory: FakeWatcherFactory;
   actorFactory: FakeActorFactory;
-  botScheme: AuthScheme; // tokenPaste — renew is always "re-confer"
+  botScheme: AuthScheme; // tokenPaste — renew is always "needs-fix"
   /** Valid credential for the "bot" grant. */
   botCredential: () => Credential;
 }
@@ -462,7 +462,7 @@ export function makeBotAll(): BotAllFixture {
 
 // Descriptor: renewableAct (github-like)
 //
-// One grant "user" whose scheme renews N times then "re-confer".
+// One grant "user" whose scheme renews N times then "needs-fix".
 // Used to test: renew-once-then-degrade, and re-authorize after degrade.
 
 export interface RenewableActFixture {
@@ -543,7 +543,7 @@ export function makeGatedWatch(): GatedWatchFixture {
 //
 // A scheme with resolveExternal: the ledger must persist { kind: "external" }
 // (no secret material) and the registry re-wraps the material at rehydration
-// by calling resolveExternal instead of conferring again.
+// by calling resolveExternal instead of granting again.
 //
 // The fixture exposes the resolver spy so tests can verify it was called and
 // what material it produced.
@@ -570,18 +570,18 @@ export function makeExternalCustody(): ExternalCustodyFixture {
     return { ...externalMaterial };
   };
 
-  // confer() returns a credential whose material is a function (external resolver).
+  // obtain() returns a credential whose material is a function (external resolver).
   // The ledger must persist this as { kind: "external" }.
   const scheme = makeFakeRenewableScheme({
-    successCount: 0, // cannot renew — always "re-confer"
+    successCount: 0, // cannot renew — always "needs-fix"
     resolveExternal,
   });
 
-  // Override confer so it returns a function-valued material.
-  const originalConfer = scheme.confer.bind(scheme);
-  scheme.confer = async (_interact) => {
+  // Override obtain so it returns a function-valued material.
+  const originalObtain = scheme.obtain.bind(scheme);
+  scheme.obtain = async (_interact) => {
     // Ignore the base implementation; return a resolver-backed credential.
-    void originalConfer; // silence unused-var lint
+    void originalObtain; // silence unused-var lint
     return {
       material: resolveExternal,
       expiresAt: "never",

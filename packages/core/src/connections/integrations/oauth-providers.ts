@@ -2,8 +2,8 @@
 //
 // Each provider is brokered by Rome Cloud OAuth: the guardian delegates access by
 // clicking Connect, Rome Cloud runs the provider authorization, and the instance
-// redeems a handoff for an OAuthTokenBundle. Conferral is route-driven
-// (`romeCloudOAuth` — see schemes.ts), and renew() is "re-confer" until a
+// redeems a handoff for an OAuthTokenBundle. Grant is route-driven
+// (`romeCloudOAuth` — see schemes.ts), and renew() is "needs-fix" until a
 // Rome Cloud refresh exchange exists.
 //
 // This phase migrates ONLY the connection state into the registry: the grant
@@ -15,7 +15,7 @@
 // registry supports (`capabilities` is `Partial<…>`); a capability-less
 // connection still carries full grant state.
 //
-// Grant names follow the grant table: grants are about conferrals, not
+// Grant names follow the grant table: grants are about grants, not
 // token count. GitHub and Google each mint one user credential → one `user`
 // grant. Slack's single OAuth dance mints TWO tokens (bot + user) that live
 // together in ONE `workspace` grant's material. Shopify mints one offline token
@@ -290,7 +290,7 @@ async function promptShopifyStore(interact: Parameters<SetupFn>[0]): Promise<str
 }
 
 /**
- * The conferral setup for a Rome Cloud-brokered OAuth provider. A linear
+ * The setup for a Rome Cloud-brokered OAuth provider. A linear
  * coroutine of the `redirect` mechanic:
  *   0. Shopify only: `promptShopifyStore` asks which store to connect,
  *   1. `beginRedirect` mints the PKCE attempt + authorize URL,
@@ -298,13 +298,13 @@ async function promptShopifyStore(interact: Parameters<SetupFn>[0]): Promise<str
  *      suspends until the return leg (the browser navigates fully away and back;
  *      the setup route resumes this coroutine, correlated by the `state` param),
  *   3. `ctx.step` redeems the handoff into a credential + profile (cancellable),
- *   4. return the terminal conferral — the single durable write of credential +
+ *   4. return the terminal grant — the single durable write of credential +
  *      profile lands only once the redeem proves the grant, via the manager's
- *      `registry.confer` (which re-materializes the tmpfs token file + gh/git
+ *      `registry.giveGrant` (which re-materializes the tmpfs token file + gh/git
  *      shell auth through custody). Abandoning at any point writes nothing.
  *
  * There is no guardian-channel mapping (OAuth providers are not channels), so
- * the conferral omits `guardianChannelUserId`.
+ * the grant omits `guardianChannelUserId`.
  */
 export function makeOAuthProviderSetup(
   provider: OAuthProvider,
@@ -355,7 +355,7 @@ export function makeOAuthProviderSetup(
  * (the tmpfs token file + gh/git shell auth). The descriptor holds the provider's
  * connection/grant state (imported by the oauth redeem route); Actor/Watcher capabilities land in follow-ups.
  *
- * `setupDeps` attaches the conferral setup (the redirect cutover) to the
+ * `setupDeps` attaches the setup (the redirect cutover) to the
  * grant's scheme. Omitted in tests that exercise connection state only;
  * threaded from index.ts at boot so the setup can reach the DB.
  */

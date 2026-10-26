@@ -1,4 +1,4 @@
-// Seam under test: ConnectionRegistry.confer refusing an account that another
+// Seam under test: ConnectionRegistry.giveGrant refusing an account that another
 // Connection of the service already holds, directly and through a SetupManager
 // setup. Observed through the ledger and the setup state.
 
@@ -41,15 +41,15 @@ function setupRegistry(setup?: SetupFn) {
   return { ...db, ledger, registry };
 }
 
-describe("ConnectionRegistry.confer account guard", () => {
+describe("ConnectionRegistry.giveGrant account guard", () => {
   it("refuses a bot another Connection of the service holds, and writes nothing", async () => {
     const { ledger, registry, close } = setupRegistry();
     try {
       const first = await registry.connect(SERVICE);
-      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
       const second = await registry.connectAnother(SERVICE);
 
-      const refused = registry.confer(SERVICE, second.id, "bot", credentialFor("t-1b"), {
+      const refused = registry.giveGrant(SERVICE, second.id, "bot", credentialFor("t-1b"), {
         botId: "100",
       });
 
@@ -69,9 +69,9 @@ describe("ConnectionRegistry.confer account guard", () => {
     const { ledger, registry, close } = setupRegistry();
     try {
       const first = await registry.connect(SERVICE);
-      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
 
-      const refused = registry.confer(SERVICE, first.id, "bot", credentialFor("t-9"), {
+      const refused = registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-9"), {
         botId: "900",
       });
 
@@ -84,13 +84,13 @@ describe("ConnectionRegistry.confer account guard", () => {
     }
   });
 
-  it("lets the same Connection confer its own bot again", async () => {
+  it("lets the same Connection grant its own bot again", async () => {
     const { ledger, registry, close } = setupRegistry();
     try {
       const first = await registry.connect(SERVICE);
-      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
 
-      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-2"), { botId: "100" });
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-2"), { botId: "100" });
 
       await expect(ledger.grantOf(first.id)).resolves.toMatchObject({
         state: "authorized",
@@ -105,14 +105,14 @@ describe("ConnectionRegistry.confer account guard", () => {
     const { ledger, registry, close } = setupRegistry();
     try {
       const first = await registry.connect(SERVICE);
-      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
       await updateGrant(ledger, first.id, (current) => ({
         ...current,
         state: "degraded",
         degraded: { at: new Date(0), reason: "token revoked upstream" },
       }));
 
-      await registry.confer(first.connectionKind, first.id, "bot", credentialFor("t-2"));
+      await registry.giveGrant(first.connectionKind, first.id, "bot", credentialFor("t-2"));
 
       const grant = await ledger.grantOf(first.id);
       expect(grant).toMatchObject({ state: "authorized" });
@@ -124,14 +124,14 @@ describe("ConnectionRegistry.confer account guard", () => {
     }
   });
 
-  it("lets a second Connection confer a different bot", async () => {
+  it("lets a second Connection grant a different bot", async () => {
     const { ledger, registry, close } = setupRegistry();
     try {
       const first = await registry.connect(SERVICE);
-      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
       const second = await registry.connectAnother(SERVICE);
 
-      await registry.confer(SERVICE, second.id, "bot", credentialFor("t-2"), { botId: "200" });
+      await registry.giveGrant(SERVICE, second.id, "bot", credentialFor("t-2"), { botId: "200" });
 
       await expect(ledger.grantOf(second.id)).resolves.toMatchObject({
         state: "authorized",
@@ -146,11 +146,11 @@ describe("ConnectionRegistry.confer account guard", () => {
     const { ledger, registry, close } = setupRegistry();
     try {
       const first = await registry.connect(SERVICE);
-      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
       await registry.revoke(first.id, "bot");
       const second = await registry.connectAnother(SERVICE);
 
-      await registry.confer(SERVICE, second.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant(SERVICE, second.id, "bot", credentialFor("t-1"), { botId: "100" });
 
       await expect(ledger.grantOf(second.id)).resolves.toMatchObject({
         state: "authorized",
@@ -207,7 +207,7 @@ describe("ConnectionRegistry.confer account guard", () => {
     const { ledger, registry, close } = setupRegistry();
     try {
       const first = await registry.connect(SERVICE);
-      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
       expect((await ledger.grantOf(first.id))?.account).toEqual({
         platform: SERVICE,
         accountId: "100",
@@ -231,10 +231,10 @@ describe("ConnectionRegistry.confer account guard", () => {
       registry.register({ ...descriptor, connectionKind: "telegram" });
       registry.register({ ...descriptor, connectionKind: "telegram_user" });
       const bot = await registry.connect("telegram");
-      await registry.confer("telegram", bot.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant("telegram", bot.id, "bot", credentialFor("t-1"), { botId: "100" });
       const user = await registry.connect("telegram_user");
 
-      const refused = registry.confer("telegram_user", user.id, "bot", credentialFor("s-1"), {
+      const refused = registry.giveGrant("telegram_user", user.id, "bot", credentialFor("s-1"), {
         botId: "100",
       });
 
@@ -256,10 +256,10 @@ describe("ConnectionRegistry.confer account guard", () => {
       const { descriptor } = makePasteTalk();
       registry.register({ ...descriptor, connectionKind: "feishu", severalAccounts: true });
       const feishu = await registry.connect("feishu");
-      await registry.confer("feishu", feishu.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant("feishu", feishu.id, "bot", credentialFor("t-1"), { botId: "100" });
       const lark = await registry.connectAnother("feishu");
 
-      await registry.confer("feishu", lark.id, "bot", credentialFor("t-2"), {
+      await registry.giveGrant("feishu", lark.id, "bot", credentialFor("t-2"), {
         botId: "100",
         domain: "lark",
       });
@@ -274,11 +274,11 @@ describe("ConnectionRegistry.confer account guard", () => {
     const { ledger, registry, close } = setupRegistry();
     try {
       const first = await registry.connect(SERVICE);
-      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
       // As for the later of two connections that reached one account.
       await updateGrant(ledger, first.id, (current) => ({ ...current, account: undefined }));
 
-      const refused = registry.confer(SERVICE, first.id, "bot", credentialFor("t-9"), {
+      const refused = registry.giveGrant(SERVICE, first.id, "bot", credentialFor("t-9"), {
         botId: "900",
       });
 
@@ -290,7 +290,7 @@ describe("ConnectionRegistry.confer account guard", () => {
 });
 
 describe("ConnectionRegistry account participants", () => {
-  it("hands the account a grant reaches to the mint, and to a later conferral", async () => {
+  it("hands the account a grant reaches to the mint, and to a later grant", async () => {
     const db = createTestDb();
     const minted: Array<{ kind: string; accountId?: string }> = [];
     const recorded: Array<{ id: string; accountId: string }> = [];
@@ -308,9 +308,9 @@ describe("ConnectionRegistry account participants", () => {
     });
     registry.register(botIdDescriptor());
     try {
-      await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), { botId: "100" });
+      await registry.giveGrant(SERVICE, undefined, "bot", credentialFor("t-1"), { botId: "100" });
       const placeholder = await registry.connectAnother(SERVICE);
-      await registry.confer(SERVICE, placeholder.id, "bot", credentialFor("t-2"), {
+      await registry.giveGrant(SERVICE, placeholder.id, "bot", credentialFor("t-2"), {
         botId: "200",
       });
 
@@ -351,7 +351,7 @@ describe("ConnectionRegistry account records", () => {
   it("finds an account's Connection by the live grant that reaches it", async () => {
     const { records, registry, close } = recordingRegistry();
     try {
-      const conn = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
+      const conn = await registry.giveGrant(SERVICE, undefined, "bot", credentialFor("t-1"), {
         botId: "100",
       });
       const account = records.byConnection(conn.id);
@@ -363,7 +363,7 @@ describe("ConnectionRegistry account records", () => {
       expect(records.idOf(conn.id)).toBeNull();
       expect(records.byId(account!.id)?.connectionId).toBeNull();
 
-      await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-2"), { botId: "100" });
+      await registry.giveGrant(SERVICE, conn.id, "bot", credentialFor("t-2"), { botId: "100" });
       expect(records.idOf(conn.id)).toBe(account?.id);
       expect(records.byId(account!.id)?.connectionId).toBe(conn.id);
     } finally {
@@ -374,11 +374,11 @@ describe("ConnectionRegistry account records", () => {
   it("gives a kept Connection a record again once its old account went elsewhere", async () => {
     const { records, registry, close } = recordingRegistry();
     try {
-      const c1 = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
+      const c1 = await registry.giveGrant(SERVICE, undefined, "bot", credentialFor("t-1"), {
         botId: "100",
       });
       await registry.revoke(c1.id, "bot");
-      await registry.confer(
+      await registry.giveGrant(
         SERVICE,
         undefined,
         "bot",
@@ -388,7 +388,7 @@ describe("ConnectionRegistry account records", () => {
       );
       expect(records.idOf(c1.id)).toBeNull();
 
-      await registry.confer(SERVICE, c1.id, "bot", credentialFor("t-3"), { botId: "300" });
+      await registry.giveGrant(SERVICE, c1.id, "bot", credentialFor("t-3"), { botId: "300" });
       expect(records.byConnection(c1.id)).toMatchObject({
         platformAccountId: "300",
         connectionId: c1.id,
@@ -402,13 +402,13 @@ describe("ConnectionRegistry account records", () => {
   it("records the account a Connection kept across a revoke reaches next", async () => {
     const { records, registry, close } = recordingRegistry();
     try {
-      const conn = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
+      const conn = await registry.giveGrant(SERVICE, undefined, "bot", credentialFor("t-1"), {
         botId: "100",
       });
       expect(records.byConnection(conn.id)?.platformAccountId).toBe("100");
 
       await registry.revoke(conn.id, "bot");
-      await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-2"), { botId: "200" });
+      await registry.giveGrant(SERVICE, conn.id, "bot", credentialFor("t-2"), { botId: "200" });
       expect(records.byConnection(conn.id)?.platformAccountId).toBe("200");
     } finally {
       close();
@@ -418,12 +418,12 @@ describe("ConnectionRegistry account records", () => {
   it("connects an account again while the Connection whose grant was revoked stays", async () => {
     const { records, registry, close } = recordingRegistry();
     try {
-      const old = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
+      const old = await registry.giveGrant(SERVICE, undefined, "bot", credentialFor("t-1"), {
         botId: "100",
       });
       await registry.revoke(old.id, "bot");
 
-      const next = await registry.confer(
+      const next = await registry.giveGrant(
         SERVICE,
         undefined,
         "bot",

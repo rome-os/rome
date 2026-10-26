@@ -480,7 +480,7 @@ async function main() {
     isConnected: () => connectionRegistry.find(AGENTS_KIND).some((conn) => conn.isUnlocked("talk")),
   });
   const agentNameResolver = createAgentNames(listedAgents);
-  // Conferral setups: in-memory session store keyed per grant,
+  // Grant setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person
   // mapping repo (guardian-link auto-mapping). Drives the generic setup
   // routes; created here so descriptors registered later expose their setup.
@@ -1327,7 +1327,7 @@ async function main() {
     onEmailAdapterBuilt: (adapter) => {
       emailAdapterRef = adapter;
     },
-    // The Rome Cloud-OAuth conferral setups (github/slack/google) read/write the
+    // The Rome Cloud-OAuth grant setups (github/slack/google) read/write the
     // oauth_pending_attempts table for the begin-redirect + return-leg redeem.
     db,
     // The personal WeChat connection is opt-in: its runtime exists only when

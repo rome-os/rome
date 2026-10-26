@@ -46,7 +46,7 @@ export interface ConnectionSlot {
   display: GrantDisplay | null;
   /** Folded display identity (displayName, else handle, else email). */
   identity: string | null;
-  /** The id of the live conferral setup for this grant, if one is
+  /** The id of the live setup for this grant, if one is
    *  in progress; the connect card re-attaches to it on reopen. Null otherwise. */
   activeSetupCid: string | null;
   /** The kind of link an agent has to this slot's account, or null when its
@@ -125,7 +125,7 @@ const OAUTH_SERVICES = new Set(["github", "google", "slack", "shopify"]);
 
 /** The copy slot key each registry grant renders under. A channel's single
  *  Talk grant is the generic `bot` slot whatever the grant is named; an OAuth
- *  conferral is the `user` slot (Slack's `workspace` grant included). */
+ *  grant is the `user` slot (Slack's `workspace` grant included). */
 const SLOT_KEY_BY_GRANT: Record<string, Record<string, SlotKey>> = {
   telegram: { bot: "bot" },
   whatsapp: { session: "bot" },

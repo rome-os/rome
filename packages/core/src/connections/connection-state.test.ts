@@ -19,7 +19,7 @@ async function connected() {
   const fx = makePasteTalk();
   registry.register(fx.descriptor);
   const conn = await registry.connect("fake-telegram");
-  await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
+  await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
   return { registry, fx, conn };
 }
 
@@ -40,7 +40,7 @@ describe("connection state", () => {
     await flush();
     expect(conn.state()).toBe("broken");
 
-    await registry.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
     expect(conn.state()).toBe("working");
   });
 

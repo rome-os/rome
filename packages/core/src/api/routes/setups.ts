@@ -1,4 +1,4 @@
-// Connection conferral HTTP surface. Vocabulary: docs/domains/connections.md.
+// Connection grant HTTP surface. Vocabulary: docs/domains/connections.md.
 //
 // Four routes for EVERY connection kind's connect setup (channels + brokered OAuth
 // alike); per-kind knowledge lives in the integration descriptor's
@@ -8,8 +8,8 @@
 //   POST /api/setups/:cid/input                    — feed answers
 //   POST /api/setups/:cid/cancel                   — cancel
 //
-// `:id` addresses the connection to confer. For a connection kind the guardian has
-// never connected there is no ledger row yet (the terminal conferral mints it),
+// `:id` addresses the connection to grant. For a connection kind the guardian has
+// never connected there is no ledger row yet (the terminal grant mints it),
 // so `:id` may instead be a bare connection kind — an offerable placeholder. A
 // start naming the connection kind with `another: true` connects a new account of a
 // connection kind that offers several, minted the same way. Either way the setup is
@@ -106,7 +106,7 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     // grant with no setup changes nothing.
     const descriptor = registry.getDescriptor(target.connectionKind);
     if (descriptor?.grant !== grant || !descriptor.auth.setup) {
-      return c.json({ error: "No conferral setup for this grant." }, 404);
+      return c.json({ error: "No setup for this grant." }, 404);
     }
     // An account that connects again starts fresh, so the card of a
     // disconnected account offers no setup into it. Its card goes on the next
@@ -140,7 +140,7 @@ export function setupsRoutes(deps: ApiDeps): Hono {
       return c.json(started);
     } catch (err) {
       if (err instanceof NoSetupError) {
-        return c.json({ error: "No conferral setup for this grant." }, 404);
+        return c.json({ error: "No setup for this grant." }, 404);
       }
       throw err;
     }

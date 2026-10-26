@@ -116,7 +116,7 @@ function containerCredential(wxid: string | undefined): Credential {
 }
 
 /**
- * The `session` scheme. Conferral is the setup below. renew() re-reads the
+ * The `session` scheme. The setup below gives the grant. renew() re-reads the
  * account: still signed in with a working key keeps the credential; a definite
  * signed-out or bad-key answer is the only thing that demands reconnecting. A
  * reader that merely fails to run keeps the credential — the client may be
@@ -124,21 +124,21 @@ function containerCredential(wxid: string | undefined): Credential {
  */
 export function wechatUserSessionScheme(reader: WechatUserReader): AuthScheme {
   return {
-    async confer(): Promise<Credential> {
-      throw new Error("conferral driven by the connection setup");
+    async obtain(): Promise<Credential> {
+      throw new Error("grant driven by the connection setup");
     },
-    async renew(cred: Credential): Promise<Credential | "re-confer"> {
+    async renew(cred: Credential): Promise<Credential | "needs-fix"> {
       try {
         await reader.conversations({ limit: 1 });
         return cred;
       } catch (error) {
-        return isWechatUserSessionRejected(error) ? "re-confer" : cred;
+        return isWechatUserSessionRejected(error) ? "needs-fix" : cred;
       }
     },
   };
 }
 
-// ── conferral setup ─────────────────────────────────────────────────────────
+// ── setup ─────────────────────────────────────────────────────────
 
 function installingView(): SetupView {
   return {
@@ -227,15 +227,15 @@ export interface WechatUserSetupDeps {
 }
 
 /**
- * Build the WeChat user-account conferral setup. A linear coroutine:
+ * Build the WeChat user-account setup. A linear coroutine:
  *   1. `ensure-runtime` — install the client if absent and bring up the
- *      session the client draws into (an already-ready account confers
+ *      session the client draws into (an already-ready account grants
  *      immediately). The client is not started here; the capture launches it
  *      under gdb to catch the first login's key.
  *   2. `capture-login` — capture the store keys with the bridge, which launches
  *      the client so the QR appears; stream that QR into the view while the
  *      guardian signs in, then wait until the store reads unlocked,
- *   3. return the terminal conferral: custody marker + account identity.
+ *   3. return the terminal grant: custody marker + account identity.
  * Nothing durable exists before the terminal return. Cancelling writes nothing;
  * the only state left behind is the client's own session, which the guardian
  * can sign out of from their phone.
@@ -264,9 +264,9 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
 
   return async (interact, ctx) => {
     // The capture lease, once the setup takes the capture path. Released when
-    // the setup ends, whether it confers, fails or is cancelled.
+    // the setup ends, whether it grants, fails or is cancelled.
     const lease: { release?: () => void } = {};
-    const confer = async () => {
+    const grant = async () => {
       const ready = await ctx.step("ensure-runtime", async (signal) => {
         const initial = await runtime.status();
         if (initial.state === "ready" && initial.running) return initial;
@@ -358,7 +358,7 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
       };
     };
     try {
-      return await confer();
+      return await grant();
     } finally {
       lease.release?.();
     }

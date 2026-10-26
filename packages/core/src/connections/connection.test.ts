@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { brokenGrant, conferredGrant, refuseDifferentAccount, renewedGrant } from "./connection.js";
+import { brokenGrant, givenGrant, refuseDifferentAccount, renewedGrant } from "./connection.js";
 import { DifferentAccountError } from "./errors.js";
 import { NO_GRANT } from "./grant.js";
 import type { ConnectionDescriptor } from "./types.js";
@@ -14,7 +14,7 @@ const account = { platform: "telegram", accountId: "100" };
 
 describe("connection rules", () => {
   it("refuses a fix that reaches another account", () => {
-    const held = conferredGrant(now, credential, { id: 100 }, account);
+    const held = givenGrant(now, credential, { id: 100 }, account);
 
     expect(() =>
       refuseDifferentAccount(descriptor, "c1", held, { platform: "telegram", accountId: "200" }),
@@ -23,7 +23,7 @@ describe("connection rules", () => {
   });
 
   it("refuses by the profile's account when the held grant stored none", () => {
-    const held = conferredGrant(now, credential, { id: 100 });
+    const held = givenGrant(now, credential, { id: 100 });
 
     expect(() =>
       refuseDifferentAccount(descriptor, "c1", held, { platform: "telegram", accountId: "200" }),
@@ -35,7 +35,7 @@ describe("connection rules", () => {
   });
 
   it("breaks a grant in place, keeping its credential and account", () => {
-    const held = conferredGrant(now, credential, { id: 100 }, account);
+    const held = givenGrant(now, credential, { id: 100 }, account);
     const broken = brokenGrant(held, "rejected", now);
 
     expect(broken).toMatchObject({
@@ -47,7 +47,7 @@ describe("connection rules", () => {
   });
 
   it("clears a break when the grant is renewed", () => {
-    const broken = brokenGrant(conferredGrant(now, credential), "rejected", now);
+    const broken = brokenGrant(givenGrant(now, credential), "rejected", now);
     const renewed = renewedGrant(broken, { material: { token: "u" }, expiresAt: "never" }, now);
 
     expect(renewed.state).toBe("authorized");

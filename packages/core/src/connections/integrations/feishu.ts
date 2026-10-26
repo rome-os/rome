@@ -9,9 +9,9 @@
 // transport already speaks the channel's record, so inbound and send pass
 // through without a projection.
 //
-// The `app` grant is conferred by pasting the two fields (`credentialsPaste`);
+// The `app` grant is granted by pasting the two fields (`credentialsPaste`);
 // `validate` mints a tenant-access-token via a transient connect so a bad
-// appId/appSecret is refused at confer time.
+// appId/appSecret is refused at grant time.
 //
 // Fault mapping: a tenant-access-token auth failure
 // (`isFeishuAuthError`) is a CredentialRejected{ grant: "app" }; every other
@@ -150,7 +150,7 @@ export interface FeishuDescriptorDeps {
   fetchBotName?: FeishuSetupDeps["fetchBotName"];
 }
 
-/** The credential fields a Feishu setup holds before conferral (the pending,
+/** The credential fields a Feishu setup holds before grant (the pending,
  *  un-set-up material the in-ceremony probes run against). */
 export interface FeishuPendingMaterial {
   appId: string;
@@ -506,7 +506,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
       { name: "domain", label: "Domain", secret: false, options: ["feishu", "lark"] },
     ],
     // A transient connect mints the tenant-access-token; a bad appId/appSecret
-    // rejects here so confer refuses invalid credentials.
+    // rejects here so grant refuses invalid credentials.
     validate: async (material) => {
       const channel = createChannel({
         appId: material.appId,
@@ -520,7 +520,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
       }
     },
   });
-  // The Feishu conferral setup: mode + domain prompt, then either the
+  // The Feishu setup: mode + domain prompt, then either the
   // manual credential probe or the agent-ready registerApp QR dance, then the
   // before the single terminal write of credential and profile.
   appScheme.setup = makeFeishuSetup({

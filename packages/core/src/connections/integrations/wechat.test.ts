@@ -4,7 +4,7 @@
 //      createAdapter seam) fires its onFault callback so we assert HTTP 401/403
 //      → CredentialRejected{ grant: "account" } and other terminal → Disconnected.
 //   3. The account-401 → renew-once-then-degrade flow end-to-end over the real
-//      ConnectionRegistry (the route-driven scheme's renew answers "re-confer").
+//      ConnectionRegistry (the route-driven scheme's renew answers "needs-fix").
 //   4. Inbound delivery over the real WechatAdapter, with ilinkai played by a
 //      stubbed fetch.
 
@@ -124,14 +124,14 @@ describe("wechat descriptor shape", () => {
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
-  it("throws from confer (conferral is the setup) and re-confers on renew", async () => {
+  it("throws from grant (grant is the setup) and fixes on renew", async () => {
     const scheme = createWechatDescriptor().auth;
-    await expect(scheme.confer({ prompt: async () => ({}) })).rejects.toThrow(
-      "conferral driven by the connection setup",
+    await expect(scheme.obtain({ prompt: async () => ({}) })).rejects.toThrow(
+      "grant driven by the connection setup",
     );
     // The setup is attached to the scheme (the generic routes discover it here).
     expect(scheme.setup).toBeTypeOf("function");
-    await expect(scheme.renew({ material: {}, expiresAt: "never" })).resolves.toBe("re-confer");
+    await expect(scheme.renew({ material: {}, expiresAt: "never" })).resolves.toBe("needs-fix");
   });
 
   it("reports needs-auth for talk before the account grant is imported", async () => {
@@ -144,7 +144,7 @@ describe("wechat descriptor shape", () => {
   it("unlocks talk and forwards attachments + typing once the grant is imported", async () => {
     const { registry, adapters } = setup();
     const conn = await registry.connect("wechat");
-    await registry.confer(conn.connectionKind, conn.id, "account", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     expect(conn.isUnlocked("talk")).toBe(true);
@@ -173,7 +173,7 @@ describe("wechat descriptor shape", () => {
   it("reports transient adapter degradation without relocking the talk capability", async () => {
     const { registry, adapters } = setup();
     const conn = await registry.connect("wechat");
-    await registry.confer(conn.connectionKind, conn.id, "account", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
 
     adapters[0].degradation = {
       reason: "WeChat reported a stale session.",
@@ -233,10 +233,10 @@ describe("wechat Talker fault mapping", () => {
 });
 
 describe("wechat account-401 drives renew-once-then-degrade", () => {
-  it("relocks talk after a terminal auth fault (route-driven renew answers re-confer)", async () => {
+  it("relocks talk after a terminal auth fault (route-driven renew answers fix)", async () => {
     const { registry, adapters } = setup();
     const conn = await registry.connect("wechat");
-    await registry.confer(conn.connectionKind, conn.id, "account", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
     expect(conn.status().talk).toEqual({ state: "unlocked" });
 
     adapters[0].fault(new Error("HTTP 401: unauthorized"));
@@ -251,7 +251,7 @@ describe("wechat account-401 drives renew-once-then-degrade", () => {
     registry.onUnlocked("talk", (c) => {
       reUnlocked = c;
     });
-    await registry.confer(conn.connectionKind, conn.id, "account", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     expect(reUnlocked).not.toBeNull();
   });

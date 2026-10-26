@@ -83,10 +83,9 @@ function stubFetch(overrides: (url: string, init?: RequestInit) => Response | nu
       }
       if (url.includes("/api/setups/") && url.endsWith("/input")) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({ accepted: true, state: { status: "done", conferral: {} } }),
-            { status: 200 },
-          ),
+          new Response(JSON.stringify({ accepted: true, state: { status: "done", grant: {} } }), {
+            status: 200,
+          }),
         );
       }
       return Promise.resolve(

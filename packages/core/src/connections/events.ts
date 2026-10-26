@@ -17,12 +17,12 @@ export interface ConnectionRef {
  *
  *  - `connected`: the connection was saved for the first time. `profile` and
  *    `account` are the grant's, and absent when it was minted holding no grant.
- *  - `fixed`: a conferral replaced the grant of a connection that already
+ *  - `fixed`: a grant replaced the grant of a connection that already
  *    existed. `account` is the account the new grant reaches, when it names one.
  *  - `broken`: the platform stopped accepting the grant. The connection keeps
  *    its account, and Rome neither hears nor speaks through it until a fix.
  *  - `revoked`: the connection's grant was revoked, so it reaches no account
- *    until a conferral fills it again.
+ *    until a grant fills it again.
  *  - `disconnected`: the connection and its grant were removed. */
 export type ConnectionEvent =
   | {

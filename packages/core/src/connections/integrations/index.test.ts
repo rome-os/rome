@@ -32,7 +32,7 @@ describe("registerBuiltinConnections", () => {
       expiresAt: new Date(0),
     };
     // Google: Rome Cloud has no refresh for it, so renew answers at once.
-    await expect(registered.get("google")!.auth.renew(expired)).resolves.toBe("re-confer");
+    await expect(registered.get("google")!.auth.renew(expired)).resolves.toBe("needs-fix");
     expect(fetchMock).not.toHaveBeenCalled();
     rs.unstubAllGlobals();
   });

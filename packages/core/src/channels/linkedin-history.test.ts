@@ -67,7 +67,7 @@ describe("LinkedIn message addressing", () => {
     expect(await people.findByChannelUser("linkedin", message.senderId)).toBeNull();
   });
 
-  // The guardian's own mapping is conferred at connect time from their public
+  // The guardian's own mapping is granted at connect time from their public
   // profile URL, which carries a vanity handle and no member id. Falling back to
   // the URL keeps that mapping resolving instead of stranding it.
   it("falls back to the profile URL when it carries no member id", async () => {

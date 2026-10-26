@@ -176,7 +176,7 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
       const registry = new ConnectionRegistry({ repository: ledger });
       registry.register(fixture.descriptor);
       const connection = await registry.connect("fake-telegram");
-      await registry.confer(
+      await registry.giveGrant(
         connection.connectionKind,
         connection.id,
         "bot",

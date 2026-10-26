@@ -18,7 +18,7 @@ export function requireConnectionRegistry(deps: ApiDeps): ConnectionRegistry {
   return deps.connectionRegistry;
 }
 
-/** Conferral setups. The daemon injects `setupManager` alongside
+/** Grant setups. The daemon injects `setupManager` alongside
  *  the registry; a missing one on the generic setup routes is a wiring bug. */
 export function requireSetupManager(
   deps: ApiDeps,

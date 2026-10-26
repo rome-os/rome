@@ -43,7 +43,7 @@ function rowToGrant(row: GrantRow): GrantRecord {
   if (row.platform !== null && row.accountId !== null) {
     rec.account = { platform: row.platform, accountId: row.accountId };
   }
-  if (row.conferredAt !== null) rec.conferredAt = row.conferredAt;
+  if (row.grantedAt !== null) rec.grantedAt = row.grantedAt;
   if (row.lastRenewedAt !== null) rec.lastRenewedAt = row.lastRenewedAt;
   if (row.degradedAt !== null) {
     rec.degraded = { at: row.degradedAt, reason: row.degradedReason ?? "" };
@@ -71,7 +71,7 @@ function grantColumns(value: GrantValue) {
     profile: value.profile ?? null,
     platform: value.account?.platform ?? null,
     accountId: value.account?.accountId ?? null,
-    conferredAt: value.conferredAt ?? null,
+    grantedAt: value.grantedAt ?? null,
     lastRenewedAt: value.lastRenewedAt ?? null,
     degradedAt: value.degraded?.at ?? null,
     degradedReason: value.degraded?.reason ?? null,

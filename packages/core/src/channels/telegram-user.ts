@@ -21,7 +21,7 @@ type SimpleEntity = string | number;
  * `displayName`/`phoneNumber`), or the connect timestamp; there is no config, so
  * this is NEVER persisted to a settings row. The login ceremony
  * returns it to the route, which splits it into the grant's credential material
- * and profile and writes both into the ledger via a single `confer`.
+ * and profile and writes both into the ledger via a single `grant`.
  */
 export interface TelegramUserSettings {
   apiId: number;
@@ -39,7 +39,7 @@ export interface TelegramUserSettings {
 export type TelegramUserLoginOutcome =
   | {
       status: "connected";
-      /** The full connected account — the conferral setup turns it into the
+      /** The full connected account — the setup turns it into the
        *  `session` grant's credential material + profile and writes both to the
        *  ledger in one terminal write. Carries secrets (`sessionString`/`apiHash`);
        *  only the non-secret identity ever crosses to a client. */
@@ -51,7 +51,7 @@ export type TelegramUserLoginOutcome =
     };
 
 /**
- * One in-flight interactive login, held for the lifetime of a conferral setup
+ * One in-flight interactive login, held for the lifetime of a setup
  * coroutine: a single GramJS client + StringSession. The coroutine
  * holds exactly one handle in scope, so — unlike the retired route-era
  * `TelegramUserAuthService` — there is no attempt-id map and no `hasPendingLogin`
@@ -380,7 +380,7 @@ export class TelegramUserAdapter {
 
 /**
  * The interactive-login implementation behind {@link openTelegramUserLogin}: one
- * throwaway GramJS client + StringSession driven by the conferral setup coroutine.
+ * throwaway GramJS client + StringSession driven by the setup coroutine.
  * `sendCode` connects and requests the phone code; `submitCode` /
  * `submitPassword` complete the phone-code + optional 2FA handshake and serialize
  * the authorized session into a {@link TelegramUserSettings} account. The
@@ -476,7 +476,7 @@ class TelegramUserLogin implements TelegramUserLoginHandle {
   }
 
   /** Serialize the authorized client + session into the connected-account payload
-   *  the terminal conferral records (credential material + profile). */
+   *  the terminal grant records (credential material + profile). */
   private finalize(user: Api.TypeUser): TelegramUserSettings {
     if (!(user instanceof Api.User)) {
       throw new TelegramUserAuthError("Telegram login did not return a user account");

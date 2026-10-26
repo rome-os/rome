@@ -94,7 +94,7 @@ async function presentedQr(app: Hono, cid: string): Promise<string | undefined> 
 }
 
 describe("WhatsApp generic setup — QR linking", () => {
-  it("presents each rotating QR as an image and confers once the phone links", async () => {
+  it("presents each rotating QR as an image and grants once the phone links", async () => {
     const { app, sockets } = harness();
     const started = await app.request("/connections/whatsapp/grants/session/setup", {
       method: "POST",
@@ -129,7 +129,7 @@ describe("WhatsApp generic setup — QR linking", () => {
       const state = await setupState(app, cid);
       expect(state.status).toBe("done");
       if (state.status === "done") {
-        expect(state.conferral.summary?.body?.[0]).toContain("+14155550134");
+        expect(state.grant.summary?.body?.[0]).toContain("+14155550134");
       }
     });
   });

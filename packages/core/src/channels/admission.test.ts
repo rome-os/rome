@@ -83,7 +83,7 @@ describe("a channel's Connection across epochs", () => {
       received.push(event.message.messageId);
     });
 
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "first" },
       expiresAt: "never",
     });
@@ -112,7 +112,7 @@ describe("a channel's Connection across epochs", () => {
     await connection.auth.revoke("bot");
     expect(connection.withTalker(() => "reached")).toBeUndefined();
     expect(connection.isUnlocked("talk")).toBe(false);
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "second" },
       expiresAt: "never",
     });
@@ -176,7 +176,7 @@ describe("a channel's Connection across epochs", () => {
     const admit = rs.fn(async () => false);
     connectionPorts({ registry, admit, channelOf: kindChannelOf }, "telegram");
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });

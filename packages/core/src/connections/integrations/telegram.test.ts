@@ -244,7 +244,7 @@ describe("telegram descriptor shape", () => {
     expect(factory.tokens).toEqual(["bot-token"]);
   });
 
-  it("reports needs-auth for talk before the bot grant is conferred", async () => {
+  it("reports needs-auth for talk before the bot grant is granted", async () => {
     const factory = new FaultBotFactory(true);
     const registry = setup(factory);
     const conn = await registry.connect("telegram");
@@ -256,7 +256,7 @@ describe("telegram descriptor shape", () => {
     const factory = new FaultBotFactory(true);
     const registry = setup(factory);
     const conn = await registry.connect("telegram");
-    await registry.confer(conn.connectionKind, conn.id, "bot", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     const received: string[] = [];
@@ -434,16 +434,16 @@ describe("telegram Talker fault mapping", () => {
 });
 
 describe("telegram send-401 drives renew-once-then-degrade", () => {
-  it("relocks talk after a send() 401 (tokenPaste renew answers re-confer)", async () => {
+  it("relocks talk after a send() 401 (tokenPaste renew answers fix)", async () => {
     const factory = new FaultBotFactory(/* skipInit */ true);
     factory.sendMessage = () => ({ ok: false, error_code: 401, description: "Unauthorized" });
     const registry = setup(factory);
     const conn = await registry.connect("telegram");
-    await registry.confer(conn.connectionKind, conn.id, "bot", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     // The send() 401 surfaces to the caller as CredentialRejected AND triggers
-    // the async grant flow: tokenPaste.renew() → "re-confer" → degrade "bot".
+    // the async grant flow: tokenPaste.renew() → "needs-fix" → degrade "bot".
     await expect(sendThrough(conn, "999" as ChatId, { text: "hi" })).rejects.toBeInstanceOf(
       CredentialRejected,
     );
@@ -454,12 +454,12 @@ describe("telegram send-401 drives renew-once-then-degrade", () => {
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
     expect(conn.auth.grants().bot).toBe("degraded");
 
-    // Re-importing a credential re-unlocks talk (re-confer path).
+    // Re-importing a credential re-unlocks talk (fix path).
     let reUnlocked: Connection | null = null;
     registry.onUnlocked("talk", (c) => {
       reUnlocked = c;
     });
-    await registry.confer(conn.connectionKind, conn.id, "bot", {
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", {
       material: { token: "fresh-token" },
       expiresAt: "never",
     });

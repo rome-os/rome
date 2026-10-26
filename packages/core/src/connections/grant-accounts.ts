@@ -9,7 +9,7 @@ const log = createLogger("connections");
 
 /**
  * Record the account each held grant reaches, for the boot pass. A grant
- * conferred before grants named their account holds a profile and no account.
+ * granted before grants named their account holds a profile and no account.
  * The oldest connection keeps an account two connections reach, and the other
  * grant is logged and left without one, as is a grant the store refuses.
  * Answers how many grants it recorded.

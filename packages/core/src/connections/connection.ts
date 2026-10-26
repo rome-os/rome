@@ -41,18 +41,18 @@ export function reachedAccount(
   return accountOf(descriptor, record.profile, domainOfGrant(record));
 }
 
-/** The grant a conferral leaves: a fresh credential and the profile and
+/** The grant a grant leaves: a fresh credential and the profile and
  *  account it names, replacing whatever the connection held. */
-export function conferredGrant(
+export function givenGrant(
   now: Date,
   cred: Credential,
   profile?: ProfileRecord,
   account?: GrantAccount,
 ): GrantValue {
-  return { state: "authorized", credential: toPersisted(cred), profile, account, conferredAt: now };
+  return { state: "authorized", credential: toPersisted(cred), profile, account, grantedAt: now };
 }
 
-/** The grant a renewal leaves: the same conferral on a renewed credential. */
+/** The grant a renewal leaves: the same grant on a renewed credential. */
 export function renewedGrant(current: GrantValue, cred: Credential, now: Date): GrantValue {
   return {
     ...current,

@@ -1,11 +1,11 @@
-// The Telegram user-account conferral setup, driven through the real
+// The Telegram user-account setup, driven through the real
 // SetupSession runtime with an injected login-handle fake (no GramJS, no
 // network).
 //
 // Seams under test:
 //   1. makeTelegramUserSetup's coroutine — prompt(apiId/apiHash/phone) →
 //      send-code → prompt(code) → optional prompt(2FA password) with the
-//      wrong-password re-prompt loop → terminal conferral of the serialized
+//      wrong-password re-prompt loop → terminal grant of the serialized
 //      session material + identity profile — observed via the session's
 //      poll-able state and the single commit call.
 //   2. Re-prompt loops: an invalid credential entry, a bad phone code, and a
@@ -25,7 +25,7 @@ import {
 } from "../../channels/telegram-user.js";
 import { SetupManager, type SetupRegistry } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
-import type { SetupConferral } from "../setup/types.js";
+import type { SetupGrant } from "../setup/types.js";
 import type { Connection } from "../types.js";
 import {
   makeTelegramUserDescriptor,
@@ -87,11 +87,11 @@ async function waitForField(session: SetupSession, name: string): Promise<void> 
 }
 
 describe("makeTelegramUserSetup", () => {
-  it("prompts credentials, sends the code, then confers on a code-only login", async () => {
+  it("prompts credentials, sends the code, then grants on a code-only login", async () => {
     const login = makeLoginFake();
     const openLogin = rs.fn(() => login);
     const fn = makeTelegramUserSetup({ openLogin });
-    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const commit = rs.fn(async (_c: SetupGrant, _s: AbortSignal) => {});
     const session = new SetupSession({ fn, commit });
 
     await session.started();
@@ -112,7 +112,7 @@ describe("makeTelegramUserSetup", () => {
     await session.provideInput({ code: "12345" });
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
-    // The login client is stopped BEFORE the conferral commit (the registry
+    // The login client is stopped BEFORE the grant commit (the registry
     // builds the real Talk from the ledger the moment the credential lands).
     expect(login.stop).toHaveBeenCalledTimes(1);
     expect(login.stop.mock.invocationCallOrder[0]).toBeLessThan(commit.mock.invocationCallOrder[0]);
@@ -255,8 +255,8 @@ describe("Telegram-user setup discovery", () => {
       getDescriptor: (connectionKind) => (connectionKind === "telegram_user" ? descriptor : null),
       withGrantSection: (_s, _g, fn) => fn(),
       // Never reached in this test: the login parks at the code prompt and never
-      // confers. Present only to satisfy SetupRegistry.
-      confer: async () => ({ id: "conn-tgu" }) as unknown as Connection,
+      // grants. Present only to satisfy SetupRegistry.
+      giveGrant: async () => ({ id: "conn-tgu" }) as unknown as Connection,
     };
   }
 

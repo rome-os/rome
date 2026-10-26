@@ -88,7 +88,7 @@ Every channel is connected through **one server-owned setup protocol** ([decisio
 
 ### Invariants
 
-- **Setup is uniform.** Enabling any channel drives the same generic surface (a conferral setup addressed by connection + grant). Setup proves provider credentials, while a link in People says who a sender is. A connected account hears strangers before any account is linked to the guardian.
+- **Setup is uniform.** Enabling any channel drives the same generic surface (a setup addressed by connection + grant). Setup proves provider credentials, while a link in People says who a sender is. A connected account hears strangers before any account is linked to the guardian.
 - **The dashboard renders setups generically.** The connect UI is a single standard renderer plus a small set of registered custom components for the few steps that need bespoke presentation (e.g. rendering a QR image). Adding a channel adds neither a connect route nor a per-service connect card.
 - **An account exists only while it is connected.** Adding another account of a service runs that service's setup for a new account, and the account and its channel come into being only when the setup connects it, so an abandoned add leaves nothing behind. Disconnecting removes the Connection and releases its channel, whatever its kind of connection, email, WhatsApp and the sign-ins such as GitHub included. Connecting again makes a new Connection.
 - **Post-connection configuration is not setup.** Config and feature surfaces that operate *after* a channel is linked — Discord per-channel agent routing, the Telegram personal-account dialog list — live under their own named routes, separate from the setup protocol and never part of connecting.

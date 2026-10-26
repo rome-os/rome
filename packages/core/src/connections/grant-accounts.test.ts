@@ -7,7 +7,7 @@ import { makePasteTalk } from "./test-fixtures.js";
 
 const SERVICE = "fake-telegram";
 
-/** A ledger whose grants were conferred before grants named their account. */
+/** A ledger whose grants were granted before grants named their account. */
 async function earlierGrants(botIds: string[]) {
   const db = createTestDb();
   const ledger = new DrizzleConnectionsRepository(db.db);
@@ -69,7 +69,7 @@ describe("recordGrantAccounts", () => {
       await registry.revoke(ids[0]!, "bot");
       const third = await registry.connectAnother(SERVICE);
 
-      const refused = registry.confer(
+      const refused = registry.giveGrant(
         SERVICE,
         third.id,
         "bot",

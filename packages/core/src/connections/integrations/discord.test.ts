@@ -179,10 +179,10 @@ describe("discord descriptor shape", () => {
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
-  it("runs the injected token validator on confer", async () => {
+  it("runs the injected token validator on grant", async () => {
     const validate = rs.fn(async () => {});
     const desc = makeDiscordDescriptor({ ...deps, validateToken: validate });
-    await desc.auth.confer({
+    await desc.auth.obtain({
       prompt: async () => ({ token: "abc" }),
     });
     expect(validate).toHaveBeenCalledWith("abc");
