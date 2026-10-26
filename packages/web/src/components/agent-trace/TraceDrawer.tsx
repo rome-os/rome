@@ -9,6 +9,7 @@ import type {
   TraceSummary,
 } from "@rome/api-types/trace-segments";
 import { Button } from "@/components/ui/button";
+import { useTurnStream } from "@/hooks/use-turn-stream";
 import { CollapsedTraceSummary } from "./CollapsedTraceSummary";
 import { TraceBody } from "./AgentTrace";
 import { turnApiPath } from "./turn-api";
@@ -36,6 +37,11 @@ export type TraceDrawerTarget =
       turnId: string;
       summary: TraceSummary;
       dumpHref?: string;
+      /**
+       * The turn was still running when opened. The drawer follows its stream,
+       * then loads the stored trace once the stream ends.
+       */
+      running?: boolean;
     };
 
 function traceDrawerOpenPlacementClass(hasApps: boolean): string {
@@ -104,6 +110,7 @@ export function TraceDrawer({
   readOnly = false,
   hasApps = false,
   outlet,
+  onFollowingChange,
 }: {
   target: TraceDrawerTarget | null;
   onClose: () => void;
@@ -131,6 +138,11 @@ export function TraceDrawer({
    * is that mode before the tab has mounted, and renders nothing.
    */
   outlet?: HTMLElement | null;
+  /**
+   * Called with true while a running turn target is being followed live and
+   * false otherwise, so a host that draws its own Live indicator can show it.
+   */
+  onFollowingChange?: (following: boolean) => void;
 }) {
   const { t } = useTranslation("activity");
   const [remoteTrace, setRemoteTrace] = useState<TraceSnapshot | null>(null);
@@ -157,6 +169,14 @@ export function TraceDrawer({
   const includeSubagentUsage =
     usageOption.targetKey === remoteTargetKey ? usageOption.include : true;
   const liveTargetKey = target?.kind === "live" ? `${target.sessionId}:${target.turnId}` : null;
+  // A turn opened while running is followed over its stream. Its stored trace
+  // is loaded once, when the stream ends, and is complete by then.
+  const turnStream = useTurnStream(turnTarget?.turnId, { enabled: !!turnTarget?.running });
+  const followingTurn = !!turnTarget?.running && !turnStream.done;
+  useEffect(() => {
+    onFollowingChange?.(followingTurn);
+    return () => onFollowingChange?.(false);
+  }, [followingTurn, onFollowingChange]);
 
   useEffect(() => {
     if (!remoteTargetKey) {
@@ -169,6 +189,7 @@ export function TraceDrawer({
       loadedTargetKeyRef.current = null;
       return;
     }
+    if (followingTurn) return;
     const key = `${remoteTargetKey}:${includeSubagentUsage}:${retryNonce}`;
     if (loadedKeyRef.current === key) return;
     let cancelled = false;
@@ -210,32 +231,49 @@ export function TraceDrawer({
     return () => {
       cancelled = true;
     };
-  }, [remoteTargetKey, storedId, turnTarget, includeSubagentUsage, retryNonce, t, loadStoredTrace]);
+  }, [
+    remoteTargetKey,
+    storedId,
+    turnTarget,
+    followingTurn,
+    includeSubagentUsage,
+    retryNonce,
+    t,
+    loadStoredTrace,
+  ]);
 
   const onRetry = remoteTargetKey ? () => setRetryNonce((n) => n + 1) : undefined;
 
   const open = target !== null;
-  const segments = target?.kind === "live" ? target.segments : (remoteTrace?.segments ?? null);
-  const displaySummary = remoteTrace?.summary ?? target?.summary;
-  const streaming = target?.kind === "live" && target.streaming;
+  // Until the stored trace lands, a followed turn shows what its stream has
+  // delivered, so the panel does not blank when the stream ends.
+  const streamedSegments = turnTarget?.running && turnStream.segments.length > 0;
+  const segments =
+    target?.kind === "live"
+      ? target.segments
+      : (remoteTrace?.segments ?? (streamedSegments ? turnStream.segments : null));
+  const displaySummary =
+    remoteTrace?.summary ?? (streamedSegments ? turnStream.summary : null) ?? target?.summary;
+  const streaming = (target?.kind === "live" && target.streaming) || followingTurn;
+  const followsLive = target?.kind === "live" || !!turnTarget?.running;
+  const followKey = liveTargetKey ?? (followsLive ? remoteTargetKey : null);
   useLayoutEffect(() => {
     shouldFollowLiveTraceRef.current = true;
-    if (target?.kind !== "live" || !scrollEl) return;
+    if (!followKey || !scrollEl) return;
     scrollEl.scrollTop = scrollEl.scrollHeight;
-  }, [liveTargetKey, target?.kind, scrollEl]);
+  }, [followKey, scrollEl]);
 
   const updateLiveTraceFollowState = useCallback(() => {
-    if (target?.kind !== "live" || !scrollEl) return;
+    if (!followsLive || !scrollEl) return;
     shouldFollowLiveTraceRef.current =
       scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight <=
       TRACE_SCROLL_BOTTOM_THRESHOLD_PX;
-  }, [target?.kind, scrollEl]);
+  }, [followsLive, scrollEl]);
 
   useLayoutEffect(() => {
-    if (target?.kind !== "live" || !streaming || !shouldFollowLiveTraceRef.current || !scrollEl)
-      return;
+    if (!followsLive || !streaming || !shouldFollowLiveTraceRef.current || !scrollEl) return;
     scrollEl.scrollTop = scrollEl.scrollHeight;
-  }, [target, streaming, scrollEl]);
+  }, [target, segments, followsLive, streaming, scrollEl]);
 
   const dumpHref =
     !readOnly && !archived
@@ -302,7 +340,7 @@ export function TraceDrawer({
       ) : target ? (
         <TraceBody
           segments={segments}
-          loading={loading}
+          loading={loading && !streamedSegments}
           error={error}
           onRetry={onRetry}
           renderInlineBlock={renderInlineBlock}

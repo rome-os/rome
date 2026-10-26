@@ -1,3 +1,5 @@
+import type { TraceSegment } from "@rome/api-types/trace-segments";
+import { TraceBody } from "@/components/agent-trace/AgentTrace";
 import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
@@ -47,6 +49,20 @@ export interface RenderEntryOptions {
   /** Set by the chat transcript: each text block renders as its own bubble,
    * and every entry comes in once while `live` (its turn is running). */
   transcript?: { live: boolean };
+}
+
+// A subagent's own trace renders with the same block renderers as the parent's,
+// so a nested subagent shows its progress the same way.
+function subagentStepsRenderer(options: RenderEntryOptions) {
+  const nested = { onApprovalResolved: options.onApprovalResolved, compact: true };
+  return (segments: TraceSegment[], live: boolean) => (
+    <TraceBody
+      segments={segments}
+      live={live}
+      renderInlineBlock={(block, key) => renderSingleEntry(block, key, { ...nested, live })}
+      renderRunBlocks={(blocks, runLive) => renderFlatEntries(blocks, { ...nested, live: runLive })}
+    />
+  );
 }
 
 export function renderSingleEntry(
@@ -102,6 +118,8 @@ export function renderSingleEntry(
           sessionId={block.sessionId}
           turnId={block.turnId}
           status="running"
+          startedAt={block.startedAt}
+          renderSteps={subagentStepsRenderer(options)}
           live={options.live}
         />
       );
@@ -115,6 +133,7 @@ export function renderSingleEntry(
           status={block.status}
           output={block.status === "completed" ? block.output : undefined}
           error={block.status === "completed" ? undefined : block.error}
+          renderSteps={subagentStepsRenderer(options)}
         />
       );
     case "text": {
@@ -343,6 +362,8 @@ export function renderFlatEntries(blocks: ChatEntry[], options: RenderEntryOptio
           output={paired?.status === "completed" ? paired.output : undefined}
           error={paired && paired.status !== "completed" ? paired.error : undefined}
           durationMs={subagentCallDurationMs(block, paired)}
+          startedAt={block.startedAt}
+          renderSteps={subagentStepsRenderer(options)}
           live={live}
         />,
       );

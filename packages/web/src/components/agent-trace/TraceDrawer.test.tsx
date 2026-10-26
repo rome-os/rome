@@ -1,9 +1,23 @@
 // @rstest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { TraceAccounting, TraceSnapshot } from "@rome/api-types/trace-segments";
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { TraceAccounting, TraceEventDto, TraceSnapshot } from "@rome/api-types/trace-segments";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { FakeTurnStream, runSegment, stepsSummary } from "@/test/fake-turn-stream";
 import { UsageSummaryView } from "@/components/chat/entries/UsageSummaryView";
 import { TraceDrawer, type TraceDrawerTarget } from "./TraceDrawer";
+
+let streams = new Map<string, FakeTurnStream | "gone">();
+rs.mock("@/lib/chat-api", () => ({
+  openTurnStream: async (turnId: string) => {
+    if (streams.get(turnId) === "gone") return new Response("{}", { status: 404 });
+    const stream = new FakeTurnStream();
+    streams.set(turnId, stream);
+    return stream.response;
+  },
+}));
+beforeEach(() => {
+  streams = new Map();
+});
 
 const translate = (key: string) => key;
 rs.mock("react-i18next", () => ({
@@ -315,5 +329,112 @@ describe("TraceDrawer hosted in the tool pane", () => {
     await waitFor(() => expect(outlet.textContent).toContain("trace.archived"));
     expect(outlet.querySelector("a[download]")).toBeNull();
     outlet.remove();
+  });
+});
+
+describe("TraceDrawer following a running subagent", () => {
+  let seq = 0;
+  const callNames = (blocks: TraceEventDto[]) => (
+    <div data-testid="calls">
+      {blocks.map((block) => (block.type === "tool_use" ? block.tool : "")).join(",")}
+    </div>
+  );
+
+  function turnTarget(turnId: string, running: boolean): TraceDrawerTarget {
+    return {
+      kind: "turn",
+      sessionId: "child-session",
+      turnId,
+      summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
+      running,
+    };
+  }
+
+  function drawer(target: TraceDrawerTarget, onFollowingChange?: (following: boolean) => void) {
+    return (
+      <TraceDrawer
+        target={target}
+        onClose={() => {}}
+        onFollowingChange={onFollowingChange}
+        renderInlineBlock={() => null}
+        renderRunBlocks={callNames}
+      />
+    );
+  }
+
+  const storedTrace = {
+    trace: {
+      summary: { distinctApps: [], totalSteps: 2, invocationCounts: {} },
+      segments: [
+        runSegment("stored-run", [
+          { tool: "Read", input: {} },
+          { tool: "Edit", input: {} },
+        ]),
+      ],
+    },
+  };
+  let traceFetch = rs.fn(async (_url: string) => new Response(JSON.stringify(storedTrace)));
+  beforeEach(() => {
+    traceFetch = rs.fn(async (_url: string) => new Response(JSON.stringify(storedTrace)));
+    rs.stubGlobal("fetch", traceFetch);
+  });
+  afterEach(() => rs.unstubAllGlobals());
+
+  it("shows the live stream with the Live badge and loads nothing until it ends", async () => {
+    const turnId = `drawer-turn-${(seq += 1)}`;
+    const onFollowingChange = rs.fn();
+    render(drawer(turnTarget(turnId, true), onFollowingChange));
+    await waitFor(() => expect(streams.has(turnId)).toBe(true));
+    await act(async () => {
+      const stream = streams.get(turnId) as FakeTurnStream;
+      stream.send("segment_upsert", runSegment("run-1", [{ tool: "Bash", input: {} }]));
+      stream.send("summary_update", stepsSummary(1));
+    });
+
+    expect((await screen.findByTestId("calls")).textContent).toBe("Bash");
+    expect(screen.getByText("trace.drawer.live")).toBeTruthy();
+    expect(traceFetch).not.toHaveBeenCalled();
+    expect(onFollowingChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("swaps to the stored trace once, when the stream ends", async () => {
+    const turnId = `drawer-turn-${(seq += 1)}`;
+    const onFollowingChange = rs.fn();
+    render(drawer(turnTarget(turnId, true), onFollowingChange));
+    await waitFor(() => expect(streams.has(turnId)).toBe(true));
+    await act(async () => {
+      const stream = streams.get(turnId) as FakeTurnStream;
+      stream.send("segment_upsert", runSegment("run-1", [{ tool: "Bash", input: {} }]));
+    });
+    await screen.findByText("Bash");
+
+    await act(async () => {
+      (streams.get(turnId) as FakeTurnStream).send("done", { success: true });
+    });
+    await waitFor(() => expect(screen.getByTestId("calls").textContent).toBe("Read,Edit"));
+    expect(traceFetch).toHaveBeenCalledTimes(1);
+    expect(String(traceFetch.mock.calls[0][0])).toContain(
+      `/api/sessions/child-session/turns/${turnId}/trace`,
+    );
+    expect(screen.queryByText("trace.drawer.live")).toBeNull();
+    expect(onFollowingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("loads the stored trace when the stream is already gone (404)", async () => {
+    const turnId = `drawer-turn-${(seq += 1)}`;
+    streams.set(turnId, "gone");
+    render(drawer(turnTarget(turnId, true)));
+    await waitFor(() => expect(screen.getByTestId("calls").textContent).toBe("Read,Edit"));
+    expect(traceFetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("trace.drawer.live")).toBeNull();
+  });
+
+  it("fetches a finished subagent once and opens no stream", async () => {
+    const turnId = `drawer-turn-${(seq += 1)}`;
+    render(drawer(turnTarget(turnId, false)));
+    await waitFor(() => expect(screen.getByTestId("calls").textContent).toBe("Read,Edit"));
+    expect(traceFetch).toHaveBeenCalledTimes(1);
+    expect(streams.size).toBe(0);
+    expect(screen.queryByText("trace.drawer.live")).toBeNull();
   });
 });

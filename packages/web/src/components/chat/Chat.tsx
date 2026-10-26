@@ -390,6 +390,9 @@ export function Chat({
   const [streamReconnectRevision, setStreamReconnectRevision] = useState(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
+  // A subagent's trace opened mid-run is followed live by the drawer; the drawer
+  // reports it so the Trace tab can show Live for it as it does for ours.
+  const [followingSubagentTrace, setFollowingSubagentTrace] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   // Inline share flow: pick turns directly on the transcript.
   const [shareMode, setShareMode] = useState(false);
@@ -1921,6 +1924,7 @@ export function Chat({
           invocationCounts: {},
         },
         dumpHref: `/api/sessions/${encodeURIComponent(node.sessionId)}/turns/${encodeURIComponent(node.turnId)}/trace.json`,
+        running: node.status === "running",
       });
       revealTrace();
     },
@@ -1955,7 +1959,9 @@ export function Chat({
   const traceOwner = useId();
   const setToolTrace = toolTrace.set;
   const traceOpen = traceDrawerTarget !== null;
-  const traceStreaming = traceDrawerTarget?.kind === "live" && traceDrawerTarget.streaming;
+  const traceStreaming =
+    (traceDrawerTarget?.kind === "live" && traceDrawerTarget.streaming) ||
+    (traceDrawerTarget?.kind === "turn" && followingSubagentTrace);
   const closeTraceRef = useRef(closeTraceDrawer);
   closeTraceRef.current = closeTraceDrawer;
   useEffect(() => {
@@ -2321,6 +2327,7 @@ export function Chat({
           target={traceDrawerTarget}
           onClose={closeTraceDrawer}
           outlet={toolTrace.outlet}
+          onFollowingChange={setFollowingSubagentTrace}
           renderInlineBlock={(block, key) =>
             renderSingleEntry(block, key, {
               onApprovalResolved: refreshActiveSession,

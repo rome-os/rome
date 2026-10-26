@@ -1,7 +1,11 @@
 import { memo, type ReactNode, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
-import type { TraceSnapshot, TraceSubagentSummary } from "@rome/api-types/trace-segments";
+import type {
+  TraceSegment,
+  TraceSnapshot,
+  TraceSubagentSummary,
+} from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
 import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
 import { renderFlatEntries } from "@/components/chat/entries";
@@ -162,6 +166,7 @@ function renderSubagents(
   onOpenSubagentTrace: ((node: TraceSubagentSummary) => void) | undefined,
   activeTraceTarget: TraceDrawerTarget | null | undefined,
   subagentIconByName: ReadonlyMap<string, string | null> | undefined,
+  parentSegments?: TraceSegment[],
 ) {
   if (!onOpenSubagentTrace || !subagents?.length) return undefined;
   return (
@@ -169,6 +174,7 @@ function renderSubagents(
       subagents={subagents}
       selected={activeTraceTarget}
       agentIconByName={subagentIconByName}
+      parentSegments={parentSegments}
       onOpenSubagentTrace={onOpenSubagentTrace}
     />
   );
@@ -270,6 +276,7 @@ const RowView = memo(function RowView({
         onOpenSubagentTrace,
         activeTraceTarget,
         subagentIconByName,
+        live?.snapshot?.segments,
       )}
       className="group"
       footer={
@@ -393,6 +400,7 @@ function StandaloneLiveTail({
         onOpenSubagentTrace,
         activeTraceTarget,
         subagentIconByName,
+        live.snapshot?.segments,
       )}
     >
       {live.text ? (
