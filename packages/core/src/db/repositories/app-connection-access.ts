@@ -434,27 +434,13 @@ export class AppConnectionAccessRepository {
       .limit(limit);
   }
 
-  async pruneAppData(
-    appId: string,
-    before: Date,
-  ): Promise<{ invocations: number; audits: number }> {
-    return this.pruneData(before, appId);
-  }
-
   async pruneExpiredData(before: Date): Promise<{ invocations: number; audits: number }> {
-    return this.pruneData(before);
-  }
-
-  private pruneData(before: Date, appId?: string): { invocations: number; audits: number } {
     return this.db.transaction((tx) => {
       const now = new Date();
-      const scopeInvocation = appId ? eq(appConnectionInvocations.appId, appId) : undefined;
-      const scopeAudit = appId ? eq(appConnectionAudit.appId, appId) : undefined;
       tx.update(appConnectionInvocations)
         .set({ status: "rejected", errorCode: "access_denied", input: null, updatedAt: now })
         .where(
           and(
-            scopeInvocation,
             inArray(appConnectionInvocations.status, ["ready", "pending_approval"]),
             lt(appConnectionInvocations.updatedAt, before),
           ),
@@ -469,7 +455,6 @@ export class AppConnectionAccessRepository {
         })
         .where(
           and(
-            scopeInvocation,
             eq(appConnectionInvocations.status, "running"),
             lt(appConnectionInvocations.updatedAt, before),
           ),
@@ -479,7 +464,6 @@ export class AppConnectionAccessRepository {
         .delete(appConnectionInvocations)
         .where(
           and(
-            scopeInvocation,
             inArray(appConnectionInvocations.status, [
               "succeeded",
               "failed",
@@ -492,7 +476,7 @@ export class AppConnectionAccessRepository {
         .run();
       const audits = tx
         .delete(appConnectionAudit)
-        .where(and(scopeAudit, lt(appConnectionAudit.createdAt, before)))
+        .where(lt(appConnectionAudit.createdAt, before))
         .run();
       return {
         invocations: Number(invocations.changes ?? 0),

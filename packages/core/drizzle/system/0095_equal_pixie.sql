@@ -47,4 +47,4 @@ CREATE TABLE `app_connection_invocations` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `uq_app_connection_invocation_request` ON `app_connection_invocations` (`app_id`,`request_id_hash`) WHERE "app_connection_invocations"."request_id_hash" IS NOT NULL;--> statement-breakpoint
-CREATE INDEX `idx_app_connection_invocation_retention` ON `app_connection_invocations` (`app_id`,`updated_at`);
+CREATE INDEX `idx_app_connection_invocation_retention` ON `app_connection_invocations` (`updated_at`);

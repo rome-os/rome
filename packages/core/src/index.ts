@@ -240,6 +240,7 @@ import { registerBuiltinConnections } from "./connections/integrations/index.js"
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
+  APP_CONNECTION_RETENTION_MS,
   AppConnectionBroker,
   createAppConnectionAccessLifecycle,
   reconcileAppConnectionAccess,
@@ -697,7 +698,7 @@ async function main() {
   const runAppConnectionCleanup = async () => {
     try {
       const result = await appConnectionAccessRepo.pruneExpiredData(
-        new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        new Date(Date.now() - APP_CONNECTION_RETENTION_MS),
       );
       appConnectionCleanupLog.info("App connection cleanup completed", result);
     } catch (err) {

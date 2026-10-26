@@ -16,7 +16,6 @@ import type { ActionEngine, ActionRunContext } from "../actions/engine.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import { actionExecutionContext } from "../actions/context.js";
 import type { CatalogEvent } from "../apps/state.js";
-import { createLogger } from "../logger.js";
 import type {
   AppConnectionAccessRecord,
   AppConnectionAccessRepository,
@@ -34,8 +33,7 @@ const MAX_INPUT_BYTES = 64 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const DEFAULT_INVOKE_LIMIT = 120;
 const DEFAULT_RATE_WINDOW_MS = 60_000;
-const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+export const APP_CONNECTION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 type BrokerActionMode = "read" | "write" | "write_without_approval";
 
@@ -187,8 +185,6 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   private readonly invokeLimit: number;
   private readonly rateWindowMs: number;
   private readonly now: () => number;
-  private readonly lastPrunedAt = new Map<string, number>();
-  private readonly log = createLogger("app-connections");
 
   constructor(
     private readonly registry: ConnectionRegistry,
@@ -342,7 +338,6 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       const result = failure("rate_limited", "The App connection rate limit was reached.", true);
       return rate.auditDenial ? await denied(result) : result;
     }
-    await this.pruneExpiredRows(appId);
     if (![input.connectionId, input.identity, input.operation].every(validKey)) {
       return await denied(failure("invalid_input", "Connection identifiers are invalid."));
     }
@@ -870,21 +865,6 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     }
     window.count += 1;
     return { allowed: true, auditDenial: false };
-  }
-
-  private async pruneExpiredRows(appId: string): Promise<void> {
-    const now = this.now();
-    const last = this.lastPrunedAt.get(appId);
-    if (last !== undefined && now - last < PRUNE_INTERVAL_MS) return;
-    this.lastPrunedAt.set(appId, now);
-    try {
-      await this.access.pruneAppData(appId, new Date(now - RETENTION_MS));
-    } catch (error) {
-      this.log.warn("App connection retention prune failed", {
-        appId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
   }
 }
 

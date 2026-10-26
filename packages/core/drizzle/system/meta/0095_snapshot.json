@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "302f6273-e003-460d-b10d-8d80dcba03dd",
+  "id": "de46a86d-6473-45f9-8d28-9df289bad1c9",
   "prevId": "58810dc1-b71d-43db-84cd-cdddcab2599e",
   "tables": {
     "action_executions": {
@@ -452,7 +452,6 @@
         "idx_app_connection_invocation_retention": {
           "name": "idx_app_connection_invocation_retention",
           "columns": [
-            "app_id",
             "updated_at"
           ],
           "isUnique": false

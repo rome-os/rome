@@ -1,7 +1,10 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
+import type { ChatId } from "@rome-os/app-runtime";
 import { ActionEngine } from "../actions/engine.js";
 import { sendApprovalCard } from "../actions/approval-card.js";
+import { ApprovalHandler } from "../actions/approval-handler.js";
+import type { BackendSessionTask } from "../actions/backend-turn.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createRomeAppContext, type RomeAppRuntimeServices } from "../apps/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -124,7 +127,7 @@ function harness(
       await sendApprovalCard(
         {
           list: async () => [{ name: "webchat", sendable: true }],
-          send: async (_channel, chatId, message) => {
+          send: async (_channel: string, chatId: ChatId, message: unknown) => {
             approvalMessages.push(message);
             return { messageId: "approval-message", chatId };
           },
@@ -142,6 +145,7 @@ function harness(
     access,
     actionRegistry,
     approvals: engineRepos.approvals,
+    journal: engineRepos.journal,
     engine,
     broker,
     invocations,
@@ -445,6 +449,97 @@ describe("App connection broker", () => {
           ],
         }),
       ]);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("keeps approved provider output out of replay and handles rejection through ApprovalHandler", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+        approval: "required",
+      });
+      const prompts: string[] = [];
+      const emitted: unknown[] = [];
+      const handler = new ApprovalHandler(
+        h.approvals,
+        h.journal,
+        h.engine,
+        {
+          async *run(params) {
+            prompts.push(params.prompt);
+          },
+        },
+        {
+          runBackendSessionTask: async (
+            _channel: string,
+            _threadId: string,
+            task: BackendSessionTask,
+          ) => {
+            await task({
+              emit: async (message: unknown) => {
+                emitted.push(message);
+              },
+            });
+          },
+        } as never,
+        undefined,
+        h.broker,
+      );
+      const origin = {
+        channelContext: { channel: "webchat", threadId: "thread-1" },
+        sessionId: "session-1",
+        agentName: "main",
+        channelThreadKey: "webchat:thread-1",
+      };
+      const invoke = async (requestId: string) =>
+        await h.broker.invoke(
+          "app-a",
+          {
+            connectionId: connection.id,
+            identity: "account",
+            operation: "documents.create",
+            requestId,
+            input: { workspaceId: "one", title: "Replay", body: "private" },
+          },
+          origin,
+        );
+
+      const approved = await invoke("request-approved-through-handler");
+      if (!approved.ok || approved.value.status !== "pending_approval") {
+        throw new Error("expected approval");
+      }
+      const approvedRow = await h.approvals.findById(approved.value.approval.approvalId);
+      const approvedPayload = approvedRow!.payload as { rootExecutionId: string };
+      await h.approvals.resolvePending(approved.value.approval.approvalId, "approve", "guardian");
+      await handler.onApproved(approved.value.approval.approvalId);
+
+      expect(
+        JSON.stringify(await h.journal.loadJournal(approvedPayload.rootExecutionId)),
+      ).not.toContain("not-for-audit");
+      expect(JSON.stringify(emitted)).not.toContain("not-for-audit");
+      expect(JSON.stringify(prompts)).not.toContain("not-for-audit");
+      expect(await h.access.getInvocation(approved.value.executionId)).toMatchObject({
+        status: "succeeded",
+        input: null,
+      });
+
+      const rejected = await invoke("request-rejected-through-handler");
+      if (!rejected.ok || rejected.value.status !== "pending_approval") {
+        throw new Error("expected approval");
+      }
+      await h.approvals.resolvePending(rejected.value.approval.approvalId, "reject", "guardian");
+      await handler.onRejected(rejected.value.approval.approvalId);
+      expect(await h.access.getInvocation(rejected.value.executionId)).toMatchObject({
+        status: "rejected",
+        errorCode: "approval_rejected",
+        input: null,
+      });
     } finally {
       h.close();
     }
@@ -777,7 +872,7 @@ describe("App connection broker", () => {
       });
       expect(h.invocations).toHaveLength(1);
 
-      expect(await h.access.pruneAppData("app-a", new Date(Date.now() + 1_000))).toEqual({
+      expect(await h.access.pruneExpiredData(new Date(Date.now() + 1_000))).toEqual({
         invocations: 1,
         audits: 1,
       });
