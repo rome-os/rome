@@ -13,7 +13,8 @@ concrete trigger, ask only for what you genuinely cannot infer, then confirm.
 When `propose_routine` is available, use it instead of any create action: the
 card creates the routine when they turn it on, or creates it right away with
 `activate: true` (see step 4). Only when that tool is unavailable on the current
-surface, follow "Surfaces without `propose_routine`" below.
+surface and you are talking directly to the guardian, follow "Surfaces without
+`propose_routine`" below. Subagents follow "Delegated scheduling" instead.
 
 A routine fires one of three ways. Decide which the request is:
 
@@ -28,6 +29,16 @@ A routine fires one of three ways. Decide which the request is:
 If it's ambiguous ("remind me about the standup"), ask one short question to
 disambiguate before going further. In particular, if it's unclear whether they
 want it on a schedule or to run it by hand, ask.
+
+## Delegated scheduling
+
+If you are a subagent, return the drafted trigger, action, arguments, and any
+missing questions to your caller. Do not create or activate the routine yourself,
+even if your caller says yes. A parent agent's reply is not guardian confirmation.
+The guardian-facing agent owns confirmation and creation: it uses its own
+`propose_routine` when available, or gets the guardian's explicit yes through the
+non-card fallback. It must not delegate confirmation or creation back to a
+subagent. Return any event-source permission still needed with the draft too.
 
 ## The flow
 
@@ -73,9 +84,11 @@ want it on a schedule or to run it by hand, ask.
 
 ## Surfaces without `propose_routine`
 
-Use this fallback **only when `propose_routine` is not available** in the current
-tool list. It is a built-in tool, not a `system:propose_routine` action. Do not
-look for that action or use this fallback to bypass a card error or rejection.
+Use this fallback **only when talking directly to the guardian on a non-card
+surface**, with `propose_routine` absent from your tool list. Its absence in a
+subagent session does not permit direct creation. It is a built-in tool, not a
+`system:propose_routine` action. Do not look for that action or use this fallback
+to bypass a card error or rejection.
 
 1. Resolve the trigger and action through the flow above. Summarize the complete
    routine in plain chat: the cadence or event and filters, the time and timezone
@@ -88,7 +101,12 @@ look for that action or use this fallback to bypass a card error or rejection.
 3. Only after that yes, discover `system:create_routine` with `search_actions`
    and read it with `read_action`. If unavailable or denied, stop and explain the
    limit. Do not bypass permissions. Call it through `execute_action` with
-   `name`, `trigger`, `actionName`, `args` (one object), and `enabled: true`.
+   `name`, `key`, `trigger`, `actionName`, `args` (one object), and `enabled: true`.
+   Generate a unique `key` once for this confirmed request and retain it with the
+   spec in the conversation. Reuse that key for every retry of this request.
+   Scope it to the conversation when its id is known. Never use the display name
+   alone or copy the example key below. The card path also uses a stable key per
+   tool call, but do not invent internal turn or tool-use ids to imitate it.
    Do not pass card-only fields such as `kind`, `sentence`, or `activate`.
    - Schedule: `trigger: { type: "schedule", tzid, tzMode, localTime, rrule }`
      for recurrence, or `date` instead of `rrule` for a dated one-off.
@@ -99,6 +117,13 @@ look for that action or use this fallback to bypass a card error or rejection.
      discovered event name and schema-backed filters. Omit `filter` if absent.
    - Manual: `trigger: { type: "manual" }`, with no schedule or event fields.
 4. Check the action result. Only report the routine as created after success.
+   If a timeout or unclear result leaves creation uncertain, discover and read
+   `system:search_routine` before retrying. Call it with `{ query: key }` and
+   compare each returned `key` exactly. Use `{ query: "" }` to list all routines
+   if needed. If the same key and confirmed spec exist, report that routine
+   rather than create another. If the key exists with a different spec, stop and
+   clarify. If no match exists, retry only with the original key. A duplicate-key
+   error also requires checking the existing routine, never minting a new key.
    If the result is an error, report it rather than claiming activation.
 
 For example, after an explicit yes to a weekly reminder that follows the
@@ -107,6 +132,7 @@ guardian's timezone, the `system:create_routine` arguments are:
 ```json
 {
   "name": "Weekly update reminder",
+  "key": "chat-confirmed:example-conversation:weekly-update-1",
   "trigger": {
     "type": "schedule",
     "tzid": "America/Los_Angeles",
