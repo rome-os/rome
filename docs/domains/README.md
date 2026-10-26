@@ -77,12 +77,12 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - Connecting through a sign-in such as GitHub is one step, and a sign-in Rome rejects leaves no connection behind.
 - Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
 - Chats keeps a connected account by its connection, holding only its agent. It is made with the connection and goes with it.
+- The own-account and delegate kinds of link follow from the kind of connection, which alone says whether an account takes an agent, and the dashboard shows them.
 
 Diffs still owed to the model, each a change of its own:
 
 - Chat replaces conversation in the dashboard, the docs and the code.
 - The per-chat agent override is removed, with a migration.
-- The own-account and delegate kinds of link follow from the kind of connection and are shown.
 - One group is one chat across all of Rome's accounts in it.
 - A Feishu person is one account across all of Rome's Feishu accounts, by the tenant-wide id.
 - The participants of a chat are the platform's member list.

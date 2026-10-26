@@ -82,6 +82,7 @@ import { sessionsRoutes } from "./routes/sessions.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
+import { accountLinkOf } from "../channels/account-links.js";
 import { readAccountAgent } from "../channels/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
@@ -100,7 +101,13 @@ export function buildApp(
   app.route(
     "/",
     discordCliRoutes(
-      { ...deps, channelRecords: new ChannelRecordsRepository(deps.db) },
+      {
+        ...deps,
+        channelRecords: new ChannelRecordsRepository(
+          deps.db,
+          accountLinkOf(deps.connectionRegistry),
+        ),
+      },
       config.host,
     ),
   );
@@ -198,7 +205,10 @@ export function buildApp(
   api.route("/", projectsFilesRoutes(deps));
   api.route("/", syncRoutes(deps));
   api.route("/", shareRoutes(deps));
-  const sessionChannelRecords = new ChannelRecordsRepository(deps.db);
+  const sessionChannelRecords = new ChannelRecordsRepository(
+    deps.db,
+    accountLinkOf(deps.connectionRegistry),
+  );
   const sessionChannelAgents = {
     records: sessionChannelRecords,
     accounts: new ConnectedAccountsRepository(deps.db),

@@ -4,6 +4,7 @@
 // Vocabulary: docs/domains/chats.md#connected-account.
 // Invariants: docs/architecture/channels.md#an-accounts-agent.
 
+import type { AccountLink } from "@rome/api-types/account-agents";
 import type {
   ChannelAccount,
   LinkAccountAgentRequest,
@@ -21,6 +22,7 @@ import {
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { linkChannelAgent } from "../../channels/account-agents.js";
+import { accountLinkOf } from "../../channels/account-links.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -28,7 +30,11 @@ const linkBodySchema: z.ZodType<LinkAccountAgentRequest> = z.object({
   agent: z.string().trim().min(1).nullable(),
 });
 
-function accountView(record: ChannelRecord, agent: string | null): ChannelAccount {
+function accountView(
+  record: ChannelRecord,
+  agent: string | null,
+  link: AccountLink | null,
+): ChannelAccount {
   return {
     id: record.id,
     connectionKind: record.connectionKind,
@@ -36,14 +42,15 @@ function accountView(record: ChannelRecord, agent: string | null): ChannelAccoun
     platform: record.platform,
     connectionId: record.connectionId,
     agent,
+    link,
   };
 }
 
 export function channelAccountsRoutes(
-  deps: Pick<ApiDeps, "db" | "agentLoader" | "accountListening">,
+  deps: Pick<ApiDeps, "db" | "agentLoader" | "accountListening" | "connectionRegistry">,
 ): Hono {
   const app = new Hono();
-  const channels = new ChannelRecordsRepository(deps.db);
+  const channels = new ChannelRecordsRepository(deps.db, accountLinkOf(deps.connectionRegistry));
   const accounts = new ConnectedAccountsRepository(deps.db);
 
   app.get("/channels/accounts", (c) => {
@@ -54,6 +61,7 @@ export function channelAccountsRoutes(
         accountView(
           record,
           record.connectionId === null ? null : accounts.agentOf(record.connectionId),
+          channels.linkOf(record.connectionKind),
         ),
       );
     return c.json({ accounts: views });
@@ -85,7 +93,11 @@ export function channelAccountsRoutes(
       const linked = linkChannelAgent(channels, accounts, id, agent);
       deps.accountListening.changed([linked.channel.id]);
       const result: LinkAccountAgentResult = {
-        account: accountView(linked.channel, linked.agent),
+        account: accountView(
+          linked.channel,
+          linked.agent,
+          channels.linkOf(linked.channel.connectionKind),
+        ),
       };
       return c.json(result);
     } catch (err) {

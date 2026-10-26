@@ -59,7 +59,8 @@
       "newAccount": "New account",
       "noAgent": "None. Rome does not listen to this account.",
       "changeInEnvoys": "Change in Envoys",
-      "agentAnswers": "Answers messages on this account",
+      "agentSpeaksAs": "Speaks as this account",
+      "agentAnswersForYou": "Answers for you from this account",
       "noAgentTitle": "No agent",
       "agentNone": "Rome does not listen to this account"
     },

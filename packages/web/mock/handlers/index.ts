@@ -44,7 +44,7 @@ import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
-import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
@@ -1326,7 +1326,7 @@ export const handlers = [
     if (agent !== null && !mockAgentNames.includes(agent)) {
       return HttpResponse.json({ error: `Agent ${agent} is not loaded.` }, { status: 400 });
     }
-    if (!LINKABLE_KINDS.has(target.connectionKind)) {
+    if (!target.link) {
       return HttpResponse.json(
         { error: `${target.connectionKind} accounts do not take an agent.` },
         { status: 400 },
@@ -1346,6 +1346,7 @@ export const handlers = [
         platform: target.platform ?? platformOf(target.connectionKind),
         connectionId: target.id,
         agent,
+        link: target.link,
       },
     });
   }),
@@ -1384,8 +1385,8 @@ export const handlers = [
       };
     }
     // Core removes an account of a service that names its accounts, which
-    // the linkable services are.
-    const unconnectedAccount = LINKABLE_KINDS.has(connection.connectionKind);
+    // the services that take an agent are.
+    const unconnectedAccount = Boolean(connection.link);
     if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
     const others = connections.connections.filter(
       (candidate) =>

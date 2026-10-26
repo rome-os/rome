@@ -15,7 +15,16 @@
     },
     "openTaskChat": "打开",
     "composerMenu": "添加文件或切换模型",
-    "placeholder": "发消息"
+    "placeholder": "发消息",
+    "empty": {
+      "title": "直接告诉我你想做什么",
+      "prompts": {
+        "weather": "今天天气怎么样？",
+        "reminder": "一小时后提醒我起来活动一下",
+        "email": "总结一下我的未读邮件",
+        "task": "帮我做一个简单的习惯打卡 app"
+      }
+    }
   },
   "senderGuardian": "守护者",
   "inputState": {

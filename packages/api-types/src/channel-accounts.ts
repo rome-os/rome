@@ -3,6 +3,8 @@
  * channel an account. Vocabulary: docs/domains/chats.md#account.
  */
 
+import type { AccountLink } from "./account-agents.js";
+
 /**
  * The account fields of one entry in `GET /api/connections`. Each is optional
  * because a core that predates several accounts omits them, and the dashboard
@@ -20,6 +22,10 @@ export interface ConnectionAccountFields {
    *  `core:main`), or null when none is, which leaves the account silent.
    *  Absent for placeholders and for a service that takes no link. */
   agent?: string | null;
+  /** The kind of link this account's agent has, which its kind of connection
+   *  decides, placeholders included. Null for a kind that takes no agent.
+   *  Absent from a core that predates it. */
+  link?: AccountLink | null;
   /** Whether the service offers "add another account". */
   severalAccounts?: boolean;
 }
@@ -38,6 +44,9 @@ export interface ChannelAccount {
   connectionId: string | null;
   /** Canonical id of the account's agent, or null when the account is silent. */
   agent: string | null;
+  /** The kind of link the account's agent has, or null when its kind of
+   *  connection takes no agent. */
+  link: AccountLink | null;
 }
 
 /** Body of `PUT /api/channels/accounts/:id/agent`. Null unlinks the account,

@@ -1,5 +1,5 @@
 import {
-  LINKABLE_KINDS,
+  type AccountLink,
   MAIN_AGENT_ID,
   agentLabel,
   canonicalAgent,
@@ -9,15 +9,9 @@ import type { ApiConnection } from "@/lib/connections-api";
 import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
 
 // Envoys reads the same feed as Connections and regroups it by agent. An
-// account is one connected account of a linkable service; it has at most one
-// agent. Vocabulary: docs/domains/chats.md#account.
-
-/** How an agent is linked to an account: the account is the agent's own, or it
- *  is the guardian's and the agent answers on their behalf as a delegate. */
-export type LinkKind = "own" | "delegate";
-
-/** The guardian's own signed-in accounts. An agent linked to one is a delegate. */
-const DELEGATE_SERVICES: ReadonlySet<string> = new Set(["telegram_user"]);
+// account is one connected account whose kind of connection takes an agent;
+// it has at most one agent. Core reports the kind of link each kind of
+// connection has. Vocabulary: docs/domains/chats.md#connected-account.
 
 export interface EnvoyAccount {
   /** The account's channel id, which the link route addresses. */
@@ -29,7 +23,7 @@ export interface EnvoyAccount {
   platform: string;
   /** The name people see on the platform, else the platform's name. */
   name: string;
-  kind: LinkKind;
+  kind: AccountLink;
   /** Canonical id of the account's agent, or null when it has none. */
   agent: string | null;
   /** Where the account's Connections card opens, or null when no card shows
@@ -65,7 +59,8 @@ function connectedGrant(connection: ApiConnection): string | null {
 }
 
 function toAccount(connection: ApiConnection): EnvoyAccount | null {
-  if (!LINKABLE_KINDS.has(connection.connectionKind)) return null;
+  const kind = connection.link;
+  if (!kind) return null;
   // A core that predates agent links omits `agent`, and a placeholder has no
   // channel, so neither is an account that can carry an agent.
   if (connection.id === null || !connection.channel || connection.agent === undefined) return null;
@@ -74,7 +69,6 @@ function toAccount(connection: ApiConnection): EnvoyAccount | null {
   // A core that predates `platform` omits it, and the service alone cannot
   // tell a Lark app from a Feishu one, so such an app reads as Feishu.
   const platform = connection.platform ?? platformOf(connection.connectionKind);
-  const kind = DELEGATE_SERVICES.has(connection.connectionKind) ? "delegate" : "own";
   return {
     channel: connection.channel,
     connectionId: connection.id,
@@ -135,14 +129,20 @@ export function buildEnvoys(
   return { envoys, unlinked, agents: [...names].sort(compareAgents) };
 }
 
-/** Services an agent's own account is made on, in the order Envoys offers them. */
-const OWN_SERVICES = ["feishu", "telegram", "discord", "slack_bot"] as const;
+/** The order Envoys offers services in. A service core reports that is not
+ *  listed follows them. */
+const SERVICE_ORDER = ["feishu", "telegram", "discord", "slack_bot", "telegram_user"];
+
+function serviceRank(service: string): number {
+  const rank = SERVICE_ORDER.indexOf(service);
+  return rank === -1 ? SERVICE_ORDER.length : rank;
+}
 
 /** One platform a new account can be connected on, and how its setup starts. */
 export interface ConnectChoice {
   service: string;
   platform: string;
-  kind: LinkKind;
+  kind: AccountLink;
   /** Whether the setup mints a new account rather than filling the service's
    *  one. Envoys cancels its setup when the page that runs it closes. An
    *  account can still connect with no agent, when the link after it fails,
@@ -157,20 +157,29 @@ export interface ConnectChoice {
 /** The platforms a new account can be connected on, own accounts first. Each
  *  setup addresses the service, never a row, since a row left by a failed
  *  removal is gone once a setup starts. Where the service offers several
- *  accounts, even the first connects as a new account. Services core does not
- *  register are left out. */
+ *  accounts, even the first connects as a new account. Only the services core
+ *  reports a kind of link for are offered. */
 export function connectChoices(connections: readonly ApiConnection[]): ConnectChoice[] {
+  const links = new Map<string, AccountLink>();
+  for (const connection of connections) {
+    if (connection.link) links.set(connection.connectionKind, connection.link);
+  }
+  const services = [...links.keys()].sort(
+    (a, b) =>
+      Number(links.get(a) === "delegate") - Number(links.get(b) === "delegate") ||
+      serviceRank(a) - serviceRank(b) ||
+      a.localeCompare(b),
+  );
   const choices: ConnectChoice[] = [];
-  for (const service of [...OWN_SERVICES, ...DELEGATE_SERVICES]) {
+  for (const service of services) {
     const rows = connections.filter((connection) => connection.connectionKind === service);
-    if (rows.length === 0) continue;
     const anyConnected = rows.some((connection) => connectedGrant(connection) !== null);
     const several = rows.some((connection) => connection.severalAccounts === true);
     const live = rows.flatMap((connection) => Object.values(connection.setups))[0] ?? null;
     choices.push({
       service,
       platform: platformOf(service),
-      kind: DELEGATE_SERVICES.has(service) ? "delegate" : "own",
+      kind: links.get(service)!,
       another: several,
       activeSetupCid: several ? null : live,
       taken: anyConnected && !several,

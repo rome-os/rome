@@ -25,7 +25,7 @@ function account(overrides: Partial<EnvoyAccount> = {}): EnvoyAccount {
     service: "discord",
     platform: "discord",
     name: "Sales",
-    kind: "own",
+    kind: "own_account",
     agent: null,
     route: "discord",
     ...overrides,

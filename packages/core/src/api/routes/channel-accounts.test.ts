@@ -4,7 +4,7 @@ import { DrizzleConnectionsRepository } from "../../connections/repository-db.js
 import { NO_GRANT } from "../../connections/grant.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb, testAccountLinkOf } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { channelAccountsRoutes } from "./channel-accounts.js";
 
@@ -21,7 +21,7 @@ describe("channel account routes", () => {
   function setup(loaded: Record<string, string> = { "sales:agent": "sales:agent" }) {
     testDb = createTestDb();
     const db = testDb.db;
-    const records = new ChannelRecordsRepository(db);
+    const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const accounts = new ConnectedAccountsRepository(db);
     const ledger = new DrizzleConnectionsRepository(db);
     // Connect as the registry does: the connection, its channel and its
@@ -48,13 +48,17 @@ describe("channel account routes", () => {
       has: (name: string) => name in loaded,
       getCanonicalName: (name: string) => loaded[name]!,
     } as unknown as ApiDeps["agentLoader"];
+    // The descriptors' kinds of link, as the registry answers them.
+    const connectionRegistry = {
+      getDescriptor: (kind: string) => ({ link: testAccountLinkOf(kind) ?? undefined }),
+    } as unknown as ApiDeps["connectionRegistry"];
     const changed: Array<string | null> = [];
     const accountListening = {
       changed: (channels: Iterable<string | null>) => changed.push(...channels),
     };
     const app = new Hono().route(
       "/",
-      channelAccountsRoutes({ db: testDb.db, agentLoader, accountListening }),
+      channelAccountsRoutes({ db: testDb.db, agentLoader, accountListening, connectionRegistry }),
     );
     const link = (
       id: string,
@@ -86,6 +90,7 @@ describe("channel account routes", () => {
           platform: "feishu",
           connectionId: "c1",
           agent: "sales:agent",
+          link: "own_account",
         },
       ],
     });
@@ -108,6 +113,7 @@ describe("channel account routes", () => {
         platform: "telegram",
         connectionId: "c2",
         agent: "sales:agent",
+        link: "delegate",
       },
     });
     expect(agentOf("telegram")).toBe("sales:agent");

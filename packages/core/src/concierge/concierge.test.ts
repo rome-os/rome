@@ -1,5 +1,8 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { AgentTurnFinishedEvent, BackendTurnParams } from "@rome-os/app-runtime";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { SessionToolContext } from "../core/session-tools.js";
 import type { ChatApi } from "./chat-api.js";
 import { startConciergeEvents } from "./events.js";
@@ -41,8 +44,9 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
       sessions.set("task-1", { id: "task-1", name: "New Chat", triggerKind: null });
       return "task-1";
     }),
-    renameChat: rs.fn(async () => {
+    renameChat: rs.fn(async (chatId: string, name: string) => {
       order.push("rename");
+      sessions.set(chatId, { ...sessions.get(chatId), name });
     }),
     postTurn: rs.fn(async (chatId: string, text: string, inputId?: string) => {
       order.push("post");
@@ -81,6 +85,7 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
         },
       ),
       createSession: rs.fn(async () => {}),
+      listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
     },
     sessionManager: { findReusableSession: async () => ({ id: "runtime-1" }) },
     aiToolState: {
@@ -184,6 +189,7 @@ describe("Concierge tools", () => {
       "chat_stop",
       "chat_list",
       "chat_forward",
+      "chat_card",
     ]);
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
     const off = setup({ enabled: false });
@@ -214,10 +220,63 @@ describe("Concierge tools", () => {
     ]);
   });
 
+  it("chat_start takes a project by the absolute path the prompt lists", async () => {
+    const s = setup();
+    const root = mkdtempSync(join(tmpdir(), "rome-concierge-projects-"));
+    rs.stubEnv("ROME_PROJECTS_ROOT", root);
+    try {
+      await s.tool("chat_start", {
+        title: "Fix",
+        brief: "Fix it",
+        project: join(root, "rome-oss"),
+      });
+      expect(s.chatApi.createChat).toHaveBeenCalledWith({
+        agentName: undefined,
+        projectPath: "rome-oss",
+      });
+    } finally {
+      rs.unstubAllEnvs();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("chat_start rejects an unknown project and names the valid ones", async () => {
+    const s = setup();
+    const root = mkdtempSync(join(tmpdir(), "rome-concierge-projects-"));
+    rs.stubEnv("ROME_PROJECTS_ROOT", root);
+    try {
+      const result = await s.tool("chat_start", { title: "Fix", brief: "Fix it", project: "rome" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("one of: default, rome-oss");
+      expect(s.chatApi.createChat).not.toHaveBeenCalled();
+    } finally {
+      rs.unstubAllEnvs();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("refuses chats it did not start", async () => {
     const s = setup();
     const result = await s.tool("chat_send", { chatId: CONCIERGE_CHAT, text: "hi" });
     expect(result.isError).toBe(true);
+  });
+
+  it("chat_card shows the card for a task chat started without one", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    expect(s.messages.get(CONCIERGE_CHAT)).toBeUndefined();
+    const result = await s.tool("chat_card", { chatId: "task-1" });
+    expect(result.isError).toBeFalsy();
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "task_chat", chatId: "task-1", title: "Flights" }],
+    ]);
+  });
+
+  it("chat_card refuses chats it did not start", async () => {
+    const s = setup();
+    const result = await s.tool("chat_card", { chatId: CONCIERGE_CHAT });
+    expect(result.isError).toBe(true);
+    expect(s.messages.get(CONCIERGE_CHAT)).toBeUndefined();
   });
 });
 

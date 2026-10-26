@@ -4,6 +4,7 @@ import {
   type TestDb,
   identityConnectionKindOf,
   recordedConnectionKindOf,
+  testAccountLinkOf,
 } from "../../test/helpers.js";
 import { AccountHeldError, PersonMappingRepository } from "./person-mapping.js";
 import { eq } from "drizzle-orm";
@@ -132,7 +133,7 @@ describe("PersonMappingRepository", () => {
   });
 
   it("findByChannelUser() reads a later channel's sender from its service's links", async () => {
-    const records = new ChannelRecordsRepository(testDb.db);
+    const records = new ChannelRecordsRepository(testDb.db, testAccountLinkOf);
     repo = new PersonMappingRepository(testDb.db, recordedConnectionKindOf(testDb.db));
     const now = new Date();
     records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now, { id: "telegram" });
@@ -148,7 +149,7 @@ describe("PersonMappingRepository", () => {
   });
 
   it("writes a later channel's links under its service", async () => {
-    const records = new ChannelRecordsRepository(testDb.db);
+    const records = new ChannelRecordsRepository(testDb.db, testAccountLinkOf);
     repo = new PersonMappingRepository(testDb.db, recordedConnectionKindOf(testDb.db));
     const now = new Date();
     records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now, { id: "telegram" });

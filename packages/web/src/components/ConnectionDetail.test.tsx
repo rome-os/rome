@@ -11,6 +11,7 @@ import type { ApiConnection, ConnectHint, GrantDisplay, GrantState } from "@/lib
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import { toast } from "sonner";
 import { stateOfGrants } from "@/test/connection-state";
+import { linkOf } from "@/test/account-links";
 
 rs.mock("sonner", () => ({
   toast: Object.assign(
@@ -75,6 +76,7 @@ function connection(
     setups: {},
     channel: null,
     agent: null,
+    link: linkOf(overrides.connectionKind),
     severalAccounts: false,
     ...overrides,
   };
@@ -425,6 +427,7 @@ describe("ConnectionDetailBody — accounts", () => {
     renderAccountBody(cardFor([feishu({ agent: "sales:agent" })], "feishu"));
 
     expect(screen.getByText("sales:agent")).toBeTruthy();
+    expect(screen.getByText("Speaks as this account")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
       `/envoys/${encodeURIComponent("sales:agent")}/settings`,
@@ -447,6 +450,12 @@ describe("ConnectionDetailBody — accounts", () => {
     expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
       "/envoys",
     );
+  });
+
+  it("shows no agent for a kind of connection core reports takes none", () => {
+    renderAccountBody(cardFor([feishu({ agent: "sales:agent", link: null })], "feishu"));
+
+    expect(screen.queryByText("sales:agent")).toBeNull();
   });
 
   it("hides the agent until the server reports links", () => {

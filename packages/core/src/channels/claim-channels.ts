@@ -3,7 +3,7 @@
  * channels were recorded. Vocabulary: docs/domains/chats.md#account.
  */
 
-import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
@@ -15,13 +15,13 @@ import type { ConnectedAccountsRepository } from "../db/repositories/connected-a
  * this only reaches Connections from before. A connection kind held one Connection
  * then, so each takes its connection kind's own name. Each gets its connected
  * account too. Such an account answered as main before accounts took agents,
- * so one of a linkable connection kind keeps main, as migration 0081 kept it
+ * so one whose connection kind takes an agent keeps main, as migration 0081 kept it
  * for the channels recorded then. `domainOf` answers a Feishu
  * app's domain, and is asked only of a Connection that has no channel.
  */
 export async function claimChannels(
   db: DrizzleDb,
-  records: Pick<ChannelRecordsRepository, "claim" | "unclaimed">,
+  records: Pick<ChannelRecordsRepository, "claim" | "unclaimed" | "linkOf">,
   accounts: Pick<ConnectedAccountsRepository, "add">,
   connections: ReadonlyArray<{ id: string; connectionKind: string }>,
   domainOf: (connectionId: string) => Promise<string | undefined> = async () => undefined,
@@ -35,7 +35,7 @@ export async function claimChannels(
       records.claim(tx, { ...connection, domain: domains[i] }, now, {
         id: connection.connectionKind,
       });
-      const agent = LINKABLE_KINDS.has(connection.connectionKind) ? MAIN_AGENT_ID : null;
+      const agent = records.linkOf(connection.connectionKind) === null ? null : MAIN_AGENT_ID;
       accounts.add(tx, connection.id, agent);
     }
   });

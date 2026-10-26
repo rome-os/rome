@@ -13,6 +13,7 @@ const telegramBot: ConnectionSlot = {
   display: null,
   identity: null,
   activeSetupCid: null,
+  link: "own_account",
 };
 
 const telegramSession: ConnectionSlot = {
@@ -23,6 +24,7 @@ const telegramSession: ConnectionSlot = {
   display: null,
   identity: null,
   activeSetupCid: null,
+  link: "delegate",
 };
 
 const meta = {

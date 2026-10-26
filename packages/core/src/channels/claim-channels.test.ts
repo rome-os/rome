@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import type { GrantRecord } from "../connections/grant.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb, testAccountLinkOf } from "../test/helpers.js";
 import { claimChannels, recordChannelAccounts } from "./claim-channels.js";
 import { domainOfGrant } from "./platform.js";
 
@@ -26,7 +26,7 @@ describe("claimChannels", () => {
 
   it("names each unrecorded Connection after its service and keeps recorded ones", async () => {
     testDb = createTestDb();
-    const records = new ChannelRecordsRepository(testDb.db);
+    const records = new ChannelRecordsRepository(testDb.db, testAccountLinkOf);
     const accounts = recordedAccounts();
     records.claim(testDb.db, { id: "c1", connectionKind: "feishu" }, new Date(), { id: "feishu" });
 
@@ -54,7 +54,7 @@ describe("claimChannels", () => {
 
   it("asks only unrecorded Connections their domain, and puts a Lark app on Lark", async () => {
     testDb = createTestDb();
-    const records = new ChannelRecordsRepository(testDb.db);
+    const records = new ChannelRecordsRepository(testDb.db, testAccountLinkOf);
     records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, new Date(), {
       id: "telegram",
     });
@@ -96,7 +96,7 @@ describe("claimChannels", () => {
         },
       },
     });
-    const records = new ChannelRecordsRepository(testDb.db);
+    const records = new ChannelRecordsRepository(testDb.db, testAccountLinkOf);
 
     await claimChannels(
       testDb.db,
@@ -111,7 +111,7 @@ describe("claimChannels", () => {
 
   it("records the account each backed channel's Connection reaches", async () => {
     testDb = createTestDb();
-    const records = new ChannelRecordsRepository(testDb.db);
+    const records = new ChannelRecordsRepository(testDb.db, testAccountLinkOf);
     const now = new Date();
     const tg = records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now).id;
     const email = records.claim(testDb.db, { id: "c2", connectionKind: "email" }, now).id;

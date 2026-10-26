@@ -109,7 +109,7 @@ function PickPlatform({ connections }: { connections: readonly ApiConnection[] }
   const name = agentLabel(agent);
   useDocumentTitle([t("connect.title"), t("index.title")]);
   const choices = connectChoices(connections);
-  const own = choices.filter((choice) => choice.kind === "own");
+  const own = choices.filter((choice) => choice.kind === "own_account");
   const delegate = choices.filter((choice) => choice.kind === "delegate");
   return (
     <Page>
@@ -230,6 +230,7 @@ function ConnectOn({
     display: null,
     identity: null,
     activeSetupCid: choice.activeSetupCid,
+    link: choice.kind,
   };
 
   const refetch = () =>

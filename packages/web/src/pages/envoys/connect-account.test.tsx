@@ -9,6 +9,7 @@ import i18n from "@/i18n";
 import type { ApiConnection } from "@/lib/connections-api";
 import EnvoysPage from "./EnvoysPage";
 import { stateOfGrants } from "@/test/connection-state";
+import { linkOf } from "@/test/account-links";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -36,6 +37,7 @@ function connection(service: string, overrides: Partial<ApiConnection> = {}): Ap
     setups: {},
     channel: service,
     agent: MAIN_AGENT_ID,
+    link: linkOf(service),
     severalAccounts: true,
     ...overrides,
   } as ApiConnection;
