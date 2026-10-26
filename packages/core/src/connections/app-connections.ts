@@ -16,6 +16,7 @@ import type { ActionEngine } from "../actions/engine.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import { actionExecutionContext } from "../actions/context.js";
 import type { CatalogEvent } from "../apps/state.js";
+import { createLogger } from "../logger.js";
 import type {
   AppConnectionAccessRecord,
   AppConnectionAccessRepository,
@@ -25,7 +26,6 @@ import type { ConnectionRegistry } from "./registry.js";
 import type { Connection, OperationDescriptor, ProfileDisplay } from "./types.js";
 
 const READ_ACTION = "core:app_connection_read";
-const READ_APPROVAL_ACTION = "core:app_connection_read_with_approval";
 const WRITE_ACTION = "core:app_connection_write";
 const APPROVED_WRITE_ACTION = "core:app_connection_write_without_approval";
 const DEFAULT_PAGE_SIZE = 20;
@@ -34,8 +34,10 @@ const MAX_INPUT_BYTES = 64 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const DEFAULT_INVOKE_LIMIT = 120;
 const DEFAULT_RATE_WINDOW_MS = 60_000;
+const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
-type BrokerActionMode = "read" | "read_with_approval" | "write" | "write_without_approval";
+type BrokerActionMode = "read" | "write" | "write_without_approval";
 
 export type AppConnectionBrokerResult<T> =
   | { ok: true; value: T }
@@ -163,6 +165,8 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   private readonly invokeLimit: number;
   private readonly rateWindowMs: number;
   private readonly now: () => number;
+  private readonly lastPrunedAt = new Map<string, number>();
+  private readonly log = createLogger("app-connections");
 
   constructor(
     private readonly registry: ConnectionRegistry,
@@ -181,7 +185,6 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
 
   registerActions(registry: ActionRegistryImpl): void {
     registry.register(this.action(READ_ACTION, "read", false));
-    registry.register(this.action(READ_APPROVAL_ACTION, "read_with_approval", true));
     registry.register(this.action(WRITE_ACTION, "write", true));
     registry.register(this.action(APPROVED_WRITE_ACTION, "write_without_approval", false));
   }
@@ -278,7 +281,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           constraints: policy?.constraints ?? [],
         };
       })
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => compareStrings(a.name, b.name));
     return { ok: true, value: paginateOperations(operations, page.value) };
   }
 
@@ -314,6 +317,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       const result = failure("rate_limited", "The App connection rate limit was reached.", true);
       return rate.auditDenial ? await denied(result) : result;
     }
+    await this.pruneExpiredRows(appId);
     if (![input.connectionId, input.identity, input.operation].every(validKey)) {
       return await denied(failure("invalid_input", "Connection identifiers are invalid."));
     }
@@ -332,6 +336,11 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       return await denied(failure("operation_not_found", "The operation is not App-accessible."));
     }
     const sideEffects = operation.appAccess!.sideEffects;
+    if (sideEffects === "read-only" && activePolicy.approval === "required") {
+      return await denied(
+        failure("access_denied", "Read operations cannot use deferred approval."),
+      );
+    }
     if (sideEffects === "write" && !validRequestId(input.requestId)) {
       return await denied(
         failure("request_id_required", "Write operations require a stable requestId."),
@@ -373,11 +382,39 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         return failure("request_in_progress", "The request is already in progress.", true);
       }
     }
-    const result = await this.actionEngine.run(
-      actionName,
-      { invocationId },
-      { initiator: `app:${appId}`, callerAppId: appId },
-    );
+    let result;
+    try {
+      result = await this.actionEngine.run(
+        actionName,
+        { invocationId },
+        { initiator: `app:${appId}`, callerAppId: appId },
+      );
+    } catch {
+      if (sideEffects === "write") {
+        await this.access.transitionInvocation(
+          invocationId,
+          ["ready", "pending_approval", "running"],
+          "outcome_unknown",
+          "outcome_unknown",
+          true,
+        );
+        await this.audit(
+          stored.invocation,
+          activePolicy.approval === "required" ? "pending" : "not_required",
+          "outcome_unknown",
+        );
+        return { ok: true, value: { status: "outcome_unknown", executionId: invocationId } };
+      }
+      await this.access.transitionInvocation(
+        invocationId,
+        ["ready", "pending_approval", "running"],
+        "failed",
+        "provider_error",
+        true,
+      );
+      await this.audit(stored.invocation, "not_required", "provider_error");
+      return failure("provider_error", "The connection operation failed.", true);
+    }
     if (result.status === "pending_approval") {
       await this.audit(stored.invocation, "pending", "pending_approval");
       return {
@@ -408,10 +445,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   }
 
   async approvalRejected(actionName: string, args: Record<string, unknown>): Promise<void> {
-    if (
-      (actionName !== WRITE_ACTION && actionName !== READ_APPROVAL_ACTION) ||
-      typeof args.invocationId !== "string"
-    ) {
+    if (actionName !== WRITE_ACTION || typeof args.invocationId !== "string") {
       return;
     }
     const invocation = await this.access.getInvocation(args.invocationId);
@@ -456,7 +490,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     mode: BrokerActionMode,
   ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>> {
     const expectedEffect = mode.startsWith("read") ? "read-only" : "write";
-    const expectedApproval = mode === "read_with_approval" || mode === "write";
+    const expectedApproval = mode === "write";
     const expectedStatus = expectedApproval ? "pending_approval" : "ready";
     const executionApproval = expectedApproval ? "approved" : "not_required";
     const invocation = await this.access.getInvocation(invocationId);
@@ -559,7 +593,12 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         ...(expectedEffect === "write" ? { requestId: invocation.id } : {}),
       });
       const output = serializeBounded(data ?? null, MAX_OUTPUT_BYTES);
-      if (!output.ok) return await fail("provider_error");
+      if (!output.ok) {
+        if (expectedEffect === "read-only") return await fail("provider_error");
+        await this.access.updateInvocation(invocation.id, "succeeded", null, true);
+        await this.audit(invocation, executionApproval, "succeeded");
+        return { ok: true, value: { status: "ok", executionId: invocation.id } };
+      }
       await this.access.updateInvocation(invocation.id, "succeeded", null, true);
       await this.audit(invocation, executionApproval, "succeeded");
       return {
@@ -801,6 +840,21 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     window.count += 1;
     return { allowed: true, auditDenial: false };
   }
+
+  private async pruneExpiredRows(appId: string): Promise<void> {
+    const now = this.now();
+    const last = this.lastPrunedAt.get(appId);
+    if (last !== undefined && now - last < PRUNE_INTERVAL_MS) return;
+    this.lastPrunedAt.set(appId, now);
+    try {
+      await this.access.pruneAppData(appId, new Date(now - RETENTION_MS));
+    } catch (error) {
+      this.log.warn("App connection retention prune failed", {
+        appId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 
 function summary(connection: Connection) {
@@ -822,7 +876,7 @@ function actionFor(
   approval: "required" | "not_required",
 ): string {
   if (sideEffects === "read-only") {
-    return approval === "required" ? READ_APPROVAL_ACTION : READ_ACTION;
+    return READ_ACTION;
   }
   return approval === "required" ? WRITE_ACTION : APPROVED_WRITE_ACTION;
 }
@@ -902,7 +956,7 @@ function canonicalJson(value: unknown, seen = new Set<object>()): unknown {
     if (Array.isArray(value)) return value.map((entry) => canonicalJson(entry, seen));
     return Object.fromEntries(
       Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) => compareStrings(left, right))
         .map(([key, entry]) => [key, canonicalJson(entry, seen)]),
     );
   } finally {
@@ -978,6 +1032,10 @@ function paginateOperations(
       ? { nextCursor: Buffer.from(operations.at(-1)!.name).toString("base64url") }
       : {}),
   };
+}
+
+function compareStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function isBrokerResult(

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, or, gt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { AppConnectionErrorBody, AppConnectionResourceConstraint } from "@rome-os/app-runtime";
 import { appConnectionAccess, appConnectionAudit, appConnectionInvocations } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
@@ -320,5 +320,32 @@ export class AppConnectionAccessRepository {
       .where(and(eq(appConnectionAudit.appId, appId), gt(appConnectionAudit.seq, afterSeq)))
       .orderBy(asc(appConnectionAudit.seq))
       .limit(limit);
+  }
+
+  async pruneAppData(
+    appId: string,
+    before: Date,
+  ): Promise<{ invocations: number; audits: number }> {
+    const invocations = await this.db
+      .delete(appConnectionInvocations)
+      .where(
+        and(
+          eq(appConnectionInvocations.appId, appId),
+          inArray(appConnectionInvocations.status, [
+            "succeeded",
+            "failed",
+            "rejected",
+            "outcome_unknown",
+          ]),
+          lt(appConnectionInvocations.updatedAt, before),
+        ),
+      );
+    const audits = await this.db
+      .delete(appConnectionAudit)
+      .where(and(eq(appConnectionAudit.appId, appId), lt(appConnectionAudit.createdAt, before)));
+    return {
+      invocations: Number(invocations.changes ?? 0),
+      audits: Number(audits.changes ?? 0),
+    };
   }
 }

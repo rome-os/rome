@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@rstest/core";
+import { describe, expect, it, rs } from "@rstest/core";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createRomeAppContext, type RomeAppRuntimeServices } from "../apps/context.js";
@@ -55,10 +55,16 @@ const operations: readonly OperationDescriptor[] = [
 ];
 
 function harness(
-  options: { invokeLimit?: number; rateWindowMs?: number; now?: () => number } = {},
+  options: {
+    invokeLimit?: number;
+    rateWindowMs?: number;
+    now?: () => number;
+    operations?: readonly OperationDescriptor[];
+  } = {},
 ) {
   const { db, close } = createTestDb();
   const invocations: Array<{ connectionId: string; call: OperationCall }> = [];
+  const actorOperations = options.operations ?? operations;
   const descriptor: ConnectionDescriptor = {
     connectionKind: "fake-docs",
     grant: "account",
@@ -78,14 +84,17 @@ function harness(
     }),
     capabilities: {
       actor: {
-        operations,
+        operations: actorOperations,
         build(_credential, kit) {
           return {
-            operations: () => operations,
+            operations: () => actorOperations,
             async invoke(call) {
               invocations.push({ connectionId: kit.connectionId, call });
               if ((call.input as { title?: string })?.title === "uncertain") {
                 throw new Error("socket closed after send");
+              }
+              if ((call.input as { title?: string })?.title === "huge-output") {
+                return { value: "x".repeat(1024 * 1024 + 1) };
               }
               return { secretResult: "not-for-audit", operation: call.operation };
             },
@@ -437,6 +446,30 @@ describe("App connection broker", () => {
     }
   });
 
+  it("fails closed for a legacy read policy that requires deferred approval", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.get",
+        approval: "required",
+      });
+      await expect(
+        h.broker.forApp("app-a").invoke({
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.get",
+          input: { workspaceId: "one", documentId: "doc" },
+        }),
+      ).rejects.toMatchObject({ detail: { code: "access_denied" } });
+      expect(h.invocations).toEqual([]);
+    } finally {
+      h.close();
+    }
+  });
+
   it("rate-limits invocations per App and resets the bounded window", async () => {
     let now = 1_000;
     const h = harness({ invokeLimit: 1, rateWindowMs: 500, now: () => now });
@@ -509,6 +542,108 @@ describe("App connection broker", () => {
       await expect(
         facade.invoke({ ...request, input: { ...request.input, body: "changed" } }),
       ).rejects.toMatchObject({ detail: { code: "request_id_conflict" } });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("records a completed write as succeeded when its output cannot be returned", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+      });
+      const request = {
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.create",
+        requestId: "request-huge-output",
+        input: { workspaceId: "one", title: "huge-output", body: "body" },
+      } as const;
+      const first = await h.broker.forApp("app-a").invoke(request);
+      expect(first).toMatchObject({ status: "ok" });
+      if (first.status !== "ok") throw new Error("expected success");
+      expect(first).not.toHaveProperty("data");
+      expect(await h.access.getInvocation(first.executionId)).toMatchObject({
+        status: "succeeded",
+        input: null,
+      });
+      expect(await h.broker.forApp("app-a").invoke(request)).toEqual({
+        status: "duplicate",
+        executionId: first.executionId,
+        outcome: "succeeded",
+      });
+      expect(h.invocations).toHaveLength(1);
+
+      expect(await h.access.pruneAppData("app-a", new Date(Date.now() + 1_000))).toEqual({
+        invocations: 1,
+        audits: 1,
+      });
+      expect(await h.access.getInvocation(first.executionId)).toBeNull();
+      expect(await h.access.listAuditForApp("app-a")).toEqual([]);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("finishes an invocation when the Action engine throws", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.get",
+      });
+      rs.spyOn(h.engine, "run").mockRejectedValueOnce(new Error("approval storage unavailable"));
+      await expect(
+        h.broker.forApp("app-a").invoke({
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.get",
+          input: { workspaceId: "one", documentId: "doc" },
+        }),
+      ).rejects.toMatchObject({ detail: { code: "provider_error", retryable: true } });
+      const [audit] = await h.access.listAuditForApp("app-a");
+      expect(audit).toMatchObject({ status: "provider_error" });
+      expect(await h.access.getInvocation(audit!.executionId)).toMatchObject({
+        status: "failed",
+        input: null,
+      });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("uses the same code-unit ordering across operation pages", async () => {
+    const names = ["a_b", "a-b", "a.b", "ab", "aB"];
+    const h = harness({
+      operations: names.map((name) => ({
+        name,
+        description: name,
+        inputSchema: { type: "object" },
+        appAccess: { sideEffects: "read-only" },
+      })),
+    });
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, { appId: "app-a", connectionId: connection.id, operation: "a-b" });
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await h.broker.forApp("app-a").operations({
+          connectionId: connection.id,
+          identity: "account",
+          limit: 1,
+          cursor,
+        });
+        seen.push(...page.operations.map((operation) => operation.name));
+        cursor = page.nextCursor;
+      } while (cursor);
+      expect(seen).toEqual(["a-b", "a.b", "aB", "a_b", "ab"]);
     } finally {
       h.close();
     }

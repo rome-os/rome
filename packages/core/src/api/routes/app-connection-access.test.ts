@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import { createTestDb } from "../../test/helpers.js";
 import { AppConnectionAccessRepository } from "../../db/repositories/app-connection-access.js";
+import { runWithSessionActor, type SessionActor } from "../../lib/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 import { appConnectionAccessRoutes } from "./app-connection-access.js";
 
@@ -71,19 +72,24 @@ function makeApp() {
   } as unknown as ApiDeps;
   const app = new Hono();
   app.route("/", appConnectionAccessRoutes(deps));
-  return { app, close, access: new AppConnectionAccessRepository(db) };
+  const request = (
+    path: string,
+    init?: RequestInit,
+    actor: SessionActor = { kind: "guardian", userId: "guardian", via: "cookie" },
+  ) => runWithSessionActor(actor, () => app.request(path, init));
+  return { request, close, access: new AppConnectionAccessRepository(db) };
 }
 
 describe("App connection access management", () => {
   it("persists and revokes an exact App, connection, identity, and operation grant", async () => {
-    const { app, close } = makeApp();
+    const { request, close } = makeApp();
     try {
       const path = "/app-connection-access/notes/connection-1/account/documents.get";
-      const put = await app.request(path, {
+      const put = await request(path, {
         method: "PUT",
         headers: sameOrigin,
         body: JSON.stringify({
-          approval: "required",
+          approval: "not_required",
           constraints: [{ inputPointer: "/workspaceId", allowedValues: ["workspace-1"] }],
         }),
       });
@@ -98,11 +104,11 @@ describe("App connection access management", () => {
         },
       });
 
-      const listed = await app.request("/app-connection-access/notes");
+      const listed = await request("/app-connection-access/notes");
       expect(await listed.json()).toMatchObject({ policies: [{ operation: "documents.get" }] });
 
-      expect((await app.request(path, { method: "DELETE", headers: sameOrigin })).status).toBe(204);
-      expect(await (await app.request("/app-connection-access/notes")).json()).toEqual({
+      expect((await request(path, { method: "DELETE", headers: sameOrigin })).status).toBe(204);
+      expect(await (await request("/app-connection-access/notes")).json()).toEqual({
         policies: [],
       });
     } finally {
@@ -111,16 +117,13 @@ describe("App connection access management", () => {
   });
 
   it("cannot grant a Core-only raw operation", async () => {
-    const { app, close } = makeApp();
+    const { request, close } = makeApp();
     try {
-      const response = await app.request(
-        "/app-connection-access/notes/connection-1/account/raw.http",
-        {
-          method: "PUT",
-          headers: sameOrigin,
-          body: JSON.stringify({ approval: "not_required", constraints: [] }),
-        },
-      );
+      const response = await request("/app-connection-access/notes/connection-1/account/raw.http", {
+        method: "PUT",
+        headers: sameOrigin,
+        body: JSON.stringify({ approval: "not_required", constraints: [] }),
+      });
       expect(response.status).toBe(404);
     } finally {
       close();
@@ -128,9 +131,9 @@ describe("App connection access management", () => {
   });
 
   it("cannot grant a write operation without a safe approval preview", async () => {
-    const { app, close } = makeApp();
+    const { request, close } = makeApp();
     try {
-      const response = await app.request(
+      const response = await request(
         "/app-connection-access/notes/connection-1/account/documents.unsafe-create",
         {
           method: "PUT",
@@ -144,12 +147,56 @@ describe("App connection access management", () => {
     }
   });
 
+  it("rejects deferred approval for reads", async () => {
+    const { request, close } = makeApp();
+    try {
+      const response = await request(
+        "/app-connection-access/notes/connection-1/account/documents.get",
+        {
+          method: "PUT",
+          headers: sameOrigin,
+          body: JSON.stringify({ approval: "required", constraints: [] }),
+        },
+      );
+      expect(response.status).toBe(400);
+    } finally {
+      close();
+    }
+  });
+
+  it("requires guardian identity for policy and audit routes", async () => {
+    const { request, close } = makeApp();
+    try {
+      const visitor = {
+        kind: "visitor",
+        accountId: "visitor-1",
+        email: "visitor@example.com",
+      } as const;
+      expect((await request("/app-connection-access/notes", undefined, visitor)).status).toBe(403);
+      expect(
+        (
+          await request(
+            "/app-connection-access/notes/connection-1/account/documents.get",
+            {
+              method: "PUT",
+              headers: sameOrigin,
+              body: JSON.stringify({ approval: "not_required", constraints: [] }),
+            },
+            visitor,
+          )
+        ).status,
+      ).toBe(403);
+    } finally {
+      close();
+    }
+  });
+
   it("accepts an encoded scoped App id", async () => {
-    const { app, close } = makeApp();
+    const { request, close } = makeApp();
     try {
       const appId = "@acme/notes";
       const path = `/app-connection-access/${encodeURIComponent(appId)}/connection-1/account/documents.get`;
-      const response = await app.request(path, {
+      const response = await request(path, {
         method: "PUT",
         headers: sameOrigin,
         body: JSON.stringify({ approval: "not_required", constraints: [] }),
@@ -162,9 +209,9 @@ describe("App connection access management", () => {
   });
 
   it("rejects a policy mutation outside the guardian origin", async () => {
-    const { app, close } = makeApp();
+    const { request, close } = makeApp();
     try {
-      const response = await app.request(
+      const response = await request(
         "/app-connection-access/notes/connection-1/account/documents.get",
         {
           method: "PUT",
@@ -173,7 +220,7 @@ describe("App connection access management", () => {
         },
       );
       expect(response.status).toBe(403);
-      expect(await (await app.request("/app-connection-access/notes")).json()).toEqual({
+      expect(await (await request("/app-connection-access/notes")).json()).toEqual({
         policies: [],
       });
     } finally {
@@ -182,7 +229,7 @@ describe("App connection access management", () => {
   });
 
   it("pages the redacted audit trail", async () => {
-    const { app, close, access } = makeApp();
+    const { request, close, access } = makeApp();
     try {
       for (const executionId of ["execution-1", "execution-2"]) {
         await access.appendAudit({
@@ -195,13 +242,13 @@ describe("App connection access management", () => {
           status: "succeeded",
         });
       }
-      const first = await (await app.request("/app-connection-access/notes/audit?limit=1")).json();
+      const first = await (await request("/app-connection-access/notes/audit?limit=1")).json();
       expect(first).toMatchObject({
         events: [{ executionId: "execution-1" }],
         nextCursor: 1,
       });
       const second = await (
-        await app.request(`/app-connection-access/notes/audit?limit=1&cursor=${first.nextCursor}`)
+        await request(`/app-connection-access/notes/audit?limit=1&cursor=${first.nextCursor}`)
       ).json();
       expect(second).toMatchObject({ events: [{ executionId: "execution-2" }] });
       expect(second).not.toHaveProperty("nextCursor");

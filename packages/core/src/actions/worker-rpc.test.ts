@@ -189,7 +189,7 @@ describe("WorkerRpcServer App connection identity", () => {
     expect(list).toHaveBeenCalledTimes(1);
 
     const contextSpoof = await actionExecutionContext.run(store, () =>
-      runWithCurrentActionContext({ actionName: "app-a:work", callerAppId: "app-a" }, () =>
+      runWithCurrentActionContext({ actionName: "app-a:work", callerAppId: "app-a" } as never, () =>
         worker.call("connections.app.list", { limit: 1 }),
       ),
     );

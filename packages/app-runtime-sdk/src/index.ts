@@ -2052,8 +2052,8 @@ export interface CurrentActionContext {
 const CURRENT_ACTION_CONTEXT_RESOLVER = Symbol.for("rome.appRuntime.currentActionContextResolver");
 const CURRENT_ACTION_CONTEXT_RUNNER = Symbol.for("rome.appRuntime.currentActionContextRunner");
 
-/** Context an App may request around a nested call. The host ignores identity fields. */
-export type CurrentActionContextPatch = Partial<CurrentActionContext>;
+/** Context an App may add around a nested call. Execution identity stays host-owned. */
+export type CurrentActionContextPatch = Pick<CurrentActionContext, "sharedContext">;
 
 type CurrentActionContextRunner = <T>(
   patch: CurrentActionContextPatch,

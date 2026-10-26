@@ -4,6 +4,7 @@ import { isResolvedApp } from "../../apps/state.js";
 import { AppConnectionAccessRepository } from "../../db/repositories/app-connection-access.js";
 import type { ApiDeps } from "../deps.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
+import { currentSessionActor } from "../../lib/session-actor.js";
 
 const ConstraintSchema = z
   .object({
@@ -31,6 +32,13 @@ const AuditQuerySchema = z.object({
 export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
   const repo = new AppConnectionAccessRepository(deps.db);
+
+  app.use("/app-connection-access/*", async (c, next) => {
+    if ((await currentSessionActor())?.kind !== "guardian") {
+      return c.json({ error: "Guardian authentication required" }, 403);
+    }
+    await next();
+  });
 
   app.get("/app-connection-access/:appId", async (c) => {
     const policies = await repo.listActiveForApp(c.req.param("appId"));
@@ -70,12 +78,18 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
     if (!target.ok) return c.json({ error: target.error }, target.status);
     const parsed = PutAccessSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Invalid access policy." }, 400);
+    if (target.value.sideEffects === "read-only" && parsed.data.approval === "required") {
+      return c.json({ error: "Read operations cannot require deferred approval." }, 400);
+    }
     const expiresAt = parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null;
     if (expiresAt && expiresAt <= new Date()) {
       return c.json({ error: "expiresAt must be in the future." }, 400);
     }
     const policy = await repo.put({
-      ...target.value,
+      appId: target.value.appId,
+      connectionId: target.value.connectionId,
+      identity: target.value.identity,
+      operation: target.value.operation,
       approval: parsed.data.approval,
       constraints: parsed.data.constraints,
       expiresAt,
@@ -108,7 +122,9 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
 function resolveTarget(
   deps: ApiDeps,
   target: { appId: string; connectionId: string; identity: string; operation: string },
-): { ok: true; value: typeof target } | { ok: false; status: 404 | 409 | 503; error: string } {
+):
+  | { ok: true; value: typeof target & { sideEffects: "read-only" | "write" } }
+  | { ok: false; status: 404 | 409 | 503; error: string } {
   if (!isResolvedApp(deps.appCatalog.get(target.appId))) {
     return { ok: false, status: 404, error: "App not found or disabled." };
   }
@@ -134,5 +150,5 @@ function resolveTarget(
   ) {
     return { ok: false, status: 404, error: "App-accessible operation not found." };
   }
-  return { ok: true, value: target };
+  return { ok: true, value: { ...target, sideEffects: operation.appAccess.sideEffects } };
 }
