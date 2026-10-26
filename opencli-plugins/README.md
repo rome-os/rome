@@ -71,6 +71,17 @@ Remote browsers can reach the daemon through a private SSH tunnel.
 Agents pick up new/changed commands automatically: the `browser-automation` skill has them run
 `opencli <site> --help` before use, and plugin commands appear there like any built-in.
 
+## User plugins
+
+Per-user scripts live in `~/.rome/<profile>/projects/browser-automation/<site>/`, visible and editable in the Projects UI.
+Use the same flat layout as the Rome plugins above, but name the plugin `user-<site>` and list its commands and overrides in a README.
+Run `opencli plugin install <dir>` once for a new site folder. Source edits are live on the next invocation.
+Both startup install loops also register these folders across all profiles.
+
+Plugins load after built-ins and user adapters. With the OpenCLI sequential-discovery fix released and pinned in Rome's Dockerfiles,
+`user-*` plugins load after `rome-*` and win on command conflicts. Only the matching `site/name` command is replaced.
+The current `@yunfanye/opencli@1.8.8` pin does not guarantee that order. The Dockerfile bump must wait for the fork release containing the fix.
+
 ## Rome-owned commands
 
 - `opencli aa flights FROM TO DEPART [--return DATE] [--miles]` — searches American Airlines cash fares

@@ -35,3 +35,23 @@ The available sites are:
 5. Collect the result and close the page when no further action needs it.
 
 A script can trigger navigation, such as when it submits a form. That navigation destroys the JavaScript execution context. Run subsequent work in a separate step after the destination page is ready, not in the same script.
+
+## Per-user OpenCLI scripts
+
+Save a script when the same browser task comes up a second time, a routine or workflow will run it, or the user asks. Keep one-off exploration interactive.
+
+Use `~/.rome/<active-profile>/projects/browser-automation/<site>/`, a normal project visible in the Projects UI. Each site folder contains:
+- `opencli-plugin.json` with `"name": "user-<site>"`.
+- `package.json` containing `{"type":"module"}`.
+- One flat `.js` file per command, calling `cli()` from `@jackwener/opencli/registry`.
+- A `README.md` listing the commands.
+
+1. Complete the task interactively first.
+2. Write the command in the site folder.
+3. For a new site folder, run `opencli plugin install <dir>` once. The install symlinks the folder, so edits are live on the next invocation.
+4. Test with `opencli <site> <cmd> -f json`.
+5. Add a command line to the plugin README.
+
+Use the rendered page, not private APIs or auth tokens. Commands that change something must only verify by default and require an explicit flag such as `--send` to act. Fail on auth walls instead of returning partial data.
+
+Overrides of Rome or upstream commands are allowed. List each override in the plugin README, start its file with a comment naming the command it replaces, and redeclare that command's aliases. Overrides stop receiving Rome's fixes. When touching one, compare it with the current Rome version and delete it if it no longer adds anything.
