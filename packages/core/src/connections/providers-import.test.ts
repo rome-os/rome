@@ -422,3 +422,27 @@ describe("a sign-in fix reaches the same account", () => {
     expect(registry.find("github")).toHaveLength(1);
   });
 });
+
+describe("a redeem racing a disconnect", () => {
+  it("waits for the disconnect, then connects afresh", async () => {
+    const registry = makeRegistry(freshDb());
+    await importProviderBundle(registry, "github", { accessToken: "gho-1" }, { subject: "42" });
+    const [old] = registry.find("github");
+
+    const disconnect = registry.disconnect(old!.id);
+    const redeem = importProviderBundle(
+      registry,
+      "github",
+      { accessToken: "gho-2" },
+      { subject: "42" },
+    );
+    await Promise.all([disconnect, redeem]);
+
+    // The redeem never lands on the connection being removed, so its
+    // credential and custody belong to a connection that stays.
+    const connections = registry.find("github");
+    expect(connections).toHaveLength(1);
+    expect(connections[0]!.id).not.toBe(old!.id);
+    expect(connections[0]!.auth.grants().user).toBe("authorized");
+  });
+});

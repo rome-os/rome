@@ -17,6 +17,7 @@ import type { ChatId } from "@rome-os/app-runtime";
 import {
   makePasteTalk,
   makeBotAll,
+  makeRenewableAct,
   makeInboundMessage,
   CredentialRejected,
 } from "./test-fixtures.js";
@@ -308,6 +309,28 @@ describe("scenario 4: idempotent conferral", () => {
     // Old instance stopped, new one built.
     expect(firstInstance.state.stopCount).toBe(1);
     expect(talkerFactory.instances).toHaveLength(2);
+  });
+
+  it("re-conferring same material with a later expiry keeps the grant from renewing early", async () => {
+    const now = new Date("2026-10-26T00:00:00Z");
+    const reg = new ConnectionRegistry({ ledger: makeLedger(), clock: () => now });
+    const { descriptor, userScheme } = makeRenewableAct();
+    reg.register(descriptor);
+    const conn = await reg.connect("fake-github");
+    const material = { token: "same-token" };
+
+    await reg.confer(conn.connectionKind, conn.id, "user", {
+      material,
+      expiresAt: new Date(now.getTime() + 60_000),
+    });
+    await reg.confer(conn.connectionKind, conn.id, "user", {
+      material: { ...material },
+      expiresAt: new Date(now.getTime() + 10 * 24 * 60 * 60_000),
+    });
+    await reg.renewExpiring(60 * 60_000);
+
+    // The live credential took the later expiry, so nothing was due to renew.
+    expect(userScheme.materialHistory).toEqual([]);
   });
 });
 

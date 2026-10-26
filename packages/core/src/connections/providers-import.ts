@@ -143,7 +143,8 @@ export function grantProfileFromBundle(
  * first redeem; later redeems fix the one that exists. Like every conferral, it
  * refuses an account other than the one the connection reaches
  * (`DifferentAccountError`) and an account another connection holds
- * (`AccountAlreadyConnectedError`).
+ * (`AccountAlreadyConnectedError`). It runs in the grant's section, so it never
+ * interleaves with a disconnect or a setup's terminal write.
  *
  * A no-op (returns `false`) when the bundle has no usable token, or when the
  * registry doesn't declare the provider's descriptor (a test wiring a subset of
@@ -167,6 +168,12 @@ export async function importProviderBundle(
 
   const profile =
     account !== undefined ? grantProfileFromBundle(provider, bundle, account) : undefined;
-  await registry.confer(provider, undefined, OAUTH_PROVIDER_GRANTS[provider], credential, profile);
+  const grant = OAUTH_PROVIDER_GRANTS[provider];
+  // In the grant's section, like every other conferral, so a disconnect
+  // running at the same time finishes before this redeem starts and the redeem
+  // makes a fresh connection, rather than restoring custody to one going away.
+  await registry.withGrantSection(provider, grant, () =>
+    registry.confer(provider, undefined, grant, credential, profile),
+  );
   return true;
 }
