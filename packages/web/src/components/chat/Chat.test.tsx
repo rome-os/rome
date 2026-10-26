@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
+import { forwardRef, useImperativeHandle, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
@@ -29,6 +29,7 @@ const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 const mockFindActiveSubmission = rs.hoisted(() => rs.fn(() => null));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
+const conciergeInsertText = rs.hoisted(() => rs.fn());
 
 rs.mock("@/hooks/use-tab-status", () => ({
   useChatTabStatus: mockUseChatTabStatus,
@@ -211,6 +212,36 @@ rs.mock("@/components/chat/ChatComposer", () => ({
       ) : null}
     </div>
   ),
+}));
+
+// Concierge's composer: records programmatic fills and sends a fixed message.
+rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
+  ConciergeComposer: forwardRef(function ConciergeComposer(
+    props: { onSend?: (snapshot: unknown, controls: unknown) => Promise<void> },
+    ref,
+  ) {
+    useImperativeHandle(ref, () => ({ insertText: conciergeInsertText }));
+    return (
+      <button
+        type="button"
+        data-testid="concierge-send-button"
+        onClick={() =>
+          void props
+            .onSend?.(
+              {
+                text: "sent at once",
+                uploads: [],
+                reasoningEffort: "medium",
+                projectPath: "",
+                inputId: "11111111-1111-4111-8111-111111111111",
+              },
+              { onUploadProgress: () => {}, signal: new AbortController().signal },
+            )
+            .catch(() => {})
+        }
+      />
+    );
+  }),
 }));
 
 rs.mock("@/components/chat/entries", () => ({
@@ -1490,5 +1521,68 @@ describe("Chat draft", () => {
     // The send registered its local follow before the render that adopted the
     // session, so the reattach poll never looks the turn up.
     expect(listSessionTurns).not.toHaveBeenCalled();
+  });
+});
+
+describe("Chat Concierge empty state", () => {
+  const guidance = () => screen.queryByRole("region", { name: "concierge.empty.title" });
+  // The file's default listing reports a running turn, which would reattach
+  // and stream; these chats start idle.
+  beforeEach(() => {
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+  });
+  afterEach(() => {
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+  });
+
+  it("guides a chat with no messages, and an example fills the composer", async () => {
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+
+    expect(await screen.findByRole("region", { name: "concierge.empty.title" })).toBeTruthy();
+    expect(screen.queryByTestId("message-list")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "concierge.empty.prompts.email" }));
+    expect(conciergeInsertText).toHaveBeenCalledWith("concierge.empty.prompts.email");
+  });
+
+  it("waits for the history, so a chat with messages never shows it", async () => {
+    let resolveMessages!: (messages: Awaited<ReturnType<typeof listSessionMessages>>) => void;
+    rs.mocked(listSessionMessages).mockImplementationOnce(
+      () => new Promise((resolve) => (resolveMessages = resolve)),
+    );
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    expect(guidance()).toBeNull();
+
+    await act(async () => {
+      resolveMessages([
+        {
+          id: "m-1",
+          sessionId: "concierge",
+          role: "user" as const,
+          content: "hello",
+          createdAt: "2026-10-26T00:00:00.000Z",
+        },
+      ]);
+    });
+    expect(await screen.findByTestId("user-row")).toBeTruthy();
+    expect(guidance()).toBeNull();
+  });
+
+  it("goes away as soon as the first message is sent", async () => {
+    rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await screen.findByRole("region", { name: "concierge.empty.title" });
+
+    fireEvent.click(screen.getByTestId("concierge-send-button"));
+
+    expect(await screen.findByTestId("user-row")).toBeTruthy();
+    expect(guidance()).toBeNull();
+  });
+
+  it("is only for Concierge: an empty normal chat keeps its message list", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
+    expect(screen.getByTestId("message-list")).toBeTruthy();
+    expect(guidance()).toBeNull();
   });
 });
