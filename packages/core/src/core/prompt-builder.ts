@@ -206,56 +206,32 @@ export function buildThreadContextBlock(
   return `<thread_context>\n${lines.join("\n")}\n</thread_context>`;
 }
 
-/** The chat lines a provider thread has not taken part in. */
-export interface ContinuationGap {
-  /** How many guardian and agent messages the thread has not seen. */
-  count: number;
-  firstAt: Date;
-  lastAt: Date;
-  /** The model the chat ran on before this thread, when it changed. */
+export const FETCH_CHANNEL_HISTORY_ACTION = "system:fetch_channel_history";
+
+/**
+ * Render a `<continuation>` block for the first turn of a provider thread that
+ * replaced the one holding the chat, after a move to another provider. Rome's
+ * transcript still has every message; the agent reads what it needs. It names
+ * no channel: the thread's channel and id are in its thread context.
+ */
+export function buildContinuationBlock(input: {
+  /** The model the chat ran on before this thread. */
   previousModel?: string;
   /** The agent may call `system:fetch_channel_history`. */
   canReadHistory: boolean;
-}
-
-export const FETCH_CHANNEL_HISTORY_ACTION = "system:fetch_channel_history";
-
-/** Second precision, as chat messages are stored. */
-function isoSeconds(at: Date): string {
-  return `${at.toISOString().slice(0, 19)}Z`;
-}
-
-/**
- * Render a `<continuation>` block: the chat has messages this provider thread
- * never saw, because the chat moved to another model or provider, or its
- * thread was lost. Prepended once, to the first turn that finds the gap. It
- * names no channel: the thread's channel and id are in its thread context.
- */
-export function buildContinuationBlock(gap: ContinuationGap): string {
-  const from = isoSeconds(gap.firstAt);
-  const to = isoSeconds(gap.lastAt);
-  const attrs = [
-    `unseen_messages="${gap.count}"`,
-    `from="${from}"`,
-    `to="${to}"`,
-    ...(gap.previousModel ? [`previous_model="${xmlEscape(gap.previousModel)}"`] : []),
-  ].join(" ");
+}): string {
+  const open = input.previousModel
+    ? `<continuation previous_model="${xmlEscape(input.previousModel)}">`
+    : "<continuation>";
   const lines = [
-    `This conversation has ${gap.count} earlier ${gap.count === 1 ? "message" : "messages"}, from ${from} to ${to}, that ${gap.count === 1 ? "is" : "are"} not in your context.`,
+    "This conversation started before your current context, so its earlier messages are not in your context.",
   ];
-  if (gap.canReadHistory) {
-    // One second past the last unseen message, so it is included.
-    const before = new Date(Math.floor(gap.lastAt.getTime() / 1000) * 1000 + 1000);
-    const windowHours = Math.max(
-      1,
-      Math.ceil((before.getTime() - gap.firstAt.getTime()) / 3_600_000),
-    );
+  if (input.canReadHistory) {
     lines.push(
-      `When the conversation needs them, read them with \`${FETCH_CHANNEL_HISTORY_ACTION}\`: pass this thread's channel and thread id, before "${isoSeconds(before)}", and windowHours ${windowHours}.` +
-        " Each call returns the newest messages before `before`; to read further back, pass the earliest time it returned as the next `before`.",
+      `When the conversation needs them, read them with \`${FETCH_CHANNEL_HISTORY_ACTION}\`, passing this thread's channel and thread id. Raise windowHours to reach older messages.`,
     );
   }
-  return `<continuation ${attrs}>\n${lines.join("\n")}\n</continuation>`;
+  return `${open}\n${lines.join("\n")}\n</continuation>`;
 }
 
 /**

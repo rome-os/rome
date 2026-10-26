@@ -241,7 +241,7 @@ function connectionMessages(backing: Backing): Messages {
   }
 
   return {
-    async query({ chatId, since, before, limit }) {
+    async query({ chatId, since, limit }) {
       const connection = connectionFor(backing);
       if (!connection) throw new ChannelNotConnected(channel);
       const connectionId = connection.id;
@@ -269,7 +269,6 @@ function connectionMessages(backing: Backing): Messages {
       // first too.
       return lines
         .filter((message) => message.timestamp.getTime() >= from.getTime())
-        .filter((message) => !before || message.timestamp.getTime() < before.getTime())
         .reverse()
         .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
         .slice(0, queryLimit(limit))

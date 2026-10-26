@@ -42,16 +42,14 @@ A session remembers the concrete model that produced its history — the **sessi
 
 ## Continuation
 
-Rome's transcript is the conversation, and a provider thread is a cache of it. A thread has not seen every chat message: a chat moved to another provider starts a new thread, a thread can be lost, and messages can reach the chat while no turn of the thread runs. The first turn that finds such a gap carries a `<continuation>` notice. It says how many messages the thread has not seen, from when to when, and the model the chat ran on before. When the agent may call `system:fetch_channel_history`, the notice also says how to read them. The agent reads them when the conversation needs them, so nothing grows the prompt unless it asks.
+Rome's transcript is the conversation, and a provider thread is a cache of it. When a chat moves to another provider, the new provider starts a thread that has seen none of the chat. Its first turn carries a `<continuation>` notice: the earlier messages are not in its context, and the model the chat ran on before. When the agent may call `system:fetch_channel_history`, the notice says to read them with it. The agent reads them when the conversation needs them, so nothing grows the prompt unless it asks.
 
 **Contracts:**
 
-- A session records how far its provider thread has read the chat: the thread, the last turn it finished, and when. A turn with a result, interrupted ones included, moves that mark forward.
-- A gap is the guardian and agent messages after the mark that the thread did not take part in. The thread's own turns, the messages its tools wrote during them, and the current turn's input are not a gap. Trace rows never are.
-- A thread that starts in a session, the first one or one that replaced another, has read nothing of the chat, so its gap is the whole chat before it. Its first turn also carries the `<thread_context>` block.
-- The notice names no channel. The thread's channel and thread id are in its thread context, and `system:fetch_channel_history` pages back with `before`.
-- A deliberate reset (the chat-settings reset policy) starts the new generation's mark at the reset, so the notice does not undo the reset. A session row written before marks existed reads as having seen the chat its resumed thread holds.
-- Subagent sessions carry no notice.
+- The notice goes on the first turn of a thread that replaced one holding the chat: a pick on another provider in an open chat, or a session reopened on another provider than its recorded thread. It appears once.
+- A thread that starts in a session also gets the `<thread_context>` block on its first turn.
+- The notice names no channel. The thread's channel and thread id are in its thread context.
+- A new chat, a new generation (the chat-settings reset policy), and a thread that resumes add no notice. Subagent sessions carry none.
 
 ## Turn
 

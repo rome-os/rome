@@ -7,13 +7,7 @@ import {
   waHistoryJson,
   waHistoryRow,
 } from "../db/repositories/whatsapp-store.js";
-import {
-  channelMessageDetail,
-  queryBefore,
-  queryLimit,
-  querySince,
-  type Messages,
-} from "./messages.js";
+import { channelMessageDetail, queryLimit, querySince, type Messages } from "./messages.js";
 import { inList, keysIn, sqlMessages } from "./messages-sql.js";
 import { whatsAppHistoryMessage } from "./whatsapp-history.js";
 
@@ -45,14 +39,9 @@ import { whatsAppHistoryMessage } from "./whatsapp-history.js";
 export function whatsAppMessages(db: DrizzleDb): Messages {
   const mirror = new WhatsAppStoreRepository(db);
   return {
-    async query({ chatId, since, before, limit }) {
+    async query({ chatId, since, limit }) {
       const chat = chatId ? canonicalChat(chatId) : null;
-      const rows = await mirror.fetchHistory(
-        chat,
-        querySince(since),
-        queryLimit(limit),
-        before && queryBefore(before),
-      );
+      const rows = await mirror.fetchHistory(chat, querySince(since), queryLimit(limit));
       // The mirror answers oldest first; the port answers newest first.
       return rows.reverse().slice(0, queryLimit(limit)).map(whatsAppHistoryMessage);
     },

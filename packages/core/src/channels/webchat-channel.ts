@@ -40,14 +40,13 @@ export function webchatChannel(webchatRepo: WebChatRepository): Channel {
     accounts: null,
     directory: null,
     messages: {
-      async query({ chatId, since, before, limit }) {
+      async query({ chatId, since, limit }) {
         const from = since ?? new Date(Date.now() - DEFAULT_WINDOW_MS);
         const lines = await adapter.fetchHistory(chatId ?? null, historyWindowHours(from));
         // Reversed before the sort, so lines sharing a timestamp come newest
         // first too.
         return lines
           .filter((message) => message.timestamp.getTime() >= from.getTime())
-          .filter((message) => !before || message.timestamp.getTime() < before.getTime())
           .reverse()
           .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
           .slice(0, queryLimit(limit));

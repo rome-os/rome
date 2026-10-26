@@ -211,7 +211,7 @@ describe("continuation notice through AgentSessionManager", () => {
     rs.restoreAllMocks();
   });
 
-  it("moves an open chat to another provider and names what the new thread has not seen, once", async () => {
+  it("moves an open chat to another provider and tells the new thread to read the earlier chat, once", async () => {
     const manager = createManager();
     const session = await acquire(manager, "claude-sonnet");
     await chatTurn(session, "Should I get a pet? A cat, but I worry about allergies.");
@@ -227,7 +227,6 @@ describe("continuation notice through AgentSessionManager", () => {
     expect(openai.opened[0]?.providerThreadId).toBeUndefined();
     const prompt = openai.calls[0]?.prompt ?? "";
     const notice = continuationOf(prompt);
-    expect(notice).toContain('unseen_messages="4"');
     expect(notice).toContain('previous_model="claude-sonnet-5-5"');
     expect(notice).toContain("system:fetch_channel_history");
     // The thread context names the channel; the notice does not repeat it.
@@ -265,26 +264,7 @@ describe("continuation notice through AgentSessionManager", () => {
     });
   });
 
-  it("names chat messages the thread did not take part in", async () => {
-    const manager = createManager();
-    const session = await acquire(manager, "claude-sonnet");
-    await chatTurn(session, "first");
-    at(30);
-    // A routine posted into the chat while no turn ran.
-    await webchatRepo.addMessage(
-      randomUUID(),
-      CHAT,
-      "assistant",
-      JSON.stringify([{ type: "text", content: "Your 9am meeting moved." }]),
-    );
-    at(40);
-    await chatTurn(session, "second");
-    const notice = continuationOf(anthropic.calls[1]?.prompt);
-    expect(notice).toContain('unseen_messages="1"');
-    expect(notice).not.toContain("previous_model");
-  });
-
-  it("names the earlier chat when a cold open lands on another provider", async () => {
+  it("tells the new thread about the earlier chat when a cold open lands on another provider", async () => {
     const first = createManager();
     const session = await acquire(first, "claude-sonnet");
     await chatTurn(session, "first");
@@ -294,7 +274,6 @@ describe("continuation notice through AgentSessionManager", () => {
     expect(resumed.sessionId).toBe(session.sessionId);
     await chatTurn(resumed, "second");
     const notice = continuationOf(openai.calls[0]?.prompt);
-    expect(notice).toContain('unseen_messages="2"');
     expect(notice).toContain('previous_model="claude-sonnet-5-5"');
     expect(openai.calls[0]?.prompt).toContain("<thread_context>");
   });
@@ -312,45 +291,26 @@ describe("continuation notice through AgentSessionManager", () => {
     expect(anthropic.calls[1]?.prompt).not.toContain("<thread_context>");
   });
 
-  it("treats a resumed row written before seen marks as having seen the chat", async () => {
+  it("starts a new generation (a reset) without a notice", async () => {
     const first = createManager();
     const session = await acquire(first, "claude-sonnet");
     await chatTurn(session, "first");
     await first.shutdown();
-    await sessionsRepo.setSeenMark(session.sessionId, { threadId: null, turnId: null, at: null });
 
-    const resumed = await acquire(createManager(), "claude-sonnet");
-    await chatTurn(resumed, "second");
-    expect(continuationOf(anthropic.calls[1]?.prompt)).toBeNull();
+    await sessionsRepo.rotateProviderGeneration({
+      agentName: AGENT,
+      channelThreadKey: key.channelThreadKey,
+      newSessionId: randomUUID(),
+      chatId: CHAT,
+    });
+    await chatTurn(await acquire(createManager(), "gpt-6-luna"), "after reset");
+    expect(continuationOf(openai.calls[0]?.prompt)).toBeNull();
   });
 
-  it("starts a reset generation without a notice, and a lost thread with one", async () => {
-    const first = createManager();
-    const session = await acquire(first, "claude-sonnet");
+  it("does not repeat the notice when the first chat turn has no earlier thread", async () => {
+    const session = await acquire(createManager(), "claude-sonnet");
     await chatTurn(session, "first");
-    await first.shutdown();
-
-    at(60);
-    await sessionsRepo.rotateProviderGeneration({
-      agentName: AGENT,
-      channelThreadKey: key.channelThreadKey,
-      newSessionId: randomUUID(),
-      chatId: CHAT,
-      seenAt: new Date(now),
-    });
-    const reset = createManager();
-    await chatTurn(await acquire(reset, "claude-sonnet"), "after reset");
-    expect(continuationOf(anthropic.calls[1]?.prompt)).toBeNull();
-    await reset.shutdown();
-
-    await sessionsRepo.rotateProviderGeneration({
-      agentName: AGENT,
-      channelThreadKey: key.channelThreadKey,
-      newSessionId: randomUUID(),
-      chatId: CHAT,
-    });
-    await chatTurn(await acquire(createManager(), "claude-sonnet"), "after loss");
-    expect(continuationOf(anthropic.calls[2]?.prompt)).toContain('unseen_messages="4"');
+    expect(continuationOf(anthropic.calls[0]?.prompt)).toBeNull();
   });
 
   it("clears an open chat's selection with null and keeps it with undefined", async () => {

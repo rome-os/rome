@@ -13,8 +13,6 @@ import {
   isNotNull,
   isNull,
   like,
-  lte,
-  notInArray,
   or,
   sql,
   type SQL,
@@ -712,13 +710,6 @@ function decodeProjectSessionCursor(cursor: string | undefined): ProjectSessionC
   return null;
 }
 
-/** What {@link WebChatRepository.findUnseenChatMessages} answers. */
-interface UnseenChatMessages {
-  count: number;
-  first: { id: string; createdAt: Date } | null;
-  last: { id: string; createdAt: Date } | null;
-}
-
 export class WebChatRepository {
   private messageInsertedListeners = new Set<WebchatMessageInsertedListener>();
   private sessionNameChangedListeners = new Set<WebchatSessionNameChangedListener>();
@@ -1287,50 +1278,6 @@ export class WebChatRepository {
     const others = this.otherPlatformMessageIdRows(input, messageId);
     if (others.length === 0) return;
     await this.db.insert(romeAgentMessagePlatformIds).values(others).onConflictDoNothing();
-  }
-
-  /**
-   * The chat lines a provider thread has not taken part in: guardian and agent
-   * messages after `after` (the whole chat when null) and up to `until`,
-   * leaving out the turns the thread ran and the messages it is answering now.
-   * Answers how many there are and the first and last of them.
-   */
-  async findUnseenChatMessages(
-    chatId: string,
-    gap: {
-      after: Date | null;
-      until: Date;
-      excludeTurnIds: string[];
-      excludeMessageIds: string[];
-    },
-  ): Promise<UnseenChatMessages> {
-    const turnIds = gap.excludeTurnIds.filter(Boolean);
-    const messageIds = gap.excludeMessageIds.filter(Boolean);
-    const where = and(
-      eq(romeAgentMessages.sessionId, chatId),
-      inArray(romeAgentMessages.role, ["user", "assistant"]),
-      lte(romeAgentMessages.createdAt, gap.until),
-      ...(gap.after ? [gt(romeAgentMessages.createdAt, gap.after)] : []),
-      ...(messageIds.length > 0 ? [notInArray(romeAgentMessages.id, messageIds)] : []),
-      ...(turnIds.length > 0
-        ? [or(isNull(romeAgentMessages.turnId), notInArray(romeAgentMessages.turnId, turnIds))]
-        : []),
-    );
-    const [total] = await this.db.select({ n: count() }).from(romeAgentMessages).where(where);
-    const n = total?.n ?? 0;
-    if (n === 0) return { count: 0, first: null, last: null };
-    const edge = (order: "asc" | "desc") =>
-      this.db
-        .select({ id: romeAgentMessages.id, createdAt: romeAgentMessages.createdAt })
-        .from(romeAgentMessages)
-        .where(where)
-        .orderBy(
-          order === "asc" ? asc(romeAgentMessages.createdAt) : desc(romeAgentMessages.createdAt),
-          order === "asc" ? asc(romeAgentMessages.id) : desc(romeAgentMessages.id),
-        )
-        .limit(1);
-    const [[first], [last]] = await Promise.all([edge("asc"), edge("desc")]);
-    return { count: n, first: first ?? null, last: last ?? null };
   }
 
   async loadConversationContext(

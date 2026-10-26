@@ -700,19 +700,14 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
     threadId: string | null,
     since: Date,
     limit: number = HISTORY_READ_LIMIT,
-    /** Only messages at or before this second. */
-    until?: Date,
   ): Promise<LinkedInHistoryMessage[]> {
     const sinceSeconds = Math.floor(since.getTime() / 1000);
     const threadClause = threadId != null ? sql`AND m.thread_id = ${threadId}` : sql``;
-    const untilClause = until
-      ? sql`AND coalesce(m.sent_at, m.created_at) <= ${Math.floor(until.getTime() / 1000)}`
-      : sql``;
     const rows = (await this.db.all(sql`
       SELECT ${linkedInHistoryColumns()}
       FROM linkedin_messages m
       LEFT JOIN linkedin_threads t ON t.thread_id = m.thread_id
-      WHERE coalesce(m.sent_at, m.created_at) >= ${sinceSeconds} ${threadClause} ${untilClause}
+      WHERE coalesce(m.sent_at, m.created_at) >= ${sinceSeconds} ${threadClause}
       ORDER BY coalesce(m.sent_at, m.created_at) DESC, m.rowid DESC
       LIMIT ${Math.min(limit, HISTORY_READ_LIMIT)}
     `)) as Array<Record<string, unknown>>;

@@ -245,37 +245,4 @@ describe("fetch_channel_history", () => {
     // localPath is intentionally excluded from the structured payload.
     expect("localPath" in data.messages[0].attachments[0]).toBe(false);
   });
-
-  it("reads the window that ends at `before`", async () => {
-    const query = rs.fn<ChannelsService["query"]>().mockResolvedValue([makeMessage()]);
-    const action = createAction(actionConfig, {
-      channelsService: {
-        list: async () => [{ name: "webchat", sendable: true }],
-        send: async (_channel, chatId) => ({ chatId }),
-        query,
-      },
-    });
-    const result = await action.execute({
-      channel: "webchat",
-      threadId: "chat-1",
-      before: "2026-10-26T02:00:00Z",
-      windowHours: 3,
-    });
-
-    expect(result.status).toBe("ok");
-    expect(query).toHaveBeenCalledWith("webchat", {
-      chatId: "chat-1",
-      since: new Date("2026-10-25T23:00:00Z"),
-      before: new Date("2026-10-26T02:00:00Z"),
-    });
-    expect((result as { data: { content: string } }).data.content).toContain(
-      "2026-10-25T23:00:00.000Z → 2026-10-26T02:00:00.000Z",
-    );
-  });
-
-  it("rejects a `before` that is not a time", async () => {
-    const action = createAction(actionConfig, makeDeps(new Map([["webchat", {}]])));
-    const result = await action.execute({ channel: "webchat", before: "yesterday" });
-    expect(result).toEqual({ status: "error", error: "before must be an ISO 8601 time." });
-  });
 });

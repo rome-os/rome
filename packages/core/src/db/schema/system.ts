@@ -52,15 +52,6 @@ export const sessions = sqliteTable(
      *  provider where its transcript lives. Null for legacy rows, which resume
      *  in the default project. */
     workingDir: text("working_dir"),
-    /** How far into the chat the session's provider thread has read: the
-     *  thread the mark belongs to, the last turn that thread finished, and
-     *  when it finished. A later chat message the thread did not take part in
-     *  is a gap the next turn names (docs/concepts/sessions.md#continuation).
-     *  A null thread with a time marks a generation a reset started, whose
-     *  first thread starts from that time. All null on legacy rows. */
-    seenThreadId: text("seen_thread_id"),
-    seenTurnId: text("seen_turn_id"),
-    seenAt: integer("seen_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
     status: text("status", {
