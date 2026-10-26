@@ -42,13 +42,28 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
 
   app.get("/app-connection-access/:appId", async (c) => {
     const policies = await repo.listActiveForApp(c.req.param("appId"));
+    const ledger = deps.connectionRegistry?.getLedger();
     return c.json({
-      policies: policies.map((policy) => ({
-        ...policy,
-        expiresAt: policy.expiresAt?.toISOString() ?? null,
-        createdAt: policy.createdAt.toISOString(),
-        updatedAt: policy.updatedAt.toISOString(),
-      })),
+      policies: await Promise.all(
+        policies.map(async (policy) => {
+          const grant = await ledger?.getGrant(policy.connectionId);
+          const conferralStatus =
+            grant?.conferralEpoch === policy.grantConferralEpoch
+              ? "current"
+              : grant?.state === "unauthorized"
+                ? "authorization_required"
+                : grant
+                  ? "replaced"
+                  : "unavailable";
+          return {
+            ...policy,
+            conferralStatus,
+            expiresAt: policy.expiresAt?.toISOString() ?? null,
+            createdAt: policy.createdAt.toISOString(),
+            updatedAt: policy.updatedAt.toISOString(),
+          };
+        }),
+      ),
     });
   });
 

@@ -127,11 +127,44 @@ describe("App connection access management", () => {
       });
 
       const listed = await request("/app-connection-access/notes");
-      expect(await listed.json()).toMatchObject({ policies: [{ operation: "documents.get" }] });
+      expect(await listed.json()).toMatchObject({
+        policies: [{ operation: "documents.get", conferralStatus: "current" }],
+      });
 
       expect((await request(path, { method: "DELETE", headers: sameOrigin })).status).toBe(204);
       expect(await (await request("/app-connection-access/notes")).json()).toEqual({
         policies: [],
+      });
+    } finally {
+      close();
+    }
+  });
+
+  it("marks a policy stale when a new grant conferral replaces its epoch", async () => {
+    let conferralEpoch = "conferral-1";
+    const { request, close } = makeApp({
+      getGrant: async () => ({
+        custody: "connection-1",
+        state: "authorized",
+        conferredAt: new Date("2026-10-26T00:00:00.000Z"),
+        conferralEpoch,
+      }),
+    });
+    try {
+      const path = "/app-connection-access/notes/connection-1/account/documents.get";
+      expect(
+        (
+          await request(path, {
+            method: "PUT",
+            headers: sameOrigin,
+            body: JSON.stringify({ approval: "not_required", constraints: [] }),
+          })
+        ).status,
+      ).toBe(200);
+
+      conferralEpoch = "conferral-2";
+      expect(await (await request("/app-connection-access/notes")).json()).toMatchObject({
+        policies: [{ operation: "documents.get", conferralStatus: "replaced" }],
       });
     } finally {
       close();
