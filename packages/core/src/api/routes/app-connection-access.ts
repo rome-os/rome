@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { isResolvedApp } from "../../apps/state.js";
 import { appAccessibleOperations } from "../../connections/app-connections.js";
-import { AppConnectionAccessRepository } from "../../db/repositories/app-connection-access.js";
 import type { ApiDeps } from "../deps.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
@@ -32,7 +31,7 @@ const AuditQuerySchema = z.object({
 
 export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
-  const repo = new AppConnectionAccessRepository(deps.db);
+  const repo = deps.appConnectionAccessRepo;
 
   app.use("/app-connection-access/*", async (c, next) => {
     if ((await currentSessionActor())?.kind !== "guardian") {
@@ -70,6 +69,8 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
 
   app.put("/app-connection-access/:appId/:connectionId/:identity/:operation", async (c) => {
     if (!isSameOriginMutationRequest(c.req.raw)) return c.json({ error: "Forbidden" }, 403);
+    const parsed = PutAccessSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Invalid access policy." }, 400);
     const target = await resolveTarget(deps, {
       appId: c.req.param("appId"),
       connectionId: c.req.param("connectionId"),
@@ -77,8 +78,6 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
       operation: c.req.param("operation"),
     });
     if (!target.ok) return c.json({ error: target.error }, target.status);
-    const parsed = PutAccessSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.json({ error: "Invalid access policy." }, 400);
     if (target.value.sideEffects === "read-only" && parsed.data.approval === "required") {
       return c.json({ error: "Read operations cannot require deferred approval." }, 400);
     }
@@ -86,16 +85,23 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
     if (expiresAt && expiresAt <= new Date()) {
       return c.json({ error: "expiresAt must be in the future." }, 400);
     }
-    const policy = await repo.put({
-      appId: target.value.appId,
-      connectionId: target.value.connectionId,
-      identity: target.value.identity,
-      operation: target.value.operation,
-      approval: parsed.data.approval,
-      constraints: parsed.data.constraints,
-      expiresAt,
-      grantConferralEpoch: target.value.grantConferralEpoch,
-    });
+    const policy = await repo.putIfAppActive(
+      {
+        appId: target.value.appId,
+        connectionId: target.value.connectionId,
+        identity: target.value.identity,
+        operation: target.value.operation,
+        approval: parsed.data.approval,
+        constraints: parsed.data.constraints,
+        expiresAt,
+        grantConferralEpoch: target.value.grantConferralEpoch,
+      },
+      () => {
+        const app = deps.appCatalog.get(target.value.appId);
+        return isResolvedApp(app) && app.enabled;
+      },
+    );
+    if (!policy) return c.json({ error: "App not found or disabled." }, 409);
     return c.json({
       policy: {
         ...policy,
@@ -131,7 +137,8 @@ async function resolveTarget(
     }
   | { ok: false; status: 404 | 409 | 503; error: string }
 > {
-  if (!isResolvedApp(deps.appCatalog.get(target.appId))) {
+  const app = deps.appCatalog.get(target.appId);
+  if (!isResolvedApp(app) || !app.enabled) {
     return { ok: false, status: 404, error: "App not found or disabled." };
   }
   if (!deps.connectionRegistry) {

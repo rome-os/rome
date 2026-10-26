@@ -589,6 +589,7 @@ async function main() {
     }),
   );
   let appBootConverged = false;
+  let appConnectionAccessReady = false;
   try {
     const bootResult = await appManager.boot();
     appBootConverged = true;
@@ -604,6 +605,7 @@ async function main() {
   }
   if (appBootConverged) {
     await reconcileAppConnectionAccess(appCatalog, appConnectionAccessRepo);
+    appConnectionAccessReady = true;
   } else {
     appsLog.warn("App connection access reconciliation skipped after failed App boot");
   }
@@ -698,9 +700,17 @@ async function main() {
     connectionRegistry,
     appConnectionAccessRepo,
     actionEngine,
+    { isReady: () => appConnectionAccessReady },
   );
   appConnections.registerActions(actionRegistry);
   const appConnectionCleanupLog = createLogger("app-connection-cleanup");
+  const recoveredAppConnectionInvocations =
+    await appConnectionAccessRepo.recoverInterruptedInvocations();
+  if (recoveredAppConnectionInvocations > 0) {
+    appConnectionCleanupLog.warn("interrupted App connection invocations recovered", {
+      invocations: recoveredAppConnectionInvocations,
+    });
+  }
   const runAppConnectionCleanup = async () => {
     try {
       const result = await appConnectionAccessRepo.pruneExpiredData(
@@ -1720,6 +1730,7 @@ async function main() {
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,
       provisionNodeCaller,

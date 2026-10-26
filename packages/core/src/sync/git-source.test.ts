@@ -458,6 +458,7 @@ describe("githubCommitterIdentity", () => {
         credential text,
         profile text,
         conferred_at integer,
+        conferral_epoch text,
         last_renewed_at integer,
         degraded_at integer,
         degraded_reason text,

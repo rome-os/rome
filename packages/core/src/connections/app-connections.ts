@@ -91,6 +91,14 @@ function failure(
   return { ok: false, error: { code, message, retryable } };
 }
 
+function brokerUnavailable(): AppConnectionBrokerResult<never> {
+  return failure(
+    "capability_unavailable",
+    "App connection access is unavailable until App startup reconciliation succeeds.",
+    true,
+  );
+}
+
 export function createAppConnectionAccessLifecycle(
   access: Pick<AppConnectionAccessRepository, "revokeApp">,
 ): (event: CatalogEvent) => Promise<void> {
@@ -186,16 +194,23 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   private readonly invokeLimit: number;
   private readonly rateWindowMs: number;
   private readonly now: () => number;
+  private readonly isReady: () => boolean;
 
   constructor(
     private readonly registry: ConnectionRegistry,
     private readonly access: AppConnectionAccessRepository,
     private readonly actionEngine: ActionEngine,
-    options: { invokeLimit?: number; rateWindowMs?: number; now?: () => number } = {},
+    options: {
+      invokeLimit?: number;
+      rateWindowMs?: number;
+      now?: () => number;
+      isReady?: () => boolean;
+    } = {},
   ) {
     this.invokeLimit = options.invokeLimit ?? DEFAULT_INVOKE_LIMIT;
     this.rateWindowMs = options.rateWindowMs ?? DEFAULT_RATE_WINDOW_MS;
     this.now = options.now ?? Date.now;
+    this.isReady = options.isReady ?? (() => true);
   }
 
   forApp(appId: string): AppConnectionsCapability {
@@ -212,6 +227,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     appId: string,
     input: { cursor?: string; limit?: number } = {},
   ): Promise<AppConnectionBrokerResult<AppConnectionPage>> {
+    if (!this.isReady()) return brokerUnavailable();
     const page = parsePage(input);
     if (!page.ok) return page;
     const ids = await this.access.listActiveConnectionIds(
@@ -238,6 +254,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     appId: string,
     input: { connectionId: string; identity: string },
   ): Promise<AppConnectionBrokerResult<AppConnectionDescription>> {
+    if (!this.isReady()) return brokerUnavailable();
     const policies = await this.access.listActiveForConnection(appId, input.connectionId);
     const grant = await this.registry.getLedger().getGrant(input.connectionId);
     if (
@@ -275,6 +292,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     appId: string,
     input: { connectionId: string; identity: string; cursor?: string; limit?: number },
   ): Promise<AppConnectionBrokerResult<AppConnectionOperationsPage>> {
+    if (!this.isReady()) return brokerUnavailable();
     const page = parsePage(input);
     if (!page.ok) return page;
     const described = await this.describe(appId, input);
@@ -327,6 +345,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     },
     context?: AppConnectionInvocationContext,
   ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>> {
+    if (!this.isReady()) return brokerUnavailable();
     const invocationId = randomUUID();
     let requestIdHash: string | null = null;
     let policy: AppConnectionAccessRecord | null = null;
@@ -432,7 +451,17 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       result = await this.actionEngine.run(
         actionName,
         { invocationId },
-        { ...context, initiator: `app:${appId}`, callerAppId: appId },
+        {
+          actor: context?.actor,
+          channelContext: context?.channelContext,
+          sharedContext: context?.sharedContext,
+          sessionId: context?.sessionId,
+          turnId: context?.turnId,
+          agentName: context?.agentName,
+          channelThreadKey: context?.channelThreadKey,
+          initiator: `app:${appId}`,
+          callerAppId: appId,
+        },
       );
     } catch {
       if (sideEffects === "write") {
@@ -542,6 +571,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     invocationId: string,
     mode: BrokerActionMode,
   ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>> {
+    if (!this.isReady()) return brokerUnavailable();
     const expectedEffect = mode.startsWith("read") ? "read-only" : "write";
     const expectedApproval = mode === "write";
     const expectedStatus = expectedApproval ? "pending_approval" : "ready";
@@ -778,10 +808,14 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     ) {
       return failure("request_id_conflict", "The requestId is bound to another request.");
     }
-    if (invocation.status === "outcome_unknown" || invocation.status === "running") {
+    if (invocation.status === "outcome_unknown") {
       return { ok: true, value: { status: "outcome_unknown", executionId: invocation.id } };
     }
-    if (invocation.status === "ready" || invocation.status === "pending_approval") {
+    if (
+      invocation.status === "ready" ||
+      invocation.status === "pending_approval" ||
+      invocation.status === "running"
+    ) {
       return failure("request_in_progress", "The original request is still in progress.", true);
     }
     if (
@@ -899,7 +933,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
 
 export function appAccessibleOperations(
   registry: Pick<ConnectionRegistry, "getDescriptor">,
-  connection: Pick<Connection, "connectionKind" | "act">,
+  connection: Pick<Connection, "connectionKind">,
   identity: string,
 ): AppConnectionBrokerResult<readonly OperationDescriptor[]> {
   const descriptor = registry.getDescriptor(connection.connectionKind);
@@ -909,7 +943,7 @@ export function appAccessibleOperations(
   if (descriptor.grant !== identity) {
     return failure("identity_not_found", "The identity cannot be isolated for App access.");
   }
-  const operations = descriptor.capabilities.actor.operations ?? connection.act?.operations() ?? [];
+  const operations = descriptor.capabilities.actor.operations ?? [];
   return {
     ok: true,
     value: operations.filter(

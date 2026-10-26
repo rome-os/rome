@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import type { ChatId } from "@rome-os/app-runtime";
@@ -70,6 +71,7 @@ function harness(
     rateWindowMs?: number;
     now?: () => number;
     operations?: readonly OperationDescriptor[];
+    isReady?: () => boolean;
   } = {},
 ) {
   const { db, close } = createTestDb();
@@ -211,6 +213,37 @@ async function grant(
 }
 
 describe("App connection broker", () => {
+  it("stays unavailable until startup reconciliation succeeds", async () => {
+    let ready = false;
+    const h = harness({ isReady: () => ready });
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.get",
+      });
+      const facade = h.broker.forApp("app-a");
+      await expect(facade.list()).rejects.toMatchObject({
+        detail: { code: "capability_unavailable", retryable: true },
+      });
+      await expect(
+        facade.invoke({
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.get",
+          input: { workspaceId: "one", documentId: "doc" },
+        }),
+      ).rejects.toMatchObject({ detail: { code: "capability_unavailable" } });
+      expect(h.invocations).toHaveLength(0);
+
+      ready = true;
+      expect((await facade.list()).connections).toHaveLength(1);
+    } finally {
+      h.close();
+    }
+  });
+
   it("isolates two Apps and two connections, and denies by default", async () => {
     const h = harness();
     try {
@@ -302,6 +335,43 @@ describe("App connection broker", () => {
         }),
       ).rejects.toMatchObject({ detail: { code: "resource_denied" } });
       expect(h.invocations).toHaveLength(0);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("forwards only allowed origin context into the Action engine", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.get",
+      });
+      const run = rs.spyOn(h.engine, "run");
+      await h.broker.invoke(
+        "app-a",
+        {
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.get",
+          input: { workspaceId: "one", documentId: "doc-1" },
+        },
+        {
+          sessionId: "session-1",
+          replayJournal: [{ status: "pending_approval" }],
+          replayRootExecutionId: "forged-root",
+        } as never,
+      );
+
+      expect(run.mock.calls[0]![2]).toMatchObject({
+        sessionId: "session-1",
+        initiator: "app:app-a",
+        callerAppId: "app-a",
+      });
+      expect(run.mock.calls[0]![2]).not.toHaveProperty("replayJournal");
+      expect(run.mock.calls[0]![2]).not.toHaveProperty("replayRootExecutionId");
     } finally {
       h.close();
     }
@@ -831,6 +901,57 @@ describe("App connection broker", () => {
       await expect(
         facade.invoke({ ...request, input: { ...request.input, body: "changed" } }),
       ).rejects.toMatchObject({ detail: { code: "request_id_conflict" } });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("keeps a live write in progress and recovers a crash orphan as outcome unknown", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      const policy = await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+      });
+      const requestId = "request-running-write";
+      const input = { workspaceId: "one", title: "Running", body: "private" };
+      h.access.createOrGetInvocation({
+        id: "running-write",
+        appId: "app-a",
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.create",
+        requestIdHash: createHash("sha256").update(requestId).digest("hex"),
+        inputHash: createHash("sha256")
+          .update(JSON.stringify({ body: "private", title: "Running", workspaceId: "one" }))
+          .digest("hex"),
+        input,
+        sideEffects: "write",
+        accessRevision: policy.revision,
+      });
+      await h.access.transitionInvocation("running-write", ["ready"], "running");
+      const request = {
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.create",
+        requestId,
+        input,
+      } as const;
+
+      await expect(h.broker.forApp("app-a").invoke(request)).rejects.toMatchObject({
+        detail: { code: "request_in_progress", retryable: true },
+      });
+      expect(await h.access.recoverInterruptedInvocations()).toBe(1);
+      expect(await h.broker.forApp("app-a").invoke(request)).toEqual({
+        status: "outcome_unknown",
+        executionId: "running-write",
+      });
+      expect(await h.access.getInvocation("running-write")).toMatchObject({
+        status: "outcome_unknown",
+        input: null,
+      });
     } finally {
       h.close();
     }

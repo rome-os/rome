@@ -51,6 +51,7 @@ import type {
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
+import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
@@ -539,6 +540,7 @@ export async function buildTestDeps(
   }
 
   const sessionsRepo = new SessionsRepository(db);
+  const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const personMappingRepo = new PersonMappingRepository(db, recordedConnectionKindOf(db));
   const channelRecords = new ChannelRecordsRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
@@ -721,6 +723,7 @@ export async function buildTestDeps(
     actionEngine,
     actionLoader,
     db,
+    appConnectionAccessRepo,
     sessionsRepo,
     personMappingRepo,
     guardianLinkCodes: new GuardianLinkCodes(),

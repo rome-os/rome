@@ -125,7 +125,7 @@ identity for one operation.
 - The host worker runtime stamps the executing Action from Core-owned execution context,
   and Core maps that registered Action to its owning App. App request fields cannot
   select an App id. In a cross-app Action call, the callee runs with the callee App's
-  access; caller fields do not transfer the caller's access or let it claim the callee's
+  access. Caller fields do not transfer the caller's access or let it claim the callee's
   id. A system Action has no App connection access unless Core built a context for a
   concrete App entry point. This binding assumes the trusted-plugin model described
   below, not a hostile worker process.
@@ -133,7 +133,7 @@ identity for one operation.
   resource constraint that cannot be resolved from the input denies the call instead of
   broadening it.
 - Invocation uses the Action engine for approval and execution. A write requires a
-  stable request id; request ids on reads are ignored. Write operations declare the
+  stable request id. Request ids on reads are ignored. Write operations declare the
   bounded, non-secret fields Core may show in an approval preview. Core persists that
   safe preview with the approval and delivers it to the originating conversation when
   one exists. Reusing a request id within the seven-day retention
@@ -143,7 +143,7 @@ identity for one operation.
   or removing an App also rejects its pending invocations and clears their stored input.
   A duplicate of a failed invocation includes the original structured error code.
 - Read operations execute synchronously and cannot use deferred approval. An
-  approval-gated write returns `pending_approval`; its later provider output is not
+  approval-gated write returns `pending_approval`. Its later provider output is not
   delivered to the App. Providers should expose a follow-up read when the App needs to
   resolve the created resource.
 - Core rechecks the policy revision and the provider grant immediately before calling

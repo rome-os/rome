@@ -1,5 +1,6 @@
 import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { AppConnectionErrorBody, AppConnectionResourceConstraint } from "@rome-os/app-runtime";
+import { KeyedMutex } from "../../lib/keyed-mutex.js";
 import {
   appConnectionAccess,
   appConnectionAudit,
@@ -43,6 +44,8 @@ function toAccessRecord(row: typeof appConnectionAccess.$inferSelect): AppConnec
 }
 
 export class AppConnectionAccessRepository {
+  private readonly appLifecycle = new KeyedMutex();
+
   constructor(private readonly db: DrizzleDb) {}
 
   async listActiveForApp(appId: string, now = new Date()): Promise<AppConnectionAccessRecord[]> {
@@ -153,6 +156,20 @@ export class AppConnectionAccessRepository {
     grantConferralEpoch: string;
     expiresAt?: Date | null;
   }): Promise<AppConnectionAccessRecord> {
+    return await this.appLifecycle.runExclusive(input.appId, () => this.putUnlocked(input));
+  }
+
+  async putIfAppActive(
+    input: Parameters<AppConnectionAccessRepository["put"]>[0],
+    isAppActive: () => boolean,
+  ): Promise<AppConnectionAccessRecord | null> {
+    return await this.appLifecycle.runExclusive(input.appId, async () => {
+      if (!isAppActive()) return null;
+      return await this.putUnlocked(input);
+    });
+  }
+
+  private async putUnlocked(input: Parameters<AppConnectionAccessRepository["put"]>[0]) {
     const now = new Date();
     await this.db
       .insert(appConnectionAccess)
@@ -210,6 +227,10 @@ export class AppConnectionAccessRepository {
   }
 
   async revokeApp(appId: string): Promise<number> {
+    return await this.appLifecycle.runExclusive(appId, () => this.revokeAppUnlocked(appId));
+  }
+
+  private revokeAppUnlocked(appId: string): number {
     return this.db.transaction((tx) => {
       const now = new Date();
       const pending = tx
@@ -459,6 +480,19 @@ export class AppConnectionAccessRepository {
       .where(and(eq(appConnectionAudit.appId, appId), gt(appConnectionAudit.seq, afterSeq)))
       .orderBy(asc(appConnectionAudit.seq))
       .limit(limit);
+  }
+
+  async recoverInterruptedInvocations(now = new Date()): Promise<number> {
+    const result = await this.db
+      .update(appConnectionInvocations)
+      .set({
+        status: "outcome_unknown",
+        errorCode: "outcome_unknown",
+        input: null,
+        updatedAt: now,
+      })
+      .where(eq(appConnectionInvocations.status, "running"));
+    return Number(result.changes ?? 0);
   }
 
   async pruneExpiredData(before: Date): Promise<{ invocations: number; audits: number }> {

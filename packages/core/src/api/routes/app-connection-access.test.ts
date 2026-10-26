@@ -8,8 +8,19 @@ import { appConnectionAccessRoutes } from "./app-connection-access.js";
 
 const sameOrigin = { "sec-fetch-site": "same-origin", "content-type": "application/json" };
 
-function makeApp() {
+function makeApp(
+  options: {
+    appEnabled?: () => boolean;
+    getGrant?: () => Promise<{
+      custody: string;
+      state: "authorized";
+      conferredAt: Date;
+      conferralEpoch: string;
+    }>;
+  } = {},
+) {
   const { db, close } = createTestDb();
+  const access = new AppConnectionAccessRepository(db);
   const connection = {
     id: "connection-1",
     connectionKind: "fake-docs",
@@ -59,7 +70,7 @@ function makeApp() {
         appId === "notes" || appId === "@acme/notes"
           ? {
               appId,
-              enabled: true,
+              enabled: options.appEnabled?.() ?? true,
               state: "installed",
               manifest: {},
             }
@@ -69,14 +80,17 @@ function makeApp() {
       all: () => [connection],
       getDescriptor: (kind: string) => (kind === "fake-docs" ? descriptor : null),
       getLedger: () => ({
-        getGrant: async () => ({
-          custody: "connection-1",
-          state: "authorized",
-          conferredAt: new Date("2026-10-26T00:00:00.000Z"),
-          conferralEpoch: "conferral-1",
-        }),
+        getGrant:
+          options.getGrant ??
+          (async () => ({
+            custody: "connection-1",
+            state: "authorized" as const,
+            conferredAt: new Date("2026-10-26T00:00:00.000Z"),
+            conferralEpoch: "conferral-1",
+          })),
       }),
     },
+    appConnectionAccessRepo: access,
   } as unknown as ApiDeps;
   const app = new Hono();
   app.route("/", appConnectionAccessRoutes(deps));
@@ -85,7 +99,7 @@ function makeApp() {
     init?: RequestInit,
     actor: SessionActor = { kind: "guardian", userId: "guardian", via: "cookie" },
   ) => runWithSessionActor(actor, () => app.request(path, init));
-  return { request, close, access: new AppConnectionAccessRepository(db) };
+  return { request, close, access };
 }
 
 describe("App connection access management", () => {
@@ -119,6 +133,50 @@ describe("App connection access management", () => {
       expect(await (await request("/app-connection-access/notes")).json()).toEqual({
         policies: [],
       });
+    } finally {
+      close();
+    }
+  });
+
+  it("cannot recreate access after concurrent App disable completes", async () => {
+    let enabled = true;
+    let enteredGrantLookup!: () => void;
+    let releaseGrantLookup!: () => void;
+    const grantLookupStarted = new Promise<void>((resolve) => {
+      enteredGrantLookup = resolve;
+    });
+    const grantLookupReleased = new Promise<void>((resolve) => {
+      releaseGrantLookup = resolve;
+    });
+    const { request, close, access } = makeApp({
+      appEnabled: () => enabled,
+      getGrant: async () => {
+        enteredGrantLookup();
+        await grantLookupReleased;
+        return {
+          custody: "connection-1",
+          state: "authorized",
+          conferredAt: new Date("2026-10-26T00:00:00.000Z"),
+          conferralEpoch: "conferral-1",
+        };
+      },
+    });
+    try {
+      const pendingPut = request(
+        "/app-connection-access/notes/connection-1/account/documents.get",
+        {
+          method: "PUT",
+          headers: sameOrigin,
+          body: JSON.stringify({ approval: "not_required", constraints: [] }),
+        },
+      );
+      await grantLookupStarted;
+      enabled = false;
+      await access.revokeApp("notes");
+      releaseGrantLookup();
+
+      expect((await pendingPut).status).toBe(409);
+      expect(await access.listActiveForApp("notes")).toEqual([]);
     } finally {
       close();
     }
