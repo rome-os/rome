@@ -156,6 +156,7 @@ export function buildPrompt(
   context: GuardianContext | null,
   previousSuggestions: string[],
   previousBriefs: Brief[] = [],
+  isFirstBrief = false,
 ): string {
   const { date, time } = nowLabel(tz);
   const isMorning = kind === "morning";
@@ -173,7 +174,11 @@ export function buildPrompt(
     "3. SCOUTING FINDINGS — the findings below were already gathered by scheduled scouting tasks. Integrate the key points.",
     ...suggestionsInstructions(context, previousSuggestions),
     "",
-    "ROBUSTNESS: Some sources may not be connected. If a source is unavailable, errors, or has nothing relevant, skip it gracefully and add a brief one-line note like '_Calendar not connected._' — NEVER fail or refuse the whole brief because one source is missing.",
+    `ROBUSTNESS: Some sources may not be connected. ${
+      isFirstBrief
+        ? "This is the guardian's first brief, so note each source that is not connected once, in one line like '_Calendar not connected._'"
+        : "The guardian may have chosen not to connect them, so leave a source that is not connected out entirely, with no section or note."
+    } If a connected source errors or has nothing relevant, skip it gracefully with a one-line note like '_Gmail could not be reached._' NEVER fail or refuse the whole brief because one source is missing.`,
     "",
     windowHint,
     "",
@@ -293,6 +298,8 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         .slice(0, 5)
         .flatMap((brief) => suggestionsSection(brief.content) ?? []);
       const previousBriefs = previousDayBriefs(recentBriefs, new Date());
+      // Any earlier brief, test runs included, already told them what isn't connected.
+      const isFirstBrief = !recentBriefs.some((b) => b.status === "completed");
       const context = deliversToGuardian(settings, shouldDeliver)
         ? await gatherGuardianContext(appContext, tz)
         : null;
@@ -312,6 +319,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               context,
               previousSuggestions,
               previousBriefs,
+              isFirstBrief,
             ),
           }),
         );

@@ -102,6 +102,16 @@ describe("buildPrompt", () => {
     expect(buildPrompt("morning", "UTC", [], null, [])).not.toContain("CONTINUITY");
   });
 
+  it("notes unconnected sources only in the first brief", () => {
+    const first = buildPrompt("morning", "UTC", [], null, [], [], true);
+    expect(first).toContain("first brief");
+    expect(first).toContain("'_Calendar not connected._'");
+
+    const later = buildPrompt("morning", "UTC", [], null, []);
+    expect(later).toContain("chosen not to connect them");
+    expect(later).not.toContain("'_Calendar not connected._'");
+  });
+
   it("passes personal context only with the Try with Rome rules", () => {
     const context = { chats: 'Chat "Orders":\n- I sort these by hand', profile: "Name: Ada" };
     const prompt = buildPrompt("evening", "UTC", [], context, ["- Earlier idea"]);
