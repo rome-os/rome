@@ -276,7 +276,7 @@ export function makeFakeWatcherFactory(): FakeWatcherFactory {
 
 /**
  * A headless AuthScheme that:
- * - obtain(): immediately returns a credential without interaction.
+ * - `obtain()`: immediately returns a credential without interaction.
  * - renew(): returns fresh credentials `successCount` times (decrements each
  *   call), then returns "needs-fix" forever. Pass Infinity to always renew.
  * - resolveExternal: optional, enables external-custody tests.
@@ -284,7 +284,7 @@ export function makeFakeWatcherFactory(): FakeWatcherFactory {
 export interface FakeRenewableScheme extends AuthScheme {
   /** Number of remaining successful renewals (starts at the configured value). */
   renewsRemaining: number;
-  /** Materials handed out by obtain() and each successful renew(). */
+  /** Materials handed out by `obtain()` and each successful renew(). */
   readonly materialHistory: SecretRecord[];
 }
 
@@ -309,7 +309,7 @@ export function makeFakeRenewableScheme(opts?: {
     async obtain(_interact): Promise<Credential> {
       const material: SecretRecord = { token: `granted-${materialHistory.length}` };
       if (materialHistory.length === 0) {
-        // The first obtain returns the configured initial material.
+        // The first `obtain()` returns the configured initial material.
         Object.assign(material, initialMaterial);
         materialHistory.push(material);
       } else {
@@ -367,7 +367,7 @@ export function makeWatchEvent(overrides?: Partial<WatchEvent>): WatchEvent {
 export interface PasteTalkFixture {
   descriptor: ConnectionDescriptor;
   talkerFactory: FakeTalkerFactory;
-  /** Call this inside an obtain call to supply a valid token. */
+  /** Call this inside an `obtain()` call to supply a valid token. */
   validCredential: () => Credential;
 }
 
@@ -570,14 +570,14 @@ export function makeExternalCustody(): ExternalCustodyFixture {
     return { ...externalMaterial };
   };
 
-  // obtain() returns a credential whose material is a function (external resolver).
+  // `obtain()` returns a credential whose material is a function (external resolver).
   // The ledger must persist this as { kind: "external" }.
   const scheme = makeFakeRenewableScheme({
     successCount: 0, // cannot renew — always "needs-fix"
     resolveExternal,
   });
 
-  // Override obtain so it returns a function-valued material.
+  // Override `obtain()` so it returns a function-valued material.
   const originalObtain = scheme.obtain.bind(scheme);
   scheme.obtain = async (_interact) => {
     // Ignore the base implementation; return a resolver-backed credential.

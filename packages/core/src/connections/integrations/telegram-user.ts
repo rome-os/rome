@@ -3,7 +3,7 @@
 // Unlike the bot channel (integrations/telegram.ts), this is a *user* session:
 // a single `session` grant holding a GramJS StringSession plus the account
 // identity fields (apiId/apiHash/phoneNumber/userId/…). There is no interactive
-// obtain() — grant runs the setup coroutine (`makeTelegramUserSetup`
+// `obtain()`. The grant comes from the setup coroutine (`makeTelegramUserSetup`
 // below): API credentials + phone number → phone code → optional 2FA password,
 // whose terminal return is the single ledger write of credential material +
 // identity profile. The transport core — connect, NewMessage streaming, the

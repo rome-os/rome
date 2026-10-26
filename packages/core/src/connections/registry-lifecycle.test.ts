@@ -718,7 +718,7 @@ describe("external custody", () => {
       expect(rc2()).toBeGreaterThanOrEqual(1);
 
       // No grant was called (rehydration must not grant)
-      // Since scheme2.materialHistory would only grow on obtain(), check it stays at 0
+      // Since scheme2.materialHistory would only grow on `obtain()`, check it stays at 0
       // (external custody grant was overridden in the fixture to return resolver-backed cred)
       // The key invariant: resolveExternal was used, not grant
       void af1;

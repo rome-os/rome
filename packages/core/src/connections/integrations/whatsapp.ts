@@ -71,7 +71,7 @@ export type WhatsAppSessionMaterial = WhatsAppAuthMaterial;
 
 /**
  * The `session` auth scheme: grant is driven by the setup attached
- * in `createWhatsAppDescriptor`, so obtain() must never run headlessly. A
+ * in `createWhatsAppDescriptor`, so `obtain()` must never run headlessly. A
  * linked session cannot renew without re-pairing, so renew() is "needs-fix".
  */
 export function whatsappSessionScheme(): AuthScheme {
