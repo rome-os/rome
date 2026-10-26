@@ -414,7 +414,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       return await denied(failure("invalid_input", "The requestId is invalid."));
     }
     requestIdHash = sideEffects === "write" && input.requestId ? digest(input.requestId) : null;
-    const serialized = serializeBounded(input.input ?? null, MAX_INPUT_BYTES);
+    const serialized = serializeCanonicalBounded(input.input ?? null, MAX_INPUT_BYTES);
     if (!serialized.ok) return await denied(serialized);
     const validation = this.validateInput(operation, input.input);
     if (!validation.ok) return await denied(validation);
@@ -1042,9 +1042,20 @@ function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function serializeCanonicalBounded(
+  value: unknown,
+  limit: number,
+): AppConnectionBrokerResult<string> {
+  try {
+    return serializeBounded(canonicalJson(value), limit);
+  } catch {
+    return failure("invalid_input", "The value is not JSON serializable.");
+  }
+}
+
 function serializeBounded(value: unknown, limit: number): AppConnectionBrokerResult<string> {
   try {
-    const serialized = JSON.stringify(canonicalJson(value));
+    const serialized = JSON.stringify(value);
     if (serialized === undefined || Buffer.byteLength(serialized) > limit) {
       return failure("invalid_input", "The value is too large or not JSON serializable.");
     }

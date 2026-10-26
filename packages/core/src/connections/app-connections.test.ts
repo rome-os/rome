@@ -108,6 +108,9 @@ function harness(
               if ((call.input as { title?: string })?.title === "huge-output") {
                 return { value: "x".repeat(1024 * 1024 + 1) };
               }
+              if ((call.input as { documentId?: string })?.documentId === "typed-output") {
+                return { fetchedAt: new Date("2026-10-26T00:00:00.000Z") };
+              }
               return { secretResult: "not-for-audit", operation: call.operation };
             },
           };
@@ -335,6 +338,32 @@ describe("App connection broker", () => {
         }),
       ).rejects.toMatchObject({ detail: { code: "resource_denied" } });
       expect(h.invocations).toHaveLength(0);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("preserves provider toJSON values in read results", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.get",
+      });
+
+      await expect(
+        h.broker.forApp("app-a").invoke({
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.get",
+          input: { workspaceId: "one", documentId: "typed-output" },
+        }),
+      ).resolves.toMatchObject({
+        status: "ok",
+        data: { fetchedAt: "2026-10-26T00:00:00.000Z" },
+      });
     } finally {
       h.close();
     }
