@@ -64,7 +64,6 @@ async function seedGithubGrant(
   await ledger.createConnection({
     id,
     connectionKind: "github",
-    label: "github",
     createdAt: new Date(),
   });
   await ledger.ensureGrant(id, OAUTH_PROVIDER_GRANTS.github);
@@ -451,7 +450,6 @@ describe("githubCommitterIdentity", () => {
       CREATE TABLE connections (
         id text PRIMARY KEY NOT NULL,
         connection_kind text NOT NULL,
-        label text NOT NULL,
         created_at integer NOT NULL
       );
       CREATE TABLE connection_grants (

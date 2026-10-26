@@ -522,7 +522,6 @@ describe("scenario 18: load() with unregistered service rows", () => {
     await ledger.createConnection({
       id: "orphan-conn-1",
       connectionKind: "ghost-service",
-      label: "ghost",
       createdAt: new Date(),
     });
 
@@ -542,7 +541,6 @@ describe("scenario 18: load() with unregistered service rows", () => {
     await ledger.createConnection({
       id: "orphan-conn-2",
       connectionKind: "ghost-service-2",
-      label: "ghost2",
       createdAt: new Date(),
     });
 
@@ -572,7 +570,6 @@ describe("scenario 18: load() with unregistered service rows", () => {
     await ledger.createConnection({
       id: "orphan-conn-3",
       connectionKind: "totally-unknown",
-      label: "unknown",
       createdAt: new Date(),
     });
 
@@ -591,7 +588,6 @@ describe("startup capability activation barrier", () => {
     await ledger.createConnection({
       id: "boot-webchat",
       connectionKind: "fake-webchat",
-      label: "Webchat",
       createdAt: new Date(),
     });
     const reg = makeRegistry(ledger);

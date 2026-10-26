@@ -158,7 +158,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       const ledgerA = new DrizzleGrantLedger(db);
       const registryA = new ConnectionRegistry({ ledger: ledgerA });
       registryA.register(desc);
-      const connA = await registryA.connect("fake-telegram", "my-telegram");
+      const connA = await registryA.connect("fake-telegram");
       await registryA.importCredential(connA.id, "bot", validCredential());
       expect(connA.isUnlocked("talk")).toBe(true);
       const connAId = connA.id;
@@ -173,7 +173,6 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       const connB = registryB.get(connAId);
       expect(connB).toBeDefined();
       expect(connB.connectionKind).toBe("fake-telegram");
-      expect(connB.label).toBe("my-telegram");
       expect(connB.isUnlocked("talk")).toBe(true);
       expect(connB.status().talk).toEqual({ state: "unlocked" });
       // No new confer: tf2 got a build call because the credential was persisted

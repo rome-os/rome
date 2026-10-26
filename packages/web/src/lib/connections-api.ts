@@ -62,7 +62,6 @@ export interface ApiConnection extends ConnectionAccountFields {
   id: string | null;
   /** The kind of connection, such as `telegram_user`. */
   connectionKind: string;
-  label: string;
   /** Working or broken. Null for a placeholder, and for a connection a
    *  disconnect kept with no access. */
   state: ConnectionState | null;

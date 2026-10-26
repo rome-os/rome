@@ -905,7 +905,6 @@ export const executionJournal = sqliteTable(
 export const connections = sqliteTable("connections", {
   id: text("id").primaryKey(),
   connectionKind: text("connection_kind").notNull(),
-  label: text("label").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 

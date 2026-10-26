@@ -119,7 +119,6 @@ function apiConnection(
   return {
     id: options.placeholder ? null : `fixture-${service}-${fixtureId++}`,
     connectionKind: service,
-    label: service,
     state: connectionState(Object.values(grantStates)),
     grants: grantStates,
     display,

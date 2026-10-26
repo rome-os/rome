@@ -19,7 +19,6 @@ async function earlierGrants(botIds: string[]) {
     await ledger.createConnection({
       id,
       connectionKind: SERVICE,
-      label: SERVICE,
       createdAt: new Date(1_000 * (i + 1)),
     });
     await ledger.ensureGrant(id, "bot");

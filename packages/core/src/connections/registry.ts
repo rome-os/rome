@@ -326,13 +326,7 @@ export class ConnectionRegistry {
         });
         continue;
       }
-      const conn = new ConnectionImpl(
-        rec.id,
-        rec.connectionKind,
-        rec.label,
-        registered.descriptor,
-        this,
-      );
+      const conn = new ConnectionImpl(rec.id, rec.connectionKind, registered.descriptor, this);
       this.connections.set(rec.id, conn);
       await conn.hydrate();
     }
@@ -357,7 +351,7 @@ export class ConnectionRegistry {
    *  zero-grant capabilities immediately (epoch from birth). Refuses a connection kind
    *  that already holds a Connection; a conferral asked for another account
    *  (`confer` with `another`) adds a second. */
-  async connect(connectionKind: string, label?: string): Promise<Connection> {
+  async connect(connectionKind: string): Promise<Connection> {
     return this.connectionMutex.runExclusive(connectionKind, async () => {
       const existing = this.find(connectionKind);
       if (existing.length > 0) {
@@ -365,7 +359,7 @@ export class ConnectionRegistry {
           { connectionKind, connectionIds: existing.map((connection) => connection.id) },
         ]);
       }
-      return this.mint(connectionKind, label);
+      return this.mint(connectionKind);
     });
   }
 
@@ -373,27 +367,19 @@ export class ConnectionRegistry {
    *  one, with no grant held yet. Tests use it to stand up several accounts
    *  without driving a setup.
    *  @internal */
-  async connectAnother(connectionKind: string, label?: string): Promise<Connection> {
-    return this.connectionMutex.runExclusive(connectionKind, () =>
-      this.mint(connectionKind, label),
-    );
+  async connectAnother(connectionKind: string): Promise<Connection> {
+    return this.connectionMutex.runExclusive(connectionKind, () => this.mint(connectionKind));
   }
 
-  private async mint(connectionKind: string, label: string | undefined): Promise<Connection> {
+  private async mint(connectionKind: string): Promise<Connection> {
     const registered = this.descriptors.get(connectionKind);
     if (!registered)
       throw new Error(`no registered descriptor for connection kind "${connectionKind}"`);
     const id = crypto.randomUUID();
     const createdAt = this.clock();
-    const record = { id, connectionKind, label: label ?? connectionKind, createdAt };
+    const record = { id, connectionKind, createdAt };
     this.createConnectionWithGrants(record, Object.keys(registered.descriptor.auth));
-    const conn = new ConnectionImpl(
-      id,
-      connectionKind,
-      label ?? connectionKind,
-      registered.descriptor,
-      this,
-    );
+    const conn = new ConnectionImpl(id, connectionKind, registered.descriptor, this);
     this.connections.set(id, conn);
     await conn.hydrate();
     return conn;
@@ -558,7 +544,7 @@ export class ConnectionRegistry {
     const commit = () =>
       ledger.runInTransaction((tx) => {
         if (minting) {
-          const record = { id, connectionKind, label: connectionKind, createdAt };
+          const record = { id, connectionKind, createdAt };
           ledger.writeConnection(tx, record);
           for (const name of Object.keys(registered!.descriptor.auth)) {
             ledger.writeEnsureGrant(tx, id, name);
@@ -587,7 +573,7 @@ export class ConnectionRegistry {
     if (minting) {
       commit();
       try {
-        conn = new ConnectionImpl(id, connectionKind, connectionKind, registered!.descriptor, this);
+        conn = new ConnectionImpl(id, connectionKind, registered!.descriptor, this);
         this.connections.set(id, conn);
         await conn.hydrate();
       } catch (err) {
@@ -844,7 +830,6 @@ class ConnectionImpl implements Connection {
   constructor(
     readonly id: ConnectionId,
     readonly connectionKind: string,
-    readonly label: string,
     private readonly descriptor: ConnectionDescriptor,
     private readonly registry: ConnectionRegistry,
   ) {

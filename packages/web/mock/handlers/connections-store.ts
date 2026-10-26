@@ -17,7 +17,6 @@ export const connections: { connections: ApiConnection[] } = {
     {
       id: "github-demo",
       connectionKind: "github",
-      label: "GitHub · Rome Demo",
       state: "working",
       grants: { user: "authorized" },
       display: {
@@ -37,18 +36,16 @@ export const connections: { connections: ApiConnection[] } = {
     ...[
       {
         service: "email",
-        label: "Email",
         grant: "inbox",
         email: "guardian@example.com",
         severalAccounts: false,
       },
-      { service: "wechat", label: "WeChat", grant: "account", email: null, severalAccounts: false },
-      { service: "feishu", label: "Feishu", grant: "bot", email: null, severalAccounts: true },
+      { service: "wechat", grant: "account", email: null, severalAccounts: false },
+      { service: "feishu", grant: "bot", email: null, severalAccounts: true },
     ].map(
-      ({ service, label, grant, email, severalAccounts }): ApiConnection => ({
+      ({ service, grant, email, severalAccounts }): ApiConnection => ({
         id: `${service}-demo`,
         connectionKind: service,
-        label: `${label} · Rome Demo`,
         state: "working",
         grants: { [grant]: "authorized" },
         display: {
@@ -70,7 +67,6 @@ export const connections: { connections: ApiConnection[] } = {
     {
       id: "discord-1",
       connectionKind: "discord",
-      label: "Discord · Rome",
       state: "working",
       grants: { bot: "authorized" },
       display: {
@@ -90,7 +86,6 @@ export const connections: { connections: ApiConnection[] } = {
     {
       id: "telegram-1",
       connectionKind: "telegram",
-      label: "Telegram · Rome",
       state: "working",
       grants: { bot: "authorized" },
       display: {
@@ -114,7 +109,6 @@ export const connections: { connections: ApiConnection[] } = {
       // whether WhatsApp is connected at all.
       id: "whatsapp-1",
       connectionKind: "whatsapp",
-      label: "WhatsApp · Rome",
       state: "working",
       grants: { session: "authorized" },
       display: {
@@ -134,7 +128,6 @@ export const connections: { connections: ApiConnection[] } = {
     {
       id: "linkedin-1",
       connectionKind: "linkedin",
-      label: "LinkedIn · Rome",
       state: "working",
       grants: { session: "authorized" },
       display: {

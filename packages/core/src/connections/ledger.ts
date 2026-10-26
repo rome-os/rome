@@ -15,7 +15,6 @@ import type { ConnectionId, GrantName, GrantState, ProfileRecord, SecretRecord }
 export interface ConnectionRecord {
   id: ConnectionId;
   connectionKind: string;
-  label: string;
   createdAt: Date;
 }
 

@@ -130,7 +130,7 @@ export function ChannelsSettingsPage() {
     () =>
       connections.flatMap((connection) =>
         connection.id !== null && connection.capabilities.talk?.state !== "unsupported"
-          ? [{ id: connection.id, label: connection.label }]
+          ? [{ id: connection.id, label: serviceLabel(connection.connectionKind) }]
           : [],
       ),
     [connections],

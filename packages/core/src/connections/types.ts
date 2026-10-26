@@ -216,7 +216,6 @@ export type ConnectionState = "working" | "broken";
 export interface Connection {
   readonly id: ConnectionId;
   readonly connectionKind: string;
-  readonly label: string;
   readonly auth: AuthState;
   /**
    * Broken when a grant is degraded, working when every grant is authorized.

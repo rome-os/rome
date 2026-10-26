@@ -26,7 +26,6 @@ function connection(
 ): ApiConnection {
   return {
     id: `conn-${overrides.connectionKind}`,
-    label: overrides.connectionKind,
     state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? {}),
     grants: {},
     display: {},

@@ -86,6 +86,8 @@ interface ConnectionView
   /** @deprecated The kind of connection under its old name, which apps built
    *  before the rename read. */
   service: string;
+  /** @deprecated A connection has no name of its own. This repeats
+   *  `connectionKind` for apps built while it carried one. */
   label: string;
   /** Working or broken. Null for a placeholder, and for a connection a
    *  disconnect kept with no access. */
@@ -159,7 +161,7 @@ function buildConnectionView(
     id: conn.id,
     connectionKind: conn.connectionKind,
     service: conn.connectionKind,
-    label: conn.label,
+    label: conn.connectionKind,
     state: conn.state(),
     grants,
     display,
@@ -294,14 +296,12 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const connected = await Promise.all(
       registry.all().map((conn) => serializeConnection(registry, conn, manager, channels)),
     );
-    // Stable ordering for the UI: by connection kind, then label, then id — the
-    // registry's own iteration order is insertion-dependent. Placeholders sort
-    // like a connection whose label is its connection kind and whose id is empty.
+    // Stable ordering for the UI: by connection kind, then id. The registry's
+    // own iteration order is insertion-dependent. A placeholder sorts like a
+    // connection whose id is empty.
     const connections = [...connected, ...placeholderViews(registry, manager)].sort(
       (a, b) =>
-        a.connectionKind.localeCompare(b.connectionKind) ||
-        a.label.localeCompare(b.label) ||
-        (a.id ?? "").localeCompare(b.id ?? ""),
+        a.connectionKind.localeCompare(b.connectionKind) || (a.id ?? "").localeCompare(b.id ?? ""),
     );
     c.header("Cache-Control", "no-store");
     return c.json({ connections });

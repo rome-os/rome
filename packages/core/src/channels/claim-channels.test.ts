@@ -65,7 +65,6 @@ describe("claimChannels", () => {
     ledger.writeConnection(testDb.db, {
       id: "c1",
       connectionKind: "feishu",
-      label: "Lark",
       createdAt: new Date(),
     });
     ledger.writeEnsureGrant(testDb.db, "c1", "app");

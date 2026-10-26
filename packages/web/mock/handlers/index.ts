@@ -1379,7 +1379,6 @@ export const handlers = [
       connections.connections.splice(connections.connections.indexOf(connection), 1);
     } else {
       connection.id = null;
-      connection.label = connection.connectionKind;
       connection.channel = null;
       connection.agent = null;
     }

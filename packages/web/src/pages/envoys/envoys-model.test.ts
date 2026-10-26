@@ -7,7 +7,6 @@ import { stateOfGrants } from "@/test/connection-state";
 function connection(overrides: Partial<ApiConnection> & { connectionKind: string }): ApiConnection {
   return {
     id: `${overrides.connectionKind}-id`,
-    label: overrides.connectionKind,
     state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? { bot: "authorized" }),
     grants: { bot: "authorized" },
     display: { bot: null },

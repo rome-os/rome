@@ -31,7 +31,6 @@ function slot(
 function card(overrides: Partial<ConnectionCard> = {}): ConnectionCard {
   return {
     service: "telegram",
-    label: "Telegram",
     kind: "channel",
     degradation: null,
     slots: [],
@@ -153,7 +152,6 @@ describe("connectionStatus — Telegram fold row states", () => {
     return {
       id: "conn-tg",
       connectionKind: "telegram",
-      label: "Telegram",
       state: stateOfGrants({ bot: state }),
       grants: { bot: state },
       display: {

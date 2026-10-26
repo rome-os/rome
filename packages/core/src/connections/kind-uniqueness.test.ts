@@ -200,13 +200,11 @@ describe("connections.connection_kind column in a migrated store", () => {
       ledger.writeConnection(db, {
         id: "discord-a",
         connectionKind: "discord",
-        label: "A",
         createdAt: new Date(1),
       });
       ledger.writeConnection(db, {
         id: "discord-b",
         connectionKind: "discord",
-        label: "B",
         createdAt: new Date(2),
       });
 
@@ -223,13 +221,11 @@ describe("connections.connection_kind column in a migrated store", () => {
       ledger.writeConnection(db, {
         id: "later",
         connectionKind: "discord",
-        label: "B",
         createdAt: new Date(2_000),
       });
       ledger.writeConnection(db, {
         id: "first",
         connectionKind: "discord",
-        label: "A",
         createdAt: new Date(1_000),
       });
 
@@ -247,13 +243,11 @@ describe("connections.connection_kind column in a migrated store", () => {
       ledger.writeConnection(db, {
         id: "zzz-first",
         connectionKind: "discord",
-        label: "A",
         createdAt: new Date(1_000),
       });
       ledger.writeConnection(db, {
         id: "aaa-later",
         connectionKind: "discord",
-        label: "B",
         createdAt: new Date(1_500),
       });
 

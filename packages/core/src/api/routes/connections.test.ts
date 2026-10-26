@@ -73,8 +73,8 @@ describe("GET /connections", () => {
     registry.register(telegram.descriptor);
     registry.register(discord.descriptor);
 
-    const tg = await registry.connect("fake-telegram", "Telegram");
-    await registry.connect("fake-discord", "Discord");
+    const tg = await registry.connect("fake-telegram");
+    await registry.connect("fake-discord");
     await registry.importCredential(tg.id, "bot", telegram.validCredential(), {
       name: "Rome Bot",
       login: "rome_bot",
@@ -96,7 +96,7 @@ describe("GET /connections", () => {
       id: tg.id,
       connectionKind: "fake-telegram",
       service: "fake-telegram",
-      label: "Telegram",
+      label: "fake-telegram",
       state: "working",
       grants: { bot: "authorized" },
       display: {
@@ -116,7 +116,7 @@ describe("GET /connections", () => {
 
     // Nothing conferred on discord yet: both grants unauthorized, everything
     // needing them locked, and no display (no profile AND no reviveProfile).
-    expect(d.label).toBe("Discord");
+    expect(d.label).toBe("fake-discord");
     expect(d.grants).toEqual({ bot: "unauthorized", user: "unauthorized" });
     expect(d.display).toEqual({ bot: null, user: null });
     expect(d.capabilities.talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
@@ -129,7 +129,7 @@ describe("GET /connections", () => {
       const setup = new ConnectionRegistry({ ledger });
       const fixture = makeTwoGrant();
       setup.register(fixture.descriptor);
-      const conn = await setup.connect("fake-discord", "Discord");
+      const conn = await setup.connect("fake-discord");
       await setup.importCredential(conn.id, "bot", fixture.botCredential());
       await setup.importCredential(conn.id, "user", fixture.userCredential());
       await ledger.updateGrant(conn.id, "user", {
@@ -178,7 +178,7 @@ describe("GET /connections", () => {
     registry.register(telegram.descriptor);
     registry.register(discord.descriptor);
     // Only telegram is connected; discord stays an offerable placeholder.
-    const tg = await registry.connect("fake-telegram", "Telegram");
+    const tg = await registry.connect("fake-telegram");
 
     const res = await makeApp(registry).request("/connections");
     const { connections } = await res.json();
@@ -246,7 +246,7 @@ describe("GET /connections", () => {
         auth: { user: tokenPaste({ label: "token", validate: async () => {} }) },
         capabilities: {},
       });
-      await registry.connect("github", "GitHub");
+      await registry.connect("github");
 
       const res = await makeApp(registry).request("/connections");
       const { connections } = await res.json();
@@ -270,7 +270,7 @@ describe("GET /connections/:id", () => {
     });
     const fixture = makeTwoGrant();
     registry.register(fixture.descriptor);
-    const conn = await registry.connect("fake-discord", "Discord");
+    const conn = await registry.connect("fake-discord");
     await registry.importCredential(conn.id, "bot", fixture.botCredential());
     const expiring: Credential = {
       material: { token: "fake-discord-user-token" },
@@ -306,7 +306,7 @@ describe("GET /connections/:id", () => {
     const registry = new ConnectionRegistry({ ledger });
     const fixture = makeTwoGrant();
     registry.register(fixture.descriptor);
-    const conn = await registry.connect("fake-discord", "Discord");
+    const conn = await registry.connect("fake-discord");
     await registry.importCredential(conn.id, "user", fixture.userCredential());
     await ledger.updateGrant(conn.id, "user", {
       state: "degraded",
@@ -333,7 +333,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     const fixture = makeTwoGrant();
     registry.register(fixture.descriptor);
-    const conn = await registry.connect("fake-discord", "Discord");
+    const conn = await registry.connect("fake-discord");
     await registry.importCredential(conn.id, "bot", fixture.botCredential());
     await registry.importCredential(conn.id, "user", fixture.userCredential());
 
@@ -561,7 +561,7 @@ describe("DELETE /connections/:id", () => {
     const registry = new ConnectionRegistry({ ledger });
     const fixture = makePasteTalkWithProfile();
     registry.register(fixture.descriptor);
-    const conn = await registry.connect("fake-telegram", "Telegram");
+    const conn = await registry.connect("fake-telegram");
     await registry.importCredential(conn.id, "bot", fixture.validCredential());
 
     const app = makeApp(registry);

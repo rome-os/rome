@@ -64,7 +64,6 @@ export class DrizzleGrantLedger implements GrantLedger {
       .values({
         id: rec.id,
         connectionKind: rec.connectionKind,
-        label: rec.label,
         createdAt: rec.createdAt,
       })
       .run();
@@ -85,7 +84,6 @@ export class DrizzleGrantLedger implements GrantLedger {
     return rows.map((row) => ({
       id: row.id,
       connectionKind: row.connectionKind,
-      label: row.label,
       createdAt: row.createdAt,
     }));
   }

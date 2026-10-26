@@ -70,6 +70,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - The dashboard chat is Rome's own channel, not a connection.
 - Rome's account record knows its platform and the platform's own id.
 - An account's connection is found by its platform and the platform's own id: the connection whose live grant reaches them.
+- A connection has no name of its own. The dashboard names it by its kind of connection.
 
 Diffs still owed to the model, each a change of its own:
 
