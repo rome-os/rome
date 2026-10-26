@@ -691,6 +691,21 @@ async function main() {
   );
   appConnections.registerActions(actionRegistry);
   appCatalog.subscribe(createAppConnectionAccessLifecycle(appConnectionAccessRepo));
+  const appConnectionCleanupLog = createLogger("app-connection-cleanup");
+  const runAppConnectionCleanup = async () => {
+    try {
+      const result = await appConnectionAccessRepo.pruneExpiredData(
+        new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+      );
+      appConnectionCleanupLog.info("App connection cleanup completed", result);
+    } catch (err) {
+      appConnectionCleanupLog.error("App connection cleanup failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+  await runAppConnectionCleanup();
+  const appConnectionCleanupInterval = setInterval(runAppConnectionCleanup, 6 * 60 * 60 * 1000);
   // The "openai" provider runs over the codex app-server JSON-RPC surface
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
@@ -2005,6 +2020,9 @@ async function main() {
 
     clearInterval(journalCleanupInterval);
     shutdownLog.info("journal cleanup timer stopped");
+
+    clearInterval(appConnectionCleanupInterval);
+    shutdownLog.info("App connection cleanup timer stopped");
 
     favorDispatchRunner.stop();
     shutdownLog.info("favor dispatch runner stopped");

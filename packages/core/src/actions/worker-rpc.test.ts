@@ -195,7 +195,14 @@ describe("WorkerRpcServer App connection identity", () => {
     const spoofed = await actionExecutionContext.run(store, () =>
       rpc(worker, "connections.app.list", { limit: 1, callerAppId: "app-a" }),
     );
-    expect(spoofed.error).toContain("invalid params");
+    expect(spoofed.result).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_input",
+        message: "The App connection request is invalid.",
+        retryable: false,
+      },
+    });
     expect(list).toHaveBeenCalledTimes(1);
 
     const contextSpoof = await actionExecutionContext.run(store, () =>
@@ -208,6 +215,20 @@ describe("WorkerRpcServer App connection identity", () => {
       value: { connections: [{ connectionId: "app-b" }] },
     });
     expect(list).toHaveBeenLastCalledWith("app-b", { limit: 1 });
+
+    expect(
+      await actionExecutionContext.run(store, () =>
+        worker.call("connections.app.list", { limit: 0 }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_input",
+        message: "The App connection request is invalid.",
+        retryable: false,
+      },
+    });
+    expect(list).toHaveBeenCalledTimes(2);
 
     await actionExecutionContext.run(store, () =>
       worker.call("connections.app.invoke", {

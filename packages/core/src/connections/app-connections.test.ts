@@ -1,10 +1,12 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { eq } from "drizzle-orm";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createRomeAppContext, type RomeAppRuntimeServices } from "../apps/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ResolvedApp } from "../apps/state.js";
 import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
+import { appConnectionInvocations } from "../db/schema.js";
 import { createActionEngineRepos, createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
@@ -208,14 +210,27 @@ describe("App connection broker", () => {
     const h = harness();
     try {
       const connection = await connect(h, "docs");
-      await grant(h, { appId: "app-a", connectionId: connection.id, operation: "documents.get" });
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+        approval: "required",
+      });
       const page = await h.broker.forApp("app-a").operations({
         connectionId: connection.id,
         identity: "account",
       });
       expect(page.operations).toEqual([
-        expect.objectContaining({ name: "documents.create", access: "not_granted" }),
-        expect.objectContaining({ name: "documents.get", access: "granted" }),
+        expect.objectContaining({
+          name: "documents.create",
+          access: "granted",
+          approval: "required",
+        }),
+        expect.objectContaining({
+          name: "documents.get",
+          access: "not_granted",
+          approval: "not_required",
+        }),
       ]);
       expect(page.operations.some((operation) => operation.name === "raw.http")).toBe(false);
     } finally {
@@ -480,6 +495,7 @@ describe("App connection broker", () => {
         status: "duplicate",
         executionId: pending.executionId,
         outcome: "failed",
+        errorCode: "approval_rejected",
       });
       expect(h.invocations).toHaveLength(0);
       expect(await h.access.getInvocation(pending.executionId)).toMatchObject({
@@ -637,6 +653,39 @@ describe("App connection broker", () => {
     }
   });
 
+  it("expires abandoned pending input even when the App is idle", async () => {
+    const h = harness();
+    try {
+      h.access.createOrGetInvocation({
+        id: "stale-pending",
+        appId: "idle-app",
+        connectionId: "connection",
+        identity: "account",
+        operation: "documents.create",
+        requestIdHash: "request-hash",
+        inputHash: "input-hash",
+        input: { body: "private" },
+        sideEffects: "write",
+        accessRevision: 1,
+      });
+      await h.access.transitionInvocation("stale-pending", ["ready"], "pending_approval");
+      await h.db
+        .update(appConnectionInvocations)
+        .set({ updatedAt: new Date(0) })
+        .where(eq(appConnectionInvocations.id, "stale-pending"));
+
+      await h.access.pruneExpiredData(new Date(1_000));
+
+      expect(await h.access.getInvocation("stale-pending")).toMatchObject({
+        status: "rejected",
+        errorCode: "access_denied",
+        input: null,
+      });
+    } finally {
+      h.close();
+    }
+  });
+
   it("finishes an invocation when the Action engine throws", async () => {
     const h = harness();
     try {
@@ -659,6 +708,39 @@ describe("App connection broker", () => {
       expect(audit).toMatchObject({ status: "provider_error" });
       expect(await h.access.getInvocation(audit!.executionId)).toMatchObject({
         status: "failed",
+        input: null,
+      });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("treats a non-ok engine result after a write claim as outcome unknown", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+      });
+      rs.spyOn(h.engine, "run").mockImplementationOnce(async (_name, args) => {
+        await h.access.updateInvocation(String(args.invocationId), "running");
+        return { status: "error", error: "persistence failed after provider execution" };
+      });
+
+      const result = await h.broker.forApp("app-a").invoke({
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.create",
+        requestId: "request-engine-error",
+        input: { workspaceId: "one", title: "Maybe created", body: "body" },
+      });
+
+      expect(result).toMatchObject({ status: "outcome_unknown" });
+      expect(await h.access.getInvocation(result.executionId)).toMatchObject({
+        status: "outcome_unknown",
+        errorCode: "outcome_unknown",
         input: null,
       });
     } finally {
@@ -747,12 +829,35 @@ describe("App connection broker", () => {
       } as never);
       expect(await h.access.listActiveForApp("app-a")).toHaveLength(1);
 
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+        approval: "required",
+      });
+      const pending = await h.broker.forApp("app-a").invoke({
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.create",
+        requestId: "request-disabled-app",
+        input: { workspaceId: "one", title: "Pending", body: "private" },
+      });
+      if (pending.status !== "pending_approval") throw new Error("expected approval");
+
       await lifecycle({
         appId: "app-a",
         change: "changed",
         current: { appId: "app-a", enabled: false, state: "installed" },
       } as never);
       expect(await h.access.listActiveForApp("app-a")).toHaveLength(0);
+      expect(await h.access.getInvocation(pending.executionId)).toMatchObject({
+        status: "rejected",
+        errorCode: "access_denied",
+        input: null,
+      });
+      expect(await h.access.listAuditForApp("app-a")).toContainEqual(
+        expect.objectContaining({ executionId: pending.executionId, status: "access_denied" }),
+      );
 
       await grant(h, {
         appId: "app-a",

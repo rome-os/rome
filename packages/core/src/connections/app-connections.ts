@@ -289,7 +289,9 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
             : {}),
           sideEffects: operation.appAccess!.sideEffects,
           access: policy ? "granted" : "not_granted",
-          approval: policy?.approval ?? "required",
+          approval:
+            policy?.approval ??
+            (operation.appAccess!.sideEffects === "read-only" ? "not_required" : "required"),
           constraints: policy?.constraints ?? [],
         };
       })
@@ -440,18 +442,26 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       };
     }
     if (result.status !== "ok" || !isBrokerResult(result.data)) {
+      const approval = activePolicy.approval === "required" ? "pending" : "not_required";
+      if (sideEffects === "write") {
+        await this.access.transitionInvocation(
+          invocationId,
+          ["ready", "pending_approval", "running"],
+          "outcome_unknown",
+          "outcome_unknown",
+          true,
+        );
+        await this.audit(stored.invocation, approval, "outcome_unknown");
+        return { ok: true, value: { status: "outcome_unknown", executionId: invocationId } };
+      }
       await this.access.transitionInvocation(
         invocationId,
-        ["ready", "pending_approval"],
+        ["ready", "pending_approval", "running"],
         "failed",
         "provider_error",
         true,
       );
-      await this.audit(
-        stored.invocation,
-        activePolicy.approval === "required" ? "pending" : "not_required",
-        "provider_error",
-      );
+      await this.audit(stored.invocation, approval, "provider_error");
       return failure("provider_error", "The connection operation failed.", true);
     }
     return result.data;
@@ -739,6 +749,9 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           status: "duplicate",
           executionId: invocation.id,
           outcome: invocation.status === "succeeded" ? "succeeded" : "failed",
+          ...(invocation.errorCode
+            ? { errorCode: invocation.errorCode as AppConnectionErrorBody["code"] }
+            : {}),
         },
       };
     }

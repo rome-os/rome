@@ -186,15 +186,63 @@ export class AppConnectionAccessRepository {
   }
 
   async revokeApp(appId: string): Promise<number> {
-    const result = await this.db
-      .update(appConnectionAccess)
-      .set({
-        revokedAt: new Date(),
-        revision: sql`${appConnectionAccess.revision} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(appConnectionAccess.appId, appId), isNull(appConnectionAccess.revokedAt)));
-    return Number(result.changes ?? 0);
+    return this.db.transaction((tx) => {
+      const now = new Date();
+      const pending = tx
+        .select()
+        .from(appConnectionInvocations)
+        .where(
+          and(
+            eq(appConnectionInvocations.appId, appId),
+            inArray(appConnectionInvocations.status, ["ready", "pending_approval"]),
+          ),
+        )
+        .all();
+      const result = tx
+        .update(appConnectionAccess)
+        .set({
+          revokedAt: now,
+          revision: sql`${appConnectionAccess.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(and(eq(appConnectionAccess.appId, appId), isNull(appConnectionAccess.revokedAt)))
+        .run();
+      tx.update(appConnectionInvocations)
+        .set({ status: "rejected", errorCode: "access_denied", input: null, updatedAt: now })
+        .where(
+          and(
+            eq(appConnectionInvocations.appId, appId),
+            inArray(appConnectionInvocations.status, ["ready", "pending_approval"]),
+          ),
+        )
+        .run();
+      tx.update(appConnectionInvocations)
+        .set({ input: null, updatedAt: now })
+        .where(
+          and(
+            eq(appConnectionInvocations.appId, appId),
+            eq(appConnectionInvocations.status, "running"),
+          ),
+        )
+        .run();
+      for (const invocation of pending) {
+        tx.insert(appConnectionAudit)
+          .values({
+            appId: invocation.appId,
+            connectionId: invocation.connectionId,
+            identity: invocation.identity,
+            operation: invocation.operation,
+            accessRevision: invocation.accessRevision,
+            approval: "rejected",
+            executionId: invocation.id,
+            requestIdHash: invocation.requestIdHash,
+            status: "access_denied",
+            createdAt: now,
+          })
+          .run();
+      }
+      return Number(result.changes ?? 0);
+    });
   }
 
   createOrGetInvocation(input: {
@@ -326,26 +374,66 @@ export class AppConnectionAccessRepository {
     appId: string,
     before: Date,
   ): Promise<{ invocations: number; audits: number }> {
-    const invocations = await this.db
-      .delete(appConnectionInvocations)
-      .where(
-        and(
-          eq(appConnectionInvocations.appId, appId),
-          inArray(appConnectionInvocations.status, [
-            "succeeded",
-            "failed",
-            "rejected",
-            "outcome_unknown",
-          ]),
-          lt(appConnectionInvocations.updatedAt, before),
-        ),
-      );
-    const audits = await this.db
-      .delete(appConnectionAudit)
-      .where(and(eq(appConnectionAudit.appId, appId), lt(appConnectionAudit.createdAt, before)));
-    return {
-      invocations: Number(invocations.changes ?? 0),
-      audits: Number(audits.changes ?? 0),
-    };
+    return this.pruneData(before, appId);
+  }
+
+  async pruneExpiredData(before: Date): Promise<{ invocations: number; audits: number }> {
+    return this.pruneData(before);
+  }
+
+  private pruneData(before: Date, appId?: string): { invocations: number; audits: number } {
+    return this.db.transaction((tx) => {
+      const now = new Date();
+      const scopeInvocation = appId ? eq(appConnectionInvocations.appId, appId) : undefined;
+      const scopeAudit = appId ? eq(appConnectionAudit.appId, appId) : undefined;
+      tx.update(appConnectionInvocations)
+        .set({ status: "rejected", errorCode: "access_denied", input: null, updatedAt: now })
+        .where(
+          and(
+            scopeInvocation,
+            inArray(appConnectionInvocations.status, ["ready", "pending_approval"]),
+            lt(appConnectionInvocations.updatedAt, before),
+          ),
+        )
+        .run();
+      tx.update(appConnectionInvocations)
+        .set({
+          status: "outcome_unknown",
+          errorCode: "outcome_unknown",
+          input: null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            scopeInvocation,
+            eq(appConnectionInvocations.status, "running"),
+            lt(appConnectionInvocations.updatedAt, before),
+          ),
+        )
+        .run();
+      const invocations = tx
+        .delete(appConnectionInvocations)
+        .where(
+          and(
+            scopeInvocation,
+            inArray(appConnectionInvocations.status, [
+              "succeeded",
+              "failed",
+              "rejected",
+              "outcome_unknown",
+            ]),
+            lt(appConnectionInvocations.updatedAt, before),
+          ),
+        )
+        .run();
+      const audits = tx
+        .delete(appConnectionAudit)
+        .where(and(scopeAudit, lt(appConnectionAudit.createdAt, before)))
+        .run();
+      return {
+        invocations: Number(invocations.changes ?? 0),
+        audits: Number(audits.changes ?? 0),
+      };
+    });
   }
 }

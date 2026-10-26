@@ -2401,7 +2401,13 @@ export class AppConnectionError extends Error {
 export type AppConnectionInvokeResult<T = unknown> =
   | { status: "ok"; executionId: string; data?: T }
   | { status: "pending_approval"; executionId: string; approval: PendingApproval }
-  | { status: "duplicate"; executionId: string; outcome: "succeeded" | "failed" }
+  | {
+      status: "duplicate";
+      executionId: string;
+      outcome: "succeeded" | "failed";
+      /** Present for a failed original request so callers retain its structured cause. */
+      errorCode?: AppConnectionErrorBody["code"];
+    }
   | { status: "outcome_unknown"; executionId: string };
 
 export interface AppConnectionsCapability {

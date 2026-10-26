@@ -31,7 +31,10 @@ import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
-import type { AppConnectionBrokerPort } from "../connections/app-connections.js";
+import type {
+  AppConnectionBrokerPort,
+  AppConnectionBrokerResult,
+} from "../connections/app-connections.js";
 
 const AppIdSchema = z.string().min(1);
 
@@ -197,6 +200,25 @@ function parseParams<T extends z.ZodType>(method: string, schema: T, params: unk
     .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
     .join("; ");
   throw new Error(`${method}: invalid params — ${issues}`);
+}
+
+function parseAppConnectionParams<T extends z.ZodType>(
+  method: string,
+  schema: T,
+  params: unknown,
+): AppConnectionBrokerResult<z.infer<T>> {
+  try {
+    return { ok: true, value: parseParams(method, schema, params) };
+  } catch {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_input",
+        message: "The App connection request is invalid.",
+        retryable: false,
+      },
+    };
+  }
 }
 
 export interface WorkerRpcServices {
@@ -377,27 +399,46 @@ export class WorkerRpcServer {
       };
     }
     switch (method) {
-      case "list":
-        return await this.services.appConnections.list(
-          appId,
-          parseParams("connections.app.list", AppConnectionsListParams, params),
+      case "list": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.list",
+          AppConnectionsListParams,
+          params,
         );
-      case "describe":
-        return await this.services.appConnections.describe(
-          appId,
-          parseParams("connections.app.describe", AppConnectionsIdentityParams, params),
+        if (!parsed.ok) return parsed;
+        return await this.services.appConnections.list(appId, parsed.value);
+      }
+      case "describe": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.describe",
+          AppConnectionsIdentityParams,
+          params,
         );
-      case "operations":
-        return await this.services.appConnections.operations(
-          appId,
-          parseParams("connections.app.operations", AppConnectionsOperationsParams, params),
+        if (!parsed.ok) return parsed;
+        return await this.services.appConnections.describe(appId, parsed.value);
+      }
+      case "operations": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.operations",
+          AppConnectionsOperationsParams,
+          params,
         );
-      case "invoke":
+        if (!parsed.ok) return parsed;
+        return await this.services.appConnections.operations(appId, parsed.value);
+      }
+      case "invoke": {
+        const parsed = parseAppConnectionParams(
+          "connections.app.invoke",
+          AppConnectionsInvokeParams,
+          params,
+        );
+        if (!parsed.ok) return parsed;
         return await this.services.appConnections.invoke(
           appId,
-          parseParams("connections.app.invoke", AppConnectionsInvokeParams, params),
+          parsed.value,
           context?.callerActionContext,
         );
+      }
     }
   }
 

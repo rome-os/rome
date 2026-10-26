@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f07965f5-700d-4e7c-9438-7221ffebe019",
+  "id": "302f6273-e003-460d-b10d-8d80dcba03dd",
   "prevId": "58810dc1-b71d-43db-84cd-cdddcab2599e",
   "tables": {
     "action_executions": {
@@ -448,6 +448,14 @@
           ],
           "isUnique": true,
           "where": "\"app_connection_invocations\".\"request_id_hash\" IS NOT NULL"
+        },
+        "idx_app_connection_invocation_retention": {
+          "name": "idx_app_connection_invocation_retention",
+          "columns": [
+            "app_id",
+            "updated_at"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},

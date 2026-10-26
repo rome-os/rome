@@ -135,7 +135,9 @@ identity for one operation.
   show in an approval preview. Reusing a request id within the seven-day retention
   window never repeats the effect, and an interrupted write whose provider outcome is
   unknown is not retried automatically. Records become eligible for pruning after that
-  window and are removed during later use.
+  window and are removed by Core's periodic cleanup even when the App is idle. Disabling
+  or removing an App also rejects its pending invocations and clears their stored input.
+  A duplicate of a failed invocation includes the original structured error code.
 - Read operations execute synchronously and cannot use deferred approval. An
   approval-gated write returns `pending_approval`; its later provider output is not
   delivered to the App. Providers should expose a follow-up read when the App needs to

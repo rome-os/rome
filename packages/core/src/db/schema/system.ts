@@ -899,7 +899,6 @@ export const executionJournal = sqliteTable(
   ],
 );
 
-
 export const appConnectionAccess = sqliteTable(
   "app_connection_access",
   {
@@ -955,6 +954,7 @@ export const appConnectionInvocations = sqliteTable(
     uniqueIndex("uq_app_connection_invocation_request")
       .on(table.appId, table.requestIdHash)
       .where(sql`${table.requestIdHash} IS NOT NULL`),
+    index("idx_app_connection_invocation_retention").on(table.appId, table.updatedAt),
   ],
 );
 
