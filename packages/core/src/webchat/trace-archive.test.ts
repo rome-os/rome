@@ -479,10 +479,10 @@ describe("trace archives (real SQLite and worker)", () => {
     expect(blocks).toBeGreaterThan(message);
   });
 
-  it("stops new exports at 5 GiB of pending uploads", async () => {
+  it("stops new exports at 5 GB of pending uploads", async () => {
     seed("backlog");
     await exportOnly("backlog");
-    repo.update("archive", { bytes: 5 * 1024 ** 3 });
+    repo.update("archive", { bytes: 5_000_000_000 });
     seed("next");
     // Leave the pending export retryable, as an offline Cloud endpoint would.
     const worker = async (_input: ArchiveWorkerInput): Promise<ArchiveFile | null> => {

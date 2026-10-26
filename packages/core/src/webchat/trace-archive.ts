@@ -28,7 +28,7 @@ class ArchiveStorageFailure extends Error {
     super(failureReason(error));
   }
 }
-const PENDING_LIMIT = 5 * 1024 ** 3;
+const PENDING_LIMIT = 5_000_000_000;
 
 export function traceArchiveFile(root: string, sessionId: string, archiveId: string): string {
   return join(root, traceArchiveRelativePath(sessionId, archiveId));
