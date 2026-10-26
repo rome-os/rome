@@ -201,7 +201,8 @@
   "desktop": {
     "iframeTitle": "Rome Desktop",
     "namedIframeTitle": "Rome desktop “{{name}}”",
-    "notFound": "There is no desktop called “{{name}}”."
+    "notFound": "There is no desktop called “{{name}}”.",
+    "reconnecting": "Reconnecting…"
   },
   "wechatApp": {
     "loading": "Checking WeChat…",

@@ -201,7 +201,8 @@
   "desktop": {
     "iframeTitle": "Rome 桌面",
     "namedIframeTitle": "Rome 桌面“{{name}}”",
-    "notFound": "没有名为“{{name}}”的桌面。"
+    "notFound": "没有名为“{{name}}”的桌面。",
+    "reconnecting": "正在重新连接…"
   },
   "wechatApp": {
     "loading": "正在检查微信…",
