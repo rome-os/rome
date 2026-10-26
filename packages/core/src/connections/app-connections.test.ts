@@ -935,6 +935,57 @@ describe("App connection broker", () => {
     }
   });
 
+  it("hashes and invokes the persisted JSON form of input values", async () => {
+    const jsonWrite: OperationDescriptor = {
+      name: "payloads.create",
+      description: "Create one flexible payload.",
+      inputSchema: {
+        type: "object",
+        properties: { payload: {} },
+        required: ["payload"],
+        additionalProperties: false,
+      },
+      appAccess: {
+        sideEffects: "write",
+        approvalPreview: { summary: "Create a flexible payload." },
+      },
+    };
+    const h = harness({ operations: [...operations, jsonWrite] });
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: jsonWrite.name,
+      });
+      const facade = h.broker.forApp("app-a");
+      const request = {
+        connectionId: connection.id,
+        identity: "account",
+        operation: jsonWrite.name,
+        requestId: "request-date-payload",
+      } as const;
+
+      await expect(
+        facade.invoke({
+          ...request,
+          input: { payload: new Date("2026-10-26T00:00:00.000Z") },
+        }),
+      ).resolves.toMatchObject({ status: "ok" });
+      expect(h.invocations[0]?.call.input).toEqual({
+        payload: "2026-10-26T00:00:00.000Z",
+      });
+      await expect(
+        facade.invoke({
+          ...request,
+          input: { payload: new Date("2026-10-27T00:00:00.000Z") },
+        }),
+      ).rejects.toMatchObject({ detail: { code: "request_id_conflict" } });
+    } finally {
+      h.close();
+    }
+  });
+
   it("recovers unstarted and uncertain crash-orphaned writes", async () => {
     const h = harness();
     try {

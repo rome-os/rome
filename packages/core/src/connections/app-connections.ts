@@ -414,11 +414,11 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       return await denied(failure("invalid_input", "The requestId is invalid."));
     }
     requestIdHash = sideEffects === "write" && input.requestId ? digest(input.requestId) : null;
-    const serialized = serializeCanonicalBounded(input.input ?? null, MAX_INPUT_BYTES);
-    if (!serialized.ok) return await denied(serialized);
-    const validation = this.validateInput(operation, input.input);
+    const normalized = normalizeJsonInput(input.input ?? null, MAX_INPUT_BYTES);
+    if (!normalized.ok) return await denied(normalized);
+    const validation = this.validateInput(operation, normalized.value.input);
     if (!validation.ok) return await denied(validation);
-    const constrained = enforceConstraints(input.input, activePolicy.constraints);
+    const constrained = enforceConstraints(normalized.value.input, activePolicy.constraints);
     if (!constrained.ok) return await denied(constrained);
 
     const stored = this.access.createOrGetInvocation({
@@ -428,12 +428,13 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       identity: input.identity,
       operation: input.operation,
       requestIdHash,
-      inputHash: digest(serialized.value),
-      input: input.input ?? null,
+      inputHash: digest(normalized.value.canonical),
+      input: normalized.value.input,
       sideEffects,
       accessRevision: activePolicy.revision,
     });
-    if (!stored.created) return this.duplicate(stored.invocation, serialized.value, input);
+    if (!stored.created)
+      return this.duplicate(stored.invocation, normalized.value.canonical, input);
 
     const actionName = actionFor(sideEffects, activePolicy.approval);
     if (activePolicy.approval === "required") {
@@ -1042,12 +1043,19 @@ function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function serializeCanonicalBounded(
+function normalizeJsonInput(
   value: unknown,
   limit: number,
-): AppConnectionBrokerResult<string> {
+): AppConnectionBrokerResult<{ input: unknown; canonical: string }> {
+  const serialized = serializeBounded(value, limit);
+  if (!serialized.ok) return serialized;
   try {
-    return serializeBounded(canonicalJson(value), limit);
+    const input: unknown = JSON.parse(serialized.value);
+    const canonical = JSON.stringify(canonicalJson(input));
+    if (canonical === undefined) {
+      return failure("invalid_input", "The value is not JSON serializable.");
+    }
+    return { ok: true, value: { input, canonical } };
   } catch {
     return failure("invalid_input", "The value is not JSON serializable.");
   }
