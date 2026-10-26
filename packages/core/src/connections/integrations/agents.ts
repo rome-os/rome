@@ -293,13 +293,13 @@ export function makeAgentsDescriptor(
 ): ConnectionDescriptor {
   return {
     connectionKind: AGENTS_KIND,
-    reviveProfile: (_grant, record) => reviveAgentsProfile(record),
+    reviveProfile: (record) => reviveAgentsProfile(record),
     // The agent Rome Cloud assigned this Rome.
-    accountIdOf: (_grant, record) => (typeof record.agentId === "string" && record.agentId) || null,
-    auth: { cloud: agentsScheme(client) },
+    accountIdOf: (record) => (typeof record.agentId === "string" && record.agentId) || null,
+    grant: "cloud",
+    auth: agentsScheme(client),
     capabilities: {
       talker: {
-        needs: ["cloud"] as const,
         build: () => createAgentsTalker(client),
       },
     },

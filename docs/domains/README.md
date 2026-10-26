@@ -70,6 +70,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - The dashboard chat is Rome's own channel, not a connection.
 - Rome's account record knows its platform and the platform's own id.
 - An account's connection is found by its platform and the platform's own id: the connection whose live grant reaches them.
+- Every kind of connection declares one grant, and everything a connection lets Rome do needs that grant.
 
 Diffs still owed to the model, each a change of its own:
 
@@ -98,6 +99,6 @@ Diffs still owed to the model, each a change of its own:
 - Linking, switching and unlinking name the connected account by its connection. Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
 - A fix that reaches another account is refused for the sign-ins such as GitHub too.
 - Connecting through a sign-in such as GitHub is one step too. A sign-in Rome rejects leaves no connection behind.
-- A connection holds one grant, and renewing or fixing replaces it whole.
+- The ledger keeps one grant per connection, and renewing or fixing replaces it whole.
 - Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
 - The code says chat, act and watch for what a connection lets Rome do.

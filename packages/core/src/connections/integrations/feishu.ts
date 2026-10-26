@@ -532,19 +532,17 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
   return {
     connectionKind: "feishu",
     severalAccounts: true,
-    reviveProfile: (_grant, record) => reviveFeishuProfile(record),
-    accountIdOf: (_grant, record) => (typeof record.appId === "string" && record.appId) || null,
+    reviveProfile: (record) => reviveFeishuProfile(record),
+    accountIdOf: (record) => (typeof record.appId === "string" && record.appId) || null,
     takesAgent: true,
-    auth: {
-      app: appScheme,
-    },
+    grant: "app",
+    auth: appScheme,
     capabilities: {
       talker: {
-        needs: ["app"] as const,
-        build(creds, kit): Talker {
+        build(cred, kit): Talker {
           // Inline material for the `app` grant (never an external resolver for
           // a Talk grant); credentialsPaste packs these fields.
-          const app = creds.app.material as unknown as FeishuAppMaterial;
+          const app = cred.material as unknown as FeishuAppMaterial;
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           const routeFault = (err: unknown): void => {
             faultSink?.(

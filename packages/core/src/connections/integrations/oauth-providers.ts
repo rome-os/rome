@@ -214,7 +214,7 @@ const OAUTH_PROVIDER_REVIVERS: Record<OAuthProvider, (record: ProfileRecord) => 
  */
 function makeOAuthProviderCustody(provider: OAuthProvider): GrantCustody {
   return {
-    async sync(_grant, material, profile) {
+    async sync(material, profile) {
       await syncGithubShellIntegrationForProvider(provider, material);
       await syncProviderTokenFile(provider, material, parseOAuthProviderProfile(provider, profile));
     },
@@ -367,13 +367,12 @@ export function makeOAuthProviderDescriptor(
   if (setupDeps) scheme.setup = makeOAuthProviderSetup(provider, setupDeps);
   return {
     connectionKind: provider,
-    auth: {
-      [OAUTH_PROVIDER_GRANTS[provider]]: scheme,
-    },
-    reviveProfile: (_grant, record) => OAUTH_PROVIDER_REVIVERS[provider](record),
+    grant: OAUTH_PROVIDER_GRANTS[provider],
+    auth: scheme,
+    reviveProfile: (record) => OAUTH_PROVIDER_REVIVERS[provider](record),
     // The provider's own id for the signed-in identity: the user, or for Slack
     // the installer in its workspace, and for Shopify the store.
-    accountIdOf: (_grant, record) => (typeof record.subject === "string" && record.subject) || null,
+    accountIdOf: (record) => (typeof record.subject === "string" && record.subject) || null,
     custody: makeOAuthProviderCustody(provider),
     capabilities: {},
   };

@@ -51,12 +51,11 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
   });
   const descriptor = {
     service: "discord",
+    grant: "bot",
     auth: {
-      bot: {
-        confer: async () => CRED,
-        renew: async () => "re-confer" as const,
-        ...(setup ? { setup } : {}),
-      },
+      confer: async () => CRED,
+      renew: async () => "re-confer" as const,
+      ...(setup ? { setup } : {}),
     },
     capabilities: {},
   } as unknown as ConnectionDescriptor;

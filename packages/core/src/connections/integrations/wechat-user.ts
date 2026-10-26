@@ -409,14 +409,12 @@ export function createWechatUserDescriptor(
 
   return {
     connectionKind: WECHAT_USER_KIND,
-    reviveProfile: (_grant, record) => reviveWechatUserProfile(record),
-    accountIdOf: (_grant, record) => (typeof record.wxid === "string" && record.wxid) || null,
-    auth: {
-      session: sessionScheme,
-    },
+    reviveProfile: (record) => reviveWechatUserProfile(record),
+    accountIdOf: (record) => (typeof record.wxid === "string" && record.wxid) || null,
+    grant: "session",
+    auth: sessionScheme,
     capabilities: {
       talker: {
-        needs: ["session"] as const,
         // Read-only: the personal account is consulted, never written to or
         // answered (docs/architecture/channels.md#wechat-personal-account).
         sends: false,

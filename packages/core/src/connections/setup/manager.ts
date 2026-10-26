@@ -171,7 +171,8 @@ export class SetupManager {
       }
     }
 
-    const fn = this.#deps.registry.getDescriptor(target.connectionKind)?.auth[grant]?.setup;
+    const descriptor = this.#deps.registry.getDescriptor(target.connectionKind);
+    const fn = descriptor?.grant === grant ? descriptor.auth.setup : undefined;
     if (!fn) throw new NoSetupError(target.connectionKind, grant);
 
     const cid = randomUUID();

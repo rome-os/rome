@@ -238,18 +238,16 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
   return {
     connectionKind: "discord",
     severalAccounts: true,
-    reviveProfile: (_grant, record) => reviveDiscordProfile(record),
-    accountIdOf: (_grant, record) => (typeof record.botId === "string" && record.botId) || null,
+    reviveProfile: (record) => reviveDiscordProfile(record),
+    accountIdOf: (record) => (typeof record.botId === "string" && record.botId) || null,
     takesAgent: true,
-    auth: {
-      bot: botScheme,
-    },
+    grant: "bot",
+    auth: botScheme,
     capabilities: {
       talker: {
-        needs: ["bot"] as const,
         history: true,
-        build(creds, kit): Talker {
-          const token = creds.bot.material as { token: string };
+        build(cred, kit): Talker {
+          const token = cred.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
 
           const adapter = new DiscordAdapter({
@@ -380,9 +378,8 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
         },
       },
       actor: {
-        needs: ["bot"] as const,
-        build(creds) {
-          const token = creds.bot.material as { token: string };
+        build(cred) {
+          const token = cred.material as { token: string };
           const adapter = new DiscordAdapter({ botToken: token.token });
           return {
             operations: () => [

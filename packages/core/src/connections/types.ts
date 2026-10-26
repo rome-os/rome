@@ -212,17 +212,16 @@ export type CapabilityStatus =
  */
 export type ConnectionState = "working" | "broken";
 
-/** One connection kind, named grants, up to three capabilities. */
+/** One connection kind, one grant, up to three capabilities. */
 export interface Connection {
   readonly id: ConnectionId;
   readonly connectionKind: string;
   readonly label: string;
   readonly auth: AuthState;
   /**
-   * Broken when a grant is degraded, working when every grant is authorized.
-   * Null while a grant is unauthorized: a disconnect that keeps the
-   * connection leaves no access behind, so it is neither. A connection with
-   * no grants is working.
+   * Broken when the grant is degraded, working when it is authorized. Null
+   * while it is unauthorized: a disconnect that keeps the connection leaves no
+   * access behind, so it is neither.
    */
   state(): ConnectionState | null;
   /** Discovery with reasons — drives the dashboard and connect hints. */
@@ -256,7 +255,7 @@ export interface RuntimeKit {
   readonly connectionId: ConnectionId;
   /** Write-through custody (Baileys). Updates the grant's stored credential
    *  material IN PLACE: no epoch rebuild, no state change, no onUnlocked. */
-  persist(grant: GrantName, material: SecretRecord): Promise<void>;
+  persist(material: SecretRecord): Promise<void>;
   registerIngress(handler: (input: unknown) => Promise<unknown>): () => void;
   // kit.webhook() lands in phase 6 — do not add it now.
 }
@@ -305,20 +304,25 @@ export type StreamFault = CredentialRejected | Disconnected;
  * transition or boot re-syncs.
  */
 export interface GrantCustody {
-  sync(grant: GrantName, material: SecretRecord, profile: ProfileRecord): Promise<void>;
-  clear(grant: GrantName): Promise<void>;
+  sync(material: SecretRecord, profile: ProfileRecord): Promise<void>;
+  clear(): Promise<void>;
 }
 
 /** A connection kind declaration. */
 export interface ConnectionDescriptor {
   connectionKind: string;
-  auth: Record<GrantName, AuthScheme>;
+  /** The name of the connection's one grant: the key the dashboard, the setup
+   *  routes and the ledger know it by. */
+  grant: GrantName;
+  /** How the guardian gives access. A connection holds one grant
+   *  (docs/domains/connections.md#grant). */
+  auth: AuthScheme;
   /** Revive a grant's stored opaque profile record: re-parse it with this
    *  connection kind's own schema, then map it through the connection kind's pure display
    *  function. Fail-closed — a record that no longer matches the schema throws
    *  rather than displaying sparsely. Generic readers consume only the returned
    *  display object; raw records never cross to generic surfaces. */
-  reviveProfile?(grant: GrantName, record: ProfileRecord): ProfileDisplay;
+  reviveProfile?(record: ProfileRecord): ProfileDisplay;
   /** Grant-state-driven custody of out-of-process artifacts (token files, shell
    *  auth). Omitted by connection kinds with no such artifact — most descriptors. */
   custody?: GrantCustody;
@@ -337,7 +341,7 @@ export interface ConnectionDescriptor {
    *  its connection kind, and a fix that reaches another account
    *  (docs/domains/connections.md#connection). A connection kind that leaves it
    *  unset, or a profile it answers null for, is never refused. */
-  accountIdOf?(grant: GrantName, profile: ProfileRecord): string | null;
+  accountIdOf?(profile: ProfileRecord): string | null;
   /** True when this kind's accounts take an agent. Such an account exists only
    *  while connected: the last grant's disconnect removes the Connection
    *  (`isUnconnectedAccount`). Declare it exactly for the kinds in
@@ -345,8 +349,7 @@ export interface ConnectionDescriptor {
   takesAgent?: boolean;
   capabilities: Partial<{
     talker: {
-      needs: readonly GrantName[];
-      build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Talker;
+      build(cred: Credential, kit: RuntimeKit): Talker;
       degradation?(instance: Talker): CapabilityDegradation | null;
       /** False when the talker can never send, so the channel it backs has no
        *  `send` port. Absent means it can. */
@@ -371,13 +374,11 @@ export interface ConnectionDescriptor {
       promptContext?: boolean;
     };
     actor: {
-      needs: readonly GrantName[];
-      build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Actor;
+      build(cred: Credential, kit: RuntimeKit): Actor;
     };
     watcher: {
-      needs: readonly GrantName[];
       subscriptionGated?: boolean;
-      build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Watcher;
+      build(cred: Credential, kit: RuntimeKit): Watcher;
     };
   }>;
 }

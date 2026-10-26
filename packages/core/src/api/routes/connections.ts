@@ -144,7 +144,7 @@ function buildConnectionView(
   const display: Record<GrantName, GrantDisplayView | null> = {};
   for (const name of Object.keys(grants)) {
     const profile = records.get(name)?.profile;
-    const revived = profile && revive ? revive(name, profile) : undefined;
+    const revived = profile && revive ? revive(profile) : undefined;
     display[name] = revived
       ? {
           displayName: revived.displayName ?? null,
@@ -210,31 +210,21 @@ async function serializeConnection(
 }
 
 /** An offerable placeholder: a registered connection kind with no connection row yet.
- *  Mirrors exactly what a freshly minted connection would project — every grant
- *  unauthorized, every declared capability needs-auth (zero-need capabilities
- *  unlock at birth) — without writing a row: minting stays in the connect
- *  setup. */
+ *  Mirrors exactly what a freshly minted connection would project — its grant
+ *  unauthorized, every declared capability needs-auth — without writing a row:
+ *  minting stays in the connect setup. */
 function placeholderView(
   connectionKind: string,
   descriptor: ConnectionDescriptor,
   manager: SetupManager | null,
 ): ConnectionView {
-  const grantNames = Object.keys(descriptor.auth);
-  const grants: Record<GrantName, GrantState> = {};
-  const display: Record<GrantName, GrantDisplayView | null> = {};
-  for (const name of grantNames) {
-    grants[name] = "unauthorized";
-    display[name] = null;
-  }
+  const grants: Record<GrantName, GrantState> = { [descriptor.grant]: "unauthorized" };
+  const display: Record<GrantName, GrantDisplayView | null> = { [descriptor.grant]: null };
 
   const capStatus = (kind: "talker" | "actor" | "watcher"): CapabilityStatus => {
     const cap = descriptor.capabilities[kind];
     if (!cap) return { state: "unsupported" };
-    if (cap.needs.length > 0) return { state: "needs-auth", missingGrants: [...cap.needs] };
-    if (kind === "watcher" && descriptor.capabilities.watcher?.subscriptionGated) {
-      return { state: "needs-subscription" };
-    }
-    return { state: "unlocked" };
+    return { state: "needs-auth", missingGrants: [descriptor.grant] };
   };
 
   return {
@@ -251,7 +241,7 @@ function placeholderView(
       watch: capStatus("watcher"),
     },
     connect: connectHint(connectionKind),
-    setups: activeSetups(manager, connectionKind, grantNames),
+    setups: activeSetups(manager, connectionKind, [descriptor.grant]),
     channel: null,
     platform: null,
     severalAccounts: descriptor.severalAccounts === true,

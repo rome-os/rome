@@ -130,14 +130,11 @@ function buildTalker(startError: unknown = null): {
 } {
   fakeState.startError = startError;
   const desc = makeDiscordDescriptor(deps);
-  const talker = desc.capabilities.talker!.build(
-    { bot: validCred() },
-    {
-      connectionId: "discord-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "discord-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   return {
     talker,
@@ -178,16 +175,14 @@ describe("discord descriptor shape", () => {
   it("declares one `bot` grant and a talker needing it", () => {
     const desc = makeDiscordDescriptor(deps);
     expect(desc.connectionKind).toBe("discord");
-    expect(Object.keys(desc.auth)).toEqual(["bot"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["bot"]);
-    expect(desc.capabilities.actor?.needs).toEqual(["bot"]);
+    expect(desc.grant).toBe("bot");
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
   it("runs the injected token validator on confer", async () => {
     const validate = rs.fn(async () => {});
     const desc = makeDiscordDescriptor({ ...deps, validateToken: validate });
-    await desc.auth.bot.confer({
+    await desc.auth.confer({
       prompt: async () => ({ token: "abc" }),
     });
     expect(validate).toHaveBeenCalledWith("abc");
@@ -221,14 +216,11 @@ describe("discord descriptor shape", () => {
       ...deps,
       personMappingRepo: { findByChannelUser } as never,
     });
-    desc.capabilities.talker!.build(
-      { bot: validCred() },
-      {
-        connectionId: "discord-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    desc.capabilities.talker!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
 
     await expect(fakeState.lastConfig?.resolveDiscordPerson?.("guardian-777")).resolves.toEqual(
       guardian,
@@ -377,14 +369,11 @@ describe("discord descriptor shape", () => {
 
   it("exposes Discord REST through Act", async () => {
     const desc = makeDiscordDescriptor(deps);
-    const actor = desc.capabilities.actor!.build(
-      { bot: validCred() },
-      {
-        connectionId: "discord-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const actor = desc.capabilities.actor!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     const request: ChannelApiRequest = {
       method: "GET",
       path: "/users/@me",
@@ -405,14 +394,11 @@ describe("discord descriptor shape", () => {
     fakeState.apiResult = {
       response: { status: 401, headers: {}, body: { message: "Unauthorized" } },
     };
-    const actor = makeDiscordDescriptor(deps).capabilities.actor!.build(
-      { bot: validCred() },
-      {
-        connectionId: "discord-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const actor = makeDiscordDescriptor(deps).capabilities.actor!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
 
     const request = actor.invoke({
       operation: "discord.api.request",
@@ -435,14 +421,11 @@ describe("discord descriptor shape", () => {
 describe("discord inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const desc = makeDiscordDescriptor(deps);
-    const talker = desc.capabilities.talker!.build(
-      { bot: validCred() },
-      {
-        connectionId: "discord-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "discord-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     const delivered: ChannelMessage[] = [];
     talker.start(
       (msg) => delivered.push(msg),

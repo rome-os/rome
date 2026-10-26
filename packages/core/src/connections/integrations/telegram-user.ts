@@ -363,18 +363,16 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
   session.setup = makeTelegramUserSetup({ openLogin: deps.openLogin ?? openTelegramUserLogin });
   return {
     connectionKind: "telegram_user",
-    reviveProfile: (_grant, record) => reviveTelegramUserProfile(record),
-    accountIdOf: (_grant, record) => (typeof record.userId === "string" && record.userId) || null,
+    reviveProfile: (record) => reviveTelegramUserProfile(record),
+    accountIdOf: (record) => (typeof record.userId === "string" && record.userId) || null,
     takesAgent: true,
-    auth: {
-      session,
-    },
+    grant: "session",
+    auth: session,
     capabilities: {
       talker: {
-        needs: ["session"] as const,
         history: true,
-        build(creds, kit): Talker {
-          const settings = telegramUserSettingsFromMaterial(creds.session.material as SecretRecord);
+        build(cred, kit): Talker {
+          const settings = telegramUserSettingsFromMaterial(cred.material as SecretRecord);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           let probeTimer: ReturnType<typeof setInterval> | null = null;
           let probeInFlight = false;

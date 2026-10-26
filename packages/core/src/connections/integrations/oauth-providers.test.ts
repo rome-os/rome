@@ -70,7 +70,7 @@ describe("OAuth profile revival", () => {
   it("revives GitHub's stored schema: login is the handle, committer identity fields survive", () => {
     const revive = makeOAuthProviderDescriptor("github").reviveProfile;
     expect(revive).toBeDefined();
-    const display = revive?.("user", {
+    const display = revive?.({
       subject: "12345",
       login: "octocat",
       displayName: "The Octocat",
@@ -88,7 +88,7 @@ describe("OAuth profile revival", () => {
 
   it("revives Slack's stored schema: workspace name is the handle; teamId stays off the display", () => {
     const revive = makeOAuthProviderDescriptor("slack").reviveProfile;
-    const display = revive?.("workspace", {
+    const display = revive?.({
       subject: "T123:U456",
       login: "Acme Corp",
       displayName: "Ada Lovelace",
@@ -103,7 +103,7 @@ describe("OAuth profile revival", () => {
 
   it("revives Google's stored schema: OIDC identity with no handle", () => {
     const revive = makeOAuthProviderDescriptor("google").reviveProfile;
-    const display = revive?.("user", {
+    const display = revive?.({
       subject: "sub-789",
       displayName: "Ada Lovelace",
       email: "ada@example.com",
@@ -115,30 +115,30 @@ describe("OAuth profile revival", () => {
     expect(display?.handle).toBeUndefined();
   });
 
-  it.each(CASES)("keeps a sparse but valid %s profile sparse", (provider, grant) => {
+  it.each(CASES)("keeps a sparse but valid %s profile sparse", (provider) => {
     const revive = makeOAuthProviderDescriptor(provider).reviveProfile;
-    const display = revive?.(grant, { email: "ada@example.com" });
+    const display = revive?.({ email: "ada@example.com" });
     expect(display?.email).toBe("ada@example.com");
     expect(display?.displayName).toBeUndefined();
     expect(display?.handle).toBeUndefined();
     expect(display?.avatarUrl).toBeUndefined();
 
-    const empty = revive?.(grant, {});
+    const empty = revive?.({});
     expect(empty?.displayName).toBeUndefined();
     expect(empty?.handle).toBeUndefined();
   });
 
   it.each(
     CASES,
-  )("rejects reviving a %s record whose values no longer match the schema — never a silently sparse display", (provider, grant) => {
+  )("rejects reviving a %s record whose values no longer match the schema — never a silently sparse display", (provider) => {
     const revive = makeOAuthProviderDescriptor(provider).reviveProfile;
-    expect(() => revive?.(grant, { displayName: 42 })).toThrow();
-    expect(() => revive?.(grant, { email: "" })).toThrow();
+    expect(() => revive?.({ displayName: 42 })).toThrow();
+    expect(() => revive?.({ email: "" })).toThrow();
   });
 
   it("revives Shopify's stored schema: the myshopify.com domain is the handle", () => {
     const revive = makeOAuthProviderDescriptor("shopify").reviveProfile;
-    const display = revive?.("store", {
+    const display = revive?.({
       subject: "acme.myshopify.com",
       login: "acme.myshopify.com",
       displayName: "Acme Goods",
@@ -150,15 +150,15 @@ describe("OAuth profile revival", () => {
     expect(display?.email).toBe("owner@example.com");
     expect(display?.avatarUrl).toBeUndefined();
     // A store has no avatar: the schema refuses one.
-    expect(() => revive?.("store", { avatarUrl: "https://example.com/a.png" })).toThrow();
+    expect(() => revive?.({ avatarUrl: "https://example.com/a.png" })).toThrow();
   });
 
   it("rejects reviving a stored record carrying keys outside the connectionKind's schema", () => {
     const github = makeOAuthProviderDescriptor("github").reviveProfile;
-    expect(() => github?.("user", { login: "octocat", teamId: "T123" })).toThrow();
+    expect(() => github?.({ login: "octocat", teamId: "T123" })).toThrow();
     // `login` is a GitHub/Slack key; Google's schema deliberately has no handle.
     const google = makeOAuthProviderDescriptor("google").reviveProfile;
-    expect(() => google?.("user", { login: "octocat" })).toThrow();
+    expect(() => google?.({ login: "octocat" })).toThrow();
   });
 });
 
@@ -190,13 +190,13 @@ describe.each(
 
   it("attaches the conferral setup to the grant only when setup deps are given", () => {
     // State-only descriptor (no setup deps): no conferral setup.
-    expect(makeOAuthProviderDescriptor(provider).auth[grant].setup).toBeUndefined();
+    expect(makeOAuthProviderDescriptor(provider).auth.setup).toBeUndefined();
     // Wired descriptor (#1611): the grant carries a setup coroutine.
     const wired = makeOAuthProviderDescriptor(provider, {
       beginRedirect: async () => "https://broker/authorize?state=s",
       redeem: async () => ({ credential: { material: { accessToken: "t" }, expiresAt: "never" } }),
     });
-    expect(typeof wired.auth[grant].setup).toBe("function");
+    expect(typeof wired.auth.setup).toBe("function");
   });
 
   it("authorizes the grant on import and relocks it on revoke", async () => {

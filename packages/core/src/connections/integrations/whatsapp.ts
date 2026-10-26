@@ -303,20 +303,18 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
 
   return {
     connectionKind: "whatsapp",
-    reviveProfile: (_grant, record) => reviveWhatsAppProfile(record),
-    accountIdOf: (_grant, record) => (typeof record.jid === "string" && record.jid) || null,
-    auth: {
-      session: sessionScheme,
-    },
+    reviveProfile: (record) => reviveWhatsAppProfile(record),
+    accountIdOf: (record) => (typeof record.jid === "string" && record.jid) || null,
+    grant: "session",
+    auth: sessionScheme,
     capabilities: {
       talker: {
-        needs: ["session"] as const,
-        build(creds, kit: RuntimeKit): Talker {
-          const material = asSessionMaterial(creds.session.material as SecretRecord);
+        build(cred, kit: RuntimeKit): Talker {
+          const material = asSessionMaterial(cred.material as SecretRecord);
           // One auth state for the whole Talker lifetime: every socket
           // generation (initial + each reconnect) reads the SAME live record,
           // and every mutation write-throughs via kit.persist("session", …).
-          const auth = createWhatsAppAuthState(material, (next) => kit.persist("session", next));
+          const auth = createWhatsAppAuthState(material, (next) => kit.persist(next));
 
           const adapter = createAdapter(async () => ({
             state: auth.state,

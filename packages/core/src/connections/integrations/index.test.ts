@@ -28,7 +28,7 @@ describe("registerBuiltinConnections", () => {
       expiresAt: new Date(0),
     };
     // Google: Rome Cloud has no refresh for it, so renew answers at once.
-    await expect(registered.get("google")!.auth.user.renew(expired)).resolves.toBe("re-confer");
+    await expect(registered.get("google")!.auth.renew(expired)).resolves.toBe("re-confer");
     expect(fetchMock).not.toHaveBeenCalled();
     rs.unstubAllGlobals();
   });
@@ -63,10 +63,7 @@ describe("registerBuiltinConnections", () => {
     } satisfies RuntimeKit;
     const talker = registered
       .get(WECHAT_USER_KIND)!
-      .capabilities.talker!.build(
-        { session: { material: { wxid: "wxid_guardian" }, expiresAt: "never" } },
-        kit,
-      );
+      .capabilities.talker!.build({ material: { wxid: "wxid_guardian" }, expiresAt: "never" }, kit);
     const page = await talker.directory!.listConversations({ limit: 10 });
 
     expect(page.conversations.map((c) => c.ref.chatId)).toEqual(["wxid_friend"]);
@@ -108,14 +105,11 @@ describe("registerBuiltinConnections", () => {
     expect(naming.map((descriptor) => descriptor.connectionKind).sort()).toEqual(
       [...LINKABLE_KINDS].sort(),
     );
-    // A disconnect removes the account once its grant goes, which covers every
-    // grant only while the service holds one.
-    for (const descriptor of naming) expect(Object.keys(descriptor.auth)).toHaveLength(1);
   });
 
   // A grant names the account it reaches, and every kind with a platform has
   // accounts (docs/domains/connections.md#grant).
-  it("names the account for every kind that holds a grant", () => {
+  it("names the account for every kind", () => {
     const registered = new Map<string, ConnectionDescriptor>();
     const registry = {
       register: (descriptor: ConnectionDescriptor) =>
@@ -129,7 +123,7 @@ describe("registerBuiltinConnections", () => {
     } as unknown as BuiltinConnectionDeps);
 
     const unnamed = [...registered.values()]
-      .filter((descriptor) => Object.keys(descriptor.auth).length > 0 && !descriptor.accountIdOf)
+      .filter((descriptor) => !descriptor.accountIdOf)
       .map((descriptor) => descriptor.connectionKind);
     expect(unnamed).toEqual([]);
   });

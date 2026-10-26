@@ -178,8 +178,7 @@ describe("telegram descriptor shape", () => {
   it("declares one `bot` grant and a talker needing it", () => {
     const desc = makeTelegramDescriptor();
     expect(desc.connectionKind).toBe("telegram");
-    expect(Object.keys(desc.auth)).toEqual(["bot"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["bot"]);
+    expect(desc.grant).toBe("bot");
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
@@ -187,14 +186,11 @@ describe("telegram descriptor shape", () => {
   it("exposes an awaitable stop() and forwards saveIncomingAttachments", () => {
     const factory = new FaultBotFactory(true);
     const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-    const talker = desc.capabilities.talker!.build(
-      { bot: validCred() },
-      {
-        connectionId: "telegram-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "telegram-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     // stop() returns the adapter's drain promise so registry.stopAll can await
     // grammy's bot.stop() letting in-flight sends / the long-poll finish.
     talker.start(
@@ -220,14 +216,11 @@ describe("telegram descriptor shape", () => {
   it("offers reply delivery over the one bot it sends with", async () => {
     const factory = new FaultBotFactory(true);
     const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-    const talker = desc.capabilities.talker!.build(
-      { bot: validCred() },
-      {
-        connectionId: "telegram-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "telegram-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     factory.sendMessage = () => ({
       ok: true,
       result: { message_id: 7, date: 0, chat: { id: 55, type: "private", first_name: "c" } },
@@ -295,14 +288,11 @@ describe("telegram inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const factory = new FaultBotFactory(/* skipInit */ true);
     const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-    const talker = desc.capabilities.talker!.build(
-      { bot: validCred() },
-      {
-        connectionId: "telegram-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "telegram-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     const delivered: unknown[] = [];
     talker.start(
       (msg) => delivered.push(msg),
@@ -371,14 +361,11 @@ function buildTalker(factory: FaultBotFactory): {
   start: () => void;
 } {
   const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-  const talker = desc.capabilities.talker!.build(
-    { bot: validCred() },
-    {
-      connectionId: "telegram-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "telegram-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   return {
     talker,

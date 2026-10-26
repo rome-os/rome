@@ -114,16 +114,15 @@ export function toPersisted(cred: Credential): PersistedCredential {
   return { material: { kind: "inline", record: cred.material }, expiresAt: cred.expiresAt };
 }
 
-/** The account `profile` names for `grant`: the platform and the platform's own
- *  id for it, or undefined when the connection kind names none. `domain` is the
+/** The account `profile` names: the platform and the platform's own id for
+ *  it, or undefined when the connection kind names none. `domain` is the
  *  Feishu app's domain, which `platformOf` reads. */
 export function accountOf(
   descriptor: ConnectionDescriptor,
-  grant: GrantName,
   profile: ProfileRecord,
   domain: string | undefined = domainOf(profile),
 ): GrantAccount | undefined {
-  const accountId = descriptor.accountIdOf?.(grant, profile);
+  const accountId = descriptor.accountIdOf?.(profile);
   if (!accountId) return undefined;
   return { platform: platformOf(descriptor.connectionKind, domain), accountId };
 }
@@ -137,7 +136,7 @@ export function reachedAccount(
 ): GrantAccount | undefined {
   if (record.account) return record.account;
   if (!record.profile) return undefined;
-  return accountOf(descriptor, record.name, record.profile, domainOfGrants([record]));
+  return accountOf(descriptor, record.profile, domainOfGrants([record]));
 }
 
 /** The ledger patch that authorizes a grant with a freshly conferred credential
@@ -267,33 +266,20 @@ export class ConnectionRegistry {
     this.onRemove = deps.onRemove;
   }
 
-  /** Declare a connection kind. Boot-time only. Validates that every
-   *  capability's `needs` is a subset of the declared grants and that the
-   *  connection kind is unique. */
+  /** Declare a connection kind. Boot-time only. Validates that the connection
+   *  kind is unique. */
   register(desc: ConnectionDescriptor): void {
     if (this.descriptors.has(desc.connectionKind)) {
       throw new Error(
         `duplicate connection descriptor for connection kind "${desc.connectionKind}"`,
       );
     }
-    const declared = new Set(Object.keys(desc.auth));
-    for (const kind of ["talker", "actor", "watcher"] as const) {
-      const cap = desc.capabilities[kind];
-      if (!cap) continue;
-      for (const grant of cap.needs) {
-        if (!declared.has(grant)) {
-          throw new Error(
-            `capability "${kind}" of connection kind "${desc.connectionKind}" needs undeclared grant "${grant}"`,
-          );
-        }
-      }
-    }
     this.descriptors.set(desc.connectionKind, { descriptor: desc });
   }
 
   /** True iff a descriptor has been registered for `connectionKind`. Lets callers
-   *  (the zero-grant boot path) skip connection kinds this registry does not
-   *  know about — e.g. a test that registers only a subset. */
+   *  skip connection kinds this registry does not know about — e.g. a test that
+   *  registers only a subset. */
   isRegistered(connectionKind: string): boolean {
     return this.descriptors.has(connectionKind);
   }
@@ -339,8 +325,8 @@ export class ConnectionRegistry {
   }
 
   /** Start every capability hydrated while boot activation was deferred. Boot
-   * uses this barrier so no provider transport starts before the zero-grant
-   * connections exist. */
+   * uses this barrier so no provider transport starts before its boot passes
+   * finish. */
   startCapabilities(): void {
     this.capabilityActivationPaused = false;
     for (const connection of this.connections.values()) {
@@ -352,9 +338,8 @@ export class ConnectionRegistry {
     return !this.capabilityActivationPaused;
   }
 
-  /** Mint a new Connection from a registered descriptor. Persists the record,
-   *  makes sure every declared grant row exists ("unauthorized"), and builds any
-   *  zero-grant capabilities immediately (epoch from birth). Refuses a connection kind
+  /** Mint a new Connection from a registered descriptor. Persists the record
+   *  and makes sure its grant row exists ("unauthorized"). Refuses a connection kind
    *  that already holds a Connection; a conferral asked for another account
    *  (`confer` with `another`) adds a second. */
   async connect(connectionKind: string, label?: string): Promise<Connection> {
@@ -386,7 +371,7 @@ export class ConnectionRegistry {
     const id = crypto.randomUUID();
     const createdAt = this.clock();
     const record = { id, connectionKind, label: label ?? connectionKind, createdAt };
-    this.createConnectionWithGrants(record, Object.keys(registered.descriptor.auth));
+    this.createConnectionWithGrants(record, [registered.descriptor.grant]);
     const conn = new ConnectionImpl(
       id,
       connectionKind,
@@ -542,9 +527,7 @@ export class ConnectionRegistry {
 
     const id = conn?.id ?? crypto.randomUUID();
     const account =
-      registered && profile !== undefined
-        ? accountOf(registered.descriptor, grant, profile)
-        : undefined;
+      registered && profile !== undefined ? accountOf(registered.descriptor, profile) : undefined;
     if (registered && account) {
       if (conn) await this.refuseDifferentAccount(registered.descriptor, id, grant, account);
       await this.refuseAccountHeldElsewhere(registered.descriptor, id, account);
@@ -560,9 +543,7 @@ export class ConnectionRegistry {
         if (minting) {
           const record = { id, connectionKind, label: connectionKind, createdAt };
           ledger.writeConnection(tx, record);
-          for (const name of Object.keys(registered!.descriptor.auth)) {
-            ledger.writeEnsureGrant(tx, id, name);
-          }
+          ledger.writeEnsureGrant(tx, id, registered!.descriptor.grant);
           this.onMint?.(tx, record, profile, account);
         }
         ledger.writeGrant(tx, id, grant, patch);
@@ -857,7 +838,7 @@ class ConnectionImpl implements Connection {
       this.slots.set(cap, {
         cap,
         kind,
-        needs: capDef.needs,
+        needs: [descriptor.grant],
         subscriptionGated: gated,
         degradation: kind === "talker" ? descriptor.capabilities.talker?.degradation : undefined,
         epoch: null,
@@ -898,7 +879,7 @@ class ConnectionImpl implements Connection {
    *  and fire onUnlocked. Runs at connect() (all grants "unauthorized") and at
    *  load() (persisted grants). */
   async hydrate(): Promise<void> {
-    for (const [name, scheme] of Object.entries(this.descriptor.auth)) {
+    for (const [name, scheme] of [[this.descriptor.grant, this.descriptor.auth] as const]) {
       const rec = await this.readGrant(name);
       if (!rec || rec.state === "unauthorized") {
         this.grantState.set(name, "unauthorized");
@@ -946,7 +927,7 @@ class ConnectionImpl implements Connection {
    *  other throw) degrades, and only an already-expired credential. */
   async renewExpiring(withinMs: number): Promise<void> {
     const deadline = this.registry.now().getTime() + withinMs;
-    for (const [grant, scheme] of Object.entries(this.descriptor.auth)) {
+    for (const [grant, scheme] of [[this.descriptor.grant, this.descriptor.auth] as const]) {
       const cred = this.liveCreds.get(grant);
       if (!cred || cred.expiresAt === "never" || cred.expiresAt.getTime() > deadline) continue;
       await this.withGrantLock(grant, () => this.renewExpiringLocked(grant, scheme, withinMs));
@@ -1172,23 +1153,20 @@ class ConnectionImpl implements Connection {
    *  exists when onUnlocked fires, so an onUnlocked handler may send through
    *  `withTalker` before start() has run — send-before-start is permitted. */
   private buildEpoch(slot: CapabilitySlot, fire: boolean): void {
-    const creds: Record<GrantName, Credential> = {};
-    for (const grant of slot.needs) {
-      const cred = this.liveCreds.get(grant);
-      if (!cred) {
-        this.log.error("buildEpoch missing live credential", {
-          connectionId: this.id,
-          capability: slot.cap,
-          grant,
-        });
-        return;
-      }
-      creds[grant] = cred;
+    const grant = this.descriptor.grant;
+    const cred = this.liveCreds.get(grant);
+    if (!cred) {
+      this.log.error("buildEpoch missing live credential", {
+        connectionId: this.id,
+        capability: slot.cap,
+        grant,
+      });
+      return;
     }
-    const kit = this.makeKit(slot.needs);
+    const kit = this.makeKit();
     const capDef = this.descriptor.capabilities[slot.kind];
     if (!capDef) return;
-    const instance = capDef.build(creds, kit);
+    const instance = capDef.build(cred, kit);
     if (slot.kind === "talker") {
       try {
         this.checkHistoryDeclared(instance as Talker);
@@ -1349,21 +1327,13 @@ class ConnectionImpl implements Connection {
     }
   }
 
-  /** A kit bound to exactly one capability build()'s needed grants. persist to
-   *  any other grant throws — prevents cross-grant writes. */
-  private makeKit(needs: readonly GrantName[]): RuntimeKit {
-    const allowed = new Set(needs);
+  /** The kit a capability's build() gets. persist writes the connection's one
+   *  grant. */
+  private makeKit(): RuntimeKit {
     return {
       connectionId: this.id,
       registerIngress: (handler) => this.registry.registerIngress(this.id, handler),
-      persist: async (grant: GrantName, material: SecretRecord): Promise<void> => {
-        if (!allowed.has(grant)) {
-          throw new Error(
-            `kit.persist("${grant}") rejected: not in this capability's needs [${[...allowed].join(", ")}]`,
-          );
-        }
-        await this.persistMaterial(grant, material);
-      },
+      persist: (material: SecretRecord) => this.persistMaterial(this.descriptor.grant, material),
     };
   }
 
@@ -1397,7 +1367,7 @@ class ConnectionImpl implements Connection {
     const material = cred.material;
     try {
       const rec = await this.readGrant(grant);
-      await custody.sync(grant, material, rec?.profile ?? {});
+      await custody.sync(material, rec?.profile ?? {});
     } catch (err) {
       this.log.warn("custody sync failed", {
         connectionId: this.id,
@@ -1413,7 +1383,7 @@ class ConnectionImpl implements Connection {
     const custody = this.descriptor.custody;
     if (!custody) return;
     try {
-      await custody.clear(grant);
+      await custody.clear();
     } catch (err) {
       this.log.warn("custody clear failed", {
         connectionId: this.id,
@@ -1432,13 +1402,18 @@ class ConnectionImpl implements Connection {
    *  poisons the next mutation on the grant nor surfaces as an unhandled rejection
    *  (the keyed mutex releases either way); the original result/rejection is still
    *  returned to THIS caller unchanged. */
+  /** The scheme of `grant`, or undefined when it is not the connection's grant. */
+  private schemeOf(grant: GrantName): AuthScheme | undefined {
+    return grant === this.descriptor.grant ? this.descriptor.auth : undefined;
+  }
+
   private withGrantLock<T>(grant: GrantName, fn: () => Promise<T>): Promise<T> {
     return this.grantMutex.runExclusive(grant, fn);
   }
 
   grants(): Record<GrantName, GrantState> {
     const out: Record<GrantName, GrantState> = {};
-    for (const name of Object.keys(this.descriptor.auth)) {
+    for (const name of [this.descriptor.grant]) {
       out[name] = this.grantState.get(name) ?? "unauthorized";
     }
     return out;
@@ -1457,7 +1432,7 @@ class ConnectionImpl implements Connection {
     credential: Credential,
     profile?: ProfileRecord,
   ): Promise<void> {
-    const scheme = this.descriptor.auth[grant];
+    const scheme = this.schemeOf(grant);
     if (!scheme) throw new Error(`connection "${this.id}" has no grant "${grant}"`);
     // Idempotent: identical inline material over an authorized grant skips the
     // epoch rebuild. A re-conferral can still refresh the profile (renamed login,
@@ -1476,7 +1451,7 @@ class ConnectionImpl implements Connection {
         if (profile !== undefined) {
           await this.ledger.updateGrant(this.id, grant, {
             profile,
-            account: accountOf(this.descriptor, grant, profile),
+            account: accountOf(this.descriptor, profile),
           });
           // The credential is byte-identical, but a re-conferral can still change
           // the profile (renamed login, moved workspace) — re-sync custody so a
@@ -1506,7 +1481,7 @@ class ConnectionImpl implements Connection {
         this.registry.now(),
         cred,
         profile,
-        profile === undefined ? undefined : accountOf(this.descriptor, grant, profile),
+        profile === undefined ? undefined : accountOf(this.descriptor, profile),
       ),
     );
     await this.activateGrantInMemory(grant, cred);
@@ -1551,7 +1526,7 @@ class ConnectionImpl implements Connection {
     grant: GrantName,
     opts: { inTx?: (tx: DrizzleTx) => void },
   ): Promise<void> {
-    const scheme = this.descriptor.auth[grant];
+    const scheme = this.schemeOf(grant);
     if (!scheme) throw new Error(`connection "${this.id}" has no grant "${grant}"`);
     // Ledger first (the ledger is authoritative): a failed durable
     // write propagates to the caller with nothing revoked in memory — the grant
@@ -1656,12 +1631,7 @@ class ConnectionImpl implements Connection {
     // just-authorized conferral), so every state application downstream re-checks
     // this predicate immediately before writing.
     const stillCurrent = () => !source.dead && slot.epoch === source;
-    const targets =
-      err.grant !== undefined
-        ? [err.grant]
-        : slot.needs.length === 1
-          ? [slot.needs[0]]
-          : [...slot.needs];
+    const targets = err.grant !== undefined ? [err.grant] : [this.descriptor.grant];
     for (const grant of targets) {
       await this.renewOnceOrDegrade(grant, err, stillCurrent);
     }
@@ -1678,7 +1648,7 @@ class ConnectionImpl implements Connection {
   ): Promise<void> {
     const existing = this.renewalsInFlight.get(grant);
     if (existing) return existing;
-    const scheme = this.descriptor.auth[grant];
+    const scheme = this.schemeOf(grant);
     if (!scheme) return Promise.resolve();
     const promise = (async () => {
       if (!stillCurrent()) return;
@@ -1863,27 +1833,24 @@ class ConnectionImpl implements Connection {
     try {
       const capDef = this.descriptor.capabilities[slot.kind];
       if (!capDef) return;
-      const kit = this.makeKit(slot.needs);
-      // Read the CURRENT live credentials, not the frozen epoch.creds: kit.persist
+      const kit = this.makeKit();
+      // Read the CURRENT live credential, not the frozen epoch.creds: kit.persist
       // replaces the liveCreds entry in place (no epoch rebuild), so a backoff
       // rebuild must pick up the post-persist material — otherwise write-through
       // custody (Baileys key rotation) is defeated on the next reconnect.
-      const creds: Record<GrantName, Credential> = {};
-      for (const grant of slot.needs) {
-        const cred = this.liveCreds.get(grant);
-        if (!cred) {
-          // A needed grant went away under us (relock raced the wait) — abandon
-          // this rebuild; the relock already tore the epoch down.
-          this.log.warn("Disconnected rebuild missing live credential; abandoning", {
-            connectionId: this.id,
-            capability: slot.cap,
-            grant,
-          });
-          return;
-        }
-        creds[grant] = cred;
+      const grant = this.descriptor.grant;
+      const cred = this.liveCreds.get(grant);
+      if (!cred) {
+        // The grant went away under us (relock raced the wait) — abandon this
+        // rebuild; the relock already tore the epoch down.
+        this.log.warn("Disconnected rebuild missing live credential; abandoning", {
+          connectionId: this.id,
+          capability: slot.cap,
+          grant,
+        });
+        return;
       }
-      const instance = capDef.build(creds, kit);
+      const instance = capDef.build(cred, kit);
       epoch.instance = instance;
       this.startInstance(slot, epoch);
     } catch (err) {

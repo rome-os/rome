@@ -182,8 +182,7 @@ describe("feishu descriptor shape", () => {
   it("declares one `app` grant and a talker needing it", () => {
     const desc = makeDescriptor(new FakeLarkChannel());
     expect(desc.connectionKind).toBe("feishu");
-    expect(Object.keys(desc.auth)).toEqual(["app"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["app"]);
+    expect(desc.grant).toBe("app");
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
@@ -195,7 +194,7 @@ describe("feishu descriptor shape", () => {
   it("validates pasted credentials via a transient connect (bad creds refused)", async () => {
     const channel = new FakeLarkChannel();
     channel.connectError = new LarkChannelError("permission_denied", "bad app secret");
-    const scheme = makeDescriptor(channel).auth.app;
+    const scheme = makeDescriptor(channel).auth;
     await expect(
       scheme.confer({
         prompt: async () => ({ appId: "cli_x", appSecret: "wrong", domain: "feishu" }),
@@ -207,7 +206,7 @@ describe("feishu descriptor shape", () => {
 
   it("confers a non-expiring credential from a good connect", async () => {
     const channel = new FakeLarkChannel();
-    const scheme = makeDescriptor(channel).auth.app;
+    const scheme = makeDescriptor(channel).auth;
     const cred = await scheme.confer({
       prompt: async () => ({ appId: "cli_x", appSecret: "s3cr3t", domain: "feishu" }),
     });
@@ -265,14 +264,11 @@ describe("feishu talk lifecycle", () => {
 describe("feishu inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const channel = new FakeLarkChannel();
-    const talker = makeDescriptor(channel).capabilities.talker!.build(
-      { app: validCred() },
-      {
-        connectionId: "feishu-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = makeDescriptor(channel).capabilities.talker!.build(validCred(), {
+      connectionId: "feishu-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     const delivered: unknown[] = [];
     talker.start(
       (msg) => {
@@ -319,14 +315,11 @@ describe("feishu inbound delivery", () => {
 describe("feishu reply delivery", () => {
   it("offers reply delivery over the channel's client, placing replies as the chat says", async () => {
     const channel = new FakeLarkChannel();
-    const talker = makeDescriptor(channel).capabilities.talker!.build(
-      { app: validCred() },
-      {
-        connectionId: "feishu-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = makeDescriptor(channel).capabilities.talker!.build(validCred(), {
+      connectionId: "feishu-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
 
     expect(talker.replyDelivery?.capabilities).toMatchObject({ maxPartLength: 3500, edit: true });
     // The chat's settings put replies in a thread, so later messages join it.
@@ -351,14 +344,11 @@ describe("feishu reply delivery", () => {
 
 // Direct-Talker harness for the raw start()/fault() contract.
 function buildTalker(channel: FakeLarkChannel): { talker: Talker; faults: StreamFault[] } {
-  const talker = makeDescriptor(channel).capabilities.talker!.build(
-    { app: validCred() },
-    {
-      connectionId: "feishu-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = makeDescriptor(channel).capabilities.talker!.build(validCred(), {
+    connectionId: "feishu-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   talker.start(
     () => {},

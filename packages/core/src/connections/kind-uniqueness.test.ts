@@ -3,7 +3,7 @@ import type { DrizzleTx, SqliteExec } from "../db/index.js";
 import { createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
-import { makePasteTalk, makeZeroGrantTalk } from "./test-fixtures.js";
+import { makePasteTalk, makeRenewableAct } from "./test-fixtures.js";
 import type { ConnectionId } from "./types.js";
 
 describe("ConnectionRegistry connection kind uniqueness", () => {
@@ -12,11 +12,11 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
     try {
       const ledger = new DrizzleGrantLedger(db);
       const registry = new ConnectionRegistry({ ledger });
-      registry.register(makeZeroGrantTalk().descriptor);
-      const existing = await registry.connect("fake-webchat");
+      registry.register(makeRenewableAct().descriptor);
+      const existing = await registry.connect("fake-github");
 
-      await expect(registry.connect("fake-webchat")).rejects.toThrow(
-        new RegExp(`fake-webchat.*${existing.id}.*remove`, "i"),
+      await expect(registry.connect("fake-github")).rejects.toThrow(
+        new RegExp(`fake-github.*${existing.id}.*remove`, "i"),
       );
       await expect(ledger.listConnections()).resolves.toHaveLength(1);
     } finally {
@@ -29,11 +29,11 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
     try {
       const ledger = new DrizzleGrantLedger(db);
       const registry = new ConnectionRegistry({ ledger });
-      registry.register(makeZeroGrantTalk().descriptor);
+      registry.register(makeRenewableAct().descriptor);
 
       const results = await Promise.allSettled([
-        registry.connect("fake-webchat"),
-        registry.connect("fake-webchat"),
+        registry.connect("fake-github"),
+        registry.connect("fake-github"),
       ]);
 
       expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
@@ -53,12 +53,12 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
     try {
       const ledger = new DrizzleGrantLedger(db);
       const registry = new ConnectionRegistry({ ledger });
-      registry.register(makeZeroGrantTalk().descriptor);
-      const first = await registry.connect("fake-webchat");
-      const second = await registry.connectAnother("fake-webchat");
+      registry.register(makeRenewableAct().descriptor);
+      const first = await registry.connect("fake-github");
+      const second = await registry.connectAnother("fake-github");
 
       expect(second.id).not.toBe(first.id);
-      expect(registry.find("fake-webchat").map((connection) => connection.id)).toEqual([
+      expect(registry.find("fake-github").map((connection) => connection.id)).toEqual([
         first.id,
         second.id,
       ]);

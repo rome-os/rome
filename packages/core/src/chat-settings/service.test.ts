@@ -4,6 +4,7 @@ import type { TalkDirectory } from "../connections/types.js";
 import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
+import { tokenPaste } from "../connections/schemes.js";
 import type { Channels } from "../channels/channel.js";
 import { connectionPorts } from "../channels/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
@@ -17,11 +18,11 @@ function directoryDescriptor(
 ): ConnectionDescriptor {
   return {
     connectionKind: service,
-    auth: {},
+    grant: "bot",
+    auth: tokenPaste({ label: "token", validate: async () => {} }),
     capabilities: {
       talker: {
-        needs: [],
-        build(_creds, kit): Talker {
+        build(_cred, kit): Talker {
           const directory: TalkDirectory = {
             async listConversations(input) {
               const all = conversations(kit.connectionId).filter(
@@ -45,6 +46,16 @@ function directoryDescriptor(
       },
     },
   };
+}
+
+/** Connects `kind` and gives it access, so its Talk is live. */
+async function connectLive(registry: ConnectionRegistry, kind: string) {
+  const connection = await registry.connect(kind);
+  await registry.importCredential(connection.id, "bot", {
+    material: { token: "token" },
+    expiresAt: "never",
+  });
+  return connection;
 }
 
 /** The channels the registry's Talks back, built by the production ports,
@@ -91,9 +102,9 @@ describe("ChatSettingsService", () => {
     );
     registry.register(directoryDescriptor("feishu", () => []));
     registry.register(directoryDescriptor("wechat", () => []));
-    const discord = await registry.connect("discord");
-    const feishu = await registry.connect("feishu");
-    const wechat = await registry.connect("wechat");
+    const discord = await connectLive(registry, "discord");
+    const feishu = await connectLive(registry, "feishu");
+    const wechat = await connectLive(registry, "wechat");
     const repository = new ChatSettingsRepository(testDb.db);
     const service = new ChatSettingsService({
       repository,
@@ -635,7 +646,7 @@ describe("ChatSettingsService", () => {
         })),
       ),
     );
-    await registry.connect("discord");
+    await connectLive(registry, "discord");
     const service = new ChatSettingsService({
       repository: new ChatSettingsRepository(testDb.db),
       connections: registry,
@@ -664,7 +675,7 @@ describe("ChatSettingsService", () => {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     registry.register(directoryDescriptor("discord", () => []));
-    const discord = await registry.connect("discord");
+    const discord = await connectLive(registry, "discord");
     const repository = new ChatSettingsRepository(testDb.db);
     const descriptors = Array.from({ length: 5 }, (_, index) => ({
       ref: {

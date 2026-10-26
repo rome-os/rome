@@ -89,7 +89,7 @@ function harness() {
   const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
   const fixture = makePasteTalk();
   fixture.descriptor.connectionKind = "fake-telegram";
-  fixture.descriptor.auth.bot.setup = setupFn;
+  fixture.descriptor.auth.setup = setupFn;
   registry.register(fixture.descriptor);
   const personMappingRepo = fakePersonRepo();
   const manager = new SetupManager({ registry, personMappingRepo });

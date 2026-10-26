@@ -242,7 +242,7 @@ describe("slack bot talker", () => {
     });
     const descriptor = makeSlackBotDescriptor({ api, createSocket: helloAs("A1") });
     const talker = descriptor.capabilities.talker!.build(
-      { bot: { material: { botToken: "xoxb-1", appToken: "xapp-1" }, expiresAt: "never" } },
+      { material: { botToken: "xoxb-1", appToken: "xapp-1" }, expiresAt: "never" },
       { connectionId: "conn-1", persist: async () => {}, registerIngress: () => () => {} },
     );
     talker.start(

@@ -24,7 +24,7 @@ import {
   makeRecordingSleep,
   makeRenewableAct,
   makePasteTalk,
-  makeTwoGrant,
+  makeBotAll,
 } from "./test-fixtures.js";
 
 // A macrotask flush: lets the async `void handle…` fault flows (which chain
@@ -51,49 +51,40 @@ function makeFailingLedger(shouldFail: (patch: GrantPatch) => boolean): GrantLed
 }
 
 describe("registry faults", () => {
-  // Scenario 5 — degrade relocks only dependents
-  describe("scenario 5: degrade relocks only dependents", () => {
-    it("degrading user (act) leaves talk live", async () => {
+  // Scenario 5 — a degraded grant relocks every capability
+  describe("scenario 5: a degraded grant relocks every capability", () => {
+    it("a rejection on act degrades the one grant and relocks talk and watch with it", async () => {
       const ledger = makeLedger();
       const registry = new ConnectionRegistry({ ledger });
-      const fx = makeTwoGrant();
+      const fx = makeBotAll();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-discord");
-
-      // Authorize both grants: bot → talk+watch, user → act.
       await registry.importCredential(conn.id, "bot", fx.botCredential());
-      // user scheme renews then re-confers; make renew return "re-confer" so the
-      // very first CredentialRejected degrades immediately (renew-once path
-      // covered in scenario 6). successCount:3 by default → force to 0.
-      fx.userScheme.renewsRemaining = 0;
-      await registry.importCredential(conn.id, "user", fx.userCredential());
 
       expect(conn.act).not.toBeNull();
       expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("watch")).toBe(true);
 
-      // Trigger CredentialRejected from act.invoke → renew re-confers → degrade.
+      // Trigger CredentialRejected from act.invoke → tokenPaste re-confers → degrade.
       const act = conn.act as Act;
       const actor = fx.actorFactory.instances.at(-1);
       if (!actor) throw new Error("actor not built");
-      actor.state.nextInvokeError = new CredentialRejected({ grant: "user" });
+      actor.state.nextInvokeError = new CredentialRejected({ grant: "bot" });
       await expect(act.invoke({ operation: "op" })).rejects.toBeInstanceOf(CredentialRejected);
       await flush();
 
-      // Act relocked; user grant degraded; talk (bot grant) untouched.
+      expect(conn.auth.grants().bot).toBe("degraded");
       expect(conn.act).toBeNull();
-      expect(conn.status().act).toEqual({ state: "needs-auth", missingGrants: ["user"] });
-      expect(conn.status().talk).toEqual({ state: "unlocked" });
-      expect(conn.isUnlocked("talk")).toBe(true);
-      expect(conn.auth.grants().user).toBe("degraded");
-      expect(conn.auth.grants().bot).toBe("authorized");
-
-      // Talk still works after the degrade — send is recorded.
-      await conn.withTalker((talker) => talker.send("thread-1" as ChatId, { text: "still alive" }));
+      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.isUnlocked("watch")).toBe(false);
+      expect(conn.status()).toEqual({
+        talk: { state: "needs-auth", missingGrants: ["bot"] },
+        act: { state: "needs-auth", missingGrants: ["bot"] },
+        watch: { state: "needs-auth", missingGrants: ["bot"] },
+      });
       const talker = fx.talkerFactory.instances.at(-1);
       if (!talker) throw new Error("talker not built");
-      expect(talker.state.sends.map((s) => s.msg)).toContainEqual({ text: "still alive" });
-      // Talk was never stopped by the user-grant degrade.
-      expect(talker.state.stopCount).toBe(0);
+      expect(talker.state.stopCount).toBe(1);
     });
   });
 
@@ -139,7 +130,7 @@ describe("registry faults", () => {
       // Inspect the creds the second actor was constructed with via a probe call.
       const probe = conn.act as Act;
       await probe.invoke({ operation: "probe" });
-      const usedMaterial = secondActor.state.invocations[0]?.creds.user.material;
+      const usedMaterial = secondActor.state.invocations[0]?.cred.material;
       expect(typeof usedMaterial).toBe("object");
       expect((usedMaterial as Record<string, string>).token).toMatch(/^renewed-/);
       expect((usedMaterial as Record<string, string>).token).not.toBe("initial-user-token");
@@ -514,10 +505,10 @@ describe("registry faults", () => {
       const originalBuild = fx.descriptor.capabilities.talker?.build;
       if (!originalBuild) throw new Error("talker build missing");
       let buildIndex = 0;
-      fx.descriptor.capabilities.talker!.build = (creds, kit) => {
+      fx.descriptor.capabilities.talker!.build = (cred, kit) => {
         const idx = buildIndex++;
         order.push(`build:${idx}`);
-        const instance = originalBuild(creds, kit);
+        const instance = originalBuild(cred, kit);
         const originalStop = instance.stop.bind(instance);
         instance.stop = () => {
           order.push(`stop:${idx}`);
@@ -579,8 +570,8 @@ describe("registry faults", () => {
       if (!instance1) throw new Error("instance1 not built");
       expect(instance1).not.toBe(instance0);
       // Same material used on rebuild.
-      expect(instance1.state.starts[0]?.creds.bot.material).toEqual(
-        instance0.state.starts[0]?.creds.bot.material,
+      expect(instance1.state.starts[0]?.cred.material).toEqual(
+        instance0.state.starts[0]?.cred.material,
       );
       // A send through the Connection after the backoff rebuild routes to the
       // NEW instance.
@@ -676,9 +667,9 @@ describe("registry faults", () => {
       const originalBuild = fx.descriptor.capabilities.talker!.build;
       fx.descriptor.capabilities.talker = {
         ...fx.descriptor.capabilities.talker!,
-        build(creds, kit) {
+        build(cred, kit) {
           capturedKit = kit;
-          return originalBuild(creds, kit);
+          return originalBuild(cred, kit);
         },
       };
       registry.register(fx.descriptor);
@@ -690,7 +681,7 @@ describe("registry faults", () => {
       if (!instance0) throw new Error("instance0 not built");
 
       // Write-through custody: rotate the material in place. No rebuild yet.
-      await capturedKit!.persist("bot", { token: "rotated-token" });
+      await capturedKit!.persist({ token: "rotated-token" });
       expect(fx.talkerFactory.instances.length).toBe(1); // no rebuild on persist
 
       // Now a Disconnected fault forces a backoff rebuild.
@@ -701,7 +692,7 @@ describe("registry faults", () => {
       if (!instance1) throw new Error("instance1 not built");
       expect(instance1).not.toBe(instance0);
       // The rebuilt instance must see the ROTATED material, not "fake-bot-token".
-      expect(instance1.state.starts[0]?.creds.bot.material).toEqual({ token: "rotated-token" });
+      expect(instance1.state.starts[0]?.cred.material).toEqual({ token: "rotated-token" });
     });
   });
 
@@ -720,8 +711,8 @@ describe("registry faults", () => {
         text: "buffered on start",
       });
       const originalBuild = fx.talkerFactory.build.bind(fx.talkerFactory);
-      fx.talkerFactory.build = (creds) => {
-        const t = originalBuild(creds);
+      fx.talkerFactory.build = (cred) => {
+        const t = originalBuild(cred);
         t.state.flushOnStart = [flushed];
         return t;
       };
@@ -772,20 +763,19 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     let renewStarted = false;
     const descriptor: ConnectionDescriptor = {
       connectionKind: "fake-session-svc",
+      grant: "session",
       auth: {
-        session: {
-          async confer(): Promise<Credential> {
-            throw new Error("route-driven");
-          },
-          async renew(): Promise<Credential | "re-confer"> {
-            renewStarted = true;
-            await renewGate;
-            return "re-confer";
-          },
+        async confer(): Promise<Credential> {
+          throw new Error("route-driven");
+        },
+        async renew(): Promise<Credential | "re-confer"> {
+          renewStarted = true;
+          await renewGate;
+          return "re-confer";
         },
       },
       capabilities: {
-        talker: { needs: ["session"] as const, build: (creds) => talkerFactory.build(creds) },
+        talker: { build: (cred) => talkerFactory.build(cred) },
       },
     };
     registry.register(descriptor);
@@ -863,16 +853,15 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
   ): ConnectionDescriptor {
     return {
       connectionKind: "fake-session-svc",
+      grant: "session",
       auth: {
-        session: {
-          async confer(): Promise<Credential> {
-            throw new Error("route-driven");
-          },
-          renew,
+        async confer(): Promise<Credential> {
+          throw new Error("route-driven");
         },
+        renew,
       },
       capabilities: {
-        talker: { needs: ["session"] as const, build: (creds) => talkerFactory.build(creds) },
+        talker: { build: (cred) => talkerFactory.build(cred) },
       },
     };
   }

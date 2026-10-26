@@ -208,17 +208,15 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
   return {
     connectionKind: "telegram",
     severalAccounts: true,
-    reviveProfile: (_grant, record) => reviveTelegramProfile(record),
-    accountIdOf: (_grant, record) => (typeof record.botId === "string" && record.botId) || null,
+    reviveProfile: (record) => reviveTelegramProfile(record),
+    accountIdOf: (record) => (typeof record.botId === "string" && record.botId) || null,
     takesAgent: true,
-    auth: {
-      bot: botScheme,
-    },
+    grant: "bot",
+    auth: botScheme,
     capabilities: {
       talker: {
-        needs: ["bot"] as const,
-        build(creds): Talker {
-          const token = creds.bot.material as { token: string };
+        build(cred): Talker {
+          const token = cred.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           const routeFault = (err: unknown): void => {
             faultSink?.(

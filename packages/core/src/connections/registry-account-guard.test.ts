@@ -23,8 +23,8 @@ function botIdDescriptor(setup?: SetupFn): ConnectionDescriptor {
   return {
     ...descriptor,
     severalAccounts: true,
-    accountIdOf: (_grant, profile) => (typeof profile.botId === "string" ? profile.botId : null),
-    auth: setup ? { bot: { ...descriptor.auth.bot!, setup } } : descriptor.auth,
+    accountIdOf: (profile) => (typeof profile.botId === "string" ? profile.botId : null),
+    auth: setup ? { ...descriptor.auth, setup } : descriptor.auth,
   };
 }
 

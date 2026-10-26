@@ -104,7 +104,8 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     const grant = c.req.param("name");
     // Checked before anything below touches the account, so a start for a
     // grant with no setup changes nothing.
-    if (!registry.getDescriptor(target.connectionKind)?.auth[grant]?.setup) {
+    const descriptor = registry.getDescriptor(target.connectionKind);
+    if (descriptor?.grant !== grant || !descriptor.auth.setup) {
       return c.json({ error: "No conferral setup for this grant." }, 404);
     }
     // An account that connects again starts fresh, so the card of a

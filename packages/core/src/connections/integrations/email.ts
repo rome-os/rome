@@ -274,17 +274,15 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
 
   return {
     connectionKind: "email",
-    reviveProfile: (_grant, record) => reviveEmailProfile(record),
-    accountIdOf: (_grant, record) => (typeof record.address === "string" && record.address) || null,
-    auth: {
-      inbox: inboxScheme,
-    },
+    reviveProfile: (record) => reviveEmailProfile(record),
+    accountIdOf: (record) => (typeof record.address === "string" && record.address) || null,
+    grant: "inbox",
+    auth: inboxScheme,
     capabilities: {
       talker: {
-        needs: ["inbox"] as const,
         history: true,
-        build(creds, kit): Talker {
-          const material = creds.inbox.material as unknown as EmailInboxMaterial;
+        build(cred, kit): Talker {
+          const material = cred.material as unknown as EmailInboxMaterial;
           const config: EmailInboxCoordinates = {
             address: material.address,
             inboundSecret: material.inboundSecret,

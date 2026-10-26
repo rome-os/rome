@@ -2,12 +2,7 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
-import {
-  makePasteTalk,
-  makeRenewableAct,
-  makeTwoGrant,
-  makeZeroGrantTalk,
-} from "./test-fixtures.js";
+import { makePasteTalk, makeRenewableAct } from "./test-fixtures.js";
 import { removeUnconnectedAccounts } from "./unconnected-accounts.js";
 
 const openDbs: Array<() => void> = [];
@@ -50,27 +45,12 @@ describe("removeUnconnectedAccounts", () => {
     expect(registry.find("fake-telegram")).toHaveLength(1);
   });
 
-  it("keeps an account while any of its grants is held", async () => {
+  it("keeps a connection outside chats", async () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
-    const discord = makeTwoGrant();
-    // Accounts that take an agent, so only the held grant keeps it.
-    registry.register({ ...discord.descriptor, takesAgent: true });
-    const conn = await registry.connect("fake-discord");
-    await registry.importCredential(conn.id, "user", discord.userCredential());
-
-    expect(await removeUnconnectedAccounts(registry)).toEqual([]);
-    expect(registry.find("fake-discord")).toHaveLength(1);
-  });
-
-  it("keeps a channel that needs no grant, and a connection outside chats", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
-    registry.register(makeZeroGrantTalk().descriptor);
     registry.register(makeRenewableAct().descriptor);
-    const zeroGrant = await registry.connect(makeZeroGrantTalk().descriptor.connectionKind);
     await registry.connect("fake-github");
 
     expect(await removeUnconnectedAccounts(registry)).toEqual([]);
-    expect(registry.all().map((conn) => conn.id)).toContain(zeroGrant.id);
     expect(registry.find("fake-github")).toHaveLength(1);
   });
 

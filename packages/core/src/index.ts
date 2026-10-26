@@ -1447,7 +1447,7 @@ async function main() {
   });
 
   // Hydrate connection/grant state without starting provider transports, so
-  // the zero-grant connections exist before any Talk epoch can admit messages.
+  // the boot passes below finish before any Talk epoch can admit messages.
   await connectionRegistry.load({ deferCapabilities: true });
   // An account exists only while connected, so one an earlier version left
   // unconnected goes before any channel is recorded for it.

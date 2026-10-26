@@ -119,14 +119,13 @@ describe("wechat descriptor shape", () => {
   it("declares one `account` grant and a talker needing it", () => {
     const desc = createWechatDescriptor();
     expect(desc.connectionKind).toBe("wechat");
-    expect(Object.keys(desc.auth)).toEqual(["account"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["account"]);
+    expect(desc.grant).toBe("account");
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
   it("throws from confer (conferral is the setup) and re-confers on renew", async () => {
-    const scheme = createWechatDescriptor().auth.account;
+    const scheme = createWechatDescriptor().auth;
     await expect(scheme.confer({ prompt: async () => ({}) })).rejects.toThrow(
       "conferral driven by the connection setup",
     );
@@ -202,14 +201,11 @@ function buildTalker(): { talker: Talker; adapter: FakeWechatAdapter; faults: St
       return adapter as never;
     },
   });
-  const talker = desc.capabilities.talker!.build(
-    { account: validCred() },
-    {
-      connectionId: "wechat-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "wechat-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   talker.start(
     () => {},
@@ -316,7 +312,7 @@ describe("wechat inbound delivery", () => {
 
     const desc = createWechatDescriptor({ createAdapter: (config) => new WechatAdapter(config) });
     const talker = desc.capabilities.talker!.build(
-      { account: { ...validCred(), material: { ...validCred().material, statePath } } },
+      { ...validCred(), material: { ...validCred().material, statePath } },
       {
         connectionId: "wechat-test",
         persist: async () => {},

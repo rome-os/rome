@@ -267,14 +267,12 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
 
   return {
     connectionKind: "linkedin",
-    reviveProfile: (_grant, record) => reviveLinkedInProfile(record),
-    accountIdOf: (_grant, record) => (typeof record.plainId === "string" && record.plainId) || null,
-    auth: {
-      session: sessionScheme,
-    },
+    reviveProfile: (record) => reviveLinkedInProfile(record),
+    accountIdOf: (record) => (typeof record.plainId === "string" && record.plainId) || null,
+    grant: "session",
+    auth: sessionScheme,
     capabilities: {
       talker: {
-        needs: ["session"] as const,
         // The inbox is mirrored into the store by the poller; nothing is
         // delivered as an inbound turn.
         receives: false,

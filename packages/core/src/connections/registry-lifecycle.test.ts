@@ -19,7 +19,6 @@ import {
   makeRenewableAct,
   makeExternalCustody,
   makeRecordingSleep,
-  makeZeroGrantTalk,
 } from "./test-fixtures.js";
 import type { GrantLedger } from "./ledger.js";
 
@@ -39,10 +38,11 @@ describe("Scenario 11 — subscription gating", () => {
   it("gated watch stays needs-subscription until subscribed", async () => {
     const { ledger, close } = makeLedger();
     try {
-      const { descriptor, watcherFactory } = makeGatedWatch();
+      const { descriptor, watcherFactory, userCredential } = makeGatedWatch();
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
+      await registry.importCredential(conn.id, "user", userCredential());
 
       // Before subscription: needs-subscription, watch is null
       expect(conn.status().watch).toEqual({ state: "needs-subscription" });
@@ -56,10 +56,11 @@ describe("Scenario 11 — subscription gating", () => {
   it("setWatchSubscribed(true) → unlocked + onUnlocked fires + watcher instance built", async () => {
     const { ledger, close } = makeLedger();
     try {
-      const { descriptor, watcherFactory } = makeGatedWatch();
+      const { descriptor, watcherFactory, userCredential } = makeGatedWatch();
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
+      await registry.importCredential(conn.id, "user", userCredential());
 
       const unlockFired: string[] = [];
       registry.onUnlocked("watch", (c) => unlockFired.push(c.id));
@@ -78,10 +79,11 @@ describe("Scenario 11 — subscription gating", () => {
   it("setWatchSubscribed(false) after subscribed → relocked, watch null", async () => {
     const { ledger, close } = makeLedger();
     try {
-      const { descriptor, watcherFactory } = makeGatedWatch();
+      const { descriptor, watcherFactory, userCredential } = makeGatedWatch();
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
+      await registry.importCredential(conn.id, "user", userCredential());
 
       await registry.setWatchSubscribed(conn.id, true);
       expect(conn.watch).not.toBeNull();
@@ -103,10 +105,11 @@ describe("Scenario 11 — subscription gating", () => {
   it("setWatchSubscribed(true) after (false) → re-unlocked + onUnlocked re-fires", async () => {
     const { ledger, close } = makeLedger();
     try {
-      const { descriptor, watcherFactory } = makeGatedWatch();
+      const { descriptor, watcherFactory, userCredential } = makeGatedWatch();
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
+      await registry.importCredential(conn.id, "user", userCredential());
 
       const unlockCount: number[] = [];
       registry.onUnlocked("watch", () => unlockCount.push(unlockCount.length));
@@ -124,21 +127,19 @@ describe("Scenario 11 — subscription gating", () => {
     }
   });
 
-  it("gated watch with grant needs: grants live but not subscribed → needs-subscription", async () => {
-    // Test that even with grants satisfied, subscription gate still applies
-    // Using makePasteTalk + manual gated descriptor would require a composite descriptor.
-    // Instead: verify the gatedWatch behavior when zero-grant but not subscribed
+  it("gated watch with its grant held but not subscribed → needs-subscription", async () => {
     const { ledger, close } = makeLedger();
     try {
-      const { descriptor } = makeGatedWatch();
+      const { descriptor, userCredential } = makeGatedWatch();
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
+      await registry.importCredential(conn.id, "user", userCredential());
 
       // talk/act: unsupported (not in gatedWatch descriptor)
       expect(conn.status().talk).toEqual({ state: "unsupported" });
       expect(conn.status().act).toEqual({ state: "unsupported" });
-      // watch: needs-subscription (zero grants, but subscriptionGated)
+      // watch: needs-subscription (grant held, but subscriptionGated)
       expect(conn.status().watch).toEqual({ state: "needs-subscription" });
     } finally {
       close();
@@ -334,9 +335,9 @@ describe("Scenario 13 — kit.persist write-through", () => {
       const originalBuild = desc2.capabilities.talker!.build.bind(desc2.capabilities.talker!);
       desc2.capabilities.talker = {
         ...desc2.capabilities.talker!,
-        build(creds, kit) {
+        build(cred, kit) {
           capturedKit = kit;
-          return originalBuild(creds, kit);
+          return originalBuild(cred, kit);
         },
       };
       // Need a fresh service name since "fake-telegram" is already registered
@@ -355,7 +356,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       registry2.onUnlocked("talk", () => unlocksBefore.push(1));
       const unlockCountBefore = unlocksBefore.length;
 
-      await capturedKit!.persist("bot", { token: "new-persisted-token" });
+      await capturedKit!.persist({ token: "new-persisted-token" });
 
       // No stop/rebuild happened
       expect(tf2.instances[0].state.stopCount).toBe(stopsBeforePersist);
@@ -393,9 +394,9 @@ describe("Scenario 13 — kit.persist write-through", () => {
       );
       descriptor.capabilities.talker = {
         ...descriptor.capabilities.talker!,
-        build(creds, kit) {
+        build(cred, kit) {
           capturedKit = kit;
-          return originalBuild(creds, kit);
+          return originalBuild(cred, kit);
         },
       };
 
@@ -407,7 +408,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
 
       // Persist new material
       const newMaterial = { token: "persisted-bot-token" };
-      await capturedKit!.persist("bot", newMaterial);
+      await capturedKit!.persist(newMaterial);
 
       // Revoke and re-import to trigger a fresh build
       await conn.auth.revoke("bot");
@@ -424,35 +425,6 @@ describe("Scenario 13 — kit.persist write-through", () => {
       // not the persisted ones — persist only updates in-memory for next build
       // but re-importing overrides it. This confirms rebuild DID happen.
       expect(secondInstance.state.starts).toHaveLength(1);
-    } finally {
-      close();
-    }
-  });
-
-  it("kit.persist for non-needed grant throws", async () => {
-    const { ledger, close } = makeLedger();
-    try {
-      let capturedKit: import("./types.js").RuntimeKit | null = null;
-      const { descriptor, validCredential } = makePasteTalk();
-      const originalBuild = descriptor.capabilities.talker!.build.bind(
-        descriptor.capabilities.talker!,
-      );
-      descriptor.capabilities.talker = {
-        ...descriptor.capabilities.talker!,
-        build(creds, kit) {
-          capturedKit = kit;
-          return originalBuild(creds, kit);
-        },
-      };
-
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
-      registry.register(descriptor);
-      const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", validCredential());
-      expect(capturedKit).not.toBeNull();
-
-      // "user" is not in talker's needs (only "bot" is)
-      await expect(capturedKit!.persist("user", { token: "x" })).rejects.toThrow(/user/);
     } finally {
       close();
     }
@@ -490,10 +462,11 @@ describe("remove(id) — teardown and cascade", () => {
   it("remove stops watcher instance for gated watch", async () => {
     const { ledger, close } = makeLedger();
     try {
-      const { descriptor, watcherFactory } = makeGatedWatch();
+      const { descriptor, watcherFactory, userCredential } = makeGatedWatch();
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
+      await registry.importCredential(conn.id, "user", userCredential());
 
       // Subscribe so the watcher builds
       await registry.setWatchSubscribed(conn.id, true);
@@ -524,26 +497,6 @@ describe("remove(id) — teardown and cascade", () => {
 
       expect(actor.state.stopCount).toBe(1);
       expect(conn.act).toBeNull();
-    } finally {
-      close();
-    }
-  });
-
-  it("zero-grant talker is stopped on remove", async () => {
-    const { ledger, close } = makeLedger();
-    try {
-      const { descriptor, talkerFactory } = makeZeroGrantTalk();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
-      registry.register(descriptor);
-      const conn = await registry.connect("fake-webchat");
-
-      // Zero-grant: talker built at connect time
-      expect(talkerFactory.instances).toHaveLength(1);
-      const talker = talkerFactory.instances[0];
-      expect(talker.state.stopCount).toBe(0);
-
-      await registry.remove(conn.id);
-      expect(talker.state.stopCount).toBe(1);
     } finally {
       close();
     }
@@ -648,26 +601,16 @@ describe("external custody", () => {
       // Actor was built with the external credential
       expect(actorFactory.instances).toHaveLength(1);
       const actor = actorFactory.instances[0];
-      // The creds passed to build() contain the credential.
-      // The credential material is the resolver function (external custody).
       // The registry passes the raw credential (including function material)
-      // to build() — it does not resolve it.
-      const buildCreds =
-        actor.state.invocations.length > 0 ? actor.state.invocations[0].creds : actor.state; // we need to check what was passed to build
-
-      // Actually, FakeActor.state.invocations is per invoke(), not build().
-      // We check via the factory: build() is called with creds, so we can
-      // check the creds snapshot stored in the starts (only for Talker/Watcher).
-      // For Actor, the creds are only captured on invoke(). Let's invoke and check.
+      // to build() — it does not resolve it. FakeActor records the credential
+      // on each invoke(), so invoke and check.
       const act = conn.act;
       expect(act).not.toBeNull();
       await act!.invoke({ operation: "test" });
 
       // The invocation creds should have the external resolver as material
       expect(actor.state.invocations).toHaveLength(1);
-      const invokedCreds = actor.state.invocations[0].creds;
-      const accountCred = invokedCreds["account"];
-      expect(accountCred).toBeDefined();
+      const accountCred = actor.state.invocations[0].cred;
       // The credential's material is the resolver function
       expect(typeof accountCred.material).toBe("function");
 
@@ -677,8 +620,6 @@ describe("external custody", () => {
       )();
       expect(resolved).toMatchObject(externalMaterial);
       expect(resolveExternalCallCount()).toBeGreaterThanOrEqual(1);
-
-      void buildCreds;
     } finally {
       close();
     }
@@ -730,8 +671,7 @@ describe("external custody", () => {
 
       // Invoke to get the creds
       await connB.act!.invoke({ operation: "rehydrated-op" });
-      const invCreds = af2.instances[0].state.invocations[0].creds;
-      const accountCred = invCreds["account"];
+      const accountCred = af2.instances[0].state.invocations[0].cred;
       expect(typeof accountCred.material).toBe("function");
 
       // Resolved material matches
@@ -779,12 +719,11 @@ describe("custody follows grant state", () => {
 
       expect(custody.syncs).toEqual([
         {
-          grant: "user",
           material: { accessToken: "initial-user-token" },
           profile: { login: "octocat", teamId: "T1" },
         },
       ]);
-      expect(custody.clears).toHaveLength(0);
+      expect(custody.clears).toBe(0);
     } finally {
       close();
     }
@@ -801,7 +740,7 @@ describe("custody follows grant state", () => {
 
       await conn.auth.revoke("user");
 
-      expect(custody.clears).toEqual([{ grant: "user" }]);
+      expect(custody.clears).toBe(1);
     } finally {
       close();
     }
@@ -837,7 +776,7 @@ describe("custody follows grant state", () => {
 
       expect(registryB.find("fake-oauth-provider")[0].auth.grants().user).toBe("degraded");
       // Degrade cleared custody; the boot rehydration never synced (expired).
-      expect(custody2.clears).toEqual([{ grant: "user" }]);
+      expect(custody2.clears).toBe(1);
       expect(custody2.syncs).toHaveLength(0);
     } finally {
       close();
@@ -862,7 +801,6 @@ describe("custody follows grant state", () => {
 
       expect(custody2.syncs).toEqual([
         {
-          grant: "user",
           material: { accessToken: "initial-user-token" },
           profile: { teamId: "T9" },
         },
@@ -889,9 +827,7 @@ describe("custody follows grant state", () => {
         material: { accessToken: "rotated" },
         expiresAt: "never",
       });
-      expect(custody.syncs).toEqual([
-        { grant: "user", material: { accessToken: "rotated" }, profile: {} },
-      ]);
+      expect(custody.syncs).toEqual([{ material: { accessToken: "rotated" }, profile: {} }]);
     } finally {
       close();
     }

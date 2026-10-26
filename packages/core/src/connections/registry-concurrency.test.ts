@@ -17,7 +17,7 @@ import { createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import type { GrantLedger, GrantPatch } from "./ledger.js";
 import { ConnectionRegistry } from "./registry.js";
-import { makePasteTalk, makeTwoGrant } from "./test-fixtures.js";
+import { makePasteTalk } from "./test-fixtures.js";
 import type { GrantName } from "./types.js";
 
 // A macrotask flush: lets the queued mutation bodies (which run on microtasks
@@ -127,38 +127,12 @@ describe("per-grant lock: same-grant mutations serialize", () => {
     // No split-brain: the live capability was built with the SAME credential the
     // ledger row records (tok2), not the earlier conferral's tok1.
     const latest = fx.talkerFactory.instances.at(-1);
-    expect(latest?.state.starts.at(-1)?.creds.bot.material).toEqual({ token: "tok2" });
+    expect(latest?.state.starts.at(-1)?.cred.material).toEqual({ token: "tok2" });
     expect(conn.auth.grants().bot).toBe("authorized");
   });
 });
 
-describe("per-grant lock: independent grants do not serialize", () => {
-  // Acceptance: mutations on DIFFERENT grants of the same connection are keyed
-  // to independent chains — a parked conferral on one grant must not block a
-  // conferral on another. A global (mis-keyed) lock would hang the second call.
-  it("a parked conferral on one grant does not block a conferral on another grant", async () => {
-    const { ledger, release } = makeGatedLedger(
-      (_c, name, patch) => name === "bot" && patch.state === "authorized",
-    );
-    const registry = new ConnectionRegistry({ ledger });
-    const fx = makeTwoGrant();
-    registry.register(fx.descriptor);
-    const conn = await registry.connect("fake-discord");
-
-    const botConferral = registry.importCredential(conn.id, "bot", fx.botCredential());
-    const userConferral = registry.importCredential(conn.id, "user", fx.userCredential());
-
-    // The user conferral completes while the bot conferral is still parked —
-    // proof the two grants hold independent chains.
-    await userConferral;
-    expect(conn.auth.grants().user).toBe("authorized");
-    expect(conn.auth.grants().bot).toBe("unauthorized");
-
-    release();
-    await botConferral;
-    expect(conn.auth.grants().bot).toBe("authorized");
-  });
-
+describe("per-connection lock: independent connections do not serialize", () => {
   // Acceptance: mutations on DIFFERENT Services/connections do not serialize —
   // each ConnectionImpl owns its own per-grant chains.
   it("a parked conferral on one connection does not block another connection's conferral", async () => {

@@ -297,19 +297,16 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
 
   return {
     connectionKind: "wechat",
-    reviveProfile: (_grant, record) => reviveWechatProfile(record),
-    accountIdOf: (_grant, record) =>
-      (typeof record.accountId === "string" && record.accountId) || null,
-    auth: {
-      account: accountScheme,
-    },
+    reviveProfile: (record) => reviveWechatProfile(record),
+    accountIdOf: (record) => (typeof record.accountId === "string" && record.accountId) || null,
+    grant: "account",
+    auth: accountScheme,
     capabilities: {
       talker: {
-        needs: ["account"] as const,
-        build(creds): Talker {
+        build(cred): Talker {
           // Inline material for the `account` grant (never an external
           // resolver for a Talk grant); the pairing flow packs these fields.
-          const account = creds.account.material as unknown as WechatAccountMaterial;
+          const account = cred.material as unknown as WechatAccountMaterial;
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           const routeFault = (err: unknown): void => {
             faultSink?.(

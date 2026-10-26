@@ -165,8 +165,7 @@ describe("email descriptor shape", () => {
   it("declares one `inbox` grant and a talker needing it", () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
     expect(desc.connectionKind).toBe("email");
-    expect(Object.keys(desc.auth)).toEqual(["inbox"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["inbox"]);
+    expect(desc.grant).toBe("inbox");
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
@@ -174,7 +173,7 @@ describe("email descriptor shape", () => {
   it("confer() is setup-driven — throws, never prompts headlessly", async () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
     await expect(
-      desc.auth.inbox.confer({
+      desc.auth.confer({
         prompt: () => Promise.reject(new Error("should not be called")),
       }),
     ).rejects.toThrow("conferral driven by the connect setup");
@@ -182,7 +181,7 @@ describe("email descriptor shape", () => {
 
   it("renew() always answers re-confer", async () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
-    await expect(desc.auth.inbox.renew(validCred())).resolves.toBe("re-confer");
+    await expect(desc.auth.renew(validCred())).resolves.toBe("re-confer");
   });
 });
 
@@ -200,19 +199,16 @@ function buildTalker(
 } {
   const desc = makeEmailDescriptor(makeDeps(provider, depsOverride));
   let ingress: ((input: unknown) => Promise<unknown>) | undefined;
-  const talker = desc.capabilities.talker!.build(
-    { inbox: validCred(material) },
-    {
-      connectionId: "email-test",
-      persist: async () => {},
-      registerIngress: (handler) => {
-        ingress = handler;
-        return () => {
-          ingress = undefined;
-        };
-      },
+  const talker = desc.capabilities.talker!.build(validCred(material), {
+    connectionId: "email-test",
+    persist: async () => {},
+    registerIngress: (handler) => {
+      ingress = handler;
+      return () => {
+        ingress = undefined;
+      };
     },
-  );
+  });
   const faults: StreamFault[] = [];
   return {
     talker,
@@ -294,17 +290,14 @@ describe("email Talker fault mapping", () => {
     const provider = makeProvider();
     const desc = makeEmailDescriptor(makeDeps(provider));
     let ingress: ((input: unknown) => Promise<unknown>) | undefined;
-    const talker = desc.capabilities.talker!.build(
-      { inbox: validCred() },
-      {
-        connectionId: "email-test",
-        persist: async () => {},
-        registerIngress: (handler) => {
-          ingress = handler;
-          return () => {};
-        },
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "email-test",
+      persist: async () => {},
+      registerIngress: (handler) => {
+        ingress = handler;
+        return () => {};
       },
-    );
+    });
     const received: ChannelMessage[] = [];
     talker.start(
       (msg) => received.push(msg),
@@ -385,17 +378,14 @@ function buildDeliveringTalker(provider: MailProvider): {
 } {
   const desc = makeEmailDescriptor(makeDeps(provider));
   let ingress: ((input: unknown) => Promise<unknown>) | undefined;
-  const talker = desc.capabilities.talker!.build(
-    { inbox: validCred() },
-    {
-      connectionId: "email-test",
-      persist: async () => {},
-      registerIngress: (handler) => {
-        ingress = handler;
-        return () => {};
-      },
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "email-test",
+    persist: async () => {},
+    registerIngress: (handler) => {
+      ingress = handler;
+      return () => {};
     },
-  );
+  });
   const delivered: ChannelMessage[] = [];
   talker.start(
     (msg) => delivered.push(msg),

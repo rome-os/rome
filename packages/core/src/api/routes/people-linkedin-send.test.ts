@@ -59,7 +59,7 @@ describe("LinkedIn replies through People", () => {
       run,
       minIntervalMs: 60_000,
       maxIntervalMs: 60_000,
-    }).capabilities.talker!.build({} as Record<string, Credential>, {} as RuntimeKit);
+    }).capabilities.talker!.build({} as Credential, {} as RuntimeKit);
     // LinkedIn's Connection, live on that talker, behind the channel list.
     deps.connections = createTestConnections(
       new Map([["linkedin", new FakeTransport("linkedin")]]),

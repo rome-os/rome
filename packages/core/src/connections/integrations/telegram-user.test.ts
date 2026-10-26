@@ -138,14 +138,11 @@ function buildTalker(deps: Parameters<typeof makeTelegramUserDescriptor>[0] = {}
   start: () => void;
 } {
   const desc = makeTelegramUserDescriptor(deps);
-  const talker = desc.capabilities.talker!.build(
-    { session: validCred() },
-    {
-      connectionId: "telegram-user-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "telegram-user-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   return {
     talker,
@@ -191,15 +188,14 @@ describe("telegram_user descriptor shape", () => {
   it("declares one setup-driven `session` grant and a talker needing it", () => {
     const desc = makeTelegramUserDescriptor();
     expect(desc.connectionKind).toBe("telegram_user");
-    expect(Object.keys(desc.auth)).toEqual(["session"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["session"]);
+    expect(desc.grant).toBe("session");
     expect(desc.capabilities.actor).toBeUndefined();
     // The `session` grant carries a conferral setup coroutine.
-    expect(typeof desc.auth.session.setup).toBe("function");
+    expect(typeof desc.auth.setup).toBe("function");
   });
 
   it("session scheme: confer is setup-driven (throws), renew answers re-confer", async () => {
-    const scheme = makeTelegramUserDescriptor().auth.session;
+    const scheme = makeTelegramUserDescriptor().auth;
     await expect(scheme.confer({ prompt: async () => ({}) })).rejects.toThrow(
       "conferral driven by the connection setup",
     );
@@ -274,14 +270,11 @@ describe("telegram_user descriptor shape", () => {
 describe("telegram_user inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const desc = makeTelegramUserDescriptor();
-    const talker = desc.capabilities.talker!.build(
-      { session: validCred() },
-      {
-        connectionId: "telegram-user-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "telegram-user-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     const delivered: unknown[] = [];
     talker.start(
       (msg) => delivered.push(msg),

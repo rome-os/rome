@@ -9,10 +9,9 @@ const log = createLogger("connections");
 
 /** Whether `conn` is an account no grant connects. An account here is a
  *  Connection of a connection kind with a Talk whose accounts take an agent, and it
- *  is removed, along with its channel, once every grant is
- *  unauthorized. Any other Connection (email, a zero-grant channel, a connection kind
- *  without a Talk) stays after its last grant goes. Each such connection kind holds a
- *  single grant, so a disconnect's grant section covers every grant read here. */
+ *  is removed, along with its channel, once its grant is
+ *  unauthorized. Any other Connection (email, a connection kind without a Talk)
+ *  stays after its grant goes. */
 export async function isUnconnectedAccount(
   registry: Pick<ConnectionRegistry, "getDescriptor" | "getLedger">,
   conn: Pick<Connection, "id" | "connectionKind">,

@@ -397,7 +397,7 @@ describe("the WeChat personal Talker", () => {
       material: { custody: "rome-container", wxid: "wxid_guardian" },
       expiresAt: "never",
     };
-    const talker = descriptor.capabilities.talker!.build({ session: credential }, kit);
+    const talker = descriptor.capabilities.talker!.build(credential, kit);
     const deliver = rs.fn();
     talker.start(deliver as unknown as (msg: ChannelMessage) => void, fault);
     return {

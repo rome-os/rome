@@ -23,12 +23,10 @@ describe("a channel's Connection across epochs", () => {
     }> = [];
     const descriptor: ConnectionDescriptor = {
       connectionKind: "discord",
-      auth: {
-        bot: tokenPaste({ label: "token", validate: async () => {} }),
-      },
+      grant: "bot",
+      auth: tokenPaste({ label: "token", validate: async () => {} }),
       capabilities: {
         talker: {
-          needs: ["bot"],
           build(): Talker {
             const state: (typeof instances)[number] = {
               sends: [],
@@ -157,10 +155,10 @@ describe("a channel's Connection across epochs", () => {
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     registry.register({
       connectionKind: "telegram",
-      auth: { bot: tokenPaste({ label: "token", validate: async () => {} }) },
+      grant: "bot",
+      auth: tokenPaste({ label: "token", validate: async () => {} }),
       capabilities: {
         talker: {
-          needs: ["bot"],
           build: (): Talker => ({
             start(next) {
               deliver = next;

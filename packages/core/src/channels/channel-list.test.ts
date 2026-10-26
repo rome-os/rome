@@ -54,10 +54,10 @@ function talkKind(
     epochs,
     descriptor: {
       connectionKind: service,
-      auth: { bot: tokenPaste({ label: "token", validate: async () => {} }) },
+      grant: "bot",
+      auth: tokenPaste({ label: "token", validate: async () => {} }),
       capabilities: {
         talker: {
-          needs: ["bot"],
           ...ports,
           build(): Talker {
             const epoch: (typeof epochs)[number] = {};
@@ -142,9 +142,10 @@ describe("channelList", () => {
   it("gives every service with a Talk a channel, beside the read-backed ones", () => {
     const actOnly: ConnectionDescriptor = {
       connectionKind: "github",
-      auth: {},
+      grant: "user",
+      auth: tokenPaste({ label: "token", validate: async () => {} }),
       capabilities: {
-        actor: { needs: [], build: () => ({ operations: () => [], invoke: async () => null }) },
+        actor: { build: () => ({ operations: () => [], invoke: async () => null }) },
       },
     };
     const { channels } = setup([
@@ -268,8 +269,8 @@ describe("channelList", () => {
     });
     const service = talkKind("telegram");
     const build = service.descriptor.capabilities.talker!.build;
-    service.descriptor.capabilities.talker!.build = (creds, kit) => ({
-      ...build(creds, kit),
+    service.descriptor.capabilities.talker!.build = (cred, kit) => ({
+      ...build(cred, kit),
       get history(): never {
         throw new Error("not started");
       },
