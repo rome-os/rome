@@ -175,6 +175,34 @@ describe("trace archives (real SQLite and worker)", () => {
     expect(JSON.parse(requests[2].body.toString()).sessionId).toBe(key);
   });
 
+  it("preserves malformed legacy traces without blocking valid turns or other sessions", async () => {
+    seed();
+    seed("other");
+    const insert = sqlite.prepare(
+      "INSERT INTO rome_agent_messages(id,session_id,role,content,created_at) VALUES (?, 'session', 'trace', ?, ?)",
+    );
+    insert.run("non-json", "legacy provider text", old);
+    insert.run("non-array", '{"type":"thinking"}', old);
+    expect((await archiver().runPass()).sessions).toBe(2);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT trace_archive_id AS archiveId,content FROM rome_agent_messages WHERE id = 'non-json'",
+        )
+        .get(),
+    ).toEqual({ archiveId: null, content: "legacy provider text" });
+    expect(
+      sqlite
+        .prepare(
+          "SELECT trace_archive_id AS archiveId FROM rome_agent_messages WHERE id = 'non-array'",
+        )
+        .get(),
+    ).toEqual({ archiveId: null });
+    await archiver().runPass();
+    expect(archiveRows()).toHaveLength(2);
+    expect(archiveRows().every((r) => r.status === "pruned")).toBe(true);
+  });
+
   it("exports a self-describing byte-exact file, fsyncs/renames and keeps accounting blocks", async () => {
     const messageId = seed();
     const exact = '{ "type": "tool_result", "content": "中文 payload" }';
@@ -770,6 +798,27 @@ describe("Pantheon + signed PUT contract", () => {
     await job.runPass();
     expect(requests).toHaveLength(4);
     expect(repo.deletes()).toEqual([]);
+  });
+
+  it("keeps remote deletion durable when not_hosted cannot confirm an older Cloud object was removed", async () => {
+    seed();
+    await archiver().runPass();
+    repo.update(archiveRows()[0].id, { location: "s3:key" });
+    await webchat.deleteSession("session");
+    const { storage, requests } = await cloud(403, "not_hosted");
+    await archiver({ storage }).cleanupDeletedChats();
+    expect(repo.deletes()).toEqual(["session"]);
+    await expect(storage.deleteSession("session", true)).rejects.toThrow("not confirmed");
+    expect(requests).toHaveLength(1);
+  });
+
+  it("requires the DELETE acknowledgement rather than treating any 2xx body as confirmation", async () => {
+    const storage = new TraceArchiveStorage({
+      token: () => "test",
+      origin: () => "http://cloud.test",
+      fetch: async () => new Response(JSON.stringify({ error: "unconfigured" }), { status: 200 }),
+    });
+    await expect(storage.deleteSession("session", true)).rejects.toThrow("not confirmed");
   });
 
   it("a delete during a PUT cannot leave an object uploaded after the remote deletion", async () => {

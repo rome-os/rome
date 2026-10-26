@@ -74,6 +74,10 @@ async function verify(file: string): Promise<ArchiveFile> {
   return { manifest, sha256: sha.digest("hex"), md5: md5.digest("base64"), bytes, lines };
 }
 
+const validLegacyArraySql =
+  "CASE WHEN json_valid(m.content) THEN json_type(m.content) = 'array' ELSE 0 END";
+const legacyArraySql = `CASE WHEN ${validLegacyArraySql} THEN m.content ELSE '[]' END`;
+
 async function exportFile(
   input: Extract<ArchiveWorkerInput, { action: "export" }>,
 ): Promise<ArchiveFile | null> {
@@ -89,9 +93,9 @@ async function exportFile(
     if (!session) return null;
     const messages = db
       .prepare(`SELECT m.id, coalesce(max(b.seq), -1) AS maxSeq, count(b.seq) AS blockCount,
-      CASE WHEN count(b.seq) = 0 THEN json_array_length(m.content) ELSE 0 END AS legacyCount
+      CASE WHEN count(b.seq) = 0 THEN json_array_length(${legacyArraySql}) ELSE 0 END AS legacyCount
       FROM rome_agent_messages m LEFT JOIN rome_agent_trace_blocks b ON b.message_id = m.id
-      WHERE m.session_id = ? AND m.role = 'trace' AND m.trace_archive_id IS NULL GROUP BY m.id`)
+      WHERE m.session_id = ? AND m.role = 'trace' AND m.trace_archive_id IS NULL GROUP BY m.id HAVING count(b.seq) > 0 OR ${validLegacyArraySql}`)
       .all(input.sessionId) as {
       id: string;
       maxSeq: number;
@@ -107,7 +111,7 @@ async function exportFile(
     const legacyBytes = db
       .prepare(`SELECT coalesce(sum(length(cast(m.content AS blob))), 0) AS bytes FROM rome_agent_messages m
       WHERE m.session_id = ? AND m.role = 'trace' AND m.trace_archive_id IS NULL AND NOT EXISTS
-      (SELECT 1 FROM rome_agent_trace_blocks b WHERE b.message_id = m.id)`)
+      (SELECT 1 FROM rome_agent_trace_blocks b WHERE b.message_id = m.id) AND ${validLegacyArraySql}`)
       .get(input.sessionId) as { bytes: number };
     const disk = await statfs(dirname(input.file));
     if (disk.bavail * disk.bsize < 2 * (raw.bytes + legacyBytes.bytes))
@@ -143,7 +147,7 @@ async function exportFile(
       WHERE m.session_id = ? AND m.role = 'trace' AND m.trace_archive_id IS NULL ORDER BY m.id, b.seq`);
     const legacy =
       db.prepare(`SELECT m.id AS messageId, m.turn_id AS turnId, j.key AS seq, j.value AS content
-      FROM rome_agent_messages m, json_each(m.content) j
+      FROM rome_agent_messages m, json_each(${legacyArraySql}) j
       WHERE m.session_id = ? AND m.role = 'trace' AND m.trace_archive_id IS NULL
       AND NOT EXISTS (SELECT 1 FROM rome_agent_trace_blocks b WHERE b.message_id = m.id)
       ORDER BY m.id, j.key`);

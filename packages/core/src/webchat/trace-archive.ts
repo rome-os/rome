@@ -344,6 +344,9 @@ export class TraceArchiver {
               identity: this.options.identity?.(),
             });
             if (!data) {
+              log.warn("trace archive export skipped: no valid trace rows", {
+                sessionId: candidate.sessionId,
+              });
               repo.update(id, { status: "discarded" });
               await this.discard(repo.get(id)!);
               continue;

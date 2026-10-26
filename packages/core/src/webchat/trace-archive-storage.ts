@@ -104,6 +104,10 @@ export class TraceArchiveStorage {
     const response = await this.request("DELETE", "", {
       sessionId: traceArchiveSessionKey(sessionId),
     });
-    await response?.body?.cancel();
+    if (!response) throw new Error("Trace archive remote deletion not confirmed");
+    const result = await response.json().catch(() => null);
+    if (!z.object({ deleted: z.number().int().nonnegative() }).safeParse(result).success) {
+      throw new Error("Trace archive remote deletion not confirmed");
+    }
   }
 }
