@@ -1,7 +1,7 @@
 ---
 name: routine-from-chat
-description: Turn a plain-language "do this automatically" request into a routine — either event-triggered ("text me when I get an email from my landlord") or scheduled ("remind me every Friday at 9am"). For third-party events (Gmail, GitHub, Slack…) it confirms with the guardian and then subscribes to the connector trigger so the event actually fires, even one that has never fired before. Ask for any missing detail, then confirm with a card. Reach for this first whenever the guardian wants something to happen automatically; do not explore the codebase or hand-build a trigger.
-tools: [ask_question, search_event_catalog, connector_login, connector_connect, connector_event_search, connector_event_schema, connector_event_subscribe, propose_routine, summon, send_message]
+description: Turn a plain-language "do this automatically" request into a routine — either event-triggered ("text me when I get an email from my landlord") or scheduled ("remind me every Friday at 9am"). For third-party events (Gmail, GitHub, Slack…) it confirms with the guardian and then subscribes to the connector trigger so the event actually fires, even one that has never fired before. Ask for any missing detail, then confirm with a card when available or in plain chat otherwise. Reach for this first whenever the guardian wants something to happen automatically; do not explore the codebase or hand-build a trigger.
+tools: [ask_question, search_event_catalog, connector_login, connector_connect, connector_event_search, connector_event_schema, connector_event_subscribe, propose_routine, search_actions, read_action, execute_action, summon, send_message]
 ---
 
 # Create a routine from chat
@@ -9,10 +9,11 @@ tools: [ask_question, search_event_catalog, connector_login, connector_connect, 
 When the guardian describes something they want to happen automatically, turn
 that intent into a **routine** — without making them learn event names, RRULEs,
 timezones, filters, or JSON. They speak in their language; you map it to a
-concrete trigger, ask only for what you genuinely can't infer, then show a
-card. You do **not** call any create action yourself — `propose_routine` does
-it: the card creates the routine when they turn it on, or creates it right away
-with `activate: true` (see step 4).
+concrete trigger, ask only for what you genuinely cannot infer, then confirm.
+When `propose_routine` is available, use it instead of any create action: the
+card creates the routine when they turn it on, or creates it right away with
+`activate: true` (see step 4). Only when that tool is unavailable on the current
+surface, follow "Surfaces without `propose_routine`" below.
 
 A routine fires one of three ways. Decide which the request is:
 
@@ -53,8 +54,12 @@ want it on a schedule or to run it by hand, ask.
    `text` question when the answer is open-ended. Never demand a raw value the user
    would have to look up, and never ask them for an RRULE or an IANA timezone —
    ask "what time?" and "roughly where are you?" and convert it yourself.
+   If `ask_question` is unavailable, ask the same question in plain chat and
+   wait for the guardian's answer. This also applies to every confirmation and
+   question below, including permission to subscribe to a connector event.
 4. **Propose with `propose_routine`.** Pass `kind: "event"`, `kind: "schedule"`,
-   or `kind: "manual"` plus the human summary and the machine spec. A confirm
+   or `kind: "manual"` plus the human summary and the machine spec. If the tool
+   is unavailable on this surface, use the fallback below instead. A confirm
    card renders; the guardian turns it on. For `manual`, set `watchLabel` to
    something like "Run on demand" and omit all trigger fields.
    **Add `activate: true`** when the guardian explicitly asked for this exact
@@ -63,7 +68,60 @@ want it on a schedule or to run it by hand, ask.
    nothing. Leave it off when you inferred any of those, or when the routine
    would send, post or spend on their behalf in a way they didn't ask for.
 5. **Close.** After `propose_routine`, reply with one short line confirming what
-   you drafted (or what is now on), then stop. Do not call any create action.
+   you drafted (or what is now on), then stop. On this card path, do not call any
+   create action.
+
+## Surfaces without `propose_routine`
+
+Use this fallback **only when `propose_routine` is not available** in the current
+tool list. It is a built-in tool, not a `system:propose_routine` action. Do not
+look for that action or use this fallback to bypass a card error or rejection.
+
+1. Resolve the trigger and action through the flow above. Summarize the complete
+   routine in plain chat: the cadence or event and filters, the time and timezone
+   behavior, what runs, and its arguments, recipients, and side effects.
+2. Ask "Create and turn on this routine?" and wait for the guardian's **explicit
+   yes in chat** to that summary. The original request is not this confirmation,
+   even when it specified every detail. Without that yes, do not create or
+   activate anything. If the spec changes, summarize it again and get a new yes.
+   Permission to subscribe to an event source does not confirm the routine.
+3. Only after that yes, discover `system:create_routine` with `search_actions`
+   and read it with `read_action`. If unavailable or denied, stop and explain the
+   limit. Do not bypass permissions. Call it through `execute_action` with
+   `name`, `trigger`, `actionName`, `args` (one object), and `enabled: true`.
+   Do not pass card-only fields such as `kind`, `sentence`, or `activate`.
+   - Schedule: `trigger: { type: "schedule", tzid, tzMode, localTime, rrule }`
+     for recurrence, or `date` instead of `rrule` for a dated one-off.
+     `tzMode` is required: use `"floating"` for a recurring reminder that follows
+     the guardian's current timezone, or `"fixed"` for a zone-anchored event.
+     Use `"fixed"` for a dated one-off. Confirm the chosen behavior in the summary.
+   - Event: `trigger: { type: "event-bus", eventName, filter }`, using the
+     discovered event name and schema-backed filters. Omit `filter` if absent.
+   - Manual: `trigger: { type: "manual" }`, with no schedule or event fields.
+4. Check the action result. Only report the routine as created after success.
+   If the result is an error, report it rather than claiming activation.
+
+For example, after an explicit yes to a weekly reminder that follows the
+guardian's timezone, the `system:create_routine` arguments are:
+
+```json
+{
+  "name": "Weekly update reminder",
+  "trigger": {
+    "type": "schedule",
+    "tzid": "America/Los_Angeles",
+    "tzMode": "floating",
+    "localTime": "09:00",
+    "rrule": "FREQ=WEEKLY;BYDAY=FR"
+  },
+  "actionName": "system:summon",
+  "args": {
+    "agentName": "core:main",
+    "prompt": "Remind the guardian to send their weekly update."
+  },
+  "enabled": true
+}
+```
 
 ## Event routines from a connector (Gmail, GitHub, Slack, …)
 
@@ -100,9 +158,10 @@ watching their third-party account:
    trigger is safe. If the guardian declines, don't subscribe — offer a schedule
    routine if one fits, otherwise stop.
 
-Then `propose_routine` with `eventName` set to exactly what subscribe returned.
-(The confirmation above arms the *event source*; this card is a separate, lighter
-step that turns the *routine* on — keep them distinct, don't collapse them.)
+Then `propose_routine` with `eventName` set to exactly what subscribe returned,
+or follow the non-card fallback when that tool is unavailable.
+The confirmation above arms the *event source*. Confirm the *routine* separately
+with its card or the explicit chat confirmation above.
 
 **Prerequisites — sign-in, *then* connection.** Subscribe needs Composio sign-in
 *and* the toolkit connected. These are two separate gates, handled in order — a
