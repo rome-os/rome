@@ -177,22 +177,6 @@ function fromPersisted(persisted: PersistedCredential, scheme: AuthScheme): Cred
   return { material: persisted.material.record, expiresAt: persisted.expiresAt };
 }
 
-/** Stable JSON of a credential's inline material, for idempotent-conferral
- *  diffing. Function (external) material is never compared — always treated as
- *  changed. */
-function materialFingerprint(material: SecretRecord): string {
-  const keys = Object.keys(material).sort();
-  return JSON.stringify(keys.map((k) => [k, material[k]]));
-}
-
-function sameMaterial(a: Credential, b: Credential): boolean {
-  return (
-    typeof a.material !== "function" &&
-    typeof b.material !== "function" &&
-    materialFingerprint(a.material) === materialFingerprint(b.material)
-  );
-}
-
 /** A capability's live epoch: the built instance plus the runtime-facing
  *  wrapper. The wrapper delegates to a MUTABLE current-instance slot so a
  *  Disconnected backoff rebuild can swap the instance while callers keep the
@@ -1440,18 +1424,7 @@ class ConnectionImpl implements Connection {
     return this.withGrantLock(grant, async () => {
       commit();
       try {
-        // Identical inline material over an authorized grant rebuilds nothing.
-        // The live credential still takes the committed one, whose expiry may
-        // have moved, and custody re-syncs, since the profile may have changed
-        // (renamed login, moved workspace) under a profile-derived artifact such
-        // as Slack's teamId.
-        const current = this.liveCreds.get(grant);
-        if (this.grantState.get(grant) === "authorized" && current && sameMaterial(current, cred)) {
-          this.liveCreds.set(grant, cred);
-          await this.syncCustody(grant, cred);
-        } else {
-          await this.activateGrantInMemory(grant, cred);
-        }
+        await this.activateGrantInMemory(grant, cred);
       } catch (err) {
         onActivationError(err);
       }

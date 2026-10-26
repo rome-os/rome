@@ -1,7 +1,7 @@
 // Registry discovery contract tests.
 //
 // Covers spec scenarios: 1 (talk unlocked by its grant), 2 (needs-auth precision),
-// 3 (import unlocks + onUnlocked), 4 (idempotent import),
+// 3 (import unlocks + onUnlocked), 4 (every conferral is a fresh grant),
 // 14 (ledger invariants), 16 (late onUnlocked registration),
 // 17 (register validation), 18 (load with unregistered service).
 //
@@ -243,52 +243,10 @@ describe("scenario 3: import unlocks + fires onUnlocked", () => {
   });
 });
 
-// Scenario 4 — idempotent import: same material → no new epoch, no re-fire
+// Scenario 4 — every conferral is a fresh grant: even the same material rebuilds
 
-describe("scenario 4: idempotent conferral", () => {
-  it("re-conferring same material does not call stop() on the talker", async () => {
-    const ledger = makeLedger();
-    const reg = makeRegistry(ledger);
-    const { descriptor, botCredential, talkerFactory } = makeBotAll();
-    reg.register(descriptor);
-
-    const conn = await reg.connect("fake-discord");
-    const cred = botCredential();
-    await reg.confer(conn.connectionKind, conn.id, "bot", cred);
-
-    const firstInstance = talkerFactory.instances[0];
-    expect(firstInstance.state.stopCount).toBe(0);
-
-    // Re-import identical material.
-    await reg.confer(conn.connectionKind, conn.id, "bot", { ...cred });
-
-    // No new stop() call, same instance count.
-    expect(firstInstance.state.stopCount).toBe(0);
-    expect(talkerFactory.instances).toHaveLength(1);
-  });
-
-  it("re-conferring same material does not re-fire onUnlocked", async () => {
-    const ledger = makeLedger();
-    const reg = makeRegistry(ledger);
-    const { descriptor, botCredential } = makeBotAll();
-    reg.register(descriptor);
-
-    let count = 0;
-    reg.onUnlocked("talk", () => count++);
-
-    const conn = await reg.connect("fake-discord");
-    const cred = botCredential();
-    await reg.confer(conn.connectionKind, conn.id, "bot", cred);
-    expect(count).toBe(1);
-
-    // Re-import identical material.
-    await reg.confer(conn.connectionKind, conn.id, "bot", { ...cred });
-
-    // Still exactly 1.
-    expect(count).toBe(1);
-  });
-
-  it("conferring different material DOES trigger a new epoch", async () => {
+describe("scenario 4: every conferral is a fresh grant", () => {
+  it("a conferral rebuilds the epoch", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
     const { descriptor, botCredential, talkerFactory } = makeBotAll();
@@ -308,6 +266,36 @@ describe("scenario 4: idempotent conferral", () => {
     // Old instance stopped, new one built.
     expect(firstInstance.state.stopCount).toBe(1);
     expect(talkerFactory.instances).toHaveLength(2);
+  });
+
+  it("re-conferring the same material activates a capability whose build failed", async () => {
+    const reg = makeRegistry(makeLedger());
+    const fx = makePasteTalk();
+    const talker = fx.descriptor.capabilities.talker!;
+    let failNext = true;
+    reg.register({
+      ...fx.descriptor,
+      capabilities: {
+        ...fx.descriptor.capabilities,
+        talker: {
+          ...talker,
+          build(...args: Parameters<typeof talker.build>) {
+            if (failNext) {
+              failNext = false;
+              throw new Error("build failed");
+            }
+            return talker.build(...args);
+          },
+        },
+      },
+    });
+    const conn = await reg.connect("fake-telegram");
+
+    await reg.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
+    expect(conn.isUnlocked("talk")).toBe(false);
+    await reg.confer(conn.connectionKind, conn.id, "bot", fx.validCredential());
+
+    expect(conn.isUnlocked("talk")).toBe(true);
   });
 
   it("re-conferring same material with a later expiry keeps the grant from renewing early", async () => {
