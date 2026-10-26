@@ -2,7 +2,8 @@
 // docs/domains/connections.md#grant.
 
 import { createLogger } from "../logger.js";
-import { type ConnectionRegistry, reachedAccount } from "./registry.js";
+import { reachedAccount } from "./connection.js";
+import type { ConnectionRegistry } from "./registry.js";
 
 const log = createLogger("connections");
 

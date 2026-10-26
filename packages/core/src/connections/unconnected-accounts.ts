@@ -24,8 +24,7 @@ export async function isUnconnectedAccount(
  * connection existed only while connected, "Add another account" made one
  * ahead of its setup and Disconnect left the Connection behind, and until
  * email, WhatsApp and the sign-ins ended at disconnect too, theirs stayed. An
- * upgrade can find any of these, and a removal that failed on disconnect
- * leaves one too. Answers the ids it removed; one that fails is logged and
+ * upgrade can find any of these. Answers the ids it removed; one that fails is logged and
  * kept.
  */
 export async function removeUnconnectedAccounts(

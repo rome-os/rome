@@ -65,7 +65,11 @@ describe("registry faults", () => {
   describe("scenario 5: a degraded grant relocks every capability", () => {
     it("a rejection on act degrades the one grant and relocks talk and watch with it", async () => {
       const ledger = makeLedger();
-      const registry = new ConnectionRegistry({ repository: ledger });
+      const heard: string[] = [];
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        onEvent: (_tx, event) => heard.push(event.kind),
+      });
       const fx = makeBotAll();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-discord");
@@ -84,6 +88,7 @@ describe("registry faults", () => {
       await flush();
 
       expect(conn.auth.grants().bot).toBe("degraded");
+      expect(heard).toEqual(["connected", "fixed", "broken"]);
       expect(conn.act).toBeNull();
       expect(conn.isUnlocked("talk")).toBe(false);
       expect(conn.isUnlocked("watch")).toBe(false);
@@ -881,9 +886,8 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     };
   }
 
-  it("a re-login completing while the degrade LEDGER WRITE is in flight leaves the fresh grant and epoch intact", async () => {
-    // Gate the degrade row write itself — the supersession window AFTER the
-    // pre-write stillCurrent check passed.
+  it("a re-login during the degrade write waits for it, then leaves the fresh grant and epoch", async () => {
+    // Gate the degrade row write itself, after the flow took the grant's lock.
     const { ledger, release } = makeGatedLedger((grant) => grant.state === "degraded");
     const registry = new ConnectionRegistry({ repository: ledger });
     const talkerFactory = makeFakeTalkerFactory();
@@ -896,25 +900,26 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     const epochATalker = talkerFactory.instances.at(-1);
     if (!epochATalker) throw new Error("epoch A talker not built");
 
-    // Fault → renew answers "re-confer" → degradeGrant starts its ledger write
-    // and parks inside it.
+    // Fault → renew answers "re-confer" → degradeGrant starts its write under
+    // the grant's lock and parks inside it.
     epochATalker.state.fault?.(new CredentialRejected({ grant: "session" }));
     await flush();
     expect(conn.auth.grants().session).toBe("authorized"); // write parked, nothing applied
 
-    // A re-login completes during the parked write.
-    await registry.confer(conn.connectionKind, conn.id, "session", {
+    // A re-login arrives during the parked write. It waits for the lock, so
+    // nothing it builds can be torn down by the break.
+    const relogin = registry.confer(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-fresh" },
       expiresAt: "never",
     });
+    await flush();
+    expect(talkerFactory.instances.at(-1)).toBe(epochATalker);
+
+    // The break lands, then the re-login fixes it.
+    release();
+    await relogin;
     const epochBTalker = talkerFactory.instances.at(-1);
     expect(epochBTalker).not.toBe(epochATalker);
-
-    // The parked degrade write now lands ON TOP of the conferral's row — the
-    // flow must not apply it in memory, and must repair the row it clobbered.
-    release();
-    await flush();
-    await flush();
 
     expect(conn.auth.grants().session).toBe("authorized");
     expect(conn.isUnlocked("talk")).toBe(true);
@@ -927,7 +932,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     });
   });
 
-  it("a re-login completing while a SUCCESSFUL RENEWAL's ledger write is in flight is not overwritten by the stale renewal", async () => {
+  it("a re-login during a successful renewal's write waits for it, then replaces the renewed credential", async () => {
     // Gate the renewal row write (the only fault-path write with lastRenewedAt).
     const { ledger, release } = makeGatedLedger((grant) => grant.lastRenewedAt !== undefined);
     const registry = new ConnectionRegistry({ repository: ledger });
@@ -946,30 +951,31 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     const epochATalker = talkerFactory.instances.at(-1);
     if (!epochATalker) throw new Error("epoch A talker not built");
 
-    // Fault → renew succeeds → the authorized+renewed write parks.
+    // Fault → renew succeeds → the authorized+renewed write parks under the
+    // grant's lock.
     epochATalker.state.fault?.(new CredentialRejected({ grant: "session" }));
     await flush();
 
-    // A re-login completes during the parked write.
-    await registry.confer(conn.connectionKind, conn.id, "session", {
+    // A re-login arrives during the parked write and waits for the lock.
+    const relogin = registry.confer(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-fresh" },
       expiresAt: "never",
     });
+    await flush();
+
+    // The renewal lands, then the re-login replaces it.
+    release();
+    await relogin;
     const epochBTalker = talkerFactory.instances.at(-1);
     expect(epochBTalker).not.toBe(epochATalker);
     const buildsAfterRelogin = talkerFactory.instances.length;
-
-    // The stale renewal write lands on top of the conferral — the flow must not
-    // swap the live credential to the stale renewal, rebuild the epoch, or leave
-    // the stale credential in the row.
-    release();
     await flush();
     await flush();
 
     expect(conn.auth.grants().session).toBe("authorized");
     expect(conn.isUnlocked("talk")).toBe(true);
     expect(epochBTalker?.state.stopCount).toBe(0);
-    expect(talkerFactory.instances.length).toBe(buildsAfterRelogin); // no stale rebuild
+    expect(talkerFactory.instances.length).toBe(buildsAfterRelogin); // nothing rebuilt after
     const grant = await ledger.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.credential).toMatchObject({
