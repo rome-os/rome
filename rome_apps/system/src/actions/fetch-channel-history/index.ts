@@ -143,7 +143,12 @@ export function createAction(
         channel: {
           type: "string",
           description:
-            'The account to read: the channel a message arrived on, such as "telegram_user" or a Feishu account\'s id, or a platform such as "whatsapp" or "email", which reads Rome\'s account there. A platform where Rome has several accounts is refused, and the error names them.',
+            'The account to read, by the channel a message arrived on, such as "telegram_user", "email" or a Feishu account\'s id. Give this or `platform`.',
+        },
+        platform: {
+          type: "string",
+          description:
+            'In place of `channel`: read Rome\'s account on this platform, such as "whatsapp" or "email". Refused where Rome holds several accounts there, and the error names their channels.',
         },
         threadId: {
           type: "string",
@@ -173,11 +178,15 @@ export function createAction(
             "When true, also return a structured `messages` array (with per-message attachment metadata: type, url, fileName, mimeType, caption) alongside the markdown `content`. Defaults to false so the default output is unchanged.",
         },
       },
-      required: ["channel"],
+      required: [],
     },
 
     async execute(args): Promise<ActionResult> {
-      const channel = args.channel as string;
+      const selector = {
+        channel: args.channel as string | undefined,
+        platform: args.platform as string | undefined,
+      };
+      const named = selector.channel ?? selector.platform;
       const threadId = (args.threadId as string | undefined) ?? null;
       const limit = args.limit as number | undefined;
       const cursor = args.cursor as string | undefined;
@@ -193,15 +202,16 @@ export function createAction(
 
       const notConfigured: ActionResult = {
         status: "error",
-        error: `Channel "${channel}" is not configured or not running.`,
+        error: `Channel "${named}" is not configured or not running.`,
       };
       let target: Awaited<ReturnType<typeof romeAccountNamed>>;
       try {
-        target = await romeAccountNamed(channels, channel);
+        target = await romeAccountNamed(channels, selector);
       } catch (err) {
         return { status: "error", error: err instanceof Error ? err.message : String(err) };
       }
       if (!target) return notConfigured;
+      const channel = target.name;
 
       log.info("fetching channel history", { channel, threadId, windowHours, limit, paging });
 

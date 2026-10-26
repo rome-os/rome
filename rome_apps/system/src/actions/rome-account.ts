@@ -1,30 +1,37 @@
 import type { ChannelSummary, ChannelsService } from "@rome-os/app-runtime";
 
+/** How a tool names the account to use: a channel by its name, which is the
+ *  address a message arrived on, or a platform, which means Rome's account
+ *  there. The two are separate inputs, so a channel named after its platform
+ *  never stands for the platform. */
+export interface AccountSelector {
+  channel?: string;
+  platform?: string;
+}
+
 /**
- * The account a tool's `channel` names: one of Rome's channels by its name,
- * or else Rome's account on the platform it names, such as `email` or
- * `whatsapp`. The name of a channel Rome holds wins, since it is the address a
- * message arrived on. A platform counts only the accounts Rome holds now, and
- * a channel left behind by a disconnected account is read by its name only
- * where no held account is on a platform of that name. Answers
- * undefined when nothing matches, and throws when Rome holds several accounts
- * on the platform, since picking one would send as the wrong one.
+ * The account `selector` names. A channel is matched by its name alone. A
+ * platform counts only the accounts Rome holds now, so a channel left behind by
+ * a disconnected account never makes it ambiguous. Answers undefined when
+ * nothing matches, and throws when the selector names neither or both, or when
+ * Rome holds several accounts on the platform, since picking one would send as
+ * the wrong one.
  */
 export async function romeAccountNamed(
   channels: ChannelsService,
-  channel: string,
+  { channel, platform }: AccountSelector,
 ): Promise<ChannelSummary | undefined> {
+  if (!channel === !platform) throw new Error("Name either `channel` or `platform`, not both.");
   const summaries = await channels.list();
-  const named = summaries.find((summary) => summary.name === channel);
-  if (named?.sendable) return named;
-  const held = summaries.filter((summary) => summary.sendable && summary.platform === channel);
+  if (channel) return summaries.find((summary) => summary.name === channel);
+  const held = summaries.filter((summary) => summary.sendable && summary.platform === platform);
   if (held.length > 1) {
     const names = held.map((summary) => `"${summary.name}"`).join(", ");
     throw new Error(
-      `Rome has several accounts on "${channel}": ${names}. Name the one to use as \`channel\`.`,
+      `Rome has several accounts on "${platform}": ${names}. Name the one to use as \`channel\`.`,
     );
   }
-  return held[0] ?? named;
+  return held[0];
 }
 
 /** What `send` and `query` take for an account: its platform and id where

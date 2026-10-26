@@ -336,7 +336,7 @@ describe("send_message to an account with an opaque id", () => {
   it("sends as Rome's one account on a platform it names", async () => {
     const adapter = accounts(FIRST);
 
-    await executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" });
+    await executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" });
 
     expect(adapter.send).toHaveBeenCalledWith(FIRST, "42", expect.objectContaining({ text: "hi" }));
   });
@@ -345,8 +345,41 @@ describe("send_message to an account with an opaque id", () => {
     const adapter = accounts(FIRST, SECOND);
 
     await expect(
-      executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" }),
+      executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" }),
     ).rejects.toThrow(`Rome has several accounts on "telegram": "${FIRST}", "${SECOND}"`);
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  // A bot connected before opaque ids has a channel named after its platform.
+  // Its name addresses that bot, and the platform still counts both accounts.
+  it("keeps a channel named after its platform apart from the platform", async () => {
+    const adapter: ChannelsService = {
+      list: rs.fn(async () => [
+        { name: "telegram", platform: "telegram", sendable: true },
+        { name: FIRST, platform: "telegram", sendable: true },
+      ]),
+      send: rs.fn(async (_account, chatId) => ({ chatId })),
+      query: async () => [],
+    };
+
+    await executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" });
+    expect(adapter.send).toHaveBeenCalledWith(
+      "telegram",
+      "42",
+      expect.objectContaining({ text: "hi" }),
+    );
+    await expect(
+      executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" }),
+    ).rejects.toThrow(`Rome has several accounts on "telegram": "telegram", "${FIRST}"`);
+    expect(adapter.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a channel named after a platform once its account is gone", async () => {
+    const adapter = accounts(FIRST);
+
+    await expect(
+      executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" }),
+    ).rejects.toThrow('No Talk connection registered for "telegram"');
     expect(adapter.send).not.toHaveBeenCalled();
   });
 
@@ -354,8 +387,20 @@ describe("send_message to an account with an opaque id", () => {
     const adapter = accounts(FIRST);
 
     await expect(
-      executeSendMessage(adapter, { channel: "discord", threadId: "42", text: "hi" }),
+      executeSendMessage(adapter, { platform: "discord", threadId: "42", text: "hi" }),
     ).rejects.toThrow('No Talk connection registered for "discord"');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a message naming both a channel and a platform, or neither", async () => {
+    const adapter = accounts(FIRST);
+
+    await expect(
+      executeSendMessage(adapter, { channel: FIRST, platform: "telegram", text: "hi" }),
+    ).rejects.toThrow("Name either `channel` or `platform`");
+    await expect(executeSendMessage(adapter, { threadId: "42", text: "hi" })).rejects.toThrow(
+      "Name either `channel` or `platform`",
+    );
     expect(adapter.send).not.toHaveBeenCalled();
   });
 
@@ -367,7 +412,7 @@ describe("send_message to an account with an opaque id", () => {
       query: async () => [],
     };
 
-    await executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" });
+    await executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" });
 
     expect(adapter.send).toHaveBeenCalledWith(
       account,

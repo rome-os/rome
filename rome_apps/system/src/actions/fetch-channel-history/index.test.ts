@@ -264,7 +264,7 @@ describe("fetch_channel_history", () => {
     it("reads Rome's one account there, by its platform and id", async () => {
       const { query, action } = platformDeps("6f1d2c3b-0000-4000-8000-000000000001");
 
-      const result = await action.execute({ channel: "whatsapp" });
+      const result = await action.execute({ platform: "whatsapp" });
 
       expect(result.status).toBe("ok");
       expect(query).toHaveBeenCalledWith(account, expect.anything());
@@ -285,7 +285,7 @@ describe("fetch_channel_history", () => {
         } as ChannelsService,
       });
 
-      expect((await action.execute({ channel: "lark" })).status).toBe("ok");
+      expect((await action.execute({ platform: "lark" })).status).toBe("ok");
       expect((await action.execute({ channel: "released" })).status).toBe("ok");
       expect(query.mock.calls.map(([account]) => account)).toEqual([held, "released"]);
     });
@@ -293,7 +293,7 @@ describe("fetch_channel_history", () => {
     it("refuses a platform where Rome has several accounts", async () => {
       const { query, action } = platformDeps("first", "second");
 
-      const result = await action.execute({ channel: "whatsapp" });
+      const result = await action.execute({ platform: "whatsapp" });
 
       expect(result).toEqual({
         status: "error",

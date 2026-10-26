@@ -170,7 +170,7 @@ export function buildPrompt(
     "Assemble a concise, well-structured briefing in markdown. Gather from these sources, using whatever tools and actions you have:",
     "",
     "1. CALENDAR — check the guardian's Google Calendar for relevant events (today, and tomorrow morning for an evening brief).",
-    "2. MESSAGES — check recent messages on connected channels: WhatsApp (use fetch_channel_history) and email (Gmail). Surface only what needs the guardian's attention; skip spam, marketing, newsletters and automated notifications, even when they ask for a reply. Summarize, don't dump.",
+    "2. MESSAGES — check recent messages on connected channels: WhatsApp (use fetch_channel_history with platform: whatsapp) and email (Gmail). Surface only what needs the guardian's attention; skip spam, marketing, newsletters and automated notifications, even when they ask for a reply. Summarize, don't dump.",
     "3. SCOUTING FINDINGS — the findings below were already gathered by scheduled scouting tasks. Integrate the key points.",
     ...suggestionsInstructions(context, previousSuggestions),
     "",
@@ -237,11 +237,11 @@ async function deliver(
     // id still overrides it for sending to a non-guardian thread.
     const explicitThread = settings.whatsappThreadId.trim();
     args = explicitThread
-      ? { channel: "whatsapp", threadId: explicitThread, text: content }
-      : { channel: "whatsapp", to: "guardian", text: content };
+      ? { platform: "whatsapp", threadId: explicitThread, text: content }
+      : { platform: "whatsapp", to: "guardian", text: content };
   } else {
     args = {
-      channel: "email",
+      platform: "email",
       to: settings.emailTo.trim() || "guardian",
       subject,
       text: content,

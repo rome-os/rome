@@ -15,7 +15,7 @@ import type {
   ChannelsService,
   PreviewPayload,
 } from "@rome-os/app-runtime";
-import { addressOf, romeAccountNamed } from "../rome-account.js";
+import { type AccountSelector, addressOf, romeAccountNamed } from "../rome-account.js";
 import type { SendMessageInput, SendMessageChatInput, SendMessageEmailInput } from "./types.js";
 export type { SendMessageInput, SendMessageOutput } from "./types.js";
 
@@ -344,8 +344,8 @@ async function resolveChatThreadId(
 
 /**
  * The account to send as: the channel `channel` names, as the channel a
- * message arrived on spells it, or else Rome's one account on the platform it
- * names, such as `email` or `whatsapp`.
+ * message arrived on spells it, or Rome's one account on `platform`, such as
+ * `email` or `whatsapp`.
  *
  * An account no Connection can send as is refused before anything else is
  * checked, so an unconfigured channel is not reported as a bad attachment or a
@@ -354,22 +354,33 @@ async function resolveChatThreadId(
  */
 async function sendableAccount(
   channels: ChannelsService,
-  channel: string,
+  selector: AccountSelector,
 ): Promise<ChannelSummary> {
-  const target = await romeAccountNamed(channels, channel);
-  if (!target?.sendable) throw new Error(`No Talk connection registered for "${channel}"`);
+  const target = await romeAccountNamed(channels, selector);
+  if (!target?.sendable) {
+    throw new Error(`No Talk connection registered for "${selector.channel ?? selector.platform}"`);
+  }
   return target;
 }
 
+/** What `send_message` takes: a message naming the account to send as by its
+ *  channel, or by its platform in place of one. */
+export type SendMessageRequest = SendMessageInput extends infer Input
+  ? Input extends SendMessageInput
+    ? Omit<Input, "channel"> & AccountSelector
+    : never
+  : never;
+
 export async function executeSendMessage(
   channels: ChannelsService,
-  requested: SendMessageInput,
+  requested: SendMessageRequest,
   deps: SendMessageRuntimeDeps = {},
 ): Promise<ActionResult> {
-  const target = await sendableAccount(channels, requested.channel);
+  const target = await sendableAccount(channels, requested);
   // Everything after names the account's channel, which People's links and
   // the chat records spell.
-  const input = { ...requested, channel: target.name } as SendMessageInput;
+  const { platform: _platform, ...rest } = requested;
+  const input = { ...rest, channel: target.name } as SendMessageInput;
   const { channel, text, attachments, turnId, parts } = input;
   const platform = target.platform ?? channel;
   const account = addressOf(target);
@@ -480,7 +491,12 @@ export function createSendMessageAction(
         channel: {
           type: "string",
           description:
-            'The account to send as: the channel a message arrived on, such as "webchat", "agents", or a Telegram, Discord or Feishu account\'s id, or a platform such as "email" or "whatsapp", which sends as Rome\'s account there. A platform where Rome has several accounts is refused, and the error names them. "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its id (a UUID, the threadId its messages arrive on) as `threadId`, or, from the main agent, its name as `to`.',
+            'The account to send as, by the channel a message arrived on, such as "webchat", "email", "agents", or a Telegram, Discord or Feishu account\'s id. Give this or `platform`. "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its id (a UUID, the threadId its messages arrive on) as `threadId`, or, from the main agent, its name as `to`.',
+        },
+        platform: {
+          type: "string",
+          description:
+            'In place of `channel`: send as Rome\'s account on this platform, such as "email" or "whatsapp". Refused where Rome holds several accounts there, and the error names their channels.',
         },
         threadId: {
           type: "string",
@@ -552,10 +568,10 @@ export function createSendMessageAction(
           },
         },
       },
-      required: ["channel"],
+      required: [],
     },
     execute: async (input: Record<string, unknown>): Promise<ActionResult> =>
-      executeSendMessage(channels, input as unknown as SendMessageInput, deps),
+      executeSendMessage(channels, input as unknown as SendMessageRequest, deps),
     // Ground-truth render of the bound call. Pure over args (no I/O), so it
     // surfaces the message body and channel — the decision-relevant facts — but
     // deliberately omits the raw threadId/channelUserId recipient, which would
