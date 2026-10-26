@@ -110,12 +110,42 @@ function messageText(raw: string): string {
     .trim();
 }
 
-/** The guardian's Rome Cloud profile, passed to the brief as JSON. */
+function objectToMarkdown(value: unknown, indent = ""): string {
+  if (value == null || (typeof value === "string" && !value.trim())) return "";
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        const content = objectToMarkdown(item, `${indent}  `);
+        if (!content) return "";
+        return typeof item === "object" ? `${indent}-\n${content}` : `${indent}- ${content}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, item]) => {
+        const content = objectToMarkdown(item, `${indent}  `);
+        if (!content) return "";
+        const words = key
+          .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+          .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2");
+        const label = words.charAt(0).toUpperCase() + words.slice(1);
+        const separator = typeof item === "object" ? "\n" : " ";
+        return `${indent}- **${label}:**${separator}${content}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return String(value).replace(/\n/g, `\n${indent}`);
+}
+
 async function readProfile(appContext: RomeAppContext): Promise<string | null> {
   try {
     const res = unwrap(await appContext.runAction("get_guardian_cloud_profile", {}));
-    if (!res.ok || !res.data || typeof res.data !== "object") return null;
-    return Object.keys(res.data).length > 0 ? JSON.stringify(res.data, null, 2) : null;
+    if (!res.ok || !res.data || typeof res.data !== "object" || Array.isArray(res.data))
+      return null;
+    return objectToMarkdown(res.data) || null;
   } catch {
     return null;
   }
