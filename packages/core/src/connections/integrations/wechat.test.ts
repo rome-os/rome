@@ -17,21 +17,21 @@ import type { ChatId, ChannelMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
 import { WechatAdapter, type WechatAdapterConfig } from "../../channels/wechat.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { Connection, StreamFault, Talker } from "../types.js";
 import { createWechatDescriptor } from "./wechat.js";
 
-// A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
+// A fresh drizzle-backed connections repository per test;
 // opened DBs are closed after each test.
 const openDbs: Array<() => void> = [];
 afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 function flush(): Promise<void> {
@@ -86,7 +86,7 @@ class FakeWechatAdapter {
 
 function setup(): { registry: ConnectionRegistry; adapters: FakeWechatAdapter[] } {
   const adapters: FakeWechatAdapter[] = [];
-  const registry = new ConnectionRegistry({ ledger: makeLedger() });
+  const registry = new ConnectionRegistry({ repository: makeLedger() });
   registry.register(
     createWechatDescriptor({
       createAdapter: (config) => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { NO_GRANT } from "../connections/grant.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import type { ChannelRecord } from "../db/repositories/channel-records.js";
 import {
   ConnectedAccountNotFound,
@@ -233,10 +234,16 @@ describe("linkAccountAgent", () => {
     testDb = createTestDb();
     const db = testDb.db;
     const accounts = new ConnectedAccountsRepository(db);
-    const ledger = new DrizzleGrantLedger(db);
+    const ledger = new DrizzleConnectionsRepository(db);
     const kinds = new Map<string, string>();
     const connect = (id: string, connectionKind: string) => {
-      ledger.writeConnection(db, { id, connectionKind, label: connectionKind, createdAt: NOW });
+      ledger.save(db, {
+        id,
+        connectionKind,
+        label: connectionKind,
+        createdAt: NOW,
+        grant: NO_GRANT,
+      });
       accounts.add(db, id);
       kinds.set(id, connectionKind);
     };

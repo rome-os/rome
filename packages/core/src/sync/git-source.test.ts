@@ -14,7 +14,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterAll, afterEach, describe, expect, it } from "@rstest/core";
 import type { GithubGrantProfile } from "../connections/integrations/oauth-providers.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import type { DrizzleDb } from "../db/index.js";
 import { createTestDb } from "../test/helpers.js";
 import {
@@ -51,25 +51,20 @@ function useTokenFile(): string {
   return path;
 }
 
-/** Seed a connected GitHub grant carrying `profile` in the ledger. */
+/** Seed a connected GitHub grant carrying `profile` in the store. */
 async function seedGithubGrant(
   db: ReturnType<typeof createTestDb>["db"],
   profile: GithubGrantProfile | undefined,
   id = "conn-github",
 ): Promise<void> {
-  const ledger = new DrizzleGrantLedger(db);
-  await ledger.createConnection({
+  const ledger = new DrizzleConnectionsRepository(db);
+  ledger.save(db, {
     id,
     connectionKind: "github",
     label: "github",
     createdAt: new Date(),
+    grant: { state: "authorized", ...(profile ? { profile } : {}) },
   });
-  await ledger.ensureGrant(id);
-  await ledger.updateGrant(id, (current) => ({
-    ...current,
-    state: "authorized",
-    ...(profile ? { profile } : {}),
-  }));
 }
 
 /** A private repo on `main` with one committed `tracked.txt`. Copies one

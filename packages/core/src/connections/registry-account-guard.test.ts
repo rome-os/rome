@@ -7,11 +7,11 @@ import type { PersonMappingRepository } from "../db/repositories/person-mapping.
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb, testAccountLinkOf } from "../test/helpers.js";
 import { AccountAlreadyConnectedError, DifferentAccountError } from "./errors.js";
-import { DrizzleGrantLedger } from "./ledger-db.js";
+import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import { SetupManager } from "./setup/manager.js";
 import type { SetupFn } from "./setup/types.js";
-import { makePasteTalk } from "./test-fixtures.js";
+import { makePasteTalk, updateGrant } from "./test-fixtures.js";
 import type { ConnectionDescriptor, Credential } from "./types.js";
 
 const SERVICE = "fake-telegram";
@@ -35,8 +35,8 @@ const credentialFor = (token: string): Credential => ({
 
 function setupRegistry(setup?: SetupFn) {
   const db = createTestDb();
-  const ledger = new DrizzleGrantLedger(db.db);
-  const registry = new ConnectionRegistry({ ledger });
+  const ledger = new DrizzleConnectionsRepository(db.db);
+  const registry = new ConnectionRegistry({ repository: ledger });
   registry.register(botIdDescriptor(setup));
   return { ...db, ledger, registry };
 }
@@ -55,10 +55,10 @@ describe("ConnectionRegistry.confer account guard", () => {
 
       await expect(refused).rejects.toBeInstanceOf(AccountAlreadyConnectedError);
       await expect(refused).rejects.toMatchObject({ connectionId: first.id, accountId: "100" });
-      await expect(ledger.getGrant(second.id)).resolves.toMatchObject({
+      await expect(ledger.grantOf(second.id)).resolves.toMatchObject({
         state: "unauthorized",
       });
-      expect((await ledger.getGrant(second.id))?.profile).toBeUndefined();
+      expect((await ledger.grantOf(second.id))?.profile).toBeUndefined();
       expect(second.isUnlocked("talk")).toBe(false);
     } finally {
       close();
@@ -76,7 +76,7 @@ describe("ConnectionRegistry.confer account guard", () => {
       });
 
       await expect(refused).rejects.toBeInstanceOf(DifferentAccountError);
-      await expect(ledger.getGrant(first.id)).resolves.toMatchObject({
+      await expect(ledger.grantOf(first.id)).resolves.toMatchObject({
         profile: { botId: "100" },
       });
     } finally {
@@ -92,7 +92,7 @@ describe("ConnectionRegistry.confer account guard", () => {
 
       await registry.confer(SERVICE, first.id, "bot", credentialFor("t-2"), { botId: "100" });
 
-      await expect(ledger.getGrant(first.id)).resolves.toMatchObject({
+      await expect(ledger.grantOf(first.id)).resolves.toMatchObject({
         state: "authorized",
         profile: { botId: "100" },
       });
@@ -106,7 +106,7 @@ describe("ConnectionRegistry.confer account guard", () => {
     try {
       const first = await registry.connect(SERVICE);
       await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
-      await ledger.updateGrant(first.id, (current) => ({
+      await updateGrant(ledger, first.id, (current) => ({
         ...current,
         state: "degraded",
         degraded: { at: new Date(0), reason: "token revoked upstream" },
@@ -114,7 +114,7 @@ describe("ConnectionRegistry.confer account guard", () => {
 
       await registry.confer(first.connectionKind, first.id, "bot", credentialFor("t-2"));
 
-      const grant = await ledger.getGrant(first.id);
+      const grant = await ledger.grantOf(first.id);
       expect(grant).toMatchObject({ state: "authorized" });
       expect(grant?.profile).toBeUndefined();
       expect(grant?.account).toBeUndefined();
@@ -133,7 +133,7 @@ describe("ConnectionRegistry.confer account guard", () => {
 
       await registry.confer(SERVICE, second.id, "bot", credentialFor("t-2"), { botId: "200" });
 
-      await expect(ledger.getGrant(second.id)).resolves.toMatchObject({
+      await expect(ledger.grantOf(second.id)).resolves.toMatchObject({
         state: "authorized",
         profile: { botId: "200" },
       });
@@ -152,7 +152,7 @@ describe("ConnectionRegistry.confer account guard", () => {
 
       await registry.confer(SERVICE, second.id, "bot", credentialFor("t-1"), { botId: "100" });
 
-      await expect(ledger.getGrant(second.id)).resolves.toMatchObject({
+      await expect(ledger.grantOf(second.id)).resolves.toMatchObject({
         state: "authorized",
       });
     } finally {
@@ -195,7 +195,7 @@ describe("ConnectionRegistry.confer account guard", () => {
         status: "failed",
         reason: new AccountAlreadyConnectedError(SERVICE, "100", first.id).message,
       });
-      await expect(ledger.getGrant(second.id)).resolves.toMatchObject({
+      await expect(ledger.grantOf(second.id)).resolves.toMatchObject({
         state: "unauthorized",
       });
     } finally {
@@ -208,14 +208,14 @@ describe("ConnectionRegistry.confer account guard", () => {
     try {
       const first = await registry.connect(SERVICE);
       await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
-      expect((await ledger.getGrant(first.id))?.account).toEqual({
+      expect((await ledger.grantOf(first.id))?.account).toEqual({
         platform: SERVICE,
         accountId: "100",
       });
 
       await registry.revoke(first.id, "bot");
 
-      expect((await ledger.getGrant(first.id))?.account).toBeUndefined();
+      expect((await ledger.grantOf(first.id))?.account).toBeUndefined();
     } finally {
       close();
     }
@@ -224,7 +224,9 @@ describe("ConnectionRegistry.confer account guard", () => {
   it("refuses an account a connection of another kind on its platform reaches", async () => {
     const db = createTestDb();
     try {
-      const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db.db) });
+      const registry = new ConnectionRegistry({
+        repository: new DrizzleConnectionsRepository(db.db),
+      });
       const { descriptor } = makePasteTalk();
       registry.register({ ...descriptor, connectionKind: "telegram" });
       registry.register({ ...descriptor, connectionKind: "telegram_user" });
@@ -248,7 +250,9 @@ describe("ConnectionRegistry.confer account guard", () => {
   it("lets the same id on another platform connect", async () => {
     const db = createTestDb();
     try {
-      const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db.db) });
+      const registry = new ConnectionRegistry({
+        repository: new DrizzleConnectionsRepository(db.db),
+      });
       const { descriptor } = makePasteTalk();
       registry.register({ ...descriptor, connectionKind: "feishu", severalAccounts: true });
       const feishu = await registry.connect("feishu");
@@ -272,7 +276,7 @@ describe("ConnectionRegistry.confer account guard", () => {
       const first = await registry.connect(SERVICE);
       await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
       // As for the later of two connections that reached one account.
-      await ledger.updateGrant(first.id, (current) => ({ ...current, account: undefined }));
+      await updateGrant(ledger, first.id, (current) => ({ ...current, account: undefined }));
 
       const refused = registry.confer(SERVICE, first.id, "bot", credentialFor("t-9"), {
         botId: "900",
@@ -291,7 +295,7 @@ describe("ConnectionRegistry account participants", () => {
     const minted: Array<{ kind: string; accountId?: string }> = [];
     const recorded: Array<{ id: string; accountId: string }> = [];
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(db.db),
+      repository: new DrizzleConnectionsRepository(db.db),
       onMint: (_tx, record, _profile, account) =>
         minted.push({ kind: record.connectionKind, accountId: account?.accountId }),
       onAccount: (_tx, { id }, account) => recorded.push({ id, accountId: account.accountId }),
@@ -320,7 +324,7 @@ describe("ConnectionRegistry account records", () => {
     const db = createTestDb();
     const records = new ChannelRecordsRepository(db.db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(db.db),
+      repository: new DrizzleConnectionsRepository(db.db),
       onMint: (tx, record, _profile, account) =>
         records.claim(tx, { ...record, account }, record.createdAt),
       onAccount: (tx, connection, account) =>

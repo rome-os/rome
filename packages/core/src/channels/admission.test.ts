@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
@@ -61,7 +61,9 @@ describe("a channel's Connection across epochs", () => {
         },
       },
     };
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(descriptor);
     const connection = await registry.connect("discord");
     const admit = rs.fn(
@@ -152,7 +154,9 @@ describe("a channel's Connection across epochs", () => {
   it("admits a message even before anyone subscribes", async () => {
     testDb = createTestDb();
     let deliver: ((message: ChannelMessage) => void) | undefined;
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register({
       connectionKind: "telegram",
       grant: "bot",

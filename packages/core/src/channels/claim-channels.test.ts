@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
-import type { GrantRecord } from "../connections/ledger.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
+import type { GrantRecord } from "../connections/grant.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb, type TestDb, testAccountLinkOf } from "../test/helpers.js";
 import { claimChannels, recordChannelAccounts } from "./claim-channels.js";
@@ -82,19 +82,18 @@ describe("claimChannels", () => {
     // createTestDb has run every migration, 0083 included, and found no
     // channel to move, so the boot pass alone decides this channel's platform.
     testDb = createTestDb();
-    const ledger = new DrizzleGrantLedger(testDb.db);
-    ledger.writeConnection(testDb.db, {
+    const ledger = new DrizzleConnectionsRepository(testDb.db);
+    ledger.save(testDb.db, {
       id: "c1",
       connectionKind: "feishu",
       label: "Lark",
       createdAt: new Date(),
-    });
-    ledger.writeEnsureGrant(testDb.db, "c1");
-    ledger.writeGrant(testDb.db, "c1", {
-      state: "authorized",
-      credential: {
-        material: { kind: "inline", record: { appId: "a", domain: "lark" } },
-        expiresAt: "never",
+      grant: {
+        state: "authorized",
+        credential: {
+          material: { kind: "inline", record: { appId: "a", domain: "lark" } },
+          expiresAt: "never",
+        },
       },
     });
     const records = new ChannelRecordsRepository(testDb.db, testAccountLinkOf);
@@ -104,7 +103,7 @@ describe("claimChannels", () => {
       records,
       recordedAccounts(),
       [{ id: "c1", connectionKind: "feishu" }],
-      async (id) => domainOfGrant(await ledger.getGrant(id)),
+      async (id) => domainOfGrant(await ledger.grantOf(id)),
     );
 
     expect(records.byConnection("c1")?.platform).toBe("lark");
@@ -124,10 +123,10 @@ describe("claimChannels", () => {
     };
 
     await recordChannelAccounts(testDb.db, records, {
-      getGrant: async (id) => grants[id] ?? null,
+      grantOf: async (id) => grants[id] ?? null,
     });
 
-    // Read by id: these grants are not in the ledger, so none reaches the account.
+    // Read by id: these grants are not in the store, so none reaches the account.
     expect(records.byId(tg)?.platformAccountId).toBe("bot-1");
     // A grant given up reaches no account, and a grant naming none tells nothing.
     expect(records.byId(email)?.platformAccountId).toBeNull();

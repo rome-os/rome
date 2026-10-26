@@ -21,7 +21,7 @@ import type {
   AppConnectionAccessRepository,
   AppConnectionInvocationRecord,
 } from "../db/repositories/app-connection-access.js";
-import type { GrantRecord } from "./ledger.js";
+import type { GrantValue } from "./grant.js";
 import type { ConnectionRegistry } from "./registry.js";
 import type { Connection, OperationDescriptor, ProfileDisplay } from "./types.js";
 
@@ -259,7 +259,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   ): Promise<AppConnectionBrokerResult<AppConnectionDescription>> {
     if (!this.isReady()) return brokerUnavailable();
     const policies = await this.access.listActiveForConnection(appId, input.connectionId);
-    const grant = await this.registry.getLedger().getGrant(input.connectionId);
+    const grant = await this.registry.grantOf(input.connectionId);
     if (
       !grant ||
       !policies.some(
@@ -305,7 +305,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     const supported = this.supportedOperations(connection, input.identity);
     if (!supported.ok) return supported;
     const policies = await this.access.listActiveForConnection(appId, input.connectionId);
-    const grant = await this.registry.getLedger().getGrant(input.connectionId);
+    const grant = await this.registry.grantOf(input.connectionId);
     const byOperation = new Map(
       policies
         .filter(
@@ -383,7 +383,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     if (!connection) {
       return await denied(failure("connection_not_found", "The connection is unavailable."));
     }
-    const grant = await this.registry.getLedger().getGrant(connection.id);
+    const grant = await this.registry.grantOf(connection.id);
     if (!policyMatchesGrant(activePolicy, grant)) {
       return await denied(failure("access_denied", "The operation is not granted."));
     }
@@ -632,7 +632,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     if (!validation.ok) return await fail(validation.error.code);
     const constrained = enforceConstraints(invocation.input, policy.constraints);
     if (!constrained.ok) return await fail(constrained.error.code);
-    const grant = await this.registry.getLedger().getGrant(connection.id);
+    const grant = await this.registry.grantOf(connection.id);
     if (!grant || grant.state === "unauthorized") {
       return await fail("authorization_required");
     }
@@ -878,7 +878,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     return { ok: true, value: true };
   }
 
-  private describeIdentity(connection: Connection, identity: string, grant: GrantRecord) {
+  private describeIdentity(connection: Connection, identity: string, grant: GrantValue) {
     let profile: ProfileDisplay | undefined;
     if (grant.profile) {
       const revive = this.registry.getDescriptor(connection.connectionKind)?.reviveProfile;
@@ -1031,7 +1031,7 @@ function isActive(policy: AppConnectionAccessRecord, now = new Date()): boolean 
   return !policy.revokedAt && (!policy.expiresAt || policy.expiresAt > now);
 }
 
-function policyMatchesGrant(policy: AppConnectionAccessRecord, grant: GrantRecord | null): boolean {
+function policyMatchesGrant(policy: AppConnectionAccessRecord, grant: GrantValue | null): boolean {
   return Boolean(
     grant &&
       ((grant.conferralEpoch && policy.grantConferralEpoch === grant.conferralEpoch) ||

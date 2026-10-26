@@ -15,8 +15,8 @@ import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
+import type { GrantValue } from "../../connections/grant.js";
 import { reachedAccount } from "../../connections/registry.js";
-import type { GrantRecord } from "../../connections/ledger.js";
 import type {
   Capability,
   CapabilityStatus,
@@ -103,7 +103,7 @@ interface ConnectionView
   setups: Record<GrantName, string>;
 }
 
-/** Per-grant extras for the detail view — ledger envelope fields the list
+/** Per-grant extras for the detail view — grant envelope fields the list
  *  doesn't carry, normalized to ISO strings (no raw DB values). */
 interface GrantDetailView {
   conferredAt: string | null;
@@ -122,18 +122,18 @@ function connectHint(connectionKind: string): ConnectHint | null {
   };
 }
 
-/** One ledger read per connection; both view builders below project from it. */
+/** One grant read per connection; both view builders below project from it. */
 async function loadGrant(
   registry: ConnectionRegistry,
   conn: Connection,
-): Promise<GrantRecord | null> {
-  return registry.getLedger().getGrant(conn.id);
+): Promise<GrantValue | null> {
+  return registry.grantOf(conn.id);
 }
 
 /** The account `record`'s grant reaches, as the wire names it. */
 function accountView(
   descriptor: ConnectionDescriptor | null,
-  record: GrantRecord | null,
+  record: GrantValue | null,
 ): AccountValue | null {
   const account = descriptor && record ? reachedAccount(descriptor, record) : undefined;
   return account ? { platform: account.platform, id: account.accountId } : null;
@@ -142,7 +142,7 @@ function accountView(
 function buildConnectionView(
   registry: ConnectionRegistry,
   conn: Connection,
-  record: GrantRecord | null,
+  record: GrantValue | null,
   manager: SetupManager | null,
   channel: ChannelRecord | null,
   agent: string | null,
@@ -188,7 +188,7 @@ function buildConnectionView(
 
 function buildGrantDetails(
   conn: Connection,
-  rec: GrantRecord | null,
+  rec: GrantValue | null,
 ): Record<GrantName, GrantDetailView> {
   const details: Record<GrantName, GrantDetailView> = {};
   for (const name of Object.keys(conn.auth.grants())) {

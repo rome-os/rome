@@ -21,7 +21,7 @@ import type { PersonMappingRepository } from "../../db/repositories/person-mappi
 import { isFeishuAuthError } from "../../channels/feishu.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { Connection, StreamFault, Talker } from "../types.js";
 import { createFeishuDescriptor, feishuRegistrationAddons } from "./feishu.js";
@@ -31,10 +31,10 @@ const openDbs: Array<() => void> = [];
 afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 function flush(): Promise<void> {
@@ -220,7 +220,7 @@ describe("feishu descriptor shape", () => {
 describe("feishu talk lifecycle", () => {
   it("unlocks talk, connects the channel, and delivers inbound once the grant is imported", async () => {
     const channel = new FakeLarkChannel();
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeDescriptor(channel));
     const conn = await registry.connect("feishu");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["app"] });
@@ -392,7 +392,7 @@ describe("feishu Talker fault mapping", () => {
 describe("feishu app-auth fault drives renew-once-then-degrade", () => {
   it("relocks talk after an auth error (credentialsPaste renew answers re-confer)", async () => {
     const channel = new FakeLarkChannel();
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeDescriptor(channel));
     const conn = await registry.connect("feishu");
     await registry.confer(conn.connectionKind, conn.id, "app", validCred());

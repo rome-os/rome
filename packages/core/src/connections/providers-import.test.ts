@@ -33,7 +33,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "../lib/oauth-providers.js";
 import type { OAuthTokenBundle } from "../lib/oauth-token-bundle.js";
 import { DifferentAccountError } from "./errors.js";
-import { DrizzleGrantLedger } from "./ledger-db.js";
+import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import {
   credentialFromBundle,
@@ -45,7 +45,7 @@ import {
   makeOAuthProviderDescriptor,
 } from "./integrations/oauth-providers.js";
 
-// A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
+// A fresh drizzle-backed connections repository per test;
 // the ledger shares each test's db (distinct tables), closed after each test.
 const openDbs: Array<() => void> = [];
 afterEach(() => {
@@ -62,7 +62,7 @@ function makeRegistry(
   db: DrizzleDb,
   providers: OAuthProvider[] = ["github", "slack", "google"],
 ): ConnectionRegistry {
-  const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
   for (const provider of providers) registry.register(makeOAuthProviderDescriptor(provider));
   return registry;
 }
@@ -246,7 +246,7 @@ describe("a malformed conferral fails loudly and stores nothing", () => {
 
 async function grantProfile(registry: ConnectionRegistry, provider: OAuthProvider) {
   const conn = registry.find(provider)[0];
-  const rec = await registry.getLedger().getGrant(conn.id);
+  const rec = await registry.grantOf(conn.id);
   return rec;
 }
 

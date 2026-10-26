@@ -42,11 +42,11 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
 
   app.get("/app-connection-access/:appId", async (c) => {
     const policies = await repo.listActiveForApp(c.req.param("appId"));
-    const ledger = deps.connectionRegistry?.getLedger();
+    const registry = deps.connectionRegistry;
     return c.json({
       policies: await Promise.all(
         policies.map(async (policy) => {
-          const grant = await ledger?.getGrant(policy.connectionId);
+          const grant = await registry?.grantOf(policy.connectionId);
           const conferralStatus =
             grant?.conferralEpoch === policy.grantConferralEpoch
               ? "current"
@@ -171,7 +171,7 @@ async function resolveTarget(
   if (!operation?.appAccess) {
     return { ok: false, status: 404, error: "App-accessible operation not found." };
   }
-  const grant = await deps.connectionRegistry.getLedger().getGrant(target.connectionId);
+  const grant = await deps.connectionRegistry.grantOf(target.connectionId);
   if (!grant?.conferralEpoch || grant.state === "unauthorized") {
     return { ok: false, status: 409, error: "Connection identity is not authorized." };
   }

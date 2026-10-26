@@ -12,7 +12,6 @@ function makeApp(
   options: {
     appEnabled?: () => boolean;
     getGrant?: () => Promise<{
-      custody: string;
       state: "authorized";
       conferredAt: Date;
       conferralEpoch: string;
@@ -79,16 +78,13 @@ function makeApp(
     connectionRegistry: {
       all: () => [connection],
       getDescriptor: (kind: string) => (kind === "fake-docs" ? descriptor : null),
-      getLedger: () => ({
-        getGrant:
-          options.getGrant ??
-          (async () => ({
-            custody: "connection-1",
-            state: "authorized" as const,
-            conferredAt: new Date("2026-10-26T00:00:00.000Z"),
-            conferralEpoch: "conferral-1",
-          })),
-      }),
+      grantOf:
+        options.getGrant ??
+        (async () => ({
+          state: "authorized" as const,
+          conferredAt: new Date("2026-10-26T00:00:00.000Z"),
+          conferralEpoch: "conferral-1",
+        })),
     },
     appConnectionAccessRepo: access,
   } as unknown as ApiDeps;
@@ -144,7 +140,6 @@ describe("App connection access management", () => {
     let conferralEpoch = "conferral-1";
     const { request, close } = makeApp({
       getGrant: async () => ({
-        custody: "connection-1",
         state: "authorized",
         conferredAt: new Date("2026-10-26T00:00:00.000Z"),
         conferralEpoch,
@@ -187,7 +182,6 @@ describe("App connection access management", () => {
         enteredGrantLookup();
         await grantLookupReleased;
         return {
-          custody: "connection-1",
           state: "authorized",
           conferredAt: new Date("2026-10-26T00:00:00.000Z"),
           conferralEpoch: "conferral-1",

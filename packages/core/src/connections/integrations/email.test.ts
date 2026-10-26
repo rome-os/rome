@@ -28,7 +28,7 @@ import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { EmailInboundResult } from "../../channels/email-control.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { ChatId, StreamFault, Talker } from "../types.js";
 import { makeEmailDescriptor, type EmailDescriptorDeps, type EmailInboxMaterial } from "./email.js";
@@ -42,10 +42,10 @@ const openDbs: Array<() => void> = [];
 afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 function flush(): Promise<void> {
@@ -489,7 +489,7 @@ describe("email inbound delivery", () => {
 
 describe("email descriptor over a real ConnectionRegistry", () => {
   it("reports needs-auth for talk before the inbox grant is imported", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(makeProvider())));
     const conn = await registry.connect("email");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
@@ -498,7 +498,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
 
   it("unlocks talk once the inbox grant is imported and delivers inbound", async () => {
     const provider = makeProvider();
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(provider)));
     const conn = await registry.connect("email");
     await registry.confer(conn.connectionKind, conn.id, "inbox", validCred());
@@ -522,7 +522,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
 
   it("degrades the inbox grant after a bad-signature deposit (setup-driven renew ⇒ re-confer)", async () => {
     const provider = makeProvider();
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(provider)));
     const conn = await registry.connect("email");
     await registry.confer(conn.connectionKind, conn.id, "inbox", validCred());

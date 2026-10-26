@@ -13,7 +13,7 @@ import type { ResolvedApp } from "../apps/state.js";
 import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import { appConnectionAccess, appConnectionInvocations, connectionGrants } from "../db/schema.js";
 import { createActionEngineRepos, createTestDb } from "../test/helpers.js";
-import { DrizzleGrantLedger } from "./ledger-db.js";
+import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import type { ConnectionDescriptor, OperationCall, OperationDescriptor } from "./types.js";
 import {
@@ -119,7 +119,7 @@ function harness(
     },
   };
   const registry = new ConnectionRegistry({
-    ledger: new DrizzleGrantLedger(db),
+    repository: new DrizzleConnectionsRepository(db),
   });
   registry.register(descriptor);
   const access = new AppConnectionAccessRepository(db);
@@ -202,7 +202,7 @@ async function grant(
     expiresAt?: Date;
   },
 ) {
-  const currentGrant = await h.registry.getLedger().getGrant(input.connectionId);
+  const currentGrant = await h.registry.grantOf(input.connectionId);
   if (!currentGrant?.conferralEpoch) throw new Error("expected conferred grant");
   return await h.access.put({
     appId: input.appId,
@@ -312,9 +312,8 @@ describe("App connection broker", () => {
         connectionId: connection.id,
         operation: "documents.get",
       });
-      const ledger = h.registry.getLedger();
-      const getGrant = ledger.getGrant.bind(ledger);
-      rs.spyOn(ledger, "getGrant").mockImplementationOnce(async (connectionId) => {
+      const getGrant = h.registry.grantOf.bind(h.registry);
+      rs.spyOn(h.registry, "grantOf").mockImplementationOnce(async (connectionId) => {
         const authorized = await getGrant(connectionId);
         await h.registry.confer(
           "fake-docs",
@@ -774,9 +773,8 @@ describe("App connection broker", () => {
         connectionId: connection.id,
         operation: "documents.create",
       });
-      const ledger = h.registry.getLedger();
-      const getGrant = ledger.getGrant.bind(ledger);
-      rs.spyOn(ledger, "getGrant").mockImplementationOnce(async (connectionId) => {
+      const getGrant = h.registry.grantOf.bind(h.registry);
+      rs.spyOn(h.registry, "grantOf").mockImplementationOnce(async (connectionId) => {
         const current = await getGrant(connectionId);
         await h.access.revoke("app-a", connection.id, "account", "documents.create");
         return current;

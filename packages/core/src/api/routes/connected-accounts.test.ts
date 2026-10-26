@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
-import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
+import { NO_GRANT } from "../../connections/grant.js";
+import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import { createTestDb, type TestDb, testAccountLinkOf } from "../../test/helpers.js";
@@ -22,15 +23,16 @@ describe("connected account routes", () => {
     const db = testDb.db;
     const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const accounts = new ConnectedAccountsRepository(db);
-    const ledger = new DrizzleGrantLedger(db);
+    const ledger = new DrizzleConnectionsRepository(db);
     const held: Array<{ id: string; connectionKind: string }> = [];
     // Connect as the registry does: the connection, its channel and its
     // connected account in one go.
     const connect = (connection: { id: string; connectionKind: string }, channel?: string) => {
-      ledger.writeConnection(db, {
+      ledger.save(db, {
         ...connection,
         label: connection.connectionKind,
         createdAt: NOW,
+        grant: NO_GRANT,
       });
       records.claim(db, connection, NOW, channel ? { id: channel } : {});
       accounts.add(db, connection.id);

@@ -232,7 +232,7 @@ import {
   isCoreMainAgentId,
   parseLegacyArtifactBindings,
 } from "./apps/artifact-id.js";
-import { ConnectionRegistry, DrizzleGrantLedger } from "./connections/index.js";
+import { ConnectionRegistry, DrizzleConnectionsRepository } from "./connections/index.js";
 import { startExpiringCredentialRenewal } from "./connections/expiring-renewal.js";
 import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_KIND } from "./connections/integrations/agents.js";
@@ -406,7 +406,7 @@ async function main() {
   const talks = (connectionKind: string) =>
     connectionRegistry.getDescriptor(connectionKind)?.capabilities.talker !== undefined;
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
-    ledger: new DrizzleGrantLedger(db),
+    repository: new DrizzleConnectionsRepository(db),
     onMint: (tx, record, profile, account) => {
       if (!talks(record.connectionKind)) return;
       channelRecords.claim(tx, { ...record, domain: domainOf(profile), account }, record.createdAt);
@@ -1547,11 +1547,11 @@ async function main() {
     channelRecords,
     connectedAccounts,
     connectionRegistry.all().filter((c) => talks(c.connectionKind)),
-    async (id) => domainOfGrant(await connectionRegistry.getLedger().getGrant(id)),
+    async (id) => domainOfGrant(await connectionRegistry.grantOf(id)),
   );
   // A channel recorded before channels knew their account learns it from its
   // connection's grant.
-  await recordChannelAccounts(db, channelRecords, connectionRegistry.getLedger());
+  await recordChannelAccounts(db, channelRecords, connectionRegistry);
   connectionRegistry.startCapabilities();
   // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
   // token the connector reads from its custody file as rejected.

@@ -13,7 +13,7 @@ import type { ApiDeps } from "../../api/deps.js";
 import { WhatsAppAdapter, type WhatsAppSocketFactory } from "../../channels/whatsapp.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { createTestDb } from "../../test/helpers.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { SetupManager } from "../setup/manager.js";
 import type { SetupState } from "../setup/types.js";
@@ -57,7 +57,7 @@ afterEach(() => {
 function harness() {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
   const sockets: FakeWhatsAppSocket[] = [];
   const socketFactory = fakeSocketFactory(sockets);
   registry.register(

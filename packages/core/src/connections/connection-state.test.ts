@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
-import { DrizzleGrantLedger } from "./ledger-db.js";
+import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import { CredentialRejected, makePasteTalk } from "./test-fixtures.js";
 
@@ -13,7 +13,9 @@ function flush(): Promise<void> {
 }
 
 async function connected() {
-  const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(createTestDb().db) });
+  const registry = new ConnectionRegistry({
+    repository: new DrizzleConnectionsRepository(createTestDb().db),
+  });
   const fx = makePasteTalk();
   registry.register(fx.descriptor);
   const conn = await registry.connect("fake-telegram");

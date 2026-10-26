@@ -71,7 +71,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - Rome's account record knows its platform and the platform's own id.
 - An account's connection is found by its platform and the platform's own id: the connection whose live grant reaches them.
 - Every kind of connection declares one grant, and everything a connection lets Rome do needs that grant.
-- The ledger keeps one grant per connection.
+- Rome saves a connection whole, with its one grant.
 - Renewing or fixing replaces a connection's grant whole.
 - A fix that reaches another account is refused, the sign-ins such as GitHub included.
 - Connecting through a sign-in such as GitHub is one step, and a sign-in Rome rejects leaves no connection behind.

@@ -15,21 +15,21 @@ import { Bot, GrammyError, type Transformer } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { Connection, StreamFault, Talker } from "../types.js";
 import { isTelegramAuthError, makeTelegramDescriptor } from "./telegram.js";
 
-// A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
+// A fresh drizzle-backed connections repository per test;
 // opened DBs are closed after each test.
 const openDbs: Array<() => void> = [];
 afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 // A macrotask flush: lets the registry's async `void handle…` fault flows
@@ -145,7 +145,7 @@ class FaultBotFactory {
 
 /** Build a real registry with the telegram descriptor over the given factory. */
 function setup(factory: FaultBotFactory): ConnectionRegistry {
-  const registry = new ConnectionRegistry({ ledger: makeLedger() });
+  const registry = new ConnectionRegistry({ repository: makeLedger() });
   registry.register(makeTelegramDescriptor({ createBot: factory.createBot }));
   return registry;
 }

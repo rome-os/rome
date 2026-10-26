@@ -29,6 +29,8 @@ import type {
   WatchEvent,
 } from "./types.js";
 import { tokenPaste } from "./schemes.js";
+import type { GrantValue } from "./grant.js";
+import type { ConnectionsRepository } from "./repository.js";
 
 // recordingSleep — replaces the registry's sleep(ms) in backoff tests.
 
@@ -684,3 +686,13 @@ export function makeCustodyGrant(opts?: { successCount?: number }): CustodyGrant
 // Re-exports used by test files
 
 export { CredentialRejected, Disconnected };
+
+/** Replace connection `id`'s kept grant with `next` of it, as a test sets up
+ *  a state no command reaches, such as a degraded grant. */
+export function updateGrant(
+  repository: Pick<ConnectionsRepository, "update">,
+  id: string,
+  next: (current: GrantValue) => GrantValue,
+): Promise<void> {
+  return repository.update(id, (current) => ({ ...current, grant: next(current.grant) }));
+}
