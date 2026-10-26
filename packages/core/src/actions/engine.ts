@@ -2070,6 +2070,16 @@ export class ActionEngine {
     store: ReplayStore,
     context: ActionRunContext | undefined,
   ): Promise<string> {
+    let preview: PreviewPayload | undefined;
+    try {
+      const action = this.registry.get(actionName);
+      preview = await action?.preview?.(args);
+    } catch (previewErr) {
+      log.warn("action preview renderer threw", {
+        actionName,
+        error: previewErr instanceof Error ? previewErr.message : String(previewErr),
+      });
+    }
     const approvalId = await this.approvalsRepo.create({
       type: "action_execution",
       requestedBy: context?.initiator ?? "unknown",
@@ -2086,21 +2096,11 @@ export class ActionEngine {
         sessionId: context?.sessionId,
         agentName: context?.agentName,
         channelThreadKey: context?.channelThreadKey,
+        preview,
       },
     });
 
     if (this.onApprovalCreated) {
-      let preview: PreviewPayload | undefined;
-      try {
-        const action = this.registry.get(actionName);
-        preview = await action?.preview?.(args);
-      } catch (previewErr) {
-        log.warn("action preview renderer threw", {
-          actionName,
-          error: previewErr instanceof Error ? previewErr.message : String(previewErr),
-        });
-      }
-
       try {
         await this.onApprovalCreated({
           approvalId,

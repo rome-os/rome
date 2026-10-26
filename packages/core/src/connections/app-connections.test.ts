@@ -1,17 +1,22 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { ActionEngine } from "../actions/engine.js";
+import { sendApprovalCard } from "../actions/approval-card.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createRomeAppContext, type RomeAppRuntimeServices } from "../apps/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ResolvedApp } from "../apps/state.js";
 import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
-import { appConnectionInvocations } from "../db/schema.js";
+import { appConnectionAccess, appConnectionInvocations } from "../db/schema.js";
 import { createActionEngineRepos, createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import type { ConnectionDescriptor, OperationCall, OperationDescriptor } from "./types.js";
-import { AppConnectionBroker, createAppConnectionAccessLifecycle } from "./app-connections.js";
+import {
+  AppConnectionBroker,
+  createAppConnectionAccessLifecycle,
+  reconcileAppConnectionAccess,
+} from "./app-connections.js";
 
 const operations: readonly OperationDescriptor[] = [
   {
@@ -110,10 +115,22 @@ function harness(
   const access = new AppConnectionAccessRepository(db);
   const actionRegistry = new ActionRegistryImpl();
   const approvalRequests: Array<{ preview?: unknown }> = [];
-  const engine = new ActionEngine(actionRegistry, createActionEngineRepos(db), {
+  const approvalMessages: unknown[] = [];
+  const engineRepos = createActionEngineRepos(db);
+  const engine = new ActionEngine(actionRegistry, engineRepos, {
     processRole: "worker",
-    onApprovalCreated: (request) => {
+    onApprovalCreated: async (request) => {
       approvalRequests.push(request);
+      await sendApprovalCard(
+        {
+          list: async () => [{ name: "webchat", sendable: true }],
+          send: async (_channel, chatId, message) => {
+            approvalMessages.push(message);
+            return { messageId: "approval-message", chatId };
+          },
+        } as never,
+        request,
+      );
     },
   });
   const broker = new AppConnectionBroker(registry, access, engine, options);
@@ -124,10 +141,12 @@ function harness(
     registry,
     access,
     actionRegistry,
+    approvals: engineRepos.approvals,
     engine,
     broker,
     invocations,
     approvalRequests,
+    approvalMessages,
   };
 }
 
@@ -310,6 +329,9 @@ describe("App connection broker", () => {
         ],
       });
       expect(JSON.stringify(h.approvalRequests[0]?.preview)).not.toContain("secret-input");
+      const approval = await h.approvals.findById(result.approval.approvalId);
+      expect(approval?.payload).toMatchObject({ preview: h.approvalRequests[0]?.preview });
+      expect(JSON.stringify(approval?.payload)).not.toContain("secret-input");
       await expect(
         h.broker.forApp("app-a").invoke({
           connectionId: connection.id,
@@ -331,6 +353,7 @@ describe("App connection broker", () => {
       const approvalAction = h.actionRegistry.get("core:app_connection_write")!;
       const executed = await approvalAction.execute({ invocationId: result.executionId });
       expect(executed).toMatchObject({ status: "ok", data: { ok: true } });
+      expect(JSON.stringify(executed)).not.toContain("not-for-audit");
       expect(h.invocations[0].call).toMatchObject({
         requestId: result.executionId,
         input: { workspaceId: "one", title: "Bound", body: "secret-input" },
@@ -409,6 +432,19 @@ describe("App connection broker", () => {
         expect.objectContaining({ invocationId: expect.any(String) }),
         { ...origin, initiator: "app:app-a", callerAppId: "app-a" },
       );
+      expect(h.approvalMessages).toEqual([
+        expect.objectContaining({
+          parts: [
+            expect.objectContaining({
+              type: "approval_card",
+              preview: expect.objectContaining({
+                title: "Allow App connection operation",
+                summary: "Create a document.",
+              }),
+            }),
+          ],
+        }),
+      ]);
     } finally {
       h.close();
     }
@@ -464,6 +500,74 @@ describe("App connection broker", () => {
         expiresAt: new Date(Date.now() - 1),
       });
       expect(await facade.list()).toEqual({ connections: [] });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("rechecks the policy after claiming and immediately before provider I/O", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+      });
+      const ledger = h.registry.getLedger();
+      const getGrant = ledger.getGrant.bind(ledger);
+      rs.spyOn(ledger, "getGrant").mockImplementationOnce(async (connectionId) => {
+        const current = await getGrant(connectionId);
+        await h.access.revoke("app-a", connection.id, "account", "documents.create");
+        return current;
+      });
+
+      await expect(
+        h.broker.forApp("app-a").invoke({
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.create",
+          requestId: "request-revoked-before-provider",
+          input: { workspaceId: "one", title: "Must not run", body: "private" },
+        }),
+      ).rejects.toMatchObject({ detail: { code: "access_denied" } });
+      expect(h.invocations).toHaveLength(0);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("makes the execution claim conditional on the current policy revision", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+      });
+      const claim = h.access.claimInvocationWithPolicy.bind(h.access);
+      rs.spyOn(h.access, "claimInvocationWithPolicy").mockImplementationOnce(
+        (invocation, expectedStatus, approval, now) => {
+          h.db
+            .update(appConnectionAccess)
+            .set({ revokedAt: new Date(), revision: 2, updatedAt: new Date() })
+            .where(eq(appConnectionAccess.appId, "app-a"))
+            .run();
+          return claim(invocation, expectedStatus, approval, now);
+        },
+      );
+
+      await expect(
+        h.broker.forApp("app-a").invoke({
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.create",
+          requestId: "request-revoked-before-claim",
+          input: { workspaceId: "one", title: "Must not claim", body: "private" },
+        }),
+      ).rejects.toMatchObject({ detail: { code: "access_denied" } });
+      expect(h.invocations).toHaveLength(0);
     } finally {
       h.close();
     }
@@ -606,6 +710,37 @@ describe("App connection broker", () => {
       await expect(
         facade.invoke({ ...request, input: { ...request.input, body: "changed" } }),
       ).rejects.toMatchObject({ detail: { code: "request_id_conflict" } });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("does not deduplicate read operations when a requestId is supplied", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.get",
+      });
+      const request = {
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.get",
+        requestId: "logical-task-id",
+        input: { workspaceId: "one", documentId: "doc" },
+      } as const;
+
+      expect(await h.broker.forApp("app-a").invoke(request)).toMatchObject({
+        status: "ok",
+        data: { operation: "documents.get" },
+      });
+      expect(await h.broker.forApp("app-a").invoke(request)).toMatchObject({
+        status: "ok",
+        data: { operation: "documents.get" },
+      });
+      expect(h.invocations).toHaveLength(2);
     } finally {
       h.close();
     }
@@ -866,6 +1001,25 @@ describe("App connection broker", () => {
       });
       await lifecycle({ appId: "app-a", change: "removed", current: null });
       expect(await h.access.listActiveForApp("app-a")).toHaveLength(0);
+
+      await grant(h, {
+        appId: "orphaned-app",
+        connectionId: connection.id,
+        operation: "documents.get",
+      });
+      await grant(h, {
+        appId: "enabled-broken-app",
+        connectionId: connection.id,
+        operation: "documents.get",
+      });
+      await reconcileAppConnectionAccess(
+        {
+          get: (appId) => (appId === "enabled-broken-app" ? { enabled: true } : null),
+        },
+        h.access,
+      );
+      expect(await h.access.listActiveForApp("orphaned-app")).toHaveLength(0);
+      expect(await h.access.listActiveForApp("enabled-broken-app")).toHaveLength(1);
     } finally {
       h.close();
     }

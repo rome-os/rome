@@ -100,6 +100,14 @@ export class AppConnectionAccessRepository {
     return rows.map((row) => row.connectionId);
   }
 
+  async listUnrevokedAppIds(): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ appId: appConnectionAccess.appId })
+      .from(appConnectionAccess)
+      .where(isNull(appConnectionAccess.revokedAt));
+    return rows.map((row) => row.appId);
+  }
+
   async get(
     appId: string,
     connectionId: string,
@@ -342,6 +350,62 @@ export class AppConnectionAccessRepository {
     return Number(result.changes ?? 0) > 0;
   }
 
+  claimInvocationWithPolicy(
+    invocation: AppConnectionInvocationRecord,
+    expectedStatus: "ready" | "pending_approval",
+    approval: AppConnectionApproval,
+    now = new Date(),
+  ): boolean {
+    return this.db.transaction((tx) => {
+      const policy = tx
+        .select()
+        .from(appConnectionAccess)
+        .where(
+          and(
+            eq(appConnectionAccess.appId, invocation.appId),
+            eq(appConnectionAccess.connectionId, invocation.connectionId),
+            eq(appConnectionAccess.identity, invocation.identity),
+            eq(appConnectionAccess.operation, invocation.operation),
+          ),
+        )
+        .limit(1)
+        .get();
+      if (!policyCurrentForInvocation(policy, invocation, approval, now)) return false;
+      const result = tx
+        .update(appConnectionInvocations)
+        .set({ status: "running", errorCode: null, updatedAt: now })
+        .where(
+          and(
+            eq(appConnectionInvocations.id, invocation.id),
+            eq(appConnectionInvocations.status, expectedStatus),
+          ),
+        )
+        .run();
+      return Number(result.changes ?? 0) > 0;
+    });
+  }
+
+  isInvocationPolicyCurrent(
+    invocation: AppConnectionInvocationRecord,
+    approval: AppConnectionApproval,
+    now = new Date(),
+  ): boolean {
+    const policy = this.db
+      .select()
+      .from(appConnectionAccess)
+      .where(
+        and(
+          eq(appConnectionAccess.appId, invocation.appId),
+          eq(appConnectionAccess.connectionId, invocation.connectionId),
+          eq(appConnectionAccess.identity, invocation.identity),
+          eq(appConnectionAccess.operation, invocation.operation),
+        ),
+      )
+      .limit(1)
+      .get();
+    return policyCurrentForInvocation(policy, invocation, approval, now);
+  }
+
   async appendAudit(input: {
     appId: string;
     connectionId: string;
@@ -436,4 +500,19 @@ export class AppConnectionAccessRepository {
       };
     });
   }
+}
+
+function policyCurrentForInvocation(
+  policy: typeof appConnectionAccess.$inferSelect | undefined,
+  invocation: AppConnectionInvocationRecord,
+  approval: AppConnectionApproval,
+  now: Date,
+): boolean {
+  return Boolean(
+    policy &&
+      policy.revokedAt === null &&
+      (policy.expiresAt === null || policy.expiresAt > now) &&
+      policy.revision === invocation.accessRevision &&
+      policy.approval === approval,
+  );
 }

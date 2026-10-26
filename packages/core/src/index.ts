@@ -242,6 +242,7 @@ import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
   AppConnectionBroker,
   createAppConnectionAccessLifecycle,
+  reconcileAppConnectionAccess,
 } from "./connections/app-connections.js";
 import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
@@ -576,6 +577,7 @@ async function main() {
       onError: (err) => appsLog.warn("runtime-status write failed", { error: err.message }),
     }),
   );
+  appCatalog.subscribe(createAppConnectionAccessLifecycle(appConnectionAccessRepo));
   // Social card image per installed web app. Registered before boot() so the
   // replay covers apps installed while the daemon was down.
   const ogImageStore = createOgImageStore();
@@ -597,6 +599,7 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+  await reconcileAppConnectionAccess(appCatalog, appConnectionAccessRepo);
 
   // Install / refresh ALL first-party apps from the packed artifacts in
   // `dist/first-party-artifacts/` (`pnpm build:apps`, folded into `pnpm build`).
@@ -690,7 +693,6 @@ async function main() {
     actionEngine,
   );
   appConnections.registerActions(actionRegistry);
-  appCatalog.subscribe(createAppConnectionAccessLifecycle(appConnectionAccessRepo));
   const appConnectionCleanupLog = createLogger("app-connection-cleanup");
   const runAppConnectionCleanup = async () => {
     try {

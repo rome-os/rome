@@ -102,6 +102,16 @@ export function createAppConnectionAccessLifecycle(
   };
 }
 
+export async function reconcileAppConnectionAccess(
+  catalog: { get(appId: string): { enabled: boolean } | null },
+  access: Pick<AppConnectionAccessRepository, "listUnrevokedAppIds" | "revokeApp">,
+): Promise<void> {
+  for (const appId of await access.listUnrevokedAppIds()) {
+    const current = catalog.get(appId);
+    if (!current || !current.enabled) await access.revokeApp(appId);
+  }
+}
+
 function expose<T>(result: AppConnectionBrokerResult<T>): T {
   if (!result.ok) throw new AppConnectionError(result.error);
   return result.value;
@@ -361,10 +371,14 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         failure("request_id_required", "Write operations require a stable requestId."),
       );
     }
-    if (input.requestId !== undefined && !validRequestId(input.requestId)) {
+    if (
+      sideEffects === "write" &&
+      input.requestId !== undefined &&
+      !validRequestId(input.requestId)
+    ) {
       return await denied(failure("invalid_input", "The requestId is invalid."));
     }
-    requestIdHash = input.requestId ? digest(input.requestId) : null;
+    requestIdHash = sideEffects === "write" && input.requestId ? digest(input.requestId) : null;
     const serialized = serializeBounded(input.input ?? null, MAX_INPUT_BYTES);
     if (!serialized.ok) return await denied(serialized);
     const validation = this.validateInput(operation, input.input);
@@ -574,10 +588,10 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         "operation_not_found",
       );
     }
-    const claimed = await this.access.transitionInvocation(
-      invocation.id,
-      [expectedStatus],
-      "running",
+    const claimed = this.access.claimInvocationWithPolicy(
+      invocation,
+      expectedStatus,
+      expectedApproval ? "required" : "not_required",
     );
     if (!claimed) return failure("access_denied", "The connection invocation is not runnable.");
     const fail = (code: AppConnectionErrorBody["code"], retryable = false) =>
@@ -609,6 +623,14 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     if (!live?.appAccess || live.appAccess.sideEffects !== expectedEffect) {
       return await fail("operation_not_found");
     }
+    if (
+      !this.access.isInvocationPolicyCurrent(
+        invocation,
+        expectedApproval ? "required" : "not_required",
+      )
+    ) {
+      return await fail("access_denied");
+    }
     try {
       const data = await act.invoke({
         operation: invocation.operation,
@@ -629,7 +651,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         value: {
           status: "ok",
           executionId: invocation.id,
-          ...(data === undefined ? {} : { data: JSON.parse(output.value) }),
+          ...(data === undefined || expectedApproval ? {} : { data: JSON.parse(output.value) }),
         },
       };
     } catch {

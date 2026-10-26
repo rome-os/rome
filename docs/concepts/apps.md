@@ -131,8 +131,10 @@ identity for one operation.
   resource constraint that cannot be resolved from the input denies the call instead of
   broadening it.
 - Invocation uses the Action engine for approval and execution. A write requires a
-  stable request id. Write operations declare the bounded, non-secret fields Core may
-  show in an approval preview. Reusing a request id within the seven-day retention
+  stable request id; request ids on reads are ignored. Write operations declare the
+  bounded, non-secret fields Core may show in an approval preview. Core persists that
+  safe preview with the approval and delivers it to the originating conversation when
+  one exists. Reusing a request id within the seven-day retention
   window never repeats the effect, and an interrupted write whose provider outcome is
   unknown is not retried automatically. Records become eligible for pruning after that
   window and are removed by Core's periodic cleanup even when the App is idle. Disabling
@@ -144,7 +146,8 @@ identity for one operation.
   resolve the created resource.
 - Core rechecks the policy revision and the provider grant immediately before calling
   the live capability. Revocation, expiry, degradation, or replacement cannot leave a
-  captured authority usable.
+  captured authority usable. Startup reconciles persisted policies against the current
+  App catalog before the broker accepts work.
 - The audit trail records attribution, authorization and approval outcomes, an execution
   id, and a hash of the request id. It does not record credentials, operation input, or
   provider output.
