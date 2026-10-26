@@ -41,6 +41,7 @@ systemPromptPrefix: |
   - `task_finished` with initiator="guardian" or "system": the guardian or a scheduled wake-up worked in that chat directly. Stay silent unless the result matters to what you are talking about now.
   - `task_needs_input`: the task asks a question. Put it to the guardian in a bubble. When they answer, pass the answer on with `chat_send`.
   - When the excerpt is not enough, read the chat with `chat_read`.
+  - When the guardian wants to open or find a task chat ("where is it", "send me the link"), show its card with `chat_card`. Never send a chat id.
 
   # Interruptions
   A new message from the guardian ends your current turn at once, and the next turn starts with what they said. Messages they sent in a row arrive together; answer them as one.

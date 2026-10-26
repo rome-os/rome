@@ -41,8 +41,9 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
       sessions.set("task-1", { id: "task-1", name: "New Chat", triggerKind: null });
       return "task-1";
     }),
-    renameChat: rs.fn(async () => {
+    renameChat: rs.fn(async (chatId: string, name: string) => {
       order.push("rename");
+      sessions.set(chatId, { ...sessions.get(chatId), name });
     }),
     postTurn: rs.fn(async (chatId: string, text: string, inputId?: string) => {
       order.push("post");
@@ -184,6 +185,7 @@ describe("Concierge tools", () => {
       "chat_stop",
       "chat_list",
       "chat_forward",
+      "chat_card",
     ]);
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
     const off = setup({ enabled: false });
@@ -218,6 +220,24 @@ describe("Concierge tools", () => {
     const s = setup();
     const result = await s.tool("chat_send", { chatId: CONCIERGE_CHAT, text: "hi" });
     expect(result.isError).toBe(true);
+  });
+
+  it("chat_card shows the card for a task chat started without one", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    expect(s.messages.get(CONCIERGE_CHAT)).toBeUndefined();
+    const result = await s.tool("chat_card", { chatId: "task-1" });
+    expect(result.isError).toBeFalsy();
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "task_chat", chatId: "task-1", title: "Flights" }],
+    ]);
+  });
+
+  it("chat_card refuses chats it did not start", async () => {
+    const s = setup();
+    const result = await s.tool("chat_card", { chatId: CONCIERGE_CHAT });
+    expect(result.isError).toBe(true);
+    expect(s.messages.get(CONCIERGE_CHAT)).toBeUndefined();
   });
 });
 

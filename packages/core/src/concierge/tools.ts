@@ -79,6 +79,14 @@ export async function buildConciergeTools(
     ]);
   };
 
+  // A card that opens the task chat; it reads the chat's live status itself.
+  const showCard = async (chatId: string, title: string) => {
+    const { chatId: conciergeChatId, turnId } = currentTurn();
+    await webchatRepo.addBackendMessage(conciergeChatId, turnId, [
+      { type: "task_chat", chatId, title },
+    ]);
+  };
+
   return [
     {
       name: "say",
@@ -132,7 +140,7 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runFacadeTool("chat_start", input, async (args) => {
-          const { chatId: conciergeChatId, turnId: conciergeTurnId } = currentTurn();
+          currentTurn();
           const title = requireString(args, "title");
           const brief = requireString(args, "brief");
           const chatId = await chatApi.createChat({
@@ -152,11 +160,7 @@ export async function buildConciergeTools(
               error: error instanceof Error ? error.message : String(error),
             }),
           );
-          if (args.card === true) {
-            await webchatRepo.addBackendMessage(conciergeChatId, conciergeTurnId, [
-              { type: "task_chat", chatId, title },
-            ]);
-          }
+          if (args.card === true) await showCard(chatId, title);
           return { chatId, turnId: turn.turnId };
         }),
     },
@@ -272,6 +276,24 @@ export async function buildConciergeTools(
           if (intro) await say(intro, "bubble");
           await say(answer, "long");
           return { forwardedChars: answer.length };
+        }),
+    },
+    {
+      name: "chat_card",
+      description:
+        "Show the guardian a card that opens a task chat and shows its live status. " +
+        "Use it when they want to open or find a task chat, instead of sending its id.",
+      inputSchema: {
+        type: "object",
+        required: ["chatId"],
+        properties: { chatId: { type: "string" } },
+      },
+      handler: (input) =>
+        runFacadeTool("chat_card", input, async (args) => {
+          const chatId = requireString(args, "chatId");
+          const chat = await requireTaskChat(chatId);
+          await showCard(chatId, chat.name);
+          return "Shown; the guardian sees the card.";
         }),
     },
   ];
