@@ -1,5 +1,6 @@
 CREATE TABLE `rome_trace_archive_deletes` (
-	`session_id` text PRIMARY KEY NOT NULL
+	`session_id` text PRIMARY KEY NOT NULL,
+	`remote_uncertain` integer DEFAULT false NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `rome_trace_archives` (
@@ -9,6 +10,7 @@ CREATE TABLE `rome_trace_archives` (
 	`location` text NOT NULL,
 	`bytes` integer NOT NULL,
 	`sha256` text NOT NULL,
+	`upload_may_finish` integer DEFAULT false NOT NULL,
 	`manifest` text,
 	`block_count` integer NOT NULL,
 	`message_count` integer NOT NULL,

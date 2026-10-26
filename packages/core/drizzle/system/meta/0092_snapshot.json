@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1d743b10-ac47-46b2-ba50-659a3a96200f",
+  "id": "2fbb104a-8648-49e8-8b96-de9096f5e428",
   "prevId": "abce59ba-f084-4efa-8758-f48b76e0a00b",
   "tables": {
     "action_executions": {
@@ -2102,6 +2102,14 @@
           "primaryKey": true,
           "notNull": true,
           "autoincrement": false
+        },
+        "remote_uncertain": {
+          "name": "remote_uncertain",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         }
       },
       "indexes": {},
@@ -2154,6 +2162,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "upload_may_finish": {
+          "name": "upload_may_finish",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "manifest": {
           "name": "manifest",
