@@ -313,7 +313,7 @@ describe("scenario 4: idempotent conferral", () => {
 
   it("re-conferring same material with a later expiry keeps the grant from renewing early", async () => {
     const now = new Date("2026-10-26T00:00:00Z");
-    const reg = new ConnectionRegistry({ ledger: makeLedger(), clock: () => now });
+    const reg = new ConnectionRegistry({ repository: makeLedger(), clock: () => now });
     const { descriptor, userScheme } = makeRenewableAct();
     reg.register(descriptor);
     const conn = await reg.connect("fake-github");
