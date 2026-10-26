@@ -128,7 +128,10 @@ function resolveTarget(
     return { ok: false, status: 409, error: "Identity cannot be isolated for App access." };
   }
   const operation = actor.operations?.find((candidate) => candidate.name === target.operation);
-  if (!operation?.appAccess) {
+  if (
+    !operation?.appAccess ||
+    (operation.appAccess.sideEffects === "write" && !operation.appAccess.approvalPreview)
+  ) {
     return { ok: false, status: 404, error: "App-accessible operation not found." };
   }
   return { ok: true, value: target };

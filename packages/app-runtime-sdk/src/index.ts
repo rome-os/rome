@@ -2052,6 +2052,7 @@ export interface CurrentActionContext {
 const CURRENT_ACTION_CONTEXT_RESOLVER = Symbol.for("rome.appRuntime.currentActionContextResolver");
 const CURRENT_ACTION_CONTEXT_RUNNER = Symbol.for("rome.appRuntime.currentActionContextRunner");
 
+/** Context an App may request around a nested call. The host ignores identity fields. */
 export type CurrentActionContextPatch = Partial<CurrentActionContext>;
 
 type CurrentActionContextRunner = <T>(
@@ -2381,6 +2382,7 @@ export interface AppConnectionErrorBody {
     | "resource_unresolved"
     | "request_id_required"
     | "request_id_conflict"
+    | "request_in_progress"
     | "rate_limited"
     | "approval_rejected"
     | "outcome_unknown"

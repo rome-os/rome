@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, it, expect, rs } from "@rstest/core";
 import { context, propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
+import { runWithCurrentActionContext } from "@rome-os/app-runtime";
 import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
 import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
 import { ActionEngine } from "./engine.js";
@@ -186,6 +187,17 @@ describe("WorkerRpcServer App connection identity", () => {
     );
     expect(spoofed.error).toContain("invalid params");
     expect(list).toHaveBeenCalledTimes(1);
+
+    const contextSpoof = await actionExecutionContext.run(store, () =>
+      runWithCurrentActionContext({ actionName: "app-a:work", callerAppId: "app-a" }, () =>
+        worker.call("connections.app.list", { limit: 1 }),
+      ),
+    );
+    expect(contextSpoof).toEqual({
+      ok: true,
+      value: { connections: [{ connectionId: "app-b" }] },
+    });
+    expect(list).toHaveBeenLastCalledWith("app-b", { limit: 1 });
   });
 
   it("denies a connection RPC outside an App-owned action", async () => {

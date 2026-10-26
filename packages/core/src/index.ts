@@ -239,12 +239,15 @@ import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
-import { AppConnectionBroker } from "./connections/app-connections.js";
+import {
+  AppConnectionBroker,
+  createAppConnectionAccessLifecycle,
+} from "./connections/app-connections.js";
 import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
 import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
 import { createOgImageStore } from "./apps/og/store.js";
-import { isResolvedApp, type ResolvedApp } from "./apps/state.js";
+import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./apps/api.js";
 import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
@@ -687,11 +690,7 @@ async function main() {
     actionEngine,
   );
   appConnections.registerActions(actionRegistry);
-  appCatalog.subscribe(async function appConnectionAccessLifecycle(event) {
-    if (!isResolvedApp(event.current)) {
-      await appConnectionAccessRepo.revokeApp(event.appId);
-    }
-  });
+  appCatalog.subscribe(createAppConnectionAccessLifecycle(appConnectionAccessRepo));
   // The "openai" provider runs over the codex app-server JSON-RPC surface
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();

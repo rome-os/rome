@@ -25,9 +25,27 @@ function makeApp() {
             appAccess: { sideEffects: "read-only" },
           },
           {
+            name: "documents.create",
+            description: "Create a document.",
+            inputSchema: { type: "object" },
+            appAccess: {
+              sideEffects: "write",
+              approvalPreview: {
+                summary: "Create a document.",
+                fields: [{ label: "Title", inputPointer: "/title" }],
+              },
+            },
+          },
+          {
             name: "raw.http",
             description: "Core only.",
             inputSchema: { type: "object" },
+          },
+          {
+            name: "documents.unsafe-create",
+            description: "Write without a safe approval preview.",
+            inputSchema: { type: "object" },
+            appAccess: { sideEffects: "write" },
           },
         ],
       },
@@ -101,6 +119,23 @@ describe("App connection access management", () => {
           method: "PUT",
           headers: sameOrigin,
           body: JSON.stringify({ approval: "not_required", constraints: [] }),
+        },
+      );
+      expect(response.status).toBe(404);
+    } finally {
+      close();
+    }
+  });
+
+  it("cannot grant a write operation without a safe approval preview", async () => {
+    const { app, close } = makeApp();
+    try {
+      const response = await app.request(
+        "/app-connection-access/notes/connection-1/account/documents.unsafe-create",
+        {
+          method: "PUT",
+          headers: sameOrigin,
+          body: JSON.stringify({ approval: "required", constraints: [] }),
         },
       );
       expect(response.status).toBe(404);

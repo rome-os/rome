@@ -104,7 +104,7 @@ The caller is the request identity an app observes: the [guardian](people.md#gua
 ## Connection access
 
 An app uses an existing [Connection](../domains/connections.md#connection) through
-`ctx.connections`. Core brokers the call; the app never receives the provider
+`ctx.connections`. Core brokers the call. The app never receives the provider
 credential, client, or unrestricted transport. Provider grants say what the guardian
 has conferred on Rome. App access says which installed app may use one conferred
 identity for one operation.
@@ -129,16 +129,17 @@ identity for one operation.
   resource constraint that cannot be resolved from the input denies the call instead of
   broadening it.
 - Invocation uses the Action engine for approval and execution. A write requires a
-  stable request id. Reusing it never repeats the effect, and an interrupted write whose
-  provider outcome is unknown is not retried automatically.
+  stable request id. Write operations declare the bounded, non-secret fields Core may
+  show in an approval preview. Reusing a request id never repeats the effect, and an
+  interrupted write whose provider outcome is unknown is not retried automatically.
 - Core rechecks the policy revision and the provider grant immediately before calling
   the live capability. Revocation, expiry, degradation, or replacement cannot leave a
   captured authority usable.
 - The audit trail records attribution, authorization and approval outcomes, an execution
   id, and a hash of the request id. It does not record credentials, operation input, or
   provider output.
-- This boundary governs supported runtime paths in the trusted-plugin model. It is not a
-  sandbox against arbitrary code already executing in the Core process.
+- This boundary governs supported runtime paths in the trusted-plugin model. It is not
+  a sandbox against arbitrary code already executing in the Core process.
 
 **Not to be confused with:**
 

@@ -101,6 +101,16 @@ export interface OperationDescriptor {
    */
   appAccess?: {
     sideEffects: "read-only" | "write";
+    /** Safe fields Core may show when a guardian approves this operation. A
+     * write operation must declare this contract before an App can use it. */
+    approvalPreview?: {
+      summary: string;
+      fields?: readonly {
+        label: string;
+        /** RFC 6901 JSON Pointer into the operation input. */
+        inputPointer: string;
+      }[];
+    };
   };
 }
 

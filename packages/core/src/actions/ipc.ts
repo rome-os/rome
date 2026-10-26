@@ -14,7 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { context, propagation, ROOT_CONTEXT } from "@opentelemetry/api";
 import { createLogger } from "../logger.js";
-import { getCurrentActionContext } from "@rome-os/app-runtime";
+import { actionExecutionContext } from "./context.js";
 
 const log = createLogger("ipc");
 
@@ -230,7 +230,7 @@ export class IpcRpc {
     propagation.inject(context.active(), carrier);
     const request: IpcRequestMessage = { type: "rpc_request", reqId, method, params };
     if (Object.keys(carrier).length > 0) request.traceCarrier = carrier;
-    const callerActionName = getCurrentActionContext()?.actionName;
+    const callerActionName = actionExecutionContext.getStore()?.actionName;
     if (callerActionName) request.callerActionName = callerActionName;
     const timeoutMs =
       options?.timeoutMs === null

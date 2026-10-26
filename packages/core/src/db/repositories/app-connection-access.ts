@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, or, gt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, gt, sql } from "drizzle-orm";
 import type { AppConnectionErrorBody, AppConnectionResourceConstraint } from "@rome-os/app-runtime";
 import { appConnectionAccess, appConnectionAudit, appConnectionInvocations } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
@@ -271,6 +271,27 @@ export class AppConnectionAccessRepository {
         updatedAt: new Date(),
       })
       .where(eq(appConnectionInvocations.id, id));
+  }
+
+  async transitionInvocation(
+    id: string,
+    from: AppConnectionInvocationStatus[],
+    status: AppConnectionInvocationStatus,
+    errorCode?: AppConnectionErrorBody["code"] | null,
+    clearInput = false,
+  ): Promise<boolean> {
+    const result = await this.db
+      .update(appConnectionInvocations)
+      .set({
+        status,
+        errorCode: errorCode ?? null,
+        ...(clearInput ? { input: null } : {}),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(eq(appConnectionInvocations.id, id), inArray(appConnectionInvocations.status, from)),
+      );
+    return Number(result.changes ?? 0) > 0;
   }
 
   async appendAudit(input: {

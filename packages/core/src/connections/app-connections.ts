@@ -14,6 +14,8 @@ import type {
 import { AppConnectionError } from "@rome-os/app-runtime";
 import type { ActionEngine } from "../actions/engine.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
+import { actionExecutionContext } from "../actions/context.js";
+import type { CatalogEvent } from "../apps/state.js";
 import type {
   AppConnectionAccessRecord,
   AppConnectionAccessRepository,
@@ -23,6 +25,7 @@ import type { ConnectionRegistry } from "./registry.js";
 import type { Connection, OperationDescriptor, ProfileDisplay } from "./types.js";
 
 const READ_ACTION = "core:app_connection_read";
+const READ_APPROVAL_ACTION = "core:app_connection_read_with_approval";
 const WRITE_ACTION = "core:app_connection_write";
 const APPROVED_WRITE_ACTION = "core:app_connection_write_without_approval";
 const DEFAULT_PAGE_SIZE = 20;
@@ -31,6 +34,8 @@ const MAX_INPUT_BYTES = 64 * 1024;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const DEFAULT_INVOKE_LIMIT = 120;
 const DEFAULT_RATE_WINDOW_MS = 60_000;
+
+type BrokerActionMode = "read" | "read_with_approval" | "write" | "write_without_approval";
 
 export type AppConnectionBrokerResult<T> =
   | { ok: true; value: T }
@@ -71,6 +76,16 @@ function failure(
   retryable = false,
 ): AppConnectionBrokerResult<never> {
   return { ok: false, error: { code, message, retryable } };
+}
+
+export function createAppConnectionAccessLifecycle(
+  access: Pick<AppConnectionAccessRepository, "revokeApp">,
+): (event: CatalogEvent) => Promise<void> {
+  return async (event) => {
+    if (event.change === "removed" || (event.current !== null && !event.current.enabled)) {
+      await access.revokeApp(event.appId);
+    }
+  };
 }
 
 function expose<T>(result: AppConnectionBrokerResult<T>): T {
@@ -141,7 +156,10 @@ export class DeniedAppConnections implements AppConnectionsCapability {
 export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnectionsContextFactory {
   private readonly ajv = new Ajv2020({ allErrors: true, strict: false });
   private readonly validators = new WeakMap<Record<string, unknown>, ValidateFunction>();
-  private readonly invokeWindows = new Map<string, { startedAt: number; count: number }>();
+  private readonly invokeWindows = new Map<
+    string,
+    { startedAt: number; count: number; denialAudited: boolean }
+  >();
   private readonly invokeLimit: number;
   private readonly rateWindowMs: number;
   private readonly now: () => number;
@@ -162,9 +180,10 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   }
 
   registerActions(registry: ActionRegistryImpl): void {
-    registry.register(this.action(READ_ACTION, "read-only", false));
+    registry.register(this.action(READ_ACTION, "read", false));
+    registry.register(this.action(READ_APPROVAL_ACTION, "read_with_approval", true));
     registry.register(this.action(WRITE_ACTION, "write", true));
-    registry.register(this.action(APPROVED_WRITE_ACTION, "write", false));
+    registry.register(this.action(APPROVED_WRITE_ACTION, "write_without_approval", false));
   }
 
   async list(
@@ -290,13 +309,13 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       });
       return result;
     };
+    const rate = this.takeInvokeSlot(appId);
+    if (!rate.allowed) {
+      const result = failure("rate_limited", "The App connection rate limit was reached.", true);
+      return rate.auditDenial ? await denied(result) : result;
+    }
     if (![input.connectionId, input.identity, input.operation].every(validKey)) {
       return await denied(failure("invalid_input", "Connection identifiers are invalid."));
-    }
-    if (!this.takeInvokeSlot(appId)) {
-      return await denied(
-        failure("rate_limited", "The App connection rate limit was reached.", true),
-      );
     }
     const connection = this.findConnection(input.connectionId);
     policy = await this.access.get(appId, input.connectionId, input.identity, input.operation);
@@ -343,19 +362,23 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     });
     if (!stored.created) return this.duplicate(stored.invocation, serialized.value, input);
 
-    const actionName =
-      sideEffects === "read-only"
-        ? READ_ACTION
-        : activePolicy.approval === "required"
-          ? WRITE_ACTION
-          : APPROVED_WRITE_ACTION;
+    const actionName = actionFor(sideEffects, activePolicy.approval);
+    if (activePolicy.approval === "required") {
+      const pending = await this.access.transitionInvocation(
+        invocationId,
+        ["ready"],
+        "pending_approval",
+      );
+      if (!pending) {
+        return failure("request_in_progress", "The request is already in progress.", true);
+      }
+    }
     const result = await this.actionEngine.run(
       actionName,
       { invocationId },
       { initiator: `app:${appId}`, callerAppId: appId },
     );
     if (result.status === "pending_approval") {
-      await this.access.updateInvocation(invocationId, "pending_approval");
       await this.audit(stored.invocation, "pending", "pending_approval");
       return {
         ok: true,
@@ -367,22 +390,45 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       };
     }
     if (result.status !== "ok" || !isBrokerResult(result.data)) {
-      await this.access.updateInvocation(invocationId, "failed", "provider_error", true);
-      await this.audit(stored.invocation, "not_required", "provider_error");
+      await this.access.transitionInvocation(
+        invocationId,
+        ["ready", "pending_approval"],
+        "failed",
+        "provider_error",
+        true,
+      );
+      await this.audit(
+        stored.invocation,
+        activePolicy.approval === "required" ? "pending" : "not_required",
+        "provider_error",
+      );
       return failure("provider_error", "The connection operation failed.", true);
     }
     return result.data;
   }
 
   async approvalRejected(actionName: string, args: Record<string, unknown>): Promise<void> {
-    if (actionName !== WRITE_ACTION || typeof args.invocationId !== "string") return;
+    if (
+      (actionName !== WRITE_ACTION && actionName !== READ_APPROVAL_ACTION) ||
+      typeof args.invocationId !== "string"
+    ) {
+      return;
+    }
     const invocation = await this.access.getInvocation(args.invocationId);
     if (!invocation) return;
-    await this.access.updateInvocation(invocation.id, "rejected", "approval_rejected", true);
+    const rejected = await this.access.transitionInvocation(
+      invocation.id,
+      ["pending_approval"],
+      "rejected",
+      "approval_rejected",
+      true,
+    );
+    if (!rejected) return;
     await this.audit(invocation, "rejected", "approval_rejected");
   }
 
-  private action(name: string, effect: "read-only" | "write", requiresApproval: boolean): Action {
+  private action(name: string, mode: BrokerActionMode, requiresApproval: boolean): Action {
+    const effect = mode.startsWith("read") ? "read-only" : "write";
     return {
       config: {
         name,
@@ -399,31 +445,30 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         if (typeof args.invocationId !== "string") {
           return { status: "error", error: "Missing connection invocation id." };
         }
-        return { status: "ok", data: await this.execute(args.invocationId, effect) };
+        return { status: "ok", data: await this.execute(args.invocationId, mode) };
       },
-      preview: async (args) => {
-        const invocation =
-          typeof args.invocationId === "string"
-            ? await this.access.getInvocation(args.invocationId)
-            : null;
-        return {
-          kind: "generic",
-          title: "Allow App connection operation",
-          summary: invocation
-            ? `${invocation.appId} wants to run ${invocation.operation} on ${invocation.connectionId}.`
-            : "An App wants to use a connection.",
-        };
-      },
+      preview: async (args) => await this.preview(args),
     };
   }
 
   private async execute(
     invocationId: string,
-    expectedEffect: "read-only" | "write",
+    mode: BrokerActionMode,
   ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>> {
+    const expectedEffect = mode.startsWith("read") ? "read-only" : "write";
+    const expectedApproval = mode === "read_with_approval" || mode === "write";
+    const expectedStatus = expectedApproval ? "pending_approval" : "ready";
+    const executionApproval = expectedApproval ? "approved" : "not_required";
     const invocation = await this.access.getInvocation(invocationId);
     if (!invocation || invocation.sideEffects !== expectedEffect) {
       return failure("access_denied", "The connection invocation is invalid.");
+    }
+    const callerAppId = actionExecutionContext.getStore()?.callerAppId;
+    if (callerAppId && callerAppId !== invocation.appId) {
+      return failure("access_denied", "The connection invocation belongs to another App.");
+    }
+    if (invocation.status !== expectedStatus) {
+      return failure("access_denied", "The connection invocation is not runnable.");
     }
     const policy = await this.access.get(
       invocation.appId,
@@ -431,33 +476,65 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       invocation.identity,
       invocation.operation,
     );
-    if (!policy || !isActive(policy) || policy.revision !== invocation.accessRevision) {
-      await this.access.updateInvocation(invocation.id, "failed", "access_denied");
-      await this.audit(
+    if (
+      !policy ||
+      !isActive(policy) ||
+      policy.revision !== invocation.accessRevision ||
+      (policy.approval === "required") !== expectedApproval
+    ) {
+      return await this.failUnclaimedInvocation(
         invocation,
-        expectedEffect === "write" ? "approved" : "not_required",
+        expectedStatus,
+        executionApproval,
         "access_denied",
+        "Connection access changed before execution.",
       );
-      return failure("access_denied", "Connection access changed before execution.");
     }
     const connection = this.findConnection(invocation.connectionId);
-    if (!connection) return await this.failInvocation(invocation, "connection_not_found");
+    if (!connection) {
+      return await this.failUnclaimedInvocation(
+        invocation,
+        expectedStatus,
+        executionApproval,
+        "connection_not_found",
+      );
+    }
     const supported = this.supportedOperations(connection, invocation.identity);
-    if (!supported.ok) return await this.failInvocation(invocation, supported.error.code);
+    if (!supported.ok) {
+      return await this.failUnclaimedInvocation(
+        invocation,
+        expectedStatus,
+        executionApproval,
+        supported.error.code,
+      );
+    }
     const descriptor = supported.value.find((entry) => entry.name === invocation.operation);
     if (!descriptor || descriptor.appAccess?.sideEffects !== expectedEffect) {
-      return await this.failInvocation(invocation, "operation_not_found");
+      return await this.failUnclaimedInvocation(
+        invocation,
+        expectedStatus,
+        executionApproval,
+        "operation_not_found",
+      );
     }
+    const claimed = await this.access.transitionInvocation(
+      invocation.id,
+      [expectedStatus],
+      "running",
+    );
+    if (!claimed) return failure("access_denied", "The connection invocation is not runnable.");
+    const fail = (code: AppConnectionErrorBody["code"], retryable = false) =>
+      this.failInvocation(invocation, code, retryable, executionApproval);
     const validation = this.validateInput(descriptor, invocation.input);
-    if (!validation.ok) return await this.failInvocation(invocation, validation.error.code);
+    if (!validation.ok) return await fail(validation.error.code);
     const constrained = enforceConstraints(invocation.input, policy.constraints);
-    if (!constrained.ok) return await this.failInvocation(invocation, constrained.error.code);
-    const grant = await this.registry.getLedger().getGrant(connection.id, invocation.identity);
+    if (!constrained.ok) return await fail(constrained.error.code);
+    const grant = await this.registry.getLedger().getGrant(connection.id);
     if (!grant || grant.state === "unauthorized") {
-      return await this.failInvocation(invocation, "authorization_required");
+      return await fail("authorization_required");
     }
     if (grant.state === "degraded") {
-      return await this.failInvocation(invocation, "connection_unhealthy");
+      return await fail("connection_unhealthy");
     }
     const actStatus = describeAct(connection);
     if (actStatus.state !== "available") {
@@ -467,15 +544,14 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           : actStatus.state === "unhealthy"
             ? "connection_unhealthy"
             : "capability_unavailable";
-      return await this.failInvocation(invocation, code);
+      return await fail(code);
     }
     const act = connection.act;
-    if (!act) return await this.failInvocation(invocation, "capability_unavailable");
+    if (!act) return await fail("capability_unavailable");
     const live = act.operations().find((entry) => entry.name === invocation.operation);
     if (!live?.appAccess || live.appAccess.sideEffects !== expectedEffect) {
-      return await this.failInvocation(invocation, "operation_not_found");
+      return await fail("operation_not_found");
     }
-    await this.access.updateInvocation(invocation.id, "running");
     try {
       const data = await act.invoke({
         operation: invocation.operation,
@@ -483,13 +559,9 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         ...(expectedEffect === "write" ? { requestId: invocation.id } : {}),
       });
       const output = serializeBounded(data ?? null, MAX_OUTPUT_BYTES);
-      if (!output.ok) return await this.failInvocation(invocation, "provider_error");
+      if (!output.ok) return await fail("provider_error");
       await this.access.updateInvocation(invocation.id, "succeeded", null, true);
-      await this.audit(
-        invocation,
-        expectedEffect === "write" && policy.approval === "required" ? "approved" : "not_required",
-        "succeeded",
-      );
+      await this.audit(invocation, executionApproval, "succeeded");
       return {
         ok: true,
         value: {
@@ -506,14 +578,10 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           "outcome_unknown",
           true,
         );
-        await this.audit(
-          invocation,
-          policy.approval === "required" ? "approved" : "not_required",
-          "outcome_unknown",
-        );
+        await this.audit(invocation, executionApproval, "outcome_unknown");
         return { ok: true, value: { status: "outcome_unknown", executionId: invocation.id } };
       }
-      return await this.failInvocation(invocation, "provider_error", true);
+      return await fail("provider_error", true);
     }
   }
 
@@ -521,10 +589,72 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     invocation: AppConnectionInvocationRecord,
     code: AppConnectionErrorBody["code"],
     retryable = false,
+    approval: "not_required" | "approved" = "not_required",
   ): Promise<AppConnectionBrokerResult<never>> {
     await this.access.updateInvocation(invocation.id, "failed", code, true);
-    await this.audit(invocation, "not_required", code);
+    await this.audit(invocation, approval, code);
     return failure(code, messageFor(code), retryable);
+  }
+
+  private async failUnclaimedInvocation(
+    invocation: AppConnectionInvocationRecord,
+    expectedStatus: "ready" | "pending_approval",
+    approval: "not_required" | "approved",
+    code: AppConnectionErrorBody["code"],
+    message = messageFor(code),
+  ): Promise<AppConnectionBrokerResult<never>> {
+    const failed = await this.access.transitionInvocation(
+      invocation.id,
+      [expectedStatus],
+      "failed",
+      code,
+      true,
+    );
+    if (!failed) return failure("access_denied", "The connection invocation is not runnable.");
+    await this.audit(invocation, approval, code);
+    return failure(code, message);
+  }
+
+  private async preview(args: Record<string, unknown>) {
+    const invocation =
+      typeof args.invocationId === "string"
+        ? await this.access.getInvocation(args.invocationId)
+        : null;
+    if (!invocation) {
+      return {
+        kind: "generic" as const,
+        title: "Allow App connection operation",
+        summary: "An App wants to use a connection.",
+      };
+    }
+    const connection = this.findConnection(invocation.connectionId);
+    const operation = connection ? this.supportedOperations(connection, invocation.identity) : null;
+    const descriptor = operation?.ok
+      ? operation.value.find((entry) => entry.name === invocation.operation)
+      : null;
+    const declared = descriptor?.appAccess?.approvalPreview;
+    const fields = [
+      { label: "App", value: invocation.appId },
+      { label: "Connection", value: connection?.label ?? invocation.connectionId },
+      { label: "Identity", value: invocation.identity },
+      { label: "Operation", value: invocation.operation },
+      ...(declared?.fields ?? []).slice(0, 8).map((field) => {
+        const resolved = resolvePointer(invocation.input, field.inputPointer);
+        return {
+          label: clip(field.label, 80),
+          value: resolved.found ? previewValue(resolved.value) : "Unavailable",
+        };
+      }),
+    ];
+    return {
+      kind: "generic" as const,
+      title: "Allow App connection operation",
+      summary: clip(
+        declared?.summary ?? `${invocation.appId} wants to run ${invocation.operation}.`,
+        240,
+      ),
+      fields,
+    };
   }
 
   private duplicate(
@@ -542,6 +672,9 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     }
     if (invocation.status === "outcome_unknown" || invocation.status === "running") {
       return { ok: true, value: { status: "outcome_unknown", executionId: invocation.id } };
+    }
+    if (invocation.status === "ready" || invocation.status === "pending_approval") {
+      return failure("request_in_progress", "The original request is still in progress.", true);
     }
     if (
       invocation.status === "succeeded" ||
@@ -573,7 +706,15 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       return failure("identity_not_found", "The identity cannot be isolated for App access.");
     }
     const operations = actor.operations ?? connection.act?.operations() ?? [];
-    return { ok: true, value: operations.filter((operation) => operation.appAccess) };
+    return {
+      ok: true,
+      value: operations.filter(
+        (operation) =>
+          operation.appAccess &&
+          (operation.appAccess.sideEffects === "read-only" ||
+            operation.appAccess.approvalPreview !== undefined),
+      ),
+    };
   }
 
   private validateInput(
@@ -596,7 +737,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   }
 
   private async describeIdentity(connection: Connection, identity: string) {
-    const grant = await this.registry.getLedger().getGrant(connection.id, identity);
+    const grant = await this.registry.getLedger().getGrant(connection.id);
     if (!grant) return failure("identity_not_found", "The identity does not exist.");
     let profile: ProfileDisplay | undefined;
     if (grant.profile) {
@@ -645,16 +786,20 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     });
   }
 
-  private takeInvokeSlot(appId: string): boolean {
+  private takeInvokeSlot(appId: string): { allowed: boolean; auditDenial: boolean } {
     const now = this.now();
     const window = this.invokeWindows.get(appId);
     if (!window || now - window.startedAt >= this.rateWindowMs) {
-      this.invokeWindows.set(appId, { startedAt: now, count: 1 });
-      return true;
+      this.invokeWindows.set(appId, { startedAt: now, count: 1, denialAudited: false });
+      return { allowed: true, auditDenial: false };
     }
-    if (window.count >= this.invokeLimit) return false;
+    if (window.count >= this.invokeLimit) {
+      if (window.denialAudited) return { allowed: false, auditDenial: false };
+      window.denialAudited = true;
+      return { allowed: false, auditDenial: true };
+    }
     window.count += 1;
-    return true;
+    return { allowed: true, auditDenial: false };
   }
 }
 
@@ -670,6 +815,32 @@ function summary(connection: Connection) {
           ? ("broken" as const)
           : ("not_connected" as const),
   };
+}
+
+function actionFor(
+  sideEffects: "read-only" | "write",
+  approval: "required" | "not_required",
+): string {
+  if (sideEffects === "read-only") {
+    return approval === "required" ? READ_APPROVAL_ACTION : READ_ACTION;
+  }
+  return approval === "required" ? WRITE_ACTION : APPROVED_WRITE_ACTION;
+}
+
+function clip(value: string, limit: number): string {
+  return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+}
+
+function previewValue(value: unknown): string {
+  if (typeof value === "string") return clip(value, 500);
+  if (typeof value === "number" || typeof value === "boolean" || value === null) {
+    return String(value);
+  }
+  try {
+    return clip(JSON.stringify(canonicalJson(value)) ?? "Unavailable", 500);
+  } catch {
+    return "Unavailable";
+  }
 }
 
 function describeAct(connection: Connection): AppConnectionDescription["act"] {
@@ -833,6 +1004,7 @@ function messageFor(code: AppConnectionErrorBody["code"]): string {
     resource_unresolved: "The operation resource cannot be determined.",
     request_id_required: "The write operation requires a request id.",
     request_id_conflict: "The request id belongs to another request.",
+    request_in_progress: "The original request is still in progress.",
     rate_limited: "The App connection rate limit was reached.",
     approval_rejected: "The guardian rejected the operation.",
     outcome_unknown: "The write outcome is unknown and will not be retried.",
