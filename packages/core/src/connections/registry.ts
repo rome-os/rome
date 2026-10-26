@@ -60,7 +60,7 @@ import type {
 type CapabilityKind = "talker" | "actor" | "watcher";
 
 const KIND_OF: Record<Capability, CapabilityKind> = {
-  talk: "talker",
+  chat: "talker",
   act: "actor",
   watch: "watcher",
 };
@@ -158,7 +158,7 @@ export class ConnectionRegistry {
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
   private readonly connections = new Map<ConnectionId, ConnectionImpl>();
   private readonly unlockHandlers: Record<Capability, Array<(conn: Connection) => void>> = {
-    talk: [],
+    chat: [],
     act: [],
     watch: [],
   };
@@ -731,7 +731,7 @@ class ConnectionImpl implements Connection {
     this.id = record.id;
     this.connectionKind = record.connectionKind;
     this.label = record.label;
-    for (const cap of ["talk", "act", "watch"] as const) {
+    for (const cap of ["chat", "act", "watch"] as const) {
       const kind = KIND_OF[cap];
       const capDef = descriptor.capabilities[kind];
       if (!capDef) continue;
@@ -946,7 +946,7 @@ class ConnectionImpl implements Connection {
 
   status(): Record<Capability, CapabilityStatus> {
     return {
-      talk: this.capStatus("talk"),
+      chat: this.capStatus("chat"),
       act: this.capStatus("act"),
       watch: this.capStatus("watch"),
     };
@@ -960,7 +960,7 @@ class ConnectionImpl implements Connection {
     if (cap === "watch" && slot.subscriptionGated && !this.watchSubscribed) {
       return { state: "needs-subscription" };
     }
-    if (cap === "talk" && slot.epoch) {
+    if (cap === "chat" && slot.epoch) {
       const degradation = slot.degradation?.(slot.epoch.instance as Talker);
       if (degradation) return { state: "unlocked", degradation };
     }
@@ -968,7 +968,7 @@ class ConnectionImpl implements Connection {
   }
 
   withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined {
-    const slot = this.slots.get("talk");
+    const slot = this.slots.get("chat");
     const epoch = slot?.epoch;
     if (!slot || !epoch) return undefined;
     let answer: T;
@@ -985,7 +985,7 @@ class ConnectionImpl implements Connection {
   }
 
   hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null {
-    const slot = this.slots.get("talk");
+    const slot = this.slots.get("chat");
     if (!slot || !slot.epoch) return null;
     slot.messageHandlers.push(handler);
     return () => {

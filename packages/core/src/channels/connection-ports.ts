@@ -325,7 +325,7 @@ export async function sendThrough(
 /**
  * The reply port of `connection`, or null when its talker cannot stream. Each
  * write looks the talker up when it runs, so a reply survives a new credential
- * epoch and fails `unauthorized` while talk is locked, rather than writing as a
+ * epoch and fails `unauthorized` while chat is locked, rather than writing as a
  * stale epoch.
  */
 function connectionReplies(
@@ -479,7 +479,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
   };
 
   // Fires now for each Connection already unlocked, then at every unlock.
-  deps.registry.onUnlocked("talk", (connection) => {
+  deps.registry.onUnlocked("chat", (connection) => {
     if (connection.connectionKind !== backing.connectionKind) return;
     const named = deps.channelOf(connection);
     if (named === channel) attach(connection);

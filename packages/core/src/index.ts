@@ -395,7 +395,7 @@ async function main() {
 
   // Connection registry (use side). Descriptors are registered here at boot, but
   // the load()/import that hydrate + rebuild live connections run LATER — after
-  // the message hook exists, so the first Talk unlock can attach its subscription.
+  // the message hook exists, so the first chat unlock can attach its subscription.
   // Each Connection of a connection kind with a Talk backs one channel, recorded and
   // released in the same transaction as the Connection. A newly connected
   // account of a linkable connection kind gets an opaque id, so it never shares an id
@@ -482,7 +482,7 @@ async function main() {
   // sending by name.
   const listedAgents = externalAgents({
     client: createRomeCloudAgentsClient(),
-    isConnected: () => connectionRegistry.find(AGENTS_KIND).some((conn) => conn.isUnlocked("talk")),
+    isConnected: () => connectionRegistry.find(AGENTS_KIND).some((conn) => conn.isUnlocked("chat")),
   });
   const agentNameResolver = createAgentNames(listedAgents);
   // Grant setups: in-memory session store keyed per grant,
@@ -1444,7 +1444,7 @@ async function main() {
   // A later channel minted at runtime (a second Feishu bot) joins the channel
   // list when its Connection first unlocks Talk, before its stream starts, and
   // a hook that takes added channels subscribes to it.
-  connectionRegistry.onUnlocked("talk", (connection) => {
+  connectionRegistry.onUnlocked("chat", (connection) => {
     const channel = joinLaterChannel(
       {
         registry: connectionRegistry,

@@ -26,7 +26,7 @@ function conn(
     grants: {},
     display: {},
     capabilities: {
-      talk: { state: "unlocked" },
+      chat: { state: "unlocked" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
@@ -79,7 +79,7 @@ describe("buildConnectionCards — runtime degradation", () => {
         connectionKind: "wechat",
         grants: { account: "authorized" },
         capabilities: {
-          talk: {
+          chat: {
             state: "unlocked",
             degradation: {
               reason: "WeChat reported a stale session.",

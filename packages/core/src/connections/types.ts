@@ -70,7 +70,7 @@ export type TalkFeatures = { [K in TalkFeatureName]?: TalkFeatureMap[K] };
 
 export type ConnectionId = string; // opaque; minted with crypto.randomUUID()
 export type GrantName = string;
-export type Capability = "talk" | "act" | "watch";
+export type Capability = "chat" | "act" | "watch";
 export type SecretRecord = Record<string, string>;
 /**
  * The non-secret half of a grant's grant outcome. Like SecretRecord, this
@@ -232,15 +232,15 @@ export interface Connection {
   isUnlocked(cap: Capability): boolean;
   /**
    * Calls `call` with the talker of the live epoch and answers what it
-   * returns, or undefined while talk is locked. Starting and stopping the
+   * returns, or undefined while chat is locked. Starting and stopping the
    * talker are the registry's. A `CredentialRejected` that
    * `call` throws, or that the promise it returns rejects with, runs the
    * grant's fault flow before it reaches the caller. Read the talker inside
    * `call` only: a talker held past it outlives a relock unguarded.
    */
   withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined;
-  /** Hears each message the live talker delivers until talk relocks, or null
-   *  while talk is locked. */
+  /** Hears each message the live talker delivers until chat relocks, or null
+   *  while chat is locked. */
   hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null;
   /** A typed handle iff unlocked, else null — presence IS the runtime check. */
   get act(): Act | null;

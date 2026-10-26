@@ -280,8 +280,8 @@ describe("whatsapp descriptor over a real registry", () => {
   it("reports needs-auth before the session grant is granted", async () => {
     const registry = setup(new FakeWhatsAppAdapter());
     const conn = await registry.connect("whatsapp");
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["session"] });
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["session"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
   });
 
   it("unlocks talk once the session is imported and round-trips send()", async () => {
@@ -290,7 +290,7 @@ describe("whatsapp descriptor over a real registry", () => {
     const conn = await registry.connect("whatsapp");
     await registry.giveGrant(conn.connectionKind, conn.id, "session", sessionCred());
 
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     // WhatsAppAdapter.send addresses by the conversation (the chat JID), and
     // its receipt is the Talk's as it is.
     const receipt = await sendThrough(conn, "120@g.us" as ChatId, { text: "hi" });

@@ -105,6 +105,7 @@ describe("GET /connections", () => {
         bot: { displayName: "Rome Bot", handle: "rome_bot", email: null, avatarUrl: null },
       },
       capabilities: {
+        chat: { state: "unlocked" },
         talk: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
@@ -125,7 +126,7 @@ describe("GET /connections", () => {
     expect(d.label).toBe("Discord");
     expect(d.grants).toEqual({ bot: "unauthorized" });
     expect(d.display).toEqual({ bot: null });
-    expect(d.capabilities.talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
+    expect(d.capabilities.chat).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
     expect(d.capabilities.act).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
   });
 
@@ -154,7 +155,7 @@ describe("GET /connections", () => {
 
     expect(d.state).toBe("broken");
     expect(d.grants).toEqual({ bot: "degraded" });
-    expect(d.capabilities.talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
+    expect(d.capabilities.chat).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
     expect(d.capabilities.act).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
   });
 
@@ -209,6 +210,7 @@ describe("GET /connections", () => {
       grants: { bot: "unauthorized" },
       display: { bot: null },
       capabilities: {
+        chat: { state: "needs-auth", missingGrants: ["bot"] },
         talk: { state: "needs-auth", missingGrants: ["bot"] },
         act: { state: "needs-auth", missingGrants: ["bot"] },
         watch: { state: "needs-auth", missingGrants: ["bot"] },

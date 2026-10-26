@@ -31,7 +31,7 @@ function connection(
     grants: {},
     display: {},
     capabilities: {
-      talk: { state: "unsupported" },
+      chat: { state: "unsupported" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
@@ -259,7 +259,7 @@ describe("ConnectionDetailPage — several accounts", () => {
       channel: "feishu",
       grants: { app: "authorized" },
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },

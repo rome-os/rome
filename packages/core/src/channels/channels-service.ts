@@ -60,7 +60,7 @@ export interface ChannelsServiceDeps {
 
 /** Every Connection that can talk, whether or not it is unlocked now. */
 function talking(registry: Pick<ConnectionRegistry, "all">): Connection[] {
-  return registry.all().filter((connection) => connection.status().talk.state !== "unsupported");
+  return registry.all().filter((connection) => connection.status().chat.state !== "unsupported");
 }
 
 /** The Connection backing a channel, or undefined when none does. A channel

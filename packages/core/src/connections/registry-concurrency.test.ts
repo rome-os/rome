@@ -79,7 +79,7 @@ describe("per-grant lock: same-grant mutations serialize", () => {
 
     // Later-issued revoke wins: memory and ledger agree on unauthorized, no cred.
     expect(conn.auth.grants().bot).toBe("unauthorized");
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.isUnlocked("chat")).toBe(false);
     const rec = await ledger.grantOf(conn.id);
     expect(rec?.state).toBe("unauthorized");
     expect(rec?.credential).toBeUndefined();

@@ -164,7 +164,7 @@ describe("ChannelsSettingsPage", () => {
               grants: {},
               display: {},
               capabilities: {
-                talk: { state: "unlocked" },
+                chat: { state: "unlocked" },
                 act: { state: "unsupported" },
                 watch: { state: "unsupported" },
               },
@@ -259,7 +259,7 @@ describe("ChannelsSettingsPage", () => {
       grants: {},
       display: {},
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },
@@ -330,7 +330,7 @@ describe("ChannelsSettingsPage", () => {
               grants: {},
               display: {},
               capabilities: {
-                talk: { state: "unlocked" },
+                chat: { state: "unlocked" },
                 act: { state: "unsupported" },
                 watch: { state: "unsupported" },
               },
@@ -387,7 +387,7 @@ describe("ChannelsSettingsPage", () => {
               label: "Discord · Rome",
               grants: {},
               display: {},
-              capabilities: { talk: { state: "unlocked" } },
+              capabilities: { chat: { state: "unlocked" } },
               connect: null,
               agent: "sales:agent",
               link: "own_account",

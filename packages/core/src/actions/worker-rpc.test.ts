@@ -274,7 +274,7 @@ describe("WorkerRpcServer param validation", () => {
         id: "email-1",
         service: "4f1c",
         connectionKind: "email",
-        status: () => ({ talk: { state: "unlocked" } }),
+        status: () => ({ chat: { state: "unlocked" } }),
       };
       const withEmail = makeServer({ connectionRegistry: { all: () => [email], ingest } });
       const without = makeServer({ connectionRegistry: { all: () => [], ingest } });

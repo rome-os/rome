@@ -160,7 +160,7 @@ describe("connectionStatus — Telegram fold row states", () => {
         bot: { displayName: null, handle: "mybot", email: null, avatarUrl: null },
       },
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },
@@ -183,7 +183,7 @@ describe("connectionStatus — Telegram fold row states", () => {
         session: { displayName: "My Name", handle: "me", email: null, avatarUrl: null },
       },
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },

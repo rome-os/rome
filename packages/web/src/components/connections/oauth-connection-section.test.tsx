@@ -63,7 +63,7 @@ function githubCard(
     grants: { user: state },
     display: { user: display },
     capabilities: {
-      talk: { state: "unsupported" },
+      chat: { state: "unsupported" },
       act:
         state === "authorized"
           ? { state: "unlocked" }
@@ -94,7 +94,7 @@ function shopifyCard(
     grants: { store: state },
     display: { store: display },
     capabilities: {
-      talk: { state: "unsupported" },
+      chat: { state: "unsupported" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },

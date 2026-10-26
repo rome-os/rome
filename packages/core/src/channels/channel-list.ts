@@ -123,11 +123,11 @@ export function laterChannel(
 }
 
 /**
- * The channel a Connection backs, added to `channels` when its Talk unlocks
+ * The channel a Connection backs, added to `channels` when its chat unlocks
  * and none of them is that channel yet. Null when one already is, or when the
  * connection kind has no Talk, or the Connection backs no channel.
  *
- * Call it from the registry's `onUnlocked("talk")`. The new channel's inbound
+ * Call it from the registry's `onUnlocked("chat")`. The new channel's inbound
  * port registers its own unlock handler while that one is still firing, so the
  * registry hands it this Connection twice. The port keeps one subscription per
  * Connection, so each message still arrives once.

@@ -25,7 +25,7 @@ export type GrantState = "unauthorized" | "authorized" | "degraded";
  *  (docs/domains/connections.md). */
 export type ConnectionState = "working" | "broken";
 
-export type Capability = "talk" | "act" | "watch";
+export type Capability = "chat" | "act" | "watch";
 
 export interface CapabilityDegradation {
   reason: string;

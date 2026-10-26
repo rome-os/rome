@@ -129,7 +129,7 @@ export function ChannelsSettingsPage() {
   const talkConnections = useMemo(
     () =>
       connections.flatMap((connection) =>
-        connection.id !== null && connection.capabilities.talk?.state !== "unsupported"
+        connection.id !== null && connection.capabilities.chat?.state !== "unsupported"
           ? [{ id: connection.id, label: connection.label }]
           : [],
       ),

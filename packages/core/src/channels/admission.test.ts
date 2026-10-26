@@ -111,7 +111,7 @@ describe("a channel's Connection across epochs", () => {
     // Past its epoch nothing reaches the stopped talker.
     await connection.auth.revoke("bot");
     expect(connection.withTalker(() => "reached")).toBeUndefined();
-    expect(connection.isUnlocked("talk")).toBe(false);
+    expect(connection.isUnlocked("chat")).toBe(false);
     await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "second" },
       expiresAt: "never",

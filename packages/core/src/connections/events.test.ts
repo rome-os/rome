@@ -83,7 +83,7 @@ describe("connection events", () => {
       await expect(repository.grantOf(connection.id)).resolves.toMatchObject({
         state: "unauthorized",
       });
-      expect(connection.isUnlocked("talk")).toBe(false);
+      expect(connection.isUnlocked("chat")).toBe(false);
     } finally {
       close();
     }
@@ -106,7 +106,7 @@ describe("connection events", () => {
       );
 
       expect(registry.get(connection.id)).toBe(connection);
-      expect(connection.isUnlocked("talk")).toBe(true);
+      expect(connection.isUnlocked("chat")).toBe(true);
       await expect(repository.grantOf(connection.id)).resolves.toMatchObject({
         state: "authorized",
       });

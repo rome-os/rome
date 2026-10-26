@@ -68,7 +68,7 @@ function connection(
     grants: {},
     display: {},
     capabilities: {
-      talk: { state: "unsupported" },
+      chat: { state: "unsupported" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
@@ -386,7 +386,7 @@ describe("ConnectionDetailBody — accounts", () => {
       grants: { app: "authorized" },
       display: { app: grantDisplay({ displayName: "Support Bot" }) },
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },

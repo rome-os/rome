@@ -480,7 +480,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
         PROFILE,
       );
       expect(conn.auth.grants().session).toBe("authorized");
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
 
       // The account revokes the session server-side: the next probe sees it.
       fakeState.probeError = rpcError(undefined, "SESSION_REVOKED");
@@ -489,7 +489,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
       // renew answers "needs-fix", so one probe fault degrades. The status
       // surface then reads needs-reconnect + reason off the ledger.
       expect(conn.auth.grants().session).toBe("degraded");
-      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.isUnlocked("chat")).toBe(false);
       const grant = await registry.grantOf(conn.id);
       expect(grant?.state).toBe("degraded");
       // The status surface reads `degradedReason` off this — a non-empty reason
@@ -546,7 +546,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
       await clock.advance(0);
 
       expect(conn.auth.grants().session).toBe("authorized");
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
     } finally {
       clock.uninstall();
     }

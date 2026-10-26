@@ -137,8 +137,8 @@ describe("wechat descriptor shape", () => {
   it("reports needs-auth for talk before the account grant is imported", async () => {
     const { registry } = setup();
     const conn = await registry.connect("wechat");
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["account"] });
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["account"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
   });
 
   it("unlocks talk and forwards attachments + typing once the grant is imported", async () => {
@@ -146,8 +146,8 @@ describe("wechat descriptor shape", () => {
     const conn = await registry.connect("wechat");
     await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
 
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(adapters).toHaveLength(1);
     expect(adapters[0].started).toBe(true);
 
@@ -170,7 +170,7 @@ describe("wechat descriptor shape", () => {
     ).resolves.toEqual([]);
   });
 
-  it("reports transient adapter degradation without relocking the talk capability", async () => {
+  it("reports transient adapter degradation without relocking the chat capability", async () => {
     const { registry, adapters } = setup();
     const conn = await registry.connect("wechat");
     await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
@@ -180,14 +180,14 @@ describe("wechat descriptor shape", () => {
       retryAt: "2026-07-20T12:00:00.000Z",
     };
 
-    expect(conn.status().talk).toEqual({
+    expect(conn.status().chat).toEqual({
       state: "unlocked",
       degradation: {
         reason: "WeChat reported a stale session.",
         retryAt: "2026-07-20T12:00:00.000Z",
       },
     });
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(conn.auth.grants().account).toBe("authorized");
   });
 });
@@ -237,22 +237,22 @@ describe("wechat account-401 drives renew-once-then-degrade", () => {
     const { registry, adapters } = setup();
     const conn = await registry.connect("wechat");
     await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
 
     adapters[0].fault(new Error("HTTP 401: unauthorized"));
     await flush();
 
-    expect(conn.isUnlocked("talk")).toBe(false);
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["account"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["account"] });
     expect(conn.auth.grants().account).toBe("degraded");
 
     // Re-importing (a fresh pairing) re-unlocks talk.
     let reUnlocked: Connection | null = null;
-    registry.onUnlocked("talk", (c) => {
+    registry.onUnlocked("chat", (c) => {
       reUnlocked = c;
     });
     await registry.giveGrant(conn.connectionKind, conn.id, "account", validCred());
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     expect(reUnlocked).not.toBeNull();
   });
 });

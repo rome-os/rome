@@ -496,7 +496,7 @@ describe("ChatSettingsService", () => {
     ).toBe("configured");
 
     await registry.stopAll();
-    expect(discord.isUnlocked("talk")).toBe(false);
+    expect(discord.isUnlocked("chat")).toBe(false);
     await expect(
       service.update({
         ref: parent,

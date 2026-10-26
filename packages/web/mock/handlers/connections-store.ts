@@ -24,7 +24,7 @@ export const connections: { connections: ApiConnection[] } = {
         user: { displayName: "Rome Demo", handle: "rome-demo", email: null, avatarUrl: null },
       },
       capabilities: {
-        talk: { state: "unsupported" },
+        chat: { state: "unsupported" },
         act: { state: "unlocked" },
         watch: { state: "unlocked" },
       },
@@ -56,7 +56,7 @@ export const connections: { connections: ApiConnection[] } = {
           [grant]: { displayName: "Rome Demo", handle: null, email, avatarUrl: null },
         },
         capabilities: {
-          talk: { state: "unlocked" },
+          chat: { state: "unlocked" },
           act: { state: "unsupported" },
           watch: { state: "unsupported" },
         },
@@ -79,7 +79,7 @@ export const connections: { connections: ApiConnection[] } = {
         bot: { displayName: "Rome", handle: "rome#4417", email: null, avatarUrl: null },
       },
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },
@@ -100,7 +100,7 @@ export const connections: { connections: ApiConnection[] } = {
         bot: { displayName: "Rome", handle: "@rome_guardian_bot", email: null, avatarUrl: null },
       },
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },
@@ -125,7 +125,7 @@ export const connections: { connections: ApiConnection[] } = {
         session: { displayName: "Rome", handle: "+1 (415) 555-0100", email: null, avatarUrl: null },
       },
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },
@@ -146,7 +146,7 @@ export const connections: { connections: ApiConnection[] } = {
         session: { displayName: "Rome", handle: "rome-guardian", email: null, avatarUrl: null },
       },
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },
@@ -169,6 +169,6 @@ export const connections: { connections: ApiConnection[] } = {
 export function talkConnections(service: string): ApiConnection[] {
   return connections.connections.filter(
     (connection) =>
-      connection.connectionKind === service && connection.capabilities.talk.state === "unlocked",
+      connection.connectionKind === service && connection.capabilities.chat.state === "unlocked",
   );
 }

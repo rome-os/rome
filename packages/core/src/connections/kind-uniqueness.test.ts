@@ -182,13 +182,13 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
         "bot",
         fixture.validCredential(),
       );
-      expect(connection.isUnlocked("talk")).toBe(true);
+      expect(connection.isUnlocked("chat")).toBe(true);
 
       await expect(registry.remove(connection.id)).rejects.toThrow(
         "injected connection deletion failure",
       );
       expect(registry.get(connection.id)).toBe(connection);
-      expect(connection.isUnlocked("talk")).toBe(true);
+      expect(connection.isUnlocked("chat")).toBe(true);
       await expect(ledger.all()).resolves.toHaveLength(1);
 
       await registry.remove(connection.id);

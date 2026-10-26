@@ -304,7 +304,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
 
     const conn = registry.find("email")[0];
     expect(conn.auth.grants().inbox).toBe("authorized");
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
 
     // The provisioned address renders from the grant profile.
     const list = await app.request("/connections");
@@ -351,7 +351,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     });
     expect(del.status).toBe(200);
     expect(registry.find("email")).toHaveLength(0);
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.isUnlocked("chat")).toBe(false);
     // guardianEmail rides the settings row, which the teardown never touches.
     expect(await settingsRepo.get("email")).toEqual({
       enabled: true,
@@ -366,7 +366,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     const [again] = registry.find("email");
     expect(again.id).not.toBe(conn.id);
     expect(again.auth.grants().inbox).toBe("authorized");
-    expect(again.isUnlocked("talk")).toBe(true);
+    expect(again.isUnlocked("chat")).toBe(true);
   });
 
   it("a failed grant fails the setup (grant stays unauthorized); a retry converges", async () => {
@@ -377,14 +377,14 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     expect(failed.state.status).toBe("failed");
     const conn = registry.find("email")[0];
     expect(conn?.auth.grants().inbox ?? "unauthorized").toBe("unauthorized");
-    expect(conn?.isUnlocked("talk") ?? false).toBe(false);
+    expect(conn?.isUnlocked("chat") ?? false).toBe(false);
 
     // The failed setup is terminal, so the next start begins fresh and lands.
     const retried = await runSetup(app);
     expect(retried.state.status).toBe("done");
     const after = registry.find("email")[0];
     expect(after.auth.grants().inbox).toBe("authorized");
-    expect(after.isUnlocked("talk")).toBe(true);
+    expect(after.isUnlocked("chat")).toBe(true);
   });
 });
 
@@ -401,7 +401,7 @@ describe("autoConnectEmail", () => {
     const conns = registry.find("email");
     expect(conns).toHaveLength(1);
     expect(conns[0].auth.grants().inbox).toBe("authorized");
-    expect(conns[0].isUnlocked("talk")).toBe(true);
+    expect(conns[0].isUnlocked("chat")).toBe(true);
     expect(await settingsRepo.get("email")).toEqual({ enabled: true });
   });
 

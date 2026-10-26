@@ -79,6 +79,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - Chats keeps a connected account by its connection, holding only its agent. It is made with the connection and goes with it.
 - The own-account and delegate kinds of link follow from the kind of connection, which alone says whether an account takes an agent, and the dashboard shows them.
 - Linking, switching and unlinking name the connected account by its connection, and the dashboard lists accounts by connection.
+- The code says chat, act and watch for what a connection lets Rome do.
 
 Diffs still owed to the model, each a change of its own:
 
@@ -104,4 +105,3 @@ Diffs still owed to the model, each a change of its own:
 - The channel record goes.
 - Email and WhatsApp accounts end at disconnect like every other, and connecting again starts a fresh connected account.
 - Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
-- The code says chat, act and watch for what a connection lets Rome do.

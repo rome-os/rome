@@ -85,7 +85,7 @@ describe("Settings connections request states", () => {
             display: {},
             setups: {},
             capabilities: {
-              talk: { state: "unsupported" },
+              chat: { state: "unsupported" },
               act: { state: "unsupported" },
               watch: { state: "unsupported" },
             },

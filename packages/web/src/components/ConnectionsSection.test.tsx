@@ -45,7 +45,7 @@ function connection(
     grants: {},
     display: {},
     capabilities: {
-      talk: { state: "unsupported" },
+      chat: { state: "unsupported" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
@@ -225,7 +225,7 @@ describe("ConnectionsSection — list of rows", () => {
         connectionKind: "wechat",
         grants: { account: "authorized" },
         capabilities: {
-          talk: {
+          chat: {
             state: "unlocked",
             degradation: {
               reason: "WeChat reported a stale session.",

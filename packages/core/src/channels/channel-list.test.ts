@@ -629,10 +629,10 @@ describe("joinLaterChannel", () => {
       linkedInAccounts: noAccounts,
       connections: { registry, admit, channelOf },
     });
-    // What index.ts does: every channel a Talk unlock adds, the hook hears.
+    // What index.ts does: every channel a chat unlock adds, the hook hears.
     const joined: string[] = [];
     const heard: InboundEvent[] = [];
-    registry.onUnlocked("talk", (connection) => {
+    registry.onUnlocked("chat", (connection) => {
       const channel = joinLaterChannel({ registry, admit, channelOf, channels }, connection);
       if (!channel) return;
       joined.push(channel.name);

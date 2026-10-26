@@ -28,7 +28,7 @@ function connection(service: string, name: string, agent: string | null): ApiCon
     grants: { bot: "authorized" },
     display: { bot: { displayName: name } },
     capabilities: {
-      talk: { state: "unlocked" },
+      chat: { state: "unlocked" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },

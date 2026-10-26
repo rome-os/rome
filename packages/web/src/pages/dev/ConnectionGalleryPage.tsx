@@ -126,7 +126,7 @@ function apiConnection(
     // Capability statuses don't drive the card presentation (copy is
     // hand-written per service), so a neutral projection suffices.
     capabilities: {
-      talk: { state: "unsupported" },
+      chat: { state: "unsupported" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },

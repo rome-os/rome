@@ -13,7 +13,7 @@ function connection(overrides: Partial<ApiConnection> & { connectionKind: string
     grants: { bot: "authorized" },
     display: { bot: null },
     capabilities: {
-      talk: { state: "unlocked" },
+      chat: { state: "unlocked" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },

@@ -48,7 +48,7 @@ function registryOf(
       id: connectionId,
       connectionKind: service,
       withTalker: (call: (live: typeof talker) => unknown) => call(talker),
-      status: () => ({ talk: { state: "unlocked" } }),
+      status: () => ({ chat: { state: "unlocked" } }),
     } as unknown as Connection;
   });
   return { all: () => all };

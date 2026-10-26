@@ -76,7 +76,7 @@ describe("registry faults", () => {
       await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.botCredential());
 
       expect(conn.act).not.toBeNull();
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
       expect(conn.isUnlocked("watch")).toBe(true);
 
       // Trigger CredentialRejected from act.invoke → tokenPaste fixes → degrade.
@@ -90,10 +90,10 @@ describe("registry faults", () => {
       expect(conn.auth.grants().bot).toBe("degraded");
       expect(heard).toEqual(["connected", "fixed", "broken"]);
       expect(conn.act).toBeNull();
-      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.isUnlocked("chat")).toBe(false);
       expect(conn.isUnlocked("watch")).toBe(false);
       expect(conn.status()).toEqual({
-        talk: { state: "needs-auth", missingGrants: ["bot"] },
+        chat: { state: "needs-auth", missingGrants: ["bot"] },
         act: { state: "needs-auth", missingGrants: ["bot"] },
         watch: { state: "needs-auth", missingGrants: ["bot"] },
       });
@@ -254,7 +254,7 @@ describe("registry faults", () => {
 
       // Prior state: unauthorized, no talk handle.
       expect(conn.auth.grants().bot).toBe("unauthorized");
-      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.isUnlocked("chat")).toBe(false);
       const buildsBefore = fx.talkerFactory.instances.length;
 
       // The import's authorize write throws → the call rejects.
@@ -266,8 +266,8 @@ describe("registry faults", () => {
       // Mirror untouched: grant still unauthorized, no epoch built, status agrees,
       // and the ledger row is unchanged (still unauthorized).
       expect(conn.auth.grants().bot).toBe("unauthorized");
-      expect(conn.isUnlocked("talk")).toBe(false);
-      expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
+      expect(conn.isUnlocked("chat")).toBe(false);
+      expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
       expect(fx.talkerFactory.instances.length).toBe(buildsBefore);
       const rec = await failing.grantOf(conn.id);
       expect(rec?.state).toBe("unauthorized");
@@ -277,7 +277,7 @@ describe("registry faults", () => {
       failImport = false;
       await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
       expect(conn.auth.grants().bot).toBe("authorized");
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
     });
   });
 
@@ -354,7 +354,7 @@ describe("registry faults", () => {
       const conn = await registry.connect("fake-telegram");
       await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
 
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
       const heard: ChannelMessage[] = [];
       expect(conn.hearTalker(async (msg) => void heard.push(msg))).not.toBeNull();
       await conn.withTalker((talker) =>
@@ -365,14 +365,14 @@ describe("registry faults", () => {
 
       // Revoke the grant → epoch dies, and nothing reaches a talker.
       await conn.auth.revoke("bot");
-      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.isUnlocked("chat")).toBe(false);
       expect(conn.auth.grants().bot).toBe("unauthorized");
       expect(conn.withTalker(() => "reached")).toBeUndefined();
       expect(conn.hearTalker(async () => {})).toBeNull();
 
       // Re-import → a NEW talker, which the old epoch's listener does not hear.
       await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
       const newTalker = fx.talkerFactory.instances.at(-1);
       if (!newTalker) throw new Error("talker not rebuilt");
       expect(newTalker).not.toBe(oldTalker);
@@ -414,7 +414,7 @@ describe("registry faults", () => {
       await flush();
 
       expect(conn.auth.grants().bot).toBe("degraded");
-      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.isUnlocked("chat")).toBe(false);
     });
 
     it("degrades the grant when the call throws CredentialRejected", async () => {
@@ -428,7 +428,7 @@ describe("registry faults", () => {
       await flush();
 
       expect(conn.auth.grants().bot).toBe("degraded");
-      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.isUnlocked("chat")).toBe(false);
     });
 
     it("ignores a rejection that settles after its epoch was replaced", async () => {
@@ -449,7 +449,7 @@ describe("registry faults", () => {
       await flush();
 
       expect(conn.auth.grants().bot).toBe("authorized");
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
     });
   });
 
@@ -565,7 +565,7 @@ describe("registry faults", () => {
       const conn = await registry.connect("fake-telegram");
 
       const unlocks: Connection[] = [];
-      registry.onUnlocked("talk", (c) => unlocks.push(c));
+      registry.onUnlocked("chat", (c) => unlocks.push(c));
 
       await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
       expect(unlocks.length).toBe(1); // initial unlock only
@@ -734,11 +734,11 @@ describe("registry faults", () => {
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
 
-      // Register the unlock handler BEFORE the epoch is built. When talk unlocks,
+      // Register the unlock handler BEFORE the epoch is built. When chat unlocks,
       // the handler synchronously registers an onMessage listener — which must be
       // wired before start() runs, or the buffered flush is lost.
       const received: ChannelMessage[] = [];
-      registry.onUnlocked("talk", (c) => {
+      registry.onUnlocked("chat", (c) => {
         c.hearTalker(async (msg) => {
           received.push(msg);
         });
@@ -825,7 +825,7 @@ describe("credential-rejected flow vs. a grant completing mid-flow", () => {
     await flush();
 
     expect(conn.auth.grants().session).toBe("authorized");
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     const grant = await ledger.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.degraded).toBeUndefined();
@@ -922,7 +922,7 @@ describe("credential-rejected flow vs. a grant completing mid-flow", () => {
     expect(epochBTalker).not.toBe(epochATalker);
 
     expect(conn.auth.grants().session).toBe("authorized");
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(epochBTalker?.state.stopCount).toBe(0);
     const grant = await ledger.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
@@ -973,7 +973,7 @@ describe("credential-rejected flow vs. a grant completing mid-flow", () => {
     await flush();
 
     expect(conn.auth.grants().session).toBe("authorized");
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(epochBTalker?.state.stopCount).toBe(0);
     expect(talkerFactory.instances.length).toBe(buildsAfterRelogin); // nothing rebuilt after
     const grant = await ledger.grantOf(conn.id);

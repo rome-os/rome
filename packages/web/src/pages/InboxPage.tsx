@@ -38,7 +38,7 @@ interface SentinelEntry {
 interface ConnectionLite {
   connectionKind: string;
   state: "working" | "broken" | null;
-  capabilities: { talk: { state: string } };
+  capabilities: { chat: { state: string } };
 }
 
 // "configured" = set up but the live connection is not currently open (pending
@@ -381,7 +381,7 @@ function BondLevelToggle({
 // ceremony detail that lives in Settings → Connections, not this overview.
 function sourceStatus(conn: ConnectionLite | undefined): SourceStatus {
   if (!conn) return "disconnected";
-  if (conn.capabilities.talk.state === "unlocked") return "connected";
+  if (conn.capabilities.chat.state === "unlocked") return "connected";
   return conn.state !== null ? "configured" : "disconnected";
 }
 

@@ -223,11 +223,11 @@ describe("feishu talk lifecycle", () => {
     const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeDescriptor(channel));
     const conn = await registry.connect("feishu");
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["app"] });
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["app"] });
 
     await registry.giveGrant(conn.connectionKind, conn.id, "app", validCred());
     await flush();
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     expect(channel.connected).toBe(true);
 
     const received: string[] = [];
@@ -397,17 +397,17 @@ describe("feishu app-auth fault drives renew-once-then-degrade", () => {
     const conn = await registry.connect("feishu");
     await registry.giveGrant(conn.connectionKind, conn.id, "app", validCred());
     await flush();
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
 
     channel.emitError(new LarkChannelError("permission_denied", "revoked"));
     await flush();
 
-    expect(conn.isUnlocked("talk")).toBe(false);
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["app"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["app"] });
     expect(conn.auth.grants().app).toBe("degraded");
 
     let reUnlocked: Connection | null = null;
-    registry.onUnlocked("talk", (c) => {
+    registry.onUnlocked("chat", (c) => {
       reUnlocked = c;
     });
     channel.connectError = null;
@@ -416,7 +416,7 @@ describe("feishu app-auth fault drives renew-once-then-degrade", () => {
       expiresAt: "never",
     });
     await flush();
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     expect(reUnlocked).not.toBeNull();
   });
 });

@@ -37,7 +37,7 @@ function connectionRow(kind: string, grants: Record<string, GrantState>, talkUnl
     connectionKind: kind,
     state: stateOfGrants(grants),
     grants,
-    capabilities: { talk: { state: talkUnlocked ? "unlocked" : "needs-auth" } },
+    capabilities: { chat: { state: talkUnlocked ? "unlocked" : "needs-auth" } },
   };
 }
 
@@ -62,7 +62,7 @@ describe("InboxPage message sources", () => {
 
   it("classifies each channel with the shared registry-native rule", async () => {
     mockBackend([
-      // Talk unlocked → Connected.
+      // Chat unlocked → Connected.
       connectionRow("telegram", { bot: "authorized" }, true),
       // Granted (even degraded) but transport not up → Configured.
       connectionRow("whatsapp", { session: "degraded" }, false),

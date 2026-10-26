@@ -36,6 +36,17 @@ import { accountLinkOf } from "../../channels/account-links.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
 
+/** What a connection lets Rome do, by capability. `talk` repeats `chat` under
+ *  its old name for dashboard tabs opened before the rename. */
+type WireCapabilities = Record<Capability, CapabilityStatus> & {
+  /** @deprecated Read `chat`. */
+  talk: CapabilityStatus;
+};
+
+function wireCapabilities(status: Record<Capability, CapabilityStatus>): WireCapabilities {
+  return { ...status, talk: status.chat };
+}
+
 /** Per-grant active-setup ids for a connection.
  *  `idOrKind` is the connection id for a real connection, or the connection kind
  *  for an offerable placeholder (the same key the setup route addresses).
@@ -95,7 +106,7 @@ interface ConnectionView
   /** One entry per declared grant: the revived display, or null when the grant
    *  has no stored profile or the descriptor exposes no projection. */
   display: Record<GrantName, GrantDisplayView | null>;
-  capabilities: Record<Capability, CapabilityStatus>;
+  capabilities: WireCapabilities;
   connect: ConnectHint | null;
   /** Active-setup discovery: per grant, the id of the live grant
    *  setup (if any), so a reopened dashboard re-attaches to it instead of
@@ -173,7 +184,7 @@ function buildConnectionView(
     state: conn.state(),
     grants,
     display,
-    capabilities: conn.status(),
+    capabilities: wireCapabilities(conn.status()),
     connect: connectHint(conn.connectionKind),
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
     channel: channel?.id ?? null,
@@ -248,11 +259,11 @@ function placeholderView(
     state: null,
     grants,
     display,
-    capabilities: {
-      talk: capStatus("talker"),
+    capabilities: wireCapabilities({
+      chat: capStatus("talker"),
       act: capStatus("actor"),
       watch: capStatus("watcher"),
-    },
+    }),
     connect: connectHint(connectionKind),
     setups: activeSetups(manager, connectionKind, [descriptor.grant]),
     channel: null,

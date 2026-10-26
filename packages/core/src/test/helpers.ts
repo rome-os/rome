@@ -330,8 +330,8 @@ export function createTestConnections(
       withTalker: (call: (talker: TestTalker) => unknown) => call(live),
       hearTalker: (handler: (message: ChannelMessage) => Promise<void>) =>
         transport.listen(handler),
-      isUnlocked: (capability: string) => capability === "talk",
-      status: () => ({ talk: { state: "unlocked" } }),
+      isUnlocked: (capability: string) => capability === "chat",
+      status: () => ({ chat: { state: "unlocked" } }),
     } as unknown as Connection);
   }
   const find = (connectionKind: string) => connections.get(`test:${connectionKind}`);

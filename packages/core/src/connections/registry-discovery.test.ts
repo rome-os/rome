@@ -1,6 +1,6 @@
 // Registry discovery contract tests.
 //
-// Covers spec scenarios: 1 (talk unlocked by its grant), 2 (needs-auth precision),
+// Covers spec scenarios: 1 (chat unlocked by its grant), 2 (needs-auth precision),
 // 3 (import unlocks + onUnlocked), 4 (every grant is a fresh grant),
 // 14 (ledger invariants), 16 (late onUnlocked registration),
 // 17 (register validation), 18 (load with unregistered service).
@@ -36,9 +36,9 @@ function makeRegistry(ledger: ConnectionsRepository): ConnectionRegistry {
   return new ConnectionRegistry({ repository: ledger });
 }
 
-// Scenario 1 — talk unlocked by its grant; onUnlocked fires; talk roundtrip
+// Scenario 1 — chat unlocked by its grant; onUnlocked fires; talker roundtrip
 
-describe("scenario 1: talk unlocked by its grant", () => {
+describe("scenario 1: chat unlocked by its grant", () => {
   it("talk is locked at connect and unlocked once the grant is held", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
@@ -46,10 +46,10 @@ describe("scenario 1: talk unlocked by its grant", () => {
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-telegram");
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.isUnlocked("chat")).toBe(false);
     await reg.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
 
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(conn.act).toBeNull();
     expect(conn.watch).toBeNull();
     expect(talkerFactory.instances).toHaveLength(1);
@@ -65,7 +65,7 @@ describe("scenario 1: talk unlocked by its grant", () => {
     await reg.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
     const s = conn.status();
 
-    expect(s.talk).toEqual({ state: "unlocked" });
+    expect(s.chat).toEqual({ state: "unlocked" });
     expect(s.act).toEqual({ state: "unsupported" });
     expect(s.watch).toEqual({ state: "unsupported" });
   });
@@ -77,7 +77,7 @@ describe("scenario 1: talk unlocked by its grant", () => {
     reg.register(descriptor);
 
     const fired: Connection[] = [];
-    reg.onUnlocked("talk", (c) => fired.push(c));
+    reg.onUnlocked("chat", (c) => fired.push(c));
 
     const conn = await reg.connect("fake-telegram");
     await reg.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
@@ -133,7 +133,7 @@ describe("scenario 2: needs-auth precision", () => {
     const conn = await reg.connect("fake-discord");
     const s = conn.status();
 
-    expect(s.talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
+    expect(s.chat).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
   });
 
   it("watch status reports needs-auth with [bot] before any grant", async () => {
@@ -171,7 +171,7 @@ describe("scenario 2: needs-auth precision", () => {
 
     const s = conn.status();
 
-    expect(s.talk).toEqual({ state: "unlocked" });
+    expect(s.chat).toEqual({ state: "unlocked" });
     expect(s.watch).toEqual({ state: "unlocked" });
     expect(s.act).toEqual({ state: "unlocked" });
   });
@@ -185,7 +185,7 @@ describe("scenario 2: needs-auth precision", () => {
     const conn = await reg.connect("fake-discord");
     await reg.giveGrant(conn.connectionKind, conn.id, "bot", botCredential());
 
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(conn.watch).not.toBeNull();
     expect(conn.act).not.toBeNull();
   });
@@ -216,7 +216,7 @@ describe("scenario 3: import unlocks + fires onUnlocked", () => {
 
     const talkFired: Connection[] = [];
     const watchFired: Connection[] = [];
-    reg.onUnlocked("talk", (c) => talkFired.push(c));
+    reg.onUnlocked("chat", (c) => talkFired.push(c));
     reg.onUnlocked("watch", (c) => watchFired.push(c));
 
     const conn = await reg.connect("fake-discord");
@@ -235,7 +235,7 @@ describe("scenario 3: import unlocks + fires onUnlocked", () => {
     reg.register(descriptor);
 
     let count = 0;
-    reg.onUnlocked("talk", () => count++);
+    reg.onUnlocked("chat", () => count++);
 
     const conn = await reg.connect("fake-discord");
     await reg.giveGrant(conn.connectionKind, conn.id, "bot", botCredential());
@@ -293,10 +293,10 @@ describe("scenario 4: every grant is a fresh grant", () => {
     const conn = await reg.connect("fake-telegram");
 
     await reg.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.isUnlocked("chat")).toBe(false);
     await reg.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
 
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
   });
 
   it("fixing same material with a later expiry keeps the grant from renewing early", async () => {
@@ -399,7 +399,7 @@ describe("scenario 16: late onUnlocked registration", () => {
 
     // Register the handler AFTER the connection is already unlocked.
     const fired: Connection[] = [];
-    reg.onUnlocked("talk", (c) => fired.push(c));
+    reg.onUnlocked("chat", (c) => fired.push(c));
 
     // Handler must fire immediately for the already-unlocked connection.
     expect(fired).toHaveLength(1);
@@ -419,7 +419,7 @@ describe("scenario 16: late onUnlocked registration", () => {
     await reg.giveGrant(connB.connectionKind, connB.id, "bot", validCredential());
 
     const fired: Connection[] = [];
-    reg.onUnlocked("talk", (c) => fired.push(c));
+    reg.onUnlocked("chat", (c) => fired.push(c));
 
     expect(fired).toHaveLength(2);
     const ids = fired.map((c) => c.id);
@@ -437,7 +437,7 @@ describe("scenario 16: late onUnlocked registration", () => {
     await reg.connect("fake-telegram");
 
     const fired: Connection[] = [];
-    reg.onUnlocked("talk", (c) => fired.push(c));
+    reg.onUnlocked("chat", (c) => fired.push(c));
 
     // No fire because the connection is locked (needs-auth).
     expect(fired).toHaveLength(0);
@@ -504,7 +504,7 @@ describe("scenario 18: load() with unregistered service rows", () => {
     // Also mint a real connection through the registry (goes through ledger).
     const conn = await reg.connect("fake-telegram");
     await reg.giveGrant(conn.connectionKind, conn.id, "bot", validCredential());
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
 
     // Create a new registry over the same ledger and load.
     const reg2 = makeRegistry(ledger);
@@ -515,7 +515,7 @@ describe("scenario 18: load() with unregistered service rows", () => {
     const loaded = reg2.find("fake-telegram");
     expect(loaded).toHaveLength(1);
     expect(loaded[0].id).toBe(conn.id);
-    expect(loaded[0].isUnlocked("talk")).toBe(true);
+    expect(loaded[0].isUnlocked("chat")).toBe(true);
   });
 
   it("all() does not include orphaned unknown-service connections after load", async () => {
@@ -553,17 +553,17 @@ describe("startup capability activation barrier", () => {
     const { descriptor, talkerFactory } = makePasteTalk();
     reg.register(descriptor);
     const unlocked: Connection[] = [];
-    reg.onUnlocked("talk", (connection) => unlocked.push(connection));
+    reg.onUnlocked("chat", (connection) => unlocked.push(connection));
 
     await reg.load({ deferCapabilities: true });
 
-    expect(reg.get(id).isUnlocked("talk")).toBe(false);
+    expect(reg.get(id).isUnlocked("chat")).toBe(false);
     expect(talkerFactory.instances).toHaveLength(0);
     expect(unlocked).toHaveLength(0);
 
     reg.startCapabilities();
 
-    expect(reg.get(id).isUnlocked("talk")).toBe(true);
+    expect(reg.get(id).isUnlocked("chat")).toBe(true);
     expect(talkerFactory.instances).toHaveLength(1);
     expect(unlocked).toEqual([reg.get(id)]);
   });

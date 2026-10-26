@@ -59,7 +59,7 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
         state: "unauthorized",
       });
       expect((await ledger.grantOf(second.id))?.profile).toBeUndefined();
-      expect(second.isUnlocked("talk")).toBe(false);
+      expect(second.isUnlocked("chat")).toBe(false);
     } finally {
       close();
     }

@@ -29,7 +29,7 @@ function connection(service: string, overrides: Partial<ApiConnection> = {}): Ap
     grants: { bot: "authorized" },
     display: { bot: { displayName: service } },
     capabilities: {
-      talk: { state: "unlocked" },
+      chat: { state: "unlocked" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },

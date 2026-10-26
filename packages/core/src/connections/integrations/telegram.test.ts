@@ -248,8 +248,8 @@ describe("telegram descriptor shape", () => {
     const factory = new FaultBotFactory(true);
     const registry = setup(factory);
     const conn = await registry.connect("telegram");
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
   });
 
   it("unlocks talk once the bot grant is imported and delivers inbound", async () => {
@@ -258,9 +258,9 @@ describe("telegram descriptor shape", () => {
     const conn = await registry.connect("telegram");
     await registry.giveGrant(conn.connectionKind, conn.id, "bot", validCred());
 
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     const received: string[] = [];
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     conn.hearTalker(async (msg) => {
       received.push(`${msg.chatId}:${msg.text}`);
       return;
@@ -441,7 +441,7 @@ describe("telegram send-401 drives renew-once-then-degrade", () => {
     const conn = await registry.connect("telegram");
     await registry.giveGrant(conn.connectionKind, conn.id, "bot", validCred());
 
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     // The send() 401 surfaces to the caller as CredentialRejected AND triggers
     // the async grant flow: tokenPaste.renew() → "needs-fix" → degrade "bot".
     await expect(sendThrough(conn, "999" as ChatId, { text: "hi" })).rejects.toBeInstanceOf(
@@ -450,20 +450,20 @@ describe("telegram send-401 drives renew-once-then-degrade", () => {
     await flush();
 
     // Talk relocked; bot grant degraded (tokenPaste cannot renew headlessly).
-    expect(conn.isUnlocked("talk")).toBe(false);
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
     expect(conn.auth.grants().bot).toBe("degraded");
 
     // Re-importing a credential re-unlocks talk (fix path).
     let reUnlocked: Connection | null = null;
-    registry.onUnlocked("talk", (c) => {
+    registry.onUnlocked("chat", (c) => {
       reUnlocked = c;
     });
     await registry.giveGrant(conn.connectionKind, conn.id, "bot", {
       material: { token: "fresh-token" },
       expiresAt: "never",
     });
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     expect(reUnlocked).not.toBeNull();
   });
 });

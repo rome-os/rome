@@ -152,7 +152,7 @@ describe("Scenario 11 — subscription gating", () => {
       await registry.giveGrant(conn.connectionKind, conn.id, "user", userCredential());
 
       // talk/act: unsupported (not in gatedWatch descriptor)
-      expect(conn.status().talk).toEqual({ state: "unsupported" });
+      expect(conn.status().chat).toEqual({ state: "unsupported" });
       expect(conn.status().act).toEqual({ state: "unsupported" });
       // watch: needs-subscription (grant held, but subscriptionGated)
       expect(conn.status().watch).toEqual({ state: "needs-subscription" });
@@ -176,7 +176,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       registryA.register(desc);
       const connA = await registryA.connect("fake-telegram", "my-telegram");
       await registryA.giveGrant(connA.connectionKind, connA.id, "bot", validCredential());
-      expect(connA.isUnlocked("talk")).toBe(true);
+      expect(connA.isUnlocked("chat")).toBe(true);
       const connAId = connA.id;
 
       // Registry B: fresh registry over same db, same descriptor
@@ -190,8 +190,8 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       expect(connB).toBeDefined();
       expect(connB.connectionKind).toBe("fake-telegram");
       expect(connB.label).toBe("my-telegram");
-      expect(connB.isUnlocked("talk")).toBe(true);
-      expect(connB.status().talk).toEqual({ state: "unlocked" });
+      expect(connB.isUnlocked("chat")).toBe(true);
+      expect(connB.status().chat).toEqual({ state: "unlocked" });
       // No new grant: tf2 got a build call because the credential was persisted
       expect(tf2.instances.length).toBeGreaterThanOrEqual(1);
       // tf1 was built once (registryA), tf2 was built once (registryB load)
@@ -334,7 +334,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       const initialBuilds = talkerFactory.instances.length;
 
       const unlockCount: number[] = [];
-      registry.onUnlocked("talk", () => unlockCount.push(1));
+      registry.onUnlocked("chat", () => unlockCount.push(1));
       // The above handler fires immediately for the already-unlocked connection
       const initialUnlockCount = unlockCount.length;
 
@@ -374,7 +374,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       const stopsBeforePersist = tf2.instances[0].state.stopCount;
       const buildsBeforePersist = tf2.instances.length;
       const unlocksBefore: number[] = [];
-      registry2.onUnlocked("talk", () => unlocksBefore.push(1));
+      registry2.onUnlocked("chat", () => unlocksBefore.push(1));
       const unlockCountBefore = unlocksBefore.length;
 
       await capturedKit!.persist({ token: "new-persisted-token" });
