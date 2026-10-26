@@ -262,6 +262,28 @@ describe("TraceDrawer hosted in the tool pane", () => {
     outlet.remove();
   });
 
+  it("leaves focus alone when the tab's trace closes", () => {
+    const outlet = document.createElement("div");
+    const trigger = document.createElement("button");
+    const elsewhere = document.createElement("button");
+    document.body.append(outlet, trigger, elsewhere);
+    trigger.focus();
+    const props = {
+      onClose: () => {},
+      outlet,
+      loadStoredTrace,
+      renderInlineBlock: () => null,
+      renderRunBlocks: () => null,
+    };
+    const { rerender } = render(<TraceDrawer target={storedTarget} {...props} />);
+    elsewhere.focus();
+    rerender(<TraceDrawer target={null} {...props} />);
+    expect(document.activeElement).toBe(elsewhere);
+    outlet.remove();
+    trigger.remove();
+    elsewhere.remove();
+  });
+
   it("still closes the overlay on Escape", () => {
     const onClose = rs.fn();
     render(

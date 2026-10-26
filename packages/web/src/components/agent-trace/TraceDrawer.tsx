@@ -250,10 +250,12 @@ export function TraceDrawer({
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
 
+  // Focus moves into the overlay and back to its trigger on close. The Trace
+  // tab leaves focus to the pane, which may already show another chat's trace.
   useEffect(() => {
+    if (!overlay) return;
     if (open) {
       triggerRef.current = document.activeElement as HTMLElement | null;
-      if (!overlay) return;
       const id = requestAnimationFrame(() => closeBtnRef.current?.focus());
       return () => cancelAnimationFrame(id);
     }
