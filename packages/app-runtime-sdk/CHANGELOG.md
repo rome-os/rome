@@ -1,5 +1,17 @@
 # @rome-os/app-runtime
 
+## [0.9.0](https://github.com/rome-os/rome/compare/app-runtime-v0.8.2...app-runtime-v0.9.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **app-runtime:** add restricted connection access
+
+### Features
+
+* **app-runtime:** add restricted connection access ([d90d3e4](https://github.com/rome-os/rome/commit/d90d3e4f7a007d96ae172200bda270d5d9f58e51))
+* **core:** let an open chat change its model and tell a new thread what it missed ([#1377](https://github.com/rome-os/rome/issues/1377)) ([b278aa9](https://github.com/rome-os/rome/commit/b278aa9839379619f0bc2ab76feb5c110bcd87c0))
+
 ## [0.8.2](https://github.com/rome-os/rome/compare/app-runtime-v0.8.1...app-runtime-v0.8.2) (2026-10-24)
 
 
