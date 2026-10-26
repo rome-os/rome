@@ -6,7 +6,14 @@ import {
   linkedInHistoryRow,
 } from "../db/repositories/linkedin-store.js";
 import { linkedInHistoryMessage } from "./linkedin-history.js";
-import { channelMessageDetail, queryLimit, querySince, type Messages } from "./messages.js";
+import {
+  channelMessageDetail,
+  MAX_QUERY_LIMIT,
+  queryLimit,
+  queryPage,
+  querySince,
+  type Messages,
+} from "./messages.js";
 import { inList, keysIn, sqlMessages } from "./messages-sql.js";
 
 /**
@@ -36,10 +43,33 @@ import { inList, keysIn, sqlMessages } from "./messages-sql.js";
 export function linkedInMessages(db: DrizzleDb): Messages {
   const mirror = new LinkedInStoreRepository(db);
   return {
-    async query({ chatId, since, limit }) {
-      const rows = await mirror.fetchHistory(chatId ?? null, querySince(since), queryLimit(limit));
-      // The mirror answers oldest first; the port answers newest first.
-      return rows.reverse().slice(0, queryLimit(limit)).map(linkedInHistoryMessage);
+    async query({ chatId, since, after, limit }) {
+      const chat = chatId ?? null;
+      const from = querySince(since);
+      // After a cursor: every message of its second, so the page settles the
+      // ties there, and the newest `limit` of the older ones.
+      // The mirror answers each read oldest first; the port answers newest first.
+      const rows = after
+        ? [
+            ...(
+              await mirror.fetchHistory(
+                chat,
+                new Date(Math.max(from.getTime(), after.timestamp * 1000)),
+                MAX_QUERY_LIMIT,
+                new Date(after.timestamp * 1000),
+              )
+            ).reverse(),
+            ...(
+              await mirror.fetchHistory(
+                chat,
+                from,
+                queryLimit(limit),
+                new Date((after.timestamp - 1) * 1000),
+              )
+            ).reverse(),
+          ]
+        : (await mirror.fetchHistory(chat, from, queryLimit(limit))).reverse();
+      return queryPage(rows.map(linkedInHistoryMessage), { after, limit });
     },
     byAccount: sqlMessages({
       channel: "linkedin",

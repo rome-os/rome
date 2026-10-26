@@ -11,6 +11,9 @@ import type {
 
 const log = createAppLogger("fetch_channel_history");
 
+/** What a channel query answers when no limit is named. */
+const DEFAULT_LIMIT = 100;
+
 /**
  * JSON-safe attachment metadata. Mirrors the subset of {@link Attachment}
  * that is useful to downstream consumers (e.g. fetching a text excerpt from a
@@ -72,7 +75,11 @@ function toStructuredMessages(channel: string, messages: ChannelMessage[]): Stru
   }));
 }
 
-function formatMessages(channel: string, messages: ChannelMessage[], windowHours: number): string {
+function formatMessages(
+  channel: string,
+  messages: ChannelMessage[],
+  since: Date | undefined,
+): string {
   if (messages.length === 0) {
     return "(No messages found in the requested window.)";
   }
@@ -112,9 +119,9 @@ function formatMessages(channel: string, messages: ChannelMessage[], windowHours
     }
   }
 
-  const cutoff = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
-  const now = new Date().toISOString();
-  const header = `## Channel History — ${cutoff} → ${now}\n\n`;
+  const header = since
+    ? `## Channel History — ${since.toISOString()} → ${new Date().toISOString()}\n\n`
+    : "## Channel History\n\n";
 
   return sections.length > 0
     ? header + sections.join("\n\n---\n\n")
@@ -144,7 +151,20 @@ export function createAction(
         },
         windowHours: {
           type: "number",
-          description: "How many hours back to fetch messages (default: 24)",
+          description:
+            "How many hours back to fetch messages. Defaults to 24, or to no bound when paging with limit or cursor.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 1000,
+          description:
+            "How many of the newest messages to return (default 100). Use with cursor to page back a few messages at a time.",
+        },
+        cursor: {
+          type: "string",
+          description:
+            "The nextCursor a previous call returned: return the messages older than that page.",
         },
         includeMessages: {
           type: "boolean",
@@ -158,7 +178,12 @@ export function createAction(
     async execute(args): Promise<ActionResult> {
       const channel = args.channel as string;
       const threadId = (args.threadId as string | undefined) ?? null;
-      const windowHours = (args.windowHours as number | undefined) ?? 24;
+      const limit = args.limit as number | undefined;
+      const cursor = args.cursor as string | undefined;
+      const paging = limit !== undefined || cursor !== undefined;
+      const windowHours = (args.windowHours as number | undefined) ?? (paging ? undefined : 24);
+      const since =
+        windowHours === undefined ? undefined : new Date(Date.now() - windowHours * 60 * 60 * 1000);
       const includeMessages = args.includeMessages === true;
 
       const notConfigured: ActionResult = {
@@ -167,17 +192,23 @@ export function createAction(
       };
       if (!(await channels.list()).some((item) => item.name === channel)) return notConfigured;
 
-      log.info("fetching channel history", { channel, threadId, windowHours });
+      log.info("fetching channel history", { channel, threadId, windowHours, limit, paging });
 
       let messages: ChannelMessage[];
+      let nextCursor: string | null = null;
       try {
+        const page = await channels.query(channel, {
+          ...(threadId ? { chatId: threadId as ChatId } : {}),
+          // With no bound, the epoch: a channel defaults a missing `since` to
+          // the last day.
+          since: since ?? new Date(0),
+          ...(cursor ? { after: cursor } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        });
+        // A full page may have older messages behind it; a short one does not.
+        if (page.length >= (limit ?? DEFAULT_LIMIT)) nextCursor = page.at(-1)?.cursor ?? null;
         // `query` answers newest first; the transcript reads oldest first.
-        messages = (
-          await channels.query(channel, {
-            ...(threadId ? { chatId: threadId as ChatId } : {}),
-            since: new Date(Date.now() - windowHours * 60 * 60 * 1000),
-          })
-        ).reverse();
+        messages = page.reverse();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("fetchHistory failed", { channel, error: message });
@@ -197,7 +228,8 @@ export function createAction(
       type HistoryData = {
         channel: string;
         messageCount: number;
-        windowHours: number;
+        windowHours?: number;
+        nextCursor?: string | null;
         content: string;
         messages?: StructuredMessage[];
       };
@@ -205,8 +237,11 @@ export function createAction(
       const data: HistoryData = {
         channel,
         messageCount: messages.length,
-        windowHours,
-        content: formatMessages(channel, messages, windowHours),
+        ...(windowHours !== undefined ? { windowHours } : {}),
+        // Only a paged read names where the next page starts, so a plain read
+        // keeps the payload it always had.
+        ...(paging ? { nextCursor } : {}),
+        content: formatMessages(channel, messages, since),
       };
 
       // Opt-in: only add the structured array when explicitly requested, so

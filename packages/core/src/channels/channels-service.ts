@@ -24,6 +24,8 @@ import type { Channel, Channels } from "./channel.js";
 import { sendThrough, type ChannelOf } from "./connection-ports.js";
 import type { ConnectionPacing } from "./delivery/connection-pacing.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
+import { parseMessageCursor } from "@rome/api-types/message";
+import { channelMessageCursor } from "./messages.js";
 
 // TODO(0.8): remove, with the service's and the proxy's uses.
 export const REMOVED_SERVICE_MEMBERS: Record<string, string> = {
@@ -89,7 +91,11 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
   async function query(channel: string, read: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
     const messages = find(channel)?.messages;
     if (!messages) throw new Error(`Channel "${channel}" reads no messages`);
-    return messages.query(read);
+    const { after: cursor, ...rest } = read;
+    const after = cursor === undefined ? undefined : parseMessageCursor(cursor);
+    if (after === null) throw new Error(`Invalid message cursor: ${cursor}`);
+    const page = await messages.query({ ...rest, ...(after ? { after } : {}) });
+    return page.map((message) => ({ ...message, cursor: channelMessageCursor(message) }));
   }
 
   return withRemovedMembers<ChannelsService>(

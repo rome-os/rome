@@ -245,4 +245,57 @@ describe("fetch_channel_history", () => {
     // localPath is intentionally excluded from the structured payload.
     expect("localPath" in data.messages[0].attachments[0]).toBe(false);
   });
+
+  describe("paging with limit and cursor", () => {
+    function pagedDeps(page: ChannelMessage[]) {
+      const query = rs.fn<ChannelsService["query"]>().mockResolvedValue(page);
+      const deps = {
+        channelsService: {
+          list: async () => [{ name: "webchat", sendable: true }],
+          send: async (_channel: string, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      };
+      return { query, action: createAction(actionConfig, deps) };
+    }
+    const at = (id: string, minute: number, cursor: string) =>
+      makeMessage({
+        messageId: id,
+        text: id,
+        timestamp: new Date(Date.UTC(2026, 9, 26, 0, minute)),
+        cursor,
+      });
+
+    it("asks for a page with no time bound and returns the cursor of its oldest message", async () => {
+      const { query, action } = pagedDeps([at("m3", 3, "c3"), at("m2", 2, "c2")]);
+      const result = await action.execute({ channel: "webchat", threadId: "chat-1", limit: 2 });
+
+      expect(query).toHaveBeenCalledWith("webchat", {
+        chatId: "chat-1",
+        since: new Date(0),
+        limit: 2,
+      });
+      const data = (result as { data: { nextCursor: string | null; content: string } }).data;
+      expect(data.nextCursor).toBe("c2");
+      expect(data.content.indexOf("m2")).toBeLessThan(data.content.indexOf("m3"));
+    });
+
+    it("resumes after a cursor, and ends with no cursor on a short page", async () => {
+      const { query, action } = pagedDeps([at("m1", 1, "c1")]);
+      const result = await action.execute({
+        channel: "webchat",
+        threadId: "chat-1",
+        limit: 2,
+        cursor: "c2",
+      });
+
+      expect(query).toHaveBeenCalledWith("webchat", {
+        chatId: "chat-1",
+        since: new Date(0),
+        after: "c2",
+        limit: 2,
+      });
+      expect((result as { data: { nextCursor: string | null } }).data.nextCursor).toBeNull();
+    });
+  });
 });

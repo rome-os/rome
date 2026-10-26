@@ -34,7 +34,7 @@ import {
 import { ChatBuffers } from "./conversation-buffer.js";
 import type { ConnectionPacing } from "./delivery/connection-pacing.js";
 import { DeliveryFailure, type DeliveryTransport } from "./delivery/types.js";
-import { MAX_QUERY_LIMIT, queryLimit, type Messages } from "./messages.js";
+import { MAX_QUERY_LIMIT, queryPage, type Messages } from "./messages.js";
 
 const log = createLogger("channel-ports");
 
@@ -241,7 +241,7 @@ function connectionMessages(backing: Backing): Messages {
   }
 
   return {
-    async query({ chatId, since, limit }) {
+    async query({ chatId, since, after, limit }) {
       const connection = connectionFor(backing);
       if (!connection) throw new ChannelNotConnected(channel);
       const connectionId = connection.id;
@@ -265,14 +265,16 @@ function connectionMessages(backing: Backing): Messages {
             }),
           ) ?? Promise.reject(new ChannelNotConnected(channel)),
       );
+      // Paged after the read, so a cursor pages back only within the window
+      // the platform answers.
       // Reversed before the sort, so lines sharing a timestamp come newest
       // first too.
-      return lines
+      const newestFirst = lines
         .filter((message) => message.timestamp.getTime() >= from.getTime())
         .reverse()
         .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-        .slice(0, queryLimit(limit))
         .map((message) => copyOf(message, channel));
+      return queryPage(newestFirst, { after, limit });
     },
     byAccount: null,
   };

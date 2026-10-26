@@ -1736,6 +1736,10 @@ export interface ChannelMessage {
   thread?: { kind: "dm" | "group" | "topic"; name?: string };
   addressing?: MessageAddressing;
   raw?: unknown;
+  /** Where this message sits in a channel read, as an opaque token. Set on
+   *  what {@link ChannelsService.query} answers: pass it as
+   *  {@link ChannelMessageQuery.after} to read the messages older than it. */
+  cursor?: string;
 }
 
 /** What {@link ChannelsService.query} asks for. Every field narrows it, and
@@ -1748,6 +1752,10 @@ export interface ChannelMessageQuery {
   chatId?: ChatId;
   /** Only messages said at or after this instant. */
   since?: Date;
+  /** Only messages older than the one whose {@link ChannelMessage.cursor}
+   *  this is: the next page back. Paging this way neither repeats nor skips a
+   *  message, also among several said in one second. */
+  after?: string;
   /** At most this many, newest first. Defaults to 100, capped at 1,000. */
   limit?: number;
 }

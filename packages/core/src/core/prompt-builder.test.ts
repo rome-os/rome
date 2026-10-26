@@ -740,7 +740,7 @@ describe("buildContinuationBlock", () => {
       [
         '<continuation previous_model="claude-sonnet-5-5">',
         "This conversation started before your current context, so its earlier messages are not in your context.",
-        "When the conversation needs them, read them with `system:fetch_channel_history`, passing this thread's channel and thread id. Raise windowHours to reach older messages.",
+        "When the conversation needs them, read them with `system:fetch_channel_history`, passing this thread's channel and thread id. To page back, pass limit, then the nextCursor it returns as cursor.",
         "</continuation>",
       ].join("\n"),
     );

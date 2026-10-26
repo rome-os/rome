@@ -1,10 +1,11 @@
 // The dashboard chat is a channel Rome serves itself, with no Connection
 // behind it (docs/domains/connections.md#connection).
 
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
+import { channelMessageOrder } from "./messages.js";
 import { WEBCHAT_SURFACE, webchatChannel } from "./webchat-channel.js";
 
 describe("webchat channel", () => {
@@ -92,6 +93,51 @@ describe("webchat channel", () => {
     });
 
     expect(history).toHaveLength(2);
+  });
+
+  it("pages back one message at a time through a second holding several", async () => {
+    await repo.createSession("sess-5", "Paging Session");
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      rs.setSystemTime(new Date("2026-10-26T00:00:00Z"));
+      await repo.addMessage(
+        "msg-old",
+        "sess-5",
+        "user",
+        JSON.stringify([{ type: "text", content: "old" }]),
+      );
+      rs.setSystemTime(new Date("2026-10-26T00:01:00Z"));
+      for (const id of ["msg-a", "msg-b", "msg-c"]) {
+        await repo.addMessage(
+          id,
+          "sess-5",
+          "assistant",
+          JSON.stringify([{ type: "text", content: id }]),
+        );
+      }
+      const channel = webchatChannel(repo);
+      const read = { chatId: "sess-5" as ChatId, since: new Date(0) };
+      const full = await channel.messages!.query({ ...read, limit: 10 });
+
+      const walked: string[] = [];
+      let after: ReturnType<typeof channelMessageOrder> | undefined;
+      for (let page = 0; page < 10; page++) {
+        const [entry] = await channel.messages!.query({
+          ...read,
+          ...(after ? { after } : {}),
+          limit: 1,
+        });
+        if (!entry) break;
+        walked.push(entry.messageId);
+        after = channelMessageOrder(entry);
+      }
+
+      expect(full).toHaveLength(4);
+      expect(walked).toEqual(full.map((entry) => entry.messageId));
+      expect(walked.at(-1)).toBe("msg-old");
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("hears nothing through a port, and renders cards with no prompt context", () => {

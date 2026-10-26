@@ -228,7 +228,7 @@ export function buildContinuationBlock(input: {
   ];
   if (input.canReadHistory) {
     lines.push(
-      `When the conversation needs them, read them with \`${FETCH_CHANNEL_HISTORY_ACTION}\`, passing this thread's channel and thread id. Raise windowHours to reach older messages.`,
+      `When the conversation needs them, read them with \`${FETCH_CHANNEL_HISTORY_ACTION}\`, passing this thread's channel and thread id. To page back, pass limit, then the nextCursor it returns as cursor.`,
     );
   }
   return `${open}\n${lines.join("\n")}\n</continuation>`;

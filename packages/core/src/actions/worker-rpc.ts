@@ -49,6 +49,7 @@ const ChannelsQueryParams = z
     channel: z.string().min(1),
     chatId: z.string().optional(),
     since: z.string().datetime().optional(),
+    after: z.string().optional(),
     limit: z.number().int().positive().optional(),
   })
   .strict();
@@ -392,7 +393,7 @@ export class WorkerRpcServer {
   }
 
   private async handleChannelsQuery(params: unknown): Promise<ChannelMessage[]> {
-    const { channel, chatId, since, limit } = parseParams(
+    const { channel, chatId, since, after, limit } = parseParams(
       "channels.query",
       ChannelsQueryParams,
       params,
@@ -400,6 +401,7 @@ export class WorkerRpcServer {
     return await this.services.channelsService.query(channel, {
       ...(chatId ? { chatId: chatId as ChatId } : {}),
       ...(since ? { since: new Date(since) } : {}),
+      ...(after ? { after } : {}),
       ...(limit ? { limit } : {}),
     });
   }

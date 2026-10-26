@@ -7,7 +7,7 @@ import type { ChannelSurface } from "../core/agent-session.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { historyWindowHours } from "../connections/integrations/talk-features.js";
 import type { Channel } from "./channel.js";
-import { queryLimit } from "./messages.js";
+import { queryPage } from "./messages.js";
 import { WebChatAdapter } from "./webchat.js";
 
 export const WEBCHAT_CHANNEL = "webchat";
@@ -40,16 +40,16 @@ export function webchatChannel(webchatRepo: WebChatRepository): Channel {
     accounts: null,
     directory: null,
     messages: {
-      async query({ chatId, since, limit }) {
+      async query({ chatId, since, after, limit }) {
         const from = since ?? new Date(Date.now() - DEFAULT_WINDOW_MS);
         const lines = await adapter.fetchHistory(chatId ?? null, historyWindowHours(from));
         // Reversed before the sort, so lines sharing a timestamp come newest
         // first too.
-        return lines
+        const newestFirst = lines
           .filter((message) => message.timestamp.getTime() >= from.getTime())
           .reverse()
-          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-          .slice(0, queryLimit(limit));
+          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+        return queryPage(newestFirst, { after, limit });
       },
       byAccount: null,
     },
