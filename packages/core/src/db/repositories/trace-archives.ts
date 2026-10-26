@@ -145,7 +145,7 @@ export class TraceArchivesRepository {
   pruneBatch(id: string): { rows: number; bytes: number; durationMs: number } {
     const start = performance.now();
     const manifest = JSON.parse(this.get(id)!.manifest!) as ArchiveManifest;
-    return this.sqlite.transaction(() => {
+    const result = this.sqlite.transaction(() => {
       const rows = this.sqlite
         .prepare(`SELECT b.rowid AS rowid, length(cast(b.content AS blob)) AS bytes
         FROM json_each(?) snapshot CROSS JOIN rome_agent_messages m CROSS JOIN rome_agent_trace_blocks b
@@ -169,8 +169,9 @@ export class TraceArchivesRepository {
             `DELETE FROM rome_agent_trace_blocks WHERE rowid IN (${ids.map(() => "?").join(",")})`,
           )
           .run(...ids);
-      return { rows: ids.length, bytes, durationMs: performance.now() - start };
+      return { rows: ids.length, bytes };
     })();
+    return { ...result, durationMs: performance.now() - start };
   }
 
   deletes(): string[] {
