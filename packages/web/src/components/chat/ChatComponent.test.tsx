@@ -55,7 +55,6 @@ rs.mock("@/hooks/use-tab-status", () => ({
 
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
   TraceDrawer: () => null,
-  traceDrawerContentInsetClass: () => "",
 }));
 
 rs.mock("@/components/chat/entries", () => ({

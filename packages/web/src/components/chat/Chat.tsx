@@ -2,6 +2,7 @@ import type { DraftDeviceFolder } from "@/lib/device-folder";
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -37,11 +38,7 @@ import { cn } from "@/lib/utils";
 import { usePresentationMode } from "@/lib/presentation-mode";
 import { dataTransferHasFiles, extractFilesFromDataTransfer } from "@/lib/clipboard-files";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import {
-  TraceDrawer,
-  traceDrawerContentInsetClass,
-  type TraceDrawerTarget,
-} from "@/components/agent-trace/TraceDrawer";
+import { TraceDrawer, type TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
@@ -59,6 +56,7 @@ import {
 import { ShareBar } from "@/components/chat/ShareBar";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
+import { useToolTrace } from "@/pages/free/tool-trace";
 import type {
   TraceSegment,
   TraceSnapshot,
@@ -315,7 +313,9 @@ export function Chat({
   // `null` outside the workspace shell; sends simply skip injection.
   const workspaceContextRegistry = useWorkspaceContextRegistry();
   const { toolView, setToolsCollapsed } = useFreeCells();
-  const isAppsPanelOpen = !toolView.collapsed;
+  // The tool pane's Trace tab. Null outside a workspace, where the trace falls
+  // back to the standalone overlay.
+  const toolTrace = useToolTrace();
   // Multiple sessions are in scope at once. Pick the right one deliberately:
   //   • mainSessionId  — the session THIS <Chat> owns: the prop, or the one its
   //     draft created, and null while a draft has none. Use for the owned
@@ -1835,26 +1835,40 @@ export function Chat({
   }, [floorSessionId, runningTurnId]);
 
   // Open the live trace drawer on demand (e.g. via the trace trigger button).
+  const revealTrace = toolTrace?.reveal;
   const openLiveTraceDrawer = useCallback(() => {
     const target = buildLiveTraceTarget();
     if (!target) return;
     liveDismissedRef.current = null;
     setTraceDrawerTarget(target);
-  }, [buildLiveTraceTarget]);
+    revealTrace?.();
+  }, [buildLiveTraceTarget, revealTrace]);
 
-  const openSubagentTraceDrawer = useCallback((node: TraceSubagentSummary) => {
-    setTraceDrawerTarget({
-      kind: "turn",
-      sessionId: node.sessionId,
-      turnId: node.turnId,
-      summary: node.traceSummary ?? {
-        distinctApps: [],
-        totalSteps: 0,
-        invocationCounts: {},
-      },
-      dumpHref: `/api/sessions/${encodeURIComponent(node.sessionId)}/turns/${encodeURIComponent(node.turnId)}/trace.json`,
-    });
-  }, []);
+  const openStoredTraceDrawer = useCallback(
+    (target: TraceDrawerTarget) => {
+      setTraceDrawerTarget(target);
+      revealTrace?.();
+    },
+    [revealTrace],
+  );
+
+  const openSubagentTraceDrawer = useCallback(
+    (node: TraceSubagentSummary) => {
+      setTraceDrawerTarget({
+        kind: "turn",
+        sessionId: node.sessionId,
+        turnId: node.turnId,
+        summary: node.traceSummary ?? {
+          distinctApps: [],
+          totalSteps: 0,
+          invocationCounts: {},
+        },
+        dumpHref: `/api/sessions/${encodeURIComponent(node.sessionId)}/turns/${encodeURIComponent(node.turnId)}/trace.json`,
+      });
+      revealTrace?.();
+    },
+    [revealTrace],
+  );
 
   // Keep a live trace target in sync when the user has already opened it,
   // but don't auto-open the drawer on new streams.
@@ -1877,6 +1891,23 @@ export function Chat({
   useEffect(() => {
     setTraceDrawerTarget(null);
   }, [mainSessionId]);
+
+  // Offer the open trace to the tool pane as its Trace tab. The tab's close
+  // button calls back into `closeTraceDrawer`, so closing there and closing
+  // from here end the same way.
+  const traceOwner = useId();
+  const setToolTrace = toolTrace?.set;
+  const traceOpen = traceDrawerTarget !== null;
+  const traceStreaming = traceDrawerTarget?.kind === "live" && traceDrawerTarget.streaming;
+  const closeTraceRef = useRef(closeTraceDrawer);
+  closeTraceRef.current = closeTraceDrawer;
+  useEffect(() => {
+    setToolTrace?.(
+      traceOwner,
+      traceOpen ? { streaming: traceStreaming, onClose: () => closeTraceRef.current() } : null,
+    );
+  }, [setToolTrace, traceOwner, traceOpen, traceStreaming]);
+  useEffect(() => () => setToolTrace?.(traceOwner, null), [setToolTrace, traceOwner]);
 
   const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
 
@@ -1981,16 +2012,7 @@ export function Chat({
         onDrop={handleDrop}
       >
         {/* ---- Main Chat Area ---- */}
-        {/* When the trace drawer is open as a side panel (wide / apps panel closed,
-            @5xl/chat) it's `fixed` and out of flow, so reserve its 480px here to
-            keep the toolbar, messages, and composer clear of it. In the narrow /
-            apps-open layout the drawer covers the chat instead, so no reserve. */}
-        <div
-          className={`relative flex min-h-0 min-w-0 flex-1 flex-col @5xl/chat:transition-[width] @5xl/chat:duration-200 @5xl/chat:ease-out ${traceDrawerContentInsetClass(
-            traceDrawerTarget !== null,
-            isAppsPanelOpen,
-          )}`}
-        >
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {isDraggingFiles && (
             <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-16 border-2 border-dashed border-info bg-info-bg/85 text-ui text-info-fg md:inset-6">
               {t("composer.dropFiles")}
@@ -2017,9 +2039,8 @@ export function Chat({
               touch feel. */}
           {/* Positioning + measurement parent for the timeline rail. Its own
               container name matters: `@container/chat` is declared on the outer
-              element and does NOT narrow when the trace drawer reserves its
-              480px on this column, so a gate keyed to it would show the rail at
-              widths where the transcript has no gutter left. */}
+              element, which also holds the standalone trace overlay, so a gate
+              keyed to it would not follow the transcript column itself. */}
           <div className="@container/transcript relative flex min-h-0 flex-1 flex-col">
             {/* The left inset opens the timeline rail's lane. Without it the
                 transcript's own `max-w-5xl` body reaches the container edge
@@ -2055,7 +2076,7 @@ export function Chat({
                   }
                   contentRef={attachContent}
                   onOpenLiveTrace={openLiveTraceDrawer}
-                  onOpenStoredTrace={setTraceDrawerTarget}
+                  onOpenStoredTrace={openStoredTraceDrawer}
                   onOpenSubagentTrace={openSubagentTraceDrawer}
                   activeTraceTarget={traceDrawerTarget}
                   subagentIconByName={subagentIconByName}
@@ -2213,7 +2234,7 @@ export function Chat({
         <TraceDrawer
           target={traceDrawerTarget}
           onClose={closeTraceDrawer}
-          hasApps={isAppsPanelOpen}
+          outlet={toolTrace ? toolTrace.outlet : undefined}
           renderInlineBlock={(block, key) =>
             renderSingleEntry(block, key, {
               onApprovalResolved: refreshActiveSession,

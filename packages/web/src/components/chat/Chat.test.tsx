@@ -14,6 +14,7 @@ import {
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
 import { applyAgentPlacement } from "@/pages/free/use-free-cells";
+import { ToolTraceContext, type ToolTraceHost } from "@/pages/free/tool-trace";
 import {
   createSession,
   deleteSession,
@@ -93,8 +94,25 @@ rs.mock("@/hooks/use-smooth-text", () => ({
 }));
 
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
-  TraceDrawer: () => null,
-  traceDrawerContentInsetClass: () => "",
+  TraceDrawer: ({
+    target,
+    outlet,
+    onClose,
+  }: {
+    target: { kind: string } | null;
+    outlet?: HTMLElement | null;
+    onClose: () => void;
+  }) =>
+    target ? (
+      <button
+        type="button"
+        data-testid="trace-drawer"
+        data-outlet={outlet === undefined ? "overlay" : outlet === null ? "pending" : "tab"}
+        onClick={onClose}
+      >
+        {target.kind}
+      </button>
+    ) : null,
 }));
 
 rs.mock("@/components/chat/AgentAvatar", () => ({
@@ -113,7 +131,9 @@ rs.mock("@/components/chat/MessageList", () => ({
   MessageList: ({
     live,
     rows,
+    onOpenStoredTrace,
   }: {
+    onOpenStoredTrace: (target: unknown) => void;
     live: { identity: { name: string } };
     rows: {
       kind: string;
@@ -127,6 +147,20 @@ rs.mock("@/components/chat/MessageList", () => ({
   }) => (
     <>
       <div data-testid="message-list">{live.identity.name}</div>
+      <button
+        type="button"
+        onClick={() =>
+          onOpenStoredTrace({
+            kind: "stored",
+            messageId: "trace-1",
+            sessionId: "session-1",
+            turnId: "turn-1",
+            summary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+          })
+        }
+      >
+        open stored trace
+      </button>
       {rows
         .filter((row) => row.kind === "user")
         .map((row) => (
@@ -352,6 +386,68 @@ describe("Chat missing-session detection", () => {
     await act(async () => resolveMessages(null));
 
     expect(onSessionNotFound).not.toHaveBeenCalled();
+  });
+});
+
+describe("Chat trace in the tool pane", () => {
+  function host(outlet: HTMLElement | null = null) {
+    return { outlet, reveal: rs.fn(), set: rs.fn() } satisfies ToolTraceHost;
+  }
+  const withHost = (toolTrace: ToolTraceHost, element: ReactNode) => (
+    <ToolTraceContext.Provider value={toolTrace}>{element}</ToolTraceContext.Provider>
+  );
+
+  it("reveals the Trace tab and registers the open trace with the pane", async () => {
+    const user = userEvent.setup();
+    const toolTrace = host();
+    renderChat(withHost(toolTrace, <Chat sessionId="session-1" />));
+    expect(toolTrace.set).toHaveBeenLastCalledWith(expect.any(String), null);
+    expect(toolTrace.reveal).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "open stored trace" }));
+    expect(toolTrace.reveal).toHaveBeenCalledTimes(1);
+    expect(toolTrace.set).toHaveBeenLastCalledWith(expect.any(String), {
+      streaming: false,
+      onClose: expect.any(Function),
+    });
+    // The pane draws the trace, so the chat no longer reserves room for a drawer.
+    expect(screen.getByTestId("trace-drawer").getAttribute("data-outlet")).toBe("pending");
+  });
+
+  it("hands the pane's outlet to the drawer", async () => {
+    const user = userEvent.setup();
+    const outlet = document.createElement("div");
+    renderChat(withHost(host(outlet), <Chat sessionId="session-1" />));
+    await user.click(screen.getByRole("button", { name: "open stored trace" }));
+    expect(screen.getByTestId("trace-drawer").getAttribute("data-outlet")).toBe("tab");
+  });
+
+  it("closes the trace when the pane's tab asks to close", async () => {
+    const user = userEvent.setup();
+    const toolTrace = host();
+    renderChat(withHost(toolTrace, <Chat sessionId="session-1" />));
+    await user.click(screen.getByRole("button", { name: "open stored trace" }));
+    const tab = toolTrace.set.mock.calls.at(-1)?.[1] as { onClose: () => void };
+    act(() => tab.onClose());
+
+    expect(screen.queryByTestId("trace-drawer")).toBeNull();
+    expect(toolTrace.set).toHaveBeenLastCalledWith(expect.any(String), null);
+  });
+
+  it("removes the tab when the chat goes away", async () => {
+    const user = userEvent.setup();
+    const toolTrace = host();
+    const { unmount } = renderChat(withHost(toolTrace, <Chat sessionId="session-1" />));
+    await user.click(screen.getByRole("button", { name: "open stored trace" }));
+    unmount();
+    expect(toolTrace.set).toHaveBeenLastCalledWith(expect.any(String), null);
+  });
+
+  it("falls back to the overlay drawer outside a tool workspace", async () => {
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="session-1" />);
+    await user.click(screen.getByRole("button", { name: "open stored trace" }));
+    expect(screen.getByTestId("trace-drawer").getAttribute("data-outlet")).toBe("overlay");
   });
 });
 

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { TraceAccounting, TraceSnapshot } from "@rome/api-types/trace-segments";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { UsageSummaryView } from "@/components/chat/entries/UsageSummaryView";
-import { TraceDrawer } from "./TraceDrawer";
+import { TraceDrawer, type TraceDrawerTarget } from "./TraceDrawer";
 
 const translate = (key: string) => key;
 rs.mock("react-i18next", () => ({
@@ -127,5 +127,137 @@ describe("TraceDrawer archived steps", () => {
     } finally {
       rs.unstubAllGlobals();
     }
+  });
+});
+
+describe("TraceDrawer hosted in the tool pane", () => {
+  const storedTarget = {
+    kind: "stored" as const,
+    messageId: "m",
+    sessionId: "s",
+    turnId: "t",
+    summary: targetSummary,
+  };
+  const loadStoredTrace = async () => usageSnapshot(false);
+
+  function hosted(outlet: HTMLElement | null, target: TraceDrawerTarget | null = storedTarget) {
+    return (
+      <TraceDrawer
+        target={target}
+        onClose={() => {}}
+        outlet={outlet}
+        loadStoredTrace={loadStoredTrace}
+        renderInlineBlock={() => null}
+        renderRunBlocks={() => null}
+      />
+    );
+  }
+
+  it("renders into the outlet with only the summary and the dump link as its header", async () => {
+    const outlet = document.createElement("div");
+    document.body.append(outlet);
+    render(hosted(outlet));
+
+    await waitFor(() => expect(outlet.textContent).toContain("trace.summary.stepsSingle"));
+    expect(outlet.querySelector("a[download]")?.getAttribute("href")).toBe(
+      "/api/chat/sessions/s/turns/t/trace.json",
+    );
+    // The tab owns the title, the Live indicator and the close button.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "trace.drawer.title" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "trace.drawer.closeAriaLabel" })).toBeNull();
+    expect(screen.queryByText("trace.drawer.live")).toBeNull();
+    outlet.remove();
+  });
+
+  it("renders nothing until the tab's outlet exists, then fills it", async () => {
+    const { container, rerender } = render(hosted(null));
+    expect(container.textContent).toBe("");
+    const outlet = document.createElement("div");
+    document.body.append(outlet);
+    rerender(hosted(outlet));
+    await waitFor(() => expect(outlet.textContent).toContain("trace.summary.stepsSingle"));
+    outlet.remove();
+  });
+
+  it("renders nothing without a target", () => {
+    const outlet = document.createElement("div");
+    document.body.append(outlet);
+    render(hosted(outlet, null));
+    expect(outlet.textContent).toBe("");
+    outlet.remove();
+  });
+
+  it("stays a dialog overlay when no outlet is given", () => {
+    render(
+      <TraceDrawer
+        target={null}
+        onClose={() => {}}
+        renderInlineBlock={() => null}
+        renderRunBlocks={() => null}
+      />,
+    );
+    expect(document.querySelector('aside[role="dialog"]')).not.toBeNull();
+  });
+
+  it("follows a live trace to the bottom once the outlet mounts", () => {
+    const heights = new WeakMap<Element, number>();
+    const scrollHeight = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight");
+    const scrollTop = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+    Object.defineProperty(Element.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(Element.prototype, "scrollTop", {
+      configurable: true,
+      get(this: Element) {
+        return heights.get(this) ?? 0;
+      },
+      set(this: Element, value: number) {
+        heights.set(this, value);
+      },
+    });
+    try {
+      const live: TraceDrawerTarget = {
+        kind: "live",
+        sessionId: "s",
+        turnId: "t",
+        summary: targetSummary,
+        segments: [],
+        streaming: true,
+      };
+      const { rerender } = render(hosted(null, live));
+      const outlet = document.createElement("div");
+      document.body.append(outlet);
+      rerender(hosted(outlet, live));
+
+      const scroller = outlet.querySelector(".overflow-y-auto");
+      expect(scroller).not.toBeNull();
+      expect(heights.get(scroller as Element)).toBe(500);
+      outlet.remove();
+    } finally {
+      if (scrollHeight) Object.defineProperty(Element.prototype, "scrollHeight", scrollHeight);
+      else delete (Element.prototype as { scrollHeight?: number }).scrollHeight;
+      if (scrollTop) Object.defineProperty(Element.prototype, "scrollTop", scrollTop);
+      else delete (Element.prototype as { scrollTop?: number }).scrollTop;
+    }
+  });
+
+  it("shows the archived note without a dump link", async () => {
+    const outlet = document.createElement("div");
+    document.body.append(outlet);
+    render(
+      <TraceDrawer
+        target={storedTarget}
+        onClose={() => {}}
+        outlet={outlet}
+        loadStoredTrace={async () => "archived"}
+        renderInlineBlock={() => null}
+        renderRunBlocks={() => null}
+      />,
+    );
+    await waitFor(() => expect(outlet.textContent).toContain("trace.archived"));
+    expect(outlet.querySelector("a[download]")).toBeNull();
+    outlet.remove();
   });
 });
