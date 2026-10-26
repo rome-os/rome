@@ -538,7 +538,7 @@ describe("ToolWorkspace Trace tab against the saved tool view", () => {
         setCollapsed={cells.setToolsCollapsed}
         addWidget={cells.addWidget}
         removeWidget={cells.removeWidget}
-        label={(widget) => widget.type}
+        label={(widget) => widget.targetId ?? widget.type}
         icon={() => null}
         content={(widget) => <ToolContent id={widget.id} />}
         fullHref={() => null}
@@ -623,5 +623,59 @@ describe("ToolWorkspace Trace tab against the saved tool view", () => {
     expect(screen.getByRole("tab", { name: "projects" }).getAttribute("aria-selected")).toBe(
       "true",
     );
+  });
+
+  const selected = (name: string) =>
+    screen.getByRole("tab", { name }).getAttribute("aria-selected") === "true";
+
+  async function openTraceOverApps(user: ReturnType<typeof userEvent.setup>) {
+    store.setActiveSession("A");
+    act(() => {
+      store.autoPlaceApp("notes", "r1");
+      store.autoPlaceApp("mail", "r1");
+      store.setToolsCollapsed(false);
+    });
+    render(<StoreWorkspace />);
+    await user.click(screen.getByRole("button", { name: "Open trace chat" }));
+    expect(selected("Trace")).toBe(true);
+  }
+
+  it("keeps Trace selected when the store re-places the active app under a new id", async () => {
+    const user = userEvent.setup();
+    await openTraceOverApps(user);
+    act(() => {
+      store.autoPlaceApp("mail", "r2", undefined, true);
+    });
+
+    expect(selected("Trace")).toBe(true);
+    expect(screen.getByText("Trace body first")).toBeTruthy();
+  });
+
+  it("keeps Trace selected when background apps close, with no empty state", async () => {
+    const user = userEvent.setup();
+    await openTraceOverApps(user);
+    await user.click(screen.getByRole("button", { name: "Close notes" }));
+    expect(selected("Trace")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Close mail" }));
+
+    expect(tabNames()).toEqual(["Trace"]);
+    expect(selected("Trace")).toBe(true);
+    expect(screen.queryByRole("heading", { name: "No apps open" })).toBeNull();
+    expect(screen.getByText("Trace body first")).toBeTruthy();
+  });
+
+  it("selects an app when the user clicks its tab, and when they add one", async () => {
+    const user = userEvent.setup();
+    await openTraceOverApps(user);
+    await user.click(screen.getByRole("tab", { name: "notes" }));
+    expect(selected("notes")).toBe(true);
+    expect(selected("Trace")).toBe(false);
+
+    await user.click(screen.getByRole("tab", { name: "Trace" }));
+    expect(selected("Trace")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Open an app" }));
+    await user.click(screen.getByRole("option", { name: "Projects" }));
+    expect(selected("Trace")).toBe(false);
+    expect(selected("projects")).toBe(true);
   });
 });

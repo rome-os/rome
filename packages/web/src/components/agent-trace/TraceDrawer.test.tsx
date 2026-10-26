@@ -243,6 +243,40 @@ describe("TraceDrawer hosted in the tool pane", () => {
     }
   });
 
+  it("ignores Escape in the tab, where the overlay would close", async () => {
+    const outlet = document.createElement("div");
+    document.body.append(outlet);
+    const onClose = rs.fn();
+    render(
+      <TraceDrawer
+        target={storedTarget}
+        onClose={onClose}
+        outlet={outlet}
+        loadStoredTrace={loadStoredTrace}
+        renderInlineBlock={() => null}
+        renderRunBlocks={() => null}
+      />,
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    outlet.remove();
+  });
+
+  it("still closes the overlay on Escape", () => {
+    const onClose = rs.fn();
+    render(
+      <TraceDrawer
+        target={storedTarget}
+        onClose={onClose}
+        loadStoredTrace={loadStoredTrace}
+        renderInlineBlock={() => null}
+        renderRunBlocks={() => null}
+      />,
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the archived note without a dump link", async () => {
     const outlet = document.createElement("div");
     document.body.append(outlet);

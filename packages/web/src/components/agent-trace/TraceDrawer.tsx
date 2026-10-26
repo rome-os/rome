@@ -246,12 +246,14 @@ export function TraceDrawer({
           : null
       : null;
 
+  const overlay = outlet === undefined;
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (open) {
       triggerRef.current = document.activeElement as HTMLElement | null;
+      if (!overlay) return;
       const id = requestAnimationFrame(() => closeBtnRef.current?.focus());
       return () => cancelAnimationFrame(id);
     }
@@ -260,10 +262,13 @@ export function TraceDrawer({
     if (trigger && document.contains(trigger) && typeof trigger.focus === "function") {
       trigger.focus();
     }
-  }, [open]);
+  }, [open, overlay]);
 
+  // Escape closes the overlay, which covers the chat. In the Trace tab it would
+  // also fire from the composer's menus or a hidden tab, so the tab's own close
+  // button and Delete key are the way out there.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !overlay) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
@@ -272,7 +277,7 @@ export function TraceDrawer({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+  }, [open, overlay, onClose]);
 
   const canIncludeSubagentUsage =
     allowSubagentUsage && !!remoteTargetKey && !!target?.summary.subagents?.length;

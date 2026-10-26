@@ -31,8 +31,10 @@ export interface ToolTraceHost {
   reveal: () => void;
   /**
    * Shows the Trace tab for `owner`, or removes it with `null`. Idempotent for
-   * the same arguments, and `null` from a non-owner is ignored. A second owner
-   * displaces the first by calling its `onClose`.
+   * the same arguments, and `null` from a non-owner is ignored. There is one
+   * Trace tab for the whole pane, so the last owner to open a trace wins: a
+   * pinned side chat opening a trace replaces the main chat's, by calling the
+   * main chat's `onClose`, and the reverse holds too.
    */
   set: (owner: string, tab: ToolTraceTab | null) => void;
 }

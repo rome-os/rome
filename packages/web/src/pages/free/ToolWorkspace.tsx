@@ -214,11 +214,14 @@ export function ToolWorkspace({
     [reveal],
   );
 
-  // Something else changed the active tab (an app installed, a tab closed), so
-  // the pane should show that tab rather than a Trace that was behind it.
-  useEffect(() => {
+  // Only the user's own choice of an app deselects the Trace tab. Changes that
+  // come from the store, such as an agent re-placing the active app under a new
+  // id or a background app closing, move `view.activeId` without the user
+  // asking to leave the trace, so they never touch `traceSelected`.
+  function addAndShow(type: WidgetType, targetId?: string) {
     setTraceSelected(false);
-  }, [view.activeId]);
+    addWidget(type, targetId);
+  }
 
   // A real expansion supersedes the hold.
   useEffect(() => {
@@ -341,7 +344,7 @@ export function ToolWorkspace({
         </DropdownMenu>
       )}
       {hasTabs && (
-        <WidgetPicker onSelect={addWidget} placements={placements}>
+        <WidgetPicker onSelect={addAndShow} placements={placements}>
           <IconButton size="sm" data-coach="add-widget" label={t("chat.add")} icon={<Plus />} />
         </WidgetPicker>
       )}
@@ -485,7 +488,7 @@ export function ToolWorkspace({
                 <EmptyStateTitle>{t("chat.emptyAppsTitle")}</EmptyStateTitle>
                 <EmptyStateDescription>{t("chat.emptyAppsDescription")}</EmptyStateDescription>
                 <EmptyStateAction>
-                  <WidgetPicker onSelect={addWidget} placements={placements}>
+                  <WidgetPicker onSelect={addAndShow} placements={placements}>
                     <Button data-coach="add-widget" variant="outline">
                       <Plus data-icon="inline-start" />
                       {t("chat.add")}
