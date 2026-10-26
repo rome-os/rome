@@ -6,6 +6,7 @@ CREATE TABLE `app_connection_access` (
 	`approval` text NOT NULL,
 	`constraints` text NOT NULL,
 	`expires_at` integer,
+	`grant_conferral_epoch` text NOT NULL,
 	`revision` integer NOT NULL,
 	`revoked_at` integer,
 	`created_at` integer NOT NULL,
@@ -47,4 +48,7 @@ CREATE TABLE `app_connection_invocations` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `uq_app_connection_invocation_request` ON `app_connection_invocations` (`app_id`,`request_id_hash`) WHERE "app_connection_invocations"."request_id_hash" IS NOT NULL;--> statement-breakpoint
-CREATE INDEX `idx_app_connection_invocation_retention` ON `app_connection_invocations` (`updated_at`);
+CREATE INDEX `idx_app_connection_invocation_retention` ON `app_connection_invocations` (`updated_at`);--> statement-breakpoint
+ALTER TABLE `connection_grants` ADD `conferral_epoch` text;--> statement-breakpoint
+-- Existing authorized grants need a stable epoch for their current conferral.
+UPDATE `connection_grants` SET `conferral_epoch` = lower(hex(randomblob(16))) WHERE `state` != 'unauthorized' AND `conferral_epoch` IS NULL;

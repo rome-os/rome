@@ -1,6 +1,11 @@
 import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { AppConnectionErrorBody, AppConnectionResourceConstraint } from "@rome-os/app-runtime";
-import { appConnectionAccess, appConnectionAudit, appConnectionInvocations } from "../schema.js";
+import {
+  appConnectionAccess,
+  appConnectionAudit,
+  appConnectionInvocations,
+  connectionGrants,
+} from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 
 export type AppConnectionApproval = "required" | "not_required";
@@ -21,6 +26,7 @@ export interface AppConnectionAccessRecord {
   approval: AppConnectionApproval;
   constraints: AppConnectionResourceConstraint[];
   expiresAt: Date | null;
+  grantConferralEpoch: string;
   revision: number;
   revokedAt: Date | null;
   createdAt: Date;
@@ -87,9 +93,17 @@ export class AppConnectionAccessRepository {
     const rows = await this.db
       .selectDistinct({ connectionId: appConnectionAccess.connectionId })
       .from(appConnectionAccess)
+      .innerJoin(connectionGrants, eq(connectionGrants.custody, appConnectionAccess.connectionId))
       .where(
         and(
           eq(appConnectionAccess.appId, appId),
+          or(
+            eq(connectionGrants.conferralEpoch, appConnectionAccess.grantConferralEpoch),
+            and(
+              eq(connectionGrants.state, "unauthorized"),
+              isNull(connectionGrants.conferralEpoch),
+            ),
+          ),
           gt(appConnectionAccess.connectionId, after),
           isNull(appConnectionAccess.revokedAt),
           or(isNull(appConnectionAccess.expiresAt), gt(appConnectionAccess.expiresAt, now)),
@@ -136,6 +150,7 @@ export class AppConnectionAccessRepository {
     operation: string;
     approval: AppConnectionApproval;
     constraints: AppConnectionResourceConstraint[];
+    grantConferralEpoch: string;
     expiresAt?: Date | null;
   }): Promise<AppConnectionAccessRecord> {
     const now = new Date();
@@ -159,6 +174,7 @@ export class AppConnectionAccessRepository {
         set: {
           approval: input.approval,
           constraints: input.constraints,
+          grantConferralEpoch: input.grantConferralEpoch,
           expiresAt: input.expiresAt ?? null,
           revision: sql`${appConnectionAccess.revision} + 1`,
           revokedAt: null,
@@ -370,7 +386,13 @@ export class AppConnectionAccessRepository {
         )
         .limit(1)
         .get();
-      if (!policyCurrentForInvocation(policy, invocation, approval, now)) return false;
+      const grant = tx
+        .select({ state: connectionGrants.state, conferralEpoch: connectionGrants.conferralEpoch })
+        .from(connectionGrants)
+        .where(eq(connectionGrants.custody, invocation.connectionId))
+        .limit(1)
+        .get();
+      if (!policyCurrentForInvocation(policy, grant, invocation, approval, now)) return false;
       const result = tx
         .update(appConnectionInvocations)
         .set({ status: "running", errorCode: null, updatedAt: now })
@@ -390,9 +412,10 @@ export class AppConnectionAccessRepository {
     approval: AppConnectionApproval,
     now = new Date(),
   ): boolean {
-    const policy = this.db
-      .select()
+    const current = this.db
+      .select({ policy: appConnectionAccess, grant: connectionGrants })
       .from(appConnectionAccess)
+      .innerJoin(connectionGrants, eq(connectionGrants.custody, appConnectionAccess.connectionId))
       .where(
         and(
           eq(appConnectionAccess.appId, invocation.appId),
@@ -403,7 +426,11 @@ export class AppConnectionAccessRepository {
       )
       .limit(1)
       .get();
-    return policyCurrentForInvocation(policy, invocation, approval, now);
+    return Boolean(
+      current &&
+        current.grant.state !== "unauthorized" &&
+        policyCurrentForInvocation(current.policy, current.grant, invocation, approval, now),
+    );
   }
 
   async appendAudit(input: {
@@ -488,15 +515,19 @@ export class AppConnectionAccessRepository {
 
 function policyCurrentForInvocation(
   policy: typeof appConnectionAccess.$inferSelect | undefined,
+  grant: Pick<typeof connectionGrants.$inferSelect, "state" | "conferralEpoch"> | undefined,
   invocation: AppConnectionInvocationRecord,
   approval: AppConnectionApproval,
   now: Date,
 ): boolean {
   return Boolean(
     policy &&
+      grant &&
       policy.revokedAt === null &&
       (policy.expiresAt === null || policy.expiresAt > now) &&
       policy.revision === invocation.accessRevision &&
-      policy.approval === approval,
+      policy.approval === approval &&
+      ((grant.conferralEpoch !== null && policy.grantConferralEpoch === grant.conferralEpoch) ||
+        (grant.state === "unauthorized" && grant.conferralEpoch === null)),
   );
 }

@@ -21,6 +21,7 @@ import type {
   AppConnectionAccessRepository,
   AppConnectionInvocationRecord,
 } from "../db/repositories/app-connection-access.js";
+import type { GrantRecord } from "./ledger.js";
 import type { ConnectionRegistry } from "./registry.js";
 import type { Connection, OperationDescriptor, ProfileDisplay } from "./types.js";
 
@@ -238,7 +239,12 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     input: { connectionId: string; identity: string },
   ): Promise<AppConnectionBrokerResult<AppConnectionDescription>> {
     const policies = await this.access.listActiveForConnection(appId, input.connectionId);
-    if (!policies.some((policy) => policy.connectionId === input.connectionId)) {
+    const grant = await this.registry.getLedger().getGrant(input.connectionId);
+    if (
+      !policies.some(
+        (policy) => policy.connectionId === input.connectionId && policyMatchesGrant(policy, grant),
+      )
+    ) {
       return failure("connection_not_found", "The connection is not visible to this App.");
     }
     const connection = this.findConnection(input.connectionId);
@@ -246,7 +252,9 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     if (
       !policies.some(
         (policy) =>
-          policy.connectionId === input.connectionId && policy.identity === input.identity,
+          policy.connectionId === input.connectionId &&
+          policy.identity === input.identity &&
+          policyMatchesGrant(policy, grant),
       )
     ) {
       return failure("identity_not_found", "The identity is not visible to this App.");
@@ -275,11 +283,14 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     const supported = this.supportedOperations(connection, input.identity);
     if (!supported.ok) return supported;
     const policies = await this.access.listActiveForConnection(appId, input.connectionId);
+    const grant = await this.registry.getLedger().getGrant(input.connectionId);
     const byOperation = new Map(
       policies
         .filter(
           (policy) =>
-            policy.connectionId === input.connectionId && policy.identity === input.identity,
+            policy.connectionId === input.connectionId &&
+            policy.identity === input.identity &&
+            policyMatchesGrant(policy, grant),
         )
         .map((policy) => [policy.operation, policy]),
     );
@@ -361,7 +372,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         failure("access_denied", "Read operations cannot use deferred approval."),
       );
     }
-    if (sideEffects === "write" && !validRequestId(input.requestId)) {
+    if (sideEffects === "write" && input.requestId === undefined) {
       return await denied(
         failure("request_id_required", "Write operations require a stable requestId."),
       );
@@ -953,6 +964,14 @@ function compactProfile(profile: ProfileDisplay) {
 
 function isActive(policy: AppConnectionAccessRecord, now = new Date()): boolean {
   return !policy.revokedAt && (!policy.expiresAt || policy.expiresAt > now);
+}
+
+function policyMatchesGrant(policy: AppConnectionAccessRecord, grant: GrantRecord | null): boolean {
+  return Boolean(
+    grant &&
+      ((grant.conferralEpoch && policy.grantConferralEpoch === grant.conferralEpoch) ||
+        (grant.state === "unauthorized" && !grant.conferralEpoch)),
+  );
 }
 
 function validRequestId(value: string | undefined): value is string {

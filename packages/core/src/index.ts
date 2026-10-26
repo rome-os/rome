@@ -588,8 +588,10 @@ async function main() {
       host: getConfiguredInstanceOrigin()?.replace(/^https?:\/\//, "") ?? null,
     }),
   );
+  let appBootConverged = false;
   try {
     const bootResult = await appManager.boot();
+    appBootConverged = true;
     appsLog.info("AppManager.boot completed", {
       appCount: bootResult.appCount,
       sweptStaging: bootResult.sweptStaging,
@@ -600,7 +602,11 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  await reconcileAppConnectionAccess(appCatalog, appConnectionAccessRepo);
+  if (appBootConverged) {
+    await reconcileAppConnectionAccess(appCatalog, appConnectionAccessRepo);
+  } else {
+    appsLog.warn("App connection access reconciliation skipped after failed App boot");
+  }
 
   // Install / refresh ALL first-party apps from the packed artifacts in
   // `dist/first-party-artifacts/` (`pnpm build:apps`, folded into `pnpm build`).

@@ -70,7 +70,7 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
 
   app.put("/app-connection-access/:appId/:connectionId/:identity/:operation", async (c) => {
     if (!isSameOriginMutationRequest(c.req.raw)) return c.json({ error: "Forbidden" }, 403);
-    const target = resolveTarget(deps, {
+    const target = await resolveTarget(deps, {
       appId: c.req.param("appId"),
       connectionId: c.req.param("connectionId"),
       identity: c.req.param("identity"),
@@ -94,6 +94,7 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
       approval: parsed.data.approval,
       constraints: parsed.data.constraints,
       expiresAt,
+      grantConferralEpoch: target.value.grantConferralEpoch,
     });
     return c.json({
       policy: {
@@ -120,12 +121,16 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
   return app;
 }
 
-function resolveTarget(
+async function resolveTarget(
   deps: ApiDeps,
   target: { appId: string; connectionId: string; identity: string; operation: string },
-):
-  | { ok: true; value: typeof target & { sideEffects: "read-only" | "write" } }
-  | { ok: false; status: 404 | 409 | 503; error: string } {
+): Promise<
+  | {
+      ok: true;
+      value: typeof target & { sideEffects: "read-only" | "write"; grantConferralEpoch: string };
+    }
+  | { ok: false; status: 404 | 409 | 503; error: string }
+> {
   if (!isResolvedApp(deps.appCatalog.get(target.appId))) {
     return { ok: false, status: 404, error: "App not found or disabled." };
   }
@@ -144,5 +149,16 @@ function resolveTarget(
   if (!operation?.appAccess) {
     return { ok: false, status: 404, error: "App-accessible operation not found." };
   }
-  return { ok: true, value: { ...target, sideEffects: operation.appAccess.sideEffects } };
+  const grant = await deps.connectionRegistry.getLedger().getGrant(target.connectionId);
+  if (!grant?.conferralEpoch || grant.state === "unauthorized") {
+    return { ok: false, status: 409, error: "Connection identity is not authorized." };
+  }
+  return {
+    ok: true,
+    value: {
+      ...target,
+      sideEffects: operation.appAccess.sideEffects,
+      grantConferralEpoch: grant.conferralEpoch,
+    },
+  };
 }

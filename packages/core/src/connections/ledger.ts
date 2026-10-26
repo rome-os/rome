@@ -49,8 +49,11 @@ export interface GrantRecord {
    *  and cleared with it. Absent when the profile names none. At most one grant
    *  in any state but "unauthorized" reaches an account. */
   account?: GrantAccount;
-  /** When the last conferral filled this grant. Retained through `revoke()`. */
+  /** When the current conferral filled this grant. Revocation clears it. */
   conferredAt?: Date;
+  /** Opaque epoch of the current conferral. Renewals preserve it; a new
+   *  conferral replaces it and revocation clears it. */
+  conferralEpoch?: string;
   lastRenewedAt?: Date;
   degraded?: { at: Date; reason: string };
 }

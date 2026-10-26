@@ -113,7 +113,9 @@ function harness(
       },
     },
   };
-  const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const registry = new ConnectionRegistry({
+    ledger: new DrizzleGrantLedger(db),
+  });
   registry.register(descriptor);
   const access = new AppConnectionAccessRepository(db);
   const actionRegistry = new ActionRegistryImpl();
@@ -194,6 +196,8 @@ async function grant(
     expiresAt?: Date;
   },
 ) {
+  const currentGrant = await h.registry.getLedger().getGrant(input.connectionId);
+  if (!currentGrant?.conferralEpoch) throw new Error("expected conferred grant");
   return await h.access.put({
     appId: input.appId,
     connectionId: input.connectionId,
@@ -202,6 +206,7 @@ async function grant(
     approval: input.approval ?? "not_required",
     constraints: input.constraints ?? [],
     expiresAt: input.expiresAt,
+    grantConferralEpoch: currentGrant.conferralEpoch,
   });
 }
 
@@ -579,7 +584,7 @@ describe("App connection broker", () => {
         { material: { token: "replacement" }, expiresAt: "never" },
         { displayName: "docs" },
       );
-      await h.access.revoke("app-a", connection.id, "account", "documents.get");
+      expect(await facade.list()).toEqual({ connections: [] });
       await expect(
         facade.invoke({
           connectionId: connection.id,

@@ -113,7 +113,9 @@ identity for one operation.
 
 - Access defaults to denied. A Core-owned policy names the app, Connection, identity,
   operation, approval mode, optional input constraints, and optional expiry. Disabling
-  or removing the app revokes its policies.
+  or removing the app revokes its policies. The policy is bound to the provider
+  grant's current conferral. Reconnecting the Connection creates a new conferral and
+  requires new App access.
 - A provider operation is invisible until its Connection descriptor explicitly opts it
   into app access. A policy cannot expose an arbitrary HTTP request, provider client,
   credential read, or global Connection mutation.

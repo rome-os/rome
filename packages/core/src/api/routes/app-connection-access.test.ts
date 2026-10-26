@@ -68,6 +68,14 @@ function makeApp() {
     connectionRegistry: {
       all: () => [connection],
       getDescriptor: (kind: string) => (kind === "fake-docs" ? descriptor : null),
+      getLedger: () => ({
+        getGrant: async () => ({
+          custody: "connection-1",
+          state: "authorized",
+          conferredAt: new Date("2026-10-26T00:00:00.000Z"),
+          conferralEpoch: "conferral-1",
+        }),
+      }),
     },
   } as unknown as ApiDeps;
   const app = new Hono();

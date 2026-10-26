@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "de46a86d-6473-45f9-8d28-9df289bad1c9",
+  "id": "618cb3b0-ed96-4098-aab7-c55458ddc01d",
   "prevId": "58810dc1-b71d-43db-84cd-cdddcab2599e",
   "tables": {
     "action_executions": {
@@ -185,6 +185,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        },
+        "grant_conferral_epoch": {
+          "name": "grant_conferral_epoch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "revision": {
@@ -818,6 +825,13 @@
         "conferred_at": {
           "name": "conferred_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "conferral_epoch": {
+          "name": "conferral_epoch",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

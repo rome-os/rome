@@ -44,6 +44,7 @@ function rowToGrant(row: GrantRow): GrantRecord {
     rec.account = { platform: row.platform, accountId: row.accountId };
   }
   if (row.conferredAt !== null) rec.conferredAt = row.conferredAt;
+  if (row.conferralEpoch !== null) rec.conferralEpoch = row.conferralEpoch;
   if (row.lastRenewedAt !== null) rec.lastRenewedAt = row.lastRenewedAt;
   if (row.degradedAt !== null) {
     rec.degraded = { at: row.degradedAt, reason: row.degradedReason ?? "" };
@@ -129,6 +130,7 @@ export class DrizzleGrantLedger implements GrantLedger {
         platform: value.account?.platform ?? null,
         accountId: value.account?.accountId ?? null,
         conferredAt: value.conferredAt ?? null,
+        conferralEpoch: value.conferralEpoch ?? null,
         lastRenewedAt: value.lastRenewedAt ?? null,
         degradedAt: value.degraded?.at ?? null,
         degradedReason: value.degraded?.reason ?? null,

@@ -151,7 +151,14 @@ function conferredGrant(
   profile?: ProfileRecord,
   account?: GrantAccount,
 ): GrantValue {
-  return { state: "authorized", credential: toPersisted(cred), profile, account, conferredAt: now };
+  return {
+    state: "authorized",
+    credential: toPersisted(cred),
+    profile,
+    account,
+    conferredAt: now,
+    conferralEpoch: crypto.randomUUID(),
+  };
 }
 
 /** The grant a renewal leaves: the same conferral on a renewed credential. */
