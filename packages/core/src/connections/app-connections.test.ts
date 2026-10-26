@@ -197,6 +197,7 @@ async function grant(
     appId: string;
     connectionId: string;
     operation: string;
+    sideEffects?: "read-only" | "write";
     approval?: "required" | "not_required";
     constraints?: Array<{ inputPointer: string; allowedValues: string[] }>;
     expiresAt?: Date;
@@ -204,11 +205,20 @@ async function grant(
 ) {
   const currentGrant = await h.registry.grantOf(input.connectionId);
   if (!currentGrant?.conferralEpoch) throw new Error("expected conferred grant");
+  const sideEffects =
+    input.sideEffects ??
+    h.registry
+      .all()
+      .find((connection) => connection.id === input.connectionId)
+      ?.act?.operations()
+      .find((operation) => operation.name === input.operation)?.appAccess?.sideEffects;
+  if (!sideEffects) throw new Error("expected App-accessible operation");
   return await h.access.put({
     appId: input.appId,
     connectionId: input.connectionId,
     identity: "account",
     operation: input.operation,
+    sideEffects,
     approval: input.approval ?? "not_required",
     constraints: input.constraints ?? [],
     expiresAt: input.expiresAt,
@@ -795,6 +805,78 @@ describe("App connection broker", () => {
     }
   });
 
+  it("denies a policy created for a different side-effect classification", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+        sideEffects: "read-only",
+      });
+
+      await expect(
+        h.broker.forApp("app-a").operations({
+          connectionId: connection.id,
+          identity: "account",
+        }),
+      ).resolves.toMatchObject({
+        operations: expect.arrayContaining([
+          expect.objectContaining({ name: "documents.create", access: "not_granted" }),
+        ]),
+      });
+
+      await expect(
+        h.broker.forApp("app-a").invoke({
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.create",
+          requestId: "request-reclassified-operation",
+          input: { workspaceId: "one", title: "Must not run", body: "private" },
+        }),
+      ).rejects.toMatchObject({ detail: { code: "access_denied" } });
+      expect(h.invocations).toHaveLength(0);
+      expect(await h.db.select().from(appConnectionInvocations)).toHaveLength(0);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("makes the execution claim conditional on the granted side-effect classification", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      const policy = await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+      });
+      const stored = h.access.createOrGetInvocation({
+        id: "reclassified-invocation",
+        appId: "app-a",
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.create",
+        requestIdHash: createHash("sha256").update("reclassified-request").digest("hex"),
+        inputHash: createHash("sha256").update("input").digest("hex"),
+        input: { workspaceId: "one", title: "Must not run", body: "private" },
+        sideEffects: "write",
+        accessRevision: policy.revision,
+      }).invocation;
+      h.db
+        .update(appConnectionAccess)
+        .set({ sideEffects: "read-only" })
+        .where(eq(appConnectionAccess.appId, "app-a"))
+        .run();
+
+      expect(h.access.claimInvocationWithPolicy(stored, "ready", "not_required")).toBe(false);
+      expect(await h.access.getInvocation(stored.id)).toMatchObject({ status: "ready" });
+    } finally {
+      h.close();
+    }
+  });
+
   it("rejects a grant degraded between the execution checks and provider I/O", async () => {
     const h = harness();
     try {
@@ -1121,6 +1203,21 @@ describe("App connection broker", () => {
         sideEffects: "write",
         accessRevision: policy.revision,
       });
+      for (const id of ["active-pending-write", "orphaned-pending-write"]) {
+        h.access.createOrGetInvocation({
+          id,
+          appId: "app-a",
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.create",
+          requestIdHash: createHash("sha256").update(id).digest("hex"),
+          inputHash: createHash("sha256").update(`${id}-input`).digest("hex"),
+          input: { workspaceId: "one", title: id, body: "private" },
+          sideEffects: "write",
+          accessRevision: policy.revision,
+        });
+        await h.access.transitionInvocation(id, ["ready"], "pending_approval");
+      }
       const request = {
         connectionId: connection.id,
         identity: "account",
@@ -1132,7 +1229,7 @@ describe("App connection broker", () => {
       await expect(h.broker.forApp("app-a").invoke(request)).rejects.toMatchObject({
         detail: { code: "request_in_progress", retryable: true },
       });
-      expect(await h.access.recoverInterruptedInvocations()).toBe(2);
+      expect(await h.access.recoverInterruptedInvocations(["active-pending-write"])).toBe(3);
       expect(await h.broker.forApp("app-a").invoke(request)).toEqual({
         status: "outcome_unknown",
         executionId: "running-write",
@@ -1155,6 +1252,15 @@ describe("App connection broker", () => {
       });
       expect(await h.access.getInvocation("ready-write")).toMatchObject({
         status: "failed",
+        input: null,
+      });
+      expect(await h.access.getInvocation("active-pending-write")).toMatchObject({
+        status: "pending_approval",
+        input: expect.any(Object),
+      });
+      expect(await h.access.getInvocation("orphaned-pending-write")).toMatchObject({
+        status: "failed",
+        errorCode: "capability_unavailable",
         input: null,
       });
     } finally {

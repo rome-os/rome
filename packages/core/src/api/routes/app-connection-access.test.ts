@@ -118,6 +118,7 @@ describe("App connection access management", () => {
           connectionId: "connection-1",
           identity: "account",
           operation: "documents.get",
+          sideEffects: "read-only",
           revision: 1,
         },
       });

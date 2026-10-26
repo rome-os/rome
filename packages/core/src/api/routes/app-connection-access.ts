@@ -106,6 +106,7 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
         connectionId: target.value.connectionId,
         identity: target.value.identity,
         operation: target.value.operation,
+        sideEffects: target.value.sideEffects,
         approval: parsed.data.approval,
         constraints: parsed.data.constraints,
         expiresAt,

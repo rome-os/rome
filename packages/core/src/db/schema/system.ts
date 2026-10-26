@@ -906,6 +906,7 @@ export const appConnectionAccess = sqliteTable(
     connectionId: text("connection_id").notNull(),
     identity: text("identity").notNull(),
     operation: text("operation").notNull(),
+    sideEffects: text("side_effects", { enum: ["read-only", "write"] }).notNull(),
     approval: text("approval", { enum: ["required", "not_required"] }).notNull(),
     constraints: text("constraints", { mode: "json" }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp" }),

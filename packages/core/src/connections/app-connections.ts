@@ -26,7 +26,7 @@ import type { ConnectionRegistry } from "./registry.js";
 import type { Connection, OperationDescriptor, ProfileDisplay } from "./types.js";
 
 const READ_ACTION = "core:app_connection_read";
-const WRITE_ACTION = "core:app_connection_write";
+export const APP_CONNECTION_WRITE_ACTION = "core:app_connection_write";
 const APPROVED_WRITE_ACTION = "core:app_connection_write_without_approval";
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
@@ -219,7 +219,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
 
   registerActions(registry: ActionRegistryImpl): void {
     registry.register(this.action(READ_ACTION, "read", false));
-    registry.register(this.action(WRITE_ACTION, "write", true));
+    registry.register(this.action(APP_CONNECTION_WRITE_ACTION, "write", true));
     registry.register(this.action(APPROVED_WRITE_ACTION, "write_without_approval", false));
   }
 
@@ -318,7 +318,9 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     );
     const operations = supported.value
       .map((operation): AppConnectionOperation => {
-        const policy = byOperation.get(operation.name);
+        const candidate = byOperation.get(operation.name);
+        const policy =
+          candidate?.sideEffects === operation.appAccess!.sideEffects ? candidate : undefined;
         return {
           name: operation.name,
           description: operation.description,
@@ -400,6 +402,9 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       return await denied(failure("operation_not_found", "The operation is not App-accessible."));
     }
     const sideEffects = operation.appAccess!.sideEffects;
+    if (activePolicy.sideEffects !== sideEffects) {
+      return await denied(failure("access_denied", "The operation access classification changed."));
+    }
     if (sideEffects === "read-only" && activePolicy.approval === "required") {
       return await denied(
         failure("access_denied", "Read operations cannot use deferred approval."),
@@ -495,7 +500,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
   }
 
   async approvalRejected(actionName: string, args: Record<string, unknown>): Promise<void> {
-    if (actionName !== WRITE_ACTION || typeof args.invocationId !== "string") {
+    if (actionName !== APP_CONNECTION_WRITE_ACTION || typeof args.invocationId !== "string") {
       return;
     }
     const invocation = await this.access.getInvocation(args.invocationId);
@@ -575,6 +580,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       !policy ||
       !isActive(policy) ||
       policy.revision !== invocation.accessRevision ||
+      policy.sideEffects !== expectedEffect ||
       (policy.approval === "required") !== expectedApproval
     ) {
       return await this.failUnclaimedInvocation(
@@ -989,7 +995,7 @@ function actionFor(
   if (sideEffects === "read-only") {
     return READ_ACTION;
   }
-  return approval === "required" ? WRITE_ACTION : APPROVED_WRITE_ACTION;
+  return approval === "required" ? APP_CONNECTION_WRITE_ACTION : APPROVED_WRITE_ACTION;
 }
 
 function clip(value: string, limit: number): string {

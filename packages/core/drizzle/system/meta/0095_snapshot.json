@@ -166,6 +166,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "side_effects": {
+          "name": "side_effects",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "approval": {
           "name": "approval",
           "type": "text",

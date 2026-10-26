@@ -23,6 +23,24 @@ export type RetryExecutionResult =
   | { outcome: "not_found" }
   | { outcome: "not_retryable"; approval: ApprovalRow };
 
+function activeActionExecutionApproval() {
+  return and(
+    eq(approvals.type, "action_execution"),
+    or(
+      eq(approvals.status, "pending"),
+      and(
+        eq(approvals.status, "approved"),
+        or(
+          eq(approvals.executionState, "idle"),
+          eq(approvals.executionState, "queued"),
+          eq(approvals.executionState, "running"),
+          eq(approvals.executionState, "failed"),
+        ),
+      ),
+    ),
+  );
+}
+
 export class ApprovalsRepository {
   constructor(private db: DrizzleDb) {}
 
@@ -213,23 +231,7 @@ export class ApprovalsRepository {
     const rows = await this.db
       .select({ payload: approvals.payload })
       .from(approvals)
-      .where(
-        and(
-          eq(approvals.type, "action_execution"),
-          or(
-            eq(approvals.status, "pending"),
-            and(
-              eq(approvals.status, "approved"),
-              or(
-                eq(approvals.executionState, "idle"),
-                eq(approvals.executionState, "queued"),
-                eq(approvals.executionState, "running"),
-                eq(approvals.executionState, "failed"),
-              ),
-            ),
-          ),
-        ),
-      );
+      .where(activeActionExecutionApproval());
     const ids: string[] = [];
     for (const row of rows) {
       const payload = row.payload as Record<string, unknown> | null;
@@ -238,6 +240,28 @@ export class ApprovalsRepository {
       }
     }
     return ids;
+  }
+
+  /** Returns the args stored by active action-execution approvals for `actionName`. */
+  async findActiveActionArgs(actionName: string): Promise<Record<string, unknown>[]> {
+    const rows = await this.db
+      .select({ payload: approvals.payload })
+      .from(approvals)
+      .where(activeActionExecutionApproval());
+    return rows.flatMap(({ payload }) => {
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+      const record = payload as Record<string, unknown>;
+      const args = record.args;
+      if (
+        record.actionName !== actionName ||
+        !args ||
+        typeof args !== "object" ||
+        Array.isArray(args)
+      ) {
+        return [];
+      }
+      return [args as Record<string, unknown>];
+    });
   }
 
   async retryFailedExecution(id: string): Promise<RetryExecutionResult> {

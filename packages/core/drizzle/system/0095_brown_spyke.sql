@@ -3,6 +3,7 @@ CREATE TABLE `app_connection_access` (
 	`connection_id` text NOT NULL,
 	`identity` text NOT NULL,
 	`operation` text NOT NULL,
+	`side_effects` text NOT NULL,
 	`approval` text NOT NULL,
 	`constraints` text NOT NULL,
 	`expires_at` integer,

@@ -112,7 +112,8 @@ identity for one operation.
 **Contracts:**
 
 - Access defaults to denied. A Core-owned policy names the app, Connection, identity,
-  operation, approval mode, optional input constraints, and optional expiry. Disabling
+  operation, side-effect classification, approval mode, optional input constraints, and
+  optional expiry. A descriptor change from read to write requires a new policy. Disabling
   or removing the app revokes its policies. The policy is bound to the provider
   grant's current conferral. Reconnecting the Connection creates a new conferral and
   requires new App access. Fixing or otherwise conferring its grant again does the same.
@@ -144,7 +145,8 @@ identity for one operation.
   unknown is not retried automatically. Records become eligible for pruning after that
   window and are removed by Core's periodic cleanup even when the App is idle. Disabling
   or removing an App also rejects its pending invocations and clears their stored input.
-  A duplicate of a failed invocation includes the original structured error code.
+  Startup preserves a pending invocation only when its durable approval exists. A duplicate
+  of a failed invocation includes the original structured error code.
 - Read operations execute synchronously and cannot use deferred approval. An
   approval-gated write returns `pending_approval`. Its later provider output is not
   delivered to the App. Providers should expose a follow-up read when the App needs to

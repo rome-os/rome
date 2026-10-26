@@ -241,6 +241,7 @@ import { registerBuiltinConnections } from "./connections/integrations/index.js"
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
+  APP_CONNECTION_WRITE_ACTION,
   APP_CONNECTION_RETENTION_MS,
   AppConnectionBroker,
   createAppConnectionAccessLifecycle,
@@ -708,8 +709,13 @@ async function main() {
   );
   appConnections.registerActions(actionRegistry);
   const appConnectionCleanupLog = createLogger("app-connection-cleanup");
+  const activeAppConnectionApprovalInvocationIds = (
+    await approvalsRepo.findActiveActionArgs(APP_CONNECTION_WRITE_ACTION)
+  ).flatMap((args) => (typeof args.invocationId === "string" ? [args.invocationId] : []));
   const recoveredAppConnectionInvocations =
-    await appConnectionAccessRepo.recoverInterruptedInvocations();
+    await appConnectionAccessRepo.recoverInterruptedInvocations(
+      activeAppConnectionApprovalInvocationIds,
+    );
   if (recoveredAppConnectionInvocations > 0) {
     appConnectionCleanupLog.warn("interrupted App connection invocations recovered", {
       invocations: recoveredAppConnectionInvocations,

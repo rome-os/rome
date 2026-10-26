@@ -10,6 +10,7 @@ import {
 import type { DrizzleDb } from "../index.js";
 
 export type AppConnectionApproval = "required" | "not_required";
+export type AppConnectionSideEffects = "read-only" | "write";
 export type AppConnectionInvocationStatus =
   | "ready"
   | "pending_approval"
@@ -24,6 +25,7 @@ export interface AppConnectionAccessRecord {
   connectionId: string;
   identity: string;
   operation: string;
+  sideEffects: AppConnectionSideEffects;
   approval: AppConnectionApproval;
   constraints: AppConnectionResourceConstraint[];
   expiresAt: Date | null;
@@ -151,6 +153,7 @@ export class AppConnectionAccessRepository {
     connectionId: string;
     identity: string;
     operation: string;
+    sideEffects: AppConnectionSideEffects;
     approval: AppConnectionApproval;
     constraints: AppConnectionResourceConstraint[];
     grantConferralEpoch: string;
@@ -189,6 +192,7 @@ export class AppConnectionAccessRepository {
           appConnectionAccess.operation,
         ],
         set: {
+          sideEffects: input.sideEffects,
           approval: input.approval,
           constraints: input.constraints,
           grantConferralEpoch: input.grantConferralEpoch,
@@ -523,7 +527,10 @@ export class AppConnectionAccessRepository {
       .limit(limit);
   }
 
-  async recoverInterruptedInvocations(now = new Date()): Promise<number> {
+  async recoverInterruptedInvocations(
+    activeApprovalInvocationIds: readonly string[] = [],
+    now = new Date(),
+  ): Promise<number> {
     return this.db.transaction((tx) => {
       const unstarted = tx
         .update(appConnectionInvocations)
@@ -545,7 +552,33 @@ export class AppConnectionAccessRepository {
         })
         .where(eq(appConnectionInvocations.status, "running"))
         .run();
-      return Number(unstarted.changes ?? 0) + Number(uncertain.changes ?? 0);
+      const activeApprovals = new Set(activeApprovalInvocationIds);
+      const orphanedApprovals = tx
+        .select({ id: appConnectionInvocations.id })
+        .from(appConnectionInvocations)
+        .where(eq(appConnectionInvocations.status, "pending_approval"))
+        .all()
+        .filter(({ id }) => !activeApprovals.has(id));
+      let orphaned = 0;
+      for (const { id } of orphanedApprovals) {
+        const result = tx
+          .update(appConnectionInvocations)
+          .set({
+            status: "failed",
+            errorCode: "capability_unavailable",
+            input: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(appConnectionInvocations.id, id),
+              eq(appConnectionInvocations.status, "pending_approval"),
+            ),
+          )
+          .run();
+        orphaned += Number(result.changes ?? 0);
+      }
+      return Number(unstarted.changes ?? 0) + Number(uncertain.changes ?? 0) + orphaned;
     });
   }
 
@@ -615,6 +648,7 @@ function policyCurrentForInvocation(
       policy.revokedAt === null &&
       (policy.expiresAt === null || policy.expiresAt > now) &&
       policy.revision === invocation.accessRevision &&
+      policy.sideEffects === invocation.sideEffects &&
       policy.approval === approval &&
       grant.conferralEpoch !== null &&
       policy.grantConferralEpoch === grant.conferralEpoch,
