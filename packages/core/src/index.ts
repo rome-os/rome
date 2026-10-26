@@ -399,20 +399,30 @@ async function main() {
     connectionRegistry.getDescriptor(connectionKind)?.capabilities.talker !== undefined;
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
     repository: new DrizzleConnectionsRepository(db),
-    onMint: (tx, record, profile, account) => {
-      if (!talks(record.connectionKind)) return;
-      channelRecords.claim(tx, { ...record, domain: domainOf(profile), account }, record.createdAt);
-      connectedAccounts.add(tx, record.id);
-    },
-    onAccount: (tx, connection, account) => {
-      if (!talks(connection.connectionKind)) return;
-      channelRecords.ensureAccount(tx, connection, account, new Date());
-      connectedAccounts.add(tx, connection.id);
-    },
-    onRevoke: () => channelRecords.forget(),
-    onRemove: (tx, id) => {
-      channelRecords.vacate(tx, id);
-      connectedAccounts.remove(tx, id);
+    onEvent: (tx, event) => {
+      const { connection } = event;
+      switch (event.kind) {
+        case "connected": {
+          const record = event.connection;
+          if (!talks(record.connectionKind)) return;
+          const claimed = { ...record, domain: domainOf(event.profile), account: event.account };
+          channelRecords.claim(tx, claimed, record.createdAt);
+          connectedAccounts.add(tx, record.id);
+          return;
+        }
+        case "fixed":
+          if (!talks(connection.connectionKind) || !event.account) return;
+          channelRecords.ensureAccount(tx, connection, event.account, new Date());
+          connectedAccounts.add(tx, connection.id);
+          return;
+        case "revoked":
+          channelRecords.forget();
+          return;
+        case "disconnected":
+          channelRecords.vacate(tx, connection.id);
+          connectedAccounts.remove(tx, connection.id);
+          return;
+      }
     },
   });
   const channelOf = recordedChannelOf(channelRecords, talks);

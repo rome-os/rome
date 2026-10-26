@@ -360,10 +360,11 @@ describe("DELETE /connections/:id/grants/:name", () => {
     const ledger = new DrizzleConnectionsRepository(db);
     const registry = new ConnectionRegistry({
       repository: ledger,
-      onMint: (tx, record) => {
-        records.claim(tx, record, record.createdAt);
+      onEvent: (tx, event) => {
+        if (event.kind === "connected")
+          records.claim(tx, event.connection, event.connection.createdAt);
+        if (event.kind === "disconnected") records.vacate(tx, event.connection.id);
       },
-      onRemove: (tx, id) => records.vacate(tx, id),
     });
     const fixture = makePasteTalk();
     registry.register(fixture.descriptor);
@@ -460,8 +461,9 @@ describe("GET /connections accounts", () => {
     const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(db),
-      onMint: (tx, record) => {
-        records.claim(tx, record, record.createdAt);
+      onEvent: (tx, event) => {
+        if (event.kind === "connected")
+          records.claim(tx, event.connection, event.connection.createdAt);
       },
     });
     registry.register({
@@ -490,8 +492,10 @@ describe("GET /connections accounts", () => {
     const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(db),
-      onMint: (tx, record, profile) => {
-        records.claim(tx, { ...record, domain: domainOf(profile) }, record.createdAt);
+      onEvent: (tx, event) => {
+        if (event.kind !== "connected") return;
+        const record = event.connection;
+        records.claim(tx, { ...record, domain: domainOf(event.profile) }, record.createdAt);
       },
     });
     registry.register({ ...telegram.descriptor, connectionKind: "feishu", severalAccounts: true });
@@ -513,8 +517,9 @@ describe("GET /connections accounts", () => {
     const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(db),
-      onMint: (tx, record) => {
-        records.claim(tx, record, record.createdAt);
+      onEvent: (tx, event) => {
+        if (event.kind === "connected")
+          records.claim(tx, event.connection, event.connection.createdAt);
       },
     });
     registry.register({ ...telegram.descriptor, connectionKind: "telegram" });
@@ -543,8 +548,9 @@ describe("GET /connections accounts", () => {
     const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(db),
-      onMint: (tx, record) => {
-        records.claim(tx, record, record.createdAt);
+      onEvent: (tx, event) => {
+        if (event.kind === "connected")
+          records.claim(tx, event.connection, event.connection.createdAt);
       },
     });
     const { link: _takesNone, ...descriptor } = telegram.descriptor;
