@@ -55,10 +55,10 @@ describe("ConnectionRegistry.confer account guard", () => {
 
       await expect(refused).rejects.toBeInstanceOf(AccountAlreadyConnectedError);
       await expect(refused).rejects.toMatchObject({ connectionId: first.id, accountId: "100" });
-      await expect(ledger.getGrant(second.id, "bot")).resolves.toMatchObject({
+      await expect(ledger.getGrant(second.id)).resolves.toMatchObject({
         state: "unauthorized",
       });
-      expect((await ledger.getGrant(second.id, "bot"))?.profile).toBeUndefined();
+      expect((await ledger.getGrant(second.id))?.profile).toBeUndefined();
       expect(second.isUnlocked("talk")).toBe(false);
     } finally {
       close();
@@ -76,7 +76,7 @@ describe("ConnectionRegistry.confer account guard", () => {
       });
 
       await expect(refused).rejects.toBeInstanceOf(DifferentAccountError);
-      await expect(ledger.getGrant(first.id, "bot")).resolves.toMatchObject({
+      await expect(ledger.getGrant(first.id)).resolves.toMatchObject({
         profile: { botId: "100" },
       });
     } finally {
@@ -92,7 +92,7 @@ describe("ConnectionRegistry.confer account guard", () => {
 
       await registry.confer(SERVICE, first.id, "bot", credentialFor("t-2"), { botId: "100" });
 
-      await expect(ledger.getGrant(first.id, "bot")).resolves.toMatchObject({
+      await expect(ledger.getGrant(first.id)).resolves.toMatchObject({
         state: "authorized",
         profile: { botId: "100" },
       });
@@ -110,7 +110,7 @@ describe("ConnectionRegistry.confer account guard", () => {
 
       await registry.confer(SERVICE, second.id, "bot", credentialFor("t-2"), { botId: "200" });
 
-      await expect(ledger.getGrant(second.id, "bot")).resolves.toMatchObject({
+      await expect(ledger.getGrant(second.id)).resolves.toMatchObject({
         state: "authorized",
         profile: { botId: "200" },
       });
@@ -129,7 +129,7 @@ describe("ConnectionRegistry.confer account guard", () => {
 
       await registry.confer(SERVICE, second.id, "bot", credentialFor("t-1"), { botId: "100" });
 
-      await expect(ledger.getGrant(second.id, "bot")).resolves.toMatchObject({
+      await expect(ledger.getGrant(second.id)).resolves.toMatchObject({
         state: "authorized",
       });
     } finally {
@@ -172,7 +172,7 @@ describe("ConnectionRegistry.confer account guard", () => {
         status: "failed",
         reason: new AccountAlreadyConnectedError(SERVICE, "100", first.id).message,
       });
-      await expect(ledger.getGrant(second.id, "bot")).resolves.toMatchObject({
+      await expect(ledger.getGrant(second.id)).resolves.toMatchObject({
         state: "unauthorized",
       });
     } finally {
@@ -185,14 +185,14 @@ describe("ConnectionRegistry.confer account guard", () => {
     try {
       const first = await registry.connect(SERVICE);
       await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
-      expect((await ledger.getGrant(first.id, "bot"))?.account).toEqual({
+      expect((await ledger.getGrant(first.id))?.account).toEqual({
         platform: SERVICE,
         accountId: "100",
       });
 
       await registry.revoke(first.id, "bot");
 
-      expect((await ledger.getGrant(first.id, "bot"))?.account).toBeUndefined();
+      expect((await ledger.getGrant(first.id))?.account).toBeUndefined();
     } finally {
       close();
     }
@@ -249,7 +249,7 @@ describe("ConnectionRegistry.confer account guard", () => {
       const first = await registry.connect(SERVICE);
       await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
       // As for the later of two connections that reached one account.
-      await ledger.updateGrant(first.id, "bot", { account: undefined });
+      await ledger.updateGrant(first.id, { account: undefined });
 
       const refused = registry.confer(SERVICE, first.id, "bot", credentialFor("t-9"), {
         botId: "900",

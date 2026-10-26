@@ -13,10 +13,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterAll, afterEach, describe, expect, it } from "@rstest/core";
-import {
-  OAUTH_PROVIDER_GRANTS,
-  type GithubGrantProfile,
-} from "../connections/integrations/oauth-providers.js";
+import type { GithubGrantProfile } from "../connections/integrations/oauth-providers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import type { DrizzleDb } from "../db/index.js";
 import { createTestDb } from "../test/helpers.js";
@@ -67,8 +64,8 @@ async function seedGithubGrant(
     label: "github",
     createdAt: new Date(),
   });
-  await ledger.ensureGrant(id, OAUTH_PROVIDER_GRANTS.github);
-  await ledger.updateGrant(id, OAUTH_PROVIDER_GRANTS.github, {
+  await ledger.ensureGrant(id);
+  await ledger.updateGrant(id, {
     state: "authorized",
     ...(profile ? { profile } : {}),
   });
@@ -455,8 +452,7 @@ describe("githubCommitterIdentity", () => {
         created_at integer NOT NULL
       );
       CREATE TABLE connection_grants (
-        custody text NOT NULL,
-        name text NOT NULL,
+        custody text PRIMARY KEY NOT NULL,
         state text NOT NULL,
         credential text,
         profile text,
@@ -465,8 +461,7 @@ describe("githubCommitterIdentity", () => {
         degraded_at integer,
         degraded_reason text,
         platform text,
-        account_id text,
-        PRIMARY KEY (custody, name)
+        account_id text
       );
     `);
     const db = drizzle(sqlite) as unknown as DrizzleDb;

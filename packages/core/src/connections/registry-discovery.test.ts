@@ -321,7 +321,7 @@ describe("scenario 14: ledger invariants", () => {
 
     const conn = await reg.connect("fake-discord");
 
-    const botRow = await ledger.getGrant(conn.id, "bot");
+    const botRow = await ledger.getGrant(conn.id);
 
     expect(botRow).not.toBeNull();
     expect(botRow!.state).toBe("unauthorized");
@@ -335,7 +335,7 @@ describe("scenario 14: ledger invariants", () => {
 
     const conn = await reg.connect("fake-discord");
 
-    const botRow = await ledger.getGrant(conn.id, "bot");
+    const botRow = await ledger.getGrant(conn.id);
     expect(botRow!.credential).toBeUndefined();
   });
 
@@ -348,7 +348,7 @@ describe("scenario 14: ledger invariants", () => {
     const conn = await reg.connect("fake-discord");
     await reg.importCredential(conn.id, "bot", botCredential());
 
-    const botRow = await ledger.getGrant(conn.id, "bot");
+    const botRow = await ledger.getGrant(conn.id);
     expect(botRow!.state).toBe("authorized");
     expect(botRow!.credential).toBeDefined();
   });
@@ -362,12 +362,12 @@ describe("scenario 14: ledger invariants", () => {
     const conn = await reg.connect("fake-discord");
 
     // Verify grant rows exist first.
-    expect(await ledger.getGrant(conn.id, "bot")).not.toBeNull();
+    expect(await ledger.getGrant(conn.id)).not.toBeNull();
 
     await reg.remove(conn.id);
 
     // Grant row must be gone after deletion.
-    const afterBot = await ledger.getGrant(conn.id, "bot");
+    const afterBot = await ledger.getGrant(conn.id);
     expect(afterBot).toBeNull();
   });
 });

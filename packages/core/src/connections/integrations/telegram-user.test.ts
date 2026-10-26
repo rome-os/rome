@@ -484,7 +484,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
       // surface then reads needs-reconnect + reason off the ledger.
       expect(conn.auth.grants().session).toBe("degraded");
       expect(conn.isUnlocked("talk")).toBe(false);
-      const grant = await registry.getLedger().getGrant(conn.id, "session");
+      const grant = await registry.getLedger().getGrant(conn.id);
       expect(grant?.state).toBe("degraded");
       // The status surface reads `degradedReason` off this — a non-empty reason
       // naming the credential rejection (the registry's renew-once-then-degrade

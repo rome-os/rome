@@ -24,30 +24,21 @@ export async function recordGrantAccounts(
   for (const conn of connections) {
     const descriptor = registry.getDescriptor(conn.connectionKind);
     if (!descriptor) continue;
-    for (const grant of await ledger.listGrants(conn.id)) {
-      if (grant.account || grant.state === "unauthorized") continue;
-      const account = reachedAccount(descriptor, grant);
-      if (!account) continue;
-      try {
-        const other = await ledger.connectionReaching(account, conn.id);
-        if (other) {
-          log.warn("a grant reaches an account another connection reaches", {
-            id: conn.id,
-            grant: grant.name,
-            other,
-          });
-          continue;
-        }
-        await ledger.updateGrant(conn.id, grant.name, { account });
-        recorded++;
-      } catch (error) {
-        // A row the ledger refuses must not keep Rome from starting.
-        log.warn("could not record the account a grant reaches", {
-          id: conn.id,
-          grant: grant.name,
-          error,
-        });
+    const grant = await ledger.getGrant(conn.id);
+    if (!grant || grant.account || grant.state === "unauthorized") continue;
+    const account = reachedAccount(descriptor, grant);
+    if (!account) continue;
+    try {
+      const other = await ledger.connectionReaching(account, conn.id);
+      if (other) {
+        log.warn("a grant reaches an account another connection reaches", { id: conn.id, other });
+        continue;
       }
+      await ledger.updateGrant(conn.id, { account });
+      recorded++;
+    } catch (error) {
+      // A row the ledger refuses must not keep Rome from starting.
+      log.warn("could not record the account a grant reaches", { id: conn.id, error });
     }
   }
   if (recorded > 0) log.info("recorded the accounts grants reach", { recorded });

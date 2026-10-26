@@ -209,7 +209,7 @@ describe("GET /oauth/shopify/start", () => {
 
     const conn = registry.find("shopify")[0];
     expect(conn?.auth.grants().store).toBe("authorized");
-    const grant = await registry.getLedger().getGrant(conn!.id, "store");
+    const grant = await registry.getLedger().getGrant(conn!.id);
     expect(grant?.profile).toMatchObject({
       login: "acme.myshopify.com",
       scopes: ["read_products", "write_products"],

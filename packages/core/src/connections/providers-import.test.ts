@@ -247,7 +247,7 @@ describe("a malformed conferral fails loudly and stores nothing", () => {
 
 async function grantProfile(registry: ConnectionRegistry, provider: OAuthProvider) {
   const conn = registry.find(provider)[0];
-  const rec = await registry.getLedger().getGrant(conn.id, OAUTH_PROVIDER_GRANTS[provider]);
+  const rec = await registry.getLedger().getGrant(conn.id);
   return rec;
 }
 

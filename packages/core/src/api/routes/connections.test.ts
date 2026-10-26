@@ -131,7 +131,7 @@ describe("GET /connections", () => {
       setup.register(fixture.descriptor);
       const conn = await setup.connect("fake-discord", "Discord");
       await setup.importCredential(conn.id, "bot", fixture.botCredential());
-      await ledger.updateGrant(conn.id, "bot", {
+      await ledger.updateGrant(conn.id, {
         state: "degraded",
         degraded: { at: new Date("2026-07-13T00:00:00Z"), reason: "token revoked upstream" },
       });
@@ -305,7 +305,7 @@ describe("GET /connections/:id", () => {
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-discord", "Discord");
     await registry.importCredential(conn.id, "bot", fixture.botCredential());
-    await ledger.updateGrant(conn.id, "bot", {
+    await ledger.updateGrant(conn.id, {
       state: "degraded",
       degraded: { at: new Date("2026-07-13T00:00:00Z"), reason: "token revoked upstream" },
     });

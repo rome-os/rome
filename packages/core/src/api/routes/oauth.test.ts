@@ -126,7 +126,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     const conn = registry.find("github")[0];
     expect(conn).toBeDefined();
     expect(conn.auth.grants().user).toBe("authorized");
-    const grant = await registry.getLedger().getGrant(conn.id, "user");
+    const grant = await registry.getLedger().getGrant(conn.id);
     expect(grant?.profile).toMatchObject({ login: "octocat", scopes: ["repo", "read:org"] });
     // Custody ran off the grant transition (not the route), driven by the grant's
     // secret material + non-secret profile.
@@ -163,7 +163,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     const conn = registry.find("slack")[0];
     expect(conn).toBeDefined();
     expect(conn.auth.grants().workspace).toBe("authorized");
-    const grant = await registry.getLedger().getGrant(conn.id, "workspace");
+    const grant = await registry.getLedger().getGrant(conn.id);
     expect(grant?.profile).toMatchObject({ teamId: "T123" });
     expect(registry.find("github")).toHaveLength(0);
   });

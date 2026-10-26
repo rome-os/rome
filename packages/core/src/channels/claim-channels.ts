@@ -46,7 +46,7 @@ export async function claimChannels(
 export async function recordChannelAccounts(
   db: DrizzleDb,
   records: Pick<ChannelRecordsRepository, "all" | "recordAccount">,
-  ledger: Pick<GrantLedger, "listGrants">,
+  ledger: Pick<GrantLedger, "getGrant">,
 ): Promise<void> {
   const unknown = records
     .all()
@@ -54,8 +54,8 @@ export async function recordChannelAccounts(
   if (unknown.length === 0) return;
   const accounts = await Promise.all(
     unknown.map(async (record) => {
-      const grants = await ledger.listGrants(record.connectionId!);
-      return grants.find((grant) => grant.state !== "unauthorized" && grant.account)?.account;
+      const grant = await ledger.getGrant(record.connectionId!);
+      return grant && grant.state !== "unauthorized" ? grant.account : undefined;
     }),
   );
   db.transaction((tx) => {

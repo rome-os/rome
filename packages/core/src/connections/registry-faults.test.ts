@@ -42,9 +42,9 @@ function makeLedger(): GrantLedger {
  *  `shouldFail` matches the patch. */
 function makeFailingLedger(shouldFail: (patch: GrantPatch) => boolean): GrantLedger {
   class FailingLedger extends DrizzleGrantLedger {
-    override async updateGrant(custody: string, name: GrantName, patch: GrantPatch) {
+    override async updateGrant(custody: string, patch: GrantPatch) {
       if (shouldFail(patch)) throw new Error("LEDGER_WRITE_FAILED");
-      return super.updateGrant(custody, name, patch);
+      return super.updateGrant(custody, patch);
     }
   }
   return new FailingLedger(createTestDb().db);
@@ -147,7 +147,7 @@ describe("registry faults", () => {
       expect(secondActor.state.stopCount).toBe(1);
 
       // Degrade reason is persisted in the ledger.
-      const rec = await ledger.getGrant(conn.id, "user");
+      const rec = await ledger.getGrant(conn.id);
       expect(rec?.state).toBe("degraded");
       expect(rec?.degraded?.reason).toBeTruthy();
       // Invariant: credential present ⇔ state !== "unauthorized".
@@ -203,7 +203,7 @@ describe("registry faults", () => {
       expect(conn.auth.grants().user).toBe("authorized");
       expect(conn.act).not.toBeNull();
       // And the ledger row is unchanged — still authorized, not degraded.
-      const rec = await failing.getGrant(conn.id, "user");
+      const rec = await failing.getGrant(conn.id);
       expect(rec?.state).toBe("authorized");
       expect(rec?.degraded).toBeUndefined();
 
@@ -220,7 +220,7 @@ describe("registry faults", () => {
 
       expect(conn.auth.grants().user).toBe("degraded");
       expect(conn.act).toBeNull();
-      const rec2 = await failing.getGrant(conn.id, "user");
+      const rec2 = await failing.getGrant(conn.id);
       expect(rec2?.state).toBe("degraded");
       expect(rec2?.degraded?.reason).toBeTruthy();
     });
@@ -254,7 +254,7 @@ describe("registry faults", () => {
       expect(conn.isUnlocked("talk")).toBe(false);
       expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
       expect(fx.talkerFactory.instances.length).toBe(buildsBefore);
-      const rec = await failing.getGrant(conn.id, "bot");
+      const rec = await failing.getGrant(conn.id);
       expect(rec?.state).toBe("unauthorized");
       expect(rec?.credential).toBeUndefined();
 
@@ -462,7 +462,7 @@ describe("registry faults", () => {
       await new Promise((r) => setTimeout(r, 0)); // let any (wrong) async flow run
 
       expect(conn.auth.grants().bot).toBe("unauthorized");
-      expect((await ledger.getGrant(conn.id, "bot"))?.state).toBe("unauthorized");
+      expect((await ledger.getGrant(conn.id))?.state).toBe("unauthorized");
     });
 
     it("a late fault from a SUPERSEDED epoch does not renew or degrade the new epoch's grant", async () => {
@@ -486,7 +486,7 @@ describe("registry faults", () => {
 
       // Still authorized: the stale fault neither renewed nor degraded.
       expect(conn.auth.grants().bot).toBe("authorized");
-      expect((await ledger.getGrant(conn.id, "bot"))?.state).toBe("authorized");
+      expect((await ledger.getGrant(conn.id))?.state).toBe("authorized");
     });
   });
 
@@ -811,7 +811,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
 
     expect(conn.auth.grants().session).toBe("authorized");
     expect(conn.isUnlocked("talk")).toBe(true);
-    const grant = await ledger.getGrant(conn.id, "session");
+    const grant = await ledger.getGrant(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.degraded).toBeUndefined();
     expect(grant?.credential).toMatchObject({
@@ -836,12 +836,12 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     });
     let gatedOnce = false;
     class GatedLedger extends DrizzleGrantLedger {
-      override async updateGrant(custody: string, name: GrantName, patch: GrantPatch) {
+      override async updateGrant(custody: string, patch: GrantPatch) {
         if (!gatedOnce && shouldGate(patch)) {
           gatedOnce = true;
           await gate;
         }
-        return super.updateGrant(custody, name, patch);
+        return super.updateGrant(custody, patch);
       }
     }
     return { ledger: new GatedLedger(createTestDb().db), release };
@@ -904,7 +904,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     expect(conn.auth.grants().session).toBe("authorized");
     expect(conn.isUnlocked("talk")).toBe(true);
     expect(epochBTalker?.state.stopCount).toBe(0);
-    const grant = await ledger.getGrant(conn.id, "session");
+    const grant = await ledger.getGrant(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.degraded).toBeUndefined();
     expect(grant?.credential).toMatchObject({
@@ -955,7 +955,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     expect(conn.isUnlocked("talk")).toBe(true);
     expect(epochBTalker?.state.stopCount).toBe(0);
     expect(talkerFactory.instances.length).toBe(buildsAfterRelogin); // no stale rebuild
-    const grant = await ledger.getGrant(conn.id, "session");
+    const grant = await ledger.getGrant(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.credential).toMatchObject({
       material: { kind: "inline", record: { token: "tok-fresh" } },

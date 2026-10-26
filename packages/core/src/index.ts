@@ -90,7 +90,7 @@ import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./channels/webchat-channel.js";
 import { claimChannels, recordChannelAccounts } from "./channels/claim-channels.js";
-import { domainOf, domainOfGrants } from "./channels/platform.js";
+import { domainOf, domainOfGrant } from "./channels/platform.js";
 import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
@@ -1461,7 +1461,7 @@ async function main() {
     db,
     channelRecords,
     connectionRegistry.all().filter((c) => talks(c.connectionKind)),
-    async (id) => domainOfGrants(await connectionRegistry.getLedger().listGrants(id)),
+    async (id) => domainOfGrant(await connectionRegistry.getLedger().getGrant(id)),
   );
   // A channel recorded before channels knew their account learns it from its
   // connection's grant.

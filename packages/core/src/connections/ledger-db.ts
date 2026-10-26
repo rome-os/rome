@@ -6,10 +6,10 @@
 // (encryption was deliberately dropped). The envelope shape is kept so
 // encryption can return later. The runtime never reads inside `material`.
 
-import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx, SqliteExec } from "../db/index.js";
 import { connectionGrants, connections } from "../db/schema/system.js";
-import type { ConnectionId, GrantName, ProfileRecord } from "./types.js";
+import type { ConnectionId, ProfileRecord } from "./types.js";
 import type {
   ConnectionRecord,
   GrantAccount,
@@ -35,7 +35,6 @@ function reviveCredential(raw: unknown): PersistedCredential {
 function rowToGrant(row: GrantRow): GrantRecord {
   const rec: GrantRecord = {
     custody: row.custody,
-    name: row.name,
     state: row.state as GrantRecord["state"],
   };
   if (row.credential !== null) rec.credential = reviveCredential(row.credential);
@@ -98,36 +97,28 @@ export class DrizzleGrantLedger implements GrantLedger {
     });
   }
 
-  writeEnsureGrant(exec: SqliteExec, custody: string, name: GrantName): void {
+  writeEnsureGrant(exec: SqliteExec, custody: string): void {
     exec
       .insert(connectionGrants)
-      .values({ custody, name, state: "unauthorized" })
-      .onConflictDoNothing({ target: [connectionGrants.custody, connectionGrants.name] })
+      .values({ custody, state: "unauthorized" })
+      .onConflictDoNothing({ target: connectionGrants.custody })
       .run();
   }
 
-  async ensureGrant(custody: string, name: GrantName): Promise<void> {
-    this.writeEnsureGrant(this.db, custody, name);
+  async ensureGrant(custody: string): Promise<void> {
+    this.writeEnsureGrant(this.db, custody);
   }
 
-  async getGrant(custody: string, name: GrantName): Promise<GrantRecord | null> {
-    const rows = await this.db
-      .select()
-      .from(connectionGrants)
-      .where(and(eq(connectionGrants.custody, custody), eq(connectionGrants.name, name)));
-    const row = rows[0];
-    return row ? rowToGrant(row) : null;
-  }
-
-  async listGrants(custody: string): Promise<GrantRecord[]> {
+  async getGrant(custody: string): Promise<GrantRecord | null> {
     const rows = await this.db
       .select()
       .from(connectionGrants)
       .where(eq(connectionGrants.custody, custody));
-    return rows.map(rowToGrant);
+    const row = rows[0];
+    return row ? rowToGrant(row) : null;
   }
 
-  writeGrant(exec: SqliteExec, custody: string, name: GrantName, patch: GrantPatch): void {
+  writeGrant(exec: SqliteExec, custody: string, patch: GrantPatch): void {
     const set: Partial<typeof connectionGrants.$inferInsert> = {};
     if ("state" in patch) set.state = patch.state as string;
     if ("credential" in patch) set.credential = patch.credential ?? null;
@@ -143,15 +134,11 @@ export class DrizzleGrantLedger implements GrantLedger {
       set.degradedReason = patch.degraded?.reason ?? null;
     }
     if (Object.keys(set).length === 0) return;
-    exec
-      .update(connectionGrants)
-      .set(set)
-      .where(and(eq(connectionGrants.custody, custody), eq(connectionGrants.name, name)))
-      .run();
+    exec.update(connectionGrants).set(set).where(eq(connectionGrants.custody, custody)).run();
   }
 
-  async updateGrant(custody: string, name: GrantName, patch: GrantPatch): Promise<void> {
-    this.writeGrant(this.db, custody, name, patch);
+  async updateGrant(custody: string, patch: GrantPatch): Promise<void> {
+    this.writeGrant(this.db, custody, patch);
   }
 
   async connectionReaching(
@@ -186,37 +173,5 @@ export class DrizzleGrantLedger implements GrantLedger {
         ),
       );
     return rows.map(rowToGrant);
-  }
-
-  connectionsHoldingIn(
-    tx: DrizzleTx,
-    connectionKind: string,
-    needs: readonly GrantName[],
-    exceptId: ConnectionId,
-  ): ConnectionId[] {
-    if (needs.length === 0) {
-      return tx
-        .select({ id: connections.id })
-        .from(connections)
-        .where(and(eq(connections.connectionKind, connectionKind), ne(connections.id, exceptId)))
-        .all()
-        .map((row) => row.id);
-    }
-    return tx
-      .select({ id: connectionGrants.custody })
-      .from(connectionGrants)
-      .innerJoin(connections, eq(connections.id, connectionGrants.custody))
-      .where(
-        and(
-          eq(connections.connectionKind, connectionKind),
-          ne(connections.id, exceptId),
-          inArray(connectionGrants.name, [...needs]),
-          ne(connectionGrants.state, "unauthorized"),
-        ),
-      )
-      .groupBy(connectionGrants.custody)
-      .having(sql`count(*) = ${new Set(needs).size}`)
-      .all()
-      .map((row) => row.id);
   }
 }

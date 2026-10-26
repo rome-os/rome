@@ -5,12 +5,13 @@
 //  2. Rehydration needs code, never the guardian: a persisted credential +
 //     descriptor ⇒ a live capability at boot.
 //  3. Rows record outcomes only — no step/flow state, no scheme-specific columns.
-//  4. One grant = one credential row; renewal and kit.persist replace it in place.
-//  5. Grant rows exist from connection creation in "unauthorized"; conferral
-//     FILLS them.
+//  4. A connection holds one grant, in one row keyed by the connection; renewal
+//     and kit.persist replace its credential in place.
+//  5. The grant row exists from connection creation in "unauthorized";
+//     conferral FILLS it.
 
 import type { DrizzleTx, SqliteExec } from "../db/index.js";
-import type { ConnectionId, GrantName, GrantState, ProfileRecord, SecretRecord } from "./types.js";
+import type { ConnectionId, GrantState, ProfileRecord, SecretRecord } from "./types.js";
 
 export interface ConnectionRecord {
   id: ConnectionId;
@@ -38,7 +39,6 @@ export interface GrantAccount {
 
 export interface GrantRecord {
   custody: string; // connectionId
-  name: GrantName;
   state: GrantState;
   credential?: PersistedCredential; // present ⇔ state !== "unauthorized"
   /** The non-secret half of the conferral outcome, written in the
@@ -68,34 +68,24 @@ export type GrantPatch = Partial<
 export interface GrantLedger {
   createConnection(rec: ConnectionRecord): Promise<void>;
   listConnections(): Promise<ConnectionRecord[]>;
-  /** Cascades the connection's grant rows. `inTx` runs a caller participant in
+  /** Cascades the connection's grant. `inTx` runs a caller participant in
    *  the same transaction as the deletes, so a teardown side-write commits
    *  atomically with the connection removal. */
   deleteConnection(id: ConnectionId, inTx?: (tx: DrizzleTx) => void): Promise<void>;
-  /** Idempotent; creates the row in "unauthorized" if absent. */
-  ensureGrant(custody: string, name: GrantName): Promise<void>;
-  getGrant(custody: string, name: GrantName): Promise<GrantRecord | null>;
-  listGrants(custody: string): Promise<GrantRecord[]>;
-  updateGrant(custody: string, name: GrantName, patch: GrantPatch): Promise<void>;
+  /** Idempotent; creates the connection's grant in "unauthorized" if absent. */
+  ensureGrant(custody: string): Promise<void>;
+  getGrant(custody: string): Promise<GrantRecord | null>;
+  updateGrant(custody: string, patch: GrantPatch): Promise<void>;
   /** Run `fn` inside one synchronous transaction (better-sqlite3). Any throw
    *  rolls the whole scope back. */
   runInTransaction<T>(fn: (tx: DrizzleTx) => T): T;
   writeConnection(exec: SqliteExec, rec: ConnectionRecord): void;
-  writeEnsureGrant(exec: SqliteExec, custody: string, name: GrantName): void;
-  writeGrant(exec: SqliteExec, custody: string, name: GrantName, patch: GrantPatch): void;
+  writeEnsureGrant(exec: SqliteExec, custody: string): void;
+  writeGrant(exec: SqliteExec, custody: string, patch: GrantPatch): void;
   /** The Connection, other than `exceptId`, holding a grant in any state but
    *  "unauthorized" that reaches `account`, or null. */
   connectionReaching(account: GrantAccount, exceptId: ConnectionId): Promise<ConnectionId | null>;
   /** The grants, outside `exceptId`, held in any state but "unauthorized" with
    *  a profile and no stored account: those the boot pass left without one. */
   heldGrantsWithoutAccount(exceptId: ConnectionId): Promise<GrantRecord[]>;
-  /** Ids of the Connections of `connectionKind`, other than `exceptId`, that hold
-   *  every grant in `needs` in a state other than "unauthorized". Reads
-   *  through `tx`, so the answer holds for the rest of that transaction. */
-  connectionsHoldingIn(
-    tx: DrizzleTx,
-    connectionKind: string,
-    needs: readonly GrantName[],
-    exceptId: ConnectionId,
-  ): ConnectionId[];
 }

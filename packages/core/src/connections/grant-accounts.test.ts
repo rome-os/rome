@@ -22,8 +22,8 @@ async function earlierGrants(botIds: string[]) {
       label: SERVICE,
       createdAt: new Date(1_000 * (i + 1)),
     });
-    await ledger.ensureGrant(id, "bot");
-    await ledger.updateGrant(id, "bot", {
+    await ledger.ensureGrant(id);
+    await ledger.updateGrant(id, {
       state: "authorized",
       credential: { material: { kind: "inline", record: { token: `t-${i}` } }, expiresAt: "never" },
       profile: { botId },
@@ -38,7 +38,7 @@ describe("recordGrantAccounts", () => {
     const { ledger, registry, ids, close } = await earlierGrants(["100", "200"]);
     try {
       expect(await recordGrantAccounts(registry)).toBe(2);
-      expect((await ledger.getGrant(ids[1]!, "bot"))?.account).toEqual({
+      expect((await ledger.getGrant(ids[1]!))?.account).toEqual({
         platform: SERVICE,
         accountId: "200",
       });
@@ -52,8 +52,8 @@ describe("recordGrantAccounts", () => {
     const { ledger, registry, ids, close } = await earlierGrants(["100", "100"]);
     try {
       expect(await recordGrantAccounts(registry)).toBe(1);
-      expect((await ledger.getGrant(ids[0]!, "bot"))?.account?.accountId).toBe("100");
-      expect((await ledger.getGrant(ids[1]!, "bot"))?.account).toBeUndefined();
+      expect((await ledger.getGrant(ids[0]!))?.account?.accountId).toBe("100");
+      expect((await ledger.getGrant(ids[1]!))?.account).toBeUndefined();
     } finally {
       close();
     }

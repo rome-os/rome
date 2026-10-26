@@ -899,9 +899,8 @@ export const executionJournal = sqliteTable(
   ],
 );
 
-// One row per minted Connection. A connection kind may hold several. The many-to-many
-// grant ledger lives in `connection_grants` below, keyed by custody (the
-// connectionId).
+// One row per minted Connection. A connection kind may hold several. Its one
+// grant lives in `connection_grants` below, keyed by custody (the connectionId).
 export const connections = sqliteTable("connections", {
   id: text("id").primaryKey(),
   connectionKind: text("connection_kind").notNull(),
@@ -950,8 +949,9 @@ export const channels = sqliteTable(
 export const connectionGrants = sqliteTable(
   "connection_grants",
   {
-    custody: text("custody").notNull(), // connectionId
-    name: text("name").notNull(),
+    // The connection that holds the grant. A connection holds exactly one.
+    // Vocabulary: docs/domains/connections.md#grant.
+    custody: text("custody").primaryKey(),
     state: text("state").notNull(), // unauthorized | authorized | degraded
     credential: text("credential", { mode: "json" }), // PersistedCredential | null
     profile: text("profile", { mode: "json" }), // ProfileRecord | null — non-secret conferral outcome
@@ -965,7 +965,6 @@ export const connectionGrants = sqliteTable(
     accountId: text("account_id"),
   },
   (table) => [
-    primaryKey({ columns: [table.custody, table.name] }),
     // At most one connection reaches an account at a time, across every kind of
     // connection on its platform. A broken (degraded) grant still counts, so a
     // broken connection keeps its account. Vocabulary:

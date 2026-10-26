@@ -123,18 +123,17 @@ function connectHint(connectionKind: string): ConnectHint | null {
 }
 
 /** One ledger read per connection; both view builders below project from it. */
-async function loadGrantRecords(
+async function loadGrant(
   registry: ConnectionRegistry,
   conn: Connection,
-): Promise<Map<GrantName, GrantRecord>> {
-  const records = await registry.getLedger().listGrants(conn.id);
-  return new Map(records.map((rec) => [rec.name, rec]));
+): Promise<GrantRecord | null> {
+  return registry.getLedger().getGrant(conn.id);
 }
 
 function buildConnectionView(
   registry: ConnectionRegistry,
   conn: Connection,
-  records: Map<GrantName, GrantRecord>,
+  record: GrantRecord | null,
   manager: SetupManager | null,
   channel: ChannelRecord | null,
 ): ConnectionView {
@@ -143,7 +142,7 @@ function buildConnectionView(
 
   const display: Record<GrantName, GrantDisplayView | null> = {};
   for (const name of Object.keys(grants)) {
-    const profile = records.get(name)?.profile;
+    const profile = record?.profile;
     const revived = profile && revive ? revive(profile) : undefined;
     display[name] = revived
       ? {
@@ -176,11 +175,10 @@ function buildConnectionView(
 
 function buildGrantDetails(
   conn: Connection,
-  records: Map<GrantName, GrantRecord>,
+  rec: GrantRecord | null,
 ): Record<GrantName, GrantDetailView> {
   const details: Record<GrantName, GrantDetailView> = {};
   for (const name of Object.keys(conn.auth.grants())) {
-    const rec = records.get(name);
     const expiresAt = rec?.credential?.expiresAt;
     details[name] = {
       conferredAt: rec?.conferredAt?.toISOString() ?? null,
@@ -203,7 +201,7 @@ async function serializeConnection(
   return buildConnectionView(
     registry,
     conn,
-    await loadGrantRecords(registry, conn),
+    await loadGrant(registry, conn),
     manager,
     channels.byConnection(conn.id),
   );
@@ -301,18 +299,18 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const registry = requireConnectionRegistry(deps);
     const conn = findConnection(registry, c.req.param("id"));
     if (!conn) return c.json({ error: "Unknown connection." }, 404);
-    const records = await loadGrantRecords(registry, conn);
+    const record = await loadGrant(registry, conn);
     c.header("Cache-Control", "no-store");
     return c.json({
       connection: {
         ...buildConnectionView(
           registry,
           conn,
-          records,
+          record,
           deps.setupManager ?? null,
           channels.byConnection(conn.id),
         ),
-        grantDetails: buildGrantDetails(conn, records),
+        grantDetails: buildGrantDetails(conn, record),
       },
     });
   });

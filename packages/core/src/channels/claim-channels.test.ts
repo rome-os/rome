@@ -4,7 +4,7 @@ import type { GrantRecord } from "../connections/ledger.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { claimChannels, recordChannelAccounts } from "./claim-channels.js";
-import { domainOfGrants } from "./platform.js";
+import { domainOfGrant } from "./platform.js";
 
 describe("claimChannels", () => {
   let testDb: TestDb | undefined;
@@ -68,8 +68,8 @@ describe("claimChannels", () => {
       label: "Lark",
       createdAt: new Date(),
     });
-    ledger.writeEnsureGrant(testDb.db, "c1", "app");
-    ledger.writeGrant(testDb.db, "c1", "app", {
+    ledger.writeEnsureGrant(testDb.db, "c1");
+    ledger.writeGrant(testDb.db, "c1", {
       state: "authorized",
       credential: {
         material: { kind: "inline", record: { appId: "a", domain: "lark" } },
@@ -79,7 +79,7 @@ describe("claimChannels", () => {
     const records = new ChannelRecordsRepository(testDb.db);
 
     await claimChannels(testDb.db, records, [{ id: "c1", connectionKind: "feishu" }], async (id) =>
-      domainOfGrants(await ledger.listGrants(id)),
+      domainOfGrant(await ledger.getGrant(id)),
     );
 
     expect(records.byConnection("c1")?.platform).toBe("lark");
@@ -92,14 +92,14 @@ describe("claimChannels", () => {
     const tg = records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now).id;
     const email = records.claim(testDb.db, { id: "c2", connectionKind: "email" }, now).id;
     const discord = records.claim(testDb.db, { id: "c3", connectionKind: "discord" }, now).id;
-    const grants: Record<string, GrantRecord[]> = {
-      c1: [grant("c1", "authorized", { platform: "telegram", accountId: "bot-1" })],
-      c2: [grant("c2", "unauthorized", { platform: "email", accountId: "a@x.test" })],
-      c3: [grant("c3", "degraded")],
+    const grants: Record<string, GrantRecord> = {
+      c1: grant("c1", "authorized", { platform: "telegram", accountId: "bot-1" }),
+      c2: grant("c2", "unauthorized", { platform: "email", accountId: "a@x.test" }),
+      c3: grant("c3", "degraded"),
     };
 
     await recordChannelAccounts(testDb.db, records, {
-      listGrants: async (id) => grants[id] ?? [],
+      getGrant: async (id) => grants[id] ?? null,
     });
 
     // Read by id: these grants are not in the ledger, so none reaches the account.
@@ -115,5 +115,5 @@ function grant(
   state: GrantRecord["state"],
   account?: GrantRecord["account"],
 ): GrantRecord {
-  return { custody, name: "bot", state, account };
+  return { custody, state, account };
 }

@@ -122,8 +122,8 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
     class FailingGrantInitLedger extends DrizzleGrantLedger {
       private failNextGrant = true;
 
-      override writeEnsureGrant(exec: SqliteExec, custody: string, name: string): void {
-        super.writeEnsureGrant(exec, custody, name);
+      override writeEnsureGrant(exec: SqliteExec, custody: string): void {
+        super.writeEnsureGrant(exec, custody);
         if (this.failNextGrant) {
           this.failNextGrant = false;
           throw new Error("injected initial grant failure");
@@ -142,7 +142,7 @@ describe("ConnectionRegistry connection kind uniqueness", () => {
       await expect(ledger.listConnections()).resolves.toEqual([]);
 
       const retried = await registry.connect("fake-telegram");
-      await expect(ledger.getGrant(retried.id, "bot")).resolves.toMatchObject({
+      await expect(ledger.getGrant(retried.id)).resolves.toMatchObject({
         state: "unauthorized",
       });
     } finally {

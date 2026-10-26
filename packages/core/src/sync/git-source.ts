@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, readdirSync, rmSync, rmdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import {
-  OAUTH_PROVIDER_GRANTS,
   githubGrantProfileSchema,
   type GithubGrantProfile,
 } from "../connections/integrations/oauth-providers.js";
@@ -441,7 +440,7 @@ async function readGithubGrantProfile(db: DrizzleDb): Promise<GithubGrantProfile
   }
   const connection = github[0];
   if (!connection) return null;
-  const grant = await ledger.getGrant(connection.id, OAUTH_PROVIDER_GRANTS.github);
+  const grant = await ledger.getGrant(connection.id);
   // Re-run GitHub's own parse on the stored record — a record that no longer
   // matches the schema fails loudly here, never a silently wrong committer.
   return grant?.profile ? githubGrantProfileSchema.parse(grant.profile) : null;

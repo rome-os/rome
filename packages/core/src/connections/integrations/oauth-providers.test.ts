@@ -352,7 +352,7 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
   }
 
   async function storedAccessToken(ledger: GrantLedger, connectionId: string) {
-    const record = await ledger.getGrant(connectionId, "store");
+    const record = await ledger.getGrant(connectionId);
     const material = record?.credential?.material;
     return material?.kind === "inline" ? material.record.accessToken : undefined;
   }

@@ -5,7 +5,7 @@ import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
 import { isUnconnectedAccount } from "./unconnected-accounts.js";
-import { domainOf, domainOfGrants, platformOf } from "../channels/platform.js";
+import { domainOf, domainOfGrant, platformOf } from "../channels/platform.js";
 import type {
   ConnectionRecord,
   GrantAccount,
@@ -136,7 +136,7 @@ export function reachedAccount(
 ): GrantAccount | undefined {
   if (record.account) return record.account;
   if (!record.profile) return undefined;
-  return accountOf(descriptor, record.profile, domainOfGrants([record]));
+  return accountOf(descriptor, record.profile, domainOfGrant(record));
 }
 
 /** The ledger patch that authorizes a grant with a freshly conferred credential
@@ -371,7 +371,7 @@ export class ConnectionRegistry {
     const id = crypto.randomUUID();
     const createdAt = this.clock();
     const record = { id, connectionKind, label: label ?? connectionKind, createdAt };
-    this.createConnectionWithGrants(record, [registered.descriptor.grant]);
+    this.createConnectionWithGrant(record);
     const conn = new ConnectionImpl(
       id,
       connectionKind,
@@ -384,13 +384,13 @@ export class ConnectionRegistry {
     return conn;
   }
 
-  /** Persist a connection and all of its initial grant placeholders as one
-   *  durable unit, in the same transaction seam as confer(). */
-  private createConnectionWithGrants(record: ConnectionRecord, grants: GrantName[]): void {
+  /** Persist a connection and its grant placeholder as one durable unit, in
+   *  the same transaction seam as confer(). */
+  private createConnectionWithGrant(record: ConnectionRecord): void {
     const ledger = this.ledger;
     ledger.runInTransaction((tx) => {
       ledger.writeConnection(tx, record);
-      for (const grant of grants) ledger.writeEnsureGrant(tx, record.id, grant);
+      ledger.writeEnsureGrant(tx, record.id);
       this.onMint?.(tx, record);
     });
   }
@@ -529,7 +529,7 @@ export class ConnectionRegistry {
     const account =
       registered && profile !== undefined ? accountOf(registered.descriptor, profile) : undefined;
     if (registered && account) {
-      if (conn) await this.refuseDifferentAccount(registered.descriptor, id, grant, account);
+      if (conn) await this.refuseDifferentAccount(registered.descriptor, id, account);
       await this.refuseAccountHeldElsewhere(registered.descriptor, id, account);
     }
     const createdAt = this.clock();
@@ -543,10 +543,10 @@ export class ConnectionRegistry {
         if (minting) {
           const record = { id, connectionKind, label: connectionKind, createdAt };
           ledger.writeConnection(tx, record);
-          ledger.writeEnsureGrant(tx, id, registered!.descriptor.grant);
+          ledger.writeEnsureGrant(tx, id);
           this.onMint?.(tx, record, profile, account);
         }
-        ledger.writeGrant(tx, id, grant, patch);
+        ledger.writeGrant(tx, id, patch);
         if (!minting && account) this.onAccount?.(tx, { id, connectionKind }, account);
         opts.inTx?.(tx);
       });
@@ -587,10 +587,9 @@ export class ConnectionRegistry {
   private async refuseDifferentAccount(
     descriptor: ConnectionDescriptor,
     connectionId: ConnectionId,
-    grant: GrantName,
     account: GrantAccount,
   ): Promise<void> {
-    const record = await this.ledger.getGrant(connectionId, grant);
+    const record = await this.ledger.getGrant(connectionId);
     const held = record ? reachedAccount(descriptor, record) : undefined;
     if (held && (held.platform !== account.platform || held.accountId !== account.accountId)) {
       throw new DifferentAccountError(
@@ -880,7 +879,7 @@ class ConnectionImpl implements Connection {
    *  load() (persisted grants). */
   async hydrate(): Promise<void> {
     for (const [name, scheme] of [[this.descriptor.grant, this.descriptor.auth] as const]) {
-      const rec = await this.readGrant(name);
+      const rec = await this.readGrant();
       if (!rec || rec.state === "unauthorized") {
         this.grantState.set(name, "unauthorized");
         continue;
@@ -965,7 +964,7 @@ class ConnectionImpl implements Connection {
       }
       return;
     }
-    await this.ledger.updateGrant(this.id, grant, {
+    await this.ledger.updateGrant(this.id, {
       state: "authorized",
       credential: toPersisted(renewed),
       lastRenewedAt: this.registry.now(),
@@ -1008,7 +1007,7 @@ class ConnectionImpl implements Connection {
     }
     // Ledger first (the ledger is authoritative) — consistent with the
     // fault-driven renew path.
-    await this.ledger.updateGrant(this.id, name, {
+    await this.ledger.updateGrant(this.id, {
       state: "authorized",
       credential: toPersisted(renewed),
       lastRenewedAt: this.registry.now(),
@@ -1018,8 +1017,8 @@ class ConnectionImpl implements Connection {
     await this.syncCustody(name, renewed);
   }
 
-  private async readGrant(name: GrantName): Promise<GrantRecord | null> {
-    return this.ledger.getGrant(this.id, name);
+  private async readGrant(): Promise<GrantRecord | null> {
+    return this.ledger.getGrant(this.id);
   }
 
   private isExpired(cred: Credential): boolean {
@@ -1347,7 +1346,7 @@ class ConnectionImpl implements Connection {
     const current = this.liveCreds.get(grant);
     const expiresAt = current?.expiresAt ?? "never";
     const next: Credential = { material, expiresAt };
-    await this.ledger.updateGrant(this.id, grant, {
+    await this.ledger.updateGrant(this.id, {
       credential: toPersisted(next),
     });
     this.liveCreds.set(grant, next);
@@ -1366,7 +1365,7 @@ class ConnectionImpl implements Connection {
     if (!custody || typeof cred.material === "function") return;
     const material = cred.material;
     try {
-      const rec = await this.readGrant(grant);
+      const rec = await this.readGrant();
       await custody.sync(material, rec?.profile ?? {});
     } catch (err) {
       this.log.warn("custody sync failed", {
@@ -1449,7 +1448,7 @@ class ConnectionImpl implements Connection {
         materialFingerprint(current.material) === materialFingerprint(credential.material)
       ) {
         if (profile !== undefined) {
-          await this.ledger.updateGrant(this.id, grant, {
+          await this.ledger.updateGrant(this.id, {
             profile,
             account: accountOf(this.descriptor, profile),
           });
@@ -1476,7 +1475,6 @@ class ConnectionImpl implements Connection {
   ): Promise<void> {
     await this.ledger.updateGrant(
       this.id,
-      grant,
       conferralPatch(
         this.registry.now(),
         cred,
@@ -1545,11 +1543,11 @@ class ConnectionImpl implements Connection {
     if (opts.inTx) {
       const ledger = this.ledger;
       ledger.runInTransaction((tx) => {
-        ledger.writeGrant(tx, this.id, grant, patch);
+        ledger.writeGrant(tx, this.id, patch);
         opts.inTx!(tx);
       });
     } else {
-      await this.ledger.updateGrant(this.id, grant, patch);
+      await this.ledger.updateGrant(this.id, patch);
     }
     this.registry.revoked(this.id);
     this.grantState.set(grant, "unauthorized");
@@ -1711,7 +1709,7 @@ class ConnectionImpl implements Connection {
       await this.degradeGrant(grant, `renew returned re-confer (${reason})`, stillCurrent);
       return;
     }
-    await this.ledger.updateGrant(this.id, grant, {
+    await this.ledger.updateGrant(this.id, {
       state: "authorized",
       credential: toPersisted(renewed),
       lastRenewedAt: this.registry.now(),
@@ -1756,7 +1754,7 @@ class ConnectionImpl implements Connection {
     stillCurrent: () => boolean,
   ): Promise<void> {
     if (!stillCurrent()) return;
-    await this.ledger.updateGrant(this.id, grant, {
+    await this.ledger.updateGrant(this.id, {
       state: "degraded",
       degraded: { at: this.registry.now(), reason },
     });
@@ -1787,13 +1785,13 @@ class ConnectionImpl implements Connection {
     const state = this.grantState.get(grant) ?? "unauthorized";
     const cred = this.liveCreds.get(grant);
     if (state === "authorized" && cred) {
-      await this.ledger.updateGrant(this.id, grant, {
+      await this.ledger.updateGrant(this.id, {
         state: "authorized",
         credential: toPersisted(cred),
         degraded: undefined,
       });
     } else if (state === "unauthorized") {
-      await this.ledger.updateGrant(this.id, grant, {
+      await this.ledger.updateGrant(this.id, {
         state: "unauthorized",
         credential: undefined,
         profile: undefined,

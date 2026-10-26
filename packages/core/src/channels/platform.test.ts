@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { GrantRecord } from "../connections/ledger.js";
-import { domainOf, domainOfGrants, platformOf } from "./platform.js";
+import { domainOf, domainOfGrant, platformOf } from "./platform.js";
 
 describe("platformOf", () => {
   it("puts a Feishu app on Lark only when its domain is lark", () => {
@@ -27,10 +27,9 @@ describe("domainOf", () => {
   });
 });
 
-describe("domainOfGrants", () => {
+describe("domainOfGrant", () => {
   const grant = (fields: Partial<GrantRecord>): GrantRecord => ({
     custody: "c1",
-    name: "app",
     state: "authorized",
     ...fields,
   });
@@ -41,18 +40,16 @@ describe("domainOfGrants", () => {
 
   it("reads the profile first, then a pre-profile grant's inline material", () => {
     expect(
-      domainOfGrants([
+      domainOfGrant(
         grant({ profile: { domain: "feishu" }, credential: inline({ domain: "lark" }) }),
-      ]),
+      ),
     ).toBe("feishu");
-    expect(domainOfGrants([grant({ credential: inline({ appId: "a", domain: "lark" }) })])).toBe(
+    expect(domainOfGrant(grant({ credential: inline({ appId: "a", domain: "lark" }) }))).toBe(
       "lark",
     );
     expect(
-      domainOfGrants([
-        grant({ credential: { material: { kind: "external" }, expiresAt: "never" } }),
-      ]),
+      domainOfGrant(grant({ credential: { material: { kind: "external" }, expiresAt: "never" } })),
     ).toBe(undefined);
-    expect(domainOfGrants([])).toBeUndefined();
+    expect(domainOfGrant(null)).toBeUndefined();
   });
 });

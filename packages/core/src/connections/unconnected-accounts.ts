@@ -18,8 +18,8 @@ export async function isUnconnectedAccount(
 ): Promise<boolean> {
   const descriptor = registry.getDescriptor(conn.connectionKind);
   if (!descriptor?.capabilities.talker || !descriptor.takesAgent) return false;
-  const grants = await registry.getLedger().listGrants(conn.id);
-  return grants.length > 0 && grants.every((grant) => grant.state === "unauthorized");
+  const grant = await registry.getLedger().getGrant(conn.id);
+  return grant?.state === "unauthorized";
 }
 
 /**

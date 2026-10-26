@@ -365,7 +365,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       expect(unlocksBefore.length).toBe(unlockCountBefore);
 
       // Ledger was updated: the grant's credential has the new material
-      const grantRow = await ledger.getGrant(conn2.id, "bot");
+      const grantRow = await ledger.getGrant(conn2.id);
       expect(grantRow).not.toBeNull();
       expect(grantRow!.credential).not.toBeNull();
       expect(grantRow!.credential!.material).toEqual({
@@ -567,7 +567,7 @@ describe("external custody", () => {
       // Import an external credential (function-valued material)
       await registry.importCredential(conn.id, "account", externalCredential());
 
-      const grantRow = await ledger.getGrant(conn.id, "account");
+      const grantRow = await ledger.getGrant(conn.id);
       expect(grantRow).not.toBeNull();
       expect(grantRow!.credential).not.toBeNull();
       expect(grantRow!.credential!.material.kind).toBe("external");
@@ -645,7 +645,7 @@ describe("external custody", () => {
       await registryA.importCredential(connA.id, "account", externalCredential());
       const connAId = connA.id;
 
-      const rowBeforeReload = await ledgerA.getGrant(connAId, "account");
+      const rowBeforeReload = await ledgerA.getGrant(connAId);
       expect(rowBeforeReload!.credential!.material.kind).toBe("external");
 
       // Registry B: rehydrate
