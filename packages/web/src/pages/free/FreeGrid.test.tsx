@@ -10,7 +10,10 @@ import { FreeGrid } from "./FreeGrid";
 import { setActiveSession } from "./use-free-cells";
 
 const mounted = rs.hoisted(() => rs.fn());
-rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: [] }) }));
+const catalog = rs.hoisted(() => ({
+  apps: [] as { id: string; displayName: string }[] | null,
+}));
+rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: catalog.apps }) }));
 rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: () => ({ sessionName: null }),
 }));
@@ -48,9 +51,9 @@ function NavigationProbe({ withProject }: { withProject: boolean }) {
   );
 }
 
-function renderGrid(withProject = true) {
+function Grid({ withProject = true }: { withProject?: boolean }) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  return (
     <MemoryRouter initialEntries={["/chat"]}>
       <QueryClientProvider client={queryClient}>
         <SlotProvider>
@@ -58,8 +61,12 @@ function renderGrid(withProject = true) {
           <NavigationProbe withProject={withProject} />
         </SlotProvider>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderGrid(withProject = true) {
+  return render(<Grid withProject={withProject} />);
 }
 
 beforeAll(async () => {
@@ -67,6 +74,7 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   mounted.mockClear();
+  catalog.apps = [];
   rs.stubGlobal(
     "fetch",
     rs.fn((input: RequestInfo | URL) =>
@@ -92,6 +100,7 @@ beforeEach(() => {
   localStorage.clear();
   setActiveSession("reset");
   setActiveSession(null);
+  rs.mocked(fetch).mockClear();
 });
 afterEach(() => {
   cleanup();
@@ -100,6 +109,21 @@ afterEach(() => {
 });
 
 describe("FreeGrid navigation seeds", () => {
+  it("uses a generic tab until the catalog arrives, without remounting the app", async () => {
+    catalog.apps = null;
+    const view = renderGrid();
+    fireEvent.click(screen.getByRole("button", { name: "Open notes" }));
+    const iframe = screen.getByTitle("Seeded app");
+    expect(screen.getByRole("tab", { name: "Apps" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close Apps" })).toBeTruthy();
+    catalog.apps = [{ id: "notes", displayName: "Personal Notes" }];
+    view.rerender(<Grid />);
+    expect(screen.getByRole("tab", { name: "Personal Notes" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close Personal Notes" })).toBeTruthy();
+    expect(screen.getByTitle("Seeded app")).toBe(iframe);
+    expect(mounted).toHaveBeenCalledTimes(1);
+  });
+
   it("places widgets once and consumes widget and project prefill without changing selection", async () => {
     renderGrid();
     fireEvent.click(screen.getByRole("button", { name: "Open notes" }));
