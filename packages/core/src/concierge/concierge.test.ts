@@ -1,5 +1,8 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { AgentTurnFinishedEvent, BackendTurnParams } from "@rome-os/app-runtime";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { SessionToolContext } from "../core/session-tools.js";
 import type { ChatApi } from "./chat-api.js";
 import { startConciergeEvents } from "./events.js";
@@ -81,6 +84,7 @@ function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
         },
       ),
       createSession: rs.fn(async () => {}),
+      listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
     },
     sessionManager: { findReusableSession: async () => ({ id: "runtime-1" }) },
     aiToolState: {
@@ -212,6 +216,41 @@ describe("Concierge tools", () => {
     expect(JSON.parse(s.messages.get(CONCIERGE_CHAT)?.[0].content ?? "")).toEqual([
       { type: "task_chat", chatId: "task-1", title: "Flights" },
     ]);
+  });
+
+  it("chat_start takes a project by the absolute path the prompt lists", async () => {
+    const s = setup();
+    const root = mkdtempSync(join(tmpdir(), "rome-concierge-projects-"));
+    rs.stubEnv("ROME_PROJECTS_ROOT", root);
+    try {
+      await s.tool("chat_start", {
+        title: "Fix",
+        brief: "Fix it",
+        project: join(root, "rome-oss"),
+      });
+      expect(s.chatApi.createChat).toHaveBeenCalledWith({
+        agentName: undefined,
+        projectPath: "rome-oss",
+      });
+    } finally {
+      rs.unstubAllEnvs();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("chat_start rejects an unknown project and names the valid ones", async () => {
+    const s = setup();
+    const root = mkdtempSync(join(tmpdir(), "rome-concierge-projects-"));
+    rs.stubEnv("ROME_PROJECTS_ROOT", root);
+    try {
+      const result = await s.tool("chat_start", { title: "Fix", brief: "Fix it", project: "rome" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("one of: default, rome-oss");
+      expect(s.chatApi.createChat).not.toHaveBeenCalled();
+    } finally {
+      rs.unstubAllEnvs();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("refuses chats it did not start", async () => {
