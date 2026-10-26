@@ -75,8 +75,12 @@ const APP_INSTALL_RPC_TIMEOUT_MS = 3 * 60 * 1000;
 /** A flag flip with no filesystem work. */
 const SHORT_RPC_TIMEOUT_MS = 30 * 1000;
 /** A backend turn runs a full agent turn in the main process and blocks until
- * delivery finishes, so allow long-running continuations generous headroom. */
-const BACKEND_TURN_RPC_TIMEOUT_MS = 30 * 60 * 1000;
+ * delivery finishes. The timeout does not stop that turn: main keeps running it,
+ * and only the caller (the routine run) records an error. Agentic turns that
+ * resume a session routinely pass 30 minutes, so 2 hours keeps the recorded
+ * outcome honest for nearly all of them while bounding how long the worker
+ * stays parked. */
+const BACKEND_TURN_RPC_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 /** Push notify: NotifyClient bounds the main-to-Rome Cloud request at 120s,
  * including Rome Cloud's server-side APNs fan-out (~100s worst case). Keep this
  * RPC timeout above that HTTP budget; 150s provides 30s headroom and overrides
