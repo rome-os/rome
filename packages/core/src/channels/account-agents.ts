@@ -1,30 +1,61 @@
-// The agent linked to a channel, as the channel-message hook reads it.
-// Vocabulary: docs/domains/chats.md#account. Invariants:
+// The agent linked to a channel, as the channel-message hook reads it: the
+// agent of the connected account behind the channel's connection.
+// Vocabulary: docs/domains/chats.md#connected-account. Invariants:
 // docs/architecture/channels.md#an-accounts-agent.
 
 import type { ChannelMessageHookDeps, ChatSettingsSnapshot } from "@rome-os/app-runtime";
 import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
+import {
+  ChannelNotLinkable,
+  ChannelRecordNotFound,
+  ChannelUnbacked,
+  type ChannelRecord,
+  type ChannelRecordsRepository,
+} from "../db/repositories/channel-records.js";
+import {
+  ConnectedAccountNotFound,
+  type ConnectedAccountsRepository,
+} from "../db/repositories/connected-accounts.js";
 import { createLogger } from "../logger.js";
 import type { InboundListening } from "./connection-ports.js";
 
 const log = createLogger("account-agents");
+
+/** Where a channel's agent is read: the channel's record names its
+ *  connection, and the connection's connected account holds the agent. */
+export interface ChannelAgents {
+  records: Pick<ChannelRecordsRepository, "byId">;
+  accounts: Pick<ConnectedAccountsRepository, "agentOf">;
+}
+
+/** The connection kind channel `channel` belongs to, and the agent stored on
+ *  its connected account, null for none or for a channel no connection backs.
+ *  A connection kind's first channel carries the connection kind's name, so a
+ *  channel with no record answers for its own connection kind. */
+function storedAgent(
+  { records, accounts }: ChannelAgents,
+  channel: string,
+): { connectionKind: string; agent: string | null } {
+  const record = records.byId(channel);
+  const connectionId = record?.connectionId ?? null;
+  return {
+    connectionKind: record?.connectionKind ?? channel,
+    agent: connectionId === null ? null : accounts.agentOf(connectionId),
+  };
+}
 
 /**
  * The answer `accountAgentResolver` gives for the channel, read with no logging
  * and no state, for read-only callers such as the sessions explorer.
  */
 export function readAccountAgent(
-  records: Pick<ChannelRecordsRepository, "byId">,
+  sources: ChannelAgents,
   agents: { has(name: string): boolean },
   channelName: string,
 ): string | null | undefined {
-  const record = records.byId(channelName);
-  // A connection kind's first channel carries the connection kind's name, so a channel with
-  // no record answers for its own connection kind.
-  if (!LINKABLE_KINDS.has(record?.connectionKind ?? channelName)) return undefined;
-  const agent = record?.agent ?? null;
+  const { connectionKind, agent } = storedAgent(sources, channelName);
+  if (!LINKABLE_KINDS.has(connectionKind)) return undefined;
   return agent !== null && (isCoreMainAgentId(agent) || agents.has(agent)) ? agent : null;
 }
 
@@ -40,12 +71,12 @@ export function readAccountAgent(
 export class AccountListening implements InboundListening {
   private readonly listeners = new Set<(channel: string) => void>();
 
-  constructor(private readonly records: Pick<ChannelRecordsRepository, "byId">) {}
+  constructor(private readonly sources: ChannelAgents) {}
 
   listens(channel: string): boolean {
-    const record = this.records.byId(channel);
-    if (!LINKABLE_KINDS.has(record?.connectionKind ?? channel)) return true;
-    return (record?.agent ?? null) !== null;
+    const { connectionKind, agent } = storedAgent(this.sources, channel);
+    if (!LINKABLE_KINDS.has(connectionKind)) return true;
+    return agent !== null;
   }
 
   onChange(listener: (channel: string) => void): void {
@@ -79,17 +110,17 @@ export class AccountListening implements InboundListening {
  * loaded as a warning.
  */
 export function accountAgentResolver(
-  records: Pick<ChannelRecordsRepository, "byId">,
+  sources: ChannelAgents,
   agents: { has(name: string): boolean },
 ): NonNullable<ChannelMessageHookDeps["accountAgentOf"]> {
   const silent = new Map<string, string | null>();
   return (channelName) => {
-    const answering = readAccountAgent(records, agents, channelName);
+    const answering = readAccountAgent(sources, agents, channelName);
     if (answering !== null) {
       silent.delete(channelName);
       return answering;
     }
-    const agent = records.byId(channelName)?.agent ?? null;
+    const { agent } = storedAgent(sources, channelName);
     if (silent.has(channelName) && silent.get(channelName) === agent) return null;
     silent.set(channelName, agent);
     if (agent === null) {
@@ -104,6 +135,44 @@ export function accountAgentResolver(
     }
     return null;
   };
+}
+
+/** A link asked of channel `channel`. */
+export interface ChannelLink {
+  channel: ChannelRecord;
+  agent: string | null;
+}
+
+/**
+ * Link `agent` to the account channel `id` stands for, or unlink it with
+ * null, and return the channel with its agent as it now stands. The link is
+ * stored on the connected account of the connection behind the channel, so
+ * only that account changes. Only a channel of a linkable connection kind
+ * takes a link, and only while a connection backs it. Unlinking is always
+ * open, and a channel no connection backs already has no agent.
+ */
+export function linkChannelAgent(
+  records: Pick<ChannelRecordsRepository, "byId">,
+  accounts: Pick<ConnectedAccountsRepository, "link">,
+  id: string,
+  agent: string | null,
+): ChannelLink {
+  const channel = records.byId(id);
+  if (!channel) throw new ChannelRecordNotFound(id);
+  if (agent !== null && !LINKABLE_KINDS.has(channel.connectionKind)) {
+    throw new ChannelNotLinkable(id, channel.connectionKind);
+  }
+  if (channel.connectionId === null) {
+    if (agent !== null) throw new ChannelUnbacked(id);
+    return { channel, agent: null };
+  }
+  try {
+    return { channel, agent: accounts.link(channel.connectionId, agent) };
+  } catch (error) {
+    // The connection went between the read and the link.
+    if (error instanceof ConnectedAccountNotFound) throw new ChannelUnbacked(id);
+    throw error;
+  }
 }
 
 /**

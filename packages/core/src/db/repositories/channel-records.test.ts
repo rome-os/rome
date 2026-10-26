@@ -1,13 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { eq } from "drizzle-orm";
 import { channels } from "../schema.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
-import {
-  ChannelNotLinkable,
-  ChannelRecordNotFound,
-  ChannelRecordsRepository,
-  ChannelUnbacked,
-} from "./channel-records.js";
+import { ChannelRecordsRepository } from "./channel-records.js";
 
 const NOW = new Date("2026-10-15T00:00:00.000Z");
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -72,43 +66,18 @@ describe("ChannelRecordsRepository", () => {
     expect(records.all()).toHaveLength(1);
   });
 
-  it("gives a re-added bot a fresh channel, with no agent", () => {
+  it("gives a re-added bot a fresh channel", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", connectionKind: "feishu" }, NOW, { id: "feishu" });
-    records.link("feishu", "sales:agent");
 
     records.vacate(db, "c1");
-    expect(records.byId("feishu")).toMatchObject({ connectionId: null, agent: null });
+    expect(records.byId("feishu")).toMatchObject({ connectionId: null });
 
     const readded = records.claim(db, { id: "c2", connectionKind: "feishu" }, NOW);
     expect(readded.id).toMatch(UUID);
-    expect(readded.agent).toBeNull();
     // The released channel keeps its id, so no later account is given it.
-    expect(records.byId("feishu")).toMatchObject({ connectionId: null, agent: null });
-  });
-
-  it("starts every new account with no agent, and with the one asked only where it takes one", () => {
-    const records = repository();
-    const db = testDb!.db;
-
-    expect(
-      records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW, { id: "telegram" }).agent,
-    ).toBeNull();
-    expect(
-      records.claim(db, { id: "c2", connectionKind: "telegram_user" }, NOW, { id: "telegram_user" })
-        .agent,
-    ).toBeNull();
-    expect(
-      records.claim(db, { id: "c3", connectionKind: "feishu" }, NOW, {
-        id: "feishu",
-        agent: "core:main",
-      }).agent,
-    ).toBe("core:main");
-    expect(
-      records.claim(db, { id: "c4", connectionKind: "webchat" }, NOW, { agent: "core:main" }).agent,
-    ).toBeNull();
-    expect(records.claim(db, { id: "c5", connectionKind: "agents" }, NOW).agent).toBeNull();
+    expect(records.byId("feishu")).toMatchObject({ connectionId: null });
   });
 
   it("never gives a later account's channel to the next account", () => {
@@ -116,12 +85,10 @@ describe("ChannelRecordsRepository", () => {
     const db = testDb!.db;
     records.claim(db, { id: "c1", connectionKind: "feishu" }, NOW, { id: "feishu" });
     const later = records.claim(db, { id: "c2", connectionKind: "feishu" }, NOW).id;
-    records.link(later, "sales:agent");
     records.vacate(db, "c2");
 
     const next = records.claim(db, { id: "c3", connectionKind: "feishu" }, NOW);
     expect(next.id).not.toBe(later);
-    expect(next.agent).toBeNull();
   });
 
   it("takes back a service's released channel when the service takes no agent", () => {
@@ -363,113 +330,6 @@ describe("ChannelRecordsRepository", () => {
     ).toThrow("rollback");
 
     expect(records.idOf("c1")).toBeNull();
-  });
-
-  it("links one agent to several channels of one platform and keeps each link", () => {
-    const records = repository();
-    const db = testDb!.db;
-    records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW, { id: "telegram" });
-    records.claim(db, { id: "c2", connectionKind: "telegram_user" }, NOW, { id: "telegram_user" });
-    const later = records.claim(db, { id: "c3", connectionKind: "telegram" }, NOW).id;
-    records.link("telegram", "sales:agent");
-
-    expect(records.link("telegram_user", "sales:agent")).toMatchObject({
-      id: "telegram_user",
-      agent: "sales:agent",
-    });
-    records.link(later, "sales:agent");
-
-    expect(records.byId("telegram")?.agent).toBe("sales:agent");
-    expect(records.byId("telegram_user")?.agent).toBe("sales:agent");
-    expect(records.byId(later)?.agent).toBe("sales:agent");
-  });
-
-  it("unlinks one channel of an agent and leaves its other channels linked", () => {
-    const records = repository();
-    const db = testDb!.db;
-    records.claim(db, { id: "c1", connectionKind: "feishu" }, NOW, { id: "feishu" });
-    const second = records.claim(db, { id: "c2", connectionKind: "feishu" }, NOW).id;
-    records.link("feishu", "sales:agent");
-    records.link(second, "sales:agent");
-
-    records.link("feishu", null);
-
-    expect(records.byId("feishu")?.agent).toBeNull();
-    expect(records.byId(second)?.agent).toBe("sales:agent");
-  });
-
-  it("links main to several channels of one platform, by its canonical id", () => {
-    const records = repository();
-    const db = testDb!.db;
-    records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW, { id: "telegram" });
-    const later = records.claim(db, { id: "c2", connectionKind: "telegram" }, NOW).id;
-    records.link("telegram", "main");
-
-    expect(records.link(later, "main")).toMatchObject({ agent: "core:main" });
-    expect(records.byId("telegram")?.agent).toBe("core:main");
-    expect(() =>
-      db
-        .update(channels)
-        .set({ agent: "core:main" })
-        .where(eq(channels.connectionKind, "telegram"))
-        .run(),
-    ).not.toThrow();
-  });
-
-  it("lets one agent hold a channel on each platform", () => {
-    const records = repository();
-    const db = testDb!.db;
-    records.claim(db, { id: "c1", connectionKind: "feishu" }, NOW, { id: "feishu" });
-    records.claim(db, { id: "c2", connectionKind: "telegram" }, NOW, { id: "telegram" });
-    records.link("feishu", "sales:agent");
-
-    records.link("telegram", "sales:agent");
-
-    expect(records.byId("telegram")?.agent).toBe("sales:agent");
-    expect(records.byId("feishu")?.agent).toBe("sales:agent");
-  });
-
-  it("unlinks with null and keeps other links", () => {
-    const records = repository();
-    const db = testDb!.db;
-    records.claim(db, { id: "c1", connectionKind: "feishu" }, NOW, { id: "feishu" });
-    const second = records.claim(db, { id: "c2", connectionKind: "feishu" }, NOW).id;
-    records.link("feishu", "sales:agent");
-    records.link(second, "support:agent");
-
-    records.link("feishu", null);
-
-    expect(records.byId("feishu")?.agent).toBeNull();
-    expect(records.byId(second)?.agent).toBe("support:agent");
-  });
-
-  it("refuses a link to a missing or unbacked channel", () => {
-    const records = repository();
-    const db = testDb!.db;
-    records.claim(db, { id: "c1", connectionKind: "feishu" }, NOW, { id: "feishu" });
-    records.vacate(db, "c1");
-
-    expect(() => records.link("nope", "sales:agent")).toThrow(ChannelRecordNotFound);
-    expect(() => records.link("feishu", "sales:agent")).toThrow(ChannelUnbacked);
-  });
-
-  it("refuses a link to a channel whose service takes none, and unlinks it", () => {
-    const records = repository();
-    const db = testDb!.db;
-    records.claim(db, { id: "c1", connectionKind: "agents" }, NOW);
-
-    expect(() => records.link("agents", "sales:agent")).toThrow(ChannelNotLinkable);
-    expect(records.link("agents", null).agent).toBeNull();
-  });
-
-  it("accepts a direct write that links one agent to every channel of a platform", () => {
-    const records = repository();
-    const db = testDb!.db;
-    records.claim(db, { id: "c1", connectionKind: "feishu" }, NOW, { id: "feishu" });
-    records.claim(db, { id: "c2", connectionKind: "feishu" }, NOW);
-
-    expect(() => db.update(channels).set({ agent: "sales:agent" }).run()).not.toThrow();
-    expect(records.all().map((record) => record.agent)).toEqual(["sales:agent", "sales:agent"]);
   });
 
   it("lists the Connections no channel records yet", () => {

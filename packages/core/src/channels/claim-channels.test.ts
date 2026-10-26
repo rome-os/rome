@@ -6,6 +6,17 @@ import { createTestDb, type TestDb } from "../test/helpers.js";
 import { claimChannels, recordChannelAccounts } from "./claim-channels.js";
 import { domainOfGrant } from "./platform.js";
 
+/** The connected accounts made, by connection, with their agent. */
+function recordedAccounts() {
+  const added = new Map<string, string | null>();
+  return {
+    added,
+    add: (_exec: unknown, connectionId: string, agent: string | null = null) => {
+      added.set(connectionId, agent);
+    },
+  };
+}
+
 describe("claimChannels", () => {
   let testDb: TestDb | undefined;
   afterEach(() => {
@@ -16,20 +27,29 @@ describe("claimChannels", () => {
   it("names each unrecorded Connection after its service and keeps recorded ones", async () => {
     testDb = createTestDb();
     const records = new ChannelRecordsRepository(testDb.db);
+    const accounts = recordedAccounts();
     records.claim(testDb.db, { id: "c1", connectionKind: "feishu" }, new Date(), { id: "feishu" });
 
-    await claimChannels(testDb.db, records, [
+    await claimChannels(testDb.db, records, accounts, [
       { id: "c1", connectionKind: "feishu" },
       { id: "c2", connectionKind: "telegram" },
       { id: "c3", connectionKind: "discord" },
+      { id: "c4", connectionKind: "email" },
     ]);
 
     expect(records.byConnection("c1")?.id).toBe("feishu");
     expect(records.byConnection("c2")?.id).toBe("telegram");
     expect(records.byConnection("c3")?.id).toBe("discord");
-    // They answered as main before accounts took agents.
-    expect(records.byConnection("c2")?.agent).toBe("core:main");
-    expect(records.all()).toHaveLength(3);
+    // They answered as main before accounts took agents. An email account
+    // takes no agent, and a recorded Connection already has its account.
+    expect(accounts.added).toEqual(
+      new Map([
+        ["c2", "core:main"],
+        ["c3", "core:main"],
+        ["c4", null],
+      ]),
+    );
+    expect(records.all()).toHaveLength(4);
   });
 
   it("asks only unrecorded Connections their domain, and puts a Lark app on Lark", async () => {
@@ -43,6 +63,7 @@ describe("claimChannels", () => {
     await claimChannels(
       testDb.db,
       records,
+      recordedAccounts(),
       [
         { id: "c1", connectionKind: "telegram" },
         { id: "c2", connectionKind: "feishu" },
@@ -78,8 +99,12 @@ describe("claimChannels", () => {
     });
     const records = new ChannelRecordsRepository(testDb.db);
 
-    await claimChannels(testDb.db, records, [{ id: "c1", connectionKind: "feishu" }], async (id) =>
-      domainOfGrant(await ledger.getGrant(id)),
+    await claimChannels(
+      testDb.db,
+      records,
+      recordedAccounts(),
+      [{ id: "c1", connectionKind: "feishu" }],
+      async (id) => domainOfGrant(await ledger.getGrant(id)),
     );
 
     expect(records.byConnection("c1")?.platform).toBe("lark");

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { and, asc, eq, isNotNull, isNull, ne, or } from "drizzle-orm";
-import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
 import type { GrantAccount } from "../../connections/ledger.js";
 import { channels, connectionGrants } from "../schema.js";
@@ -10,10 +9,10 @@ import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
 /**
  * A channel a Connection backs, as stored: its id, the connection kind and platform
  * it is on, the platform's own id for the account (null until a grant reports
- * it), the Connection behind it now, and the agent linked to it. The
- * Connection behind it is the one whose live grant reaches its platform and
- * id, or, for a channel that knows no account yet, the one it was claimed
- * for; null when none is. Vocabulary: docs/domains/connections.md#connection.
+ * it), and the Connection behind it now. Its agent is its connected
+ * account's (ConnectedAccountsRepository). The Connection behind it is the
+ * one whose live grant reaches its platform and id, or, for a channel that
+ * knows no account yet, the one it was claimed for; null when none is. Vocabulary: docs/domains/connections.md#connection.
  */
 export interface ChannelRecord {
   id: string;
@@ -21,7 +20,6 @@ export interface ChannelRecord {
   platform: string;
   platformAccountId: string | null;
   connectionId: string | null;
-  agent: string | null;
   createdAt: Date;
 }
 
@@ -62,7 +60,7 @@ type Exec = DrizzleDb | DrizzleTx;
 function releaseAccount(exec: Exec, platform: string, accountId: string, keep: string): void {
   exec
     .update(channels)
-    .set({ platformAccountId: null, connectionId: null, agent: null })
+    .set({ platformAccountId: null, connectionId: null })
     .where(
       and(
         eq(channels.platform, platform),
@@ -85,14 +83,13 @@ export type ChannelOfLink = (link: string) => string | null;
  *  `ChannelRecordsRepository.sendersOfLink` states the rule. */
 export type SendersOfLink = (link: string) => string[];
 
-function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
+function toRecord(row: Omit<typeof channels.$inferSelect, "agent">): ChannelRecord {
   return {
     id: row.id,
     connectionKind: row.connectionKind,
     platform: row.platform,
     platformAccountId: row.platformAccountId,
     connectionId: row.connectionId,
-    agent: row.agent,
     createdAt: row.createdAt,
   };
 }
@@ -130,7 +127,7 @@ function reached(exec: Exec) {
 }
 
 /**
- * The channels the Connections back, and which agent each is linked to.
+ * The channels the Connections back.
  *
  * A channel's id is minted once and never changes, since every stored row
  * spells it. It is an opaque id, except that a connection kind's first channel carries
@@ -257,10 +254,8 @@ export class ChannelRecordsRepository {
    * name first. Failing that, it gets the connection kind's name if no channel holds
    * it, and a fresh opaque id otherwise. A linkable connection kind's channel gets an
    * opaque id, so its id is one no account ever had, unless the caller names
-   * one (`id`, taken only while free). A new channel is linked to `agent`
-   * when its connection kind takes one, and to none by default: Rome picks no agent
-   * for an account. `domain` is a Feishu app's domain, which decides its
-   * channel's platform. `account` is the account the Connection reaches, when
+   * one (`id`, taken only while free). `domain` is a Feishu app's domain,
+   * which decides its channel's platform. `account` is the account the Connection reaches, when
    * its grant reports one, and the channel records it; its platform decides
    * the channel's. Which channel is taken back does not depend on it yet:
    * names such as `email` and `whatsapp` still reach a connection kind's one
@@ -270,7 +265,7 @@ export class ChannelRecordsRepository {
     exec: Exec,
     connection: { id: string; connectionKind: string; domain?: string; account?: GrantAccount },
     now: Date,
-    { agent = null, id: named }: { agent?: string | null; id?: string } = {},
+    { id: named }: { id?: string } = {},
   ): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
@@ -293,12 +288,10 @@ export class ChannelRecordsRepository {
               a.createdAt.getTime() - b.createdAt.getTime(),
           )[0];
     if (vacant) {
-      // Only a connection kind that takes no agent gets here, so the channel starts with none.
       if (accountId !== null) releaseAccount(exec, platform, accountId, vacant.id);
       // A different account taking the channel back replaces the one it held.
       const taken = {
         connectionId: connection.id,
-        agent: null,
         platformAccountId: accountId,
         platform: accountId === null ? vacant.platform : platform,
       };
@@ -319,7 +312,6 @@ export class ChannelRecordsRepository {
       platform,
       platformAccountId: accountId,
       connectionId: connection.id,
-      agent: LINKABLE_KINDS.has(connectionKind) ? agent : null,
       createdAt: now,
     };
     exec.insert(channels).values(row).run();
@@ -370,8 +362,7 @@ export class ChannelRecordsRepository {
     else this.claim(exec, { ...connection, account }, now);
   }
 
-  /** Release the channel `connectionId` backs. The row and its id stay, and
-   *  its link goes: an agent stays linked only where it can still answer. A
+  /** Release the channel `connectionId` backs. The row and its id stay. A
    *  channel of a connection kind that takes an agent also lets go of its
    *  account, so connecting that account again makes a fresh record
    *  (docs/domains/connections.md#connection). */
@@ -384,33 +375,10 @@ export class ChannelRecordsRepository {
       .update(channels)
       .set({
         connectionId: null,
-        agent: null,
         platformAccountId: LINKABLE_KINDS.has(row.connectionKind) ? null : row.platformAccountId,
       })
       .where(eq(channels.id, row.id))
       .run();
-  }
-
-  /**
-   * Link `agent` to channel `id`, or unlink it with null, and return the
-   * channel as it now stands. Only channel `id` changes: an agent may be the
-   * agent of any number of channels, several on one platform included. Main is
-   * stored by its canonical id. Only a channel of a linkable connection kind takes a
-   * link; unlinking is always open.
-   */
-  link(id: string, requested: string | null): ChannelRecord {
-    const agent = requested !== null && isCoreMainAgentId(requested) ? MAIN_AGENT_ID : requested;
-    return this.db.transaction((tx) => {
-      const found = reached(tx).where(eq(channels.id, id)).get();
-      if (!found) throw new ChannelRecordNotFound(id);
-      const row = reachedRecord(found);
-      if (agent !== null && !LINKABLE_KINDS.has(row.connectionKind)) {
-        throw new ChannelNotLinkable(id, row.connectionKind);
-      }
-      if (agent !== null && row.connectionId === null) throw new ChannelUnbacked(id);
-      tx.update(channels).set({ agent }).where(eq(channels.id, id)).run();
-      return { ...row, agent };
-    });
   }
 
   /** The Connections no channel records yet, for the boot pass that gives

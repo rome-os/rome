@@ -32,6 +32,7 @@ import {
   ChannelRecordsRepository,
   type ChannelRecord,
 } from "../../db/repositories/channel-records.js";
+import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
 
@@ -135,6 +136,7 @@ function buildConnectionView(
   record: GrantRecord | null,
   manager: SetupManager | null,
   channel: ChannelRecord | null,
+  agent: string | null,
 ): ConnectionView {
   const revive = registry.getDescriptor(conn.connectionKind)?.reviveProfile;
   const grants = conn.auth.grants();
@@ -167,7 +169,7 @@ function buildConnectionView(
     channel: channel?.id ?? null,
     platform: channel?.platform ?? null,
     // Null means silent, so a connection kind that takes no link reports none.
-    agent: LINKABLE_KINDS.has(conn.connectionKind) ? (channel?.agent ?? null) : undefined,
+    agent: LINKABLE_KINDS.has(conn.connectionKind) ? agent : undefined,
     severalAccounts: registry.getDescriptor(conn.connectionKind)?.severalAccounts === true,
   };
 }
@@ -196,6 +198,7 @@ async function serializeConnection(
   conn: Connection,
   manager: SetupManager | null,
   channels: ChannelRecordsRepository,
+  accounts: ConnectedAccountsRepository,
 ): Promise<ConnectionView> {
   return buildConnectionView(
     registry,
@@ -203,6 +206,7 @@ async function serializeConnection(
     await loadGrant(registry, conn),
     manager,
     channels.byConnection(conn.id),
+    accounts.agentOf(conn.id),
   );
 }
 
@@ -274,12 +278,15 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
   const findConnection = (registry: ConnectionRegistry, id: string): Connection | undefined =>
     registry.all().find((c) => c.id === id);
   const channels = new ChannelRecordsRepository(deps.db);
+  const accounts = new ConnectedAccountsRepository(deps.db);
 
   app.get("/connections", async (c) => {
     const registry = requireConnectionRegistry(deps);
     const manager = deps.setupManager ?? null;
     const connected = await Promise.all(
-      registry.all().map((conn) => serializeConnection(registry, conn, manager, channels)),
+      registry
+        .all()
+        .map((conn) => serializeConnection(registry, conn, manager, channels, accounts)),
     );
     // Stable ordering for the UI: by connection kind, then label, then id — the
     // registry's own iteration order is insertion-dependent. Placeholders sort
@@ -308,6 +315,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
           record,
           deps.setupManager ?? null,
           channels.byConnection(conn.id),
+          accounts.agentOf(conn.id),
         ),
         grantDetails: buildGrantDetails(conn, record),
       },
@@ -354,7 +362,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
       ok: true,
       connection: removed
         ? null
-        : await serializeConnection(registry, conn, deps.setupManager ?? null, channels),
+        : await serializeConnection(registry, conn, deps.setupManager ?? null, channels, accounts),
     });
   });
 

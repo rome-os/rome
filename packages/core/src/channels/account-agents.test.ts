@@ -1,6 +1,21 @@
-import { beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelRecord } from "../db/repositories/channel-records.js";
-import { AccountListening, answeringAgentOf, accountAgentResolver } from "./account-agents.js";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import {
+  ChannelNotLinkable,
+  ChannelRecordNotFound,
+  ChannelRecordsRepository,
+  ChannelUnbacked,
+  type ChannelRecord,
+} from "../db/repositories/channel-records.js";
+import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
+import { createTestDb, type TestDb } from "../test/helpers.js";
+import {
+  AccountListening,
+  answeringAgentOf,
+  accountAgentResolver,
+  linkChannelAgent,
+  type ChannelAgents,
+} from "./account-agents.js";
 
 const warn = rs.hoisted(() => rs.fn());
 const info = rs.hoisted(() => rs.fn());
@@ -9,16 +24,29 @@ rs.mock("../logger.js", () => ({
   createLogger: () => ({ debug: rs.fn(), info, warn, error: rs.fn() }),
 }));
 
+/** Each channel is backed by a connection of the same id, whose connected
+ *  account holds the record's agent. */
+function channelAgents(
+  records: () => Map<string, { connectionKind: string; agent: string | null }>,
+): ChannelAgents {
+  return {
+    records: {
+      byId: (id) => {
+        const record = records().get(id);
+        return record
+          ? ({ id, connectionKind: record.connectionKind, connectionId: id } as ChannelRecord)
+          : null;
+      },
+    },
+    accounts: { agentOf: (connectionId) => records().get(connectionId)?.agent ?? null },
+  };
+}
+
 describe("accountAgentResolver", () => {
   let agent: string | null;
   let loaded: Set<string>;
   let records: Map<string, { connectionKind: string; agent: string | null }>;
-  const repository = {
-    byId: (id: string) => {
-      const record = records.get(id);
-      return record ? ({ id, ...record } as unknown as ChannelRecord) : null;
-    },
-  };
+  const repository = channelAgents(() => records);
   const agents = { has: (name: string) => loaded.has(name) };
 
   beforeEach(() => {
@@ -111,12 +139,7 @@ describe("accountAgentResolver", () => {
 
 describe("AccountListening", () => {
   const records = new Map<string, { connectionKind: string; agent: string | null }>();
-  const repository = {
-    byId: (id: string) => {
-      const record = records.get(id);
-      return record ? ({ id, ...record } as unknown as ChannelRecord) : null;
-    },
-  };
+  const repository = channelAgents(() => records);
 
   beforeEach(() => records.clear());
 
@@ -196,5 +219,66 @@ describe("answeringAgentOf", () => {
     );
     expect(answeringAgentOf("sales:agent", "main", "group", isLoaded)).toBe("main");
     expect(answeringAgentOf(undefined, "gone:agent", "group", isLoaded)).toBe("gone:agent");
+  });
+});
+
+describe("linkChannelAgent", () => {
+  const NOW = new Date("2026-10-26T00:00:00.000Z");
+  let testDb: TestDb | undefined;
+  afterEach(() => {
+    testDb?.close();
+    testDb = undefined;
+  });
+
+  function setup() {
+    testDb = createTestDb();
+    const db = testDb.db;
+    const records = new ChannelRecordsRepository(db);
+    const accounts = new ConnectedAccountsRepository(db);
+    const ledger = new DrizzleGrantLedger(db);
+    const connect = (id: string, connectionKind: string, channel?: string) => {
+      ledger.writeConnection(db, { id, connectionKind, label: connectionKind, createdAt: NOW });
+      accounts.add(db, id);
+      return records.claim(db, { id, connectionKind }, NOW, channel ? { id: channel } : {}).id;
+    };
+    return { db, records, accounts, connect };
+  }
+
+  it("stores the link on the connected account behind the channel", () => {
+    const { records, accounts, connect } = setup();
+    const feishu = connect("c1", "feishu", "feishu");
+    const later = connect("c2", "feishu");
+
+    expect(linkChannelAgent(records, accounts, later, "sales:agent")).toMatchObject({
+      channel: { id: later, connectionId: "c2" },
+      agent: "sales:agent",
+    });
+    expect(accounts.agentOf("c2")).toBe("sales:agent");
+    expect(accounts.agentOf("c1")).toBeNull();
+    expect(linkChannelAgent(records, accounts, feishu, "main").agent).toBe("core:main");
+  });
+
+  it("refuses a link to a missing or unbacked channel, and unlinks an unbacked one", () => {
+    const { db, records, accounts, connect } = setup();
+    connect("c1", "feishu", "feishu");
+    records.vacate(db, "c1");
+
+    expect(() => linkChannelAgent(records, accounts, "nope", "sales:agent")).toThrow(
+      ChannelRecordNotFound,
+    );
+    expect(() => linkChannelAgent(records, accounts, "feishu", "sales:agent")).toThrow(
+      ChannelUnbacked,
+    );
+    expect(linkChannelAgent(records, accounts, "feishu", null).agent).toBeNull();
+  });
+
+  it("refuses a link to a channel whose connection kind takes none, and unlinks it", () => {
+    const { records, accounts, connect } = setup();
+    connect("c1", "agents");
+
+    expect(() => linkChannelAgent(records, accounts, "agents", "sales:agent")).toThrow(
+      ChannelNotLinkable,
+    );
+    expect(linkChannelAgent(records, accounts, "agents", null).agent).toBeNull();
   });
 });

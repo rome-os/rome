@@ -80,6 +80,7 @@ import { favorRoutes } from "./routes/favors.js";
 import { sessionsRoutes } from "./routes/sessions.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
+import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
 import { readAccountAgent } from "../channels/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
@@ -196,11 +197,15 @@ export function buildApp(
   api.route("/", syncRoutes(deps));
   api.route("/", shareRoutes(deps));
   const sessionChannelRecords = new ChannelRecordsRepository(deps.db);
+  const sessionChannelAgents = {
+    records: sessionChannelRecords,
+    accounts: new ConnectedAccountsRepository(deps.db),
+  };
   const sessionQueries = new SessionQueryService({
     repository: new SessionQueryRepository(deps.db),
     agentLoader: deps.agentLoader,
     appCatalog: deps.appCatalog,
-    accountAgentOf: (channel) => readAccountAgent(sessionChannelRecords, deps.agentLoader, channel),
+    accountAgentOf: (channel) => readAccountAgent(sessionChannelAgents, deps.agentLoader, channel),
     // A channel with no record answers no agent, so the records are every
     // channel that can.
     channelNames: () => sessionChannelRecords.all().map((record) => record.id),
