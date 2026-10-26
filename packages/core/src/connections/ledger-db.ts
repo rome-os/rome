@@ -10,13 +10,14 @@ import { and, asc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx, SqliteExec } from "../db/index.js";
 import { connectionGrants, connections } from "../db/schema/system.js";
 import type { ConnectionId, ProfileRecord } from "./types.js";
-import type {
-  ConnectionRecord,
-  GrantAccount,
-  GrantLedger,
-  GrantPatch,
-  GrantRecord,
-  PersistedCredential,
+import {
+  type ConnectionRecord,
+  type GrantAccount,
+  type GrantLedger,
+  type GrantRecord,
+  type GrantValue,
+  grantValueOf,
+  type PersistedCredential,
 } from "./ledger.js";
 
 type GrantRow = typeof connectionGrants.$inferSelect;
@@ -118,27 +119,33 @@ export class DrizzleGrantLedger implements GrantLedger {
     return row ? rowToGrant(row) : null;
   }
 
-  writeGrant(exec: SqliteExec, custody: string, patch: GrantPatch): void {
-    const set: Partial<typeof connectionGrants.$inferInsert> = {};
-    if ("state" in patch) set.state = patch.state as string;
-    if ("credential" in patch) set.credential = patch.credential ?? null;
-    if ("profile" in patch) set.profile = patch.profile ?? null;
-    if ("account" in patch) {
-      set.platform = patch.account?.platform ?? null;
-      set.accountId = patch.account?.accountId ?? null;
-    }
-    if ("conferredAt" in patch) set.conferredAt = patch.conferredAt ?? null;
-    if ("lastRenewedAt" in patch) set.lastRenewedAt = patch.lastRenewedAt ?? null;
-    if ("degraded" in patch) {
-      set.degradedAt = patch.degraded?.at ?? null;
-      set.degradedReason = patch.degraded?.reason ?? null;
-    }
-    if (Object.keys(set).length === 0) return;
-    exec.update(connectionGrants).set(set).where(eq(connectionGrants.custody, custody)).run();
+  writeGrant(exec: SqliteExec, custody: string, value: GrantValue): void {
+    exec
+      .update(connectionGrants)
+      .set({
+        state: value.state,
+        credential: value.credential ?? null,
+        profile: value.profile ?? null,
+        platform: value.account?.platform ?? null,
+        accountId: value.account?.accountId ?? null,
+        conferredAt: value.conferredAt ?? null,
+        lastRenewedAt: value.lastRenewedAt ?? null,
+        degradedAt: value.degraded?.at ?? null,
+        degradedReason: value.degraded?.reason ?? null,
+      })
+      .where(eq(connectionGrants.custody, custody))
+      .run();
   }
 
-  async updateGrant(custody: string, patch: GrantPatch): Promise<void> {
-    this.writeGrant(this.db, custody, patch);
+  async updateGrant(custody: string, next: (current: GrantValue) => GrantValue): Promise<void> {
+    this.runInTransaction((tx) => {
+      const row = tx
+        .select()
+        .from(connectionGrants)
+        .where(eq(connectionGrants.custody, custody))
+        .get();
+      this.writeGrant(tx, custody, next(grantValueOf(row ? rowToGrant(row) : null)));
+    });
   }
 
   async connectionReaching(

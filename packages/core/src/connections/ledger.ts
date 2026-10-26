@@ -5,8 +5,8 @@
 //  2. Rehydration needs code, never the guardian: a persisted credential +
 //     descriptor ⇒ a live capability at boot.
 //  3. Rows record outcomes only — no step/flow state, no scheme-specific columns.
-//  4. A connection holds one grant, in one row keyed by the connection; renewal
-//     and kit.persist replace its credential in place.
+//  4. A connection holds one grant, in one row keyed by the connection. A
+//     grant is a value: conferral, renewal and kit.persist each replace it whole.
 //  5. The grant row exists from connection creation in "unauthorized";
 //     conferral FILLS it.
 
@@ -55,13 +55,20 @@ export interface GrantRecord {
   degraded?: { at: Date; reason: string };
 }
 
-/** The fields a grant update may change. */
-export type GrantPatch = Partial<
-  Pick<
-    GrantRecord,
-    "state" | "credential" | "profile" | "account" | "conferredAt" | "lastRenewedAt" | "degraded"
-  >
->;
+/** A connection's grant as one value: everything the ledger keeps for it. A
+ *  grant has no identity of its own, so every write replaces it whole.
+ *  Vocabulary: docs/domains/connections.md#grant. */
+export type GrantValue = Omit<GrantRecord, "custody">;
+
+/** What a connection holds when no grant fills it. */
+export const NO_GRANT: GrantValue = { state: "unauthorized" };
+
+/** The value of `record`, or NO_GRANT when there is none. */
+export function grantValueOf(record: GrantRecord | null): GrantValue {
+  if (!record) return NO_GRANT;
+  const { custody: _custody, ...value } = record;
+  return value;
+}
 
 /** Each `write*` helper takes an executor (the db for autocommit, or a `tx`), so
  *  the registry can enlist several writes in one caller-owned transaction. */
@@ -75,13 +82,17 @@ export interface GrantLedger {
   /** Idempotent; creates the connection's grant in "unauthorized" if absent. */
   ensureGrant(custody: string): Promise<void>;
   getGrant(custody: string): Promise<GrantRecord | null>;
-  updateGrant(custody: string, patch: GrantPatch): Promise<void>;
+  /** Replace the connection's grant whole with `next` of the one it holds,
+   *  read and written in one transaction. `next` is pure: it reads the clock
+   *  or anything else outside the grant before the call, not inside it. */
+  updateGrant(custody: string, next: (current: GrantValue) => GrantValue): Promise<void>;
   /** Run `fn` inside one synchronous transaction (better-sqlite3). Any throw
    *  rolls the whole scope back. */
   runInTransaction<T>(fn: (tx: DrizzleTx) => T): T;
   writeConnection(exec: SqliteExec, rec: ConnectionRecord): void;
   writeEnsureGrant(exec: SqliteExec, custody: string): void;
-  writeGrant(exec: SqliteExec, custody: string, patch: GrantPatch): void;
+  /** Replace the connection's grant whole with `value`. */
+  writeGrant(exec: SqliteExec, custody: string, value: GrantValue): void;
   /** The Connection, other than `exceptId`, holding a grant in any state but
    *  "unauthorized" that reaches `account`, or null. */
   connectionReaching(account: GrantAccount, exceptId: ConnectionId): Promise<ConnectionId | null>;

@@ -6,12 +6,14 @@ import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
 import { isUnconnectedAccount } from "./unconnected-accounts.js";
 import { domainOf, domainOfGrant, platformOf } from "../channels/platform.js";
-import type {
-  ConnectionRecord,
-  GrantAccount,
-  GrantLedger,
-  GrantRecord,
-  PersistedCredential,
+import {
+  type ConnectionRecord,
+  type GrantAccount,
+  type GrantLedger,
+  type GrantRecord,
+  type GrantValue,
+  NO_GRANT,
+  type PersistedCredential,
 } from "./ledger.js";
 import {
   AccountAlreadyConnectedError,
@@ -139,26 +141,26 @@ export function reachedAccount(
   return accountOf(descriptor, record.profile, domainOfGrant(record));
 }
 
-/** The ledger patch that authorizes a grant with a freshly conferred credential
- *  (+ optional profile). Shared by the in-place `applyNewCredential` path and the
- *  transactional `confer` path so both write an identical row. */
-function conferralPatch(
+/** The grant a conferral leaves: a fresh credential and the profile and
+ *  account it names, replacing whatever the connection held. Shared by the
+ *  in-place `applyNewCredential` path and the transactional `confer` path so
+ *  both write an identical row. */
+function conferredGrant(
   now: Date,
   cred: Credential,
   profile?: ProfileRecord,
   account?: GrantAccount,
-): Partial<
-  Pick<GrantRecord, "state" | "credential" | "profile" | "account" | "conferredAt" | "degraded">
-> {
+): GrantValue {
+  return { state: "authorized", credential: toPersisted(cred), profile, account, conferredAt: now };
+}
+
+/** The grant a renewal leaves: the same conferral on a renewed credential. */
+function renewedGrant(current: GrantValue, cred: Credential, now: Date): GrantValue {
   return {
+    ...current,
     state: "authorized",
     credential: toPersisted(cred),
-    // Written in the SAME update as the credential, with the account it names.
-    // Only patched when the conferral supplied one, so an import with no
-    // identity to record leaves any existing profile untouched rather than
-    // wiping it.
-    ...(profile !== undefined ? { profile, account } : {}),
-    conferredAt: now,
+    lastRenewedAt: now,
     degraded: undefined,
   };
 }
@@ -533,7 +535,7 @@ export class ConnectionRegistry {
       await this.refuseAccountHeldElsewhere(registered.descriptor, id, account);
     }
     const createdAt = this.clock();
-    const patch = conferralPatch(this.now(), credential, profile, account);
+    const grantValue = conferredGrant(this.now(), credential, profile, account);
     const ledger = this.ledger;
 
     // One transaction spanning every durable write of the conferral: mint (if a
@@ -546,7 +548,7 @@ export class ConnectionRegistry {
           ledger.writeEnsureGrant(tx, id);
           this.onMint?.(tx, record, profile, account);
         }
-        ledger.writeGrant(tx, id, patch);
+        ledger.writeGrant(tx, id, grantValue);
         if (!minting && account) this.onAccount?.(tx, { id, connectionKind }, account);
         opts.inTx?.(tx);
       });
@@ -964,11 +966,8 @@ class ConnectionImpl implements Connection {
       }
       return;
     }
-    await this.ledger.updateGrant(this.id, {
-      state: "authorized",
-      credential: toPersisted(renewed),
-      lastRenewedAt: this.registry.now(),
-    });
+    const now = this.registry.now();
+    await this.ledger.updateGrant(this.id, (current) => renewedGrant(current, renewed, now));
     this.liveCreds.set(grant, renewed);
     this.reconcile(grant);
     await this.syncCustody(grant, renewed);
@@ -1007,11 +1006,8 @@ class ConnectionImpl implements Connection {
     }
     // Ledger first (the ledger is authoritative) — consistent with the
     // fault-driven renew path.
-    await this.ledger.updateGrant(this.id, {
-      state: "authorized",
-      credential: toPersisted(renewed),
-      lastRenewedAt: this.registry.now(),
-    });
+    const now = this.registry.now();
+    await this.ledger.updateGrant(this.id, (current) => renewedGrant(current, renewed, now));
     this.grantState.set(name, "authorized");
     this.liveCreds.set(name, renewed);
     await this.syncCustody(name, renewed);
@@ -1346,9 +1342,10 @@ class ConnectionImpl implements Connection {
     const current = this.liveCreds.get(grant);
     const expiresAt = current?.expiresAt ?? "never";
     const next: Credential = { material, expiresAt };
-    await this.ledger.updateGrant(this.id, {
+    await this.ledger.updateGrant(this.id, (current) => ({
+      ...current,
       credential: toPersisted(next),
-    });
+    }));
     this.liveCreds.set(grant, next);
   }
 
@@ -1448,10 +1445,13 @@ class ConnectionImpl implements Connection {
         materialFingerprint(current.material) === materialFingerprint(credential.material)
       ) {
         if (profile !== undefined) {
-          await this.ledger.updateGrant(this.id, {
+          const reconferred = conferredGrant(
+            this.registry.now(),
+            current,
             profile,
-            account: accountOf(this.descriptor, profile),
-          });
+            accountOf(this.descriptor, profile),
+          );
+          await this.ledger.updateGrant(this.id, () => reconferred);
           // The credential is byte-identical, but a re-conferral can still change
           // the profile (renamed login, moved workspace) — re-sync custody so a
           // profile-derived artifact (the Slack file's teamId) stays current.
@@ -1473,15 +1473,13 @@ class ConnectionImpl implements Connection {
     cred: Credential,
     profile?: ProfileRecord,
   ): Promise<void> {
-    await this.ledger.updateGrant(
-      this.id,
-      conferralPatch(
-        this.registry.now(),
-        cred,
-        profile,
-        profile === undefined ? undefined : accountOf(this.descriptor, profile),
-      ),
+    const conferred = conferredGrant(
+      this.registry.now(),
+      cred,
+      profile,
+      profile === undefined ? undefined : accountOf(this.descriptor, profile),
     );
+    await this.ledger.updateGrant(this.id, () => conferred);
     await this.activateGrantInMemory(grant, cred);
   }
 
@@ -1529,25 +1527,15 @@ class ConnectionImpl implements Connection {
     // Ledger first (the ledger is authoritative): a failed durable
     // write propagates to the caller with nothing revoked in memory — the grant
     // stays authorized and its epoch alive.
-    const patch = {
-      state: "unauthorized" as const,
-      credential: undefined,
-      // An unauthorized grant records no conferral outcome — clear the profile
-      // with the credential so a revoked grant carries no stale identity.
-      // `conferredAt` is deliberately NOT cleared, so the grant keeps a record
-      // of its last conferral.
-      profile: undefined,
-      account: undefined,
-      degraded: undefined,
-    };
+    // A revoked grant holds nothing, so it carries no stale identity.
     if (opts.inTx) {
       const ledger = this.ledger;
       ledger.runInTransaction((tx) => {
-        ledger.writeGrant(tx, this.id, patch);
+        ledger.writeGrant(tx, this.id, NO_GRANT);
         opts.inTx!(tx);
       });
     } else {
-      await this.ledger.updateGrant(this.id, patch);
+      await this.ledger.updateGrant(this.id, () => NO_GRANT);
     }
     this.registry.revoked(this.id);
     this.grantState.set(grant, "unauthorized");
@@ -1709,11 +1697,8 @@ class ConnectionImpl implements Connection {
       await this.degradeGrant(grant, `renew returned re-confer (${reason})`, stillCurrent);
       return;
     }
-    await this.ledger.updateGrant(this.id, {
-      state: "authorized",
-      credential: toPersisted(renewed),
-      lastRenewedAt: this.registry.now(),
-    });
+    const now = this.registry.now();
+    await this.ledger.updateGrant(this.id, (current) => renewedGrant(current, renewed, now));
     // The write itself awaited — same supersession window as degradeGrant's:
     // applying the stale renewal in memory would replace the winner's fresh
     // credential and rebuild over its epoch. Repair the row instead.
@@ -1754,10 +1739,12 @@ class ConnectionImpl implements Connection {
     stillCurrent: () => boolean,
   ): Promise<void> {
     if (!stillCurrent()) return;
-    await this.ledger.updateGrant(this.id, {
+    const degraded = { at: this.registry.now(), reason };
+    await this.ledger.updateGrant(this.id, (current) => ({
+      ...current,
       state: "degraded",
-      degraded: { at: this.registry.now(), reason },
-    });
+      degraded,
+    }));
     if (!stillCurrent()) {
       await this.repairLedgerFromMirror(grant);
       return;
@@ -1785,19 +1772,14 @@ class ConnectionImpl implements Connection {
     const state = this.grantState.get(grant) ?? "unauthorized";
     const cred = this.liveCreds.get(grant);
     if (state === "authorized" && cred) {
-      await this.ledger.updateGrant(this.id, {
+      await this.ledger.updateGrant(this.id, (current) => ({
+        ...current,
         state: "authorized",
         credential: toPersisted(cred),
         degraded: undefined,
-      });
+      }));
     } else if (state === "unauthorized") {
-      await this.ledger.updateGrant(this.id, {
-        state: "unauthorized",
-        credential: undefined,
-        profile: undefined,
-        account: undefined,
-        degraded: undefined,
-      });
+      await this.ledger.updateGrant(this.id, () => NO_GRANT);
     }
     this.log.warn("superseded fault flow repaired ledger from mirror", {
       connectionId: this.id,

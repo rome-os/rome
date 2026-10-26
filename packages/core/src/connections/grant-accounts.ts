@@ -34,7 +34,7 @@ export async function recordGrantAccounts(
         log.warn("a grant reaches an account another connection reaches", { id: conn.id, other });
         continue;
       }
-      await ledger.updateGrant(conn.id, { account });
+      await ledger.updateGrant(conn.id, (current) => ({ ...current, account }));
       recorded++;
     } catch (error) {
       // A row the ledger refuses must not keep Rome from starting.

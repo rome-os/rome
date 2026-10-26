@@ -131,10 +131,11 @@ describe("GET /connections", () => {
       setup.register(fixture.descriptor);
       const conn = await setup.connect("fake-discord", "Discord");
       await setup.importCredential(conn.id, "bot", fixture.botCredential());
-      await ledger.updateGrant(conn.id, {
+      await ledger.updateGrant(conn.id, (current) => ({
+        ...current,
         state: "degraded",
         degraded: { at: new Date("2026-07-13T00:00:00Z"), reason: "token revoked upstream" },
-      });
+      }));
     }
     // Fresh registry over the same ledger — the boot-shaped path to a degraded grant.
     const registry = new ConnectionRegistry({ ledger });
@@ -305,10 +306,11 @@ describe("GET /connections/:id", () => {
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-discord", "Discord");
     await registry.importCredential(conn.id, "bot", fixture.botCredential());
-    await ledger.updateGrant(conn.id, {
+    await ledger.updateGrant(conn.id, (current) => ({
+      ...current,
       state: "degraded",
       degraded: { at: new Date("2026-07-13T00:00:00Z"), reason: "token revoked upstream" },
-    });
+    }));
 
     const res = await makeApp(registry).request(`/connections/${conn.id}`);
     const { connection } = await res.json();

@@ -23,11 +23,12 @@ async function earlierGrants(botIds: string[]) {
       createdAt: new Date(1_000 * (i + 1)),
     });
     await ledger.ensureGrant(id);
-    await ledger.updateGrant(id, {
+    await ledger.updateGrant(id, (current) => ({
+      ...current,
       state: "authorized",
       credential: { material: { kind: "inline", record: { token: `t-${i}` } }, expiresAt: "never" },
       profile: { botId },
-    });
+    }));
     ids.push(id);
   }
   return { ...db, ledger, registry, ids };

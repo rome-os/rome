@@ -65,10 +65,11 @@ async function seedGithubGrant(
     createdAt: new Date(),
   });
   await ledger.ensureGrant(id);
-  await ledger.updateGrant(id, {
+  await ledger.updateGrant(id, (current) => ({
+    ...current,
     state: "authorized",
     ...(profile ? { profile } : {}),
-  });
+  }));
 }
 
 /** A private repo on `main` with one committed `tracked.txt`. Copies one

@@ -101,6 +101,29 @@ describe("ConnectionRegistry.confer account guard", () => {
     }
   });
 
+  it("replaces the grant whole, so a fix with no profile leaves none behind", async () => {
+    const { ledger, registry, close } = setupRegistry();
+    try {
+      const first = await registry.connect(SERVICE);
+      await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
+      await ledger.updateGrant(first.id, (current) => ({
+        ...current,
+        state: "degraded",
+        degraded: { at: new Date(0), reason: "token revoked upstream" },
+      }));
+
+      await registry.importCredential(first.id, "bot", credentialFor("t-2"));
+
+      const grant = await ledger.getGrant(first.id);
+      expect(grant).toMatchObject({ state: "authorized" });
+      expect(grant?.profile).toBeUndefined();
+      expect(grant?.account).toBeUndefined();
+      expect(grant?.degraded).toBeUndefined();
+    } finally {
+      close();
+    }
+  });
+
   it("lets a second Connection confer a different bot", async () => {
     const { ledger, registry, close } = setupRegistry();
     try {
@@ -249,7 +272,7 @@ describe("ConnectionRegistry.confer account guard", () => {
       const first = await registry.connect(SERVICE);
       await registry.confer(SERVICE, first.id, "bot", credentialFor("t-1"), { botId: "100" });
       // As for the later of two connections that reached one account.
-      await ledger.updateGrant(first.id, { account: undefined });
+      await ledger.updateGrant(first.id, (current) => ({ ...current, account: undefined }));
 
       const refused = registry.confer(SERVICE, first.id, "bot", credentialFor("t-9"), {
         botId: "900",
