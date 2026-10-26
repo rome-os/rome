@@ -69,14 +69,15 @@ function SubagentChip({
     retain: !node.traceSummary,
   });
   return (
-    <li className="flex min-w-0 items-center">
-      <span
-        data-subagent-separator
-        aria-hidden="true"
-        className="mx-2 shrink-0 text-aux text-border-strong"
-      >
-        |
-      </span>
+    <li
+      data-subagent-separator
+      // The separator is the li's own left edge, drawn by `before`, and the li
+      // is pulled 8px left over the row's 16px gap. Where it follows another item
+      // on the same line the separator sits mid-gap. Where it starts a line,
+      // the whole edge lies outside the row, which clips it, so a wrapped item
+      // never begins with a bar. No measuring needed.
+      className="relative -ml-2 flex min-w-0 max-w-full items-center pl-2 before:absolute before:left-0 before:top-1/2 before:h-3 before:-translate-y-1/2 before:border-l before:border-border-strong"
+    >
       <Button
         type="button"
         // Selection is a variant swap, not a per-site override: ghost's
@@ -90,10 +91,10 @@ function SubagentChip({
         aria-label={t("trace.subagents.openTrace", { agent: label })}
         title={progress.currentStep ?? undefined}
         onClick={() => void onOpenSubagentTrace(node)}
-        // `shrink` defeats the primitive's base `shrink-0`: the row is
-        // overflow-hidden, so without it a crowded list drops whole chips
-        // off the end instead of narrowing every chip.
-        className="group/subagent min-w-0 shrink max-w-48 justify-start text-left"
+        // `shrink` defeats the primitive's base `shrink-0` so a chip wider than
+        // the whole row, the only case that still needs it, truncates rather than
+        // overflowing. Otherwise the row wraps the chip to its own line.
+        className="group/subagent min-w-0 max-w-full shrink justify-start text-left"
       >
         <AgentAvatar
           iconUrl={iconUrl}
@@ -131,7 +132,8 @@ export function DelegatedSubagentGroup({
   return (
     <ul
       aria-label={t("trace.subagents.ariaLabel")}
-      className="flex min-w-0 items-center overflow-hidden"
+      // `contents` hands the chips to the header line, which wraps and clips them.
+      className="contents"
     >
       {subagents.map((node) => (
         <SubagentChip

@@ -132,6 +132,27 @@ describe("DelegatedSubagentGroup", () => {
     expect(container.querySelector("svg[data-subagent-connectors]")).toBeNull();
   });
 
+  it("hands its chips to the header line and never caps or clips them itself", () => {
+    const { container } = render(
+      <DelegatedSubagentGroup
+        subagents={[completedSubagent(), completedSubagent({ toolUseId: "subagent-2" })]}
+        onOpenSubagentTrace={() => {}}
+      />,
+    );
+    // The row wraps and clips (see MessageRow); the group only contributes items.
+    expect(screen.getByRole("list", { name: "Delegated subagents" }).className).toBe("contents");
+    for (const chip of screen.getAllByRole("button")) {
+      expect(chip.className).toContain("max-w-full");
+      expect(chip.className).not.toContain("max-w-48");
+    }
+    // Each item carries its own separator, pulled over the row gap so that an
+    // item that starts a line has it clipped.
+    for (const item of container.querySelectorAll("[data-subagent-separator]")) {
+      expect(item.className).toContain("-ml-2");
+      expect(item.className).toContain("before:border-l");
+    }
+  });
+
   it("opens the selected child trace", async () => {
     const child = completedSubagent();
     const onOpen = rs.fn((_node: TraceSubagentSummary) => {});

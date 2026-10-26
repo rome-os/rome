@@ -9,7 +9,9 @@ interface MessageRowProps {
   name: string;
   /** Compact turn trace, on the name line. */
   subtitle?: ReactNode;
-  /** Secondary turn metadata, after the trace on the name line. */
+  /** Secondary turn metadata, after the trace on the name line. Its elements
+   * become items of the header's wrapping line, so it should render a
+   * `display: contents` root. */
   headerAccessory?: ReactNode;
   /** The turn's bubbles and cards, stacked top to bottom. */
   children?: ReactNode;
@@ -43,15 +45,21 @@ export function MessageRow({
         <div className="size-5 self-start [grid-area:avatar] *:size-full @min-[40rem]/message:size-8">
           {avatar}
         </div>
-        {/* A fixed height keeps the row on whole pixels: the aux line height alone
-            is fractional, and the transcript would carry the fraction into the
-            pinned composer. */}
-        <div className="flex h-5 min-w-0 items-center gap-2 [grid-area:header] @min-[40rem]/message:pl-3">
-          <span className="shrink-0 truncate text-aux text-muted-foreground">{name}</span>
-          {subtitle ? <div className="shrink-0">{subtitle}</div> : null}
-          {headerAccessory ? (
-            <div className="min-w-0 flex-1 overflow-hidden">{headerAccessory}</div>
-          ) : null}
+        {/* The name and trace stay together on a fixed 20px line, which keeps the
+            row on whole pixels (the aux line height alone is fractional, and the
+            transcript would carry the fraction into the pinned composer). The
+            accessory's items join this line and wrap onto the next one when it
+            is full. The inner element clips what a wrapped item pushes out of
+            its left edge (see DelegatedSubagentGroup), so it carries no padding;
+            the outer one holds the gutter inset. */}
+        <div className="min-w-0 [grid-area:header] @min-[40rem]/message:pl-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 overflow-hidden">
+            <div className="flex h-5 min-w-0 max-w-full items-center gap-2">
+              <span className="shrink-0 truncate text-aux text-muted-foreground">{name}</span>
+              {subtitle ? <div className="shrink-0">{subtitle}</div> : null}
+            </div>
+            {headerAccessory ? <div className="contents">{headerAccessory}</div> : null}
+          </div>
         </div>
         {children ? (
           <div className="mt-1 flex min-w-0 flex-col gap-1 [grid-area:body]">{children}</div>
