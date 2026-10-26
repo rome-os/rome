@@ -38,7 +38,6 @@ import { isReasoningEffort } from "@/lib/chat-helpers";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
 import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import { randomUUID } from "@/lib/random-uuid";
-import { discardSendOrigin, recordSendOrigin } from "@/lib/send-flight";
 import type { ChatErrorNotice, PendingUpload } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 import { ErrorEventView } from "../entries/ErrorEventView";
@@ -169,7 +168,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       // Text alone clears at once and comes back on failure. Attachments keep
       // the text on screen until the server accepts the upload.
       const clearsOptimistically = uploads.length === 0;
-      if (textareaRef.current && text) recordSendOrigin(inputId, textareaRef.current);
       if (clearsOptimistically) {
         setInputText("");
         setPendingUploads([]);
@@ -183,7 +181,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           setInputText((current) => (current === rawText ? "" : current));
         }
       } catch {
-        discardSendOrigin(inputId);
         failedSendRef.current = { inputId, text, uploads };
         if (clearsOptimistically) {
           setInputText(text);
