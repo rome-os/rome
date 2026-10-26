@@ -24,6 +24,11 @@ function SubagentTraceSummary({
   }
 
   const duration = formatDuration(node.traceSummary?.totalDurationMs);
+  // Between the run ending and the stored summary joining in, the last live
+  // numbers stand in for it rather than dropping to a bare "completed".
+  if (node.status === "completed" && !node.traceSummary && progress.label) {
+    return <span>{progress.label}</span>;
+  }
   if (node.status !== "completed") {
     const status = t(`trace.subagents.status.${node.status}`);
     return <span>{duration ? `${status}${t("trace.summary.joiner")}${duration}` : status}</span>;
@@ -61,6 +66,7 @@ function SubagentChip({
     turnId: node.turnId,
     running: node.status === "running",
     startedAtMs: subagentStartMs(parentSegments, node.toolUseId),
+    retain: !node.traceSummary,
   });
   return (
     <li className="flex min-w-0 items-center">
