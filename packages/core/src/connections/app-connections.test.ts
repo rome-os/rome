@@ -239,7 +239,7 @@ describe("App connection broker", () => {
       });
       const facade = h.broker.forApp("app-a");
       await expect(facade.list()).rejects.toMatchObject({
-        detail: { code: "capability_unavailable", retryable: true },
+        detail: { code: "capability_unavailable", retryable: false },
       });
       await expect(
         facade.invoke({

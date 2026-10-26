@@ -95,7 +95,6 @@ function brokerUnavailable(): AppConnectionBrokerResult<never> {
   return failure(
     "capability_unavailable",
     "App connection access is unavailable until App startup reconciliation succeeds.",
-    true,
   );
 }
 
