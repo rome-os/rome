@@ -120,13 +120,13 @@ describe("whatsapp descriptor shape", () => {
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
-  it("setup-driven scheme: confer throws, renew is re-confer", async () => {
+  it("setup-driven scheme: grant throws, renew is fix", async () => {
     const { deps } = makeDeps(new FakeWhatsAppAdapter());
     const scheme = createWhatsAppDescriptor(deps).auth;
-    await expect(scheme.confer({ prompt: async () => ({}) })).rejects.toThrow(
-      "conferral driven by the connection setup",
+    await expect(scheme.obtain({ prompt: async () => ({}) })).rejects.toThrow(
+      "grant driven by the connection setup",
     );
-    await expect(scheme.renew(sessionCred())).resolves.toBe("re-confer");
+    await expect(scheme.renew(sessionCred())).resolves.toBe("needs-fix");
   });
 
   it("threads the store sink + guardian-map callback into the adapter", () => {
@@ -277,7 +277,7 @@ describe("whatsapp descriptor over a real registry", () => {
     return registry;
   }
 
-  it("reports needs-auth before the session grant is conferred", async () => {
+  it("reports needs-auth before the session grant is granted", async () => {
     const registry = setup(new FakeWhatsAppAdapter());
     const conn = await registry.connect("whatsapp");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["session"] });
@@ -288,7 +288,7 @@ describe("whatsapp descriptor over a real registry", () => {
     const fake = new FakeWhatsAppAdapter();
     const registry = setup(fake);
     const conn = await registry.connect("whatsapp");
-    await registry.confer(conn.connectionKind, conn.id, "session", sessionCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "session", sessionCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     // WhatsAppAdapter.send addresses by the conversation (the chat JID), and

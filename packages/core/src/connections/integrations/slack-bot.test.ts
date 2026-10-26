@@ -7,7 +7,7 @@ import {
 } from "../../channels/slack.js";
 import { CredentialRejected } from "../errors.js";
 import { SetupSession } from "../setup/session.js";
-import type { SetupConferral, SetupState } from "../setup/types.js";
+import type { SetupGrant, SetupState } from "../setup/types.js";
 import {
   makeSlackBotDescriptor,
   makeSlackBotSetup,
@@ -118,9 +118,9 @@ describe("slack bot manifest", () => {
 });
 
 describe("slack bot setup", () => {
-  it("asks for a name, links the prefilled app, and confers both checked tokens", async () => {
+  it("asks for a name, links the prefilled app, and grants both checked tokens", async () => {
     const api = fakeApi();
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeSlackBotSetup({ api, createSocket: helloAs("A1") }),
       commit,
@@ -145,7 +145,7 @@ describe("slack bot setup", () => {
   });
 
   it("renews from the existing app's tokens without offering a new app", async () => {
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeSlackBotSetup({ api: fakeApi(), createSocket: helloAs("A1") }),
       commit,
@@ -165,7 +165,7 @@ describe("slack bot setup", () => {
   });
 
   it("re-prompts a name Slack would refuse", async () => {
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeSlackBotSetup({ api: fakeApi(), createSocket: helloAs("A1") }),
       commit,
@@ -178,7 +178,7 @@ describe("slack bot setup", () => {
 
   it("re-prompts swapped tokens without calling Slack", async () => {
     const api = fakeApi();
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeSlackBotSetup({ api, createSocket: helloAs("A1") }),
       commit,
@@ -193,7 +193,7 @@ describe("slack bot setup", () => {
   });
 
   it("re-prompts two valid tokens from different apps", async () => {
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeSlackBotSetup({ api: fakeApi(), createSocket: helloAs("A2") }),
       commit,
@@ -214,7 +214,7 @@ describe("slack bot setup", () => {
         return "wss://example.invalid/socket";
       }),
     });
-    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const commit = rs.fn(async (_value: SetupGrant) => {});
     const session = new SetupSession({
       fn: makeSlackBotSetup({ api, createSocket: helloAs("A1") }),
       commit,

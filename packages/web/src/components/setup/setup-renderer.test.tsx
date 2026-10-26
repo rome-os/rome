@@ -121,7 +121,7 @@ describe("SetupRenderer standard renderers", () => {
     expect(onCancel).toHaveBeenCalled();
   });
 
-  it("presenting renders a QR payload as an image (WeChat/WhatsApp QR conferral)", () => {
+  it("presenting renders a QR payload as an image (WeChat/WhatsApp QR grant)", () => {
     renderState({
       status: "presenting",
       view: {
@@ -136,7 +136,7 @@ describe("SetupRenderer standard renderers", () => {
   });
 
   it("done renders the summary view", () => {
-    renderState({ status: "done", conferral: { summary: { title: "Discord connected" } } });
+    renderState({ status: "done", grant: { summary: { title: "Discord connected" } } });
     expect(screen.getByText("Discord connected")).toBeTruthy();
   });
 

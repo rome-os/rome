@@ -64,11 +64,11 @@ describe("InboxPage message sources", () => {
     mockBackend([
       // Talk unlocked → Connected.
       connectionRow("telegram", { bot: "authorized" }, true),
-      // Conferred (even degraded) but transport not up → Configured.
+      // Granted (even degraded) but transport not up → Configured.
       connectionRow("whatsapp", { session: "degraded" }, false),
       connectionRow("wechat", { account: "authorized" }, true),
       connectionRow("discord", { bot: "authorized" }, true),
-      // Nothing conferred → Disconnected.
+      // Nothing granted → Disconnected.
       connectionRow("telegram_user", { session: "unauthorized" }, false),
     ]);
     renderPage();

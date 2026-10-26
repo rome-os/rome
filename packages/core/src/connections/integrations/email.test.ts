@@ -8,7 +8,7 @@
 //      { grant: "inbox" }; adapter.start() rejecting (Rome Cloud outage) →
 //      Disconnected.
 //   4. end-to-end over the real ConnectionRegistry: a bad-signature deposit
-//      degrades the inbox grant (renew-once via setup-driven "re-confer").
+//      degrades the inbox grant (renew-once via setup-driven "needs-fix").
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { createHmac } from "node:crypto";
@@ -170,18 +170,18 @@ describe("email descriptor shape", () => {
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
-  it("confer() is setup-driven — throws, never prompts headlessly", async () => {
+  it("obtain() is setup-driven — throws, never prompts headlessly", async () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
     await expect(
-      desc.auth.confer({
+      desc.auth.obtain({
         prompt: () => Promise.reject(new Error("should not be called")),
       }),
-    ).rejects.toThrow("conferral driven by the connect setup");
+    ).rejects.toThrow("grant driven by the connect setup");
   });
 
-  it("renew() always answers re-confer", async () => {
+  it("renew() always answers fix", async () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
-    await expect(desc.auth.renew(validCred())).resolves.toBe("re-confer");
+    await expect(desc.auth.renew(validCred())).resolves.toBe("needs-fix");
   });
 });
 
@@ -258,7 +258,7 @@ describe("email Talker fault mapping", () => {
     await flush();
 
     // start() builds the transport from the grant material it was handed; it must
-    // never reach for MailProvider.provision() (conferral is
+    // never reach for MailProvider.provision() (grant is
     // setup-driven), and a valid grant produces no fault.
     expect(provider.provision).not.toHaveBeenCalled();
     expect(h.faults).toHaveLength(0);
@@ -501,7 +501,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(provider)));
     const conn = await registry.connect("email");
-    await registry.confer(conn.connectionKind, conn.id, "inbox", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "inbox", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     const received: ChannelMessage[] = [];
@@ -520,12 +520,12 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     expect(received).toHaveLength(1);
   });
 
-  it("degrades the inbox grant after a bad-signature deposit (setup-driven renew ⇒ re-confer)", async () => {
+  it("degrades the inbox grant after a bad-signature deposit (setup-driven renew ⇒ fix)", async () => {
     const provider = makeProvider();
     const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(provider)));
     const conn = await registry.connect("email");
-    await registry.confer(conn.connectionKind, conn.id, "inbox", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "inbox", validCred());
     const raw = JSON.stringify(buildEvent());
     const result = await registry.ingest(conn.id, {
       rawBody: raw,

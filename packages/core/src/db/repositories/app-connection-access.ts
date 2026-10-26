@@ -29,7 +29,7 @@ export interface AppConnectionAccessRecord {
   approval: AppConnectionApproval;
   constraints: AppConnectionResourceConstraint[];
   expiresAt: Date | null;
-  grantConferralEpoch: string;
+  grantEpoch: string;
   revision: number;
   revokedAt: Date | null;
   createdAt: Date;
@@ -164,11 +164,8 @@ export class AppConnectionAccessRepository {
         and(
           eq(appConnectionAccess.appId, appId),
           or(
-            eq(connectionGrants.conferralEpoch, appConnectionAccess.grantConferralEpoch),
-            and(
-              eq(connectionGrants.state, "unauthorized"),
-              isNull(connectionGrants.conferralEpoch),
-            ),
+            eq(connectionGrants.grantEpoch, appConnectionAccess.grantEpoch),
+            and(eq(connectionGrants.state, "unauthorized"), isNull(connectionGrants.grantEpoch)),
           ),
           gt(appConnectionAccess.connectionId, after),
           isNull(appConnectionAccess.revokedAt),
@@ -217,7 +214,7 @@ export class AppConnectionAccessRepository {
     sideEffects: AppConnectionSideEffects;
     approval: AppConnectionApproval;
     constraints: AppConnectionResourceConstraint[];
-    grantConferralEpoch: string;
+    grantEpoch: string;
     expiresAt?: Date | null;
   }): Promise<AppConnectionAccessRecord> {
     return await this.appLifecycle.runExclusive(input.appId, () => this.putUnlocked(input));
@@ -257,7 +254,7 @@ export class AppConnectionAccessRepository {
             sideEffects: input.sideEffects,
             approval: input.approval,
             constraints: input.constraints,
-            grantConferralEpoch: input.grantConferralEpoch,
+            grantEpoch: input.grantEpoch,
             expiresAt: input.expiresAt ?? null,
             revision: sql`${appConnectionAccess.revision} + 1`,
             revokedAt: null,
@@ -453,7 +450,7 @@ export class AppConnectionAccessRepository {
         .limit(1)
         .get();
       const grant = tx
-        .select({ state: connectionGrants.state, conferralEpoch: connectionGrants.conferralEpoch })
+        .select({ state: connectionGrants.state, grantEpoch: connectionGrants.grantEpoch })
         .from(connectionGrants)
         .where(eq(connectionGrants.custody, invocation.connectionId))
         .limit(1)
@@ -657,7 +654,7 @@ export class AppConnectionAccessRepository {
 
 function policyCurrentForInvocation(
   policy: typeof appConnectionAccess.$inferSelect | undefined,
-  grant: Pick<typeof connectionGrants.$inferSelect, "state" | "conferralEpoch"> | undefined,
+  grant: Pick<typeof connectionGrants.$inferSelect, "state" | "grantEpoch"> | undefined,
   invocation: AppConnectionInvocationRecord,
   approval: AppConnectionApproval,
   now: Date,
@@ -671,7 +668,7 @@ function policyCurrentForInvocation(
       policy.revision === invocation.accessRevision &&
       policy.sideEffects === invocation.sideEffects &&
       policy.approval === approval &&
-      grant.conferralEpoch !== null &&
-      policy.grantConferralEpoch === grant.conferralEpoch,
+      grant.grantEpoch !== null &&
+      policy.grantEpoch === grant.grantEpoch,
   );
 }

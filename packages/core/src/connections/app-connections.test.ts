@@ -81,7 +81,7 @@ function harness(
     connectionKind: "fake-docs",
     grant: "account",
     auth: {
-      async confer() {
+      async obtain() {
         throw new Error("not used");
       },
       async renew(credential) {
@@ -181,7 +181,7 @@ async function connect(h: ReturnType<typeof harness>, label: string, another = f
   const connection = another
     ? await h.registry.connectAnother("fake-docs", label)
     : await h.registry.connect("fake-docs", label);
-  await h.registry.confer(
+  await h.registry.giveGrant(
     "fake-docs",
     connection.id,
     "account",
@@ -204,7 +204,7 @@ async function grant(
   },
 ) {
   const currentGrant = await h.registry.grantOf(input.connectionId);
-  if (!currentGrant?.conferralEpoch) throw new Error("expected conferred grant");
+  if (!currentGrant?.grantEpoch) throw new Error("expected granted connection");
   const sideEffects =
     input.sideEffects ??
     h.registry
@@ -222,7 +222,7 @@ async function grant(
     approval: input.approval ?? "not_required",
     constraints: input.constraints ?? [],
     expiresAt: input.expiresAt,
-    grantConferralEpoch: currentGrant.conferralEpoch,
+    grantEpoch: currentGrant.grantEpoch,
   });
 }
 
@@ -325,7 +325,7 @@ describe("App connection broker", () => {
       const getGrant = h.registry.grantOf.bind(h.registry);
       rs.spyOn(h.registry, "grantOf").mockImplementationOnce(async (connectionId) => {
         const authorized = await getGrant(connectionId);
-        await h.registry.confer(
+        await h.registry.giveGrant(
           "fake-docs",
           connection.id,
           "account",
@@ -800,7 +800,7 @@ describe("App connection broker", () => {
           input: { workspaceId: "one", documentId: "doc" },
         }),
       ).rejects.toMatchObject({ detail: { code: "authorization_required" } });
-      await h.registry.confer(
+      await h.registry.giveGrant(
         "fake-docs",
         connection.id,
         "account",

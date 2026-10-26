@@ -130,7 +130,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
 
       // The grant ledger is the sole OAuth store: import the provider's bundle
       // into the grant so it holds both the connection state and the non-secret
-      // conferral outcome (login, display name, email, avatar, scopes, Slack's
+      // grant outcome (login, display name, email, avatar, scopes, Slack's
       // `teamId`) alongside the credential in one write. The grant transition
       // drives the registry's custody hook, which materializes the tmpfs token
       // file and gh/git shell auth fire-and-forget; the route never touches
@@ -146,10 +146,10 @@ export function oauthRoutes(deps: ApiDeps): Hono {
       // spent handoff replayable — the realistic failure (a bundle with no
       // usable token) needs a fresh authorization anyway.
       if (!deps.connectionRegistry) {
-        throw new Error("Connection registry is unavailable; cannot record the conferral.");
+        throw new Error("Connection registry is unavailable; cannot record the grant.");
       }
       // Default to an empty profile when the provider returned no identity, so the
-      // grant still records a conferral outcome — scopes and Slack's teamId come
+      // grant still records a grant outcome — scopes and Slack's teamId come
       // from the token bundle even when the identity fields are sparse.
       const imported = await importProviderBundle(
         deps.connectionRegistry,
@@ -163,7 +163,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
 
       // An already-signed-in guardian redeeming here is connecting a provider
       // (a sign-in redeem has no session yet), so land them on that connection's
-      // own page — the surface that shows the grant it just conferred.
+      // own page — the surface that shows the grant it just granted.
       const existingSession = verifySession(getCookie(c, COOKIE_NAME) ?? "");
       const nextPath = existingSession
         ? `/settings/connections/${encodeURIComponent(redeemed.provider)}`

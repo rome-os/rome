@@ -22,10 +22,10 @@ function setup(onEvent?: (event: ConnectionEvent) => void) {
 }
 
 describe("connection events", () => {
-  it("raises connected once at the conferral that mints the connection", async () => {
+  it("raises connected once at the grant that mints the connection", async () => {
     const { registry, fixture, heard, close } = setup();
     try {
-      await registry.confer("fake-telegram", undefined, "bot", fixture.validCredential());
+      await registry.giveGrant("fake-telegram", undefined, "bot", fixture.validCredential());
 
       expect(heard).toEqual(["connected fake-telegram"]);
     } finally {
@@ -33,12 +33,12 @@ describe("connection events", () => {
     }
   });
 
-  it("raises fixed when a conferral replaces the grant of a connection that exists", async () => {
+  it("raises fixed when a grant replaces the grant of a connection that exists", async () => {
     const { registry, fixture, heard, close } = setup();
     try {
       const connection = await registry.connect("fake-telegram");
-      await registry.confer("fake-telegram", connection.id, "bot", fixture.validCredential());
-      await registry.confer("fake-telegram", connection.id, "bot", fixture.validCredential());
+      await registry.giveGrant("fake-telegram", connection.id, "bot", fixture.validCredential());
+      await registry.giveGrant("fake-telegram", connection.id, "bot", fixture.validCredential());
 
       expect(heard).toEqual([
         "connected fake-telegram",
@@ -53,7 +53,7 @@ describe("connection events", () => {
   it("raises disconnected alone when the connection is disconnected", async () => {
     const { registry, fixture, heard, close } = setup();
     try {
-      const connection = await registry.confer(
+      const connection = await registry.giveGrant(
         "fake-telegram",
         undefined,
         "bot",
@@ -77,7 +77,7 @@ describe("connection events", () => {
       const connection = await registry.connect("fake-telegram");
 
       await expect(
-        registry.confer("fake-telegram", connection.id, "bot", fixture.validCredential()),
+        registry.giveGrant("fake-telegram", connection.id, "bot", fixture.validCredential()),
       ).rejects.toThrow("injected subscriber failure");
 
       await expect(repository.grantOf(connection.id)).resolves.toMatchObject({
@@ -94,7 +94,7 @@ describe("connection events", () => {
       if (event.kind === "disconnected") throw new Error("injected subscriber failure");
     });
     try {
-      const connection = await registry.confer(
+      const connection = await registry.giveGrant(
         "fake-telegram",
         undefined,
         "bot",

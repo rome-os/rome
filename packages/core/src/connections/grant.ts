@@ -6,8 +6,8 @@
 //     its descriptor give a live capability at boot.
 //  3. A grant records outcomes only: no step or flow state, no scheme-specific
 //     fields.
-//  4. A grant has no identity of its own. Conferral replaces it whole and
-//     mints a new conferral epoch; renewal and kit.persist retain that epoch.
+//  4. A grant has no guardian-facing identity of its own. Giving a grant mints
+//     a new epoch; renewal and kit.persist retain that epoch.
 
 import type { GrantState, ProfileRecord, SecretRecord } from "./types.js";
 
@@ -32,19 +32,19 @@ export interface GrantRecord {
   custody: string; // connectionId
   state: GrantState;
   credential?: PersistedCredential; // present ⇔ state !== "unauthorized"
-  /** The non-secret half of the conferral outcome, written in the
+  /** The non-secret half of the grant outcome, written in the
    *  SAME update as `credential` — never through a separate setter. Absent until
-   *  a conferral supplies one; degrade preserves it (no wipe), revoke clears it. */
+   *  a grant supplies one; degrade preserves it (no wipe), revoke clears it. */
   profile?: ProfileRecord;
   /** The account the profile names, written in the same update as the profile
    *  and cleared with it. Absent when the profile names none. At most one grant
    *  in any state but "unauthorized" reaches an account. */
   account?: GrantAccount;
-  /** When the last conferral filled this grant. Retained through `revoke()`. */
-  conferredAt?: Date;
-  /** Opaque identity of the conferral that produced this grant. App access
-   *  policies bind to it so reconferral cannot inherit an older policy. */
-  conferralEpoch?: string;
+  /** When the last grant filled this grant. Retained through `revoke()`. */
+  grantedAt?: Date;
+  /** Opaque identity of the authority that filled this grant. App access
+   *  policies bind to it so giving the grant again cannot inherit an older policy. */
+  grantEpoch?: string;
   lastRenewedAt?: Date;
   degraded?: { at: Date; reason: string };
 }

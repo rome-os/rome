@@ -1,10 +1,10 @@
-// The Email conferral setup, driven through the real
+// The Email setup, driven through the real
 // SetupSession runtime and, end-to-end, through the generic setup routes over a
 // real ConnectionRegistry (no network: fake MailProvider).
 //
 // Seams under test:
 //   1. makeEmailSetup's coroutine — show progress → `ctx.step("provision")` →
-//      pure-config settings write → terminal conferral — observed via the
+//      pure-config settings write → terminal grant — observed via the
 //      session's poll-able state and the single commit call.
 //   2. The cutover surface — enable via POST
 //      /connections/email/grants/inbox/setup + poll, tear down via the
@@ -27,7 +27,7 @@ import { ConnectionRegistry } from "../registry.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { SetupManager } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
-import type { SetupConferral } from "../setup/types.js";
+import type { SetupGrant } from "../setup/types.js";
 import { autoConnectEmail, makeEmailDescriptor, makeEmailSetup } from "./email.js";
 
 const EMAIL_ADDRESS = "slug@mail.romeos.cc";
@@ -60,12 +60,12 @@ function makeSettingsStore(initial?: Record<string, unknown>) {
 }
 
 describe("makeEmailSetup (coroutine)", () => {
-  it("shows provisioning progress, then confers the provisioned coordinates + email profile", async () => {
+  it("shows provisioning progress, then grants the provisioned coordinates + email profile", async () => {
     const provision = deferred<{ address: string; inboundSecret: string }>();
     const { values, repo } = makeSettingsStore();
     const fn = makeEmailSetup({ provision: () => provision.promise, settings: repo });
     let rowAtCommit: unknown;
-    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {
+    const commit = rs.fn(async (_c: SetupGrant, _s: AbortSignal) => {
       rowAtCommit = values.get("email");
     });
     const session = new SetupSession({ fn, commit });
@@ -92,7 +92,7 @@ describe("makeEmailSetup (coroutine)", () => {
       },
     });
 
-    // The settings row is pure config, and it landed BEFORE the conferral (the
+    // The settings row is pure config, and it landed BEFORE the grant (the
     // row the fresh adapter epoch reads at start()).
     expect(rowAtCommit).toEqual({ enabled: true });
     expect(values.get("email")).toEqual({ enabled: true });
@@ -223,8 +223,8 @@ function makeSetupApp() {
     inboundSecret: EMAIL_SECRET,
   }));
   // Fault injection at the persistence seam: while armed, the ledger's
-  // writeGrant (the credential write inside `confer`'s terminal transaction)
-  // throws, so the whole conferral transaction rolls back AFTER provisioning
+  // writeGrant (the credential write inside `grant`'s terminal transaction)
+  // throws, so the whole grant transaction rolls back AFTER provisioning
   // succeeded — the placeholder mint reverts with it.
   let grantWriteFailures = 0;
   const realLedger = new DrizzleConnectionsRepository(testDb);
@@ -295,7 +295,7 @@ async function runSetup(app: Hono, idOrKind = "email") {
 }
 
 describe("Email cutover — generic setup routes + registry-native teardown", () => {
-  it("enables end-to-end: provisions, confers the inbox grant, unlocks Talk, delivers signed mail — no credential in settings", async () => {
+  it("enables end-to-end: provisions, grants the inbox grant, unlocks Talk, delivers signed mail — no credential in settings", async () => {
     const { app, registry, settingsRepo, provisionMock } = makeSetupApp();
 
     const { state } = await runSetup(app);
@@ -369,7 +369,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     expect(again.isUnlocked("talk")).toBe(true);
   });
 
-  it("a failed conferral fails the setup (grant stays unauthorized); a retry converges", async () => {
+  it("a failed grant fails the setup (grant stays unauthorized); a retry converges", async () => {
     const { app, registry, failNextGrantWrite } = makeSetupApp();
 
     failNextGrantWrite();
@@ -391,7 +391,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
 describe("autoConnectEmail", () => {
   const inbox = { address: EMAIL_ADDRESS, inboundSecret: EMAIL_SECRET };
 
-  it("provisions and confers the inbox grant when no email connection exists", async () => {
+  it("provisions and grants the inbox grant when no email connection exists", async () => {
     const { registry, settingsRepo } = makeSetupApp();
     const provision = rs.fn(async () => inbox);
 

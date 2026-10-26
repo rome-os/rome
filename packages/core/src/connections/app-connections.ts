@@ -1043,8 +1043,8 @@ function isActive(policy: AppConnectionAccessRecord, now = new Date()): boolean 
 function policyMatchesGrant(policy: AppConnectionAccessRecord, grant: GrantValue | null): boolean {
   return Boolean(
     grant &&
-      ((grant.conferralEpoch && policy.grantConferralEpoch === grant.conferralEpoch) ||
-        (grant.state === "unauthorized" && !grant.conferralEpoch)),
+      ((grant.grantEpoch && policy.grantEpoch === grant.grantEpoch) ||
+        (grant.state === "unauthorized" && !grant.grantEpoch)),
   );
 }
 

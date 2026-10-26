@@ -15,7 +15,7 @@ import { useSetup } from "@/components/setup/use-setup";
 import type { ConnectionSlot } from "@/lib/connection-cards";
 import { revokeConnectionGrant } from "@/lib/connections-api";
 
-// Every Talk channel connects through the conferral setup: the card
+// Every Talk channel connects through the setup: the card
 // is a thin frame around `useSetup` (drives `/api/connections/:id/grants/:name/
 // setup` + `/api/setups/:cid/input`) and the standard `SetupRenderer`. What used
 // to be seven near-identical per-service cards (telegram bot / telegram user /
@@ -57,7 +57,7 @@ export interface ChannelConnectConfig {
   /** Setup service id — addresses the setup (`useSetup`/`SetupRenderer`) and,
    *  by default, the brand badge and copy namespace. */
   service: string;
-  /** Grant to address before a connection row exists; the terminal conferral
+  /** Grant to address before a connection row exists; the terminal grant
    *  mints the row, so this is the fallback when `slot.grant` is null. */
   defaultGrant: string;
   /** ConnectionSlotCard copy namespace (`connections.cards.<copyService>`) when
@@ -174,7 +174,7 @@ export interface ChannelConnectCardProps {
  * Disconnect (and, per config, a "linked as guardian" note); when not, it runs
  * the setup through the standard renderers (plus any per-service custom
  * renderer). A channel that reads connected was guardian-linked during the
- * terminal conferral, so there is no separate verify-status polling.
+ * terminal grant, so there is no separate verify-status polling.
  */
 export function ChannelConnectCard({
   config,
@@ -199,7 +199,7 @@ export function ChannelConnectCard({
 
   // The setup addresses the connection by id, or by the bare service name when
   // the guardian has never connected or is adding another account (the
-  // terminal conferral mints the row).
+  // terminal grant mints the row).
   const setup = useSetup({
     idOrKind: (another ? null : slot.connectionId) ?? config.service,
     grant: slot.grant ?? config.defaultGrant,

@@ -11,7 +11,7 @@
 //      authorized grant on load().
 //   4. romeCloudOAuth at-load renew: an EXPIRED credential (google's and
 //      shopify's tokens do expire) renews via the scheme. With no refresh wired
-//      it answers "re-confer" and the grant degrades until the guardian
+//      it answers "needs-fix" and the grant degrades until the guardian
 //      reconnects; with a refresh wired (shopify) the grant renews.
 //   5. Shopify's setup asks which store to connect before the redirect, and an
 //      expiring grant renews ahead of expiry.
@@ -188,8 +188,8 @@ describe.each(
     });
   });
 
-  it("attaches the conferral setup to the grant only when setup deps are given", () => {
-    // State-only descriptor (no setup deps): no conferral setup.
+  it("attaches the setup to the grant only when setup deps are given", () => {
+    // State-only descriptor (no setup deps): no setup.
     expect(makeOAuthProviderDescriptor(provider).auth.setup).toBeUndefined();
     // Wired descriptor (#1611): the grant carries a setup coroutine.
     const wired = makeOAuthProviderDescriptor(provider, {
@@ -204,7 +204,7 @@ describe.each(
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
 
-    await registry.confer(conn.connectionKind, conn.id, grant, credential(material));
+    await registry.giveGrant(conn.connectionKind, conn.id, grant, credential(material));
     expect(conn.auth.grants()[grant]).toBe("authorized");
 
     await conn.auth.revoke(grant);
@@ -217,7 +217,7 @@ describe.each(
     const registry = new ConnectionRegistry({ repository: ledger });
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
-    await registry.confer(conn.connectionKind, conn.id, grant, credential(material));
+    await registry.giveGrant(conn.connectionKind, conn.id, grant, credential(material));
 
     // Second registry over the SAME ledger: boot rehydration restores the grant.
     const registry2 = new ConnectionRegistry({ repository: ledger });
@@ -229,7 +229,7 @@ describe.each(
     expect(rehydrated.auth.grants()[grant]).toBe("authorized");
   });
 
-  it("degrades an EXPIRED credential at load: romeCloudOAuth renew answers re-confer", async () => {
+  it("degrades an EXPIRED credential at load: romeCloudOAuth renew answers fix", async () => {
     const ledger = makeLedger();
 
     const registry = new ConnectionRegistry({ repository: ledger });
@@ -237,14 +237,14 @@ describe.each(
     const conn = await registry.connect(provider);
     // A bundle that carried an explicit expiry, now past (google's tokens
     // always do; github/slack only if the provider ever sends one).
-    await registry.confer(conn.connectionKind, conn.id, grant, {
+    await registry.giveGrant(conn.connectionKind, conn.id, grant, {
       material,
       expiresAt: new Date(Date.now() - 60_000),
     });
     expect(conn.auth.grants()[grant]).toBe("authorized");
 
     // Boot: load() sees the expired credential, renews once via the scheme —
-    // romeCloudOAuth has no refresh exchange, so renew() answers "re-confer"
+    // romeCloudOAuth has no refresh exchange, so renew() answers "needs-fix"
     // and the grant degrades until the guardian re-runs the OAuth flow.
     const registry2 = new ConnectionRegistry({ repository: ledger });
     registry2.register(makeOAuthProviderDescriptor(provider));
@@ -265,7 +265,7 @@ describe("OAUTH_PROVIDER_GRANTS", () => {
   });
 });
 
-describe("OAuth conferral setup", () => {
+describe("OAuth setup", () => {
   const ctx: SetupContext = {
     step: (_label, fn) => fn(new AbortController().signal),
     signal: new AbortController().signal,
@@ -344,7 +344,7 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     const registry = new ConnectionRegistry({ repository: ledger });
     registry.register(makeOAuthProviderDescriptor("shopify", setupDeps(refresh)));
     const conn = await registry.connect("shopify");
-    await registry.confer(conn.connectionKind, conn.id, "store", {
+    await registry.giveGrant(conn.connectionKind, conn.id, "store", {
       material: { accessToken: "shpat_old", refreshToken: "shprt_old" },
       expiresAt: new Date(Date.now() + expiresInMs),
     });
@@ -463,7 +463,7 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     const renewal = registry.renewExpiring(10 * 60_000);
     await rs.waitFor(() => expect(refresh).toHaveBeenCalled());
     // ...and the guardian reconnects in the meantime.
-    const reconnect = registry.confer(
+    const reconnect = registry.giveGrant(
       "shopify",
       conn.id,
       "store",

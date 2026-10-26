@@ -122,7 +122,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
 
     expect(res.status).toBe(200);
     // Ledger import happened — a github connection holds an authorized grant that
-    // carries the non-secret conferral outcome (identity + scopes).
+    // carries the non-secret grant outcome (identity + scopes).
     const conn = registry.find("github")[0];
     expect(conn).toBeDefined();
     expect(conn.auth.grants().user).toBe("authorized");
@@ -197,9 +197,9 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
       metadata: null,
     });
     const registry = makeRegistry();
-    // Force the conferral to fail: the grant must NOT reach authorized, and
+    // Force the grant to fail: the grant must NOT reach authorized, and
     // custody must never fire.
-    rs.spyOn(registry, "confer").mockRejectedValueOnce(new Error("ledger down"));
+    rs.spyOn(registry, "giveGrant").mockRejectedValueOnce(new Error("ledger down"));
 
     const res = await postRedeem(makeDeps(registry));
 

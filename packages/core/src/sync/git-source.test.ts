@@ -363,7 +363,7 @@ describe("GitSyncSource.availability", () => {
 });
 
 describe("githubCommitterIdentity", () => {
-  it("attributes commits to the conferred grant identity", async () => {
+  it("attributes commits to the granted grant identity", async () => {
     const { db, close } = createTestDb();
     try {
       await seedGithubGrant(db, {
@@ -452,8 +452,8 @@ describe("githubCommitterIdentity", () => {
         state text NOT NULL,
         credential text,
         profile text,
-        conferred_at integer,
-        conferral_epoch text,
+        granted_at integer,
+        grant_epoch text,
         last_renewed_at integer,
         degraded_at integer,
         degraded_reason text,

@@ -234,7 +234,7 @@ describe("ConnectionDetailPage — OAuth service (github)", () => {
     expect(screen.getByText("React when something happens in your repositories")).toBeTruthy();
   });
 
-  it("renders Reconnect + Disconnect when the grant is conferred", async () => {
+  it("renders Reconnect + Disconnect when the grant is granted", async () => {
     mockApi([...minimalConnections(), oauth("github", "authorized")]);
     renderDetail("github");
 
@@ -324,7 +324,7 @@ describe("ConnectionDetailPage — several accounts", () => {
   /** The setup start for a new account, answered as connected at once. */
   const connectedSetup = (connectionId: string) => ({
     cid: "cid-new",
-    state: { status: "done", conferral: { connectionId } },
+    state: { status: "done", grant: { connectionId } },
     reattached: false,
   });
 

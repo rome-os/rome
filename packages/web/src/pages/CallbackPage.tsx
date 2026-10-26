@@ -31,7 +31,7 @@ function connectionPath(connectionKind: string | undefined): string {
  *  send it and the page has to be the ending.
  *
  *  Deliberately NOT `connected`. A resumed setup is typically still `presenting`
- *  while it redeems, and the redeem or the conferral commit can still fail —
+ *  while it redeems, and the redeem or the grant commit can still fail —
  *  delivery is the most this browser can honestly report. It cannot wait for
  *  `done` either: `/api/setups/:cid` stays private, so an anonymous browser has
  *  no way to poll for the real outcome. */
@@ -95,7 +95,7 @@ const returnHandlers = new Map<string, Promise<ReturnOutcome>>();
  *  - CONNECT a provider — a connection setup (the layer that unifies channels +
  *    connectors). A live setup is suspended at the redirect awaiting this
  *    `state`; delivering the leg to it resumes the coroutine, which redeems via
- *    the OAuth primitive and confers. This is the #1611 path.
+ *    the OAuth primitive and grants. This is the #1611 path.
  *  - SIGN IN with the provider — authentication (guardian → Rome Cloud account),
  *    NOT a connection. No setup is waiting, so this falls through to
  *    `/oauth/redeem`, which redeems the SAME OAuth primitive and also

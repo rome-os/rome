@@ -106,7 +106,7 @@ The caller is the request identity an app observes: the [guardian](people.md#gua
 An app uses an existing [Connection](../domains/connections.md#connection) through
 `ctx.connections`. Core brokers the call. The app never receives the provider
 credential, client, or unrestricted transport. Provider grants say what the guardian
-has conferred on Rome. App access says which installed app may use one conferred
+has let Rome access. App access says which installed app may use one granted
 identity for one operation.
 
 **Contracts:**
@@ -115,10 +115,10 @@ identity for one operation.
   operation, side-effect classification, approval mode, optional input constraints, and
   optional expiry. A descriptor change from read to write requires a new policy. Disabling
   or removing the app revokes its policies. The policy is bound to the provider
-  grant's current conferral. Reconnecting the Connection creates a new conferral and
-  requires new App access. Fixing or otherwise conferring its grant again does the same.
-  Automatic renewal keeps the current conferral. Guardian policy listings label a
-  replaced conferral instead of presenting its policy as current.
+  grant's current epoch. Reconnecting the Connection creates a new epoch and requires
+  new App access. Fixing or otherwise giving its grant again does the same. Automatic
+  renewal keeps the current epoch. Guardian policy listings label a replaced grant
+  instead of presenting its policy as current.
 - A provider operation is invisible until its Connection descriptor explicitly opts it
   into app access. A policy cannot expose an arbitrary HTTP request, provider client,
   credential read, or global Connection mutation.

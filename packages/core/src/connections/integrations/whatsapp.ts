@@ -15,11 +15,11 @@
 //      and every mutation write-throughs via `kit.persist("session", …)` — see
 //      createWhatsAppAuthState. On stop() we `flush()` the debounce so the final
 //      rotation is never lost.
-//   2. Conferral is a pairing handshake. The setup coroutine below
+//   2. Grant is a pairing handshake. The setup coroutine below
 //      drives it over a TRANSIENT socket whose mutating auth state lives in
 //      setup memory only; the coroutine's return is the one durable write, so
 //      an abandoned or cancelled pairing leaves zero durable state. renew() is
-//      "re-confer": a dead session can only be re-linked.
+//      "needs-fix": a dead session can only be re-linked.
 //
 // Fault mapping: the adapter owns transient reconnection; only
 // terminal outcomes reach `fault`. DisconnectReason.loggedOut (device unlinked)
@@ -70,23 +70,23 @@ export interface WhatsAppDescriptorDeps {
 export type WhatsAppSessionMaterial = WhatsAppAuthMaterial;
 
 /**
- * The `session` auth scheme: conferral is driven by the setup attached
- * in `createWhatsAppDescriptor`, so confer() must never run headlessly. A
- * linked session cannot renew without re-pairing, so renew() is "re-confer".
+ * The `session` auth scheme: grant is driven by the setup attached
+ * in `createWhatsAppDescriptor`, so `obtain()` must never run headlessly. A
+ * linked session cannot renew without re-pairing, so renew() is "needs-fix".
  */
 export function whatsappSessionScheme(): AuthScheme {
   return {
-    async confer(_interact: GuardianInteraction): Promise<Credential> {
-      throw new Error("conferral driven by the connection setup");
+    async obtain(_interact: GuardianInteraction): Promise<Credential> {
+      throw new Error("grant driven by the connection setup");
     },
-    async renew(): Promise<Credential | "re-confer"> {
-      return "re-confer";
+    async renew(): Promise<Credential | "needs-fix"> {
+      return "needs-fix";
     },
   };
 }
 
 // ── Grant profile ─────────────────────────────────────────────────────────
-// The non-secret conferral outcome recorded beside the session credential: the
+// The non-secret grant outcome recorded beside the session credential: the
 // linked account's phone number + canonical self JID.
 
 const whatsappGrantProfileSchema = z
@@ -119,13 +119,13 @@ export function reviveWhatsAppProfile(record: ProfileRecord): ProfileDisplay {
   return toWhatsAppDisplay(whatsappGrantProfileSchema.parse(record));
 }
 
-// ── conferral setup ───────────────────────────────────────────────
+// ── setup ───────────────────────────────────────────────
 
 /**
  * One transient pairing attempt: a throwaway socket over an IN-MEMORY auth
  * state (no disk, no ledger — abandoning the setup writes nothing). The setup
  * coroutine drives it; `serialize()` yields the accumulated session material
- * for the terminal conferral.
+ * for the terminal grant.
  */
 export interface WhatsAppPairingHandle {
   /** Start the transient socket. */
@@ -145,7 +145,7 @@ export interface WhatsAppPairingHandle {
  *  whose persist hook is a no-op — during setup the mutating session state
  *  lives in setup memory only. The sync sink still mirrors contacts/history so
  *  the address book populates during pairing (parity with the pre-cutover
- *  transient socket); the real Talker re-attaches the same sink post-confer. */
+ *  transient socket); the real Talker re-attaches the same sink post-grant. */
 function openWhatsAppPairingSocket(
   createAdapter: (authProvider: WhatsAppAuthProvider) => WhatsAppAdapter,
   syncSink: WhatsAppSyncSink,
@@ -209,14 +209,14 @@ async function defaultQrDataUrl(content: string): Promise<string> {
 }
 
 /**
- * Build the WhatsApp conferral setup. A linear coroutine:
+ * Build the WhatsApp setup. A linear coroutine:
  *   1. spin up the transient pairing socket,
  *   2. show each linking QR WhatsApp issues (it rotates them) as a scannable
  *      `data:` image,
  *   3. `ctx.step("paired")` — wait for the Baileys handshake to reach `open`,
- *   4. stop the transient socket, then return the terminal conferral: the
+ *   4. stop the transient socket, then return the terminal grant: the
  *      in-memory session material + whatsapp profile + guardian mapping.
- * The runtime performs the single durable write from the returned conferral;
+ * The runtime performs the single durable write from the returned grant;
  * cancel/abandon tears the socket down and writes nothing.
  */
 export function makeWhatsAppSetup(deps: {
@@ -226,7 +226,7 @@ export function makeWhatsAppSetup(deps: {
   const makeQrDataUrl = deps.makeQrDataUrl ?? defaultQrDataUrl;
   return async (interact, ctx) => {
     const pairing = deps.openPairing();
-    let conferred = false;
+    let granted = false;
     // Set once the wait ends, so a QR still rendering cannot repaint over the
     // final state; `latest` drops a slow render overtaken by a newer QR.
     let settled = false;
@@ -248,12 +248,12 @@ export function makeWhatsAppSetup(deps: {
       });
       settled = true;
 
-      // Stop the transient socket BEFORE the conferral commit — WhatsApp rejects
+      // Stop the transient socket BEFORE the grant commit — WhatsApp rejects
       // a second concurrent socket on the same session, and the registry builds
       // the real Talker from the ledger the moment the credential lands.
       await pairing.stop();
       const material = pairing.serialize();
-      conferred = true;
+      granted = true;
       const profile = whatsappProfileFromJid(selfJid) ?? undefined;
       return {
         credential: { material, expiresAt: "never" },
@@ -270,7 +270,7 @@ export function makeWhatsAppSetup(deps: {
       settled = true;
       // Cancel, fault, or any throw above: tear the transient socket down.
       // Nothing durable exists — the auth state lived in setup memory only.
-      if (!conferred) await pairing.stop().catch(() => {});
+      if (!granted) await pairing.stop().catch(() => {});
     }
   };
 }
@@ -296,7 +296,7 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
     deps.openPairing ?? (() => openWhatsAppPairingSocket(createAdapter, deps.syncSink));
 
   const sessionScheme = whatsappSessionScheme();
-  // The WhatsApp conferral setup: show the linking QR, drive the Baileys
+  // The WhatsApp setup: show the linking QR, drive the Baileys
   // handshake over a transient in-memory socket, then land the session
   // material + profile + guardian mapping in one terminal write.
   sessionScheme.setup = makeWhatsAppSetup({ openPairing, makeQrDataUrl: deps.makeQrDataUrl });

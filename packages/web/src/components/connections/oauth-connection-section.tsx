@@ -38,10 +38,10 @@ function openAuthorizeUrl(url: string): void {
  * self-composing pattern (see `discord-connect-card.tsx`). Serves
  * github/google/slack.
  *
- * Connect/reconnect run through the generic conferral setup (#1611): the
+ * Connect/reconnect run through the generic setup (#1611): the
  * setup's first state is `awaiting-redirect`, so clicking Connect hands the
  * guardian off to the broker; the return leg (handled by the OAuth callback
- * page) resumes the setup, which redeems and confers. There is NO bespoke
+ * page) resumes the setup, which redeems and grants. There is NO bespoke
  * per-provider fetch logic here — the card renders from generic setup states and
  * an availability hint carried on the connection payload.
  *
@@ -81,7 +81,7 @@ export function OAuthConnectionSection({
   const shopifyInstallUrl = card.service === "shopify" ? (card.connect?.url ?? null) : null;
 
   // The setup addresses the connection by id, or by the bare service name when
-  // the guardian has never connected (the terminal conferral mints the row).
+  // the guardian has never connected (the terminal grant mints the row).
   const setup = useSetup({
     idOrKind: slot.connectionId ?? card.service,
     grant: slot.grant ?? "",

@@ -47,7 +47,7 @@ export interface GrantDisplay {
   avatarUrl: string | null;
 }
 
-/** Where the guardian goes to (re-)confer this connection's grants. Resolved
+/** Where the guardian goes to (re-)grant this connection's grants. Resolved
  *  server-side for Rome Cloud-brokered OAuth services; null for services whose
  *  connect ceremony is dashboard-local (channels). */
 export interface ConnectHint {
@@ -72,7 +72,7 @@ export interface ApiConnection extends ConnectionAccountFields {
   display: Record<string, GrantDisplay | null>;
   capabilities: Record<Capability, CapabilityStatus>;
   connect: ConnectHint | null;
-  /** Active-setup discovery: per grant, the id of the live conferral
+  /** Active-setup discovery: per grant, the id of the live grant
    *  setup (if any). Lets a reopened dashboard re-attach instead of starting
    *  a fresh one. Empty when no setup is in progress. */
   setups: Record<string, string>;

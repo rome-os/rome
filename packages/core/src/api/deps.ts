@@ -221,7 +221,7 @@ export interface ApiDeps {
   /** Use-side registry. Present but with zero registered descriptors in
    *  this phase — later phases register real integrations and route through it. */
   connectionRegistry?: ConnectionRegistry;
-  /** Conferral-setup sessions. In-memory, created alongside the
+  /** Grant-setup sessions. In-memory, created alongside the
    *  registry; drives the generic setup routes. Present only when the
    *  registry is. */
   setupManager?: SetupManager;

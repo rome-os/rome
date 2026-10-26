@@ -13,8 +13,8 @@ function makeApp(
     appEnabled?: () => boolean;
     getGrant?: () => Promise<{
       state: "authorized";
-      conferredAt: Date;
-      conferralEpoch: string;
+      grantedAt: Date;
+      grantEpoch: string;
     }>;
   } = {},
 ) {
@@ -82,8 +82,8 @@ function makeApp(
         options.getGrant ??
         (async () => ({
           state: "authorized" as const,
-          conferredAt: new Date("2026-10-26T00:00:00.000Z"),
-          conferralEpoch: "conferral-1",
+          grantedAt: new Date("2026-10-26T00:00:00.000Z"),
+          grantEpoch: "grant-1",
         })),
     },
     appConnectionAccessRepo: access,
@@ -125,7 +125,7 @@ describe("App connection access management", () => {
 
       const listed = await request("/app-connection-access/notes");
       expect(await listed.json()).toMatchObject({
-        policies: [{ operation: "documents.get", conferralStatus: "current" }],
+        policies: [{ operation: "documents.get", grantStatus: "current" }],
       });
 
       expect((await request(path, { method: "DELETE", headers: sameOrigin })).status).toBe(204);
@@ -137,13 +137,13 @@ describe("App connection access management", () => {
     }
   });
 
-  it("marks a policy stale when a new grant conferral replaces its epoch", async () => {
-    let conferralEpoch = "conferral-1";
+  it("marks a policy stale when giving the grant again replaces its epoch", async () => {
+    let grantEpoch = "grant-1";
     const { request, close } = makeApp({
       getGrant: async () => ({
         state: "authorized",
-        conferredAt: new Date("2026-10-26T00:00:00.000Z"),
-        conferralEpoch,
+        grantedAt: new Date("2026-10-26T00:00:00.000Z"),
+        grantEpoch,
       }),
     });
     try {
@@ -158,9 +158,9 @@ describe("App connection access management", () => {
         ).status,
       ).toBe(200);
 
-      conferralEpoch = "conferral-2";
+      grantEpoch = "grant-2";
       expect(await (await request("/app-connection-access/notes")).json()).toMatchObject({
-        policies: [{ operation: "documents.get", conferralStatus: "replaced" }],
+        policies: [{ operation: "documents.get", grantStatus: "replaced" }],
       });
     } finally {
       close();
@@ -184,8 +184,8 @@ describe("App connection access management", () => {
         await grantLookupReleased;
         return {
           state: "authorized",
-          conferredAt: new Date("2026-10-26T00:00:00.000Z"),
-          conferralEpoch: "conferral-1",
+          grantedAt: new Date("2026-10-26T00:00:00.000Z"),
+          grantEpoch: "grant-1",
         };
       },
     });

@@ -474,11 +474,11 @@ describe("ConnectionDetailBody — accounts", () => {
       const method = init?.method ?? "GET";
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       if (url.endsWith("/setup") && method === "POST") {
-        const conferral = connectionId ? { connectionId } : {};
+        const grant = connectionId ? { connectionId } : {};
         return new Response(
           JSON.stringify({
             cid: "cid-new",
-            state: { status: "done", conferral },
+            state: { status: "done", grant },
             reattached: false,
           }),
           { status: 200 },

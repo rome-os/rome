@@ -910,7 +910,7 @@ export const appConnectionAccess = sqliteTable(
     approval: text("approval", { enum: ["required", "not_required"] }).notNull(),
     constraints: text("constraints", { mode: "json" }).notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp" }),
-    grantConferralEpoch: text("grant_conferral_epoch").notNull(),
+    grantEpoch: text("grant_epoch").notNull(),
     revision: integer("revision").notNull(),
     revokedAt: integer("revoked_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
@@ -1037,7 +1037,7 @@ export const connectedAccounts = sqliteTable("connected_accounts", {
 // or scheme-specific columns. `credential` is a PersistedCredential envelope
 // stored as plain JSON (encryption was deliberately dropped); the envelope
 // shape is kept so encryption can return later. A grant row is present in "unauthorized" from
-// connection creation; conferral fills it. One grant = one credential row.
+// connection creation; giving a grant fills it. One grant = one credential row.
 export const connectionGrants = sqliteTable(
   "connection_grants",
   {
@@ -1046,9 +1046,9 @@ export const connectionGrants = sqliteTable(
     custody: text("custody").primaryKey(),
     state: text("state").notNull(), // unauthorized | authorized | degraded
     credential: text("credential", { mode: "json" }), // PersistedCredential | null
-    profile: text("profile", { mode: "json" }), // ProfileRecord | null — non-secret conferral outcome
-    conferredAt: integer("conferred_at", { mode: "timestamp" }),
-    conferralEpoch: text("conferral_epoch"),
+    profile: text("profile", { mode: "json" }), // ProfileRecord | null — non-secret grant outcome
+    grantedAt: integer("granted_at", { mode: "timestamp" }),
+    grantEpoch: text("grant_epoch"),
     lastRenewedAt: integer("last_renewed_at", { mode: "timestamp" }),
     degradedAt: integer("degraded_at", { mode: "timestamp" }),
     degradedReason: text("degraded_reason"),

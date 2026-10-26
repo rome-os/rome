@@ -75,7 +75,7 @@ export interface BuiltinConnectionDeps {
   /** Keeps index.ts's prompt-builder "our own inbox address" ref pointed at the
    *  CURRENT email epoch (birth/relock/backoff rebuild). */
   onEmailAdapterBuilt?: (adapter: EmailAdapter) => void;
-  /** DB handle for the Rome Cloud-OAuth conferral setups (github/slack/google):
+  /** DB handle for the Rome Cloud-OAuth grant setups (github/slack/google):
    *  the begin-redirect (mints the PKCE attempt) and the return-leg redeem both
    *  read/write the `oauth_pending_attempts` table. */
   db: DrizzleDb;
@@ -154,9 +154,9 @@ export function registerBuiltinConnections(
   );
   // Rome Cloud-OAuth provider connection state (github/slack/
   // google/shopify; grant ledger only, no capabilities yet — Actors land in follow-ups).
-  // The conferral setup drives connect through the generic setup
+  // The setup drives connect through the generic setup
   // surface: begin-redirect → guardian consents on the broker → the return leg
-  // resumes the coroutine → redeem → terminal confer (which re-materializes the
+  // resumes the coroutine → redeem → terminal grant (which re-materializes the
   // tmpfs token file + gh/git shell auth via custody). Registration is NOT gated
   // on the connect-UI provider list (google is env-gated there), so an existing
   // grant still loads. A `reconnect` hint is

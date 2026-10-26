@@ -77,7 +77,7 @@ describe("GET /connections", () => {
 
     const tg = await registry.connect("fake-telegram", "Telegram");
     await registry.connect("fake-discord", "Discord");
-    await registry.confer(tg.connectionKind, tg.id, "bot", telegram.validCredential(), {
+    await registry.giveGrant(tg.connectionKind, tg.id, "bot", telegram.validCredential(), {
       name: "Rome Bot",
       login: "rome_bot",
     });
@@ -120,7 +120,7 @@ describe("GET /connections", () => {
       severalAccounts: false,
     });
 
-    // Nothing conferred on discord yet: its grant unauthorized, everything
+    // Nothing granted on discord yet: its grant unauthorized, everything
     // locked, and no display (no profile AND no reviveProfile).
     expect(d.label).toBe("Discord");
     expect(d.grants).toEqual({ bot: "unauthorized" });
@@ -136,7 +136,7 @@ describe("GET /connections", () => {
       const fixture = makeBotAll();
       setup.register(fixture.descriptor);
       const conn = await setup.connect("fake-discord", "Discord");
-      await setup.confer(conn.connectionKind, conn.id, "bot", fixture.botCredential());
+      await setup.giveGrant(conn.connectionKind, conn.id, "bot", fixture.botCredential());
       await updateGrant(ledger, conn.id, (current) => ({
         ...current,
         state: "degraded",
@@ -163,7 +163,7 @@ describe("GET /connections", () => {
     const gated = makeGatedWatch();
     registry.register(gated.descriptor);
     const conn = await registry.connect("fake-github-watch");
-    await registry.confer(conn.connectionKind, conn.id, "user", gated.userCredential());
+    await registry.giveGrant(conn.connectionKind, conn.id, "user", gated.userCredential());
 
     const app = makeApp(registry);
     let res = await app.request("/connections");
@@ -288,7 +288,7 @@ describe("GET /connections/:id", () => {
       material: { token: "fake-discord-bot-token" },
       expiresAt: new Date("2026-08-01T00:00:00Z"),
     };
-    await registry.confer(conn.connectionKind, conn.id, "bot", expiring);
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", expiring);
 
     const res = await makeApp(registry).request(`/connections/${conn.id}`);
     expect(res.status).toBe(200);
@@ -299,7 +299,7 @@ describe("GET /connections/:id", () => {
     expect(connection.grants).toEqual({ bot: "authorized" });
     expect(connection.grantDetails).toEqual({
       bot: {
-        conferredAt: "2026-07-13T12:00:00.000Z",
+        grantedAt: "2026-07-13T12:00:00.000Z",
         lastRenewedAt: null,
         degraded: null,
         tokenExpiresAt: "2026-08-01T00:00:00.000Z",
@@ -313,7 +313,7 @@ describe("GET /connections/:id", () => {
     const fixture = makeBotAll();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-discord", "Discord");
-    await registry.confer(conn.connectionKind, conn.id, "bot", fixture.botCredential());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.botCredential());
     await updateGrant(ledger, conn.id, (current) => ({
       ...current,
       state: "degraded",
@@ -341,7 +341,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
     const fixture = makeBotAll();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-discord", "Discord");
-    await registry.confer(conn.connectionKind, conn.id, "bot", fixture.botCredential());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.botCredential());
 
     const res = await makeApp(registry).request(`/connections/${conn.id}/grants/bot`, {
       method: "DELETE",
@@ -369,7 +369,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
     const fixture = makePasteTalk();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-telegram");
-    await registry.confer(conn.connectionKind, conn.id, "bot", fixture.validCredential());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.validCredential());
 
     const res = await makeApp(registry, { db }).request(`/connections/${conn.id}/grants/bot`, {
       method: "DELETE",
@@ -388,7 +388,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
     const fixture = makePasteTalk();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-telegram");
-    await registry.confer(conn.connectionKind, conn.id, "bot", fixture.validCredential());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.validCredential());
     const app = makeApp(registry);
     const disconnect = () =>
       app.request(`/connections/${conn.id}/grants/bot`, { method: "DELETE", headers: SAME_ORIGIN });
@@ -405,7 +405,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
     const fixture = makeRenewableAct();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-github");
-    await registry.confer(conn.connectionKind, conn.id, "user", fixture.userCredential());
+    await registry.giveGrant(conn.connectionKind, conn.id, "user", fixture.userCredential());
 
     const res = await makeApp(registry).request(`/connections/${conn.id}/grants/user`, {
       method: "DELETE",
@@ -441,7 +441,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
     const fixture = makeBotAll();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-discord", "Discord");
-    await registry.confer(conn.connectionKind, conn.id, "bot", fixture.botCredential());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.botCredential());
 
     const res = await makeApp(registry).request(`/connections/${conn.id}/grants/bot`, {
       method: "DELETE",
@@ -472,7 +472,7 @@ describe("GET /connections accounts", () => {
       severalAccounts: true,
     });
     const first = await registry.connect("telegram");
-    await registry.confer(first.connectionKind, first.id, "bot", telegram.validCredential());
+    await registry.giveGrant(first.connectionKind, first.id, "bot", telegram.validCredential());
     const connection = await registry.connectAnother("telegram");
     const app = makeApp(registry, { db });
 
@@ -499,7 +499,7 @@ describe("GET /connections accounts", () => {
       },
     });
     registry.register({ ...telegram.descriptor, connectionKind: "feishu", severalAccounts: true });
-    const lark = await registry.confer("feishu", undefined, "bot", telegram.validCredential(), {
+    const lark = await registry.giveGrant("feishu", undefined, "bot", telegram.validCredential(), {
       domain: "lark",
     });
 
@@ -581,10 +581,16 @@ describe("GET /connections by account", () => {
     });
     const { link: _takesNone, ...descriptor } = telegram.descriptor;
     registry.register({ ...descriptor, connectionKind: "whatsapp" });
-    const first = await registry.confer("telegram", undefined, "bot", telegram.validCredential(), {
-      id: 41,
-    });
-    const second = await registry.confer(
+    const first = await registry.giveGrant(
+      "telegram",
+      undefined,
+      "bot",
+      telegram.validCredential(),
+      {
+        id: 41,
+      },
+    );
+    const second = await registry.giveGrant(
       "telegram",
       undefined,
       "bot",
@@ -643,7 +649,7 @@ describe("DELETE /connections/:id", () => {
     const fixture = makePasteTalkWithProfile();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-telegram", "Telegram");
-    await registry.confer(conn.connectionKind, conn.id, "bot", fixture.validCredential());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.validCredential());
 
     const app = makeApp(registry);
     const res = await app.request(`/connections/${conn.id}`, {
@@ -699,7 +705,7 @@ describe("guardian links across a disconnect", () => {
     fixture.descriptor.connectionKind = "discord";
     registry.register(fixture.descriptor);
     const conn = await registry.connect("discord");
-    await registry.confer(conn.connectionKind, conn.id, "bot", fixture.botCredential());
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.botCredential());
     const personMappingRepo = new PersonMappingRepository(db, identityConnectionKindOf);
     await personMappingRepo.create({
       displayName: "Guardian",

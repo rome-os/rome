@@ -287,7 +287,7 @@ describe("buildConnectionCards — slot mapping", () => {
     expect(cards.find((c) => c.service === "wechat")?.slots[0].grant).toBe("account");
   });
 
-  it("maps OAuth conferrals onto the user slot, Slack's workspace grant included", () => {
+  it("maps OAuth grants onto the user slot, Slack's workspace grant included", () => {
     const cards = buildConnectionCards([
       conn({ connectionKind: "slack", grants: { workspace: "authorized" } }),
       conn({ connectionKind: "github", grants: { user: "authorized" } }),

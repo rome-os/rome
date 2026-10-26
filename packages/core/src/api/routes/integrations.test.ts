@@ -90,7 +90,7 @@ describe("POST /integrations/relay/resume", () => {
 });
 
 // The legacy `POST /integrations/:provider/reconnect` was removed in #1611 —
-// reconnect now re-runs the conferral setup (force-start), so there is
+// reconnect now re-runs the setup (force-start), so there is
 // no bespoke reconnect route to test here anymore.
 
 describe("PUT /integrations/relay", () => {

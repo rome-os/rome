@@ -63,7 +63,7 @@ interface GrantDisplayView {
   avatarUrl: string | null;
 }
 
-/** Where the guardian goes to (re-)confer this connection's grants. Resolved
+/** Where the guardian goes to (re-)grant this connection's grants. Resolved
  *  server-side for Rome Cloud-brokered OAuth connection kinds; null for connection kinds whose
  *  connect setup is dashboard-local (channels). */
 interface ConnectHint {
@@ -97,7 +97,7 @@ interface ConnectionView
   display: Record<GrantName, GrantDisplayView | null>;
   capabilities: Record<Capability, CapabilityStatus>;
   connect: ConnectHint | null;
-  /** Active-setup discovery: per grant, the id of the live conferral
+  /** Active-setup discovery: per grant, the id of the live grant
    *  setup (if any), so a reopened dashboard re-attaches to it instead of
    *  starting a fresh one. Empty when no setup is in progress. */
   setups: Record<GrantName, string>;
@@ -106,7 +106,7 @@ interface ConnectionView
 /** Per-grant extras for the detail view — grant envelope fields the list
  *  doesn't carry, normalized to ISO strings (no raw DB values). */
 interface GrantDetailView {
-  conferredAt: string | null;
+  grantedAt: string | null;
   lastRenewedAt: string | null;
   degraded: { at: string; reason: string } | null;
   tokenExpiresAt: string | null;
@@ -194,7 +194,7 @@ function buildGrantDetails(
   for (const name of Object.keys(conn.auth.grants())) {
     const expiresAt = rec?.credential?.expiresAt;
     details[name] = {
-      conferredAt: rec?.conferredAt?.toISOString() ?? null,
+      grantedAt: rec?.grantedAt?.toISOString() ?? null,
       lastRenewedAt: rec?.lastRenewedAt?.toISOString() ?? null,
       degraded: rec?.degraded
         ? { at: rec.degraded.at.toISOString(), reason: rec.degraded.reason }

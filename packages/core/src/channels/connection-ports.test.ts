@@ -321,7 +321,7 @@ describe("connection-backed send, across epochs", () => {
       if (!talker) throw new Error("talker not built");
       talker.directMessaging = { chatFor: async () => answer as ChatId };
     };
-    await registry.confer(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
     offerDirect("first");
     const direct = connectionPorts({ registry, channelOf: kindChannelOf }, "fake-telegram")?.send
       ?.direct;
@@ -332,7 +332,7 @@ describe("connection-backed send, across epochs", () => {
     await connection.auth.revoke("bot");
     await expect(direct.chatFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
 
-    await registry.confer(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
     offerDirect("second");
     await expect(direct.chatFor("7")).resolves.toBe("second");
   });
@@ -364,9 +364,9 @@ describe("connection ports for a service's later channels", () => {
         heard.push({ channel: event.message.channel, connectionId: event.ref.connectionId });
       });
     }
-    await registry.confer(first.connectionKind, first.id, "bot", fx.validCredential());
+    await registry.giveGrant(first.connectionKind, first.id, "bot", fx.validCredential());
     const firstTalker = fx.talkerFactory.instances.at(-1)!;
-    await registry.confer(second.connectionKind, second.id, "bot", fx.validCredential());
+    await registry.giveGrant(second.connectionKind, second.id, "bot", fx.validCredential());
     const secondTalker = fx.talkerFactory.instances.at(-1)!;
 
     secondTalker.state.deliver?.({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
@@ -424,7 +424,7 @@ describe("a Connection Rome does not listen to", () => {
   it("hears nothing, not even admission, until it is listened to", async () => {
     const { registry, fx, heard, admitted, listen, deliver } = setup(false);
     const connection = await registry.connect("fake-telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
 
     await deliver("before");
     expect(heard).toEqual([]);
@@ -439,7 +439,7 @@ describe("a Connection Rome does not listen to", () => {
   it("stops hearing when it stops being listened to, and starts again", async () => {
     const { registry, fx, heard, listen, deliver } = setup(true);
     const connection = await registry.connect("fake-telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
 
     await deliver("m1");
     listen(false);
@@ -455,7 +455,7 @@ describe("a Connection Rome does not listen to", () => {
   it("ignores a change to another Connection", async () => {
     const { registry, fx, heard, listen, deliver } = setup(false);
     const connection = await registry.connect("fake-telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
 
     listen(true, "another-connection");
     await deliver("m1");
@@ -466,7 +466,7 @@ describe("a Connection Rome does not listen to", () => {
   it("sends whether or not it is listened to", async () => {
     const { registry, fx, ports } = setup(false);
     const connection = await registry.connect("fake-telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
 
     await ports.send!.send("dm-1" as ChatId, { text: "hi" });
 
@@ -477,7 +477,7 @@ describe("a Connection Rome does not listen to", () => {
     const { registry, fx, heard, listen, deliver } = setup(false);
     const connection = await registry.connect("fake-telegram");
     listen(true);
-    await registry.confer(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
 
     await deliver("m1");
 
@@ -502,7 +502,7 @@ describe("a Connection with no channel record", () => {
     ports.inbound!.subscribe(async (event) => {
       heard.push(event.ref.connectionId);
     });
-    await registry.confer(unrecorded.connectionKind, unrecorded.id, "bot", fx.validCredential());
+    await registry.giveGrant(unrecorded.connectionKind, unrecorded.id, "bot", fx.validCredential());
     const talker = fx.talkerFactory.instances.at(-1)!;
 
     talker.state.deliver!({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });

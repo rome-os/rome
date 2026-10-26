@@ -98,7 +98,7 @@ describe("connectionStatus — status vocabulary", () => {
     });
   });
 
-  it("nothing conferred + unavailable connect hint ⇒ muted Unavailable, carrying the reason as a title", () => {
+  it("nothing granted + unavailable connect hint ⇒ muted Unavailable, carrying the reason as a title", () => {
     expect(
       connectionStatus(
         card({
@@ -130,7 +130,7 @@ describe("connectionStatus — status vocabulary", () => {
     ).toEqual({ label: "Working", tone: "success" });
   });
 
-  it("nothing conferred + available connect hint ⇒ muted Not connected", () => {
+  it("nothing granted + available connect hint ⇒ muted Not connected", () => {
     expect(
       connectionStatus(
         card({
@@ -201,7 +201,7 @@ describe("connectionStatus — Telegram fold row states", () => {
     return connectionStatus(telegram);
   }
 
-  it("neither conferred ⇒ Not connected", () => {
+  it("neither granted ⇒ Not connected", () => {
     expect(telegramStatus([telegramConn("unauthorized")])).toEqual({
       label: "Not connected",
       tone: "muted",

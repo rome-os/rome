@@ -190,7 +190,7 @@ describe("channelList", () => {
     );
 
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -224,7 +224,7 @@ describe("channelList", () => {
     const connection = await registry.connect("telegram");
     // The Connection exists but its Talk is not built until a credential backs it.
     await expect(telegram.messages!.query({})).rejects.toBeInstanceOf(ChannelNotConnected);
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -248,7 +248,7 @@ describe("channelList", () => {
     const history: TalkHistory = { query: async () => [] };
     registry.register(talkKind("telegram", {}, null, null, history).descriptor);
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -279,7 +279,7 @@ describe("channelList", () => {
     });
     registry.register(service.descriptor);
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -306,7 +306,7 @@ describe("channelList", () => {
 
     for (const service of ["telegram", "discord"]) {
       const connection = await registry.connect(service);
-      await registry.confer(connection.connectionKind, connection.id, "bot", {
+      await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
         material: { token: "t" },
         expiresAt: "never",
       });
@@ -345,7 +345,7 @@ describe("channelList", () => {
     const ids: Record<string, string> = {};
     for (const service of ["discord", "feishu"]) {
       const connection = await registry.connect(service);
-      await registry.confer(connection.connectionKind, connection.id, "bot", {
+      await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
         material: { token: "t" },
         expiresAt: "never",
       });
@@ -376,7 +376,7 @@ describe("channelList", () => {
 
     expect(send.activity).toBeNull();
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -401,7 +401,7 @@ describe("channelList", () => {
 
     const connection = await registry.connect("telegram");
     const grant = { material: { token: "first" }, expiresAt: "never" as const };
-    await registry.confer(connection.connectionKind, connection.id, "bot", grant);
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", grant);
     service.epochs[0]!.deliver?.(message({ messageId: "stranger", senderId: "unknown" }));
     service.epochs[0]!.deliver?.(message({ messageId: "empty", text: "  " }));
     service.epochs[0]!.deliver?.(message({ messageId: "first" }));
@@ -411,7 +411,7 @@ describe("channelList", () => {
     expect(failing).toHaveBeenCalledTimes(1);
 
     await connection.auth.revoke("bot");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       ...grant,
       material: { token: "2" },
     });
@@ -433,7 +433,7 @@ describe("channelList", () => {
     inbound.subscribe(handler);
 
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -456,10 +456,10 @@ describe("channelList", () => {
     const grant = { material: { token: "t" }, expiresAt: "never" as const };
 
     const first = await registry.connect("telegram");
-    await registry.confer(first.connectionKind, first.id, "bot", grant);
+    await registry.giveGrant(first.connectionKind, first.id, "bot", grant);
     await registry.remove(first.id);
     const second = await registry.connect("telegram");
-    await registry.confer(second.connectionKind, second.id, "bot", grant);
+    await registry.giveGrant(second.connectionKind, second.id, "bot", grant);
     service.epochs[1]!.deliver?.(message({ messageId: "after reconnect" }));
 
     await rs.waitFor(() => expect(heard).toEqual(["after reconnect"]));
@@ -484,7 +484,7 @@ describe("channelList", () => {
     });
 
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -517,7 +517,7 @@ describe("channelList", () => {
       });
 
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -542,7 +542,7 @@ describe("channelList", () => {
       });
 
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -567,7 +567,7 @@ describe("channelList", () => {
     });
 
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -598,7 +598,7 @@ describe("channelList", () => {
     });
 
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -642,11 +642,11 @@ describe("joinLaterChannel", () => {
     });
     const grant = { material: { token: "t" }, expiresAt: "never" as const };
 
-    await registry.confer(first.connectionKind, first.id, "bot", grant);
+    await registry.giveGrant(first.connectionKind, first.id, "bot", grant);
     expect(joined).toEqual([]);
 
     const second = await registry.connectAnother("telegram");
-    await registry.confer(second.connectionKind, second.id, "bot", grant);
+    await registry.giveGrant(second.connectionKind, second.id, "bot", grant);
     expect(joined).toEqual([`later-${second.id}`]);
     service.epochs[1]!.deliver?.(message({ messageId: "to the second bot" }));
 
@@ -677,7 +677,7 @@ describe("joinLaterChannel", () => {
     });
     registry.register(service.descriptor);
     const connection = await registry.connect("telegram");
-    await registry.confer(connection.connectionKind, connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });

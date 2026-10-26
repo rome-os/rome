@@ -1,7 +1,7 @@
 // The Telegram-user descriptor. Layers under test:
 //   1. material round-trip (settings ⇄ SecretRecord, incl. apiId stringify +
 //      nullable username), descriptor shape, the route-driven session scheme
-//      (confer throws, renew "re-confer") — pure.
+//      (grant throws, renew "needs-fix") — pure.
 //   2. fault mapping — a fake TelegramUserAdapter (rs.mock) lets us drive a
 //      start rejection and a send failure; the real
 //      isTelegramUserSessionRejected classifier (imported unmocked) decides
@@ -190,17 +190,17 @@ describe("telegram_user descriptor shape", () => {
     expect(desc.connectionKind).toBe("telegram_user");
     expect(desc.grant).toBe("session");
     expect(desc.capabilities.actor).toBeUndefined();
-    // The `session` grant carries a conferral setup coroutine.
+    // The `session` grant carries a setup coroutine.
     expect(typeof desc.auth.setup).toBe("function");
   });
 
-  it("session scheme: confer is setup-driven (throws), renew answers re-confer", async () => {
+  it("session scheme: grant is setup-driven (throws), renew answers fix", async () => {
     const scheme = makeTelegramUserDescriptor().auth;
-    await expect(scheme.confer({ prompt: async () => ({}) })).rejects.toThrow(
-      "conferral driven by the connection setup",
+    await expect(scheme.obtain({ prompt: async () => ({}) })).rejects.toThrow(
+      "grant driven by the connection setup",
     );
     expect(await scheme.renew({ material: {} as SecretRecord, expiresAt: "never" })).toBe(
-      "re-confer",
+      "needs-fix",
     );
   });
 
@@ -472,7 +472,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
     try {
       const registry = makeRegistry();
       const conn = await registry.connect("telegram_user");
-      await registry.confer(
+      await registry.giveGrant(
         conn.connectionKind,
         conn.id,
         "session",
@@ -486,7 +486,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
       fakeState.probeError = rpcError(undefined, "SESSION_REVOKED");
       await clock.advance(1000);
 
-      // renew answers "re-confer", so one probe fault degrades. The status
+      // renew answers "needs-fix", so one probe fault degrades. The status
       // surface then reads needs-reconnect + reason off the ledger.
       expect(conn.auth.grants().session).toBe("degraded");
       expect(conn.isUnlocked("talk")).toBe(false);
@@ -494,7 +494,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
       expect(grant?.state).toBe("degraded");
       // The status surface reads `degradedReason` off this — a non-empty reason
       // naming the credential rejection (the registry's renew-once-then-degrade
-      // wording; a user session's renew can only answer "re-confer").
+      // wording; a user session's renew can only answer "needs-fix").
       expect(grant?.degraded?.reason).toContain("credential rejected");
       expect(grant?.degraded?.at).toBeInstanceOf(Date);
     } finally {
@@ -507,7 +507,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
     try {
       const registry = makeRegistry();
       const conn = await registry.connect("telegram_user");
-      await registry.confer(
+      await registry.giveGrant(
         conn.connectionKind,
         conn.id,
         "session",
@@ -534,7 +534,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
         }),
         expiresAt: "never",
       };
-      await registry.confer(conn.connectionKind, conn.id, "session", cred2, PROFILE);
+      await registry.giveGrant(conn.connectionKind, conn.id, "session", cred2, PROFILE);
       expect(conn.auth.grants().session).toBe("authorized");
 
       // Epoch A's parked probe now fails auth — but it reports through the dead

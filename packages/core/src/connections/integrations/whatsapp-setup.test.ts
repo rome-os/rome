@@ -1,9 +1,9 @@
-// The WhatsApp conferral setup, driven through the real SetupSession
+// The WhatsApp setup, driven through the real SetupSession
 // runtime with an injected pairing-socket fake (no Baileys, no network).
 //
 // Seams under test:
 //   1. makeWhatsAppSetup's coroutine — transient socket → show(each QR) →
-//      "paired" wait → terminal conferral of the
+//      "paired" wait → terminal grant of the
 //      in-memory session material + whatsapp profile — observed via the
 //      session's poll-able state and the single commit call.
 //   2. Zero-durable-state teardown: cancel/fault stops the transient socket and
@@ -16,7 +16,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { SetupManager, type SetupRegistry } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
-import type { SetupConferral } from "../setup/types.js";
+import type { SetupGrant } from "../setup/types.js";
 import type { Connection } from "../types.js";
 import {
   createWhatsAppDescriptor,
@@ -57,11 +57,11 @@ function presentedView(session: SetupSession) {
 }
 
 describe("makeWhatsAppSetup", () => {
-  it("shows each rotating QR, then confers on link", async () => {
+  it("shows each rotating QR, then grants on link", async () => {
     const link = deferred<string>();
     const pairing = makePairingFake(link.promise);
     const fn = makeWhatsAppSetup({ openPairing: () => pairing, makeQrDataUrl: fakeQrDataUrl });
-    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const commit = rs.fn(async (_c: SetupGrant, _s: AbortSignal) => {});
     const session = new SetupSession({ fn, commit });
 
     // No form: the setup goes straight to a working view while the socket starts.
@@ -82,7 +82,7 @@ describe("makeWhatsAppSetup", () => {
     link.resolve("14155550134@s.whatsapp.net");
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
-    // The transient socket is stopped BEFORE the conferral commit (WhatsApp
+    // The transient socket is stopped BEFORE the grant commit (WhatsApp
     // allows one live socket per session; the registry builds the real Talker).
     expect(pairing.stop).toHaveBeenCalledTimes(1);
     expect(pairing.stop.mock.invocationCallOrder[0]).toBeLessThan(
@@ -154,8 +154,8 @@ describe("WhatsApp setup discovery", () => {
       getDescriptor: (connectionKind) => (connectionKind === "whatsapp" ? descriptor : null),
       withGrantSection: (_s, _g, fn) => fn(),
       // Never reached: the discovery test parks the pairing promise unresolved,
-      // so the setup never confers. Present only to satisfy SetupRegistry.
-      confer: async () => ({ id: "conn-wa" }) as unknown as Connection,
+      // so the setup never grants. Present only to satisfy SetupRegistry.
+      giveGrant: async () => ({ id: "conn-wa" }) as unknown as Connection,
     };
   }
 

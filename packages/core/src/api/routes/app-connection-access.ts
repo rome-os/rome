@@ -47,8 +47,8 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
       policies: await Promise.all(
         policies.map(async (policy) => {
           const grant = await registry?.grantOf(policy.connectionId);
-          const conferralStatus =
-            grant?.conferralEpoch === policy.grantConferralEpoch
+          const grantStatus =
+            grant?.grantEpoch === policy.grantEpoch
               ? "current"
               : grant?.state === "unauthorized"
                 ? "authorization_required"
@@ -57,7 +57,7 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
                   : "unavailable";
           return {
             ...policy,
-            conferralStatus,
+            grantStatus,
             expiresAt: policy.expiresAt?.toISOString() ?? null,
             createdAt: policy.createdAt.toISOString(),
             updatedAt: policy.updatedAt.toISOString(),
@@ -110,7 +110,7 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
         approval: parsed.data.approval,
         constraints: parsed.data.constraints,
         expiresAt,
-        grantConferralEpoch: target.value.grantConferralEpoch,
+        grantEpoch: target.value.grantEpoch,
       },
       () => {
         const app = deps.appCatalog.get(target.value.appId);
@@ -149,7 +149,7 @@ async function resolveTarget(
 ): Promise<
   | {
       ok: true;
-      value: typeof target & { sideEffects: "read-only" | "write"; grantConferralEpoch: string };
+      value: typeof target & { sideEffects: "read-only" | "write"; grantEpoch: string };
     }
   | { ok: false; status: 404 | 409 | 503; error: string }
 > {
@@ -173,7 +173,7 @@ async function resolveTarget(
     return { ok: false, status: 404, error: "App-accessible operation not found." };
   }
   const grant = await deps.connectionRegistry.grantOf(target.connectionId);
-  if (!grant?.conferralEpoch || grant.state === "unauthorized") {
+  if (!grant?.grantEpoch || grant.state === "unauthorized") {
     return { ok: false, status: 409, error: "Connection identity is not authorized." };
   }
   return {
@@ -181,7 +181,7 @@ async function resolveTarget(
     value: {
       ...target,
       sideEffects: operation.appAccess.sideEffects,
-      grantConferralEpoch: grant.conferralEpoch,
+      grantEpoch: grant.grantEpoch,
     },
   };
 }

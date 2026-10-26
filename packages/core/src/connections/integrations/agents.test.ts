@@ -232,7 +232,7 @@ describe("agents channel", () => {
     });
     registry.register(makeAgentsDescriptor(client));
     const conn = await registry.connect("agents");
-    await registry.confer(
+    await registry.giveGrant(
       conn.connectionKind,
       conn.id,
       "cloud",
@@ -295,16 +295,16 @@ describe("agents channel", () => {
 
   it("records the agent Cloud assigned when the guardian connects", async () => {
     const setup = makeAgentsSetup(fakeClient([]));
-    const conferral = await setup(
+    const grant = await setup(
       { show: () => {} } as never,
       {
         step: (_label: string, fn: (signal: AbortSignal) => Promise<unknown>) =>
           fn(new AbortController().signal),
       } as never,
     );
-    expect(conferral.profile).toEqual(HOME);
+    expect(grant.profile).toEqual(HOME);
     // The instance token is the credential, so the grant records the agent only in its profile.
-    expect(conferral.credential.material).toEqual({});
+    expect(grant.credential.material).toEqual({});
     expect(reviveAgentsProfile(HOME).handle).toBe("home-rome");
   });
 

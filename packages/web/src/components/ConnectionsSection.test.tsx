@@ -313,7 +313,7 @@ describe("ConnectionsSection — several accounts", () => {
   function connectedSetup(connectionId: string | null) {
     return {
       cid: "cid-new",
-      state: { status: "done", conferral: connectionId ? { connectionId } : {} },
+      state: { status: "done", grant: connectionId ? { connectionId } : {} },
       reattached: false,
     };
   }

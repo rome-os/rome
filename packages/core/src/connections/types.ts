@@ -73,7 +73,7 @@ export type GrantName = string;
 export type Capability = "talk" | "act" | "watch";
 export type SecretRecord = Record<string, string>;
 /**
- * The non-secret half of a grant's conferral outcome. Like SecretRecord, this
+ * The non-secret half of a grant's grant outcome. Like SecretRecord, this
  * is deliberately opaque to the connection framework: each integration owns
  * the keys and value shapes it stores here.
  */
@@ -141,8 +141,8 @@ export interface AuthState {
 }
 
 /**
- * Conferral ceremonies are not implemented for `confer`; this is the minimal
- * placeholder so `AuthScheme` compiles. Headless conferrals (tests, settings
+ * Grant ceremonies are not implemented for `grant`; this is the minimal
+ * placeholder so `AuthScheme` compiles. Headless grants (tests, settings
  * import) never call it.
  */
 export interface GuardianInteraction {
@@ -186,25 +186,25 @@ export interface ProfileDisplay {
 
 /** What a builder supplies per grant. */
 export interface AuthScheme {
-  confer(interact: GuardianInteraction): Promise<Credential>;
+  obtain(interact: GuardianInteraction): Promise<Credential>;
   /**
-   * the guardian-facing conferral setup for this grant. When present,
+   * the guardian-facing setup for this grant. When present,
    * the generic setup surface (`POST
    * /api/connections/:id/grants/:name/setup`) drives it: a server-owned
-   * coroutine that prompts/shows/redirects and returns a terminal conferral
+   * coroutine that prompts/shows/redirects and returns a terminal grant
    * (credential + profile + optional guardian mapping). Absent for grants with
    * no dashboard setup (headless imports, OAuth redirect routes). Kept
    * `unknown`-free by importing the setup type lazily to avoid a cycle: see
    * `./setup/types.ts`.
    */
   setup?: import("./setup/types.js").SetupFn;
-  /** Renew WITHOUT the guardian, if the scheme can; "re-confer" is the honest
+  /** Renew WITHOUT the guardian, if the scheme can; "needs-fix" is the honest
    *  answer for pasted tokens and pairing sessions. Required, not optional. */
-  renew(cred: Credential): Promise<Credential | "re-confer">;
+  renew(cred: Credential): Promise<Credential | "needs-fix">;
   /**
    * External-custody resolver. When a rehydrated credential persisted
    * as `{ kind: "external" }`, the registry re-wraps its live `material` with
-   * this resolver — rehydration must never confer.
+   * this resolver — rehydration must never grant.
    */
   resolveExternal?: () => Promise<SecretRecord>;
 }
@@ -241,7 +241,7 @@ export interface Connection {
   /**
    * Broken when the grant is degraded, working when it is authorized. Null
    * while it is unauthorized: a disconnect ends the connection, so only one
-   * whose removal failed, or one not yet conferred, is neither.
+   * whose removal failed, or one not yet granted, is neither.
    */
   state(): ConnectionState | null;
   /** Discovery with reasons — drives the dashboard and connect hints. */
@@ -316,7 +316,7 @@ export type StreamFault = CredentialRejected | Disconnected;
  * (the `gh`/git shell wrappers) or a sandboxed app (the `connector` reading a
  * tmpfs token file). The registry drives those artifacts off grant transitions,
  * NOT off any capability build: `sync` runs whenever a grant reaches
- * `authorized` (fresh conferral, renew, or boot rehydration) with that grant's
+ * `authorized` (fresh grant, renew, or boot rehydration) with that grant's
  * live secret `material` plus its integration-owned non-secret `profile`;
  * `clear` runs on revoke AND on
  * degrade. Both are fire-and-forget: a failure is logged and swallowed so it can
@@ -356,7 +356,7 @@ export interface ConnectionDescriptor {
    *  an app id, an inbox address), or null when the profile names none. It reads
    *  the one field rather than parsing the strict profile schema, so a stored
    *  profile with an extra key still names its account.
-   *  The ledger stores it on the grant with the account's platform. Conferral
+   *  The ledger stores it on the grant with the account's platform. Grant
    *  refuses an account another live grant reaches on that platform, whatever
    *  its connection kind, and a fix that reaches another account
    *  (docs/domains/connections.md#connection). A connection kind that leaves it

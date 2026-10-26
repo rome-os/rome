@@ -157,7 +157,7 @@ function composioStatus(overrides: Partial<ComposioCliStatus> = {}): ComposioCli
   };
 }
 
-/** Every service offerable, nothing conferred — the fresh-install placeholders. */
+/** Every service offerable, nothing granted — the fresh-install placeholders. */
 const emptyConnections: ApiConnection[] = [
   apiConnection("telegram", { bot: { state: "unauthorized" } }, { placeholder: true }),
   apiConnection("telegram_user", { session: { state: "unauthorized" } }, { placeholder: true }),
@@ -184,7 +184,7 @@ const emptyConnections: ApiConnection[] = [
   ),
 ];
 
-/** Every service conferred and healthy, with hydrated grant profiles. */
+/** Every service granted and healthy, with hydrated grant profiles. */
 const connectedConnections: ApiConnection[] = [
   apiConnection("telegram", {
     bot: { state: "authorized", display: { handle: "rome_dev_bot" } },

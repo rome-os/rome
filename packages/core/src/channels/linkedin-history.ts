@@ -13,7 +13,7 @@ import { linkedInMemberIdFromProfileUrl, type LinkedInHistoryMessage } from "./l
  *
  * The stored profile URL stays the fallback rather than being replaced by one:
  * a URL carrying no member id is a vanity handle (`/in/ada-lovelace`), which is
- * the form the guardian's own mapping is conferred in at connect time. Narrowing
+ * the form the guardian's own mapping is granted in at connect time. Narrowing
  * to the member id alone would strand it.
  */
 function linkedInChannelUserId(row: LinkedInHistoryMessage): string {

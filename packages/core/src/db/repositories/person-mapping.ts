@@ -415,7 +415,7 @@ export class PersonMappingRepository {
 
   /** Write helper for {@link addChannelMapping}, taking an executor so it runs
    *  standalone (`this.db`) or enlisted in a caller's transaction (the terminal
-   *  conferral maps the guardian in the SAME transaction as the credential
+   *  grant maps the guardian in the SAME transaction as the credential
    *  write). */
   writeChannelMapping(
     exec: SqliteExec,

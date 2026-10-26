@@ -1,9 +1,9 @@
-// The WeChat conferral setup (issue #1606), driven through the real
+// The WeChat setup (issue #1606), driven through the real
 // SetupSession runtime with an injected login-service fake (no ilinkai, no
 // network).
 //
 // Seams under test: makeWechatSetup's coroutine — QR show (data-url payload +
-// open link) → `scan-confirmed` poll wait → terminal conferral whose material
+// open link) → `scan-confirmed` poll wait → terminal grant whose material
 // is built by wechatAccountMaterial (token, baseUrl, accountId duplicated)
 // — observed via the session's poll-able state and the single
 // commit call. QR refresh loops via repeated `show`; cancel genuinely
@@ -12,7 +12,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { WechatSettings } from "../../channels/wechat.js";
 import { SetupSession } from "../setup/session.js";
-import type { SetupConferral, SetupState } from "../setup/types.js";
+import type { SetupGrant, SetupState } from "../setup/types.js";
 import { makeWechatSetup, type WechatLoginService } from "./wechat.js";
 
 const ACCOUNT: WechatSettings = {
@@ -58,9 +58,9 @@ function makeAuthFake(script: Array<PollResult | Promise<PollResult>>) {
 
 function makeSetupSession(
   auth: WechatLoginService,
-  opts: { pollIntervalMs?: number; commit?: (c: SetupConferral) => Promise<void> } = {},
+  opts: { pollIntervalMs?: number; commit?: (c: SetupGrant) => Promise<void> } = {},
 ) {
-  const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {
+  const commit = rs.fn(async (_c: SetupGrant, _s: AbortSignal) => {
     await opts.commit?.(_c);
   });
   const fn = makeWechatSetup({
@@ -78,7 +78,7 @@ function presentingView(state: SetupState) {
 }
 
 describe("makeWechatSetup", () => {
-  it("shows the QR (data-url payload + open link), then confers on scan confirm", async () => {
+  it("shows the QR (data-url payload + open link), then grants on scan confirm", async () => {
     const auth = makeAuthFake([
       { status: "wait" },
       { status: "confirmed", account: { ...ACCOUNT } },
@@ -95,10 +95,10 @@ describe("makeWechatSetup", () => {
 
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(commit).toHaveBeenCalledTimes(1);
-    const conferral = commit.mock.calls[0][0];
+    const grant = commit.mock.calls[0][0];
     // Material shape: token + coordinates,
     // accountId duplicated into material; connectedAt stays out.
-    expect(conferral.credential).toEqual({
+    expect(grant.credential).toEqual({
       material: {
         token: "w-tok",
         baseUrl: "https://ilinkai.weixin.qq.com",
@@ -108,10 +108,10 @@ describe("makeWechatSetup", () => {
       },
       expiresAt: "never",
     });
-    expect(conferral.profile).toEqual({ accountId: "acct-1", userId: "user-9" });
-    expect(conferral.guardianChannelUserId).toBe("user-9");
-    expect(conferral.summary?.title).toBe("WeChat connected");
-    // The confirmed attempt is discarded once its account is in the conferral.
+    expect(grant.profile).toEqual({ accountId: "acct-1", userId: "user-9" });
+    expect(grant.guardianChannelUserId).toBe("user-9");
+    expect(grant.summary?.title).toBe("WeChat connected");
+    // The confirmed attempt is discarded once its account is in the grant.
     expect(auth.completeLogin).toHaveBeenCalledExactlyOnceWith("attempt-1");
   });
 
@@ -126,14 +126,14 @@ describe("makeWechatSetup", () => {
 
     await session.started();
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
-    const conferral = commit.mock.calls[0][0];
-    expect(conferral.credential.material).toEqual({
+    const grant = commit.mock.calls[0][0];
+    expect(grant.credential.material).toEqual({
       token: "w-tok",
       baseUrl: "https://ilinkai.weixin.qq.com",
       accountId: "acct-1",
     });
-    expect(conferral.profile).toEqual({ accountId: "acct-1" });
-    expect(conferral.guardianChannelUserId).toBeUndefined();
+    expect(grant.profile).toEqual({ accountId: "acct-1" });
+    expect(grant.guardianChannelUserId).toBeUndefined();
   });
 
   it("marks the scan step done once the provider reports the QR scanned", async () => {
