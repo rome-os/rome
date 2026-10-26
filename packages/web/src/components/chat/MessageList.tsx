@@ -20,6 +20,7 @@ import { UserMessage } from "@/components/chat/UserMessage";
 import type { AgentIdentity, ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
+import { modelDisplayName } from "@/lib/model-display";
 
 // The block-level callbacks + resolved-interaction map threaded into
 // renderFlatEntries — a single bag instead of six loose props.
@@ -203,6 +204,16 @@ function turnCopyText(messages: ChatMessage[]): string {
   return parts.join("\n\n");
 }
 
+// A small centered line where the chat moved to another model.
+function ModelSwitchNotice({ model }: { model: string }) {
+  const { t } = useTranslation("chat");
+  return (
+    <p role="note" className="mb-4 text-center text-aux text-muted-foreground">
+      {t("modelSwitch.notice", { model: modelDisplayName(model) })}
+    </p>
+  );
+}
+
 // Stable row keys preserve inline-card drafts when the live block moves on or
 // the turn ends. Memoization keeps token updates out of the historical rows.
 const RowView = memo(function RowView({
@@ -227,6 +238,7 @@ const RowView = memo(function RowView({
   feedback?: boolean;
 }) {
   if (row.kind === "user") return <UserMessage msg={row.message} />;
+  if (row.kind === "model_switch") return <ModelSwitchNotice model={row.model} />;
   const avatar = <AgentAvatar iconUrl={row.identity.iconUrl} label={row.identity.name} />;
   if (row.kind === "trace") {
     const summary = row.message.traceSummary;
@@ -449,6 +461,7 @@ function StandaloneLiveTail({
 // turnId rows (transient/optimistic) and the standalone live tail aren't
 // selectable.
 function rowTurnRef(row: ChatRow): { turnId: string | null; sessionId: string } {
+  if (row.kind === "model_switch") return { turnId: null, sessionId: row.sessionId };
   if (row.kind === "user" || row.kind === "trace") {
     return { turnId: row.message.turnId ?? null, sessionId: row.message.sessionId };
   }

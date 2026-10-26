@@ -284,6 +284,9 @@
       "ready": "Rome 额度可用"
     }
   },
+  "modelSwitch": {
+    "notice": "已切换到 {{model}}"
+  },
   "modelSelector": {
     "label": "模型",
     "saveFailed": "保存模型选择失败。",

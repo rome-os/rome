@@ -13,12 +13,15 @@ import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
-import type { SessionsRepository } from "../db/repositories/sessions.js";
+import type { SessionSeenMark, SessionsRepository } from "../db/repositories/sessions.js";
 import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
+  buildContinuationBlock,
   buildInteractiveSurfaceGuidanceSection,
   buildDeviceFolderBlock,
   buildThreadContextBlock,
+  FETCH_CHANNEL_HISTORY_ACTION,
+  type ContinuationGap,
   type PromptBuilder,
 } from "./prompt-builder.js";
 import type { ActionRegistry, Action } from "../actions/types.js";
@@ -220,8 +223,12 @@ export interface AgentSessionInit {
   resumeSessionId?: string;
   /** Appended to the system prompt at open time. */
   contextSuffix?: string;
-  /** Optional exact model selection, used by the WebChat model selector. */
-  selectionId?: ModelSelectionId;
+  /**
+   * Optional exact model selection, used by the WebChat model selector. On a
+   * session that is already open, a value replaces its selection from the next
+   * turn and null clears it; undefined leaves it as it is.
+   */
+  selectionId?: ModelSelectionId | null;
   reasoningEffort?: ModelReasoningEffort;
   /**
    * Open this session with the same tool catalog and system prompt but no live
@@ -566,6 +573,8 @@ export function createAgentSessionManager(
             channelThreadKey: key.channelThreadKey,
             newSessionId: uuidv4(),
             chatId: init.romeSessionId,
+            // A reset forgets on purpose, so the new thread names no gap.
+            seenAt: interactionAt,
           });
           preparedSessionId = replacement.id;
           preparedChatId = replacement.chatId ?? undefined;
@@ -633,19 +642,19 @@ export function createAgentSessionManager(
         reopen = true;
       } else if (explicitResume && existingIsQuiescent) {
         await existing.close("idle");
-      } else if (existing.status === "idle") {
+      } else {
         // Provider/model changes are resolved at the serialized turn boundary.
         // Reusing the Rome session here preserves its turn queue and lets the
-        // session swap only the model backend when needed.
-        recordAcquire("reuse");
-        return existing;
-      } else {
+        // session swap only the model backend when needed. A selection made
+        // in the open chat applies from the next turn.
+        if (init?.selectionId !== undefined) existing.selectModel(init.selectionId);
         recordAcquire("reuse");
         return existing;
       }
     }
     const current = sessions.get(k);
     if (current && current.status !== "closed") {
+      if (init?.selectionId !== undefined) current.selectModel(init.selectionId);
       recordAcquire("reuse");
       return current;
     }
@@ -990,6 +999,12 @@ async function openSession(
         )
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
+  // How far into the chat this generation's thread has read. Subagents name
+  // no gap, so they read none.
+  const seenMark: SessionSeenMark =
+    opts.isSubagent || (isNewSession && !preparedSessionId)
+      ? { threadId: null, turnId: null, at: null }
+      : await deps.sessionsRepo.getSeenMark(sessionId);
 
   if (isNewSession && !preparedSessionId) {
     const dbSession: DbAgentSession = {
@@ -1772,6 +1787,9 @@ async function openSession(
   // would raise on the second turn (there is no SDK conversation to resume).
   let modelSession: ModelSession;
   let initialResolution: ModelResolution | undefined;
+  // Whether the provider continues a thread it already has, rather than
+  // starting one that has seen nothing of this chat.
+  let threadResumed = false;
   if (config.codeBacked) {
     modelSession = createNullModelSession({
       ...buildSessionParams({
@@ -1796,6 +1814,9 @@ async function openSession(
       resumeResult?.provider,
       providerThreadId,
     );
+    threadResumed =
+      providerThreadId !== undefined &&
+      resumeResult?.provider === initialResolution.modelProvider.id;
   }
   // A resume the caller moved to another dir now writes its transcript there,
   // so the row follows it once the provider has opened.
@@ -1820,6 +1841,10 @@ async function openSession(
     isSubagent: opts.isSubagent,
     selectionId,
     sessionPin,
+    threadResumed,
+    seenMark,
+    // The model the row's thread ran on, named when this open starts over.
+    previousModel: threadResumed ? undefined : (resumeResult?.model ?? undefined),
     openModelSession,
     toolCount:
       (initialResolution
@@ -1864,6 +1889,12 @@ interface ImplArgs {
   selectionId?: ModelSelectionId;
   /** Session model pin from the resumed row, when one exists. */
   sessionPin?: { providerId: ProviderId; model: string };
+  /** The opened provider session continues a thread the row recorded. */
+  threadResumed: boolean;
+  /** How far into the chat the row's thread has read. */
+  seenMark: SessionSeenMark;
+  /** The model the row's thread ran on, when this open starts a new thread. */
+  previousModel?: string;
   openModelSession: (
     resolution: ModelResolution,
     resumeProviderId?: string | null,
@@ -2108,6 +2139,17 @@ class AgentSessionImpl implements AgentSession {
   // turn of a fresh session only. Flipped the first time runOneTurn considers it
   // so it never reappears on later turns of the same session.
   private threadContextInjected = false;
+  /**
+   * The current provider thread started in this session rather than resuming
+   * one, so it has seen none of the chat. Its first turn carries the
+   * `<thread_context>` block and, when the chat has messages, the
+   * `<continuation>` notice.
+   */
+  private threadFresh: boolean;
+  /** How far into the chat the provider thread has read; see SessionSeenMark. */
+  private seenMark: SessionSeenMark;
+  /** The model the chat ran on before the current thread started. */
+  private previousModel?: string;
   private selectionId?: ModelSelectionId;
   /**
    * The session model pin: the concrete model this session's history
@@ -2155,6 +2197,9 @@ class AgentSessionImpl implements AgentSession {
     this.isSubagent = args.isSubagent;
     this.selectionId = args.selectionId;
     this.sessionPin = args.sessionPin;
+    this.threadFresh = !args.threadResumed;
+    this.seenMark = args.seenMark;
+    this.previousModel = args.previousModel;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
     this.subagentToolNames = args.subagentToolNames;
@@ -2237,6 +2282,15 @@ class AgentSessionImpl implements AgentSession {
     this.modelEventsLoop = this.runEventsLoop(session);
   }
 
+  /**
+   * The guardian picked a model in the open chat. The next turn resolves it
+   * ahead of the pin, and its successful turn re-pins the session. Null clears
+   * the selection, so the pin decides again.
+   */
+  selectModel(selectionId: ModelSelectionId | null): void {
+    this.selectionId = selectionId ?? undefined;
+  }
+
   private async ensureModelSessionForTurn(): Promise<void> {
     if (this.config.codeBacked) return;
     const resolution = await this.deps.modelResolver.getModelProvider(
@@ -2267,6 +2321,13 @@ class AgentSessionImpl implements AgentSession {
       this.modelSession = next;
       this.modelSessionAvailable = true;
       this.providerInfoStored = false;
+      if (resumeThreadId === undefined) {
+        // Another provider, or a thread that never got an id: the new thread
+        // has seen nothing of this chat.
+        this.threadFresh = true;
+        this.threadContextInjected = false;
+        this.previousModel = previous.model;
+      }
       this.toolCount =
         this.config.tools.filter((name) => resolution.modelProvider.builtinTools.has(name)).length +
         buildSubagentTools(this.deps.agentLoader, this.config).tools.length;
@@ -2406,6 +2467,7 @@ class AgentSessionImpl implements AgentSession {
               sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
             if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
             await this.maybePersistProviderInfo();
+            await this.markThreadSeen(session, sink.turnId);
             await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
           }
           // Use `outbound` (not `msg`) so provider-output validation is
@@ -2643,6 +2705,97 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private providerInfoStored = false;
+
+  /**
+   * The chat lines the current provider thread has not taken part in, or null
+   * when there are none to name. The thread has read the chat up to its seen
+   * mark when the mark is its own; a thread that started in this session has
+   * read nothing, unless a reset started the generation. The turn's own input
+   * is not a gap. See docs/concepts/sessions.md#continuation.
+   */
+  private async findContinuationGap(
+    sink: TurnSink,
+    turnId: string,
+    input: AgentTurnInput,
+  ): Promise<ContinuationGap | null> {
+    const chatId = sink.romeSessionId;
+    if (!chatId || !this.deps.webchatRepo || this.config.codeBacked) return null;
+    const mark = this.seenMark;
+    let after: Date | null;
+    let markedTurnId: string | null = null;
+    if (this.threadFresh) {
+      // Only a reset's mark (no thread yet) carries over to a new thread.
+      after = mark.threadId === null ? mark.at : null;
+    } else if (mark.threadId === null && mark.at === null) {
+      // A row written before marks existed. Its resumed thread has seen the
+      // chat as far as anyone knows.
+      return null;
+    } else if (mark.threadId === null || mark.threadId === this.modelSession.providerThreadId) {
+      after = mark.at;
+      markedTurnId = mark.turnId;
+    } else {
+      // The provider resumed another thread than the one marked.
+      after = null;
+    }
+    try {
+      const unseen = await this.deps.webchatRepo.findUnseenChatMessages(chatId, {
+        after,
+        until: new Date(),
+        excludeTurnIds: [turnId, ...(markedTurnId ? [markedTurnId] : [])],
+        excludeMessageIds: input.inputId ? [input.inputId] : [],
+      });
+      if (unseen.count === 0 || !unseen.first || !unseen.last) return null;
+      const previousModel =
+        this.threadFresh && this.previousModel && this.previousModel !== this.modelSession.model
+          ? this.previousModel
+          : undefined;
+      return {
+        count: unseen.count,
+        firstAt: unseen.first.createdAt,
+        lastAt: unseen.last.createdAt,
+        ...(previousModel ? { previousModel } : {}),
+        canReadHistory: this.mayCall(FETCH_CHANNEL_HISTORY_ACTION),
+      };
+    } catch (err) {
+      log.warn("failed to read the chat's unseen messages", {
+        sessionId: this.sessionId,
+        chatId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
+  private mayCall(actionName: string): boolean {
+    const canonical = this.deps.actionRegistry.getCanonicalName?.(actionName) ?? actionName;
+    return this.deps.actionRegistry
+      .getForAgent(this.config.actions ?? [])
+      .some((action) => action.config.name === canonical);
+  }
+
+  /**
+   * Record that the thread has read the chat through this finished turn, so
+   * the next turn on it names only what came after. Best-effort: a lost write
+   * at worst names messages the thread had seen.
+   */
+  private async markThreadSeen(session: ModelSession, turnId: string): Promise<void> {
+    if (this.isSubagent || this.config.codeBacked) return;
+    const mark: SessionSeenMark = {
+      threadId: session.providerThreadId ?? null,
+      turnId,
+      at: new Date(),
+    };
+    this.seenMark = mark;
+    this.threadFresh = false;
+    try {
+      await this.deps.sessionsRepo.setSeenMark(this.sessionId, mark);
+    } catch (err) {
+      log.warn("failed to persist the thread's seen mark", {
+        sessionId: this.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   private async maybePersistReasoningEffort(reasoningEffort: string | undefined): Promise<void> {
     if (!reasoningEffort || reasoningEffort === this.storedReasoningEffort) return;
@@ -3508,7 +3661,13 @@ class AgentSessionImpl implements AgentSession {
       if (deviceFolderBlock) {
         userPrompt = `${deviceFolderBlock}\n\n${userPrompt}`;
       }
-      if (!this.isSubagent && this.isNewSession && !this.threadContextInjected && tc) {
+      if (!this.isSubagent) {
+        const gap = await this.findContinuationGap(sink, turnId, input);
+        if (gap) userPrompt = `${buildContinuationBlock(gap)}\n\n${userPrompt}`;
+      }
+      // A thread that starts in this session, the first one or one that
+      // replaced it on another provider, has not seen the block yet.
+      if (!this.isSubagent && this.threadFresh && !this.threadContextInjected && tc) {
         this.threadContextInjected = true;
         const block = buildThreadContextBlock(tc, this.workingDir);
         if (block) {

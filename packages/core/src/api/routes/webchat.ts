@@ -59,6 +59,7 @@ import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
   WEBCHAT_REASONING_EFFORT_SETTING_KEY,
   WEBCHAT_LARGE_MODEL_SETTING_KEY,
+  normalizeWebchatLargeModelSelectionId,
   normalizeWebchatReasoningEffort,
   resolveWebchatLargeModelSelection,
   type WebchatLargeModelSelection,
@@ -2492,6 +2493,36 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.json(toWebchatSessionResponse(session, messageCount));
   });
 
+  // The model picker of an open chat. The pick is stored on the chat and the
+  // next turn runs on it, also when the chat's session is open; its successful
+  // turn re-pins the session (docs/concepts/sessions.md#model-pin). "auto"
+  // clears the pick.
+  app.patch("/chat/sessions/:id/model", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const body = await c.req.json<unknown>().catch(() => undefined);
+    const requested =
+      typeof body === "object" && body !== null
+        ? (body as { largeModelSelection?: unknown }).largeModelSelection
+        : undefined;
+    if (
+      typeof requested !== "string" ||
+      normalizeWebchatLargeModelSelectionId(requested) !== requested
+    ) {
+      return c.json({ error: "largeModelSelection must be a model selection id" }, 400);
+    }
+    if ((await deps.settingsRepo.get<boolean>(ENABLE_MODEL_SELECTOR_SETTING_KEY)) !== true) {
+      return c.json({ error: "The model selector is turned off" }, 409);
+    }
+    const selection = resolveWebchatLargeModelSelection(requested);
+    await deps.webchatRepo.updateSessionLargeModelSelection(sessionId, selection?.id ?? null);
+    const session = await deps.webchatRepo.getSession(sessionId);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+    const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
+    return c.json(toWebchatSessionResponse(session, messageCount));
+  });
+
   app.patch("/chat/sessions/:id/name", async (c) => {
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
@@ -3436,7 +3467,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           romeSessionId: sessionId,
           contextSuffix,
           handback,
-          selectionId: modelSelection?.id,
+          // Null clears a selection an open session still holds, so a chat
+          // switched back to Auto follows its pin again.
+          selectionId: modelSelection?.id ?? null,
           reasoningEffort,
         },
       );

@@ -19,6 +19,7 @@ import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   channelMessageDetail,
   heldOn,
+  queryBefore,
   queryLimit,
   querySince,
   type AccountMessages,
@@ -110,10 +111,12 @@ function directAddresses(accounts: readonly MessageAccount[]): string[] {
  */
 export function wechatUserMessages(reader: WechatUserReader): Messages {
   return {
-    async query({ chatId, since, limit }) {
+    async query({ chatId, since, before, limit }) {
       const messages = await reader.messages({
         ...(chatId ? { chatId } : {}),
         ...(since ? { since: querySince(since) } : {}),
+        // The reader reads at or before; the port reads strictly before.
+        ...(before ? { before: queryBefore(before) } : {}),
         limit: queryLimit(limit),
       });
       // The reader answers oldest first, same-second messages included; the

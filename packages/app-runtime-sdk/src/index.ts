@@ -1748,6 +1748,9 @@ export interface ChannelMessageQuery {
   chatId?: ChatId;
   /** Only messages said at or after this instant. */
   since?: Date;
+  /** Only messages said before this instant. A reader pages back by passing
+   *  the earliest time the last page answered. */
+  before?: Date;
   /** At most this many, newest first. Defaults to 100, capped at 1,000. */
   limit?: number;
 }

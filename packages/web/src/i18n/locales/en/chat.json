@@ -284,6 +284,9 @@
       "ready": "Rome credits ready"
     }
   },
+  "modelSwitch": {
+    "notice": "Switched to {{model}}"
+  },
   "modelSelector": {
     "label": "Model",
     "saveFailed": "Failed to save model selection.",

@@ -211,6 +211,13 @@ function traceSummaryOf(blocks: TraceEventDto[]): TraceSummary {
   // through `terminalError` alone — the error block never leaves the trace.
   const lastError = blocks.filter((block) => block.type === "error").at(-1);
   const failed = turnEnd?.type === "turn_end" && turnEnd.status === "error";
+  const terminal = blocks
+    .filter((block) => block.type === "result" || block.type === "error")
+    .at(-1);
+  const model =
+    terminal?.type === "result" || terminal?.type === "error"
+      ? terminal.accounting?.model
+      : undefined;
   return {
     distinctApps: totalSteps > 0 ? [ROME_APP] : [],
     totalSteps,
@@ -221,6 +228,7 @@ function traceSummaryOf(blocks: TraceEventDto[]): TraceSummary {
       ? { stoppedByUser: true }
       : {}),
     ...(failed && lastError?.type === "error" ? { terminalError: lastError.error } : {}),
+    ...(model ? { model } : {}),
   };
 }
 
@@ -1175,6 +1183,14 @@ export const handlers = [
     if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
     const { pinned } = (await request.json()) as { pinned: boolean };
     found.pinnedAt = pinned ? new Date().toISOString() : null;
+    return HttpResponse.json(found);
+  }),
+  // The open chat's model picker. Kept in memory like the pin.
+  http.patch("/api/chat/sessions/:sessionId/model", async ({ params, request }) => {
+    const found = chatSessions.find((s) => s.id === params.sessionId);
+    if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const { largeModelSelection } = (await request.json()) as { largeModelSelection: string };
+    found.largeModelSelection = largeModelSelection === "auto" ? null : largeModelSelection;
     return HttpResponse.json(found);
   }),
   // Thumbs on an assistant turn. Each row hydrates lazily as it scrolls into

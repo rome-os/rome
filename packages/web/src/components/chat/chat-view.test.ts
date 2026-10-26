@@ -262,6 +262,60 @@ describe("buildRows", () => {
   });
 });
 
+describe("buildRows model switch notice", () => {
+  const idMap = new Map([[MAIN, MAIN_IDENTITY]]);
+  const turn = (sessionId: string, turnId: string, model?: string) => [
+    mk(sessionId, "user", turnId, [{ type: "text", content: `ask ${turnId}` }]),
+    mk(sessionId, "trace", turnId, [], {
+      traceSummary: {
+        distinctApps: [],
+        totalSteps: 0,
+        invocationCounts: {},
+        ...(model ? { model } : {}),
+      },
+    }),
+    mk(sessionId, "assistant", turnId, [{ type: "text", content: `reply ${turnId}` }]),
+  ];
+  const rowsOf = (messages: ChatMessage[], runningTurnId: string | null = null) =>
+    buildRows(messages, idMap, MAIN_IDENTITY, { runningTurnId, isStreaming: !!runningTurnId });
+
+  it("puts a notice before the first turn that ran on another model", () => {
+    const rows = rowsOf([
+      ...turn(MAIN, "t1", "claude-sonnet-5-5"),
+      ...turn(MAIN, "t2", "claude-sonnet-5-5"),
+      ...turn(MAIN, "t3", "gpt-6-luna"),
+      ...turn(MAIN, "t4", "gpt-6-luna"),
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual([
+      "user",
+      "agent",
+      "user",
+      "agent",
+      "model_switch",
+      "user",
+      "agent",
+      "user",
+      "agent",
+    ]);
+    expect(rows[4]).toMatchObject({ kind: "model_switch", model: "gpt-6-luna", turnId: "t3" });
+  });
+
+  it("skips turns with no known model and compares within one session", () => {
+    const rows = rowsOf([
+      ...turn(MAIN, "t1", "gpt-6-luna"),
+      ...turn(MAIN, "t2"),
+      ...turn(CHILD, "c1", "claude-sonnet-5-5"),
+      ...turn(MAIN, "t3", "gpt-6-luna"),
+    ]);
+    expect(rows.some((r) => r.kind === "model_switch")).toBe(false);
+  });
+
+  it("shows no notice for the first turn or the running turn", () => {
+    const messages = [...turn(MAIN, "t1", "claude-sonnet-5-5"), ...turn(MAIN, "t2")];
+    expect(rowsOf(messages, "t2").some((r) => r.kind === "model_switch")).toBe(false);
+  });
+});
+
 describe("isLastTurnFailed", () => {
   const trace = (sessionId: string, turnId: string, turnStatus?: "completed" | "error") =>
     mk(sessionId, "trace", turnId, [], {

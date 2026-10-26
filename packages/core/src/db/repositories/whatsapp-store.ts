@@ -317,14 +317,19 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
     threadJid: string | null,
     since: Date,
     limit: number = HISTORY_READ_LIMIT,
+    /** Only messages at or before this second. */
+    until?: Date,
   ): Promise<WaHistoryMessage[]> {
     const sinceSeconds = Math.floor(since.getTime() / 1000);
     const threadClause = threadJid != null ? sql`AND m.chat_jid = ${threadJid}` : sql``;
+    const untilClause = until
+      ? sql`AND m.timestamp <= ${Math.floor(until.getTime() / 1000)}`
+      : sql``;
     const rows = (await this.db.all(sql`
       SELECT ${waHistoryColumns()}
       FROM wa_messages m
       ${WA_HISTORY_JOINS}
-      WHERE m.timestamp >= ${sinceSeconds} ${threadClause}
+      WHERE m.timestamp >= ${sinceSeconds} ${threadClause} ${untilClause}
       ORDER BY m.timestamp DESC, m.rowid DESC
       LIMIT ${Math.min(limit, HISTORY_READ_LIMIT)}
     `)) as Array<Record<string, unknown>>;

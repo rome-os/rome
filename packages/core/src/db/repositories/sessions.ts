@@ -11,6 +11,17 @@ export interface StoredSessionTurnCheckpoint {
   checkpointId: string;
 }
 
+/**
+ * How far into its chat a session's provider thread has read: the thread, the
+ * last turn it finished, and when. A null thread with a time is a generation a
+ * reset started. All null when nothing is recorded.
+ */
+export interface SessionSeenMark {
+  threadId: string | null;
+  turnId: string | null;
+  at: Date | null;
+}
+
 export class SessionsRepository {
   constructor(private db: DrizzleDb) {}
 
@@ -80,6 +91,10 @@ export class SessionsRepository {
     channelThreadKey: string;
     newSessionId: string;
     chatId?: string;
+    /** Start the new generation as having seen the chat up to this time, so
+     *  its first thread names no gap before it. A deliberate reset passes
+     *  it: forgetting is the point. */
+    seenAt?: Date;
   }): Promise<typeof sessions.$inferSelect> {
     return this.db.transaction((tx) => {
       const exactKey = and(
@@ -104,6 +119,7 @@ export class SessionsRepository {
           provider: null,
           providerThreadId: null,
           model: null,
+          seenAt: input.seenAt ?? null,
           createdAt: now,
           lastActiveAt: now,
           status: "active",
@@ -160,6 +176,26 @@ export class SessionsRepository {
     await this.db
       .update(sessions)
       .set({ provider, providerThreadId: providerThreadId ?? null, model: model ?? null })
+      .where(eq(sessions.id, id));
+  }
+
+  /** How far into its chat the session's provider thread has read. */
+  async getSeenMark(id: string): Promise<SessionSeenMark> {
+    const rows = await this.db
+      .select({
+        threadId: sessions.seenThreadId,
+        turnId: sessions.seenTurnId,
+        at: sessions.seenAt,
+      })
+      .from(sessions)
+      .where(eq(sessions.id, id));
+    return rows[0] ?? { threadId: null, turnId: null, at: null };
+  }
+
+  async setSeenMark(id: string, mark: SessionSeenMark): Promise<void> {
+    await this.db
+      .update(sessions)
+      .set({ seenThreadId: mark.threadId, seenTurnId: mark.turnId, seenAt: mark.at })
       .where(eq(sessions.id, id));
   }
 

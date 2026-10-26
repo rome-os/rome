@@ -72,7 +72,11 @@ function toStructuredMessages(channel: string, messages: ChannelMessage[]): Stru
   }));
 }
 
-function formatMessages(channel: string, messages: ChannelMessage[], windowHours: number): string {
+function formatMessages(
+  channel: string,
+  messages: ChannelMessage[],
+  window: { from: Date; to: Date },
+): string {
   if (messages.length === 0) {
     return "(No messages found in the requested window.)";
   }
@@ -112,9 +116,7 @@ function formatMessages(channel: string, messages: ChannelMessage[], windowHours
     }
   }
 
-  const cutoff = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
-  const now = new Date().toISOString();
-  const header = `## Channel History — ${cutoff} → ${now}\n\n`;
+  const header = `## Channel History — ${window.from.toISOString()} → ${window.to.toISOString()}\n\n`;
 
   return sections.length > 0
     ? header + sections.join("\n\n---\n\n")
@@ -144,7 +146,13 @@ export function createAction(
         },
         windowHours: {
           type: "number",
-          description: "How many hours back to fetch messages (default: 24)",
+          description:
+            "How many hours back to fetch messages, counted from `before` when given, else from now (default: 24)",
+        },
+        before: {
+          type: "string",
+          description:
+            "Optional ISO 8601 time. Only messages said before it are returned. Each call returns the newest messages of the window, so to page back, pass the earliest time the previous call returned.",
         },
         includeMessages: {
           type: "boolean",
@@ -160,6 +168,15 @@ export function createAction(
       const threadId = (args.threadId as string | undefined) ?? null;
       const windowHours = (args.windowHours as number | undefined) ?? 24;
       const includeMessages = args.includeMessages === true;
+      let before: Date | undefined;
+      if (args.before !== undefined) {
+        before = typeof args.before === "string" ? new Date(args.before) : undefined;
+        if (!before || Number.isNaN(before.getTime())) {
+          return { status: "error", error: "before must be an ISO 8601 time." };
+        }
+      }
+      const to = before ?? new Date();
+      const from = new Date(to.getTime() - windowHours * 60 * 60 * 1000);
 
       const notConfigured: ActionResult = {
         status: "error",
@@ -167,7 +184,7 @@ export function createAction(
       };
       if (!(await channels.list()).some((item) => item.name === channel)) return notConfigured;
 
-      log.info("fetching channel history", { channel, threadId, windowHours });
+      log.info("fetching channel history", { channel, threadId, windowHours, before });
 
       let messages: ChannelMessage[];
       try {
@@ -175,7 +192,8 @@ export function createAction(
         messages = (
           await channels.query(channel, {
             ...(threadId ? { chatId: threadId as ChatId } : {}),
-            since: new Date(Date.now() - windowHours * 60 * 60 * 1000),
+            since: from,
+            ...(before ? { before } : {}),
           })
         ).reverse();
       } catch (err) {
@@ -206,7 +224,7 @@ export function createAction(
         channel,
         messageCount: messages.length,
         windowHours,
-        content: formatMessages(channel, messages, windowHours),
+        content: formatMessages(channel, messages, { from, to }),
       };
 
       // Opt-in: only add the structured array when explicitly requested, so

@@ -129,8 +129,12 @@ export interface ChatComposerProps {
   persistNewChatDraft?: boolean;
   // Whether the project picker is shown (typically only in draft mode).
   showProjectSelector?: boolean;
-  // Whether the large-model picker is shown (typically only in draft mode).
+  // Whether the large-model picker is shown.
   showModelSelector?: boolean;
+  // An open chat's own model pick. When set, the picker shows and changes it,
+  // and sends carry no selection: the chat stores it. A draft leaves it unset,
+  // so the picker edits the default for new chats.
+  chatModelSelection?: { value: string; onChange: (next: string) => void };
   // Seed for the draft project name. Honored once at mount and again when it
   // changes from undefined → defined (i.e., transitioning into a new draft).
   initialProjectName?: string;
@@ -212,6 +216,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     persistNewChatDraft = false,
     showProjectSelector = false,
     showModelSelector = false,
+    chatModelSelection,
     initialProjectName,
     initialDeviceFolder,
     pinnedAgentMention = null,
@@ -475,6 +480,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     setImpersonationMenuOpen(false);
   }, [settings, impersonationEnabled]);
 
+  // Only a draft's first send carries the pick; an open chat has stored it.
+  const draftModelSelection =
+    showModelSelector && modelSelectorEnabled && !chatModelSelection
+      ? largeModelSelection
+      : undefined;
+
   const updateLargeModelSelection = useCallback(
     async (next: string) => {
       if (uploadInFlightRef.current) return;
@@ -610,8 +621,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           text: trimmed,
           uploads: pendingUploads,
           personaId,
-          largeModelSelection:
-            showModelSelector && modelSelectorEnabled ? largeModelSelection : undefined,
+          largeModelSelection: draftModelSelection,
           reasoningEffort,
           projectPath: draftProjectName,
           deviceFolder: draftDeviceFolder ?? undefined,
@@ -640,9 +650,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       reasoningEffort,
       draftSkill,
       pendingUploads,
-      showModelSelector,
-      modelSelectorEnabled,
-      largeModelSelection,
+      draftModelSelection,
       draftProjectName,
       draftDeviceFolder,
       draftAgentMention,
@@ -693,8 +701,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       text,
       uploads,
       personaId,
-      largeModelSelection:
-        showModelSelector && modelSelectorEnabled ? largeModelSelection : undefined,
+      largeModelSelection: draftModelSelection,
       reasoningEffort,
       projectPath: draftProjectName,
       deviceFolder: draftDeviceFolder ?? undefined,
@@ -772,9 +779,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     pendingUploads,
     draftSkill,
     personaId,
-    showModelSelector,
-    modelSelectorEnabled,
-    largeModelSelection,
+    draftModelSelection,
     reasoningEffort,
     draftProjectName,
     draftDeviceFolder,
@@ -1318,8 +1323,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               <ModelSelectorMenu
                 open={modelMenuOpen}
                 onOpenChange={setModelMenuOpen}
-                value={largeModelSelection}
-                onChange={(next) => void updateLargeModelSelection(next)}
+                value={chatModelSelection?.value ?? largeModelSelection}
+                onChange={(next) =>
+                  chatModelSelection
+                    ? chatModelSelection.onChange(next)
+                    : void updateLargeModelSelection(next)
+                }
                 disabled={uploadInFlight}
               />
             )}

@@ -3317,6 +3317,62 @@ describe("Webchat API", () => {
       await streamRes.text();
     }
 
+    it("stores an open chat's model pick and hands it to the next turn's acquire", async () => {
+      await deps.settingsRepo.set("enableModelSelector", true);
+      mockScriptedManager();
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      const send = (text: string) =>
+        app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+      const pick = (largeModelSelection: unknown) =>
+        app.request(`/chat/sessions/${sessionId}/model`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ largeModelSelection }),
+        });
+      await drainTurn(app, await send("first"));
+      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ selectionId: null }),
+      );
+
+      const picked = await pick("gpt-6-luna");
+      expect(picked.status).toBe(200);
+      await expect(picked.json()).resolves.toMatchObject({ largeModelSelection: "gpt-6-luna" });
+      await drainTurn(app, await send("second"));
+      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ selectionId: "gpt-6-luna" }),
+      );
+
+      // Auto clears the pick, and the next acquire clears it on a live session.
+      const cleared = await pick("auto");
+      await expect(cleared.json()).resolves.toMatchObject({ largeModelSelection: null });
+      await drainTurn(app, await send("third"));
+      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ selectionId: null }),
+      );
+
+      expect((await pick("gpt-99")).status).toBe(400);
+      expect((await pick(null)).status).toBe(400);
+      await deps.settingsRepo.set("enableModelSelector", false);
+      expect((await pick("gpt-6-luna")).status).toBe(409);
+      expect(await deps.webchatRepo.getSession(sessionId)).toMatchObject({
+        largeModelSelection: null,
+      });
+      const missing = await app.request("/chat/sessions/does-not-exist/model", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ largeModelSelection: "gpt-6-luna" }),
+      });
+      expect(missing.status).toBe(404);
+    });
+
     const handoffEvents = (toolUseId: string) =>
       async function* () {
         // Mirror the real MCP facade tool_result shape: the action's JSON is

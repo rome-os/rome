@@ -102,6 +102,15 @@ export function querySince(since: Date | undefined): Date {
   return new Date(Math.ceil(since.getTime() / 1000) * 1000);
 }
 
+/**
+ * The last whole second a query with `before` reads: the stores here keep
+ * seconds, so a message in that second was said before the instant only when
+ * the instant falls after the second starts.
+ */
+export function queryBefore(before: Date): Date {
+  return new Date((Math.ceil(before.getTime() / 1000) - 1) * 1000);
+}
+
 /** The number of messages a query asks for, defaulted and capped. */
 export function queryLimit(limit: number | undefined): number {
   if (limit === undefined || !Number.isFinite(limit)) return DEFAULT_QUERY_LIMIT;

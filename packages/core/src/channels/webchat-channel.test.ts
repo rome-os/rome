@@ -1,7 +1,7 @@
 // The dashboard chat is a channel Rome serves itself, with no Connection
 // behind it (docs/domains/connections.md#connection).
 
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
@@ -92,6 +92,32 @@ describe("webchat channel", () => {
     });
 
     expect(history).toHaveLength(2);
+  });
+
+  it("pages back from `before`, keeping the newest lines of the window", async () => {
+    await repo.createSession("sess-5", "Paging Session");
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      for (const [index, id] of ["msg-1", "msg-2", "msg-3", "msg-4"].entries()) {
+        rs.setSystemTime(new Date(Date.parse("2026-10-26T00:00:00Z") + index * 60_000));
+        await repo.addMessage(
+          id,
+          "sess-5",
+          "user",
+          JSON.stringify([{ type: "text", content: id }]),
+        );
+      }
+      rs.setSystemTime(new Date("2026-10-26T01:00:00Z"));
+      const page = await webchatChannel(repo).messages!.query({
+        chatId: "sess-5" as ChatId,
+        since: new Date("2026-10-25T00:00:00Z"),
+        before: new Date("2026-10-26T00:03:00Z"),
+        limit: 2,
+      });
+      expect(page.map((message) => message.messageId)).toEqual(["msg-3", "msg-2"]);
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("hears nothing through a port, and renders cards with no prompt context", () => {

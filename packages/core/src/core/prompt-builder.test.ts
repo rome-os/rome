@@ -26,6 +26,7 @@ rs.mock("../paths.js", () => ({
 
 import {
   buildInteractiveSurfaceGuidanceSection,
+  buildContinuationBlock,
   buildDeviceFolderBlock,
   buildThreadContextBlock,
   buildWorkspaceContextSection,
@@ -728,5 +729,41 @@ describe("buildDeviceFolderBlock", () => {
     });
     expect(block).toContain("(id d1)");
     expect(block?.match(/<\/device_folder>/g)).toHaveLength(1);
+  });
+});
+
+describe("buildContinuationBlock", () => {
+  const firstAt = new Date("2026-10-26T00:12:03.400Z");
+  const lastAt = new Date("2026-10-26T02:41:10.900Z");
+
+  it("names the gap and how to read it, without naming a channel", () => {
+    const block = buildContinuationBlock({
+      count: 14,
+      firstAt,
+      lastAt,
+      previousModel: "claude-sonnet-5-5",
+      canReadHistory: true,
+    });
+    expect(block).toBe(
+      [
+        '<continuation unseen_messages="14" from="2026-10-26T00:12:03Z" to="2026-10-26T02:41:10Z" previous_model="claude-sonnet-5-5">',
+        "This conversation has 14 earlier messages, from 2026-10-26T00:12:03Z to 2026-10-26T02:41:10Z, that are not in your context.",
+        'When the conversation needs them, read them with `system:fetch_channel_history`: pass this thread\'s channel and thread id, before "2026-10-26T02:41:11Z", and windowHours 3. Each call returns the newest messages before `before`; to read further back, pass the earliest time it returned as the next `before`.',
+        "</continuation>",
+      ].join("\n"),
+    );
+  });
+
+  it("leaves out the read hint for an agent that may not call the action", () => {
+    const block = buildContinuationBlock({
+      count: 1,
+      firstAt,
+      lastAt: firstAt,
+      canReadHistory: false,
+    });
+    expect(block).toContain("1 earlier message, from");
+    expect(block).toContain("that is not in your context");
+    expect(block).not.toContain("fetch_channel_history");
+    expect(block).not.toContain("previous_model");
   });
 });

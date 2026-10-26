@@ -4,7 +4,9 @@ description: >
   Fetch recent message history from a channel adapter.
   Pass threadId to fetch a specific thread, or omit it to fetch all accessible
   threads (supported by Discord: returns messages from all guild channels).
-  Returns a markdown-formatted summary grouped by thread. Pass
+  Returns the newest messages of the window, as a markdown-formatted summary
+  grouped by thread. Pass before (an ISO time) to read the window that ends
+  there, and page back by passing the earliest time a call returned. Pass
   includeMessages=true to additionally receive a structured `messages` array
   with per-message attachment metadata (url, fileName, mimeType, localPath).
 complexity: moderate

@@ -4045,13 +4045,14 @@ describe("AgentRunner", () => {
     });
 
     it("does not inject into a resumed session (the block is already in its history)", async () => {
-      // Pre-create the DB session so findReusableSession resolves it → isNewSession=false.
+      // A row whose provider thread the provider resumes already holds the block.
       const repo = new SessionsRepository(testDb.db);
-      await repo.create({
+      const id = await repo.create({
         agentName: "test-main",
         channelThreadKey: "webchat:tc-resumed",
         status: "active",
       });
+      await repo.setProviderInfo(id, "mock", "mock-thread-1", "mock-model");
       const runner = createRunner(alwaysResultProvider());
 
       const messages = await collectMessages(
@@ -4065,6 +4066,30 @@ describe("AgentRunner", () => {
       );
 
       expect(initUserPrompt(messages)).not.toContain("<thread_context>");
+    });
+
+    it("injects into a session whose row never recorded a provider thread", async () => {
+      // The provider resumes only a recorded thread, so this one starts new
+      // and has not seen the block.
+      const repo = new SessionsRepository(testDb.db);
+      await repo.create({
+        agentName: "test-main",
+        channelThreadKey: "webchat:tc-unthreaded",
+        status: "active",
+      });
+      const runner = createRunner(alwaysResultProvider());
+
+      const messages = await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "Continue",
+          channelThreadKey: "webchat:tc-unthreaded",
+          threadContext: webchatThreadContext,
+          workingDir: projectWorkingDir,
+        }),
+      );
+
+      expect(initUserPrompt(messages)).toContain("<thread_context>");
     });
 
     it("does not inject into subagent sessions", async () => {

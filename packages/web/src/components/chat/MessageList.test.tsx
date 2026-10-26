@@ -729,3 +729,66 @@ describe("timeline anchors", () => {
     expect(anchorIds(container)).toEqual(["u-dimmed"]);
   });
 });
+
+describe("MessageList model switch notice", () => {
+  it("shows a centered line naming the model the chat moved to", () => {
+    const turn = (turnId: string, model: string): ChatMessage[] => [
+      {
+        id: `u-${turnId}`,
+        sessionId: "s-1",
+        turnId,
+        role: "user",
+        content: `ask ${turnId}`,
+        createdAt: "2026-10-26T00:00:00.000Z",
+      },
+      {
+        id: `t-${turnId}`,
+        sessionId: "s-1",
+        turnId,
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        traceSummary: { distinctApps: [], totalSteps: 0, invocationCounts: {}, model },
+      },
+      {
+        id: `a-${turnId}`,
+        sessionId: "s-1",
+        turnId,
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: `reply ${turnId}` }]),
+        createdAt: "2026-10-26T00:00:00.000Z",
+      },
+    ];
+    const rows = buildRows(
+      [...turn("t1", "claude-sonnet-5-5"), ...turn("t2", "gpt-6-luna")],
+      new Map([["s-1", IDENTITY]]),
+      IDENTITY,
+      { runningTurnId: null, isStreaming: false },
+    );
+    render(
+      <ThemeProvider>
+        <MessageList
+          rows={rows}
+          live={{
+            isStreaming: false,
+            runningTurnId: null,
+            snapshot: null,
+            text: "",
+            identity: IDENTITY,
+          }}
+          contentRef={() => {}}
+          onOpenLiveTrace={() => {}}
+          onOpenStoredTrace={() => {}}
+          actions={{
+            onApprovalResolved: () => {},
+            onSubmitAppComponent: () => {},
+            onDismissAppComponent: () => {},
+            interactionResults: new Map(),
+          }}
+        />
+      </ThemeProvider>,
+    );
+    const notes = screen.getAllByRole("note");
+    expect(notes.map((note) => note.textContent)).toEqual(["Switched to GPT-6 Luna"]);
+  });
+});

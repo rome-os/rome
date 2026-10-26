@@ -26,6 +26,9 @@ A session remembers the concrete model that produced its history — the **sessi
 
 - A successful turn establishes or updates the pin. A pinned session never drifts to another model on its own. A session with no pin resolves from the agent's exact `modelId`, when configured, or its tier until its next successful turn records a pin.
 - Resolution precedence for a turn is **explicit guardian selection → session pin → agent modelId → agent tier**. An explicit model selection (the webchat model selector) wins over both pins, and the successful turn then re-pins the session to the model that actually ran. Choosing a model is therefore the rescue path for a session stranded by a pin whose model cannot run.
+- The webchat model selector stays available after a chat's first message. A pick is stored on the chat, and the next turn runs on it, also when the chat's session is already open. Auto clears the pick, so the session pin decides again.
+- A pick on the same provider continues the provider thread on the new model. A pick on another provider starts a new thread, which has seen none of the chat, so its first turn carries a [continuation](#continuation) notice.
+- The chat shows a short centered note before the first turn that ran on another model than the session's previous turn. It names the model that ran, as the turn's accounting records it, so two picks that a custom provider maps to one model show no note.
 - A pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection, or a new session whose configured model is available.
 - A new session — including a summoned or subagent session on a shared thread — resolves from its own agent's exact model or tier, because session lookup is agent-scoped. A fork inherits the live session's model unless its caller supplies a tier override, and never updates its source session's pin.
 - Changing an agent's configured `modelId` does not rewrite a saved session pin. The changed default applies to new or unpinned sessions.
@@ -36,6 +39,19 @@ A session remembers the concrete model that produced its history — the **sessi
 - **Provider pin** — an [agent](agents.md) may pin a *provider* while still letting a tier select the concrete model.
 - **Agent model pin** — `provider` with `modelId` supplies an exact default for a new or unpinned session. The session model pin records the model that produced existing history and takes precedence over that default.
 - **Model tier** — the portable agent-level default the session pin overrides once a turn has run.
+
+## Continuation
+
+Rome's transcript is the conversation, and a provider thread is a cache of it. A thread has not seen every chat message: a chat moved to another provider starts a new thread, a thread can be lost, and messages can reach the chat while no turn of the thread runs. The first turn that finds such a gap carries a `<continuation>` notice. It says how many messages the thread has not seen, from when to when, and the model the chat ran on before. When the agent may call `system:fetch_channel_history`, the notice also says how to read them. The agent reads them when the conversation needs them, so nothing grows the prompt unless it asks.
+
+**Contracts:**
+
+- A session records how far its provider thread has read the chat: the thread, the last turn it finished, and when. A turn with a result, interrupted ones included, moves that mark forward.
+- A gap is the guardian and agent messages after the mark that the thread did not take part in. The thread's own turns, the messages its tools wrote during them, and the current turn's input are not a gap. Trace rows never are.
+- A thread that starts in a session, the first one or one that replaced another, has read nothing of the chat, so its gap is the whole chat before it. Its first turn also carries the `<thread_context>` block.
+- The notice names no channel. The thread's channel and thread id are in its thread context, and `system:fetch_channel_history` pages back with `before`.
+- A deliberate reset (the chat-settings reset policy) starts the new generation's mark at the reset, so the notice does not undo the reset. A session row written before marks existed reads as having seen the chat its resumed thread holds.
+- Subagent sessions carry no notice.
 
 ## Turn
 

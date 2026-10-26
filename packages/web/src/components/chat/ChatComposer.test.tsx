@@ -1172,3 +1172,53 @@ describe("New chat draft", () => {
     expect(screen.getByRole("button", { name: "Remove skill" })).toBeTruthy();
   });
 });
+
+describe("composer model picker in an open chat", () => {
+  it("shows and changes the chat's own pick, and sends without one", async () => {
+    stubCoarsePointer(false);
+    const user = userEvent.setup();
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    const onChange = rs.fn();
+    const { fetchSpy } = renderComposer(
+      {
+        onSend,
+        showModelSelector: true,
+        chatModelSelection: { value: "gpt-6-luna", onChange },
+      },
+      { settings: { enableModelSelector: true, webchatLargeModel: "claude-opus-5-5" } },
+    );
+
+    const trigger = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => expect(trigger.textContent).toContain("GPT-6 Luna"));
+    await user.click(trigger);
+    await user.click(await screen.findByRole("option", { name: /Opus 5\.5/ }));
+
+    expect(onChange).toHaveBeenCalledWith("claude-opus-5-5");
+    // The chat stores its pick; the default for new chats is left alone.
+    expect(fetchSpy.mock.calls.some(([, init]) => init?.method && init.method !== "GET")).toBe(
+      false,
+    );
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][0].largeModelSelection).toBeUndefined();
+  });
+
+  it("sends a draft's pick with its first message", async () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer(
+      { onSend, showModelSelector: true },
+      { settings: { enableModelSelector: true, webchatLargeModel: "claude-opus-5-5" } },
+    );
+    const trigger = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => expect(trigger.textContent).toContain("Opus 5.5"));
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend.mock.calls[0][0].largeModelSelection).toBe("claude-opus-5-5");
+  });
+});

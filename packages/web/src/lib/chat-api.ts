@@ -135,6 +135,20 @@ export async function renameSession(sessionId: string, name: string): Promise<Ch
   return jsonOrThrow<ChatSession>(res);
 }
 
+/** Store the model an open chat runs on from its next turn. "auto" clears it. */
+export async function updateSessionModel(
+  sessionId: string,
+  largeModelSelection: string,
+): Promise<ChatSession> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/model`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ largeModelSelection }),
+  });
+  return jsonOrThrow<ChatSession>(res);
+}
+
 export async function getSession(sessionId: string): Promise<ChatSession | null> {
   const res = await fetch(`/api/chat/sessions/${sessionId}`, { credentials: "include" });
   if (res.status === 404) return null;
