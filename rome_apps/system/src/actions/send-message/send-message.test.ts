@@ -642,6 +642,12 @@ describe("send_message preview", () => {
     expect(action.preview!({ platform: "email", to: "a@b.com", text: "hi" })).toMatchObject({
       fields: [{ label: "Channel", value: "Email" }],
     });
+    expect(action.preview!({ platform: "agents", to: "Atlas", text: "hi" })).toMatchObject({
+      fields: [
+        { label: "Channel", value: "Agents" },
+        { label: "To", value: "Atlas" },
+      ],
+    });
   });
 
   it("falls back to the raw channel name for an unmapped adapter", () => {
