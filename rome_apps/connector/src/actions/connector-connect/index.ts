@@ -58,7 +58,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             status: "pending_interaction",
             interaction: {
               appId: "connector",
-              promptText: romeManagedConnectHint(toolkit),
+              promptText: `A connect card for ${toolkit} is shown. Ask the guardian to click Connect on the card to start authorization. If this surface does not display cards, connect ${toolkit} in Settings → Connections.`,
               render: { kind: "inline", componentId: "connect-card", props: { toolkit } },
             },
           };
