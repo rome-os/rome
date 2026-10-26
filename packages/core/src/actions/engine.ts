@@ -22,7 +22,7 @@ import type {
 } from "../db/repositories/action-executions.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
-import { actionExecutionContext } from "./context.js";
+import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../logger.js";
 import { currentSessionId } from "../telemetry-context.js";
@@ -2073,7 +2073,24 @@ export class ActionEngine {
     let preview: PreviewPayload | undefined;
     try {
       const action = this.registry.get(actionName);
-      preview = await action?.preview?.(args);
+      const previewStore: ActionExecutionStore = {
+        actionName,
+        executionId: context?.executionId ?? store.rootExecutionId,
+        rootExecutionId: store.rootExecutionId,
+        parentExecutionId: context?.parentExecutionId,
+        parentActionName: context?.parentActionName,
+        initiator: context?.initiator ?? "unknown",
+        actor: context?.actor,
+        callerAppId: context?.callerAppId,
+        engine: this,
+        channelContext: context?.channelContext,
+        sharedContext: context?.sharedContext,
+        sessionId: context?.sessionId,
+        turnId: context?.turnId,
+        agentName: context?.agentName,
+        channelThreadKey: context?.channelThreadKey,
+      };
+      preview = await actionExecutionContext.run(previewStore, () => action?.preview?.(args));
     } catch (previewErr) {
       log.warn("action preview renderer threw", {
         actionName,

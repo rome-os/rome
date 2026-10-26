@@ -461,6 +461,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         actionName,
         { invocationId },
         {
+          executionId: invocationId,
           actor: context?.actor,
           channelContext: context?.channelContext,
           sharedContext: context?.sharedContext,
@@ -594,6 +595,23 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         expectedStatus,
         executionApproval,
         "operation_not_found",
+      );
+    }
+    const grantBeforeClaim = await this.registry.grantOf(connection.id);
+    if (!grantBeforeClaim || grantBeforeClaim.state === "unauthorized") {
+      return await this.failUnclaimedInvocation(
+        invocation,
+        expectedStatus,
+        executionApproval,
+        "authorization_required",
+      );
+    }
+    if (grantBeforeClaim.state === "degraded") {
+      return await this.failUnclaimedInvocation(
+        invocation,
+        expectedStatus,
+        executionApproval,
+        "connection_unhealthy",
       );
     }
     const claimed = this.access.claimInvocationWithPolicy(
@@ -780,11 +798,10 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     if (invocation.status === "outcome_unknown") {
       return { ok: true, value: { status: "outcome_unknown", executionId: invocation.id } };
     }
-    if (
-      invocation.status === "ready" ||
-      invocation.status === "pending_approval" ||
-      invocation.status === "running"
-    ) {
+    if (invocation.status === "pending_approval") {
+      return failure("request_in_progress", "The original request is awaiting approval.");
+    }
+    if (invocation.status === "ready" || invocation.status === "running") {
       return failure("request_in_progress", "The original request is still in progress.", true);
     }
     if (

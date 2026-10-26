@@ -455,7 +455,7 @@ export class AppConnectionAccessRepository {
         .where(eq(connectionGrants.custody, invocation.connectionId))
         .limit(1)
         .get();
-      if (!policyCurrentForInvocation(policy, grant, invocation, approval, now)) return false;
+      if (!policyCurrentForInvocation(policy, grant, invocation, approval, now, true)) return false;
       const result = tx
         .update(appConnectionInvocations)
         .set({ status: "running", errorCode: null, updatedAt: now })
@@ -603,29 +603,73 @@ export class AppConnectionAccessRepository {
   async pruneExpiredData(before: Date): Promise<{ invocations: number; audits: number }> {
     return this.db.transaction((tx) => {
       const now = new Date();
-      tx.update(appConnectionInvocations)
-        .set({ status: "rejected", errorCode: "access_denied", input: null, updatedAt: now })
+      const stale = tx
+        .select()
+        .from(appConnectionInvocations)
         .where(
           and(
-            inArray(appConnectionInvocations.status, ["ready", "pending_approval"]),
+            inArray(appConnectionInvocations.status, ["ready", "pending_approval", "running"]),
             lt(appConnectionInvocations.updatedAt, before),
           ),
         )
-        .run();
-      tx.update(appConnectionInvocations)
-        .set({
-          status: "outcome_unknown",
-          errorCode: "outcome_unknown",
-          input: null,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(appConnectionInvocations.status, "running"),
-            lt(appConnectionInvocations.updatedAt, before),
-          ),
-        )
-        .run();
+        .all();
+      for (const invocation of stale) {
+        const wasRunning = invocation.status === "running";
+        const errorCode = wasRunning ? "outcome_unknown" : "access_denied";
+        const updated = tx
+          .update(appConnectionInvocations)
+          .set({
+            status: wasRunning ? "outcome_unknown" : "rejected",
+            errorCode,
+            input: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(appConnectionInvocations.id, invocation.id),
+              eq(appConnectionInvocations.status, invocation.status),
+            ),
+          )
+          .run();
+        if (Number(updated.changes ?? 0) === 0) continue;
+
+        const resumedAfterApproval =
+          wasRunning &&
+          invocation.sideEffects === "write" &&
+          Boolean(
+            tx
+              .select({ seq: appConnectionAudit.seq })
+              .from(appConnectionAudit)
+              .where(
+                and(
+                  eq(appConnectionAudit.appId, invocation.appId),
+                  eq(appConnectionAudit.executionId, invocation.id),
+                  eq(appConnectionAudit.approval, "pending"),
+                ),
+              )
+              .limit(1)
+              .get(),
+          );
+        tx.insert(appConnectionAudit)
+          .values({
+            appId: invocation.appId,
+            connectionId: invocation.connectionId,
+            identity: invocation.identity,
+            operation: invocation.operation,
+            accessRevision: invocation.accessRevision,
+            approval:
+              invocation.status === "pending_approval"
+                ? "pending"
+                : resumedAfterApproval
+                  ? "approved"
+                  : "not_required",
+            executionId: invocation.id,
+            requestIdHash: invocation.requestIdHash,
+            status: errorCode,
+            createdAt: now,
+          })
+          .run();
+      }
       const invocations = tx
         .delete(appConnectionInvocations)
         .where(
@@ -636,7 +680,10 @@ export class AppConnectionAccessRepository {
               "rejected",
               "outcome_unknown",
             ]),
-            lt(appConnectionInvocations.updatedAt, before),
+            or(
+              eq(appConnectionInvocations.sideEffects, "read-only"),
+              lt(appConnectionInvocations.updatedAt, before),
+            ),
           ),
         )
         .run();
@@ -658,11 +705,12 @@ function policyCurrentForInvocation(
   invocation: AppConnectionInvocationRecord,
   approval: AppConnectionApproval,
   now: Date,
+  allowDegraded = false,
 ): boolean {
   return Boolean(
     policy &&
       grant &&
-      grant.state === "authorized" &&
+      (grant.state === "authorized" || (allowDegraded && grant.state === "degraded")) &&
       policy.revokedAt === null &&
       (policy.expiresAt === null || policy.expiresAt > now) &&
       policy.revision === invocation.accessRevision &&

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, rs } from "@rstest/core";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { ChatId } from "@rome-os/app-runtime";
 import { ActionEngine } from "../actions/engine.js";
 import { sendApprovalCard } from "../actions/approval-card.js";
@@ -439,6 +439,7 @@ describe("App connection broker", () => {
       );
 
       expect(run.mock.calls[0]![2]).toMatchObject({
+        executionId: run.mock.calls[0]![1].invocationId,
         sessionId: "session-1",
         initiator: "app:app-a",
         callerAppId: "app-a",
@@ -492,7 +493,7 @@ describe("App connection broker", () => {
           requestId: "request-0001",
           input: { body: "secret-input", title: "Bound", workspaceId: "one" },
         }),
-      ).rejects.toMatchObject({ detail: { code: "request_in_progress", retryable: true } });
+      ).rejects.toMatchObject({ detail: { code: "request_in_progress", retryable: false } });
       const bypass = await appContext("app-a", h).runAction(
         "core:app_connection_write_without_approval",
         { invocationId: result.executionId },
@@ -643,8 +644,14 @@ describe("App connection broker", () => {
       expect(run).toHaveBeenCalledWith(
         "core:app_connection_write",
         expect.objectContaining({ invocationId: expect.any(String) }),
-        { ...origin, initiator: "app:app-a", callerAppId: "app-a" },
+        {
+          ...origin,
+          executionId: expect.any(String),
+          initiator: "app:app-a",
+          callerAppId: "app-a",
+        },
       );
+      expect(run.mock.calls[0]![2]?.executionId).toBe(run.mock.calls[0]![1].invocationId);
       expect(h.approvalMessages).toEqual([
         expect.objectContaining({
           parts: [
@@ -856,6 +863,54 @@ describe("App connection broker", () => {
         }),
       ).rejects.toMatchObject({ detail: { code: "access_denied" } });
       expect(h.invocations).toHaveLength(0);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("reports a grant degraded while approval was pending as unhealthy", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+        approval: "required",
+      });
+      const pending = await h.broker.forApp("app-a").invoke({
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.create",
+        requestId: "request-degraded-during-approval",
+        input: { workspaceId: "one", title: "Must not run", body: "private" },
+      });
+      if (pending.status !== "pending_approval") throw new Error("expected approval");
+      const claim = h.access.claimInvocationWithPolicy.bind(h.access);
+      rs.spyOn(h.access, "claimInvocationWithPolicy").mockImplementationOnce(
+        (invocation, expectedStatus, approval, now) => {
+          h.db
+            .update(connectionGrants)
+            .set({ state: "degraded" })
+            .where(eq(connectionGrants.custody, connection.id))
+            .run();
+          return claim(invocation, expectedStatus, approval, now);
+        },
+      );
+
+      const approvalAction = h.actionRegistry.get("core:app_connection_write")!;
+      await expect(
+        approvalAction.execute({ invocationId: pending.executionId }),
+      ).resolves.toMatchObject({
+        status: "error",
+        error: "The connection is unhealthy.",
+      });
+      expect(h.invocations).toHaveLength(0);
+      expect(await h.access.getInvocation(pending.executionId)).toMatchObject({
+        status: "failed",
+        errorCode: "connection_unhealthy",
+        input: null,
+      });
     } finally {
       h.close();
     }
@@ -1442,10 +1497,23 @@ describe("App connection broker", () => {
         accessRevision: 1,
       });
       await h.access.transitionInvocation("stale-pending", ["ready"], "pending_approval");
+      h.access.createOrGetInvocation({
+        id: "stale-running",
+        appId: "idle-app",
+        connectionId: "connection",
+        identity: "account",
+        operation: "documents.create",
+        requestIdHash: "running-request-hash",
+        inputHash: "running-input-hash",
+        input: { body: "private" },
+        sideEffects: "write",
+        accessRevision: 1,
+      });
+      await h.access.transitionInvocation("stale-running", ["ready"], "running");
       await h.db
         .update(appConnectionInvocations)
         .set({ updatedAt: new Date(0) })
-        .where(eq(appConnectionInvocations.id, "stale-pending"));
+        .where(inArray(appConnectionInvocations.id, ["stale-pending", "stale-running"]));
 
       await h.access.pruneExpiredData(new Date(1_000));
 
@@ -1454,6 +1522,51 @@ describe("App connection broker", () => {
         errorCode: "access_denied",
         input: null,
       });
+      expect(await h.access.getInvocation("stale-running")).toMatchObject({
+        status: "outcome_unknown",
+        errorCode: "outcome_unknown",
+        input: null,
+      });
+      expect(await h.access.listAuditForApp("idle-app")).toEqual([
+        expect.objectContaining({
+          executionId: "stale-pending",
+          approval: "pending",
+          status: "access_denied",
+        }),
+        expect.objectContaining({
+          executionId: "stale-running",
+          approval: "not_required",
+          status: "outcome_unknown",
+        }),
+      ]);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("prunes completed read invocation rows without waiting for retention", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.get",
+      });
+      const result = await h.broker.forApp("app-a").invoke({
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.get",
+        input: { workspaceId: "one", documentId: "doc" },
+      });
+      if (result.status !== "ok") throw new Error("expected success");
+
+      expect(await h.access.pruneExpiredData(new Date(0))).toEqual({
+        invocations: 1,
+        audits: 0,
+      });
+      expect(await h.access.getInvocation(result.executionId)).toBeNull();
+      expect(await h.access.listAuditForApp("app-a")).toHaveLength(1);
     } finally {
       h.close();
     }

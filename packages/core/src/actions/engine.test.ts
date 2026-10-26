@@ -7,7 +7,7 @@ import {
   type ActionRunContext,
   type ApprovalCreatedEvent,
 } from "./engine.js";
-import { actionExecutionContext } from "./context.js";
+import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import { hashArgs, replayContext, type JournalEntry } from "./replay.js";
 import { ActionRegistryImpl } from "./registry.js";
 import type { MemoryHeadroom } from "./memory-headroom.js";
@@ -1966,6 +1966,43 @@ describe("ActionEngine", () => {
           channelContext: { channel: "webchat", threadId: "t-2", channelUserId: "u-2" },
         },
       ]);
+    });
+
+    it("renders a nested App approval preview under the callee identity", async () => {
+      const previewContexts: Array<ActionExecutionStore | undefined> = [];
+      await setup({
+        actions: [
+          {
+            ...buildAction("app-b:write", { requiresApproval: true }),
+            preview: () => {
+              previewContexts.push(actionExecutionContext.getStore());
+              return {
+                kind: "generic" as const,
+                title: "App B write",
+                summary: "nested approval card",
+              };
+            },
+          },
+          buildAction("app-a:start", {
+            execute: async () => {
+              await callAction("app-b:write", { target: "prod" }, { callerAppId: "app-a" });
+              return { status: "ok" };
+            },
+          }),
+        ],
+      });
+
+      const result = await rome.actionEngine.run("app-a:start", {});
+
+      if (result.status !== "pending_approval") {
+        throw new Error(`expected pending_approval, got ${result.status}`);
+      }
+      expect(previewContexts[0]).toMatchObject({
+        actionName: "app-b:write",
+        callerAppId: "app-a",
+        parentActionName: "app-a:start",
+      });
+      expect(previewContexts[0]?.actionName).not.toBe("app-a:start");
     });
 
     it("records pending_approval entry in journal for requiresApproval sub-action", async () => {
