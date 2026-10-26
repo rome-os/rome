@@ -155,11 +155,15 @@ describe("WorkerRpcServer App connection identity", () => {
       ok: true,
       value: { connections: [{ connectionId: appId }] },
     }));
+    const invoke = rs.fn(async () => ({
+      ok: true,
+      value: { status: "ok", executionId: "connection-execution" },
+    }));
     const appConnections = {
       list,
       describe: rs.fn(),
       operations: rs.fn(),
-      invoke: rs.fn(),
+      invoke,
     };
     const { server } = makeServer({
       appConnections,
@@ -171,6 +175,12 @@ describe("WorkerRpcServer App connection identity", () => {
       executionId: "execution-1",
       rootExecutionId: "execution-1",
       initiator: "app:app-a",
+      actor: { kind: "guardian", userId: "guardian", via: "cookie" } as const,
+      channelContext: { channel: "webchat", threadId: "thread-1", channelUserId: "guardian" },
+      sessionId: "session-1",
+      turnId: "turn-1",
+      agentName: "main",
+      channelThreadKey: "webchat:thread-1",
     };
 
     const result = await actionExecutionContext.run(store, () =>
@@ -198,6 +208,27 @@ describe("WorkerRpcServer App connection identity", () => {
       value: { connections: [{ connectionId: "app-b" }] },
     });
     expect(list).toHaveBeenLastCalledWith("app-b", { limit: 1 });
+
+    await actionExecutionContext.run(store, () =>
+      worker.call("connections.app.invoke", {
+        connectionId: "connection-1",
+        identity: "account",
+        operation: "documents.create",
+        requestId: "request-1",
+      }),
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      "app-b",
+      expect.objectContaining({ operation: "documents.create" }),
+      expect.objectContaining({
+        actor: store.actor,
+        channelContext: store.channelContext,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        agentName: "main",
+        channelThreadKey: "webchat:thread-1",
+      }),
+    );
   });
 
   it("denies a connection RPC outside an App-owned action", async () => {

@@ -351,6 +351,54 @@ describe("App connection broker", () => {
     }
   });
 
+  it("preserves the originating session when a worker requests approval", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+        approval: "required",
+      });
+      const run = rs.spyOn(h.engine, "run");
+      const origin = {
+        actor: { kind: "guardian", userId: "guardian", via: "cookie" } as const,
+        channelContext: {
+          channel: "webchat",
+          threadId: "thread-1",
+          channelUserId: "guardian",
+        },
+        sharedContext: { locale: "zh-CN" },
+        sessionId: "session-1",
+        turnId: "turn-1",
+        agentName: "main",
+        channelThreadKey: "webchat:thread-1",
+      };
+
+      const result = await h.broker.invoke(
+        "app-a",
+        {
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.create",
+          requestId: "request-with-origin",
+          input: { workspaceId: "one", title: "Routed", body: "content" },
+        },
+        origin,
+      );
+
+      expect(result).toMatchObject({ ok: true, value: { status: "pending_approval" } });
+      expect(run).toHaveBeenCalledWith(
+        "core:app_connection_write",
+        expect.objectContaining({ invocationId: expect.any(String) }),
+        { ...origin, initiator: "app:app-a", callerAppId: "app-a" },
+      );
+    } finally {
+      h.close();
+    }
+  });
+
   it("expires and revokes grants without leaving captured authority live", async () => {
     const h = harness();
     try {

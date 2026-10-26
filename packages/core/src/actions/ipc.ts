@@ -14,7 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { context, propagation, ROOT_CONTEXT } from "@opentelemetry/api";
 import { createLogger } from "../logger.js";
-import { actionExecutionContext } from "./context.js";
+import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 
 const log = createLogger("ipc");
 
@@ -31,7 +31,20 @@ export interface IpcRequestMessage {
   traceCarrier?: Record<string, string>;
   /** Host-consumed caller binding captured by the Core IPC client. */
   callerActionName?: string;
+  /** Host-captured origin metadata used to route approval and continuation. */
+  callerActionContext?: IpcCallerActionContext;
 }
+
+export type IpcCallerActionContext = Pick<
+  ActionExecutionStore,
+  | "actor"
+  | "channelContext"
+  | "sharedContext"
+  | "sessionId"
+  | "turnId"
+  | "agentName"
+  | "channelThreadKey"
+>;
 
 export interface IpcResponseMessage {
   type: "rpc_response";
@@ -137,6 +150,8 @@ export interface IpcCallContext {
   openStream<T>(name: string): IpcOutboundStream<T>;
   /** The action executing at the Core-owned worker IPC boundary. */
   callerActionName?: string;
+  /** Origin metadata captured beside `callerActionName`. */
+  callerActionContext?: IpcCallerActionContext;
 }
 
 export interface IpcTransport {
@@ -230,8 +245,19 @@ export class IpcRpc {
     propagation.inject(context.active(), carrier);
     const request: IpcRequestMessage = { type: "rpc_request", reqId, method, params };
     if (Object.keys(carrier).length > 0) request.traceCarrier = carrier;
-    const callerActionName = actionExecutionContext.getStore()?.actionName;
-    if (callerActionName) request.callerActionName = callerActionName;
+    const actionContext = actionExecutionContext.getStore();
+    if (actionContext?.actionName) {
+      request.callerActionName = actionContext.actionName;
+      request.callerActionContext = {
+        actor: actionContext.actor,
+        channelContext: actionContext.channelContext,
+        sharedContext: actionContext.sharedContext,
+        sessionId: actionContext.sessionId,
+        turnId: actionContext.turnId,
+        agentName: actionContext.agentName,
+        channelThreadKey: actionContext.channelThreadKey,
+      };
+    }
     const timeoutMs =
       options?.timeoutMs === null
         ? null
@@ -341,6 +367,7 @@ export class IpcRpc {
     const ctx: IpcCallContext = {
       openStream: <T>(name: string): IpcOutboundStream<T> => this.openStream<T>(name),
       callerActionName: message.callerActionName,
+      callerActionContext: message.callerActionContext,
     };
     // Transport callbacks fire in the async context captured when the channel
     // was created: for a pooled worker, the request that forked it. Extracting

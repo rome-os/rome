@@ -396,6 +396,7 @@ export class WorkerRpcServer {
         return await this.services.appConnections.invoke(
           appId,
           parseParams("connections.app.invoke", AppConnectionsInvokeParams, params),
+          context?.callerActionContext,
         );
     }
   }

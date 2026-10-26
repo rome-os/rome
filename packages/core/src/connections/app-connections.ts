@@ -12,7 +12,7 @@ import type {
   AppConnectionsCapability,
 } from "@rome-os/app-runtime";
 import { AppConnectionError } from "@rome-os/app-runtime";
-import type { ActionEngine } from "../actions/engine.js";
+import type { ActionEngine, ActionRunContext } from "../actions/engine.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import { actionExecutionContext } from "../actions/context.js";
 import type { CatalogEvent } from "../apps/state.js";
@@ -43,6 +43,17 @@ export type AppConnectionBrokerResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: AppConnectionErrorBody };
 
+export type AppConnectionInvocationContext = Pick<
+  ActionRunContext,
+  | "actor"
+  | "channelContext"
+  | "sharedContext"
+  | "sessionId"
+  | "turnId"
+  | "agentName"
+  | "channelThreadKey"
+>;
+
 export interface AppConnectionBrokerPort {
   list(
     appId: string,
@@ -65,6 +76,7 @@ export interface AppConnectionBrokerPort {
       input?: unknown;
       requestId?: string;
     },
+    context?: AppConnectionInvocationContext,
   ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>>;
 }
 
@@ -294,6 +306,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       input?: unknown;
       requestId?: string;
     },
+    context?: AppConnectionInvocationContext,
   ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>> {
     const invocationId = randomUUID();
     let requestIdHash: string | null = null;
@@ -387,7 +400,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       result = await this.actionEngine.run(
         actionName,
         { invocationId },
-        { initiator: `app:${appId}`, callerAppId: appId },
+        { ...context, initiator: `app:${appId}`, callerAppId: appId },
       );
     } catch {
       if (sideEffects === "write") {
