@@ -585,6 +585,7 @@ describe("App connection broker", () => {
         { displayName: "docs" },
       );
       expect(await facade.list()).toEqual({ connections: [] });
+      const invocationCount = (await h.db.select().from(appConnectionInvocations)).length;
       await expect(
         facade.invoke({
           connectionId: connection.id,
@@ -593,6 +594,7 @@ describe("App connection broker", () => {
           input: { workspaceId: "one", documentId: "doc" },
         }),
       ).rejects.toMatchObject({ detail: { code: "access_denied" } });
+      expect(await h.db.select().from(appConnectionInvocations)).toHaveLength(invocationCount);
       await grant(h, {
         appId: "app-a",
         connectionId: connection.id,

@@ -360,6 +360,16 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     if (!connection) {
       return await denied(failure("connection_not_found", "The connection is unavailable."));
     }
+    const grant = await this.registry.getLedger().getGrant(connection.id);
+    if (!policyMatchesGrant(activePolicy, grant)) {
+      return await denied(failure("access_denied", "The operation is not granted."));
+    }
+    if (grant?.state === "unauthorized") {
+      return await denied(failure("authorization_required", "The connection needs authorization."));
+    }
+    if (grant?.state === "degraded") {
+      return await denied(failure("connection_unhealthy", "The connection is not healthy."));
+    }
     const supported = this.supportedOperations(connection, input.identity);
     if (!supported.ok) return await denied(supported);
     const operation = supported.value.find((candidate) => candidate.name === input.operation);

@@ -248,15 +248,17 @@ export class IpcRpc {
     const actionContext = actionExecutionContext.getStore();
     if (actionContext?.actionName) {
       request.callerActionName = actionContext.actionName;
-      request.callerActionContext = {
-        actor: actionContext.actor,
-        channelContext: actionContext.channelContext,
-        sharedContext: actionContext.sharedContext,
-        sessionId: actionContext.sessionId,
-        turnId: actionContext.turnId,
-        agentName: actionContext.agentName,
-        channelThreadKey: actionContext.channelThreadKey,
-      };
+      if (method.startsWith("connections.app.")) {
+        request.callerActionContext = {
+          actor: actionContext.actor,
+          channelContext: actionContext.channelContext,
+          sharedContext: actionContext.sharedContext,
+          sessionId: actionContext.sessionId,
+          turnId: actionContext.turnId,
+          agentName: actionContext.agentName,
+          channelThreadKey: actionContext.channelThreadKey,
+        };
+      }
     }
     const timeoutMs =
       options?.timeoutMs === null
