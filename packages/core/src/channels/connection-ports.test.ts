@@ -350,18 +350,26 @@ describe("connection ports for a service's later channels", () => {
       [first.id, "fake-telegram"],
       [second.id, "fake-telegram-2"],
     ]);
+    // Only the second has reported the account it reaches.
+    const account = { platform: "telegram", id: "8123" };
     const deps: ConnectionPortsDeps = {
       registry,
       channelOf: (connection) => names.get(connection.id) ?? connection.connectionKind,
+      accountOf: (connectionId) => (connectionId === second.id ? account : null),
     };
     const ports = {
       first: connectionPorts(deps, "fake-telegram"),
       second: connectionPorts(deps, "fake-telegram", "fake-telegram-2"),
     };
-    const heard: Array<{ channel: string; connectionId: string }> = [];
+    const heard: Array<{ channel: string; account?: unknown; connectionId: string }> = [];
     for (const port of Object.values(ports)) {
       port?.inbound?.subscribe(async (event) => {
-        heard.push({ channel: event.message.channel, connectionId: event.ref.connectionId });
+        const { channel, account } = event.message;
+        heard.push({
+          channel,
+          ...(account ? { account } : {}),
+          connectionId: event.ref.connectionId,
+        });
       });
     }
     await registry.confer(first.connectionKind, first.id, "bot", fx.validCredential());
@@ -370,8 +378,12 @@ describe("connection ports for a service's later channels", () => {
     const secondTalker = fx.talkerFactory.instances.at(-1)!;
 
     secondTalker.state.deliver?.({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
+    firstTalker.state.deliver?.({ ...said("m2", "dm-1", 0), channel: "fake-telegram" });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(heard).toEqual([{ channel: "fake-telegram-2", connectionId: second.id }]);
+    expect(heard).toEqual([
+      { channel: "fake-telegram-2", account, connectionId: second.id },
+      { channel: "fake-telegram", connectionId: first.id },
+    ]);
 
     await ports.second?.send?.send("dm-1" as ChatId, { text: "hi" });
     expect(secondTalker.state.sends).toHaveLength(1);

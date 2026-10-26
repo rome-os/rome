@@ -9,6 +9,7 @@
  */
 
 import type {
+  Account,
   ChannelActivity,
   ChannelInbound,
   ChannelInboundMedia,
@@ -56,6 +57,10 @@ export interface ConnectionPortsDeps {
   pacing?: ConnectionPacing;
   /** Which Connections the inbound port hears. Absent, every one is heard. */
   listening?: InboundListening;
+  /** The account each Connection reaches, which an inbound message names as
+   *  the one it arrived on. Absent, or null for a Connection, a message names
+   *  none. */
+  accountOf?: (connectionId: string) => Account | null;
 }
 
 /**
@@ -442,10 +447,16 @@ function connectionInbound(backing: Backing): ChannelInbound {
     async (message: ChannelMessage): Promise<void> => {
       if (!isAnswerable(message)) return;
       // A talker delivers the channel's own record, inbound, named after its
-      // connection kind. The event names the channel it arrived on.
+      // connection kind. The event names the channel and the account it
+      // arrived on.
+      const account = deps.accountOf?.(connectionId) ?? null;
       const event: InboundEvent = {
         kind: "message",
-        message: message.channel === channel ? message : { ...message, channel },
+        message: {
+          ...message,
+          channel,
+          ...(account ? { account } : {}),
+        },
         ref: { connectionId, chatId: message.chatId },
       };
       // A Connection id is a UUID, so the first colon ends it.

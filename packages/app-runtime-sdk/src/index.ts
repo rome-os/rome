@@ -1693,6 +1693,18 @@ export interface ChatRef {
   chatId: ChatId;
 }
 
+/**
+ * An account: the platform it is on and the platform's own id for it, such as
+ * `{ platform: "telegram", id: "8123456789" }`. Two accounts are the same
+ * account when both are the same. An app names one of Rome's accounts this way
+ * to send as it or read what was said on it; {@link ChannelsService.list}
+ * answers each of Rome's accounts.
+ */
+export interface Account {
+  platform: string;
+  id: string;
+}
+
 export interface ChatDescriptor {
   ref: ChatRef;
   /** The kind of connection the chat is reached through, such as `telegram_user`. */
@@ -1719,6 +1731,10 @@ export interface ChatDescriptor {
 export interface ChannelMessage {
   /** The channel's name, as every stored row and link spells it. */
   channel: string;
+  /** Rome's account that carried the message: the one it arrived on or was
+   *  sent as. Absent where Rome does not know the account, such as on a
+   *  channel Rome serves itself, or from a host that predates accounts. */
+  account?: Account;
   direction: "inbound" | "outbound";
   messageId: string;
   chatId: ChatId;
@@ -1764,6 +1780,11 @@ export interface ChannelMessageQuery {
 export interface ChannelSummary {
   /** The channel's name, as every stored row and link spells it. */
   name: string;
+  /** Rome's account this channel is, to pass to `send` and `query`. Absent
+   *  until the account's connection reports which account it reaches, for a
+   *  channel Rome serves itself such as `webchat`, and from a host that
+   *  predates accounts. Such a channel is addressed by its `name`. */
+  account?: Account;
   /** The platform the channel is an account on, such as `telegram`. Rome can
    *  hold several accounts on one platform, each its own channel: a Telegram
    *  bot and a signed-in Telegram are both on `telegram`. A channel named after
@@ -1786,19 +1807,28 @@ export interface ChannelSummary {
  * it subscribes through.
  */
 export interface ChannelsService {
-  /** Every channel this Rome has, and whether a Connection backs each. */
+  /** Every channel this Rome has, the account each is, and whether a
+   *  Connection backs each. Rome's accounts on a platform are the channels
+   *  whose `platform` it is. */
   list(): Promise<ChannelSummary[]>;
-  /** Send on a channel, through the Connection backing it. Rejects when no
-   *  Connection backs the channel. */
-  send(channel: string, chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
+  /** Send as one of Rome's accounts, through the Connection that reaches it.
+   *  Rejects when no Connection reaches the account. A channel's name in
+   *  place of the account sends on that channel, as a host that predates
+   *  accounts takes it; such a host rejects an account. */
+  send(
+    account: Account | string,
+    chatId: ChatId,
+    message: OutgoingMessage,
+  ): Promise<MessageReceipt>;
   /**
-   * The channel's `messages.query`: its newest messages, newest first.
+   * What was said on one of Rome's accounts: its newest messages, newest
+   * first. A channel's name in place of the account reads that channel.
    *
-   * A channel read live through its Connection shares one read for 30 seconds
-   * among the queries over the same window, so a message just sent through
-   * `send` may not appear until that read expires.
+   * An account read live through its Connection shares one read for 30
+   * seconds among the queries over the same window, so a message just sent
+   * through `send` may not appear until that read expires.
    */
-  query(channel: string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
+  query(account: Account | string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
 }
 
 /** Exact provider-neutral chat command recognized before an agent turn. */
@@ -1978,20 +2008,21 @@ export interface ChannelMessageHookDeps {
    *  bot, in place. Read it at each `register()` rather than keep a copy. */
   channels: readonly Channel[];
   /**
-   * The agent of the account carried by the channel named `channelName`, read
-   * when each message arrives, since switching the agent changes it on the
+   * The agent of one of Rome's accounts, read when each message arrives, since switching the agent changes it on the
    * same channel:
    * - a canonical agent id (`<app-id>:<local-name>`, `core:main` for main):
    *   that agent answers, except in a group or channel that chose its own agent;
    * - null: the account takes an agent but has none, or that agent is not
    *   loaded, so nothing answers;
-   * - undefined: the channel takes no agent, such as webchat or email, and its
+   * - undefined: the account takes no agent, such as webchat or email, and its
    *   conversations choose their agent, main by default.
-   * A host that predates account agents passes neither `accountAgentOf` nor
-   * `linkedAgentOf`, which reads as undefined for every channel. A host that
-   * passes only `linkedAgentOf` answers the same through it.
+   * Pass the message's {@link ChannelMessage.account}, or the channel's name
+   * where it has none. A host that predates accounts answers only a channel's
+   * name. A host that predates account agents passes neither `accountAgentOf`
+   * nor `linkedAgentOf`, which reads as undefined for every channel. A host
+   * that passes only `linkedAgentOf` answers the same through it.
    */
-  accountAgentOf?: (channelName: string) => string | null | undefined;
+  accountAgentOf?: (account: Account | string) => string | null | undefined;
   /** @deprecated Use `accountAgentOf`, which answers the same. */
   linkedAgentOf?: (channelName: string) => string | null | undefined;
 }

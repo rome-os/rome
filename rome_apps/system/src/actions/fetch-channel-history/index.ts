@@ -8,6 +8,7 @@ import type {
   ChannelsService,
   ChatId,
 } from "@rome-os/app-runtime";
+import { addressOf, romeAccountNamed } from "../rome-account.js";
 
 const log = createAppLogger("fetch_channel_history");
 
@@ -142,7 +143,7 @@ export function createAction(
         channel: {
           type: "string",
           description:
-            'Channel name, e.g. "discord", "telegram", "telegram_user", "whatsapp", "wechat", "email"',
+            'The account to read: the channel a message arrived on, such as "telegram_user" or a Feishu account\'s id, or a platform such as "whatsapp" or "email", which reads Rome\'s account there. A platform where Rome has several accounts is refused, and the error names them.',
         },
         threadId: {
           type: "string",
@@ -194,14 +195,20 @@ export function createAction(
         status: "error",
         error: `Channel "${channel}" is not configured or not running.`,
       };
-      if (!(await channels.list()).some((item) => item.name === channel)) return notConfigured;
+      let target: Awaited<ReturnType<typeof romeAccountNamed>>;
+      try {
+        target = await romeAccountNamed(channels, channel);
+      } catch (err) {
+        return { status: "error", error: err instanceof Error ? err.message : String(err) };
+      }
+      if (!target) return notConfigured;
 
       log.info("fetching channel history", { channel, threadId, windowHours, limit, paging });
 
       let messages: ChannelMessage[];
       let nextCursor: string | null = null;
       try {
-        const page = await channels.query(channel, {
+        const page = await channels.query(addressOf(target), {
           ...(threadId ? { chatId: threadId as ChatId } : {}),
           // With no bound, the epoch: a channel defaults a missing `since` to
           // the last day.

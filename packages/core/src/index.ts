@@ -91,7 +91,13 @@ import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./channels/webchat-channel.js";
 import { claimChannels, recordChannelAccounts } from "./channels/claim-channels.js";
 import { domainOf, domainOfGrant } from "./channels/platform.js";
-import { AccountListening, accountAgentResolver, byChannel } from "./channels/account-agents.js";
+import {
+  AccountListening,
+  accountAgentResolver,
+  byAccount,
+  byChannel,
+} from "./channels/account-agents.js";
+import { romeAccounts } from "./channels/rome-accounts.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
@@ -402,8 +408,12 @@ async function main() {
   // with an account that came before it.
   const talks = (connectionKind: string) =>
     connectionRegistry.getDescriptor(connectionKind)?.capabilities.talker !== undefined;
+  const connectionsRepository = new DrizzleConnectionsRepository(db);
+  // Rome's accounts, by the platform and the platform's id, and the
+  // connections that reach them.
+  const accounts = romeAccounts(connectionsRepository);
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
-    repository: new DrizzleConnectionsRepository(db),
+    repository: connectionsRepository,
     onEvent: (tx, event) => {
       const { connection } = event;
       switch (event.kind) {
@@ -477,6 +487,7 @@ async function main() {
     channelOf,
     platformOf: (name: string) => channelRecords.platformOf(name),
     pacing: replyPacing,
+    accounts,
   });
   // The agents this Rome can message, one read for the People page and for
   // sending by name.
@@ -1298,8 +1309,10 @@ async function main() {
   // Register every built-in descriptor now (before load()/import), threading the
   // runtime deps the factories need from here where the repos/adapters exist.
   const accountAgentOf = accountAgentResolver(accountAgents, agentLoader);
-  // The hook still names an account by its channel.
+  // A hook names the account a message arrived on, or its channel on a host
+  // that predates accounts.
   const channelAgentOf = byChannel(channelRecords, accountAgentOf);
+  const hookAgentOf = byAccount(accounts, accountAgentOf, channelAgentOf);
   const { RomeCloudMailProvider } = await import("./lib/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
@@ -1351,6 +1364,7 @@ async function main() {
       channelOf,
       pacing: replyPacing,
       listening: accountListening,
+      accountOf: (connectionId) => accounts.accountOf(connectionId),
     },
     connectionAccounts: {
       [AGENTS_KIND]: agentsAccounts(listedAgents),
@@ -1388,8 +1402,8 @@ async function main() {
         conversationSettings: appChatSettings,
         chatStop: hookChatStop,
         channels: hookChannels,
-        accountAgentOf: channelAgentOf,
-        linkedAgentOf: channelAgentOf,
+        accountAgentOf: hookAgentOf,
+        linkedAgentOf: hookAgentOf,
       });
       if (loadedHook) {
         messageHook = loadedHook;
@@ -1430,8 +1444,8 @@ async function main() {
           conversationSettings: appChatSettings,
           chatStop: hookChatStop,
           channels: hookChannels,
-          accountAgentOf: channelAgentOf,
-          linkedAgentOf: channelAgentOf,
+          accountAgentOf: hookAgentOf,
+          linkedAgentOf: hookAgentOf,
         },
         getCurrent: () => messageHook,
         setCurrent: (hook) => {
@@ -1452,6 +1466,7 @@ async function main() {
         channelOf,
         pacing: replyPacing,
         listening: accountListening,
+        accountOf: (connectionId) => accounts.accountOf(connectionId),
         channels,
       },
       connection,

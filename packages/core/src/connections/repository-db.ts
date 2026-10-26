@@ -150,6 +150,36 @@ export class DrizzleConnectionsRepository implements ConnectionsRepository {
     return rows[0]?.id ?? null;
   }
 
+  /** The account `id`'s grant reaches as the store records it, or null when
+   *  the grant is unauthorized or records none. Read in place, for a caller
+   *  that answers per message. */
+  accountOf(id: ConnectionId): GrantAccount | null {
+    const row = this.db
+      .select({ platform: connectionGrants.platform, accountId: connectionGrants.accountId })
+      .from(connectionGrants)
+      .where(and(eq(connectionGrants.custody, id), ne(connectionGrants.state, "unauthorized")))
+      .get();
+    if (!row?.platform || !row.accountId) return null;
+    return { platform: row.platform, accountId: row.accountId };
+  }
+
+  /** The connection whose grant reaches `account` as the store records it, or
+   *  null. The store's unique index on the account lets at most one hold it. */
+  holderOf(account: GrantAccount): ConnectionId | null {
+    const row = this.db
+      .select({ id: connectionGrants.custody })
+      .from(connectionGrants)
+      .where(
+        and(
+          eq(connectionGrants.platform, account.platform),
+          eq(connectionGrants.accountId, account.accountId),
+          ne(connectionGrants.state, "unauthorized"),
+        ),
+      )
+      .get();
+    return row?.id ?? null;
+  }
+
   async heldWithoutAccount(exceptId: ConnectionId): Promise<GrantRecord[]> {
     const rows = await this.db
       .select()

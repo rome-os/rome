@@ -124,8 +124,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     }
 
     // Read per message, since switching the agent changes it on the same
-    // channel. `/stop` above still reaches a turn that started before an unlink.
-    const accountAgent = this.options.accountAgentOf?.(service);
+    // account. `/stop` above still reaches a turn that started before an
+    // unlink. A host that predates accounts names none, and answers the channel.
+    const accountAgent = this.options.accountAgentOf?.(message.account ?? service);
     if (accountAgent === null) {
       log.debug("account has no agent; not answering", {
         service,
@@ -280,6 +281,15 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
   }
 }
 
+/** A host that passes only `linkedAgentOf` predates accounts, so its messages
+ *  name none and the hook asks it by channel name alone. */
+function byChannelName(
+  linkedAgentOf: ChannelMessageHookDeps["linkedAgentOf"],
+): ChannelMessageHookDeps["accountAgentOf"] {
+  if (!linkedAgentOf) return undefined;
+  return (target) => (typeof target === "string" ? linkedAgentOf(target) : undefined);
+}
+
 /** A host handed the hook no `channels`, so it would hear nothing. */
 export class MissingChannelsError extends Error {
   constructor() {
@@ -299,6 +309,6 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
     deps.chatSettings ?? deps.conversationSettings,
     deps.chatStop,
     deps.channels,
-    { accountAgentOf: deps.accountAgentOf ?? deps.linkedAgentOf },
+    { accountAgentOf: deps.accountAgentOf ?? byChannelName(deps.linkedAgentOf) },
   );
 }

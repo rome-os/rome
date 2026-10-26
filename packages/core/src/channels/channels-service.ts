@@ -1,7 +1,9 @@
 /**
- * `ChannelsService`: the channels this Rome has, by name, for app actions.
- * An action sends and reads through it the same way in the main process and in
- * a worker (where `ChannelsServiceProxy` reaches this one over RPC).
+ * `ChannelsService`: Rome's accounts, and the channels they are, for app
+ * actions. An action names an account by its platform and the platform's id
+ * (`Account`), or a channel by its name. It sends and reads through the
+ * service the same way in the main process and in a worker (where
+ * `ChannelsServiceProxy` reaches this one over RPC).
  *
  * Connections are the service's own business. A channel is one presence, so
  * at most one Connection backs it, and nothing above the service names a
@@ -9,6 +11,7 @@
  */
 
 import type {
+  Account,
   ChannelMessage,
   ChannelMessageQuery,
   ChannelSummary,
@@ -26,6 +29,7 @@ import type { ConnectionPacing } from "./delivery/connection-pacing.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 import { parseMessageCursor } from "@rome/api-types/message";
 import { channelMessageCursor } from "./messages.js";
+import { accountLabel, isAccount, type RomeAccounts } from "./rome-accounts.js";
 
 // TODO(0.8): remove, with the service's and the proxy's uses.
 export const REMOVED_SERVICE_MEMBERS: Record<string, string> = {
@@ -56,6 +60,9 @@ export interface ChannelsServiceDeps {
   /** Channels Rome serves itself, which no Connection backs, such as webchat.
    *  Each sends through its own port, before the channel list is built too. */
   own?: readonly Channel[];
+  /** Rome's accounts and the Connections that reach them. Absent, the service
+   *  names no account and takes only a channel's name. */
+  accounts?: RomeAccounts;
 }
 
 /** Every Connection that can talk, whether or not it is unlocked now. */
@@ -85,10 +92,43 @@ export function emailConnection(
   return emails.find((connection) => channelOf(connection) === "email") ?? emails[0];
 }
 
+/** An account no Connection of Rome's reaches, so nothing sends as it or reads
+ *  what was said on it. */
+export class AccountNotHeld extends Error {
+  constructor(readonly account: Account) {
+    super(`No connection reaches account "${accountLabel(account)}"`);
+    this.name = "AccountNotHeld";
+  }
+}
+
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
   const find = (name: string) => deps.channels()?.find((channel) => channel.name === name);
+  const accountOf = (connection: Connection) => deps.accounts?.accountOf(connection.id) ?? null;
 
-  async function query(channel: string, read: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
+  /** The Connection that reaches `account`, among those that can talk. */
+  function holding(account: Account): Connection {
+    const id = deps.accounts?.holderOf(account);
+    const connection = id ? talking(deps.registry).find((each) => each.id === id) : undefined;
+    if (!connection) throw new AccountNotHeld(account);
+    return connection;
+  }
+
+  /** The channel `target` names, and the account it is where one is known. */
+  function resolve(target: Account | string): { channel: string; account: Account | null } {
+    if (!isAccount(target)) {
+      const backing = backingConnection(deps.registry, target, deps.channelOf);
+      return { channel: target, account: backing ? accountOf(backing) : null };
+    }
+    const channel = deps.channelOf(holding(target));
+    if (channel === null) throw new AccountNotHeld(target);
+    return { channel, account: { platform: target.platform, id: target.id } };
+  }
+
+  async function query(
+    target: Account | string,
+    read: ChannelMessageQuery = {},
+  ): Promise<ChannelMessage[]> {
+    const { channel, account } = resolve(target);
     const messages = find(channel)?.messages;
     if (!messages) throw new Error(`Channel "${channel}" reads no messages`);
     const { after: cursor, ...rest } = read;
@@ -98,7 +138,11 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     const after = cursor === undefined ? undefined : parseMessageCursor(cursor);
     if (after === null) throw new Error(`Invalid message cursor: ${cursor}`);
     const page = await messages.query({ ...rest, ...(after ? { after } : {}) });
-    return page.map((message) => ({ ...message, cursor: channelMessageCursor(message) }));
+    return page.map((message) => ({
+      ...message,
+      ...(account ? { account } : {}),
+      cursor: channelMessageCursor(message),
+    }));
   }
 
   return withRemovedMembers<ChannelsService>(
@@ -109,7 +153,8 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
           const name = deps.channelOf(connection);
           if (name === null) continue;
           const platform = deps.platformOf?.(name) ?? platformOf(connection.connectionKind);
-          summaries.set(name, { name, platform, sendable: true });
+          const account = accountOf(connection);
+          summaries.set(name, { name, ...(account ? { account } : {}), platform, sendable: true });
         }
         for (const channel of deps.own ?? []) {
           const platform = deps.platformOf?.(channel.name) ?? platformOf(channel.name);
@@ -131,10 +176,14 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       },
 
       async send(
-        channel: string,
+        target: Account | string,
         chatId: ChatId,
         message: OutgoingMessage,
       ): Promise<MessageReceipt> {
+        if (isAccount(target)) {
+          return sendThrough(holding(target), chatId, message, deps.pacing);
+        }
+        const channel = target;
         const own = deps.own?.find((candidate) => candidate.name === channel)?.send;
         if (own) return own.send(chatId, message);
         const backing = backingConnection(deps.registry, channel, deps.channelOf);

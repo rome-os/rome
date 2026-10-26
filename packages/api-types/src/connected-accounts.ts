@@ -4,14 +4,13 @@
  * Vocabulary: docs/domains/chats.md#connected-account.
  */
 
+import type { Account } from "@rome-os/app-runtime";
 import type { AccountLink } from "./account-agents.js";
 
 /** An account, the same wherever it is seen: the platform it is on and the
- *  platform's own id for it. Vocabulary: docs/domains/chats.md#account. */
-export interface AccountValue {
-  platform: string;
-  id: string;
-}
+ *  platform's own id for it. The SDK's `Account`, which apps pass to send as
+ *  one of Rome's accounts. Vocabulary: docs/domains/chats.md#account. */
+export type AccountValue = Account;
 
 /**
  * The account fields of one entry in `GET /api/connections`. Each is optional

@@ -11,9 +11,11 @@ import type {
   ChatRepository,
   EnsureChannelChatInput,
   MessageReceipt,
+  ChannelSummary,
   ChannelsService,
   PreviewPayload,
 } from "@rome-os/app-runtime";
+import { addressOf, romeAccountNamed } from "../rome-account.js";
 import type { SendMessageInput, SendMessageChatInput, SendMessageEmailInput } from "./types.js";
 export type { SendMessageInput, SendMessageOutput } from "./types.js";
 
@@ -341,29 +343,36 @@ async function resolveChatThreadId(
 }
 
 /**
- * The platform `channel` is an account on. `channel` is the account's id: its
- * channel's name, as the channel a message arrived on spells it, and never a
- * platform standing for one of its accounts. A platform with one account named
- * after it, such as `webchat`, `email` or `agents`, is addressed by that name.
+ * The account to send as: the channel `channel` names, as the channel a
+ * message arrived on spells it, or else Rome's one account on the platform it
+ * names, such as `email` or `whatsapp`.
  *
- * A channel no Connection can send on is refused before anything else is
+ * An account no Connection can send as is refused before anything else is
  * checked, so an unconfigured channel is not reported as a bad attachment or a
  * missing guardian mapping. The text is the one the channels service rejects
  * with.
  */
-async function platformOfSendable(channels: ChannelsService, channel: string): Promise<string> {
-  const target = (await channels.list()).find((candidate) => candidate.name === channel);
-  if (!target?.sendable) throw new Error(`No Talk connection registered for "${channel}"`);
-  return target.platform ?? channel;
+async function sendableAccount(
+  channels: ChannelsService,
+  channel: string,
+): Promise<ChannelSummary> {
+  const target = await romeAccountNamed(channels, channel, (summary) => summary.sendable);
+  if (!target) throw new Error(`No Talk connection registered for "${channel}"`);
+  return target;
 }
 
 export async function executeSendMessage(
   channels: ChannelsService,
-  input: SendMessageInput,
+  requested: SendMessageInput,
   deps: SendMessageRuntimeDeps = {},
 ): Promise<ActionResult> {
+  const target = await sendableAccount(channels, requested.channel);
+  // Everything after names the account's channel, which People's links and
+  // the chat records spell.
+  const input = { ...requested, channel: target.name } as SendMessageInput;
   const { channel, text, attachments, turnId, parts } = input;
-  const platform = await platformOfSendable(channels, channel);
+  const platform = target.platform ?? channel;
+  const account = addressOf(target);
   const hasAttachments = !!attachments && attachments.length > 0;
   const hasParts = !!parts && parts.length > 0;
 
@@ -399,7 +408,7 @@ export async function executeSendMessage(
       reply: !!(email.threadId || replyTarget),
       attachmentCount: attachments?.length ?? 0,
     });
-    const delivery = await channels.send(channel, threadId as ChatId, {
+    const delivery = await channels.send(account, threadId as ChatId, {
       kind: "email",
       text,
       parts,
@@ -443,7 +452,7 @@ export async function executeSendMessage(
     channelUserId,
     attachmentCount: attachments?.length ?? 0,
   });
-  const delivery = await channels.send(channel, threadId as ChatId, {
+  const delivery = await channels.send(account, threadId as ChatId, {
     text,
     parts,
     attachments: safeInput.attachments,
@@ -471,7 +480,7 @@ export function createSendMessageAction(
         channel: {
           type: "string",
           description:
-            'The id of the account to send as: the channel a message arrived on, such as "webchat", "email", "agents", or a Telegram, Discord or Feishu account\'s id. A platform name such as "telegram" reaches only an account whose id it is. "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its id (a UUID, the threadId its messages arrive on) as `threadId`, or, from the main agent, its name as `to`.',
+            'The account to send as: the channel a message arrived on, such as "webchat", "agents", or a Telegram, Discord or Feishu account\'s id, or a platform such as "email" or "whatsapp", which sends as Rome\'s account there. A platform where Rome has several accounts is refused, and the error names them. "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its id (a UUID, the threadId its messages arrive on) as `threadId`, or, from the main agent, its name as `to`.',
         },
         threadId: {
           type: "string",

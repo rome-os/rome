@@ -246,6 +246,43 @@ describe("fetch_channel_history", () => {
     expect("localPath" in data.messages[0].attachments[0]).toBe(false);
   });
 
+  describe("on a platform", () => {
+    const account = { platform: "whatsapp", id: "15551234567" };
+    function platformDeps(...names: string[]) {
+      const query = rs.fn<ChannelsService["query"]>().mockResolvedValue([]);
+      const deps = {
+        channelsService: {
+          list: async () =>
+            names.map((name) => ({ name, account, platform: "whatsapp", sendable: true })),
+          send: async (_account: unknown, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      };
+      return { query, action: createAction(actionConfig, deps) };
+    }
+
+    it("reads Rome's one account there, by its platform and id", async () => {
+      const { query, action } = platformDeps("6f1d2c3b-0000-4000-8000-000000000001");
+
+      const result = await action.execute({ channel: "whatsapp" });
+
+      expect(result.status).toBe("ok");
+      expect(query).toHaveBeenCalledWith(account, expect.anything());
+    });
+
+    it("refuses a platform where Rome has several accounts", async () => {
+      const { query, action } = platformDeps("first", "second");
+
+      const result = await action.execute({ channel: "whatsapp" });
+
+      expect(result).toEqual({
+        status: "error",
+        error: expect.stringContaining('Rome has several accounts on "whatsapp"'),
+      });
+      expect(query).not.toHaveBeenCalled();
+    });
+  });
+
   describe("paging with limit and cursor", () => {
     function pagedDeps(page: ChannelMessage[]) {
       const query = rs.fn<ChannelsService["query"]>().mockResolvedValue(page);

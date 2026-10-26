@@ -2,12 +2,14 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChannelsService, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Channels } from "./channel.js";
 import {
+  AccountNotHeld,
   backingConnection,
   emailConnection,
   createChannelsService,
   type ChannelsServiceDeps,
 } from "./channels-service.js";
 import { recordedChannelOf } from "./connection-ports.js";
+import type { RomeAccounts } from "./rome-accounts.js";
 import type { Connection } from "../connections/types.js";
 import { kindChannelOf } from "../test/helpers.js";
 
@@ -235,6 +237,76 @@ describe("createChannelsService", () => {
       platform: "discord",
       sendable: true,
     });
+  });
+});
+
+describe("ChannelsService — by account", () => {
+  const TG = { platform: "telegram", id: "8123" };
+  const DISCORD = { platform: "discord", id: "555" };
+  // tg-a reaches TG and discord-1 reaches DISCORD, as their grants record.
+  const accounts: RomeAccounts = {
+    accountOf: (id) => (id === "tg-a" ? TG : id === "discord-1" ? DISCORD : null),
+    holderOf: (account) =>
+      account.platform === TG.platform && account.id === TG.id
+        ? "tg-a"
+        : account.platform === DISCORD.platform && account.id === DISCORD.id
+          ? "discord-1"
+          : null,
+  };
+
+  function byAccount(channels: unknown[] = []) {
+    const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
+    const channelsService = createChannelsService({
+      channels: () => channels as Channels,
+      registry: registryOf(CONNECTIONS, send),
+      channelOf: kindChannelOf,
+      accounts,
+    });
+    return { channelsService, send };
+  }
+
+  it("lists the account each channel is", async () => {
+    const { channelsService } = byAccount();
+
+    expect(await channelsService.list()).toEqual([
+      { name: "discord", account: DISCORD, platform: "discord", sendable: true },
+      { name: "telegram_user", account: TG, platform: "telegram", sendable: true },
+    ]);
+  });
+
+  it("sends as an account through the Connection that reaches it", async () => {
+    const { channelsService, send } = byAccount();
+
+    await channelsService.send({ ...TG }, "c1" as ChatId, { text: "hi" });
+
+    expect(send).toHaveBeenCalledWith("tg-a", "c1", { text: "hi" });
+  });
+
+  it("refuses an account no Connection of Rome's reaches", async () => {
+    const { channelsService, send } = byAccount();
+    const stranger = { platform: "telegram", id: "999" };
+
+    await expect(channelsService.send(stranger, "c1" as ChatId, { text: "hi" })).rejects.toThrow(
+      AccountNotHeld,
+    );
+    await expect(channelsService.query(stranger)).rejects.toThrow(
+      'No connection reaches account "telegram:999"',
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("reads an account's channel, and names the account on each message", async () => {
+    const query = rs.fn(async () => [line("m", 1_000)]);
+    const { channelsService } = byAccount([
+      { name: "telegram_user", messages: { query, byAccount: null } },
+    ]);
+
+    const [byValue] = await channelsService.query(TG, { limit: 1 });
+    const [byName] = await channelsService.query("telegram_user", { limit: 1 });
+
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(byValue?.account).toEqual(TG);
+    expect(byName?.account).toEqual(TG);
   });
 });
 

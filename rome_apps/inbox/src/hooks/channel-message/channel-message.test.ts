@@ -437,7 +437,7 @@ describe("ChannelMessageHook", () => {
   describe("on accounts that take an agent", () => {
     // feishu-2 takes a link, and telegram stands for a channel that takes none.
     let linked: string | null;
-    const accountAgentOf = rs.fn((name: string) => (name === "feishu-2" ? linked : undefined));
+    const accountAgentOf = rs.fn((name: unknown) => (name === "feishu-2" ? linked : undefined));
 
     beforeEach(async () => {
       linked = "sales:agent";
@@ -475,6 +475,21 @@ describe("ChannelMessageHook", () => {
         ...passed({ accountAgentName: undefined, routedAgentName: "override" }),
       );
       expect(accountAgentOf).toHaveBeenCalledWith("feishu-2");
+    });
+
+    it("asks by the account a message arrived on, where it names one", async () => {
+      const account = { platform: "lark", id: "ou_sales" };
+      accountAgentOf.mockImplementation((target: unknown) =>
+        target === account ? "support:agent" : undefined,
+      );
+
+      await harness.emit(FEISHU_2_ID, message({ account }));
+
+      expect(accountAgentOf).toHaveBeenCalledWith(account);
+      expect(harness.run).toHaveBeenCalledWith(...passed({ accountAgentName: "support:agent" }));
+      accountAgentOf.mockImplementation((name: unknown) =>
+        name === "feishu-2" ? linked : undefined,
+      );
     });
 
     it("passes a group's explicit pin to main as its choice", async () => {

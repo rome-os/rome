@@ -266,6 +266,25 @@ describe("WorkerRpcServer param validation", () => {
       });
     });
 
+    it("sends and reads by account, and refuses an account missing its id", async () => {
+      const service = {
+        send: rs.fn(async () => ({ messageId: "m1" })),
+        query: rs.fn(async () => []),
+      };
+      const { server } = makeServer({ channelsService: service });
+      const fake = connect(server);
+      const account = { platform: "telegram", id: "8123" };
+
+      await rpc(fake, "channels.send", { channel: account, chatId: "c1", message: { text: "hi" } });
+      await rpc(fake, "channels.query", { channel: account });
+      const refused = await rpc(fake, "channels.query", { channel: { platform: "telegram" } });
+
+      expect(service.send).toHaveBeenCalledWith(account, "c1", { text: "hi" });
+      expect(service.query).toHaveBeenCalledWith(account, {});
+      expect(refused.error).toMatch(/channels\.query: invalid params/);
+      expect(service.query).toHaveBeenCalledTimes(1);
+    });
+
     it("ingests inbound email through the email Connection, and skips without one", async () => {
       const ingest = rs.fn(async () => ({ status: "accepted" }));
       // Its record has an opaque id, as for an account connected after

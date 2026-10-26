@@ -34,8 +34,14 @@ import { parseRemixSource } from "../apps/remix-source.js";
 
 const AppIdSchema = z.string().min(1);
 
+// An app names one of Rome's accounts, or a channel by its name.
+const AccountOrChannel = z.union([
+  z.string().min(1),
+  z.object({ platform: z.string().min(1), id: z.string().min(1) }).strict(),
+]);
+
 const ChannelsSendParams = z.object({
-  channel: z.string().min(1),
+  channel: AccountOrChannel,
   chatId: z.string(),
   message: z.custom<OutgoingMessage>((val) => typeof val === "object" && val !== null, {
     message: "message must be an object",
@@ -46,7 +52,7 @@ const ChannelsSendParams = z.object({
 // request naming one is refused rather than answered from another account.
 const ChannelsQueryParams = z
   .object({
-    channel: z.string().min(1),
+    channel: AccountOrChannel,
     chatId: z.string().optional(),
     since: z.string().datetime().optional(),
     after: z.string().optional(),

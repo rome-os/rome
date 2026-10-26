@@ -3,7 +3,7 @@
 // Vocabulary: docs/domains/chats.md#connected-account. Invariants:
 // docs/architecture/channels.md#an-accounts-agent.
 
-import type { ChatSettingsSnapshot } from "@rome-os/app-runtime";
+import type { Account, ChatSettingsSnapshot } from "@rome-os/app-runtime";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import type { AccountLink } from "@rome/api-types/account-agents";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
@@ -14,6 +14,7 @@ import {
 import { createLogger } from "../logger.js";
 import type { AccountLinkOf } from "./account-links.js";
 import type { InboundListening } from "./connection-ports.js";
+import { isAccount, type RomeAccounts } from "./rome-accounts.js";
 
 const log = createLogger("account-agents");
 
@@ -58,8 +59,8 @@ export function readAccountAgent(
 
 /**
  * An agent reader keyed by connection id, asked by channel name, for callers
- * that still name an account by its channel: the channel-message hook and the
- * sessions explorer. A channel a connection backs answers for that
+ * that still name an account by its channel: the sessions explorer, and a
+ * channel-message hook from before accounts. A channel a connection backs answers for that
  * connection. One no connection backs answers null when its kind of
  * connection takes an agent, and undefined otherwise. A connection kind's
  * first channel carries the kind's name, so a channel with no record answers
@@ -73,6 +74,24 @@ export function byChannel(
     const record = records.byId(channel);
     if (record?.connectionId) return agentOf(record.connectionId);
     return records.linkOf(record?.connectionKind ?? channel) === null ? undefined : null;
+  };
+}
+
+/**
+ * An agent reader keyed by connection id, asked by account, for the
+ * channel-message hook. An account no connection of Rome's reaches answers
+ * null, so nothing answers on it. A channel's name, which a hook from before
+ * accounts passes, is answered by `channelAgentOf`.
+ */
+export function byAccount(
+  accounts: Pick<RomeAccounts, "holderOf">,
+  agentOf: (connectionId: string) => string | null | undefined,
+  channelAgentOf: (channel: string) => string | null | undefined,
+): (target: Account | string) => string | null | undefined {
+  return (target) => {
+    if (!isAccount(target)) return channelAgentOf(target);
+    const connectionId = accounts.holderOf(target);
+    return connectionId ? agentOf(connectionId) : null;
   };
 }
 

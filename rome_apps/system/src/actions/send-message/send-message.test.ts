@@ -333,13 +333,47 @@ describe("send_message to an account with an opaque id", () => {
     );
   });
 
-  it("refuses a platform name that is not an account's id", async () => {
+  it("sends as Rome's one account on a platform it names", async () => {
     const adapter = accounts(FIRST);
+
+    await executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" });
+
+    expect(adapter.send).toHaveBeenCalledWith(FIRST, "42", expect.objectContaining({ text: "hi" }));
+  });
+
+  it("refuses a platform where Rome has several accounts, naming them", async () => {
+    const adapter = accounts(FIRST, SECOND);
 
     await expect(
       executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" }),
-    ).rejects.toThrow('No Talk connection registered for "telegram"');
+    ).rejects.toThrow(`Rome has several accounts on "telegram": "${FIRST}", "${SECOND}"`);
     expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a platform where Rome has no account it can send as", async () => {
+    const adapter = accounts(FIRST);
+
+    await expect(
+      executeSendMessage(adapter, { channel: "discord", threadId: "42", text: "hi" }),
+    ).rejects.toThrow('No Talk connection registered for "discord"');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("sends as the account by its platform and id where the host names it", async () => {
+    const account = { platform: "telegram", id: "8123456789" };
+    const adapter: ChannelsService = {
+      list: rs.fn(async () => [{ name: FIRST, account, platform: "telegram", sendable: true }]),
+      send: rs.fn(async (_account, chatId) => ({ chatId })),
+      query: async () => [],
+    };
+
+    await executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" });
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      account,
+      "42",
+      expect.objectContaining({ text: "hi" }),
+    );
   });
 
   it("resolves to: guardian through the link People keys by platform", async () => {
