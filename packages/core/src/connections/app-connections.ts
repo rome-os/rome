@@ -569,27 +569,6 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     if (invocation.status !== expectedStatus) {
       return failure("access_denied", "The connection invocation is not runnable.");
     }
-    const policy = await this.access.get(
-      invocation.appId,
-      invocation.connectionId,
-      invocation.identity,
-      invocation.operation,
-    );
-    if (
-      !policy ||
-      !isActive(policy) ||
-      policy.revision !== invocation.accessRevision ||
-      policy.sideEffects !== expectedEffect ||
-      (policy.approval === "required") !== expectedApproval
-    ) {
-      return await this.failUnclaimedInvocation(
-        invocation,
-        expectedStatus,
-        executionApproval,
-        "access_denied",
-        "Connection access changed before execution.",
-      );
-    }
     const connection = this.findConnection(invocation.connectionId);
     if (!connection) {
       return await this.failUnclaimedInvocation(
@@ -633,6 +612,13 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     }
     const fail = (code: AppConnectionErrorBody["code"], retryable = false) =>
       this.failInvocation(invocation, code, retryable, executionApproval);
+    const policy = await this.access.get(
+      invocation.appId,
+      invocation.connectionId,
+      invocation.identity,
+      invocation.operation,
+    );
+    if (!policy) return await fail("access_denied");
     const validation = this.validateInput(descriptor, invocation.input);
     if (!validation.ok) return await fail(validation.error.code);
     const constrained = enforceConstraints(invocation.input, policy.constraints);

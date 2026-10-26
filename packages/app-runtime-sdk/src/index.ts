@@ -2426,7 +2426,7 @@ export interface AppConnectionsCapability {
     identity: string;
     operation: string;
     input?: unknown;
-    /** Required for write operations. Reusing it never repeats the effect. */
+    /** Required for writes; must contain 8–200 characters. Reusing it never repeats the effect. */
     requestId?: string;
   }): Promise<AppConnectionInvokeResult<T>>;
 }

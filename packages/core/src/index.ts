@@ -627,7 +627,9 @@ async function main() {
     await reconcileAppConnectionAccess(appCatalog, appConnectionAccessRepo);
     appConnectionAccessReady = true;
   } else {
-    appsLog.warn("App connection access reconciliation skipped after failed App boot");
+    appsLog.warn(
+      "App connection access remains unavailable after failed App boot; restart after fixing App boot",
+    );
   }
 
   // Install / refresh ALL first-party apps from the packed artifacts in
