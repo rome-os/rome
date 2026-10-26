@@ -1,3 +1,4 @@
+import { canVacuumTraces } from "../../webchat/trace-archive-maintenance.js";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -692,6 +693,84 @@ describe("Webchat API", () => {
     }
   });
 
+  it("omits archived legacy inline steps from newly frozen shares", async () => {
+    const sessionId = "archived-inline-share";
+    await deps.webchatRepo.createSession(sessionId, "Legacy archive");
+    await deps.webchatRepo.addMessage(
+      "archived-inline",
+      sessionId,
+      "trace",
+      JSON.stringify([{ type: "thinking", content: "private archived inline steps" }]),
+      "old",
+    );
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ traceArchiveId: "archive" })
+      .where(eq(romeAgentMessages.id, "archived-inline"));
+    const app = createWebchatRuntime(deps).routes;
+    const response = await app.request(`/chat/sessions/${sessionId}/share`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ turnIds: ["old"] }),
+    });
+    expect(response.status).toBe(201);
+    const shares = await deps.webchatRepo.listSharedChatsBySession(sessionId);
+    const share = await deps.webchatRepo.getSharedChat(shares[0].id);
+    expect(JSON.stringify(share?.snapshot)).not.toContain("private archived inline steps");
+    expect(JSON.parse(share!.snapshot).traces).toEqual({});
+  });
+
+  it("shows archived old turns and full new turns after reactivation, including raw downloads", async () => {
+    const sessionId = "reactivated-archive";
+    await deps.webchatRepo.createSession(sessionId, "Reactivated archive");
+    for (const turnId of ["old", "new"]) {
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: `archive-${turnId}`,
+        sessionId,
+        turnId,
+        startSeq: 0,
+        blocks: [
+          { type: "thinking", content: `${turnId} full trace` },
+          { type: "tool_result", toolUseId: "tool", tool: "Read", output: `${turnId} full trace` },
+          { type: "result", content: "done" },
+        ],
+      });
+    }
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ traceArchiveId: "archive" })
+      .where(eq(romeAgentMessages.id, "archive-old"));
+    const app = createWebchatRuntime(deps).routes;
+    for (const path of [
+      `/sessions/${sessionId}/messages`,
+      `/chat/sessions/${sessionId}/messages`,
+    ]) {
+      const messages = (await (await app.request(path)).json()) as Array<{
+        id: string;
+        traceArchived?: boolean;
+        traceSummary?: unknown;
+      }>;
+      expect(messages.find((m) => m.id === "archive-old")).toMatchObject({ traceArchived: true });
+      expect(messages.find((m) => m.id === "archive-old")?.traceSummary).toBeUndefined();
+      expect(messages.find((m) => m.id === "archive-new")?.traceSummary).toBeDefined();
+    }
+    for (const turn of ["old", "new"]) {
+      for (const path of [
+        `/sessions/messages/archive-${turn}/content`,
+        `/chat/messages/archive-${turn}/content`,
+        `/sessions/${sessionId}/turns/${turn}/trace`,
+        `/sessions/${sessionId}/turns/${turn}/trace.json`,
+        `/chat/sessions/${sessionId}/turns/${turn}/trace.json`,
+      ]) {
+        const response = await app.request(path);
+        expect(response.status).toBe(200);
+        const payload = await response.json();
+        if (turn === "old") expect(payload).toEqual({ trace: null, traceArchived: true });
+        else expect(JSON.stringify(payload)).toContain("new full trace");
+      }
+    }
+  });
+
   it("keeps complete cost and usage from 30-day-old descendants while their root is active", async () => {
     rs.useFakeTimers({ toFake: ["Date"] });
     rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
@@ -850,6 +929,18 @@ describe("Webchat API", () => {
         },
       ],
     });
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ traceArchiveId: "test-archive" })
+      .where(eq(romeAgentMessages.id, "grandchild-usage-trace"));
+    await expect(
+      readAccounting("/chat/messages/parent-usage-trace/content"),
+    ).resolves.toMatchObject({ costUsd: 1.23, includedSubagentCount: 2 });
+    const archivedGrandchild = await app.request(
+      `/sessions/${grandchildSessionId}/turns/${grandchildTurnId}/trace`,
+    );
+    expect(await archivedGrandchild.json()).toEqual({ trace: null, traceArchived: true });
+
     await expect(
       readAccounting("/chat/messages/parent-usage-trace/content?includeSubagentUsage=false"),
     ).resolves.toMatchObject({
@@ -4110,6 +4201,10 @@ describe("Webchat API", () => {
     });
 
     it("processes written feedback in an exact fork and shows its Sessions record", async () => {
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ traceArchiveId: "archive" })
+        .where(eq(romeAgentMessages.sessionId, SESSION_ID));
       // Seed the rated exchange plus a later turn: the fork inherits the
       // source transcript at its head, so the prompt must quote the rated
       // turn's exchange verbatim rather than pointing at "the latest turn".
@@ -4488,6 +4583,10 @@ describe("Webchat API", () => {
     });
 
     it("resumes the source, runs an exact fork, and returns the branch session id", async () => {
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ traceArchiveId: "archive" })
+        .where(eq(romeAgentMessages.sessionId, SESSION_ID));
       await deps.webchatRepo.addMessage(
         "branch-later-anchor",
         SESSION_ID,
@@ -5227,6 +5326,30 @@ describe("Webchat API", () => {
       await lateReader.cancel();
       releaseRetry();
       await retry;
+    });
+
+    it("blocks compaction during an unfinished foreground webchat turn", async () => {
+      const { runtime } = createWebchatRuntime(deps);
+      const stream = { finished: false } as NonNullable<
+        ReturnType<typeof runtime.activeStreams.get>
+      >[number];
+      runtime.activeStreams.set("foreground", [stream]);
+      expect(deps.agentTurnStreamRegistry.hasActiveTurns()).toBe(false);
+      expect(runtime.hasActiveTurns("foreground")).toBe(true);
+      const guards = {
+        pageSize: 4096,
+        pageCount: 524288,
+        freelist: 262144,
+        freeDisk: 3 * 1024 ** 3,
+        now: new Date("2026-10-25T03:00:00Z"),
+        timezone: "UTC",
+        lastActivityAt: Date.parse("2026-10-25T02:00:00Z"),
+        routineDue: false,
+      };
+      expect(canVacuumTraces({ ...guards, turnRunning: runtime.hasActiveTurns() })).toBe(false);
+      stream.finished = true;
+      expect(canVacuumTraces({ ...guards, turnRunning: runtime.hasActiveTurns() })).toBe(true);
+      runtime.activeStreams.clear();
     });
 
     it("counts a turn in the shared turn registry as running", async () => {

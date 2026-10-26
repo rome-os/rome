@@ -20,6 +20,7 @@ export interface DiagnosticBundle {
   upgradedSinceLastBoot: boolean;
   previousVersion: string | null;
   database: { ok: boolean };
+  traceArchives?: { at: string; pendingBytes: number; failures: number };
   relay: { configured: boolean; depositUrlConfigured: boolean };
   channels: string[];
   apps: { total: number; failed: string[]; broken: string[] };
@@ -66,7 +67,11 @@ export async function assembleDiagnosticBundle(deps: DiagnosticsDeps): Promise<D
   const broken = apps.filter((a) => a.state === "broken").map((a) => a.appId);
   const channels = await deps.channelsService.list();
 
+  const traceArchives = await deps.settingsRepo
+    .get<DiagnosticBundle["traceArchives"]>("traceArchiveStatus")
+    .catch(() => null);
   return {
+    ...(traceArchives ? { traceArchives } : {}),
     build,
     uptimeSeconds: Math.round(process.uptime()),
     upgradedSinceLastBoot: deps.bootVersionReport.upgradedSinceLastBoot,

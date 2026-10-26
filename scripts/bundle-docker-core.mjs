@@ -102,6 +102,11 @@ export function dockerBundleOptions(format = "esm") {
 const entrypoints = [
   ["packages/core/src/index.ts", "packages/core/dist/index.js", "esm"],
   ["packages/core/src/daemon/index.ts", "packages/core/dist/daemon/index.js", "esm"],
+  [
+    "packages/core/src/webchat/trace-archive-worker.ts",
+    "packages/core/dist/webchat/trace-archive-worker.js",
+    "esm",
+  ],
   ["packages/core/src/actions/worker.ts", "packages/core/dist/actions/worker.js", "esm"],
   ["scripts/generate-caddyfile.ts", "dist/scripts/generate-caddyfile.js", "cjs"],
 ];

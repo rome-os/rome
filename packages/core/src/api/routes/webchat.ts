@@ -690,6 +690,7 @@ export interface WebchatRuntime {
    * their predecessor's `onFinish` before starting work.
    */
   activeStreams: Map<string, ActiveWebchatStream[]>;
+  hasActiveTurns(sessionId?: string): boolean;
   flushAll(): Promise<void>;
   /**
    * Run a backend-initiated agent task on a webchat session. If a stream is
@@ -996,7 +997,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const collectDescendantUsage = async (
     blocks: TraceEventDto[],
     visited: Set<string>,
-    sessionActivityCutoff?: Date,
   ): Promise<DescendantUsage> => {
     const refs = blocks
       .filter((block) => block.type === "subagent_start")
@@ -1006,7 +1006,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         visited.add(key);
         return true;
       });
-    const rows = await deps.webchatRepo.getTraceContentsByTurns(refs, { sessionActivityCutoff });
+    const rows = await deps.webchatRepo.getTraceAccountingByTurns(refs);
     const rowsByTurn = new Map(rows.map((row) => [`${row.sessionId}:${row.turnId}`, row]));
     const children = await Promise.all(
       refs.map(async (ref): Promise<DescendantUsage> => {
@@ -1022,7 +1022,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
         const childEvents = parseStoredTraceEvents(row.content);
         const accounting = terminalAccounting(childEvents);
-        const nested = await collectDescendantUsage(childEvents, visited, sessionActivityCutoff);
+        const nested = await collectDescendantUsage(childEvents, visited);
         return {
           usage: accounting ? addTokenUsage(accounting.usage, nested.usage) : nested.usage,
           costUsd: (accounting?.costUsd ?? 0) + nested.costUsd,
@@ -1053,10 +1053,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       },
     );
   };
-  const includeSubagentUsage = async (
-    blocks: TraceEventDto[],
-    sessionActivityCutoff?: Date,
-  ): Promise<TraceEventDto[]> => {
+  const includeSubagentUsage = async (blocks: TraceEventDto[]): Promise<TraceEventDto[]> => {
     let terminalIndex = -1;
     for (let index = blocks.length - 1; index >= 0; index -= 1) {
       const block = blocks[index];
@@ -1070,7 +1067,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (terminal.type !== "result" && terminal.type !== "error") return blocks;
     const accounting = terminal.accounting;
     if (!accounting) return blocks;
-    const descendants = await collectDescendantUsage(blocks, new Set(), sessionActivityCutoff);
+    const descendants = await collectDescendantUsage(blocks, new Set());
     if (descendants.count === 0) return blocks;
     const nextAccounting: TraceAccounting = {
       ...accounting,
@@ -1092,11 +1089,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const buildStoredTraceSnapshot = async (
     idPrefix: string,
     content: string,
-    options: { includeSubagentUsage?: boolean; sessionActivityCutoff?: Date } = {},
+    options: { includeSubagentUsage?: boolean } = {},
   ): Promise<TraceSnapshot> => {
     let blocks = parseStoredTraceEvents(content);
-    if (options.includeSubagentUsage)
-      blocks = await includeSubagentUsage(blocks, options.sessionActivityCutoff);
+    if (options.includeSubagentUsage) blocks = await includeSubagentUsage(blocks);
     return buildTraceSnapshot({
       idPrefix,
       blocks,
@@ -1194,7 +1190,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (visited.has(sid)) return;
       visited.add(sid);
       const rows = await deps.webchatRepo.getMessages(sid);
-      const traceContents = await deps.webchatRepo.getTraceContents(sid);
+      const traceContents = await deps.webchatRepo.getTraceContents(sid, {
+        sessionActivityCutoff: sessionTraceCutoff(),
+      });
       const contentById = new Map(traceContents.map((r) => [r.id, r.content]));
       const childSessionIds: string[] = [];
       for (const row of rows) {
@@ -1343,7 +1341,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let threadContext: ThreadContext;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
     try {
-      const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
+      const [traceRow] = await deps.webchatRepo.getTraceAccountingByTurns([
+        { sessionId: input.session.id, turnId: input.turnId },
+      ]);
       const turnStatus = traceRow
         ? parseStoredTraceEvents(traceRow.content)
             .filter(
@@ -2005,7 +2005,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (row === null) return c.json({ error: "Message not found" }, 404);
     if (row.traceArchived) return c.json({ trace: null, traceArchived: true });
     const snapshot = await buildStoredTraceSnapshot(`msg-${messageId}`, row.content, {
-      sessionActivityCutoff,
       includeSubagentUsage: c.req.query("includeSubagentUsage") !== "false",
     });
     return c.json({ trace: snapshot });
@@ -2023,7 +2022,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (row?.traceArchived) return c.json({ trace: null, traceArchived: true });
     if (!row) return c.json({ error: "Trace not found" }, 404);
     const snapshot = await buildStoredTraceSnapshot(`msg-${row.id}`, row.content, {
-      sessionActivityCutoff,
       includeSubagentUsage: c.req.query("includeSubagentUsage") !== "false",
     });
     return c.json({ trace: snapshot });
@@ -2663,7 +2661,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (row === null) return c.json({ error: "Message not found" }, 404);
     if (row.traceArchived) return c.json({ trace: null, traceArchived: true });
     const snapshot = await buildStoredTraceSnapshot(`msg-${messageId}`, row.content, {
-      sessionActivityCutoff,
       includeSubagentUsage: c.req.query("includeSubagentUsage") !== "false",
     });
     return c.json({ trace: snapshot });
@@ -4185,6 +4182,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   const runtime: WebchatRuntime = {
     activeStreams,
+    hasActiveTurns(sessionId) {
+      return sessionId
+        ? isSessionRunning(sessionId)
+        : deps.agentTurnStreamRegistry.hasActiveTurns() ||
+            [...activeStreams.values()].some((streams) =>
+              streams.some((stream) => !stream.finished),
+            );
+    },
     async flushAll(): Promise<void> {
       const allStreams = [...activeStreams.values()].flat();
       await Promise.all(allStreams.map((stream) => persistTrace(stream)));

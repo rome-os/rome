@@ -90,7 +90,7 @@ const definitions = [
   {
     id: "showcases",
     displayName: "Showcases",
-    version: "0.1.0",
+    version: "0.1.1",
     description: "Import, view, export, and share static Rome agent trace showcases.",
     hasFrontend: true,
     iconUrl: showcasesIcon,

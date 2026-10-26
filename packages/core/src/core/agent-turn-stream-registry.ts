@@ -30,6 +30,7 @@ export interface AgentTurnStreamRegistry {
     interrupt?(reason?: string): Promise<void>;
   }): MutableAgentTurnStream;
   get(turnId: string): ActiveAgentTurnStream | undefined;
+  hasActiveTurns(): boolean;
   getActiveByConversation(ref: ChatRef): ActiveAgentTurnStream | undefined;
   listBySession(sessionId: string): ActiveAgentTurnStream[];
   /** Calls `listener` with the session id whenever one of its turns starts or finishes. */
@@ -103,6 +104,10 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
       }
       notifySession(input.sessionId);
       return stream;
+    },
+
+    hasActiveTurns() {
+      return [...streams.values()].some((stream) => !stream.finished);
     },
 
     get(turnId) {

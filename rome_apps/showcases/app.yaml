@@ -2,7 +2,7 @@ formatVersion: 1
 id: showcases
 name: Showcases
 icon: assets/icon.svg
-version: 0.1.0
+version: 0.1.1
 description: Import, view, export, and share static Rome agent trace showcases.
 tagline: "Show off what your agents did, one shareable trace at a time."
 appRoot: dist

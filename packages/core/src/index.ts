@@ -1,3 +1,9 @@
+import { TraceArchivesRepository } from "./db/repositories/trace-archives.js";
+import { TraceArchiver } from "./webchat/trace-archive.js";
+import {
+  startTraceArchiveMaintenance,
+  vacuumTraceDatabase,
+} from "./webchat/trace-archive-maintenance.js";
 import { createNodeDevicesService } from "./lib/node-devices.js";
 import type { Admission } from "./channels/admission.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./channels/guardian-link-code.js";
@@ -1775,6 +1781,36 @@ async function main() {
     }
   }
 
+  let traceArchiveIdentity:
+    | { accountId: string; instanceId: string; token: string | null }
+    | undefined;
+  const traceArchivesRepo = new TraceArchivesRepository(db);
+  const traceArchiver = new TraceArchiver({
+    repo: traceArchivesRepo,
+    onPass: (stats) => settingsRepo.set("traceArchiveStatus", stats),
+    identity: () =>
+      traceArchiveIdentity?.token === getInstanceToken() && traceArchiveIdentity
+        ? { accountId: traceArchiveIdentity.accountId, instanceId: traceArchiveIdentity.instanceId }
+        : undefined,
+    isRunning: (sessionId) =>
+      (internalApi?.hasActiveTurns(sessionId) ?? false) ||
+      agentTurnStreamRegistry.listBySession(sessionId).length > 0,
+  });
+  const unsubscribeArchiveDelete = webchatRepo.onTraceArchiveDelete(() => {
+    void traceArchiver.cleanupDeletedChats().catch(() => log.warn("trace archive cleanup failed"));
+  });
+  const stopTraceArchiveMaintenance = startTraceArchiveMaintenance({
+    archiver: traceArchiver,
+    vacuum: async () => {
+      const timezone = await resolveGuardianTimezone(settingsRepo);
+      vacuumTraceDatabase(traceArchivesRepo, {
+        timezone,
+        turnRunning:
+          (internalApi?.hasActiveTurns() ?? false) || agentTurnStreamRegistry.hasActiveTurns(),
+      });
+    },
+  });
+
   await runJournalCleanup();
   const journalCleanupInterval = setInterval(runJournalCleanup, 6 * 3600000);
 
@@ -1823,10 +1859,16 @@ async function main() {
   // It also gates connecting email for a seat created before sign-in connected
   // it: only an enrolled instance can provision an inbox, and a warm-pool
   // instance with no seat has no owner to provision one for.
+  const traceArchiveIdentityToken = getInstanceToken();
   void logInstanceIdentityAtBoot(getBuildInfo().version)
     .then(async (identity) => {
       await recordResolvedAccount(db, identity);
       if (identity.status !== "ok") return;
+      traceArchiveIdentity = {
+        accountId: identity.identity.accountId,
+        instanceId: identity.identity.instanceId,
+        token: traceArchiveIdentityToken,
+      };
       if (!(await getGuardianAuthState(db)).exists) return;
       await connectEmailWithoutClick("boot");
     })
@@ -1887,6 +1929,8 @@ async function main() {
     shuttingDown = true;
     const shutdownLog = createLogger("shutdown");
     shutdownLog.info("shutting down", { signal });
+    unsubscribeArchiveDelete();
+    await stopTraceArchiveMaintenance();
     nodeDevices.close();
 
     if (internalApi) {

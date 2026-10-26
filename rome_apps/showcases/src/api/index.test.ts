@@ -83,6 +83,22 @@ describe("showcases webchat sources", () => {
     expect(sessions.map((s) => s.id)).toEqual(["handoff", "web"]);
   });
 
+  it("refuses a reactivated chat with archived turns instead of importing retained half traces", async () => {
+    seedSession("web", "webchat", Math.floor(Date.now() / 1000));
+    testDb.db.run(
+      sql`UPDATE rome_agent_messages SET trace_archive_id = 'archive' WHERE role = 'trace'`,
+    );
+    const api = handler();
+    const res = await api.handle(request("POST", "imports/webchat-session", { sessionId: "web" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      traceCount: 0,
+      message: "This chat's steps are archived.",
+    });
+    const collections = await api.handle(request("GET", "collections"));
+    expect(JSON.stringify(await collections.json())).not.toContain("local-import");
+  });
+
   it("imports a webchat session with its prompt, steps and reply", async () => {
     seedSession("web", "webchat", 1700000000);
 
