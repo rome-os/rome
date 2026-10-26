@@ -23,7 +23,8 @@ interface PostedTurn {
 export interface ChatApi {
   createChat(input: { agentName?: string; projectPath?: string }): Promise<string>;
   renameChat(chatId: string, name: string): Promise<void>;
-  postTurn(chatId: string, text: string): Promise<PostedTurn>;
+  /** `inputId` becomes the user message's id. */
+  postTurn(chatId: string, text: string, inputId?: string): Promise<PostedTurn>;
   listChats(): Promise<ChatListEntry[]>;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
   activeTurns(chatId: string): Promise<string[]>;
@@ -73,10 +74,10 @@ export function createLoopbackChatApi(
     async renameChat(chatId, name) {
       await call(`${chatPath(chatId)}/name`, { method: "PATCH", body: { name } });
     },
-    async postTurn(chatId, text) {
+    async postTurn(chatId, text, inputId) {
       const turn = await call<{ turnId?: unknown; disposition?: PostedTurn["disposition"] }>(
         `${chatPath(chatId)}/turns`,
-        { method: "POST", body: { text } },
+        { method: "POST", body: { text, ...(inputId ? { inputId } : {}) } },
       );
       return {
         turnId: typeof turn.turnId === "string" ? turn.turnId : "",

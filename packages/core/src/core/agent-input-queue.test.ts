@@ -202,6 +202,17 @@ describe("input priority", () => {
     expect(s.statuses.filter((status) => status.inputId === "a").at(-1)?.turnId).toBe("turn-2");
   });
 
+  it("keeps the inputs in order across two supersedes before any is read", async () => {
+    const s = prioritySetup();
+    s.submit("a");
+    s.submit("b", "now");
+    s.queue.finish("turn-1");
+    expect(s.started.at(-1)?.prompt).toBe("a\n\nb");
+    s.submit("c", "now");
+    s.queue.finish("turn-2");
+    expect(s.started.at(-1)?.prompt).toBe("a\n\nb\n\nc");
+  });
+
   it("answers a burst of now inputs in one turn", async () => {
     const s = prioritySetup();
     s.submit("a", "now");

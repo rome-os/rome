@@ -2858,6 +2858,7 @@ export class WebChatRepository {
   async getTurnChatMessages(sessionId: string, turnId: string) {
     return this.db
       .select({
+        id: romeAgentMessages.id,
         role: romeAgentMessages.role,
         content: romeAgentMessages.content,
       })

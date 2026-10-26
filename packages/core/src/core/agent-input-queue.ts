@@ -39,6 +39,8 @@ interface ActiveInputTurn {
   first: Entry;
   /** Inputs folded into `first`'s prompt when the turn started. Their status follows `first`. */
   bound: Entry[];
+  /** `first` and `bound` in the order the turn's prompt holds them. */
+  prompted: Entry[];
   /** Inputs steered into the turn, in dispatch order. */
   steered: Entry[];
   ready: boolean;
@@ -140,6 +142,7 @@ export class AgentInputQueue {
       handle,
       first: entry,
       bound,
+      prompted: parts,
       steered: [],
       ready: false,
       sealed: false,
@@ -252,7 +255,9 @@ export class AgentInputQueue {
       // The provider never saw these, or saw them only in a turn it dropped
       // (Claude resumes from its transcript, which lacks an input it had not
       // read yet). An input the provider retained is already queued again.
-      this.carried = [active.first, ...active.bound, ...active.steered].filter(
+      // In prompt order: a turn that itself took carried inputs holds them
+      // before `first`, and a second supersede must keep them there.
+      this.carried = [...active.prompted, ...active.steered].filter(
         (entry) =>
           entry.state !== "consumed" && entry.state !== "cancelled" && !this.queued.includes(entry),
       );

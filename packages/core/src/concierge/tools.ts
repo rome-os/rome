@@ -1,6 +1,7 @@
 // Concierge's facade tools: `say` is its only way to speak, and the `chat_*`
 // tools run its task chats.
 
+import { randomUUID } from "node:crypto";
 import type { FacadeToolDef } from "../core/mcp-facade.js";
 import { runFacadeTool } from "../core/mcp-facade.js";
 import type { SessionToolContext } from "../core/session-tools.js";
@@ -59,6 +60,13 @@ export async function buildConciergeTools(
       throw new Error(`No task chat ${chatId}. Use chat_list to find your task chats.`);
     }
     return chat;
+  };
+
+  // Marked before posting, so the turn that answers it already finds the mark.
+  const postInput = async (chatId: string, text: string) => {
+    const inputId = randomUUID();
+    service.markPosted(inputId);
+    return await chatApi.postTurn(chatId, text, inputId);
   };
 
   const findListEntry = async (chatId: string) =>
@@ -136,8 +144,7 @@ export async function buildConciergeTools(
             triggerKind: TASK_CHAT_TRIGGER_KIND,
             triggerName: title,
           });
-          const turn = await chatApi.postTurn(chatId, brief);
-          service.markStarted(turn.turnId);
+          const turn = await postInput(chatId, brief);
           // Named after the first turn: the first message would rename it.
           await chatApi.renameChat(chatId, title).catch((error: unknown) =>
             log.warn("failed to name a task chat", {
@@ -171,9 +178,7 @@ export async function buildConciergeTools(
           currentTurn();
           const chatId = requireString(args, "chatId");
           await requireTaskChat(chatId);
-          const turn = await chatApi.postTurn(chatId, requireString(args, "text"));
-          service.markStarted(turn.turnId);
-          return turn;
+          return await postInput(chatId, requireString(args, "text"));
         }),
     },
     {

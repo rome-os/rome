@@ -14,11 +14,26 @@ import { buildConciergeTools } from "./tools.js";
 
 const CONCIERGE_CHAT = CONCIERGE_CHAT_ID;
 
-function setup(options: { enabled?: boolean } = {}) {
+interface Row {
+  id?: string;
+  role: string;
+  content: string;
+  /** Unset rows belong to every turn. */
+  turnId?: string;
+}
+
+function setup(options: { enabled?: boolean; settingsDelayMs?: number } = {}) {
   const sessions = new Map<string, Record<string, unknown>>([
     [CONCIERGE_CHAT, { id: CONCIERGE_CHAT, name: "Concierge", triggerKind: null }],
   ]);
-  const messages = new Map<string, Array<{ role: string; content: string }>>();
+  const messages = new Map<string, Row[]>();
+  /** Every input posted to a task chat, by id, in order. */
+  const posted: string[] = [];
+  /** The receipt `postTurn` answers with next. */
+  let receipt: { turnId: string; disposition: "started" | "queued" | "steering" } = {
+    turnId: "task-turn-1",
+    disposition: "started",
+  };
   const backendTurns: BackendTurnParams[] = [];
   const order: string[] = [];
   const chatApi: ChatApi = {
@@ -29,20 +44,31 @@ function setup(options: { enabled?: boolean } = {}) {
     renameChat: rs.fn(async () => {
       order.push("rename");
     }),
-    postTurn: rs.fn(async () => {
+    postTurn: rs.fn(async (chatId: string, text: string, inputId?: string) => {
       order.push("post");
-      return { turnId: "task-turn-1", disposition: "started" as const };
+      const list = messages.get(chatId) ?? [];
+      list.push({ id: inputId, role: "user", content: text, turnId: receipt.turnId });
+      messages.set(chatId, list);
+      if (inputId) posted.push(inputId);
+      return receipt;
     }),
     listChats: rs.fn(async () => []),
     activeTurns: rs.fn(async () => []),
     interruptTurn: rs.fn(async () => {}),
   };
   const deps = {
-    settingsRepo: { get: async () => options.enabled ?? true },
+    settingsRepo: {
+      get: async () => {
+        if (options.settingsDelayMs)
+          await new Promise((resolve) => setTimeout(resolve, options.settingsDelayMs));
+        return options.enabled ?? true;
+      },
+    },
     webchatRepo: {
       getSession: async (id: string) => sessions.get(id) ?? null,
       getMessages: async (id: string) => messages.get(id) ?? [],
-      getTurnChatMessages: async (id: string) => messages.get(id) ?? [],
+      getTurnChatMessages: async (id: string, turnId: string) =>
+        (messages.get(id) ?? []).filter((row) => !row.turnId || row.turnId === turnId),
       addBackendMessage: rs.fn(async (chatId: string, _turnId: string, parts: unknown[]) => {
         const list = messages.get(chatId) ?? [];
         list.push({ role: "assistant", content: JSON.stringify(parts) });
@@ -66,8 +92,10 @@ function setup(options: { enabled?: boolean } = {}) {
     chatApi,
     runBackendTurn: async (params: BackendTurnParams) => {
       backendTurns.push(params);
+      await onBackendTurn(params);
     },
   } as unknown as ConciergeDeps;
+  let onBackendTurn: (params: BackendTurnParams) => Promise<void> | void = () => {};
   const service = new ConciergeService(deps);
   const context = (agentName = CONCIERGE_AGENT_ID): SessionToolContext => ({
     agentName,
@@ -119,7 +147,30 @@ function setup(options: { enabled?: boolean } = {}) {
     if (!found) throw new Error(`no tool ${name}`);
     return await found.handler(input);
   };
-  return { service, deps, chatApi, messages, backendTurns, order, context, finish, tool };
+  /** Moves a posted input to the turn that takes it, as the input queue does. */
+  const assignInput = (chatId: string, inputId: string, turnId: string) => {
+    const row = messages.get(chatId)?.find((candidate) => candidate.id === inputId);
+    if (row) row.turnId = turnId;
+  };
+  return {
+    service,
+    deps,
+    chatApi,
+    messages,
+    backendTurns,
+    order,
+    context,
+    finish,
+    tool,
+    posted,
+    assignInput,
+    setReceipt: (next: typeof receipt) => {
+      receipt = next;
+    },
+    onBackendTurn: (handler: typeof onBackendTurn) => {
+      onBackendTurn = handler;
+    },
+  };
 }
 
 describe("Concierge tools", () => {
@@ -190,6 +241,33 @@ describe("Concierge events", () => {
     expect(s.backendTurns[0].prompt).toContain("3 options");
   });
 
+  // The receipt of a queued or deferred follow-up names the running turn; a
+  // later turn answers it.
+  it("reports the turn that answers a queued chat_send follow-up as Concierge's", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.setReceipt({ turnId: "task-turn-1", disposition: "queued" });
+    await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
+    s.assignInput("task-1", s.posted[1], "task-turn-2");
+    await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId: "task-1", text: "f" });
+    await s.finish({ turnId: "task-turn-2", agentName: "core:main", chatId: "task-1", text: "t" });
+    expect(s.backendTurns.map((turn) => turn.prompt.match(/initiator="(\w+)"/)?.[1])).toEqual([
+      "concierge",
+      "concierge",
+    ]);
+  });
+
+  it("reports a task-chat turn the guardian started there as the guardian's", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    await s.finish({ turnId: "task-turn-1", agentName: "core:main", chatId: "task-1", text: "f" });
+    s.messages
+      .get("task-1")
+      ?.push({ id: "g1", role: "user", content: "hi", turnId: "task-turn-2" });
+    await s.finish({ turnId: "task-turn-2", agentName: "core:main", chatId: "task-1", text: "x" });
+    expect(s.backendTurns.at(-1)?.prompt).toContain('initiator="guardian"');
+  });
+
   it("ignores turns of chats Concierge did not start", async () => {
     const s = setup();
     await s.finish({ turnId: "t", agentName: "core:main", chatId: "other", text: "x" });
@@ -231,6 +309,30 @@ describe("Concierge events", () => {
       status: "interrupted",
     });
     expect(s.backendTurns).toHaveLength(1);
+  });
+});
+
+describe("Concierge reminder", () => {
+  // The reminder's own finish event fires while the reminder runs; a slow
+  // settings read must not let it see the guard already cleared.
+  it("never reminds the reminder, even when the settings read is slow", async () => {
+    const s = setup({ settingsDelayMs: 10 });
+    s.onBackendTurn(() => {
+      void s.finish({
+        turnId: `reminder-${s.backendTurns.length}`,
+        agentName: CONCIERGE_AGENT_ID,
+        chatId: CONCIERGE_CHAT,
+        text: "still not done",
+      });
+    });
+    await s.finish({
+      turnId: "c1",
+      agentName: CONCIERGE_AGENT_ID,
+      chatId: CONCIERGE_CHAT,
+      text: "hi",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([NUDGE_PROMPT]);
   });
 });
 

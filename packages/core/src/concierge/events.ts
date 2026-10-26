@@ -72,11 +72,14 @@ export function startConciergeEvents(
   const remindersRunning = new Set<string>();
 
   const onConciergeTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
+    // Read before any await: the reminder's own finish event fires while the
+    // reminder still runs, and the flag clears as soon as it returns.
+    const reminderRunning = remindersRunning.has(chatId);
     if (!(await service.isEnabled())) return;
     const nudge = shouldNudge({
       status: event.status,
       text: event.output.text,
-      reminderRunning: remindersRunning.has(chatId),
+      reminderRunning,
     });
     if (!nudge) return;
     remindersRunning.add(chatId);
@@ -88,7 +91,6 @@ export function startConciergeEvents(
   };
 
   const onTaskChatTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
-    const started = service.takeStarted(event.turn.turnId);
     if (!(await service.isEnabled())) return;
     const { webchatRepo } = service.deps;
     const chat = await webchatRepo.getSession(chatId);
@@ -97,6 +99,8 @@ export function startConciergeEvents(
     if (!conciergeChatId) return;
     await waitForTurnStream(service, chatId, event.turn.turnId);
     const rows = await webchatRepo.getTurnChatMessages(chatId, event.turn.turnId);
+    const userRows = rows.filter((row) => row.role === "user");
+    const started = service.takePosted(userRows.map((row) => row.id));
     const question = event.status === "completed" ? openQuestion(rows) : null;
     const reply = event.output.text.trim();
     const taskEvent: TaskEvent = question
@@ -106,11 +110,7 @@ export function startConciergeEvents(
           chatId,
           title: chat.triggerName ?? chat.name,
           status: event.status,
-          initiator: started
-            ? "concierge"
-            : rows.some((row) => row.role === "user")
-              ? "guardian"
-              : "system",
+          initiator: started ? "concierge" : userRows.length > 0 ? "guardian" : "system",
           replyExcerpt: reply.slice(0, REPLY_EXCERPT_CHARS),
           replyChars: reply.length,
         };

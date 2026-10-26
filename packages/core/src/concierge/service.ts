@@ -46,11 +46,11 @@ export interface ConciergeDeps {
 
 /**
  * Holds the in-process state Concierge needs between a turn and its
- * lifecycle event: which task-chat turns it started.
+ * lifecycle event: which task-chat inputs it posted.
  * The state is advisory and lost on restart.
  */
 export class ConciergeService {
-  private readonly startedTurns = new Set<string>();
+  private readonly postedInputs = new Set<string>();
   private creating: Promise<string> | null = null;
 
   constructor(readonly deps: ConciergeDeps) {}
@@ -136,12 +136,19 @@ export class ConciergeService {
     });
   }
 
-  markStarted(turnId: string): void {
-    if (turnId) this.startedTurns.add(turnId);
+  /** Records an input Concierge posts to a task chat. Its id is the user message's id. */
+  markPosted(inputId: string): void {
+    this.postedInputs.add(inputId);
   }
 
-  /** Whether Concierge started the task-chat turn. Forgets the turn. */
-  takeStarted(turnId: string): boolean {
-    return this.startedTurns.delete(turnId);
+  /**
+   * Whether any of a finished task-chat turn's user messages is an input
+   * Concierge posted. Forgets those inputs. A follow-up the task chat queued
+   * or deferred sits under the turn that answered it, not the receipt's turn.
+   */
+  takePosted(messageIds: string[]): boolean {
+    let posted = false;
+    for (const id of messageIds) if (this.postedInputs.delete(id)) posted = true;
+    return posted;
   }
 }
