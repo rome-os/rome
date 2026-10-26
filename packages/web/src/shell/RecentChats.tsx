@@ -1,4 +1,9 @@
-import { ChevronDownIcon, ChevronRightIcon, Pencil2Icon } from "@radix-ui/react-icons";
+import {
+  ChatBubbleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  Pencil2Icon,
+} from "@radix-ui/react-icons";
 import {
   Archive,
   ArchiveRestore,
@@ -35,8 +40,14 @@ import type { ChatSession } from "@/lib/chat-types";
 import { deviceFolderName, pathSegments } from "@/lib/device-folder";
 import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
+import {
+  CONCIERGE_AGENT_ID,
+  TASK_CHAT_TRIGGER_KIND,
+  useConciergeChatId,
+} from "@/hooks/use-concierge";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
+import { RomeLogo } from "@/components/logo";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
 import { emitSessionsChanged, useArchiveSession, usePinSession } from "@/lib/session-events";
 
@@ -250,7 +261,18 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
+function ChatRowLink({
+  id,
+  name,
+  nested,
+  marker,
+}: {
+  id: string;
+  name: string;
+  nested: boolean;
+  /** Names who started the chat, shown as a small mark after the name. */
+  marker?: string;
+}) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -283,6 +305,13 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
           <span ref={nameRef} className="truncate">
             {name}
           </span>
+          {marker ? (
+            <ChatBubbleIcon
+              role="img"
+              aria-label={marker}
+              className="ml-2 h-3 w-3 shrink-0 text-subtle-foreground"
+            />
+          ) : null}
         </Link>
       </TooltipTrigger>
       {/* Right of the row, so the bubble reaches into the page rather than
@@ -342,10 +371,15 @@ export function RecentChats({
   // while it was in flight. Per mount, since events stop while unmounted; the
   // remount's refetch reconciles whatever was missed.
   const liveRunning = useRef(new Map<string, boolean>());
+  // The Concierge chat has its own entry above the list.
   const sessions = useMemo(
-    () => (cachedSessions ?? []).map((s) => withLiveRunning(s, liveRunning.current)),
+    () =>
+      (cachedSessions ?? [])
+        .filter((s) => s.agentName !== CONCIERGE_AGENT_ID)
+        .map((s) => withLiveRunning(s, liveRunning.current)),
     [cachedSessions],
   );
+  const conciergeChatId = useConciergeChatId();
 
   // Live running state. A stop refetches the list for unread and
   // lastTurnFailed, and a reconnect refetches whatever changed meanwhile.
@@ -709,7 +743,16 @@ export function RecentChats({
             }`}
           />
         ) : (
-          <ChatRowLink id={session.id} name={session.name} nested={nested} />
+          <ChatRowLink
+            id={session.id}
+            name={session.name}
+            nested={nested}
+            marker={
+              session.triggerKind === TASK_CHAT_TRIGGER_KIND
+                ? t("recentChats.startedByConcierge")
+                : undefined
+            }
+          />
         )}
         <span
           className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
@@ -1092,6 +1135,22 @@ export function RecentChats({
             </span>
             <span className="flex-1 truncate">{t("recentChats.newChat")}</span>
           </Link>
+          {conciergeChatId ? (
+            <Link
+              to={`/chat/${conciergeChatId}`}
+              className={`${LINK_CLASS} ${
+                activeSessionId === conciergeChatId ? ACTIVE_CLASS : IDLE_CLASS
+              }`}
+            >
+              <span
+                className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+                aria-hidden
+              >
+                <RomeLogo className="size-4 shrink-0" aria-hidden />
+              </span>
+              <span className="flex-1 truncate">{t("recentChats.concierge")}</span>
+            </Link>
+          ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2 scrollbar-idle-hidden">
           {hasPinned ? (

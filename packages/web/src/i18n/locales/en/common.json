@@ -42,6 +42,8 @@
     "title": "Chats",
     "newChat": "New chat",
     "empty": "No chats yet",
+    "concierge": "Concierge",
+    "startedByConcierge": "Started by Concierge",
     "rowStatus": {
       "waiting": "Waiting for you",
       "running": "Replying now",

@@ -1,6 +1,7 @@
 // Accounts and their agents. An account is a channel, as the dashboard
 // shows it; one whose Connection was deleted is listed with no Connection.
-// Vocabulary: docs/domains/chats.md#account.
+// Its agent is its connected account's.
+// Vocabulary: docs/domains/chats.md#connected-account.
 // Invariants: docs/architecture/channels.md#an-accounts-agent.
 
 import type {
@@ -17,7 +18,9 @@ import {
   ChannelUnbacked,
   type ChannelRecord,
 } from "../../db/repositories/channel-records.js";
+import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { linkChannelAgent } from "../../channels/account-agents.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -25,14 +28,14 @@ const linkBodySchema: z.ZodType<LinkAccountAgentRequest> = z.object({
   agent: z.string().trim().min(1).nullable(),
 });
 
-function accountView(record: ChannelRecord): ChannelAccount {
+function accountView(record: ChannelRecord, agent: string | null): ChannelAccount {
   return {
     id: record.id,
     connectionKind: record.connectionKind,
     service: record.connectionKind,
     platform: record.platform,
     connectionId: record.connectionId,
-    agent: record.agent,
+    agent,
   };
 }
 
@@ -41,10 +44,19 @@ export function channelAccountsRoutes(
 ): Hono {
   const app = new Hono();
   const channels = new ChannelRecordsRepository(deps.db);
+  const accounts = new ConnectedAccountsRepository(deps.db);
 
   app.get("/channels/accounts", (c) => {
     c.header("Cache-Control", "no-store");
-    return c.json({ accounts: channels.all().map(accountView) });
+    const views = channels
+      .all()
+      .map((record) =>
+        accountView(
+          record,
+          record.connectionId === null ? null : accounts.agentOf(record.connectionId),
+        ),
+      );
+    return c.json({ accounts: views });
   });
 
   // Link an agent to an account, or unlink it with `null`. Only this account
@@ -70,9 +82,11 @@ export function channelAccountsRoutes(
     }
     const id = c.req.param("id");
     try {
-      const channel = channels.link(id, agent);
-      deps.accountListening.changed([channel.id]);
-      const result: LinkAccountAgentResult = { account: accountView(channel) };
+      const linked = linkChannelAgent(channels, accounts, id, agent);
+      deps.accountListening.changed([linked.channel.id]);
+      const result: LinkAccountAgentResult = {
+        account: accountView(linked.channel, linked.agent),
+      };
       return c.json(result);
     } catch (err) {
       if (err instanceof ChannelRecordNotFound) return c.json({ error: err.message }, 404);

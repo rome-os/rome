@@ -719,6 +719,11 @@
         "description": "适用于守护者在 Telegram 和飞书的私聊。在 Telegram 中，回复以纯文本显示。回复中途失败时不会重发，可能停在未完成的状态。",
         "toggleLabel": "边生成边发送回复"
       },
+      "concierge": {
+        "title": "Concierge",
+        "description": "在对话列表里增加一个对话：代理像发消息一样用短消息和你聊天，较长的工作交给可以打开查看的任务对话。",
+        "toggleLabel": "在对话中显示 Concierge"
+      },
       "feishuStreamingStyle": {
         "title": "飞书流式样式",
         "description": "消息每条最多编辑 20 次，之后回复在新消息里继续。卡片以打字效果显示文字。",

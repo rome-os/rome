@@ -6,6 +6,7 @@ import { Mutex } from "async-mutex";
 import {
   AgentInputQueue,
   type AgentInputReceipt,
+  SUPERSEDED_INTERRUPT_REASON,
   type SubmitInputOptions,
 } from "./agent-input-queue.js";
 import { v4 as uuidv4 } from "uuid";
@@ -118,6 +119,7 @@ import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
+import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
 import type {
   StoredConversationContextMessage,
   WebChatRepository,
@@ -416,6 +418,8 @@ interface ManagerDeps {
   /** App-declared event sources: an event `defer` subscribes through them.
    *  When absent, an event wait is created without any check. */
   eventSources?: EventSources;
+  /** Extra tools per session. When absent, no session carries any. */
+  sessionTools?: SessionToolsProvider;
 }
 
 /** The parts of a channel's surface that change how its sessions prompt. */
@@ -1563,6 +1567,15 @@ async function openSession(
     resumeThreadId?: string,
   ): Promise<ModelSession> => {
     const params = buildSessionParams(resolution, resumeProviderId, resumeThreadId);
+    const sessionTools = await deps.sessionTools?.({
+      agentName: key.agentName,
+      channelThreadKey: key.channelThreadKey,
+      sessionId,
+      isSubagent: opts.isSubagent === true,
+      getTurnId: sessionExecRefs.getTurnId,
+      getThreadContext: sessionExecRefs.getThreadContext,
+    });
+    if (sessionTools?.length) params.sessionTools = sessionTools;
     sessionIdUnused = false;
     const resumed = params.providerThreadId !== undefined;
     const openStartMs = Date.now();
@@ -1719,6 +1732,9 @@ async function openSession(
         executeSubagent: makeExecuteSubagent(refs),
         executeSubmitOutput: conversationalHandback ? makeExecuteSubmitOutput(refs) : undefined,
         executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
+        sessionTools: liveOpenParams.sessionTools
+          ? detachSessionTools(liveOpenParams.sessionTools)
+          : undefined,
         // The spread keeps `supportsInteractiveSurface` (it shapes the
         // advertised catalog + system prompt, which must stay byte-identical
         // to the source); this flag makes the interactive *runtime* degrade
@@ -3331,7 +3347,25 @@ class AgentSessionImpl implements AgentSession {
     options: SubmitInputOptions,
   ): AgentInputReceipt {
     if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
-    return this.inputs.submit(input, options);
+    const receipt = this.inputs.submit(input, options);
+    // The queue ends its own turn. A system turn (a backend continuation) runs
+    // outside the queue, so a `now` input ends it here.
+    const sink = this.currentSink;
+    if (
+      options.priority === "now" &&
+      sink &&
+      !sink.done &&
+      sink.turnId !== receipt.turnId &&
+      !this.inputs.owns(sink.turnId)
+    ) {
+      void this.interrupt(SUPERSEDED_INTERRUPT_REASON, sink.turnId).catch((error) =>
+        log.warn("superseding the running turn failed", {
+          sessionId: this.sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+    return receipt;
   }
 
   sendTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle {

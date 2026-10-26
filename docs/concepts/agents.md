@@ -39,6 +39,16 @@ systemPromptPrefix: Complete the requested coding task.
 
 An agent model pin supplies the default for a new session, not an instruction to migrate existing history. Changing the YAML affects new sessions. Existing sessions retain their [session model pin](sessions.md#model-pin) unless the guardian explicitly selects another model.
 
+## Session policy
+
+A core or app agent may declare how a chat treats its turns in an optional `policy:` block. Each omitted field keeps the default, which is the behavior every chat had before the block existed.
+
+| Field | Values | Default |
+|---|---|---|
+| `finalText` | `deliver` sends the model's text to the chat. `private` keeps it, narration and final reply alike, in the trace, so the agent reaches the guardian only through its tools. | `deliver` |
+| `autoTitle` | Whether the chat's first message names the chat. | `true` |
+| `loadMemory` | Whether a core agent's system prompt carries the memory index, project summaries, and runtime paths. | `true` for `main` only |
+
 ## Builtin tools
 
 A builtin tool is a tool the model provider runs itself, such as a file read or a shell command. An agent's `tools` list names the builtin tools it gets. Its actions, skills, and subagents are Rome tools, which `tools` does not control.

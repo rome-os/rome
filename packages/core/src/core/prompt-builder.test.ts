@@ -114,6 +114,22 @@ describe("PromptBuilder", () => {
     expect(prompt).not.toContain("Private guardian preference.");
   });
 
+  it("injects MEMORY.md into a core agent whose policy loads memory", () => {
+    mkdirSync(mockPaths.profileMemoryDir, { recursive: true });
+    writeFileSync(
+      join(mockPaths.profileMemoryDir, "MEMORY.md"),
+      "# Memory\n\nShared guardian preference.",
+    );
+
+    const prompt = new PromptBuilder().build(
+      { ...mainConfig, name: "concierge", policy: { loadMemory: true } },
+      corePromptOptions,
+    );
+
+    expect(prompt).toContain("Shared guardian preference.");
+    expect(prompt).toContain("# Runtime Context");
+  });
+
   it("injects project context from PROJECT.md only", () => {
     const projectMemoryDir = join(mockPaths.profileMemoryDir, "projects", "alpha");
     mkdirSync(projectMemoryDir, { recursive: true });

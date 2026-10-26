@@ -915,10 +915,9 @@ export const connections = sqliteTable("connections", {
 // its account from before channels were recorded keeps the name. A row
 // outlives its Connection, unbacked and unlinked, so its id is never minted
 // again: a linkable connection kind's next Connection gets a channel of its own, and
-// another connection kind's takes the row back. `agent` is the canonical id of the
-// account's agent, and one agent may be the agent of any number of channels,
-// several on one platform included. `platform` is the platform the row was
-// minted on, and the row keeps it.
+// another connection kind's takes the row back. `agent` is no longer written
+// or read: an account's agent lives on `connected_accounts`. `platform` is
+// the platform the row was minted on, and the row keeps it.
 export const channels = sqliteTable(
   "channels",
   {
@@ -940,6 +939,17 @@ export const channels = sqliteTable(
       .where(sql`${table.platformAccountId} IS NOT NULL`),
   ],
 );
+
+// Chats' record of a connected account: one row per connection that lets
+// Rome chat, keyed by that connection and holding the agent that speaks
+// through the account, null for none. It lives exactly as long as its
+// connection. Vocabulary: docs/domains/chats.md#connected-account.
+export const connectedAccounts = sqliteTable("connected_accounts", {
+  connectionId: text("connection_id")
+    .primaryKey()
+    .references(() => connections.id, { onDelete: "cascade" }),
+  agent: text("agent"),
+});
 
 // The grant ledger. Rows record outcomes only — never step/flow state
 // or scheme-specific columns. `credential` is a PersistedCredential envelope

@@ -2522,6 +2522,79 @@ describe("Webchat API", () => {
       ]);
     });
 
+    it("passes an input's priority to the session and rejects an unknown one", async () => {
+      const priorities: unknown[] = [];
+      deps.agentSessionManager = fakeSessionManager(async (key) => ({
+        key: { agentName: key.agentName, channelThreadKey: "webchat:priority" },
+        sessionId: "agent-session",
+        status: "idle",
+        sendTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+          priorities.push((options as SubmitInputOptions | undefined)?.priority);
+          return {
+            turnId: `turn-priority-${priorities.length}`,
+            events: (async function* () {
+              yield { type: "result", content: "ok" };
+            })() as AsyncGenerator<never>,
+            turnContext: otelContext.active(),
+          };
+        },
+        subscribe: () => () => undefined,
+        onStatusChange: () => () => undefined,
+        interrupt: async () => undefined,
+        close: async () => undefined,
+      }));
+      deps.actionEngine = {
+        run: rs.fn(async () => ({ status: "ok" })),
+      } as unknown as typeof deps.actionEngine;
+      const app = createWebchatRuntime(deps).routes;
+      const session = (await (
+        await app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "Priority" }),
+        })
+      ).json()) as { id: string };
+      const post = (body: Record<string, unknown>) =>
+        app.request(`/chat/sessions/${session.id}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+      expect((await post({ text: "a" })).status).toBe(200);
+      expect((await post({ text: "b", priority: "now" })).status).toBe(200);
+      expect((await post({ text: "c", priority: "later" })).status).toBe(400);
+      expect(priorities).toEqual([undefined, "now"]);
+    });
+
+    it("keeps a private agent's text in the trace: no commentary message, no reply", async () => {
+      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      rs.spyOn(deps.agentLoader, "get").mockReturnValue({
+        name: "main",
+        policy: { finalText: "private", autoTitle: false },
+      } as ReturnType<typeof deps.agentLoader.get>);
+      const { sendMessageRun, sessionId } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "text", content: "Note to self.", turnPhase: "commentary" };
+            yield { type: "tool_use", id: "tu-1", tool: "some_tool", input: {} };
+            yield { type: "tool_result", toolUseId: "tu-1", tool: "some_tool", output: {} };
+            yield { type: "text", content: "Private answer.", turnPhase: "final" };
+            yield { type: "result", content: "Private answer." };
+          })() as AsyncGenerator<never>,
+      );
+
+      expect(sendMessageRun).not.toHaveBeenCalledWith(
+        "send_message",
+        expect.anything(),
+        expect.anything(),
+      );
+      const messages = await deps.webchatRepo.getMessages(sessionId);
+      expect(messages.filter((m) => m.role === "assistant")).toEqual([]);
+      const trace = messages.find((m) => m.role === "trace");
+      expect(trace).toBeTruthy();
+    });
+
     it("persists each text block's block id beside its block index", async () => {
       const { sendMessageRun, sessionId } = await runScriptedStream(
         () =>

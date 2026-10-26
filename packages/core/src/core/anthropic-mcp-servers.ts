@@ -24,7 +24,7 @@ import type {
   ModelToolDefinition,
   SkillMcpDefinition,
 } from "./agent-runner.js";
-import type { HandbackSpec, RoutineActivationGate } from "./mcp-facade.js";
+import type { FacadeToolDef, HandbackSpec, RoutineActivationGate } from "./mcp-facade.js";
 import {
   createRomeMcpServer,
   type RomeMcpGroup,
@@ -53,6 +53,8 @@ interface BuildAnthropicMcpServersParams {
   interactiveSurfaceDetached?: boolean;
   /** See FacadeParams.executeDefer. */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
+  /** See FacadeParams.sessionTools. */
+  sessionTools?: FacadeToolDef[];
   /** See FacadeParams.routineActivation. */
   routineActivation?: RoutineActivationGate;
 }
@@ -112,6 +114,7 @@ export function buildAnthropicMcpServers({
   supportsInteractiveSurface,
   interactiveSurfaceDetached,
   executeDefer,
+  sessionTools,
   routineActivation,
 }: BuildAnthropicMcpServersParams): AnthropicMcpServers {
   const server = createRomeMcpServer({
@@ -125,6 +128,7 @@ export function buildAnthropicMcpServers({
     supportsInteractiveSurface,
     interactiveSurfaceDetached,
     executeDefer,
+    sessionTools,
     routineActivation,
   });
 

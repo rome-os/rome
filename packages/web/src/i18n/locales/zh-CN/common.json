@@ -41,6 +41,8 @@
     "allChats": "所有聊天",
     "title": "最近对话",
     "newChat": "新对话",
+    "concierge": "Concierge",
+    "startedByConcierge": "由 Concierge 发起",
     "empty": "还没有对话",
     "rowStatus": {
       "waiting": "等你处理",

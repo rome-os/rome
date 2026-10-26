@@ -94,6 +94,7 @@ import { domainOf, domainOfGrant } from "./channels/platform.js";
 import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
+import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { ConnectionPacing } from "./channels/delivery/connection-pacing.js";
 import { ReplyStreams } from "./channels/delivery/streams.js";
 import { replyStreamingSwitch } from "./channels/delivery/streaming-switch.js";
@@ -138,6 +139,11 @@ import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
+import { resolveSessionPolicy } from "./core/session-policy.js";
+import { ConciergeService } from "./concierge/service.js";
+import { buildConciergeTools } from "./concierge/tools.js";
+import { startConciergeEvents } from "./concierge/events.js";
+import { createLoopbackChatApi } from "./concierge/chat-api.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
@@ -294,9 +300,11 @@ async function main() {
 
   const sessionsRepo = new SessionsRepository(db);
   const channelRecords = new ChannelRecordsRepository(db);
+  const connectedAccounts = new ConnectedAccountsRepository(db);
+  const channelAgents = { records: channelRecords, accounts: connectedAccounts };
   // Rome listens to an account of a linkable connection kind only while it has an
   // agent: each channel's inbound port reads this, and a link tells it.
-  const accountListening = new AccountListening(channelRecords);
+  const accountListening = new AccountListening(channelAgents);
   // The connection kind a channel name belongs to. Whatever is keyed by connection kind, such
   // as a descriptor, a channel policy, or a person's link, reads it.
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
@@ -390,13 +398,18 @@ async function main() {
     onMint: (tx, record, profile, account) => {
       if (!talks(record.connectionKind)) return;
       channelRecords.claim(tx, { ...record, domain: domainOf(profile), account }, record.createdAt);
+      connectedAccounts.add(tx, record.id);
     },
     onAccount: (tx, connection, account) => {
       if (!talks(connection.connectionKind)) return;
       channelRecords.ensureAccount(tx, connection, account, new Date());
+      connectedAccounts.add(tx, connection.id);
     },
     onRevoke: () => channelRecords.forget(),
-    onRemove: (tx, id) => channelRecords.vacate(tx, id),
+    onRemove: (tx, id) => {
+      channelRecords.vacate(tx, id);
+      connectedAccounts.remove(tx, id);
+    },
   });
   const channelOf = recordedChannelOf(channelRecords, talks);
   const linkAgentToGuardian = createAgentsGuardianLink({
@@ -876,6 +889,16 @@ async function main() {
       return access ? credentialFingerprint(access.token) : null;
     },
   });
+  // Concierge (rome-os/rome#1344). Its backend turns run through the runner
+  // created below, by the time any turn finishes.
+  const concierge = new ConciergeService({
+    settingsRepo,
+    webchatRepo,
+    sessionManager,
+    aiToolState,
+    chatApi: createLoopbackChatApi(),
+    runBackendTurn: (params) => backendTurnRunner.runAndDeliver(params),
+  });
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
@@ -904,6 +927,7 @@ async function main() {
       },
       connectionKindOfChannel,
       eventSources,
+      sessionTools: (context) => buildConciergeTools(concierge, context),
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
@@ -970,7 +994,12 @@ async function main() {
     resolveDeviceFolder: (channel, threadId) =>
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
+    isTextPrivate: (agentName) =>
+      agentLoader.has(agentName) &&
+      resolveSessionPolicy(agentLoader.get(agentName)).finalText === "private",
   });
+
+  startConciergeEvents(concierge, lifecycleDispatcher);
 
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
@@ -1249,7 +1278,7 @@ async function main() {
   //
   // Register every built-in descriptor now (before load()/import), threading the
   // runtime deps the factories need from here where the repos/adapters exist.
-  const accountAgentOf = accountAgentResolver(channelRecords, agentLoader);
+  const accountAgentOf = accountAgentResolver(channelAgents, agentLoader);
   const { RomeCloudMailProvider } = await import("./lib/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
@@ -1460,6 +1489,7 @@ async function main() {
   await claimChannels(
     db,
     channelRecords,
+    connectedAccounts,
     connectionRegistry.all().filter((c) => talks(c.connectionKind)),
     async (id) => domainOfGrant(await connectionRegistry.getLedger().getGrant(id)),
   );
@@ -1643,6 +1673,7 @@ async function main() {
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      concierge,
       feedback: feedbackClient,
       provisionNodeCaller,
       autoConnectEmail: () => connectEmailWithoutClick("seat-created"),

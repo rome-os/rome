@@ -4,6 +4,19 @@
     "mermaid": "Mermaid 图表"
   },
   "title": "Rome",
+  "concierge": {
+    "typing": "正在输入",
+    "taskChat": "任务对话",
+    "taskStatus": {
+      "running": "进行中",
+      "waiting": "等你处理",
+      "failed": "出错停止了",
+      "idle": "已完成"
+    },
+    "openTaskChat": "打开",
+    "composerMenu": "添加文件或切换模型",
+    "placeholder": "发消息"
+  },
   "senderGuardian": "守护者",
   "inputState": {
     "queued": "等待加入对话",

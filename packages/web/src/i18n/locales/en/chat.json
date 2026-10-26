@@ -4,6 +4,19 @@
     "mermaid": "Mermaid diagram"
   },
   "title": "Rome",
+  "concierge": {
+    "typing": "Typing",
+    "taskChat": "Task chat",
+    "taskStatus": {
+      "running": "Working",
+      "waiting": "Needs you",
+      "failed": "Stopped with an error",
+      "idle": "Done"
+    },
+    "openTaskChat": "Open",
+    "composerMenu": "Add files or change the model",
+    "placeholder": "Message"
+  },
   "senderGuardian": "Guardian",
   "inputState": {
     "queued": "Waiting to be included",

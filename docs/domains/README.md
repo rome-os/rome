@@ -76,6 +76,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - A fix that reaches another account is refused, the sign-ins such as GitHub included.
 - Connecting through a sign-in such as GitHub is one step, and a sign-in Rome rejects leaves no connection behind.
 - Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
+- Chats keeps a connected account by its connection, holding only its agent. It is made with the connection and goes with it.
 
 Diffs still owed to the model, each a change of its own:
 
@@ -99,7 +100,7 @@ Diffs still owed to the model, each a change of its own:
 - The guardian can delete a person.
 - A delegate link is stored and shown as the agent of its person.
 - People's labels and docs say platform where they say channel.
-- Chats keeps a connected account by its connection, holding only its agent, and the channel record goes.
+- The channel record goes.
 - Email and WhatsApp accounts end at disconnect like every other, and connecting again starts a fresh connected account.
 - Linking, switching and unlinking name the connected account by its connection. Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
 - The code says chat, act and watch for what a connection lets Rome do.

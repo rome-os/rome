@@ -139,6 +139,7 @@ interface SettingsData {
   enableImpersonation?: boolean;
   enableReplyStreaming?: boolean;
   feishuReplyStreamingStyle?: FeishuStreamingStyle;
+  experimentalConcierge?: boolean;
   showAiToolUsage?: boolean;
   tierModelMappings?: TierModelMappings;
 }
@@ -1518,7 +1519,8 @@ function ImpersonationAdvancedSection({
  *  Reply streaming is the first: with it off, Rome sends each reply whole. The
  *  setting is `enableReplyStreaming`, read by the host on every reply.
  *  `feishuReplyStreamingStyle` chooses how a reply streams to Feishu, cards
- *  unless it says messages, read for each message a reply creates. */
+ *  unless it says messages, read for each message a reply creates.
+ *  `experimentalConcierge` shows the Concierge chat under Chats. */
 function ExperimentalFeaturesSection({
   settings,
   onSave,
@@ -1533,6 +1535,7 @@ function ExperimentalFeaturesSection({
   const [feishuStyle, setFeishuStyle] = useState<FeishuStreamingStyle>(
     settings.feishuReplyStreamingStyle === "message" ? "message" : "card",
   );
+  const [concierge, setConcierge] = useState(settings.experimentalConcierge ?? false);
 
   function toggleReplyStreaming(next: boolean) {
     setReplyStreaming(next);
@@ -1542,6 +1545,11 @@ function ExperimentalFeaturesSection({
   function chooseFeishuStyle(next: FeishuStreamingStyle) {
     setFeishuStyle(next);
     void onSave({ feishuReplyStreamingStyle: next });
+  }
+
+  function toggleConcierge(next: boolean) {
+    setConcierge(next);
+    void onSave({ experimentalConcierge: next });
   }
 
   return (
@@ -1585,6 +1593,14 @@ function ExperimentalFeaturesSection({
             />
           </FormRowControl>
         </FormRow>
+        <SettingsToggleRow
+          title={t("advanced.experimental.concierge.title")}
+          description={t("advanced.experimental.concierge.description")}
+          label={t("advanced.experimental.concierge.toggleLabel")}
+          checked={concierge}
+          onChange={toggleConcierge}
+          disabled={saving}
+        />
       </FormRows>
     </Section>
   );

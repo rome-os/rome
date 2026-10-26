@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef } from "react";
+import { memo, useMemo } from "react";
 import { CircleAlert, CircleHelp, CircleSlash } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ChatBubble } from "@/components/chat/ChatBubble";
@@ -8,7 +8,6 @@ import type { ChatMessage } from "@/lib/chat-types";
 import { userMessageText } from "@/components/chat/chat-view";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
-import { useSendFlight } from "@/components/chat/use-chat-motion";
 import { MessageRow } from "@/components/chat/MessageRow";
 import { SenderAvatar, sentByViewer } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
@@ -21,9 +20,6 @@ export const UserMessage = memo(
   function UserMessage({ msg }: { msg: ChatMessage }) {
     const { t } = useTranslation("chat");
     const { data: viewer } = useDashboardIdentity();
-    const rowRef = useRef<HTMLDivElement>(null);
-    const bubbleRef = useRef<HTMLDivElement>(null);
-    useSendFlight(msg.id, rowRef, bubbleRef);
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
     const timestamp = useMemo(() => formatMessageTimestamp(msg.createdAt), [msg.createdAt]);
     const undelivered =
@@ -46,7 +42,6 @@ export const UserMessage = memo(
     // icon read.
     const bubble = (
       <ChatBubble
-        ref={own ? bubbleRef : undefined}
         tone={undelivered ? "muted" : own ? "sent" : "received"}
         className={cn(
           "max-w-[70%] transition-colors motion-reduce:transition-none",
@@ -111,7 +106,7 @@ export const UserMessage = memo(
       );
     }
     return (
-      <div ref={rowRef} className="group mb-4 flex items-start justify-end gap-2">
+      <div className="group mb-4 flex items-start justify-end gap-2">
         <div className="flex min-w-0 flex-1 flex-col items-end">
           {bubble}
           {status}

@@ -2,6 +2,7 @@ import type { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
+import type { ConciergeService } from "../concierge/service.js";
 import type { ActionLoader } from "../actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { OutboxRepository } from "../db/repositories/outbox.js";
@@ -77,6 +78,8 @@ export interface ApiConfig {
  * exception is `appsRoot`, a genuine config override rather than a service.
  */
 export interface ApiDeps {
+  /** The Concierge feature. Absent ⇒ its routes answer as if the setting were off. */
+  concierge?: ConciergeService;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
   chatSettings: ChatSettingsControl;

@@ -128,6 +128,40 @@ describe("backend turn delivery", () => {
     });
   });
 
+  it("delivers no reply for an agent whose text is private", async () => {
+    const agentRunner = createMockAgentRunner([
+      [
+        { type: "turn_start", turnId: "turn-1", sessionId: "agent-session-1", userPrompt: "Wake" },
+        { type: "result", content: "A private note." },
+      ],
+    ]);
+    const send = rs.fn(async (chatId: string) => ({ messageId: "m", chatId }));
+    const webchat = {
+      name: "webchat",
+      send: { send, direct: null, activity: null },
+    } as unknown as Channel;
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: (name) => (name === "webchat" ? webchat : null),
+      isTextPrivate: (agentName) => agentName === "core:concierge",
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (_sessionId, task) => {
+        await task({ emit: async () => {} });
+      },
+    });
+
+    await runner.runAndDeliver({
+      agentName: "core:concierge",
+      sessionId: "agent-session-1",
+      channel: "webchat",
+      threadId: "chat-1",
+      prompt: "<task_event/>",
+    });
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("resumes a webchat continuation with the chat's device folder", async () => {
     const agentRunner = createMockAgentRunner([[{ type: "result", content: "" }]]);
     const folder = { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" };

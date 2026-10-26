@@ -130,6 +130,11 @@ export interface FacadeParams {
    */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
   /**
+   * Tools this session alone carries, registered on every surface beside
+   * `defer`. Their handlers own their own context.
+   */
+  sessionTools?: FacadeToolDef[];
+  /**
    * Lets `propose_routine` with `activate: true` create the routine itself.
    * Absent → auto-enable is unavailable and the draft card is shown instead.
    */
@@ -724,6 +729,7 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
       params.routineActivation
         ? { ...params.routineActivation, executeAction: params.executeAction }
         : undefined,
+      params.sessionTools,
     ),
   };
 }
@@ -1240,6 +1246,7 @@ function buildInteractiveTools(
   hasHandback: boolean,
   executeDefer?: (input: DeferInput) => Promise<unknown>,
   activation?: ActivationDeps,
+  sessionTools: FacadeToolDef[] = [],
 ): FacadeToolDef[] {
   // `ask_question` is registered on every surface: webchat mounts the card; other
   // surfaces (messaging channels, subagents, CLI) get the questions relayed as
@@ -1344,6 +1351,7 @@ function buildInteractiveTools(
   if (executeDefer) {
     tools.push(buildDeferFacadeTool(executeDefer));
   }
+  tools.push(...sessionTools);
   // propose_routine and confirm_output render/resolve UI and have no prose
   // fallback, so keep them on interactive surfaces only. Detached sessions
   // (exact forks) keep advertising them — the catalog must stay byte-identical

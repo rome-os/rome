@@ -13,6 +13,7 @@ import type { ChatComposerHandle } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { useSettings } from "@/hooks/use-settings";
+import { CONCIERGE_CHAT_ID, useConciergeChat } from "@/hooks/use-concierge";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import type { AgentMention } from "@/lib/chat-types";
 
@@ -63,6 +64,8 @@ export function ChatComponent({
   const { i18n } = useTranslation("chat");
 
   const { data: settings } = useSettings();
+  const concierge = useConciergeChat();
+  const isConcierge = sessionId === CONCIERGE_CHAT_ID;
   const coarsePointer = useCoarsePointer();
   const guardianName = (settings?.guardianName as string | undefined) ?? "";
   const mainAgentDisplayName =
@@ -234,6 +237,10 @@ export function ChatComponent({
     [navigate],
   );
 
+  // `/chat/concierge` opened directly: wait until the server has created the
+  // chat, or loading it would 404 and leave for a new chat.
+  if (isConcierge && concierge.loading) return null;
+
   return (
     <>
       <Chat
@@ -249,6 +256,7 @@ export function ChatComponent({
         initialAgentMention={initialAgentMention}
         composerRef={composerRef}
         navbarSlot={navbarSlot}
+        variant={isConcierge && concierge.chatId ? "concierge" : "default"}
         centerDraftComposer={greetingOnlyHome}
         emptyState={
           <ChatEmptyState

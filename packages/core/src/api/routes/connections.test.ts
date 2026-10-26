@@ -21,6 +21,7 @@ import {
 import type { Credential, ProfileRecord } from "../../connections/types.js";
 import { domainOf } from "../../channels/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
+import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { createTestDb, identityConnectionKindOf } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
@@ -512,7 +513,8 @@ describe("GET /connections accounts", () => {
     registry.register({ ...telegram.descriptor, connectionKind: "telegram" });
     const conn = await registry.connect("telegram");
     const channel = records.idOf(conn.id) as string;
-    records.link(channel, "sales:agent");
+    const accounts = new ConnectedAccountsRepository(db);
+    accounts.link(conn.id, "sales:agent");
 
     const { connections } = await (await makeApp(registry, { db }).request("/connections")).json();
 
@@ -521,7 +523,7 @@ describe("GET /connections accounts", () => {
       agent: "sales:agent",
     });
 
-    records.link(channel, null);
+    accounts.link(conn.id, null);
     const relisted = await (await makeApp(registry, { db }).request("/connections")).json();
     expect(
       relisted.connections.find((each: { id: string }) => each.id === conn.id).agent,
