@@ -118,6 +118,7 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("I sort these by hand");
     expect(prompt).toContain("- Earlier idea");
     expect(prompt).toContain("under a **Try with Rome** header");
+    expect(prompt).toContain("what could Rome do that would make their life noticeably better");
     expect(prompt).not.toContain("${");
 
     const without = buildPrompt("evening", "UTC", [], null, []);

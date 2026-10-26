@@ -19,11 +19,11 @@ constant notifications and get a calm rundown instead.
 - **Morning & evening briefs** — fully configurable times (default 8:00 AM and
   11:00 PM). Each brief checks your calendar, recent messages, and every scouting
   finding gathered since the last brief.
-- **Try with Rome** — when your recent chats show a task you keep doing by hand
-  or a goal you shared at signup, the brief may suggest one or two things Rome
-  could do for you. It stays out when nothing clearly fits. Your chats and Rome
-  Cloud profile are read only for briefs sent to you, never for a brief sent to
-  someone else.
+- **Try with Rome** — based on how you use Rome and what you care about, the
+  brief may suggest one or two things Rome could do to make your day easier,
+  such as a routine for a task you keep doing by hand. It stays out when
+  nothing clearly fits. Your chats and Rome Cloud profile are read only for
+  briefs sent to you, never for a brief sent to someone else.
 - **Delivered where you want** — send briefs to WhatsApp or email; pick the
   channel and recipient in settings.
 - **Test anytime** — run a brief on demand to preview exactly what you'd receive.
