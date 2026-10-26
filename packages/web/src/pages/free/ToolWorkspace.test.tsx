@@ -534,6 +534,7 @@ describe("ToolWorkspace Trace tab against the saved tool view", () => {
       <ToolWorkspace
         placements={cells.placements}
         view={cells.toolView}
+        activations={cells.toolActivations}
         selectTool={cells.selectTool}
         setCollapsed={cells.setToolsCollapsed}
         addWidget={cells.addWidget}
@@ -640,15 +641,26 @@ describe("ToolWorkspace Trace tab against the saved tool view", () => {
     expect(selected("Trace")).toBe(true);
   }
 
-  it("keeps Trace selected when the store re-places the active app under a new id", async () => {
+  it("keeps Trace selected when the agent re-places the active app under a new id", async () => {
+    const user = userEvent.setup();
+    await openTraceOverApps(user);
+    act(() => {
+      store.applyAgentPlacement("p1", "mail", "r2");
+    });
+
+    expect(selected("Trace")).toBe(true);
+    expect(screen.getByText("Trace body first")).toBeTruthy();
+  });
+
+  it("shows the app when the user opens one from a chat link while Trace is selected", async () => {
     const user = userEvent.setup();
     await openTraceOverApps(user);
     act(() => {
       store.autoPlaceApp("mail", "r2", undefined, true);
     });
 
-    expect(selected("Trace")).toBe(true);
-    expect(screen.getByText("Trace body first")).toBeTruthy();
+    expect(selected("Trace")).toBe(false);
+    expect(selected("mail")).toBe(true);
   });
 
   it("keeps Trace selected when background apps close, with no empty state", async () => {

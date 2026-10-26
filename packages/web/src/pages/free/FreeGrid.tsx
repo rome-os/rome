@@ -164,8 +164,15 @@ export function FreeGrid() {
   const params = useParams<{ "*"?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const { placements, addWidget, removeWidget, toolView, selectTool, setToolsCollapsed } =
-    useFreeCells();
+  const {
+    placements,
+    addWidget,
+    removeWidget,
+    toolView,
+    toolActivations,
+    selectTool,
+    setToolsCollapsed,
+  } = useFreeCells();
   const { apps } = useApps();
   const sessionNames = useSessionNames(
     placements.flatMap((widget) =>
@@ -392,6 +399,7 @@ export function FreeGrid() {
             // App tiles navigate inside a frozen iframe, so persist the live
             // route before the link is followed; the href then carries it.
             onOpenIntent={flushAppLink}
+            activations={toolActivations}
           >
             <ChatWidget
               sessionId={chatSessionId}

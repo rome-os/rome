@@ -131,6 +131,8 @@ interface ToolWorkspaceProps {
   fullHref: (widget: WidgetPlacement) => string | null;
   /** Fires just before the full-page link can be followed, to refresh it. */
   onOpenIntent?: (widget: WidgetPlacement) => void;
+  /** The store's count of explicit app activations; a change leaves the Trace tab. */
+  activations?: number;
   children: ReactNode;
 }
 
@@ -146,6 +148,7 @@ export function ToolWorkspace({
   content,
   fullHref,
   onOpenIntent,
+  activations,
   children,
 }: ToolWorkspaceProps) {
   const { t } = useTranslation("common");
@@ -214,10 +217,15 @@ export function ToolWorkspace({
     [reveal],
   );
 
-  // Only the user's own choice of an app deselects the Trace tab. Changes that
-  // come from the store, such as an agent re-placing the active app under a new
-  // id or a background app closing, move `view.activeId` without the user
-  // asking to leave the trace, so they never touch `traceSelected`.
+  // Only the user's own choice of an app deselects the Trace tab: a tab or
+  // picker here, or an explicit activation elsewhere (a chat link), which the
+  // store counts. Store-side changes, such as an agent re-placing the active
+  // app under a new id or a background app closing, move `view.activeId`
+  // without the user asking to leave the trace, so they never touch it.
+  useEffect(() => {
+    if (activations !== undefined) setTraceSelected(false);
+  }, [activations]);
+
   function addAndShow(type: WidgetType, targetId?: string) {
     setTraceSelected(false);
     addWidget(type, targetId);
