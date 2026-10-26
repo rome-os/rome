@@ -5,7 +5,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb, testAccountLinkOf } from "../test/helpers.js";
 import { AccountAlreadyConnectedError, DifferentAccountError } from "./errors.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
@@ -318,7 +318,7 @@ describe("ConnectionRegistry account participants", () => {
 describe("ConnectionRegistry account records", () => {
   function recordingRegistry() {
     const db = createTestDb();
-    const records = new ChannelRecordsRepository(db.db);
+    const records = new ChannelRecordsRepository(db.db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
       ledger: new DrizzleGrantLedger(db.db),
       onMint: (tx, record, _profile, account) =>

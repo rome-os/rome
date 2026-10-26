@@ -10,7 +10,6 @@
 // the connect setup, a later account of a connection kind included.
 
 import type { ConnectionAccountFields } from "@rome/api-types/channel-accounts";
-import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { createLogger } from "../../logger.js";
@@ -33,6 +32,7 @@ import {
   type ChannelRecord,
 } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
+import { accountLinkOf } from "../../channels/account-links.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
 
@@ -75,7 +75,9 @@ interface ConnectHint {
 }
 
 interface ConnectionView
-  extends Required<Pick<ConnectionAccountFields, "channel" | "platform" | "severalAccounts">>,
+  extends Required<
+      Pick<ConnectionAccountFields, "channel" | "platform" | "link" | "severalAccounts">
+    >,
     Pick<ConnectionAccountFields, "agent"> {
   /** Ledger connection id, or null for an offerable placeholder — a registered
    *  connection kind the guardian has never connected (nothing to address or tear down
@@ -139,6 +141,7 @@ function buildConnectionView(
   agent: string | null,
 ): ConnectionView {
   const revive = registry.getDescriptor(conn.connectionKind)?.reviveProfile;
+  const link = registry.getDescriptor(conn.connectionKind)?.link ?? null;
   const grants = conn.auth.grants();
 
   const display: Record<GrantName, GrantDisplayView | null> = {};
@@ -169,7 +172,8 @@ function buildConnectionView(
     channel: channel?.id ?? null,
     platform: channel?.platform ?? null,
     // Null means silent, so a connection kind that takes no link reports none.
-    agent: LINKABLE_KINDS.has(conn.connectionKind) ? agent : undefined,
+    agent: link === null ? undefined : agent,
+    link,
     severalAccounts: registry.getDescriptor(conn.connectionKind)?.severalAccounts === true,
   };
 }
@@ -245,6 +249,7 @@ function placeholderView(
     setups: activeSetups(manager, connectionKind, [descriptor.grant]),
     channel: null,
     platform: null,
+    link: descriptor.link ?? null,
     severalAccounts: descriptor.severalAccounts === true,
   };
 }
@@ -277,7 +282,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
 
   const findConnection = (registry: ConnectionRegistry, id: string): Connection | undefined =>
     registry.all().find((c) => c.id === id);
-  const channels = new ChannelRecordsRepository(deps.db);
+  const channels = new ChannelRecordsRepository(deps.db, accountLinkOf(deps.connectionRegistry));
   const accounts = new ConnectedAccountsRepository(deps.db);
 
   app.get("/connections", async (c) => {

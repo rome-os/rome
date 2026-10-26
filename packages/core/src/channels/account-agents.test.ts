@@ -8,7 +8,7 @@ import {
   type ChannelRecord,
 } from "../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb, testAccountLinkOf } from "../test/helpers.js";
 import {
   AccountListening,
   answeringAgentOf,
@@ -37,6 +37,7 @@ function channelAgents(
           ? ({ id, connectionKind: record.connectionKind, connectionId: id } as ChannelRecord)
           : null;
       },
+      linkOf: testAccountLinkOf,
     },
     accounts: { agentOf: (connectionId) => records().get(connectionId)?.agent ?? null },
   };
@@ -233,7 +234,7 @@ describe("linkChannelAgent", () => {
   function setup() {
     testDb = createTestDb();
     const db = testDb.db;
-    const records = new ChannelRecordsRepository(db);
+    const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const accounts = new ConnectedAccountsRepository(db);
     const ledger = new DrizzleGrantLedger(db);
     const connect = (id: string, connectionKind: string, channel?: string) => {

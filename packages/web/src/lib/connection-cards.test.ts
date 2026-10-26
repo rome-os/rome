@@ -223,6 +223,7 @@ describe("buildConnectionCards — Composio card", () => {
         display: null,
         identity: null,
         activeSetupCid: null,
+        link: null,
       },
     ]);
 

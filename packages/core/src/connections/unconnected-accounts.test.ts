@@ -37,7 +37,7 @@ describe("removeUnconnectedAccounts", () => {
 
   it("removes a disconnected connection whose accounts take no agent", async () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
-    const { takesAgent: _noAgent, ...descriptor } = makePasteTalk().descriptor;
+    const { link: _noAgent, ...descriptor } = makePasteTalk().descriptor;
     registry.register(descriptor);
     const conn = await registry.connect("fake-telegram");
 

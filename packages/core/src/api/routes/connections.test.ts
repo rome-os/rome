@@ -23,7 +23,7 @@ import { domainOf } from "../../channels/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import { createTestDb, identityConnectionKindOf } from "../../test/helpers.js";
+import { createTestDb, identityConnectionKindOf, testAccountLinkOf } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { connectionsRoutes } from "./connections.js";
 
@@ -112,6 +112,9 @@ describe("GET /connections", () => {
       setups: {},
       channel: null,
       platform: null,
+      // The fake bot declares itself a kind whose accounts take an agent.
+      agent: null,
+      link: "own_account",
       severalAccounts: false,
     });
 
@@ -212,6 +215,7 @@ describe("GET /connections", () => {
       setups: {},
       channel: null,
       platform: null,
+      link: null,
       severalAccounts: false,
     });
   });
@@ -349,7 +353,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
   it("removes an account once it holds no grant, and releases its channel", async () => {
     const { db, close } = createTestDb();
     openDbs.push(close);
-    const records = new ChannelRecordsRepository(db);
+    const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const ledger = new DrizzleGrantLedger(db);
     const registry = new ConnectionRegistry({
       ledger,
@@ -450,7 +454,7 @@ describe("GET /connections accounts", () => {
   it("reports each account's channel, an opaque id of its own", async () => {
     const { db, close } = createTestDb();
     openDbs.push(close);
-    const records = new ChannelRecordsRepository(db);
+    const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
       ledger: new DrizzleGrantLedger(db),
       onMint: (tx, record) => {
@@ -480,7 +484,7 @@ describe("GET /connections accounts", () => {
   it("reports a Lark app's account on the Lark platform", async () => {
     const { db, close } = createTestDb();
     openDbs.push(close);
-    const records = new ChannelRecordsRepository(db);
+    const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
       ledger: new DrizzleGrantLedger(db),
       onMint: (tx, record, profile) => {
@@ -503,7 +507,7 @@ describe("GET /connections accounts", () => {
   it("reports the agent linked to each account", async () => {
     const { db, close } = createTestDb();
     openDbs.push(close);
-    const records = new ChannelRecordsRepository(db);
+    const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
       ledger: new DrizzleGrantLedger(db),
       onMint: (tx, record) => {
@@ -533,14 +537,15 @@ describe("GET /connections accounts", () => {
   it("reports no agent for a service that takes no link", async () => {
     const { db, close } = createTestDb();
     openDbs.push(close);
-    const records = new ChannelRecordsRepository(db);
+    const records = new ChannelRecordsRepository(db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
       ledger: new DrizzleGrantLedger(db),
       onMint: (tx, record) => {
         records.claim(tx, record, record.createdAt);
       },
     });
-    registry.register({ ...telegram.descriptor, connectionKind: "whatsapp" });
+    const { link: _takesNone, ...descriptor } = telegram.descriptor;
+    registry.register({ ...descriptor, connectionKind: "whatsapp" });
     const conn = await registry.connect("whatsapp");
 
     const { connections } = await (await makeApp(registry, { db }).request("/connections")).json();
@@ -548,6 +553,7 @@ describe("GET /connections accounts", () => {
     const listed = connections.find((each: { id: string }) => each.id === conn.id);
     expect(listed.channel).toBe("whatsapp");
     expect("agent" in listed).toBe(false);
+    expect(listed.link).toBeNull();
   });
 });
 

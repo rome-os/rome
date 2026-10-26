@@ -69,6 +69,8 @@ import { createChannelsService } from "../channels/channels-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
+import type { AccountLink } from "@rome/api-types/account-agents";
+import type { AccountLinkOf } from "../channels/account-links.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
@@ -137,12 +139,26 @@ function migratedSystemImage(): Buffer {
   return migratedImage;
 }
 
+/** The kinds of link the built-in descriptors declare, for tests that build a
+ *  channel record without a registry. `connections/integrations/index.test.ts`
+ *  keeps it in step with the descriptors. */
+export const BUILTIN_ACCOUNT_LINKS: Readonly<Record<string, AccountLink>> = {
+  feishu: "own_account",
+  telegram: "own_account",
+  discord: "own_account",
+  slack_bot: "own_account",
+  telegram_user: "delegate",
+};
+
+/** {@link BUILTIN_ACCOUNT_LINKS} as a lookup. */
+export const testAccountLinkOf: AccountLinkOf = (kind) => BUILTIN_ACCOUNT_LINKS[kind] ?? null;
+
 /** Maps every channel to itself. Valid only where no connection kind has a later channel. */
 export const identityConnectionKindOf: ConnectionKindOfChannel = (channel) => channel;
 
 /** Maps a channel to its connection kind through `db`'s channel records, as Rome does. */
 export function recordedConnectionKindOf(db: DrizzleDb): ConnectionKindOfChannel {
-  const records = new ChannelRecordsRepository(db);
+  const records = new ChannelRecordsRepository(db, testAccountLinkOf);
   return (channel) => records.connectionKindOf(channel);
 }
 
@@ -540,7 +556,7 @@ export async function buildTestDeps(
 
   const sessionsRepo = new SessionsRepository(db);
   const personMappingRepo = new PersonMappingRepository(db, recordedConnectionKindOf(db));
-  const channelRecords = new ChannelRecordsRepository(db);
+  const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);

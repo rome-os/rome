@@ -8,6 +8,7 @@ import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import i18n from "@/i18n";
 import type { ApiConnection } from "@/lib/connections-api";
 import EnvoysPage from "./EnvoysPage";
+import { linkOf } from "@/test/account-links";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -35,6 +36,7 @@ function connection(service: string, name: string, agent: string | null): ApiCon
     setups: {},
     channel: service,
     agent,
+    link: linkOf(service),
   } as ApiConnection;
 }
 
