@@ -198,6 +198,7 @@ export function createAction(config, deps) {
             connectionId: appId,
             connectionKind: "fake",
             label: appId,
+            identity: "account",
             health: "working" as const,
           },
         ],

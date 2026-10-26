@@ -115,8 +115,8 @@ identity for one operation.
   operation, approval mode, optional input constraints, and optional expiry. Disabling
   or removing the app revokes its policies. The policy is bound to the provider
   grant's current conferral. Reconnecting the Connection creates a new conferral and
-  requires new App access. Fixing or otherwise conferring its grant again does the same;
-  automatic renewal keeps the current conferral.
+  requires new App access. Fixing or otherwise conferring its grant again does the same.
+  Automatic renewal keeps the current conferral.
 - A provider operation is invisible until its Connection descriptor explicitly opts it
   into app access. A policy cannot expose an arbitrary HTTP request, provider client,
   credential read, or global Connection mutation.

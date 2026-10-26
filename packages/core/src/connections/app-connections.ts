@@ -261,6 +261,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     const policies = await this.access.listActiveForConnection(appId, input.connectionId);
     const grant = await this.registry.getLedger().getGrant(input.connectionId);
     if (
+      !grant ||
       !policies.some(
         (policy) => policy.connectionId === input.connectionId && policyMatchesGrant(policy, grant),
       )
@@ -279,7 +280,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     ) {
       return failure("identity_not_found", "The identity is not visible to this App.");
     }
-    const identity = await this.describeIdentity(connection, input.identity);
+    const identity = this.describeIdentity(connection, input.identity, grant);
     if (!identity.ok) return identity;
     return {
       ok: true,
@@ -468,30 +469,10 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         },
       );
     } catch {
-      if (sideEffects === "write") {
-        await this.access.transitionInvocation(
-          invocationId,
-          ["ready", "pending_approval", "running"],
-          "outcome_unknown",
-          "outcome_unknown",
-          true,
-        );
-        await this.audit(
-          stored.invocation,
-          activePolicy.approval === "required" ? "pending" : "not_required",
-          "outcome_unknown",
-        );
-        return { ok: true, value: { status: "outcome_unknown", executionId: invocationId } };
-      }
-      await this.access.transitionInvocation(
-        invocationId,
-        ["ready", "pending_approval", "running"],
-        "failed",
-        "provider_error",
-        true,
+      return await this.finishEngineFailure(
+        stored.invocation,
+        activePolicy.approval === "required" ? "pending" : "not_required",
       );
-      await this.audit(stored.invocation, "not_required", "provider_error");
-      return failure("provider_error", "The connection operation failed.", true);
     }
     if (result.status === "pending_approval") {
       await this.audit(stored.invocation, "pending", "pending_approval");
@@ -505,27 +486,10 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       };
     }
     if (result.status !== "ok" || !isBrokerResult(result.data)) {
-      const approval = activePolicy.approval === "required" ? "pending" : "not_required";
-      if (sideEffects === "write") {
-        await this.access.transitionInvocation(
-          invocationId,
-          ["ready", "pending_approval", "running"],
-          "outcome_unknown",
-          "outcome_unknown",
-          true,
-        );
-        await this.audit(stored.invocation, approval, "outcome_unknown");
-        return { ok: true, value: { status: "outcome_unknown", executionId: invocationId } };
-      }
-      await this.access.transitionInvocation(
-        invocationId,
-        ["ready", "pending_approval", "running"],
-        "failed",
-        "provider_error",
-        true,
+      return await this.finishEngineFailure(
+        stored.invocation,
+        activePolicy.approval === "required" ? "pending" : "not_required",
       );
-      await this.audit(stored.invocation, approval, "provider_error");
-      return failure("provider_error", "The connection operation failed.", true);
     }
     return result.data;
   }
@@ -859,6 +823,42 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     return appAccessibleOperations(this.registry, connection, identity);
   }
 
+  private async finishEngineFailure(
+    invocation: AppConnectionInvocationRecord,
+    approval: "not_required" | "pending",
+  ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>> {
+    const current = await this.access.getInvocation(invocation.id);
+    if (
+      invocation.sideEffects === "write" &&
+      (current?.status === "running" || current?.status === "outcome_unknown")
+    ) {
+      if (current.status === "running") {
+        await this.access.transitionInvocation(
+          invocation.id,
+          ["running"],
+          "outcome_unknown",
+          "outcome_unknown",
+          true,
+        );
+        await this.audit(invocation, approval, "outcome_unknown");
+      }
+      return { ok: true, value: { status: "outcome_unknown", executionId: invocation.id } };
+    }
+    if (invocation.sideEffects === "write" && current?.status === "succeeded") {
+      return { ok: true, value: { status: "ok", executionId: invocation.id } };
+    }
+    const code = invocation.sideEffects === "write" ? "capability_unavailable" : "provider_error";
+    const failed = await this.access.transitionInvocation(
+      invocation.id,
+      ["ready", "pending_approval", "running"],
+      "failed",
+      code,
+      true,
+    );
+    if (failed) await this.audit(invocation, approval, code);
+    return failure(code, "The connection operation could not complete.", true);
+  }
+
   private validateInput(
     operation: OperationDescriptor,
     input: unknown,
@@ -878,9 +878,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     return { ok: true, value: true };
   }
 
-  private async describeIdentity(connection: Connection, identity: string) {
-    const grant = await this.registry.getLedger().getGrant(connection.id);
-    if (!grant) return failure("identity_not_found", "The identity does not exist.");
+  private describeIdentity(connection: Connection, identity: string, grant: GrantRecord) {
     let profile: ProfileDisplay | undefined;
     if (grant.profile) {
       const revive = this.registry.getDescriptor(connection.connectionKind)?.reviveProfile;

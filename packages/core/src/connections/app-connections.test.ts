@@ -302,6 +302,39 @@ describe("App connection broker", () => {
     }
   });
 
+  it("describes the same grant snapshot that made the connection visible", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "original");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.get",
+      });
+      const ledger = h.registry.getLedger();
+      const getGrant = ledger.getGrant.bind(ledger);
+      rs.spyOn(ledger, "getGrant").mockImplementationOnce(async (connectionId) => {
+        const authorized = await getGrant(connectionId);
+        await h.registry.importCredential(
+          connection.id,
+          "account",
+          { material: { token: "replacement" }, expiresAt: "never" },
+          { displayName: "replacement" },
+        );
+        return authorized;
+      });
+
+      await expect(
+        h.broker.forApp("app-a").describe({
+          connectionId: connection.id,
+          identity: "account",
+        }),
+      ).resolves.toMatchObject({ identity: { profile: { displayName: "original" } } });
+    } finally {
+      h.close();
+    }
+  });
+
   it("validates input and fails closed when a resource cannot be resolved", async () => {
     const h = harness();
     try {
@@ -1256,6 +1289,38 @@ describe("App connection broker", () => {
       expect(audit).toMatchObject({ status: "provider_error" });
       expect(await h.access.getInvocation(audit!.executionId)).toMatchObject({
         status: "failed",
+        input: null,
+      });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("does not report an unclaimed write as having an unknown outcome", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+      });
+      rs.spyOn(h.engine, "run").mockRejectedValueOnce(new Error("engine unavailable"));
+
+      await expect(
+        h.broker.forApp("app-a").invoke({
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.create",
+          requestId: "request-engine-unavailable",
+          input: { workspaceId: "one", title: "Not sent", body: "private" },
+        }),
+      ).rejects.toMatchObject({ detail: { code: "capability_unavailable", retryable: true } });
+      expect(h.invocations).toHaveLength(0);
+      const [stored] = await h.db.select().from(appConnectionInvocations);
+      expect(stored).toMatchObject({
+        status: "failed",
+        errorCode: "capability_unavailable",
         input: null,
       });
     } finally {
