@@ -9,14 +9,13 @@
 // hook, so no kind-specific profile field name is known here. Minting stays in
 // the connect setup, a later account of a connection kind included.
 
-import type { ConnectionAccountFields } from "@rome/api-types/channel-accounts";
-import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
+import type { AccountValue, ConnectionAccountFields } from "@rome/api-types/connected-accounts";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { createLogger } from "../../logger.js";
 import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
+import { reachedAccount } from "../../connections/registry.js";
 import type { GrantRecord } from "../../connections/ledger.js";
 import type {
   Capability,
@@ -33,10 +32,9 @@ import {
   type ChannelRecord,
 } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
+import { accountLinkOf } from "../../channels/account-links.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
-
-const log = createLogger("api:connections");
 
 /** Per-grant active-setup ids for a connection.
  *  `idOrKind` is the connection id for a real connection, or the connection kind
@@ -75,7 +73,9 @@ interface ConnectHint {
 }
 
 interface ConnectionView
-  extends Required<Pick<ConnectionAccountFields, "channel" | "platform" | "severalAccounts">>,
+  extends Required<
+      Pick<ConnectionAccountFields, "channel" | "platform" | "account" | "link" | "severalAccounts">
+    >,
     Pick<ConnectionAccountFields, "agent"> {
   /** Ledger connection id, or null for an offerable placeholder — a registered
    *  connection kind the guardian has never connected (nothing to address or tear down
@@ -130,6 +130,15 @@ async function loadGrant(
   return registry.getLedger().getGrant(conn.id);
 }
 
+/** The account `record`'s grant reaches, as the wire names it. */
+function accountView(
+  descriptor: ConnectionDescriptor | null,
+  record: GrantRecord | null,
+): AccountValue | null {
+  const account = descriptor && record ? reachedAccount(descriptor, record) : undefined;
+  return account ? { platform: account.platform, id: account.accountId } : null;
+}
+
 function buildConnectionView(
   registry: ConnectionRegistry,
   conn: Connection,
@@ -139,6 +148,7 @@ function buildConnectionView(
   agent: string | null,
 ): ConnectionView {
   const revive = registry.getDescriptor(conn.connectionKind)?.reviveProfile;
+  const link = registry.getDescriptor(conn.connectionKind)?.link ?? null;
   const grants = conn.auth.grants();
 
   const display: Record<GrantName, GrantDisplayView | null> = {};
@@ -168,8 +178,10 @@ function buildConnectionView(
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
     channel: channel?.id ?? null,
     platform: channel?.platform ?? null,
+    account: accountView(registry.getDescriptor(conn.connectionKind), record),
     // Null means silent, so a connection kind that takes no link reports none.
-    agent: LINKABLE_KINDS.has(conn.connectionKind) ? agent : undefined,
+    agent: link === null ? undefined : agent,
+    link,
     severalAccounts: registry.getDescriptor(conn.connectionKind)?.severalAccounts === true,
   };
 }
@@ -245,6 +257,8 @@ function placeholderView(
     setups: activeSetups(manager, connectionKind, [descriptor.grant]),
     channel: null,
     platform: null,
+    account: null,
+    link: descriptor.link ?? null,
     severalAccounts: descriptor.severalAccounts === true,
   };
 }
@@ -277,21 +291,35 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
 
   const findConnection = (registry: ConnectionRegistry, id: string): Connection | undefined =>
     registry.all().find((c) => c.id === id);
-  const channels = new ChannelRecordsRepository(deps.db);
+  const channels = new ChannelRecordsRepository(deps.db, accountLinkOf(deps.connectionRegistry));
   const accounts = new ConnectedAccountsRepository(deps.db);
 
+  // `?platform=&accountId=` finds the connection that reaches an account, so
+  // it lists no placeholders. An account id means nothing without its platform.
   app.get("/connections", async (c) => {
     const registry = requireConnectionRegistry(deps);
     const manager = deps.setupManager ?? null;
-    const connected = await Promise.all(
-      registry
-        .all()
-        .map((conn) => serializeConnection(registry, conn, manager, channels, accounts)),
+    const platform = c.req.query("platform");
+    const accountId = c.req.query("accountId");
+    if (accountId !== undefined && platform === undefined) {
+      return c.json({ error: "Name the platform an account id is on." }, 400);
+    }
+    const connected = (
+      await Promise.all(
+        registry
+          .all()
+          .map((conn) => serializeConnection(registry, conn, manager, channels, accounts)),
+      )
+    ).filter(
+      (view) =>
+        (platform === undefined || view.account?.platform === platform) &&
+        (accountId === undefined || view.account?.id === accountId),
     );
+    const placeholders = platform === undefined ? placeholderViews(registry, manager) : [];
     // Stable ordering for the UI: by connection kind, then label, then id — the
     // registry's own iteration order is insertion-dependent. Placeholders sort
     // like a connection whose label is its connection kind and whose id is empty.
-    const connections = [...connected, ...placeholderViews(registry, manager)].sort(
+    const connections = [...connected, ...placeholders].sort(
       (a, b) =>
         a.connectionKind.localeCompare(b.connectionKind) ||
         a.label.localeCompare(b.label) ||
@@ -332,31 +360,13 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const name = c.req.param("name");
     if (!(name in conn.auth.grants())) return c.json({ error: "Unknown grant." }, 404);
 
-    // Serialize teardown with any in-flight setup on this grant. First
-    // cancel a live setup OUTSIDE the section so it cannot re-import the
-    // credential after we revoke (a setup waiting at its guardian-link unwinds
-    // with no write; one already committing runs to `done` first, then our
-    // revoke below wins as the final state). Then run the revoke INSIDE the same
-    // per-(connection kind, grant) critical section the setup's terminal write uses, so
-    // the two can never interleave.
+    // Cancel a live setup first, OUTSIDE the grant's section, so it cannot
+    // re-import the credential after the revoke (a setup waiting at its
+    // guardian-link unwinds with no write; one already committing runs to
+    // `done` first, then the disconnect wins as the final state). The
+    // disconnect itself runs inside that section.
     await deps.setupManager?.cancelActive(conn.id, name);
-    // Disconnecting ends the connection, whatever its kind, and its channel
-    // goes with it. The revoke runs first, since it is what clears the grant's
-    // custody artifacts.
-    const removed = await registry.withGrantSection(conn.connectionKind, name, async () => {
-      // A disconnect that ran while this one waited may have removed it.
-      if (!registry.all().some((held) => held.id === conn.id)) return true;
-      await registry.revoke(conn.id, name);
-      try {
-        await registry.remove(conn.id);
-      } catch (error) {
-        // The revoke committed, so the disconnect stands. The boot pass
-        // removes the connection this left behind.
-        log.warn("could not remove a disconnected connection", { id: conn.id, error });
-        return false;
-      }
-      return true;
-    });
+    const removed = await registry.disconnect(conn.id);
     c.header("Cache-Control", "no-store");
     return c.json({
       ok: true,

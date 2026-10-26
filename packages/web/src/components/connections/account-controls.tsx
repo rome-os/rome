@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { LINKABLE_KINDS, agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
+import { agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
 import { useTranslation } from "react-i18next";
 import { Bot, ChevronRight, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -18,7 +18,7 @@ import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 /**
  * Account controls on a channel card: "Add another account" for services that
  * offer several, and the agent of a linkable service's account whose Talk is
- * connected, with a way to Envoys to change it. Both act on the account (the card's channel), not on
+ * connected, with a way to Envoys to change it. Both act on the account, not on
  * a slot, so they sit below the slot cards. Adding opens the service's connect
  * flow for a new account, which exists only once that flow connects it.
  */
@@ -43,8 +43,7 @@ export function AccountControls({
   // already under way and cancel it.
   const [adding, setAdding] = useState(false);
   const connected = talkConnected(card);
-  const showLink =
-    card.linkReported && card.channel !== null && connected && LINKABLE_KINDS.has(card.service);
+  const showLink = card.linkReported && connected && Boolean(card.link);
   // A second account only makes sense next to a first one that exists.
   const showAdd =
     adding || (card.severalAccounts && connected && CHANNEL_CONFIGS[card.service] !== undefined);
@@ -172,7 +171,13 @@ function AccountAgentRow({ card }: { card: ConnectionCard }) {
             )}
           </ListRowTitle>
           <ListRowDescription>
-            {agent ? t("connections.accounts.agentAnswers") : t("connections.accounts.agentNone")}
+            {agent
+              ? t(
+                  card.link === "delegate"
+                    ? "connections.accounts.agentAnswersForYou"
+                    : "connections.accounts.agentSpeaksAs",
+                )
+              : t("connections.accounts.agentNone")}
           </ListRowDescription>
         </ListRowContent>
         <span className="sr-only shrink-0 text-aux text-muted-foreground sm:not-sr-only">

@@ -95,6 +95,7 @@ import { AccountListening, accountAgentResolver } from "./channels/account-agent
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
+import { accountLinkOf } from "./channels/account-links.js";
 import { ConnectionPacing } from "./channels/delivery/connection-pacing.js";
 import { ReplyStreams } from "./channels/delivery/streams.js";
 import { replyStreamingSwitch } from "./channels/delivery/streaming-switch.js";
@@ -306,7 +307,10 @@ async function main() {
   }
 
   const sessionsRepo = new SessionsRepository(db);
-  const channelRecords = new ChannelRecordsRepository(db);
+  // Read on each call, so the registry built below answers it.
+  const channelRecords = new ChannelRecordsRepository(db, (kind) =>
+    accountLinkOf(connectionRegistry)(kind),
+  );
   const connectedAccounts = new ConnectedAccountsRepository(db);
   const channelAgents = { records: channelRecords, accounts: connectedAccounts };
   // Rome listens to an account of a linkable connection kind only while it has an

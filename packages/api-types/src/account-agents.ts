@@ -1,18 +1,12 @@
 /**
- * The kinds of connection whose accounts can be linked to an agent: the bots a guardian
- * adds to chats on behalf of an agent, and the signed-in Telegram user. A
- * channel that carries Rome's own traffic (the Cloud `agents` channel, webchat,
- * email) takes no link. Core checks it when it links an agent, and the
- * dashboard reads it to offer the picker. Invariants:
- * docs/architecture/channels.md#an-accounts-agent.
+ * The kind of link an account's agent has, which its kind of connection
+ * decides: `own_account` for an account made for the agent, such as a bot, so
+ * the agent speaks as it, and `delegate` for the guardian's own signed-in
+ * account, which the agent answers from on the guardian's behalf. A kind of
+ * connection that declares none takes no agent. Vocabulary:
+ * docs/domains/chats.md#own-account and docs/domains/chats.md#delegate.
  */
-export const LINKABLE_KINDS: ReadonlySet<string> = new Set([
-  "feishu",
-  "telegram",
-  "discord",
-  "telegram_user",
-  "slack_bot",
-]);
+export type AccountLink = "own_account" | "delegate";
 
 /** The canonical id of main, the id core stores when main is linked. Main is
  *  linked to an account like any agent. */

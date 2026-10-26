@@ -89,6 +89,7 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
+import { ConciergeEmptyState } from "@/components/chat/ConciergeEmptyState";
 import type {
   AgentMention,
   ChatErrorNotice,
@@ -1723,6 +1724,15 @@ export function Chat({
     [displayMessages, identityBySession, mainIdentity, runningTurnId, isActiveSessionStreaming],
   );
 
+  // Concierge before its first message. It waits for the history fetch, so a
+  // chat with messages never flashes the guidance while they load.
+  const conciergeEmpty =
+    concierge &&
+    !!mainSessionId &&
+    messages.has(mainSessionId) &&
+    rows.length === 0 &&
+    !displayedStreaming;
+
   // The composer's pinned chip = the floor agent (the specialist during a
   // handoff, the main agent otherwise).
   const floorAgentMention: AgentMention | null = floorHandoff
@@ -2082,7 +2092,9 @@ export function Chat({
                 !concierge && "@min-[48rem]/transcript:pl-8",
               )}
             >
-              {mainSessionId ? (
+              {conciergeEmpty ? (
+                <ConciergeEmptyState onPick={(prompt) => composerRef.current?.insertText(prompt)} />
+              ) : mainSessionId ? (
                 <MessageList
                   rows={rows}
                   live={{

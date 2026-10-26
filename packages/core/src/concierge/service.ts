@@ -36,6 +36,7 @@ export interface ConciergeDeps {
     | "getTurnChatMessages"
     | "addBackendMessage"
     | "setSessionTrigger"
+    | "listProjects"
   >;
   sessionManager: Pick<SessionManager, "findReusableSession">;
   aiToolState: { get(): AIToolStateValue };

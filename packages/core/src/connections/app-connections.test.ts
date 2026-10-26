@@ -181,7 +181,8 @@ async function connect(h: ReturnType<typeof harness>, label: string, another = f
   const connection = another
     ? await h.registry.connectAnother("fake-docs", label)
     : await h.registry.connect("fake-docs", label);
-  await h.registry.importCredential(
+  await h.registry.confer(
+    "fake-docs",
     connection.id,
     "account",
     { material: { token: `${label}-token` }, expiresAt: "never" },
@@ -315,7 +316,8 @@ describe("App connection broker", () => {
       const getGrant = ledger.getGrant.bind(ledger);
       rs.spyOn(ledger, "getGrant").mockImplementationOnce(async (connectionId) => {
         const authorized = await getGrant(connectionId);
-        await h.registry.importCredential(
+        await h.registry.confer(
+          "fake-docs",
           connection.id,
           "account",
           { material: { token: "replacement" }, expiresAt: "never" },
@@ -733,7 +735,8 @@ describe("App connection broker", () => {
           input: { workspaceId: "one", documentId: "doc" },
         }),
       ).rejects.toMatchObject({ detail: { code: "authorization_required" } });
-      await h.registry.importCredential(
+      await h.registry.confer(
+        "fake-docs",
         connection.id,
         "account",
         { material: { token: "replacement" }, expiresAt: "never" },

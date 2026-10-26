@@ -9,6 +9,7 @@ import { emitAgentMessage } from "./runtime-events.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
+import { noAccountLinks } from "../channels/account-links.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
@@ -107,7 +108,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   await actionLoader.loadFromCatalog(appCatalog);
   await skillCatalog.loadFromCatalog(appCatalog);
 
-  const channelRecords = new ChannelRecordsRepository(db);
+  const channelRecords = new ChannelRecordsRepository(db, noAccountLinks);
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
   const personMappingRepo = new PersonMappingRepository(db, connectionKindOfChannel);
   const sentinelLogRepo = new SentinelLogRepository(db);

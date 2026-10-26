@@ -3,6 +3,7 @@ import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import type { ApiConnection } from "@/lib/connections-api";
 import { buildEnvoys, connectChoices } from "./envoys-model";
 import { stateOfGrants } from "@/test/connection-state";
+import { linkOf } from "@/test/account-links";
 
 function connection(overrides: Partial<ApiConnection> & { connectionKind: string }): ApiConnection {
   return {
@@ -20,6 +21,7 @@ function connection(overrides: Partial<ApiConnection> & { connectionKind: string
     setups: {},
     channel: overrides.connectionKind,
     agent: null,
+    link: linkOf(overrides.connectionKind),
     ...overrides,
   };
 }
@@ -71,7 +73,15 @@ describe("buildEnvoys", () => {
   it("lists connected accounts with no agent apart", () => {
     const { envoys, unlinked } = buildEnvoys([connection({ connectionKind: "feishu" })], []);
     expect(envoys).toEqual([]);
-    expect(unlinked.map((account) => account.channel)).toEqual(["feishu"]);
+    expect(unlinked.map((account) => account.connectionId)).toEqual(["feishu-id"]);
+  });
+
+  it("lists an account whose connection has no channel yet, by its connection", () => {
+    const { unlinked } = buildEnvoys(
+      [connection({ connectionKind: "discord", id: "c2", channel: null })],
+      [],
+    );
+    expect(unlinked.map((account) => account.connectionId)).toEqual(["c2"]);
   });
 
   it("leaves out accounts that cannot carry an agent", () => {
@@ -185,7 +195,12 @@ describe("connectChoices", () => {
         severalAccounts: true,
       }),
     ]);
-    expect(choice).toMatchObject({ kind: "own", platform: "slack", another: true, taken: false });
+    expect(choice).toMatchObject({
+      kind: "own_account",
+      platform: "slack",
+      another: true,
+      taken: false,
+    });
   });
 
   it("offers own accounts first and leaves out services core does not register", () => {

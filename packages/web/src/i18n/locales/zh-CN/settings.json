@@ -59,7 +59,8 @@
       "newAccount": "新账号",
       "noAgent": "无。Rome 不监听此账号。",
       "changeInEnvoys": "在外派智能体中更改",
-      "agentAnswers": "负责回复此账号上的消息",
+      "agentSpeaksAs": "以此账号的身份发言",
+      "agentAnswersForYou": "代你在此账号上回复",
       "noAgentTitle": "无智能体",
       "agentNone": "Rome 不监听此账号"
     },

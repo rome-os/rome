@@ -42,7 +42,7 @@ describe("Scenario 11 — subscription gating", () => {
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
-      await registry.importCredential(conn.id, "user", userCredential());
+      await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
 
       // Before subscription: needs-subscription, watch is null
       expect(conn.status().watch).toEqual({ state: "needs-subscription" });
@@ -60,7 +60,7 @@ describe("Scenario 11 — subscription gating", () => {
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
-      await registry.importCredential(conn.id, "user", userCredential());
+      await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
 
       const unlockFired: string[] = [];
       registry.onUnlocked("watch", (c) => unlockFired.push(c.id));
@@ -83,7 +83,7 @@ describe("Scenario 11 — subscription gating", () => {
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
-      await registry.importCredential(conn.id, "user", userCredential());
+      await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
 
       await registry.setWatchSubscribed(conn.id, true);
       expect(conn.watch).not.toBeNull();
@@ -109,7 +109,7 @@ describe("Scenario 11 — subscription gating", () => {
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
-      await registry.importCredential(conn.id, "user", userCredential());
+      await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
 
       const unlockCount: number[] = [];
       registry.onUnlocked("watch", () => unlockCount.push(unlockCount.length));
@@ -134,7 +134,7 @@ describe("Scenario 11 — subscription gating", () => {
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
-      await registry.importCredential(conn.id, "user", userCredential());
+      await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
 
       // talk/act: unsupported (not in gatedWatch descriptor)
       expect(conn.status().talk).toEqual({ state: "unsupported" });
@@ -160,7 +160,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       const registryA = new ConnectionRegistry({ ledger: ledgerA });
       registryA.register(desc);
       const connA = await registryA.connect("fake-telegram", "my-telegram");
-      await registryA.importCredential(connA.id, "bot", validCredential());
+      await registryA.confer(connA.connectionKind, connA.id, "bot", validCredential());
       expect(connA.isUnlocked("talk")).toBe(true);
       const connAId = connA.id;
 
@@ -205,7 +205,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
         material: { token: "expired-token" },
         expiresAt: new Date(Date.now() - 10_000), // 10 seconds ago
       };
-      await registryA.importCredential(connA.id, "user", expiredCred);
+      await registryA.confer(connA.connectionKind, connA.id, "user", expiredCred);
       const connAId = connA.id;
 
       // Registry B: load — should renew expired credential at load
@@ -254,7 +254,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
         material: { token: "expired-again" },
         expiresAt: new Date(Date.now() - 1_000),
       };
-      await registryA.importCredential(connA.id, "user", expiredCred);
+      await registryA.confer(connA.connectionKind, connA.id, "user", expiredCred);
       const connAId = connA.id;
 
       // Registry B: load — renew returns "re-confer" → degraded
@@ -308,7 +308,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", validCredential());
 
       expect(talkerFactory.instances).toHaveLength(1);
       const talker = talkerFactory.instances[0];
@@ -325,7 +325,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       // build() in the descriptor. We can test this via the talker's start
       // capture. But kit is not exposed directly.
       //
-      // Alternative approach: use the registry's importCredential to get a
+      // Alternative approach: use the registry's confer to get a
       // connection, then check that the talker built from the descriptor
       // has access to kit. The kit is passed to build(). We need to capture it.
       //
@@ -346,7 +346,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       const registry2 = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry2.register(desc2patched);
       const conn2 = await registry2.connect("fake-telegram-persist");
-      await registry2.importCredential(conn2.id, "bot", vc2());
+      await registry2.confer(conn2.connectionKind, conn2.id, "bot", vc2());
       expect(tf2.instances).toHaveLength(1);
       expect(capturedKit).not.toBeNull();
 
@@ -403,7 +403,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", validCredential());
       expect(capturedKit).not.toBeNull();
 
       // Persist new material
@@ -413,7 +413,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       // Revoke and re-import to trigger a fresh build
       await conn.auth.revoke("bot");
       // Now re-authorize to trigger a rebuild
-      await registry.importCredential(conn.id, "bot", {
+      await registry.confer(conn.connectionKind, conn.id, "bot", {
         material: { token: "re-imported-token" },
         expiresAt: "never",
       });
@@ -421,7 +421,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       // The latest build should have been called again
       expect(talkerFactory.instances).toHaveLength(2);
       const secondInstance = talkerFactory.instances[1];
-      // The second build received the re-imported credentials (from importCredential),
+      // The second build received the re-conferred credentials (from confer),
       // not the persisted ones — persist only updates in-memory for next build
       // but re-importing overrides it. This confirms rebuild DID happen.
       expect(secondInstance.state.starts).toHaveLength(1);
@@ -441,7 +441,7 @@ describe("remove(id) — teardown and cascade", () => {
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", validCredential());
 
       expect(talkerFactory.instances).toHaveLength(1);
       const talker = talkerFactory.instances[0];
@@ -466,7 +466,7 @@ describe("remove(id) — teardown and cascade", () => {
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
-      await registry.importCredential(conn.id, "user", userCredential());
+      await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
 
       // Subscribe so the watcher builds
       await registry.setWatchSubscribed(conn.id, true);
@@ -490,7 +490,7 @@ describe("remove(id) — teardown and cascade", () => {
       const registry = new ConnectionRegistry({ ledger });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github");
-      await registry.importCredential(conn.id, "user", userCredential());
+      await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
       const actor = actorFactory.instances[0]!;
 
       await conn.auth.revoke("user");
@@ -513,7 +513,7 @@ describe("stopAll() awaits each transport drain", () => {
       const registry = new ConnectionRegistry({ ledger });
       registry.register(descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", validCredential());
       const talker = talkerFactory.instances[0];
       expect(talker.state.stopCount).toBe(0);
 
@@ -538,7 +538,7 @@ describe("stopAll() awaits each transport drain", () => {
       const registry = new ConnectionRegistry({ ledger });
       registry.register(fixture.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fixture.validCredential());
+      await registry.confer(conn.connectionKind, conn.id, "bot", fixture.validCredential());
       const talker = fixture.talkerFactory.instances[0];
 
       const done = registry.stopAll();
@@ -565,7 +565,7 @@ describe("external custody", () => {
       const conn = await registry.connect("fake-composio");
 
       // Import an external credential (function-valued material)
-      await registry.importCredential(conn.id, "account", externalCredential());
+      await registry.confer(conn.connectionKind, conn.id, "account", externalCredential());
 
       const grantRow = await ledger.getGrant(conn.id);
       expect(grantRow).not.toBeNull();
@@ -596,7 +596,7 @@ describe("external custody", () => {
       registry.register(descriptor);
       const conn = await registry.connect("fake-composio");
 
-      await registry.importCredential(conn.id, "account", externalCredential());
+      await registry.confer(conn.connectionKind, conn.id, "account", externalCredential());
 
       // Actor was built with the external credential
       expect(actorFactory.instances).toHaveLength(1);
@@ -642,7 +642,7 @@ describe("external custody", () => {
       const registryA = new ConnectionRegistry({ ledger: ledgerA });
       registryA.register(descriptor);
       const connA = await registryA.connect("fake-composio");
-      await registryA.importCredential(connA.id, "account", externalCredential());
+      await registryA.confer(connA.connectionKind, connA.id, "account", externalCredential());
       const connAId = connA.id;
 
       const rowBeforeReload = await ledgerA.getGrant(connAId);
@@ -712,7 +712,7 @@ describe("custody follows grant state", () => {
       // No custody before any grant is authorized.
       expect(custody.syncs).toHaveLength(0);
 
-      await registry.importCredential(conn.id, "user", userCredential(), {
+      await registry.confer(conn.connectionKind, conn.id, "user", userCredential(), {
         login: "octocat",
         teamId: "T1",
       });
@@ -736,7 +736,9 @@ describe("custody follows grant state", () => {
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-oauth-provider");
-      await registry.importCredential(conn.id, "user", userCredential(), { login: "octocat" });
+      await registry.confer(conn.connectionKind, conn.id, "user", userCredential(), {
+        login: "octocat",
+      });
 
       await conn.auth.revoke("user");
 
@@ -759,7 +761,7 @@ describe("custody follows grant state", () => {
       });
       registryA.register(descriptor);
       const conn = await registryA.connect("fake-oauth-provider");
-      await registryA.importCredential(conn.id, "user", {
+      await registryA.confer(conn.connectionKind, conn.id, "user", {
         material: { accessToken: "stale" },
         expiresAt: new Date(Date.now() - 60_000),
       });
@@ -790,7 +792,9 @@ describe("custody follows grant state", () => {
       const registryA = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
       registryA.register(descriptor);
       const conn = await registryA.connect("fake-oauth-provider");
-      await registryA.importCredential(conn.id, "user", userCredential(), { teamId: "T9" });
+      await registryA.confer(conn.connectionKind, conn.id, "user", userCredential(), {
+        teamId: "T9",
+      });
 
       // Boot: a fresh registry over the same ledger re-materializes custody in
       // process (the container's tmpfs was wiped) — profile intact.
@@ -820,10 +824,10 @@ describe("custody follows grant state", () => {
       const conn = await registry.connect("fake-oauth-provider");
 
       // The disk error does not propagate; the grant still lands authorized.
-      await registry.importCredential(conn.id, "user", userCredential());
+      await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
       expect(conn.auth.grants().user).toBe("authorized");
       // The ledger is authoritative; the next transition re-syncs.
-      await registry.importCredential(conn.id, "user", {
+      await registry.confer(conn.connectionKind, conn.id, "user", {
         material: { accessToken: "rotated" },
         expiresAt: "never",
       });

@@ -142,9 +142,7 @@ export function reachedAccount(
 }
 
 /** The grant a conferral leaves: a fresh credential and the profile and
- *  account it names, replacing whatever the connection held. Shared by the
- *  in-place `applyNewCredential` path and the transactional `confer` path so
- *  both write an identical row. */
+ *  account it names, replacing whatever the connection held. */
 function conferredGrant(
   now: Date,
   cred: Credential,
@@ -184,13 +182,6 @@ function fromPersisted(persisted: PersistedCredential, scheme: AuthScheme): Cred
     return { material: resolve, expiresAt: persisted.expiresAt };
   }
   return { material: persisted.material.record, expiresAt: persisted.expiresAt };
-}
-
-/** Stable JSON of a credential's inline material, for idempotent-import diffing.
- *  Function (external) material is never compared — always treated as changed. */
-function materialFingerprint(material: SecretRecord): string {
-  const keys = Object.keys(material).sort();
-  return JSON.stringify(keys.map((k) => [k, material[k]]));
 }
 
 /** A capability's live epoch: the built instance plus the runtime-facing
@@ -455,6 +446,29 @@ export class ConnectionRegistry {
     });
   }
 
+  /** End a connection, whatever its kind: revoke its grant, which clears the
+   *  grant's custody artifacts, then remove it. Runs in the grant's section,
+   *  so it never interleaves with a setup's terminal write. Answers false when
+   *  the revoke committed but the removal failed: the disconnect stands, and
+   *  the boot pass removes the connection it left behind. */
+  async disconnect(id: ConnectionId): Promise<boolean> {
+    const conn = this.connections.get(id);
+    if (!conn) throw new Error(`unknown connection "${id}"`);
+    const grant = conn.descriptor.grant;
+    return this.withGrantSection(conn.connectionKind, grant, async () => {
+      // A disconnect that ran while this one waited may have removed it.
+      if (!this.connections.has(id)) return true;
+      await conn.revoke(grant);
+      try {
+        await this.remove(id);
+      } catch (error) {
+        this.log.warn("could not remove a disconnected connection", { id, error });
+        return false;
+      }
+      return true;
+    });
+  }
+
   /** Tell the caller a revoke of one of `id`'s grants was written. Called by
    *  the Connection, under the grant's lock. */
   revoked(id: ConnectionId): void {
@@ -496,7 +510,7 @@ export class ConnectionRegistry {
     connectionId: ConnectionId | undefined,
     grant: GrantName,
     credential: Credential,
-    profile: ProfileRecord | undefined,
+    profile?: ProfileRecord,
     opts: ConferOptions = {},
   ): Promise<Connection> {
     return this.connectionMutex.runExclusive(connectionKind, () =>
@@ -647,27 +661,6 @@ export class ConnectionRegistry {
     return null;
   }
 
-  /** Headless conferral: skip confer(), inject a caller-supplied credential.
-   *  The API-shim path (phase 3). Idempotent: re-importing
-   *  identical inline material over an authorized grant is a no-op.
-   *
-   *  `profile` is the non-secret conferral outcome: when supplied it
-   *  is written to the grant row in the SAME update as the credential — there is
-   *  no separate profile setter, so an authorized grant can never be observed
-   *  with a missing-but-expected or previous-conferral profile. Callers with no
-   *  identity to record (channel imports) omit it, leaving any existing profile
-   *  untouched. */
-  async importCredential(
-    connectionId: ConnectionId,
-    grant: GrantName,
-    credential: Credential,
-    profile?: ProfileRecord,
-  ): Promise<void> {
-    const conn = this.connections.get(connectionId);
-    if (!conn) throw new Error(`unknown connection "${connectionId}"`);
-    await conn.importCredential(grant, credential, profile);
-  }
-
   /** In-memory subscription gate for subscription-gated Watchers (phase 6
    *  persists real subscription state). Transitions build/teardown the watch
    *  epoch and fire onUnlocked exactly like a grant change. */
@@ -712,7 +705,7 @@ export class ConnectionRegistry {
    *  each other.
    *
    *  Composition is deadlock-free by construction: a registry grant mutation
-   *  invoked from inside the section (`importCredential`, `revoke`) acquires only the per-connection grant lock — a
+   *  invoked from inside the section (`confer`, `revoke`) acquires only the per-connection grant lock — a
    *  DISTINCT lock this section never holds and which is uncontended while the
    *  section runs — so it runs without re-queueing behind other section work and
    *  cannot deadlock against the section (reentrancy by scope falls out of the
@@ -729,7 +722,7 @@ export class ConnectionRegistry {
 
   /** Register an unlock handler. Fires immediately for every already-unlocked
    *  connection, then for every future unlock epoch (connect, load,
-   *  importCredential, re-import after degrade, subscription arrival).
+   *  conferral, re-conferral after degrade, subscription arrival).
    *
    *  Delivery guarantee: only handlers a caller registers SYNCHRONOUSLY inside
    *  the onUnlocked callback (via `conn.hearTalker` / `conn.watch.onEvent`)
@@ -834,7 +827,7 @@ class ConnectionImpl implements Connection {
     readonly id: ConnectionId,
     readonly connectionKind: string,
     readonly label: string,
-    private readonly descriptor: ConnectionDescriptor,
+    readonly descriptor: ConnectionDescriptor,
     private readonly registry: ConnectionRegistry,
   ) {
     for (const cap of ["talk", "act", "watch"] as const) {
@@ -1420,74 +1413,6 @@ class ConnectionImpl implements Connection {
       out[name] = this.grantState.get(name) ?? "unauthorized";
     }
     return out;
-  }
-
-  importCredential(
-    grant: GrantName,
-    credential: Credential,
-    profile?: ProfileRecord,
-  ): Promise<void> {
-    return this.withGrantLock(grant, () => this.importCredentialLocked(grant, credential, profile));
-  }
-
-  private async importCredentialLocked(
-    grant: GrantName,
-    credential: Credential,
-    profile?: ProfileRecord,
-  ): Promise<void> {
-    const scheme = this.schemeOf(grant);
-    if (!scheme) throw new Error(`connection "${this.id}" has no grant "${grant}"`);
-    // Idempotent: identical inline material over an authorized grant skips the
-    // epoch rebuild. A re-conferral can still refresh the profile (renamed login,
-    // changed scopes) while reusing the same token, so persist a supplied profile
-    // even on the no-op material path — an authorized grant must never keep a
-    // previous conferral's profile. No epoch rebuild, no onUnlocked: profile is
-    // not credential material.
-    if (this.grantState.get(grant) === "authorized") {
-      const current = this.liveCreds.get(grant);
-      if (
-        current &&
-        typeof current.material !== "function" &&
-        typeof credential.material !== "function" &&
-        materialFingerprint(current.material) === materialFingerprint(credential.material)
-      ) {
-        if (profile !== undefined) {
-          const reconferred = conferredGrant(
-            this.registry.now(),
-            current,
-            profile,
-            accountOf(this.descriptor, profile),
-          );
-          await this.ledger.updateGrant(this.id, () => reconferred);
-          // The credential is byte-identical, but a re-conferral can still change
-          // the profile (renamed login, moved workspace) — re-sync custody so a
-          // profile-derived artifact (the Slack file's teamId) stays current.
-          await this.syncCustody(grant, current);
-        }
-        return;
-      }
-    }
-    await this.applyNewCredential(grant, credential, profile);
-  }
-
-  /** Persist a freshly minted/imported credential, mark the grant authorized,
-   *  clear the renewed flag, and rebuild every dependent capability. Ledger
-   *  first (the ledger is authoritative): if the durable write throws,
-   *  the error propagates to the caller with the in-memory mirror untouched —
-   *  the grant stays in its prior state, no rebuild. */
-  private async applyNewCredential(
-    grant: GrantName,
-    cred: Credential,
-    profile?: ProfileRecord,
-  ): Promise<void> {
-    const conferred = conferredGrant(
-      this.registry.now(),
-      cred,
-      profile,
-      profile === undefined ? undefined : accountOf(this.descriptor, profile),
-    );
-    await this.ledger.updateGrant(this.id, () => conferred);
-    await this.activateGrantInMemory(grant, cred);
   }
 
   /** The registry's transactional `confer` for an existing connection: run its

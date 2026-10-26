@@ -4,20 +4,15 @@
 // docs/architecture/channels.md#an-accounts-agent.
 
 import type { ChannelMessageHookDeps, ChatSettingsSnapshot } from "@rome-os/app-runtime";
-import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import {
-  ChannelNotLinkable,
-  ChannelRecordNotFound,
-  ChannelUnbacked,
-  type ChannelRecord,
-  type ChannelRecordsRepository,
-} from "../db/repositories/channel-records.js";
+import type { AccountLink } from "@rome/api-types/account-agents";
+import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import {
   ConnectedAccountNotFound,
   type ConnectedAccountsRepository,
 } from "../db/repositories/connected-accounts.js";
 import { createLogger } from "../logger.js";
+import type { AccountLinkOf } from "./account-links.js";
 import type { InboundListening } from "./connection-ports.js";
 
 const log = createLogger("account-agents");
@@ -25,22 +20,22 @@ const log = createLogger("account-agents");
 /** Where a channel's agent is read: the channel's record names its
  *  connection, and the connection's connected account holds the agent. */
 export interface ChannelAgents {
-  records: Pick<ChannelRecordsRepository, "byId">;
+  records: Pick<ChannelRecordsRepository, "byId" | "linkOf">;
   accounts: Pick<ConnectedAccountsRepository, "agentOf">;
 }
 
-/** The connection kind channel `channel` belongs to, and the agent stored on
- *  its connected account, null for none or for a channel no connection backs.
+/** Whether channel `channel`'s kind of connection takes an agent, and the
+ *  agent stored on its connected account, null for none or for a channel no connection backs.
  *  A connection kind's first channel carries the connection kind's name, so a
  *  channel with no record answers for its own connection kind. */
 function storedAgent(
   { records, accounts }: ChannelAgents,
   channel: string,
-): { connectionKind: string; agent: string | null } {
+): { takesAgent: boolean; agent: string | null } {
   const record = records.byId(channel);
   const connectionId = record?.connectionId ?? null;
   return {
-    connectionKind: record?.connectionKind ?? channel,
+    takesAgent: records.linkOf(record?.connectionKind ?? channel) !== null,
     agent: connectionId === null ? null : accounts.agentOf(connectionId),
   };
 }
@@ -54,14 +49,14 @@ export function readAccountAgent(
   agents: { has(name: string): boolean },
   channelName: string,
 ): string | null | undefined {
-  const { connectionKind, agent } = storedAgent(sources, channelName);
-  if (!LINKABLE_KINDS.has(connectionKind)) return undefined;
+  const { takesAgent, agent } = storedAgent(sources, channelName);
+  if (!takesAgent) return undefined;
   return agent !== null && (isCoreMainAgentId(agent) || agents.has(agent)) ? agent : null;
 }
 
 /**
- * Which accounts Rome listens to. An account of a connection kind in
- * `LINKABLE_KINDS` is listened to only while its record names an agent,
+ * Which accounts Rome listens to. An account of a connection kind that takes
+ * an agent is listened to only while its record names an agent,
  * loaded or not; an account of any other connection kind always is. A channel with
  * no record answers for its own connection kind, as in {@link readAccountAgent}.
  *
@@ -74,8 +69,8 @@ export class AccountListening implements InboundListening {
   constructor(private readonly sources: ChannelAgents) {}
 
   listens(channel: string): boolean {
-    const { connectionKind, agent } = storedAgent(this.sources, channel);
-    if (!LINKABLE_KINDS.has(connectionKind)) return true;
+    const { takesAgent, agent } = storedAgent(this.sources, channel);
+    if (!takesAgent) return true;
     return agent !== null;
   }
 
@@ -102,8 +97,8 @@ export class AccountListening implements InboundListening {
 /**
  * The hook's `accountAgentOf`, reading the channel's record on each call, so a
  * switched agent, or a channel whose record lands after wiring, is right on the next
- * message. It answers undefined for a channel whose connection kind is outside
- * `LINKABLE_KINDS`, the stored agent for a linked one, and null for one with
+ * message. It answers undefined for a channel whose connection kind takes no
+ * agent, the stored agent for a linked one, and null for one with
  * no agent or whose agent is not loaded. Each silent state logs once per
  * channel until the channel answers again: an account with no agent at
  * info, since a newly added one starts that way, and one whose agent is not
@@ -137,42 +132,46 @@ export function accountAgentResolver(
   };
 }
 
-/** A link asked of channel `channel`. */
-export interface ChannelLink {
-  channel: ChannelRecord;
+/** A link asked of a connected account whose kind of connection takes no
+ *  agent. */
+export class AccountNotLinkable extends Error {
+  constructor(
+    readonly connectionId: string,
+    readonly connectionKind: string,
+  ) {
+    super(`A ${connectionKind} account cannot be linked to an agent`);
+    this.name = "AccountNotLinkable";
+  }
+}
+
+/** A connected account's agent as it stands after a link. */
+export interface AccountLinked {
+  connectionId: string;
   agent: string | null;
+  link: AccountLink | null;
 }
 
 /**
- * Link `agent` to the account channel `id` stands for, or unlink it with
- * null, and return the channel with its agent as it now stands. The link is
- * stored on the connected account of the connection behind the channel, so
- * only that account changes. Only a channel of a linkable connection kind
- * takes a link, and only while a connection backs it. Unlinking is always
- * open, and a channel no connection backs already has no agent.
+ * Link `agent` to the connected account of connection `connectionId`, or
+ * unlink it with null, and return its agent as it now stands. Only that
+ * account changes. Only an account whose kind of connection takes an agent
+ * takes a link, and unlinking is always open. `kindOf` names the kind of a
+ * connection Rome holds, or null for none. Throws
+ * {@link ConnectedAccountNotFound} when Rome holds no such connection, and
+ * {@link AccountNotLinkable} for a kind that takes no agent.
  */
-export function linkChannelAgent(
-  records: Pick<ChannelRecordsRepository, "byId">,
+export function linkAccountAgent(
+  kindOf: (connectionId: string) => string | null,
+  linkOf: AccountLinkOf,
   accounts: Pick<ConnectedAccountsRepository, "link">,
-  id: string,
+  connectionId: string,
   agent: string | null,
-): ChannelLink {
-  const channel = records.byId(id);
-  if (!channel) throw new ChannelRecordNotFound(id);
-  if (agent !== null && !LINKABLE_KINDS.has(channel.connectionKind)) {
-    throw new ChannelNotLinkable(id, channel.connectionKind);
-  }
-  if (channel.connectionId === null) {
-    if (agent !== null) throw new ChannelUnbacked(id);
-    return { channel, agent: null };
-  }
-  try {
-    return { channel, agent: accounts.link(channel.connectionId, agent) };
-  } catch (error) {
-    // The connection went between the read and the link.
-    if (error instanceof ConnectedAccountNotFound) throw new ChannelUnbacked(id);
-    throw error;
-  }
+): AccountLinked {
+  const kind = kindOf(connectionId);
+  if (kind === null) throw new ConnectedAccountNotFound(connectionId);
+  const link = linkOf(kind);
+  if (agent !== null && link === null) throw new AccountNotLinkable(connectionId, kind);
+  return { connectionId, agent: accounts.link(connectionId, agent), link };
 }
 
 /**

@@ -365,7 +365,7 @@ export function makeWatchEvent(overrides?: Partial<WatchEvent>): WatchEvent {
 export interface PasteTalkFixture {
   descriptor: ConnectionDescriptor;
   talkerFactory: FakeTalkerFactory;
-  /** Call this inside an importCredential call to supply a valid token. */
+  /** Call this inside a confer call to supply a valid token. */
   validCredential: () => Credential;
 }
 
@@ -376,7 +376,7 @@ export function makePasteTalk(opts?: FakeTalkerOptions): PasteTalkFixture {
     connectionKind: "fake-telegram",
     // Names its account by the profile's `botId`, as Telegram does.
     accountIdOf: (profile) => (typeof profile.botId === "string" ? profile.botId : null),
-    takesAgent: true,
+    link: "own_account",
     grant: "bot",
     auth: tokenPaste({
       label: "Fake bot token",

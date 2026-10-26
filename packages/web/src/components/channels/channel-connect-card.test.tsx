@@ -33,6 +33,7 @@ function unconnected(grant: string): ConnectionSlot {
     display: null,
     identity: null,
     activeSetupCid: null,
+    link: "own_account",
   };
 }
 
@@ -47,6 +48,7 @@ function connected(grant: string, identity: string | null): ConnectionSlot {
       : null,
     identity,
     activeSetupCid: null,
+    link: "own_account",
   };
 }
 
@@ -294,12 +296,29 @@ describe("ChannelConnectCard — config variations", () => {
     }
   });
 
+  it("disconnects an account of a kind that takes no agent without asking", async () => {
+    const fetchMock = stubFetch();
+    renderCard(
+      <ChannelConnectCard
+        config={CHANNEL_CONFIGS.email}
+        slot={{ ...connected("inbox", "agent@rome.computer"), link: null }}
+        role="primary"
+        onRefresh={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true),
+    );
+  });
+
   it("shows no guardian note for email when connected", () => {
     stubFetch();
     renderCard(
       <ChannelConnectCard
         config={CHANNEL_CONFIGS.email}
-        slot={connected("inbox", "agent@rome.computer")}
+        slot={{ ...connected("inbox", "agent@rome.computer"), link: null }}
         role="primary"
         onRefresh={() => {}}
       />,
@@ -313,7 +332,7 @@ describe("ChannelConnectCard — config variations", () => {
     renderCard(
       <ChannelConnectCard
         config={CHANNEL_CONFIGS.telegram_user}
-        slot={{ ...connected("session", null) }}
+        slot={{ ...connected("session", null), link: "delegate" }}
         role="secondary"
         onRefresh={() => {}}
       />,

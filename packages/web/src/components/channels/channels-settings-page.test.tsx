@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { ChannelsSettingsPage } from "./channels-settings-page";
+import { linkOf } from "@/test/account-links";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -263,6 +264,7 @@ describe("ChannelsSettingsPage", () => {
         watch: { state: "unsupported" },
       },
       connect: null,
+      link: linkOf(service),
       ...linked,
     });
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
@@ -334,6 +336,7 @@ describe("ChannelsSettingsPage", () => {
               },
               connect: null,
               agent: "sales:agent",
+              link: "own_account",
             },
           ],
         });
@@ -387,6 +390,7 @@ describe("ChannelsSettingsPage", () => {
               capabilities: { talk: { state: "unlocked" } },
               connect: null,
               agent: "sales:agent",
+              link: "own_account",
             },
           ],
         });

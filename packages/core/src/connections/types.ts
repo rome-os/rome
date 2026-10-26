@@ -13,6 +13,7 @@ import type {
   ChannelDirectMessaging,
   ChannelInboundMedia,
 } from "@rome-os/app-runtime";
+import type { AccountLink } from "@rome/api-types/account-agents";
 import type { DeliveryTransport } from "../channels/delivery/types.js";
 import type { CredentialRejected, Disconnected } from "./errors.js";
 
@@ -361,9 +362,12 @@ export interface ConnectionDescriptor {
    *  (docs/domains/connections.md#connection). A connection kind that leaves it
    *  unset, or a profile it answers null for, is never refused. */
   accountIdOf?(profile: ProfileRecord): string | null;
-  /** True when this kind's accounts take an agent. Declare it exactly for the
-   *  kinds in `LINKABLE_KINDS`, whose channels start fresh. */
-  takesAgent?: boolean;
+  /** The kind of link an agent has to this kind's accounts: `own_account` for
+   *  an account made for the agent, `delegate` for the guardian's own signed-in
+   *  account. A kind that leaves it unset takes no agent. It is the one place
+   *  that says which kinds take an agent. Vocabulary:
+   *  docs/domains/chats.md#connected-account. */
+  link?: AccountLink;
   capabilities: Partial<{
     talker: {
       build(cred: Credential, kit: RuntimeKit): Talker;

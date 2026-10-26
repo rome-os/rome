@@ -2,7 +2,6 @@ import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { User } from "lucide-react";
-import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
@@ -195,7 +194,7 @@ export function ChannelConnectCard({
   const [disconnecting, setDisconnecting] = useState(false);
   // Disconnecting an account removes it, so the guardian confirms the cost first.
   const [confirming, setConfirming] = useState(false);
-  const confirmsDisconnect = LINKABLE_KINDS.has(config.service);
+  const confirmsDisconnect = Boolean(slot.link);
   const [error, setError] = useState<string | null>(null);
 
   // The setup addresses the connection by id, or by the bare service name when

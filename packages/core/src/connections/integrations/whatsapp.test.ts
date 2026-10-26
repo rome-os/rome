@@ -288,7 +288,7 @@ describe("whatsapp descriptor over a real registry", () => {
     const fake = new FakeWhatsAppAdapter();
     const registry = setup(fake);
     const conn = await registry.connect("whatsapp");
-    await registry.importCredential(conn.id, "session", sessionCred());
+    await registry.confer(conn.connectionKind, conn.id, "session", sessionCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     // WhatsAppAdapter.send addresses by the conversation (the chat JID), and

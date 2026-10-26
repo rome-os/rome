@@ -15,7 +15,16 @@
     },
     "openTaskChat": "Open",
     "composerMenu": "Add files or change the model",
-    "placeholder": "Message"
+    "placeholder": "Message",
+    "empty": {
+      "title": "Just tell me what you want to get done",
+      "prompts": {
+        "weather": "What's the weather today?",
+        "reminder": "Remind me to stretch in an hour",
+        "email": "Summarize my unread email",
+        "task": "Build me a simple habit tracker app"
+      }
+    }
   },
   "senderGuardian": "Guardian",
   "inputState": {

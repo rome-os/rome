@@ -1,5 +1,9 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
+import {
+  ACCOUNT_KINDS,
+  GUARDIAN_OWN_KINDS,
+} from "../../../../../rome_apps/dream/src/lib/chat-activity.js";
+import { BUILTIN_ACCOUNT_LINKS } from "../../test/helpers.js";
 import type { WechatUserRuntime } from "../../channels/wechat-user.js";
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConnectionDescriptor, RuntimeKit } from "../types.js";
@@ -84,9 +88,10 @@ describe("registerBuiltinConnections", () => {
     expect(registered.has(WECHAT_USER_KIND)).toBe(false);
   });
 
-  // Removal on disconnect follows `takesAgent` on a Talk, and a fresh channel
-  // follows `LINKABLE_KINDS`; the two must name the same kinds.
-  it("takes an agent exactly for the kinds an agent can be linked to", () => {
+  // A bot takes an agent as its own account and the guardian's signed-in
+  // account as a delegate; Dream and the test fixtures keep their own lists of
+  // these kinds, so all three must agree.
+  it("declares the kind of link for exactly the kinds that take an agent", () => {
     const registered = new Map<string, ConnectionDescriptor>();
     const registry = {
       register: (descriptor: ConnectionDescriptor) =>
@@ -99,12 +104,33 @@ describe("registerBuiltinConnections", () => {
       wechatUserRuntime: {} as WechatUserRuntime,
     } as unknown as BuiltinConnectionDeps);
 
-    const naming = [...registered.values()].filter(
-      (descriptor) => descriptor.capabilities.talker && descriptor.takesAgent,
+    const links = Object.fromEntries(
+      [...registered.values()]
+        .filter((descriptor) => descriptor.link !== undefined)
+        .map((descriptor) => [descriptor.connectionKind, descriptor.link]),
     );
-    expect(naming.map((descriptor) => descriptor.connectionKind).sort()).toEqual(
-      [...LINKABLE_KINDS].sort(),
-    );
+    expect(links).toEqual({
+      feishu: "own_account",
+      telegram: "own_account",
+      discord: "own_account",
+      slack_bot: "own_account",
+      telegram_user: "delegate",
+    });
+    // Only a kind with a Talk can be a connected account.
+    for (const kind of Object.keys(links)) {
+      expect(registered.get(kind)?.capabilities.talker).toBeDefined();
+    }
+    expect(links).toEqual(BUILTIN_ACCOUNT_LINKS);
+    expect(
+      Object.keys(links)
+        .filter((kind) => links[kind] === "own_account")
+        .sort(),
+    ).toEqual([...ACCOUNT_KINDS].sort());
+    expect(
+      Object.keys(links)
+        .filter((kind) => links[kind] === "delegate")
+        .sort(),
+    ).toEqual([...GUARDIAN_OWN_KINDS].sort());
   });
 
   // A grant names the account it reaches, and every kind with a platform has

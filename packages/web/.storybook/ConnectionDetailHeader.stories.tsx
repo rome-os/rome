@@ -18,13 +18,14 @@ const notConnected: ConnectionCard = {
       display: null,
       identity: null,
       activeSetupCid: null,
+      link: "own_account",
     },
   ],
   connect: { url: "/api/connections/discord/start", available: true, unavailableReason: null },
   route: "discord",
-  channel: null,
   agent: null,
   linkReported: false,
+  link: "own_account",
   severalAccounts: false,
 };
 

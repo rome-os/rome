@@ -256,7 +256,7 @@ describe("telegram descriptor shape", () => {
     const factory = new FaultBotFactory(true);
     const registry = setup(factory);
     const conn = await registry.connect("telegram");
-    await registry.importCredential(conn.id, "bot", validCred());
+    await registry.confer(conn.connectionKind, conn.id, "bot", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     const received: string[] = [];
@@ -439,7 +439,7 @@ describe("telegram send-401 drives renew-once-then-degrade", () => {
     factory.sendMessage = () => ({ ok: false, error_code: 401, description: "Unauthorized" });
     const registry = setup(factory);
     const conn = await registry.connect("telegram");
-    await registry.importCredential(conn.id, "bot", validCred());
+    await registry.confer(conn.connectionKind, conn.id, "bot", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     // The send() 401 surfaces to the caller as CredentialRejected AND triggers
@@ -459,7 +459,7 @@ describe("telegram send-401 drives renew-once-then-degrade", () => {
     registry.onUnlocked("talk", (c) => {
       reUnlocked = c;
     });
-    await registry.importCredential(conn.id, "bot", {
+    await registry.confer(conn.connectionKind, conn.id, "bot", {
       material: { token: "fresh-token" },
       expiresAt: "never",
     });

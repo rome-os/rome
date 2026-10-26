@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { and, asc, eq, isNotNull, isNull, ne, or } from "drizzle-orm";
+import type { AccountLinkOf } from "../../channels/account-links.js";
 import { platformOf } from "../../channels/platform.js";
 import type { GrantAccount } from "../../connections/ledger.js";
 import { channels, connectionGrants } from "../schema.js";
@@ -21,32 +21,6 @@ export interface ChannelRecord {
   platformAccountId: string | null;
   connectionId: string | null;
   createdAt: Date;
-}
-
-export class ChannelRecordNotFound extends Error {
-  constructor(readonly channel: string) {
-    super(`No channel with id "${channel}"`);
-    this.name = "ChannelRecordNotFound";
-  }
-}
-
-/** A link asked of a channel no Connection backs now. */
-export class ChannelUnbacked extends Error {
-  constructor(readonly channel: string) {
-    super(`Channel "${channel}" has no connection, so no agent can be linked to it`);
-    this.name = "ChannelUnbacked";
-  }
-}
-
-/** A link asked of a channel whose connection kind takes no agent. */
-export class ChannelNotLinkable extends Error {
-  constructor(
-    readonly channel: string,
-    readonly connectionKind: string,
-  ) {
-    super(`A ${connectionKind} account cannot be linked to an agent`);
-    this.name = "ChannelNotLinkable";
-  }
 }
 
 type Exec = DrizzleDb | DrizzleTx;
@@ -149,7 +123,12 @@ export class ChannelRecordsRepository {
    *  which channels are backed. */
   private readonly links = new Map<string, string | null>();
 
-  constructor(private readonly db: DrizzleDb) {}
+  /** `linkOf` says which kinds of connection take an agent, whose accounts
+   *  start fresh. */
+  constructor(
+    private readonly db: DrizzleDb,
+    readonly linkOf: AccountLinkOf,
+  ) {}
 
   all(): ChannelRecord[] {
     return reached(this.db).orderBy(asc(channels.createdAt)).all().map(reachedRecord);
@@ -275,18 +254,19 @@ export class ChannelRecordsRepository {
     const connectionKind = connection.connectionKind;
     const platform = connection.account?.platform ?? platformOf(connectionKind, connection.domain);
     const accountId = connection.account?.accountId ?? null;
-    const vacant = LINKABLE_KINDS.has(connectionKind)
-      ? undefined
-      : exec
-          .select()
-          .from(channels)
-          .where(and(eq(channels.connectionKind, connectionKind), isNull(channels.connectionId)))
-          .all()
-          .sort(
-            (a, b) =>
-              Number(b.id === connectionKind) - Number(a.id === connectionKind) ||
-              a.createdAt.getTime() - b.createdAt.getTime(),
-          )[0];
+    const vacant =
+      this.linkOf(connectionKind) !== null
+        ? undefined
+        : exec
+            .select()
+            .from(channels)
+            .where(and(eq(channels.connectionKind, connectionKind), isNull(channels.connectionId)))
+            .all()
+            .sort(
+              (a, b) =>
+                Number(b.id === connectionKind) - Number(a.id === connectionKind) ||
+                a.createdAt.getTime() - b.createdAt.getTime(),
+            )[0];
     if (vacant) {
       if (accountId !== null) releaseAccount(exec, platform, accountId, vacant.id);
       // A different account taking the channel back replaces the one it held.
@@ -299,7 +279,7 @@ export class ChannelRecordsRepository {
       return toRecord({ ...vacant, ...taken });
     }
 
-    const wanted = named ?? (LINKABLE_KINDS.has(connectionKind) ? undefined : connectionKind);
+    const wanted = named ?? (this.linkOf(connectionKind) !== null ? undefined : connectionKind);
     const free =
       wanted !== undefined &&
       exec.select({ id: channels.id }).from(channels).where(eq(channels.id, wanted)).get() ===
@@ -375,7 +355,7 @@ export class ChannelRecordsRepository {
       .update(channels)
       .set({
         connectionId: null,
-        platformAccountId: LINKABLE_KINDS.has(row.connectionKind) ? null : row.platformAccountId,
+        platformAccountId: this.linkOf(row.connectionKind) !== null ? null : row.platformAccountId,
       })
       .where(eq(channels.id, row.id))
       .run();

@@ -5,7 +5,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb, testAccountLinkOf } from "../test/helpers.js";
 import { AccountAlreadyConnectedError, DifferentAccountError } from "./errors.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
@@ -112,7 +112,7 @@ describe("ConnectionRegistry.confer account guard", () => {
         degraded: { at: new Date(0), reason: "token revoked upstream" },
       }));
 
-      await registry.importCredential(first.id, "bot", credentialFor("t-2"));
+      await registry.confer(first.connectionKind, first.id, "bot", credentialFor("t-2"));
 
       const grant = await ledger.getGrant(first.id);
       expect(grant).toMatchObject({ state: "authorized" });
@@ -318,7 +318,7 @@ describe("ConnectionRegistry account participants", () => {
 describe("ConnectionRegistry account records", () => {
   function recordingRegistry() {
     const db = createTestDb();
-    const records = new ChannelRecordsRepository(db.db);
+    const records = new ChannelRecordsRepository(db.db, testAccountLinkOf);
     const registry = new ConnectionRegistry({
       ledger: new DrizzleGrantLedger(db.db),
       onMint: (tx, record, _profile, account) =>

@@ -85,7 +85,7 @@ export function reviveEmailProfile(record: ProfileRecord): ProfileDisplay {
 
 /** Parse the provisioned address into the `inbox` grant profile — the pure
  *  non-secret identity recorded alongside the credential in the SAME
- *  `importCredential` update. The connect route calls this with the
+ *  conferral write. The connect route calls this with the
  *  freshly provisioned address; a wrong-typed value throws (fail-closed). */
 export function emailGrantProfile(address: string): EmailGrantProfile {
   return emailGrantProfileSchema.parse({ address });
@@ -126,7 +126,7 @@ export interface EmailDescriptorDeps {
 /**
  * The `inbox` grant scheme. Conferral is setup-driven: the generic
  * setup surface pumps `makeEmailSetup` and performs the terminal
- * `importCredential` — so `confer()` throws; `renew()` always answers
+ * conferral — so the scheme's `confer()` throws; `renew()` always answers
  * "re-confer" (a refused/rotated secret needs fresh provisioning, not a
  * headless renewal).
  */

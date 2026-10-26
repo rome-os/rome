@@ -472,7 +472,13 @@ describe("telegram_user probe → grant degradation (registry)", () => {
     try {
       const registry = makeRegistry();
       const conn = await registry.connect("telegram_user");
-      await registry.importCredential(conn.id, "session", validCred() as Credential, PROFILE);
+      await registry.confer(
+        conn.connectionKind,
+        conn.id,
+        "session",
+        validCred() as Credential,
+        PROFILE,
+      );
       expect(conn.auth.grants().session).toBe("authorized");
       expect(conn.isUnlocked("talk")).toBe(true);
 
@@ -501,7 +507,13 @@ describe("telegram_user probe → grant degradation (registry)", () => {
     try {
       const registry = makeRegistry();
       const conn = await registry.connect("telegram_user");
-      await registry.importCredential(conn.id, "session", validCred() as Credential, PROFILE);
+      await registry.confer(
+        conn.connectionKind,
+        conn.id,
+        "session",
+        validCred() as Credential,
+        PROFILE,
+      );
 
       // Park epoch A's probe in flight (it has read the live client but not yet
       // returned) so a re-login can land underneath it.
@@ -522,7 +534,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
         }),
         expiresAt: "never",
       };
-      await registry.importCredential(conn.id, "session", cred2, PROFILE);
+      await registry.confer(conn.connectionKind, conn.id, "session", cred2, PROFILE);
       expect(conn.auth.grants().session).toBe("authorized");
 
       // Epoch A's parked probe now fails auth — but it reports through the dead

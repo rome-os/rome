@@ -1,4 +1,5 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
+import { statSync } from "node:fs";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { getProjectsRoot } from "../paths.js";
@@ -116,6 +117,43 @@ export async function resolveProjectWorkingDirWithinRoot(
     throw new Error(`Working directory "${requestedPath}" is not a directory`);
   }
   return realWorkingDir;
+}
+
+/**
+ * Resolve a project an agent names to its project path. Prompts list projects
+ * by absolute path, so this accepts the absolute path of a folder inside the
+ * root as well as the path relative to it (`rome-oss`, `apps/story-shelf`).
+ * The project must be one of `knownPaths` or an existing folder under the root.
+ * Every error names the valid values, so the agent retries with the right
+ * project instead of picking another one or creating an empty one by typo.
+ */
+export function resolveAgentProjectPath(
+  value: string,
+  knownPaths: readonly string[],
+  rootPath: string = getWebchatProjectsRoot(),
+): string {
+  const trimmed = value.trim();
+  const hint = `Pass a path relative to the projects root ${rootPath}, one of: ${knownPaths.join(", ") || "(none yet)"}.`;
+  let projectPath: string;
+  try {
+    const fromRoot = isAbsolute(trimmed) ? relative(rootPath, trimmed) : trimmed;
+    if (isAbsolute(trimmed) && !isStrictSubpath(fromRoot)) {
+      throw new Error("it is not inside the projects root");
+    }
+    projectPath = normalizeWebchatProjectPath(fromRoot.split(sep).join("/"));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid project "${value}": ${reason}. ${hint}`);
+  }
+  if (knownPaths.includes(projectPath)) return projectPath;
+  try {
+    if (statSync(resolveWebchatProjectPath(projectPath, rootPath)).isDirectory()) {
+      return projectPath;
+    }
+  } catch {
+    // Missing: reported below.
+  }
+  throw new Error(`No project "${projectPath}". ${hint}`);
 }
 
 export async function ensureWebchatProjectWorkspace(

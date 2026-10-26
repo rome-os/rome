@@ -6,6 +6,7 @@ import type { FacadeToolDef } from "../core/mcp-facade.js";
 import { runFacadeTool } from "../core/mcp-facade.js";
 import type { SessionToolContext } from "../core/session-tools.js";
 import { createLogger } from "../logger.js";
+import { getWebchatProjectsRoot, resolveAgentProjectPath } from "../webchat/projects.js";
 import { type ConciergeService, isConciergeAgent, TASK_CHAT_TRIGGER_KIND } from "./service.js";
 import { latestAnswer, transcriptLines } from "./transcript.js";
 
@@ -54,6 +55,14 @@ export async function buildConciergeTools(
     return { chatId: thread.threadId, turnId };
   };
 
+  const taskProjectPath = async (project: string | undefined) =>
+    project === undefined
+      ? undefined
+      : resolveAgentProjectPath(
+          project,
+          (await webchatRepo.listProjects()).map((stored) => stored.path),
+        );
+
   const requireTaskChat = async (chatId: string) => {
     const chat = await webchatRepo.getSession(chatId);
     if (!chat || chat.triggerKind !== TASK_CHAT_TRIGGER_KIND) {
@@ -76,6 +85,14 @@ export async function buildConciergeTools(
     const { chatId, turnId } = currentTurn();
     await webchatRepo.addBackendMessage(chatId, turnId, [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },
+    ]);
+  };
+
+  // A card that opens the task chat; it reads the chat's live status itself.
+  const showCard = async (chatId: string, title: string) => {
+    const { chatId: conciergeChatId, turnId } = currentTurn();
+    await webchatRepo.addBackendMessage(conciergeChatId, turnId, [
+      { type: "task_chat", chatId, title },
     ]);
   };
 
@@ -122,7 +139,10 @@ export async function buildConciergeTools(
               "The full request for the other agent, with every detail it needs. It does not see this conversation.",
           },
           agent: { type: "string", description: 'Agent id. Defaults to "main".' },
-          project: { type: "string", description: "Project path the chat works in." },
+          project: {
+            type: "string",
+            description: `Project the chat works in, as a path relative to the projects root ${getWebchatProjectsRoot()}, such as "website" or "apps/notes". Defaults to "default".`,
+          },
           card: {
             type: "boolean",
             description:
@@ -132,12 +152,12 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runFacadeTool("chat_start", input, async (args) => {
-          const { chatId: conciergeChatId, turnId: conciergeTurnId } = currentTurn();
+          currentTurn();
           const title = requireString(args, "title");
           const brief = requireString(args, "brief");
           const chatId = await chatApi.createChat({
             agentName: optionalString(args, "agent"),
-            projectPath: optionalString(args, "project"),
+            projectPath: await taskProjectPath(optionalString(args, "project")),
           });
           // Marked before the first turn, so that turn's event already sees it.
           await webchatRepo.setSessionTrigger(chatId, {
@@ -152,11 +172,7 @@ export async function buildConciergeTools(
               error: error instanceof Error ? error.message : String(error),
             }),
           );
-          if (args.card === true) {
-            await webchatRepo.addBackendMessage(conciergeChatId, conciergeTurnId, [
-              { type: "task_chat", chatId, title },
-            ]);
-          }
+          if (args.card === true) await showCard(chatId, title);
           return { chatId, turnId: turn.turnId };
         }),
     },
@@ -272,6 +288,24 @@ export async function buildConciergeTools(
           if (intro) await say(intro, "bubble");
           await say(answer, "long");
           return { forwardedChars: answer.length };
+        }),
+    },
+    {
+      name: "chat_card",
+      description:
+        "Show the guardian a card that opens a task chat and shows its live status. " +
+        "Use it when they want to open or find a task chat, instead of sending its id.",
+      inputSchema: {
+        type: "object",
+        required: ["chatId"],
+        properties: { chatId: { type: "string" } },
+      },
+      handler: (input) =>
+        runFacadeTool("chat_card", input, async (args) => {
+          const chatId = requireString(args, "chatId");
+          const chat = await requireTaskChat(chatId);
+          await showCard(chatId, chat.name);
+          return "Shown; the guardian sees the card.";
         }),
     },
   ];

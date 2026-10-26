@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { channels } from "../schema.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb, testAccountLinkOf } from "../../test/helpers.js";
 import { ChannelRecordsRepository } from "./channel-records.js";
 
 const NOW = new Date("2026-10-15T00:00:00.000Z");
@@ -15,7 +15,7 @@ describe("ChannelRecordsRepository", () => {
 
   function repository(): ChannelRecordsRepository {
     testDb = createTestDb();
-    return new ChannelRecordsRepository(testDb.db);
+    return new ChannelRecordsRepository(testDb.db, testAccountLinkOf);
   }
 
   it("gives a linkable service's account an opaque id, and the service's name only when asked", () => {
@@ -227,8 +227,10 @@ describe("ChannelRecordsRepository", () => {
     // Rows are written here around the repository, so each read is a fresh
     // repository's, with nothing cached from before the write.
     const records = {
-      channelOfLink: (link: string) => new ChannelRecordsRepository(db).channelOfLink(link),
-      vacate: (connectionId: string) => new ChannelRecordsRepository(db).vacate(db, connectionId),
+      channelOfLink: (link: string) =>
+        new ChannelRecordsRepository(db, testAccountLinkOf).channelOfLink(link),
+      vacate: (connectionId: string) =>
+        new ChannelRecordsRepository(db, testAccountLinkOf).vacate(db, connectionId),
     };
     // Nothing recorded: a link reaches the channel it names, as it always has.
     expect(records.channelOfLink("telegram")).toBe("telegram");

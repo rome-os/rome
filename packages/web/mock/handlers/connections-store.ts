@@ -32,6 +32,7 @@ export const connections: { connections: ApiConnection[] } = {
       setups: {},
       channel: null,
       agent: null,
+      link: null,
       severalAccounts: false,
     },
     ...[
@@ -64,6 +65,7 @@ export const connections: { connections: ApiConnection[] } = {
         channel: service,
         // Core links main to every existing linkable bot on upgrade.
         agent: service === "feishu" ? MAIN_AGENT_ID : null,
+        link: service === "feishu" ? "own_account" : null,
         severalAccounts,
       }),
     ),
@@ -85,6 +87,7 @@ export const connections: { connections: ApiConnection[] } = {
       setups: {},
       channel: "discord",
       agent: MAIN_AGENT_ID,
+      link: "own_account",
       severalAccounts: true,
     },
     {
@@ -105,6 +108,7 @@ export const connections: { connections: ApiConnection[] } = {
       setups: {},
       channel: "telegram",
       agent: MAIN_AGENT_ID,
+      link: "own_account",
       severalAccounts: true,
     },
     {
@@ -129,6 +133,7 @@ export const connections: { connections: ApiConnection[] } = {
       setups: {},
       channel: "whatsapp",
       agent: null,
+      link: null,
       severalAccounts: false,
     },
     {
@@ -149,6 +154,7 @@ export const connections: { connections: ApiConnection[] } = {
       setups: {},
       channel: "linkedin",
       agent: null,
+      link: null,
       severalAccounts: false,
     },
   ],

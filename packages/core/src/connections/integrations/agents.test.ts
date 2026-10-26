@@ -232,7 +232,13 @@ describe("agents channel", () => {
     });
     registry.register(makeAgentsDescriptor(client));
     const conn = await registry.connect("agents");
-    await registry.importCredential(conn.id, "cloud", { material: HOME, expiresAt: "never" }, HOME);
+    await registry.confer(
+      conn.connectionKind,
+      conn.id,
+      "cloud",
+      { material: HOME, expiresAt: "never" },
+      HOME,
+    );
     await until(() => conn.auth.grants().cloud === "degraded");
     expect(conn.isUnlocked("talk")).toBe(false);
   });

@@ -223,6 +223,7 @@ describe("buildConnectionCards — Composio card", () => {
         display: null,
         identity: null,
         activeSetupCid: null,
+        link: null,
       },
     ]);
 
@@ -403,7 +404,6 @@ describe("buildConnectionCards — several accounts per service", () => {
     expect(cards.map((card) => card.route)).toEqual(["feishu", SECOND]);
     const [first, second] = cards;
     expect(first.label).toBe("Feishu");
-    expect(first.channel).toBe("feishu");
     expect(first.agent).toBeNull();
     expect(second.label).toBe("Feishu · Sales Bot");
     expect(second.service).toBe("feishu");
@@ -492,7 +492,6 @@ describe("buildConnectionCards — several accounts per service", () => {
       conn({ connectionKind: "feishu", grants: { app: "authorized" } }),
     ]);
     expect(cards[0].route).toBe("feishu");
-    expect(cards[0].channel).toBeNull();
     expect(cards[0].severalAccounts).toBe(false);
   });
 });

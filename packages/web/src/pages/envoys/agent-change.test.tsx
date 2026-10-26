@@ -19,13 +19,12 @@ afterEach(() => {
 
 function account(overrides: Partial<EnvoyAccount> = {}): EnvoyAccount {
   return {
-    channel: "discord",
     connectionId: "discord-id",
     grant: "bot",
     service: "discord",
     platform: "discord",
     name: "Sales",
-    kind: "own",
+    kind: "own_account",
     agent: null,
     route: "discord",
     ...overrides,
@@ -88,7 +87,7 @@ describe("AgentChange", () => {
 
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith("sales:agent"));
     expect(puts).toEqual([
-      { url: "/api/channels/accounts/discord/agent", body: { agent: "sales:agent" } },
+      { url: "/api/accounts/discord-id/agent", body: { agent: "sales:agent" } },
     ]);
   });
 
@@ -145,7 +144,7 @@ describe("AgentChange", () => {
     await user.click(screen.getByRole("button", { name: "Link" }));
     await waitFor(() =>
       expect(puts).toEqual([
-        { url: "/api/channels/accounts/discord/agent", body: { agent: MAIN_AGENT_ID } },
+        { url: "/api/accounts/discord-id/agent", body: { agent: MAIN_AGENT_ID } },
       ]),
     );
   });

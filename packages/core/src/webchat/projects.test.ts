@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterAll, afterEach, describe, expect, it } from "@rstest/core";
 import { mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import {
   getWebchatProjectDisplayName,
   normalizeSelectedWebchatProjectPath,
   normalizeWebchatProjectPath,
+  resolveAgentProjectPath,
   resolveProjectWorkingDirWithinRoot,
   resolveWebchatContinuationDeviceFolder,
   resolveWebchatContinuationWorkingDir,
@@ -215,5 +216,42 @@ describe("resolveProjectWorkingDirWithinRoot", () => {
     await expect(resolveProjectWorkingDirWithinRoot("notes.txt", root)).rejects.toThrow(
       "is not a directory",
     );
+  });
+});
+
+describe("resolveAgentProjectPath", () => {
+  const root = mkdtempSync(join(tmpdir(), "rome-agent-projects-"));
+  mkdirSync(join(root, "apps", "story-shelf"), { recursive: true });
+  const known = ["default", "rome-oss"];
+
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("takes a path relative to the projects root", () => {
+    expect(resolveAgentProjectPath(" rome-oss ", known, root)).toBe("rome-oss");
+  });
+
+  it("maps the absolute path the prompt lists to the relative project path", () => {
+    expect(resolveAgentProjectPath(join(root, "rome-oss"), known, root)).toBe("rome-oss");
+    expect(resolveAgentProjectPath(join(root, "apps", "story-shelf"), known, root)).toBe(
+      "apps/story-shelf",
+    );
+  });
+
+  it("accepts an existing folder that is not registered yet", () => {
+    expect(resolveAgentProjectPath("apps/story-shelf", known, root)).toBe("apps/story-shelf");
+  });
+
+  it("names the valid values when the project is unknown or the path is invalid", () => {
+    const hint = `Pass a path relative to the projects root ${root}, one of: default, rome-oss.`;
+    expect(() => resolveAgentProjectPath("rome", known, root)).toThrow(
+      `No project "rome". ${hint}`,
+    );
+    expect(() => resolveAgentProjectPath("/elsewhere/rome-oss", known, root)).toThrow(
+      `Invalid project "/elsewhere/rome-oss": it is not inside the projects root. ${hint}`,
+    );
+    expect(() => resolveAgentProjectPath(root, known, root)).toThrow(hint);
+    expect(() => resolveAgentProjectPath("rome-oss/../x", known, root)).toThrow(hint);
   });
 });

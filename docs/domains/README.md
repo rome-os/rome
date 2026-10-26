@@ -73,14 +73,17 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - Every kind of connection declares one grant, and everything a connection lets Rome do needs that grant.
 - The ledger keeps one grant per connection.
 - Renewing or fixing replaces a connection's grant whole.
+- A fix that reaches another account is refused, the sign-ins such as GitHub included.
+- Connecting through a sign-in such as GitHub is one step, and a sign-in Rome rejects leaves no connection behind.
 - Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
 - Chats keeps a connected account by its connection, holding only its agent. It is made with the connection and goes with it.
+- The own-account and delegate kinds of link follow from the kind of connection, which alone says whether an account takes an agent, and the dashboard shows them.
+- Linking, switching and unlinking name the connected account by its connection, and the dashboard lists accounts by connection.
 
 Diffs still owed to the model, each a change of its own:
 
 - Chat replaces conversation in the dashboard, the docs and the code.
 - The per-chat agent override is removed, with a migration.
-- The own-account and delegate kinds of link follow from the kind of connection and are shown.
 - One group is one chat across all of Rome's accounts in it.
 - A Feishu person is one account across all of Rome's Feishu accounts, by the tenant-wide id.
 - The participants of a chat are the platform's member list.
@@ -100,7 +103,5 @@ Diffs still owed to the model, each a change of its own:
 - People's labels and docs say platform where they say channel.
 - The channel record goes.
 - Email and WhatsApp accounts end at disconnect like every other, and connecting again starts a fresh connected account.
-- Linking, switching and unlinking name the connected account by its connection. Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
-- A fix that reaches another account is refused for the sign-ins such as GitHub too.
-- Connecting through a sign-in such as GitHub is one step too. A sign-in Rome rejects leaves no connection behind.
+- Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
 - The code says chat, act and watch for what a connection lets Rome do.

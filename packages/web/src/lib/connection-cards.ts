@@ -19,6 +19,7 @@
  * "Not connected".
  */
 
+import type { AccountLink } from "@rome/api-types/account-agents";
 import type {
   ApiConnection,
   CapabilityDegradation,
@@ -48,6 +49,9 @@ export interface ConnectionSlot {
   /** The id of the live conferral setup for this grant, if one is
    *  in progress; the connect card re-attaches to it on reopen. Null otherwise. */
   activeSetupCid: string | null;
+  /** The kind of link an agent has to this slot's account, or null when its
+   *  kind of connection takes none. */
+  link: AccountLink | null;
 }
 
 export interface ConnectionCard {
@@ -65,9 +69,6 @@ export interface ConnectionCard {
   degradation: CapabilityDegradation | null;
   slots: ConnectionSlot[];
   connect: ConnectHint | null;
-  /** The account's channel id; null for placeholders and services without a
-   *  Talk. Never shown on screens. */
-  channel: string | null;
   /** Canonical id of the account's agent, or null when it has none and Rome
    *  does not listen to it. */
   agent: string | null;
@@ -75,6 +76,9 @@ export interface ConnectionCard {
    *  serves accounts before agent links omits `agent`, and the picker
    *  stays hidden. */
   linkReported: boolean;
+  /** The kind of link the account's agent has, or null when its kind of
+   *  connection takes none. */
+  link: AccountLink | null;
   /** Whether the service offers "add another account". */
   severalAccounts: boolean;
 }
@@ -159,6 +163,7 @@ function toSlots(connection: ApiConnection, key?: SlotKey): ConnectionSlot[] {
       display,
       identity: foldIdentity(display),
       activeSetupCid: connection.setups[grant] ?? null,
+      link: connection.link ?? null,
     };
   });
 }
@@ -206,12 +211,11 @@ function toCard(connection: ApiConnection): ConnectionCard {
     degradation: runtimeDegradation(connection),
     slots,
     connect: connection.connect,
-    // Read defensively: a core that predates accounts omits these fields.
-    channel: connection.channel ?? null,
     // The bot's link only. A folded personal account (`telegram_user`) keeps
     // its own link, which this card does not show or set yet.
     agent: connection.agent ?? null,
     linkReported: connection.agent !== undefined,
+    link: connection.link ?? null,
     severalAccounts: connection.severalAccounts === true,
   };
 }
@@ -236,12 +240,13 @@ function composioCard(status: ComposioCliStatus): ConnectionCard {
         display: null,
         identity: null,
         activeSetupCid: null,
+        link: null,
       },
     ],
     connect: null,
-    channel: null,
     agent: null,
     linkReported: false,
+    link: null,
     severalAccounts: false,
   };
 }
@@ -300,9 +305,9 @@ export function buildConnectionCards(
         degradation: runtimeDegradation(connection),
         slots: sessionSlots,
         connect: null,
-        channel: null,
         agent: null,
         linkReported: false,
+        link: null,
         severalAccounts: false,
       });
     }
