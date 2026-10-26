@@ -78,6 +78,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
 - Chats keeps a connected account by its connection, holding only its agent. It is made with the connection and goes with it.
 - The own-account and delegate kinds of link follow from the kind of connection, which alone says whether an account takes an agent, and the dashboard shows them.
+- Linking, switching and unlinking name the connected account by its connection, and the dashboard lists accounts by connection.
 
 Diffs still owed to the model, each a change of its own:
 
@@ -102,5 +103,5 @@ Diffs still owed to the model, each a change of its own:
 - People's labels and docs say platform where they say channel.
 - The channel record goes.
 - Email and WhatsApp accounts end at disconnect like every other, and connecting again starts a fresh connected account.
-- Linking, switching and unlinking name the connected account by its connection. Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
+- Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
 - The code says chat, act and watch for what a connection lets Rome do.

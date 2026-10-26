@@ -23,32 +23,6 @@ export interface ChannelRecord {
   createdAt: Date;
 }
 
-export class ChannelRecordNotFound extends Error {
-  constructor(readonly channel: string) {
-    super(`No channel with id "${channel}"`);
-    this.name = "ChannelRecordNotFound";
-  }
-}
-
-/** A link asked of a channel no Connection backs now. */
-export class ChannelUnbacked extends Error {
-  constructor(readonly channel: string) {
-    super(`Channel "${channel}" has no connection, so no agent can be linked to it`);
-    this.name = "ChannelUnbacked";
-  }
-}
-
-/** A link asked of a channel whose connection kind takes no agent. */
-export class ChannelNotLinkable extends Error {
-  constructor(
-    readonly channel: string,
-    readonly connectionKind: string,
-  ) {
-    super(`A ${connectionKind} account cannot be linked to an agent`);
-    this.name = "ChannelNotLinkable";
-  }
-}
-
 type Exec = DrizzleDb | DrizzleTx;
 
 /** Let go of the account `accountId` on `platform` from every channel but

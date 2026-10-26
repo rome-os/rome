@@ -73,7 +73,15 @@ describe("buildEnvoys", () => {
   it("lists connected accounts with no agent apart", () => {
     const { envoys, unlinked } = buildEnvoys([connection({ connectionKind: "feishu" })], []);
     expect(envoys).toEqual([]);
-    expect(unlinked.map((account) => account.channel)).toEqual(["feishu"]);
+    expect(unlinked.map((account) => account.connectionId)).toEqual(["feishu-id"]);
+  });
+
+  it("lists an account whose connection has no channel yet, by its connection", () => {
+    const { unlinked } = buildEnvoys(
+      [connection({ connectionKind: "discord", id: "c2", channel: null })],
+      [],
+    );
+    expect(unlinked.map((account) => account.connectionId)).toEqual(["c2"]);
   });
 
   it("leaves out accounts that cannot carry an agent", () => {

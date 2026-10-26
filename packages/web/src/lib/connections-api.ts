@@ -11,7 +11,7 @@ import type {
   ConnectionAccountFields,
   LinkAccountAgentRequest,
   LinkAccountAgentResult,
-} from "@rome/api-types/channel-accounts";
+} from "@rome/api-types/connected-accounts";
 import { fetchJson } from "@/lib/fetch-json";
 
 /** Runtime health can change without a grant ceremony (for example, a long-poll
@@ -106,16 +106,17 @@ export async function revokeConnectionGrant(
   return { ok: true };
 }
 
-/** Link an agent to an account by its channel id, or pass null to unlink it,
- *  so Rome stops listening to the account. `fallback` is the error message when the server gives none. */
+/** Link an agent to a connected account, named by its connection's id, or
+ *  pass null to unlink it, so Rome stops listening to the account. `fallback`
+ *  is the error message when the server gives none. */
 export async function linkAccountAgent(
-  id: string,
+  connectionId: string,
   agent: string | null,
   fallback: string,
 ): Promise<LinkAccountAgentResult> {
   const body: LinkAccountAgentRequest = { agent };
   return fetchJson<LinkAccountAgentResult>(
-    `/api/channels/accounts/${encodeURIComponent(id)}/agent`,
+    `/api/accounts/${encodeURIComponent(connectionId)}/agent`,
     { method: "PUT", json: body, fallback },
   );
 }

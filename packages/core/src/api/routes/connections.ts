@@ -9,13 +9,14 @@
 // hook, so no kind-specific profile field name is known here. Minting stays in
 // the connect setup, a later account of a connection kind included.
 
-import type { ConnectionAccountFields } from "@rome/api-types/channel-accounts";
+import type { AccountValue, ConnectionAccountFields } from "@rome/api-types/connected-accounts";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
 import type { GrantValue } from "../../connections/grant.js";
+import { reachedAccount } from "../../connections/registry.js";
 import type {
   Capability,
   CapabilityStatus,
@@ -73,7 +74,7 @@ interface ConnectHint {
 
 interface ConnectionView
   extends Required<
-      Pick<ConnectionAccountFields, "channel" | "platform" | "link" | "severalAccounts">
+      Pick<ConnectionAccountFields, "channel" | "platform" | "account" | "link" | "severalAccounts">
     >,
     Pick<ConnectionAccountFields, "agent"> {
   /** Ledger connection id, or null for an offerable placeholder — a registered
@@ -129,6 +130,15 @@ async function loadGrant(
   return registry.grantOf(conn.id);
 }
 
+/** The account `record`'s grant reaches, as the wire names it. */
+function accountView(
+  descriptor: ConnectionDescriptor | null,
+  record: GrantValue | null,
+): AccountValue | null {
+  const account = descriptor && record ? reachedAccount(descriptor, record) : undefined;
+  return account ? { platform: account.platform, id: account.accountId } : null;
+}
+
 function buildConnectionView(
   registry: ConnectionRegistry,
   conn: Connection,
@@ -168,6 +178,7 @@ function buildConnectionView(
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
     channel: channel?.id ?? null,
     platform: channel?.platform ?? null,
+    account: accountView(registry.getDescriptor(conn.connectionKind), record),
     // Null means silent, so a connection kind that takes no link reports none.
     agent: link === null ? undefined : agent,
     link,
@@ -246,6 +257,7 @@ function placeholderView(
     setups: activeSetups(manager, connectionKind, [descriptor.grant]),
     channel: null,
     platform: null,
+    account: null,
     link: descriptor.link ?? null,
     severalAccounts: descriptor.severalAccounts === true,
   };
@@ -282,18 +294,32 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
   const channels = new ChannelRecordsRepository(deps.db, accountLinkOf(deps.connectionRegistry));
   const accounts = new ConnectedAccountsRepository(deps.db);
 
+  // `?platform=&accountId=` finds the connection that reaches an account, so
+  // it lists no placeholders. An account id means nothing without its platform.
   app.get("/connections", async (c) => {
     const registry = requireConnectionRegistry(deps);
     const manager = deps.setupManager ?? null;
-    const connected = await Promise.all(
-      registry
-        .all()
-        .map((conn) => serializeConnection(registry, conn, manager, channels, accounts)),
+    const platform = c.req.query("platform");
+    const accountId = c.req.query("accountId");
+    if (accountId !== undefined && platform === undefined) {
+      return c.json({ error: "Name the platform an account id is on." }, 400);
+    }
+    const connected = (
+      await Promise.all(
+        registry
+          .all()
+          .map((conn) => serializeConnection(registry, conn, manager, channels, accounts)),
+      )
+    ).filter(
+      (view) =>
+        (platform === undefined || view.account?.platform === platform) &&
+        (accountId === undefined || view.account?.id === accountId),
     );
+    const placeholders = platform === undefined ? placeholderViews(registry, manager) : [];
     // Stable ordering for the UI: by connection kind, then label, then id — the
     // registry's own iteration order is insertion-dependent. Placeholders sort
     // like a connection whose label is its connection kind and whose id is empty.
-    const connections = [...connected, ...placeholderViews(registry, manager)].sort(
+    const connections = [...connected, ...placeholders].sort(
       (a, b) =>
         a.connectionKind.localeCompare(b.connectionKind) ||
         a.label.localeCompare(b.label) ||

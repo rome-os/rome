@@ -5,18 +5,14 @@
 
 import type { ChannelMessageHookDeps, ChatSettingsSnapshot } from "@rome-os/app-runtime";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import {
-  ChannelNotLinkable,
-  ChannelRecordNotFound,
-  ChannelUnbacked,
-  type ChannelRecord,
-  type ChannelRecordsRepository,
-} from "../db/repositories/channel-records.js";
+import type { AccountLink } from "@rome/api-types/account-agents";
+import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import {
   ConnectedAccountNotFound,
   type ConnectedAccountsRepository,
 } from "../db/repositories/connected-accounts.js";
 import { createLogger } from "../logger.js";
+import type { AccountLinkOf } from "./account-links.js";
 import type { InboundListening } from "./connection-ports.js";
 
 const log = createLogger("account-agents");
@@ -136,42 +132,46 @@ export function accountAgentResolver(
   };
 }
 
-/** A link asked of channel `channel`. */
-export interface ChannelLink {
-  channel: ChannelRecord;
+/** A link asked of a connected account whose kind of connection takes no
+ *  agent. */
+export class AccountNotLinkable extends Error {
+  constructor(
+    readonly connectionId: string,
+    readonly connectionKind: string,
+  ) {
+    super(`A ${connectionKind} account cannot be linked to an agent`);
+    this.name = "AccountNotLinkable";
+  }
+}
+
+/** A connected account's agent as it stands after a link. */
+export interface AccountLinked {
+  connectionId: string;
   agent: string | null;
+  link: AccountLink | null;
 }
 
 /**
- * Link `agent` to the account channel `id` stands for, or unlink it with
- * null, and return the channel with its agent as it now stands. The link is
- * stored on the connected account of the connection behind the channel, so
- * only that account changes. Only a channel whose connection kind takes an agent
- * takes a link, and only while a connection backs it. Unlinking is always
- * open, and a channel no connection backs already has no agent.
+ * Link `agent` to the connected account of connection `connectionId`, or
+ * unlink it with null, and return its agent as it now stands. Only that
+ * account changes. Only an account whose kind of connection takes an agent
+ * takes a link, and unlinking is always open. `kindOf` names the kind of a
+ * connection Rome holds, or null for none. Throws
+ * {@link ConnectedAccountNotFound} when Rome holds no such connection, and
+ * {@link AccountNotLinkable} for a kind that takes no agent.
  */
-export function linkChannelAgent(
-  records: Pick<ChannelRecordsRepository, "byId" | "linkOf">,
+export function linkAccountAgent(
+  kindOf: (connectionId: string) => string | null,
+  linkOf: AccountLinkOf,
   accounts: Pick<ConnectedAccountsRepository, "link">,
-  id: string,
+  connectionId: string,
   agent: string | null,
-): ChannelLink {
-  const channel = records.byId(id);
-  if (!channel) throw new ChannelRecordNotFound(id);
-  if (agent !== null && records.linkOf(channel.connectionKind) === null) {
-    throw new ChannelNotLinkable(id, channel.connectionKind);
-  }
-  if (channel.connectionId === null) {
-    if (agent !== null) throw new ChannelUnbacked(id);
-    return { channel, agent: null };
-  }
-  try {
-    return { channel, agent: accounts.link(channel.connectionId, agent) };
-  } catch (error) {
-    // The connection went between the read and the link.
-    if (error instanceof ConnectedAccountNotFound) throw new ChannelUnbacked(id);
-    throw error;
-  }
+): AccountLinked {
+  const kind = kindOf(connectionId);
+  if (kind === null) throw new ConnectedAccountNotFound(connectionId);
+  const link = linkOf(kind);
+  if (agent !== null && link === null) throw new AccountNotLinkable(connectionId, kind);
+  return { connectionId, agent: accounts.link(connectionId, agent), link };
 }
 
 /**
