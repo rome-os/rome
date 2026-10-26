@@ -69,6 +69,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - Working and broken are states of the connection, and the dashboard shows them.
 - The dashboard chat is Rome's own channel, not a connection.
 - Rome's account record knows its platform and the platform's own id.
+- An account's connection is found by its platform and the platform's own id: the connection whose live grant reaches them.
 
 Diffs still owed to the model, each a change of its own:
 
@@ -92,7 +93,7 @@ Diffs still owed to the model, each a change of its own:
 - The guardian can delete a person.
 - A delegate link is stored and shown as the agent of its person.
 - People's labels and docs say platform where they say channel.
-- An account's connection is found by its platform and the platform's own id. Neither the account record nor the connection names the other.
+- Neither the account record nor the connection names the other.
 - A fix that reaches another account is refused for the sign-ins such as GitHub too.
 - Connecting through a sign-in such as GitHub is one step too. A sign-in Rome rejects leaves no connection behind.
 - A connection holds one grant, and renewing or fixing replaces it whole.

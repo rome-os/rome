@@ -89,9 +89,9 @@ describe("claimChannels", () => {
     testDb = createTestDb();
     const records = new ChannelRecordsRepository(testDb.db);
     const now = new Date();
-    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now);
-    records.claim(testDb.db, { id: "c2", connectionKind: "email" }, now);
-    records.claim(testDb.db, { id: "c3", connectionKind: "discord" }, now);
+    const tg = records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now).id;
+    const email = records.claim(testDb.db, { id: "c2", connectionKind: "email" }, now).id;
+    const discord = records.claim(testDb.db, { id: "c3", connectionKind: "discord" }, now).id;
     const grants: Record<string, GrantRecord[]> = {
       c1: [grant("c1", "authorized", { platform: "telegram", accountId: "bot-1" })],
       c2: [grant("c2", "unauthorized", { platform: "email", accountId: "a@x.test" })],
@@ -102,10 +102,11 @@ describe("claimChannels", () => {
       listGrants: async (id) => grants[id] ?? [],
     });
 
-    expect(records.byConnection("c1")?.platformAccountId).toBe("bot-1");
+    // Read by id: these grants are not in the ledger, so none reaches the account.
+    expect(records.byId(tg)?.platformAccountId).toBe("bot-1");
     // A grant given up reaches no account, and a grant naming none tells nothing.
-    expect(records.byConnection("c2")?.platformAccountId).toBeNull();
-    expect(records.byConnection("c3")?.platformAccountId).toBeNull();
+    expect(records.byId(email)?.platformAccountId).toBeNull();
+    expect(records.byId(discord)?.platformAccountId).toBeNull();
   });
 });
 

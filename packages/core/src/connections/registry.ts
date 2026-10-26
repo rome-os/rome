@@ -87,6 +87,9 @@ export interface ConnectionRegistryDeps {
   /** Runs inside the transaction that confers a grant on a Connection that
    *  already exists, when the grant names the account it reaches. */
   onAccount?: (tx: DrizzleTx, id: ConnectionId, account: GrantAccount) => void;
+  /** Runs once a grant's revoke is written: the Connection no longer reaches
+   *  the account the grant did. */
+  onRevoke?: (id: ConnectionId) => void;
   /** Runs inside the transaction that deletes a Connection, before any
    *  caller participant. */
   onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
@@ -224,6 +227,7 @@ export class ConnectionRegistry {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly onMint?: ConnectionRegistryDeps["onMint"];
   private readonly onAccount?: ConnectionRegistryDeps["onAccount"];
+  private readonly onRevoke?: ConnectionRegistryDeps["onRevoke"];
   private readonly onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
 
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
@@ -255,6 +259,7 @@ export class ConnectionRegistry {
     this.sleep = deps.sleep ?? defaultSleep;
     this.onMint = deps.onMint;
     this.onAccount = deps.onAccount;
+    this.onRevoke = deps.onRevoke;
     this.onRemove = deps.onRemove;
   }
 
@@ -450,6 +455,12 @@ export class ConnectionRegistry {
       current.teardownAll();
       this.connections.delete(id);
     });
+  }
+
+  /** Tell the caller a revoke of one of `id`'s grants was written. Called by
+   *  the Connection, under the grant's lock. */
+  revoked(id: ConnectionId): void {
+    this.onRevoke?.(id);
   }
 
   /** Commit grant revocation and the caller's cleanup together before stopping capabilities. */
@@ -1561,6 +1572,7 @@ class ConnectionImpl implements Connection {
     } else {
       await this.ledger.updateGrant(this.id, grant, patch);
     }
+    this.registry.revoked(this.id);
     this.grantState.set(grant, "unauthorized");
     this.liveCreds.delete(grant);
     this.renewedSinceLastConfer.delete(grant);

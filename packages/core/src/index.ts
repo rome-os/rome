@@ -396,6 +396,7 @@ async function main() {
       );
     },
     onAccount: (tx, id, account) => channelRecords.recordAccount(tx, id, account.accountId),
+    onRevoke: () => channelRecords.forget(),
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
   const channelOf = recordedChannelOf(channelRecords, talks);

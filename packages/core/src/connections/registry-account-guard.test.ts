@@ -302,10 +302,34 @@ describe("ConnectionRegistry account records", () => {
         records.claim(tx, { ...record, accountId: account?.accountId }, record.createdAt),
       onAccount: (tx, id, account) => records.recordAccount(tx, id, account.accountId),
       onRemove: (tx, id) => records.vacate(tx, id),
+      onRevoke: () => records.forget(),
     });
     registry.register(botIdDescriptor());
     return { ...db, records, registry };
   }
+
+  it("finds an account's Connection by the live grant that reaches it", async () => {
+    const { records, registry, close } = recordingRegistry();
+    try {
+      const conn = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
+        botId: "100",
+      });
+      const account = records.byConnection(conn.id);
+      expect(account).toMatchObject({ platformAccountId: "100", connectionId: conn.id });
+      expect(records.idOf(conn.id)).toBe(account?.id);
+
+      // A revoked grant reaches no account, so the account has no Connection.
+      await registry.revoke(conn.id, "bot");
+      expect(records.idOf(conn.id)).toBeNull();
+      expect(records.byId(account!.id)?.connectionId).toBeNull();
+
+      await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-2"), { botId: "100" });
+      expect(records.idOf(conn.id)).toBe(account?.id);
+      expect(records.byId(account!.id)?.connectionId).toBe(conn.id);
+    } finally {
+      close();
+    }
+  });
 
   it("records the account a Connection kept across a revoke reaches next", async () => {
     const { records, registry, close } = recordingRegistry();
