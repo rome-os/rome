@@ -86,7 +86,8 @@ Reactivation keeps exported turns archived and shows new turns in full. History,
 
 Usage totals, model attribution, settled turn status, and descendant cost remain identical after archiving.
 Chat deletion removes local archives and durably retries remote deletion without delaying the chat delete.
-A failed upload can finish after deletion. If its outcome is uncertain, deletion intent survives successful delete responses and later restarts.
+An unconfirmed upload can finish after deletion, and an unconfirmed deletion can erase a later archive.
+Uncertain remote operations keep deletion intent across successful retries and restarts.
 An unresolved remote deletion prevents reuse of that archive prefix. If the session id is reused, its new trace rows stay intact.
 Instance teardown leaves Cloud archives with the account. Account deletion owns their removal.
 Restore is separate from this window.

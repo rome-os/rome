@@ -29,11 +29,17 @@ export class TraceArchiveStorage {
     } = {},
   ) {}
 
-  private async request(method: string, route: string, body: unknown): Promise<Response | null> {
+  private async request(
+    method: string,
+    route: string,
+    body: unknown,
+    onDispatch?: () => void,
+  ): Promise<Response | null> {
     const token = (this.options.token ?? getInstanceToken)();
     if (!token || this.notHosted) return null;
     const origin = (this.options.origin ?? getRomeCloudOrigin)();
     if (!origin) throw new Error("Trace archive Cloud origin unavailable");
+    onDispatch?.();
     const response = await (this.options.fetch ?? fetch)(
       new URL(`/api/instance/trace-archives${route}`, origin),
       {
@@ -94,14 +100,25 @@ export class TraceArchiveStorage {
   }
 
   /** A missing token cannot confirm deletion of an object uploaded with an earlier token. */
-  async deleteSession(sessionId: string, remoteRequired: boolean): Promise<void> {
+  async deleteSession(
+    sessionId: string,
+    remoteRequired: boolean,
+    onDispatch?: () => void,
+    onRejected?: () => void,
+  ): Promise<void> {
     if (!remoteRequired) return;
     if (!(this.options.token ?? getInstanceToken)())
       throw new Error("Trace archive deletion awaits instance token");
-    const response = await this.request("DELETE", "", {
-      sessionId: traceArchiveSessionKey(sessionId),
-    });
-    if (!response) throw new Error("Trace archive remote deletion not confirmed");
+    const response = await this.request(
+      "DELETE",
+      "",
+      { sessionId: traceArchiveSessionKey(sessionId) },
+      onDispatch,
+    );
+    if (!response) {
+      onRejected?.();
+      throw new Error("Trace archive remote deletion not confirmed");
+    }
     const result = await response.json().catch(() => null);
     if (!z.object({ deleted: z.number().int().nonnegative() }).safeParse(result).success) {
       throw new Error("Trace archive remote deletion not confirmed");

@@ -740,7 +740,8 @@ describe("Pantheon + signed PUT contract", () => {
     expect(JSON.parse(requests[0].body.toString())).toEqual({ sessionId: "session" });
     succeed();
     await archiver({ storage }).cleanupDeletedChats();
-    expect(repo.deletes()).toEqual([]);
+    expect(repo.deletes()).toEqual(["session"]);
+    expect(archiveRows()).toEqual([]);
   });
   it("reactivation discards the new upload without erasing earlier valid archives", async () => {
     seed();
@@ -824,7 +825,7 @@ describe("Pantheon + signed PUT contract", () => {
     succeed();
     await job.runPass();
     expect(requests).toHaveLength(4);
-    expect(repo.deletes()).toEqual([]);
+    expect(repo.deletes()).toHaveLength(2);
   });
 
   it("keeps remote deletion durable when not_hosted cannot confirm an older Cloud object was removed", async () => {
@@ -847,6 +848,80 @@ describe("Pantheon + signed PUT contract", () => {
     });
     await expect(storage.deleteSession("session", true)).rejects.toThrow("not confirmed");
   });
+
+  for (const source of ["chat", "discard"] as const) {
+    it(`fences a reused prefix after a lost ${source} DELETE response and successful retry`, async () => {
+      seed();
+      let deletes = 0;
+      let puts = 0;
+      let objectExists = false;
+      let lateDelete: (() => void) | undefined;
+      const storage = new TraceArchiveStorage({
+        token: () => "test",
+        origin: () => "http://cloud.test",
+        fetch: async (_url, init) => {
+          if (init?.method === "POST") {
+            return Response.json({
+              url: "http://s3.test/object",
+              method: "PUT",
+              headers: {},
+              objectKey: "key",
+              expiresAt: now.toISOString(),
+            });
+          }
+          if (init?.method === "PUT") {
+            puts++;
+            objectExists = true;
+            return new Response(null, { status: 200 });
+          }
+          deletes++;
+          if (deletes === 1) {
+            lateDelete = () => {
+              objectExists = false;
+            };
+            throw new TypeError("DELETE response lost");
+          }
+          objectExists = false;
+          return Response.json({ deleted: 1 });
+        },
+      });
+      const wrapped =
+        source === "discard"
+          ? ({
+              store: async (...args: Parameters<TraceArchiveStorage["store"]>) => {
+                const result = await storage.store(...args);
+                seed(
+                  "session",
+                  [{ type: "tool_result", content: "reactivated" }],
+                  Math.floor(now.getTime() / 1000),
+                );
+                return result;
+              },
+              deleteSession: storage.deleteSession.bind(storage),
+            } as TraceArchiveStorage)
+          : storage;
+      await archiver({ storage: wrapped }).runPass();
+      if (source === "chat") {
+        await webchat.deleteMessagesBySession("session");
+        await archiver({ storage }).cleanupDeletedChats();
+        seed("session", [{ type: "tool_result", content: "new generation" }], old + 1);
+      } else {
+        sqlite.prepare("UPDATE rome_agent_messages SET created_at = ?").run(old);
+      }
+      const remaining = count();
+      // A fresh archiver simulates restart. A successful retry settles only itself.
+      await archiver({ storage }).runPass();
+      expect(deletes).toBeGreaterThanOrEqual(2);
+      expect(repo.deletes()).toEqual(["session"]);
+      expect(archiveRows()).toEqual([]);
+      expect(puts).toBe(1);
+      objectExists = true;
+      lateDelete!();
+      expect(objectExists).toBe(false);
+      expect(count()).toBe(remaining);
+      expect(repo.candidates(now)).toEqual([]);
+    });
+  }
 
   it("retains deletion intent when a failed PUT commits after DELETE", async () => {
     seed();

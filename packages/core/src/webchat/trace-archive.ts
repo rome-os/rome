@@ -161,6 +161,26 @@ export class TraceArchiver {
     return traceArchiveFile(this.root, row.sessionId, row.id);
   }
 
+  private async deleteRemote(sessionId: string, required: boolean) {
+    const repo = this.options.repo;
+    if (required) repo.ensureDelete(sessionId);
+    let dispatched = false;
+    let earlierUnsettledDelete = false;
+    const confirmed = () => {
+      if (dispatched && !earlierUnsettledDelete) repo.confirmRemoteDelete(sessionId);
+    };
+    await this.storage.deleteSession(
+      sessionId,
+      required,
+      () => {
+        earlierUnsettledDelete = repo.beginRemoteDelete(sessionId);
+        dispatched = true;
+      },
+      confirmed,
+    );
+    confirmed();
+  }
+
   private async cleanup(attempted = this.deleteAttempts) {
     const repo = this.options.repo;
     let failures = 0;
@@ -173,7 +193,7 @@ export class TraceArchiver {
         const file = traceArchiveFile(this.root, sessionId, "cleanup");
         await rm(dirname(file), { recursive: true, force: true });
         const remoteRequired = repo.hasRemoteArchives(sessionId);
-        await this.storage.deleteSession(sessionId, remoteRequired);
+        await this.deleteRemote(sessionId, remoteRequired);
         if (repo.finishDelete(sessionId)) attempted.delete(sessionId);
       } catch (error) {
         failures++;
@@ -189,14 +209,16 @@ export class TraceArchiver {
     if (row.location.startsWith("s3:") || row.uploadMayFinish) {
       // The fixed Cloud API deletes a whole session prefix, not one object. Never erase valid archives.
       if (this.options.repo.hasRetainedArchives(row.sessionId)) return;
-      await this.storage.deleteSession(row.sessionId, true);
-      if (row.uploadMayFinish) return;
+      await this.deleteRemote(row.sessionId, true);
+      this.options.repo.finishDelete(row.sessionId, row.id);
+      return;
     }
     this.options.repo.remove(row.id);
   }
 
   private async resume(row: TraceArchive, stats: ArchivePassStats, exported?: ArchiveFile) {
     const repo = this.options.repo;
+    if (!repo.get(row.id)) return;
     if (row.status === "discarded") {
       await this.discard(row);
       return;

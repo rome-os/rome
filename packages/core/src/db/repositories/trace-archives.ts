@@ -181,8 +181,32 @@ export class TraceArchivesRepository {
       }[]
     ).map((r) => r.session_id);
   }
-  /** An ambiguous PUT may finish after DELETE. Keep its privacy tombstone across every restart. */
-  finishDelete(sessionId: string): boolean {
+  ensureDelete(sessionId: string) {
+    this.sqlite
+      .prepare("INSERT OR IGNORE INTO rome_trace_archive_deletes(session_id) VALUES (?)")
+      .run(sessionId);
+  }
+
+  beginRemoteDelete(sessionId: string): boolean {
+    return this.sqlite.transaction(() => {
+      const old = this.sqlite
+        .prepare("SELECT remote_uncertain FROM rome_trace_archive_deletes WHERE session_id = ?")
+        .get(sessionId) as { remote_uncertain: number };
+      this.sqlite
+        .prepare("UPDATE rome_trace_archive_deletes SET remote_uncertain = 1 WHERE session_id = ?")
+        .run(sessionId);
+      return Boolean(old.remote_uncertain);
+    })();
+  }
+
+  confirmRemoteDelete(sessionId: string) {
+    this.sqlite
+      .prepare("UPDATE rome_trace_archive_deletes SET remote_uncertain = 0 WHERE session_id = ?")
+      .run(sessionId);
+  }
+
+  /** Unsettled PUTs or DELETEs can finish late. Keep their prefix fenced across every restart. */
+  finishDelete(sessionId: string, archiveId?: string): boolean {
     return this.sqlite.transaction(() => {
       const uncertain = Boolean(
         this.sqlite
@@ -191,7 +215,12 @@ export class TraceArchivesRepository {
           )
           .get(sessionId, sessionId),
       );
-      this.sqlite.prepare("DELETE FROM rome_trace_archives WHERE session_id = ?").run(sessionId);
+      if (archiveId)
+        this.sqlite
+          .prepare("DELETE FROM rome_trace_archives WHERE session_id = ? AND id = ?")
+          .run(sessionId, archiveId);
+      else
+        this.sqlite.prepare("DELETE FROM rome_trace_archives WHERE session_id = ?").run(sessionId);
       if (uncertain)
         this.sqlite
           .prepare(
