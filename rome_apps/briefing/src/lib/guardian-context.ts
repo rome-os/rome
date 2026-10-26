@@ -117,7 +117,13 @@ function objectToMarkdown(value: unknown, indent = ""): string {
       .map((item) => {
         const content = objectToMarkdown(item, `${indent}  `);
         if (!content) return "";
-        return typeof item === "object" ? `${indent}-\n${content}` : `${indent}- ${content}`;
+        if (typeof item !== "object") return `${indent}- ${content}`;
+        const prefix = `${indent}  - `;
+        const lines = content.split("\n");
+        if (!Array.isArray(item) && lines.every((line) => line.startsWith(prefix))) {
+          return `${indent}- ${lines.map((line) => line.slice(prefix.length)).join(" · ")}`;
+        }
+        return `${indent}- ${content.trimStart().slice(2)}`;
       })
       .filter(Boolean)
       .join("\n");

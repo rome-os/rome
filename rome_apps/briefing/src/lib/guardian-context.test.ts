@@ -136,14 +136,8 @@ describe("gatherGuardianContext", () => {
 - **Display Name:** Ada Baker
 - **Created At:** 2026-01-01T00:00:00Z
 - **Sign In Links:**
-  -
-    - **Provider:** github
-    - **Login:** ada
-    - **Email:** ada@example.com
-    - **Display Name:** Ada Baker
-  -
-    - **Provider:** google
-    - **Login:** ada@example.com
+  - **Provider:** github · **Login:** ada · **Email:** ada@example.com · **Display Name:** Ada Baker
+  - **Provider:** google · **Login:** ada@example.com
 - **Research:**
   - **Status:** completed
   - **Completed At:** 2026-10-23T12:00:00Z
@@ -159,21 +153,33 @@ describe("gatherGuardianContext", () => {
     - **Summary:** Runs a bakery.
       Handles orders by hand.
     - **Facts:**
-      -
-        - **Topic:** Role
-        - **Text:** Owns the bakery
-        - **Source Url:** https://example.com/about
-      -
-        - **Topic:** Orders
-        - **Text:** Takes custom cake orders
+      - **Topic:** Role · **Text:** Owns the bakery · **Source Url:** https://example.com/about
+      - **Topic:** Orders · **Text:** Takes custom cake orders
     - **Accounts:**
-      -
-        - **Platform:** github
-        - **Url:** https://github.com/ada
-        - **Matched By:** signInLink
+      - **Platform:** github · **Url:** https://github.com/ada · **Matched By:** signInLink
     - **Survey Fit:** No survey answers
     - **Limitations:**
       - Only public sources`);
+  });
+
+  it("keeps nested and multiline array items structured without bare dash lines", async () => {
+    const data = {
+      items: [
+        { name: "Bakery", details: { role: "Founder" }, notes: "First line\nSecond line" },
+        { notes: "First line\nSecond line" },
+        { enabled: false, count: 0, missing: undefined },
+      ],
+    };
+    const { profile } = await gatherGuardianContext(appContext({ status: "ok", data }), "UTC", now);
+    expect(profile).toBe(`- **Items:**
+  - **Name:** Bakery
+    - **Details:**
+      - **Role:** Founder
+    - **Notes:** First line
+      Second line
+  - **Notes:** First line
+      Second line
+  - **Enabled:** false · **Count:** 0`);
   });
 
   it("skips empty values recursively but keeps false, zero, and new fields", async () => {
