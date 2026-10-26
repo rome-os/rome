@@ -21,10 +21,11 @@ import { UpgradeStatusHub } from "./status-hub.js";
 
 const log = createLogger("system-upgrade");
 
-/** Rome Cloud gives an upgrade 30 minutes, rollback included, and every path
- * that stops Rome replaces this process. 45 minutes leaves margin for its
- * queueing before the upgrade starts. */
-export const UPGRADE_RESTART_WINDOW_MS = 45 * 60_000;
+/** Rome Cloud spends up to 40 minutes on an accepted upgrade: up to 10 pulling
+ * images, then up to 30 for the upgrade itself, rollback included. Every path
+ * that stops Rome replaces this process. An hour leaves margin for queueing
+ * before the upgrade starts. */
+export const UPGRADE_RESTART_WINDOW_MS = 60 * 60_000;
 
 export interface SystemUpgradeOfferResult {
   /** Whether an upgrade offer is now (or already was) live. */

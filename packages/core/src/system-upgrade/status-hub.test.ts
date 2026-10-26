@@ -24,7 +24,7 @@ class FakeClock {
   }
 }
 
-const RESTART_WINDOW_MS = 2_700_000;
+const RESTART_WINDOW_MS = 3_600_000;
 
 function makeHub(onDeadline = rs.fn()) {
   const clock = new FakeClock();
