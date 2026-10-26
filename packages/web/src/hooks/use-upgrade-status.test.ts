@@ -43,6 +43,7 @@ function updatingStatus(): ServerUpgradeStatus {
 describe("useUpgradeStatus", () => {
   beforeEach(() => {
     rs.useFakeTimers();
+    sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -50,6 +51,7 @@ describe("useUpgradeStatus", () => {
     rs.useRealTimers();
     rs.unstubAllGlobals();
     rs.clearAllMocks();
+    sessionStorage.clear();
   });
 
   it("hides the banner while idle and polls at the slow cadence", async () => {
@@ -494,5 +496,153 @@ describe("useUpgradeStatus", () => {
     expect(result.current.state).toBeNull();
 
     unmount();
+  });
+
+  it("retains the original attempt age across reloads, even while polling fails", async () => {
+    rs.stubGlobal("fetch", rs.fn().mockResolvedValue(jsonResponse(updatingStatus())));
+    const first = renderHook(() => useUpgradeStatus());
+    await act(async () => {});
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(UPGRADE_RESTART_TIMEOUT_MS - 60_000);
+    });
+    first.unmount();
+
+    rs.stubGlobal("fetch", rs.fn().mockRejectedValue(new TypeError("offline")));
+    const second = renderHook(() => useUpgradeStatus());
+    expect(second.result.current.state).toMatchObject({
+      phase: "updating",
+      targetVersion: "1.2.0",
+    });
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(60_000);
+    });
+    expect(second.result.current.state?.phase).toBe("stalled");
+    second.unmount();
+
+    const third = renderHook(() => useUpgradeStatus());
+    expect(third.result.current.state?.phase).toBe("stalled");
+  });
+
+  it("starts a fresh timer and resets dismissal when the target changes", async () => {
+    let targetVersion = "1.2.0";
+    rs.stubGlobal(
+      "fetch",
+      rs.fn().mockImplementation(async () => jsonResponse({ ...updatingStatus(), targetVersion })),
+    );
+    const { result } = renderHook(() => useUpgradeStatus());
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(UPGRADE_RESTART_TIMEOUT_MS);
+    });
+    expect(result.current.state?.phase).toBe("stalled");
+    act(() => result.current.dismissStalled());
+    targetVersion = "1.3.0";
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(UPGRADE_STATUS_IDLE_POLL_MS);
+    });
+    expect(result.current.state).toMatchObject({ phase: "updating", targetVersion });
+    const stored = JSON.parse(sessionStorage.getItem("rome:upgrade-updating-attempt")!);
+    expect(stored).toEqual({ targetVersion, startedAt: Date.now() });
+  });
+
+  it.each([
+    "idle",
+    "build",
+  ])("clears persisted age on %s completion for a later same-target attempt", async (completion) => {
+    let completed = false;
+    rs.stubGlobal(
+      "fetch",
+      rs.fn().mockImplementation(async (url: string) => {
+        if (url === "/api/build-info")
+          return Response.json({
+            version: completed && completion === "build" ? "1.2.0" : "1.1.0",
+          });
+        return jsonResponse(completed && completion === "idle" ? idleStatus : updatingStatus());
+      }),
+    );
+    const first = renderHook(() => useUpgradeStatus());
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(UPGRADE_RESTART_TIMEOUT_MS);
+    });
+    expect(first.result.current.state?.phase).toBe("stalled");
+    completed = true;
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(UPGRADE_STATUS_IDLE_POLL_MS);
+    });
+    expect(first.result.current.state).toBeNull();
+    expect(sessionStorage.getItem("rome:upgrade-updating-attempt")).toBeNull();
+    first.unmount();
+
+    completed = false;
+    const second = renderHook(() => useUpgradeStatus());
+    await act(async () => {});
+    expect(second.result.current.state?.phase).toBe("updating");
+  });
+
+  it("clears persisted age when a fresh live countdown resolves the attempt", async () => {
+    rs.stubGlobal("fetch", rs.fn().mockResolvedValue(jsonResponse(updatingStatus())));
+    const first = renderHook(() => useUpgradeStatus());
+    await act(async () => {});
+    first.unmount();
+    rs.stubGlobal(
+      "fetch",
+      rs.fn().mockImplementation(async () => jsonResponse(countdownStatus())),
+    );
+    const second = renderHook(() => useUpgradeStatus());
+    await act(async () => {});
+    expect(second.result.current.state?.phase).toBe("countdown");
+    expect(sessionStorage.getItem("rome:upgrade-updating-attempt")).toBeNull();
+  });
+
+  it.each([
+    "invalid JSON",
+    "invalid timestamp",
+    "future timestamp",
+  ])("ignores %s in session storage", async (kind) => {
+    sessionStorage.setItem(
+      "rome:upgrade-updating-attempt",
+      kind === "invalid JSON"
+        ? "{"
+        : JSON.stringify({
+            targetVersion: "1.2.0",
+            startedAt: kind === "future timestamp" ? Date.now() + 60_000 : -1,
+          }),
+    );
+    rs.stubGlobal("fetch", rs.fn().mockResolvedValue(jsonResponse(updatingStatus())));
+    const { result } = renderHook(() => useUpgradeStatus());
+    await act(async () => {});
+    expect(result.current.state?.phase).toBe("updating");
+    expect(JSON.parse(sessionStorage.getItem("rome:upgrade-updating-attempt")!).startedAt).toBe(
+      Date.now(),
+    );
+  });
+
+  it("keeps in-memory tracking when session storage is unavailable", async () => {
+    const get = rs.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    const set = rs.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    const remove = rs.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    try {
+      rs.stubGlobal("fetch", rs.fn().mockResolvedValue(jsonResponse(updatingStatus())));
+      const { result, unmount } = renderHook(() => useUpgradeStatus());
+      await act(async () => {
+        await rs.advanceTimersByTimeAsync(UPGRADE_RESTART_TIMEOUT_MS);
+      });
+      expect(result.current.state?.phase).toBe("stalled");
+      rs.stubGlobal("fetch", rs.fn().mockResolvedValue(jsonResponse(idleStatus)));
+      await act(async () => {
+        await rs.advanceTimersByTimeAsync(UPGRADE_STATUS_IDLE_POLL_MS);
+      });
+      expect(result.current.state).toBeNull();
+      unmount();
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+      remove.mockRestore();
+    }
   });
 });

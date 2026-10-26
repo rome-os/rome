@@ -68,6 +68,33 @@ const buildInfoSchema = z.object({
   version: z.string().nullable(),
 });
 
+const UPDATING_ATTEMPT_STORAGE_KEY = "rome:upgrade-updating-attempt";
+const updatingAttemptSchema = z.object({
+  targetVersion: z.string().nullable(),
+  startedAt: z.number().finite().nonnegative(),
+});
+type UpdatingAttempt = z.infer<typeof updatingAttemptSchema>;
+
+function readUpdatingAttempt(): UpdatingAttempt | null {
+  try {
+    const parsed = updatingAttemptSchema.safeParse(
+      JSON.parse(sessionStorage.getItem(UPDATING_ATTEMPT_STORAGE_KEY) ?? "null"),
+    );
+    return parsed.success && parsed.data.startedAt <= Date.now() ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistUpdatingAttempt(attempt: UpdatingAttempt | null): void {
+  try {
+    if (attempt) sessionStorage.setItem(UPDATING_ATTEMPT_STORAGE_KEY, JSON.stringify(attempt));
+    else sessionStorage.removeItem(UPDATING_ATTEMPT_STORAGE_KEY);
+  } catch {
+    // Storage may be disabled. The mounted hook still tracks the attempt.
+  }
+}
+
 type ServerUpgradeStatus = z.infer<typeof upgradeStatusSchema>;
 
 /** Estimated server clock "now", from the last snapshot's server/local pair —
@@ -88,7 +115,8 @@ function deadlineElapsed(status: UpgradeStatus): boolean {
  * routes status to a draining process, `/api/build-info` confirming the target
  * version clears it instead.
  *
- * The restart is tracked as *client-local* state (`updatingSince`), entered on
+ * The restart start time is tracked locally and saved in session storage by
+ * target version so reloads retain its age. Updating is entered on
  * any of: the `now` verb acking, a polled snapshot reporting `updating` (the
  * old process after a deadline-path cutover), or the rendered countdown
  * crossing its deadline (consent-by-silence with no ack to observe). It exits
@@ -97,9 +125,9 @@ function deadlineElapsed(status: UpgradeStatus): boolean {
  */
 export function useUpgradeStatus(): UseUpgradeStatusResult {
   const [server, setServer] = useState<UpgradeStatus | null>(null);
-  /** Local Date.now() when the client concluded a restart began; null when no
-   * restart is believed to be in flight. */
-  const [updatingSince, setUpdatingSince] = useState<number | null>(null);
+  // Keep the target and its original start together across same-tab reloads.
+  const [updatingAttempt, setUpdatingAttempt] = useState(readUpdatingAttempt);
+  const updatingSince = updatingAttempt?.startedAt ?? null;
   // A rolling replacement can leave the accepting process serving
   // `updating` after another process is already serving the target build.
   // Remember that target so a later response from the draining process cannot
@@ -112,8 +140,8 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
 
   const serverRef = useRef(server);
   serverRef.current = server;
-  const updatingSinceRef = useRef(updatingSince);
-  updatingSinceRef.current = updatingSince;
+  const updatingAttemptRef = useRef(updatingAttempt);
+  updatingAttemptRef.current = updatingAttempt;
   const completedTargetRef = useRef(completedTarget);
   completedTargetRef.current = completedTarget;
   // Bumped on every verb acknowledgement. A poll that started before the bump
@@ -135,47 +163,69 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
     };
   }, []);
 
-  const applySnapshot = useCallback((value: ServerUpgradeStatus) => {
-    const status: UpgradeStatus = { ...value, receivedAt: Date.now() };
-    setServer(status);
-    if (
-      value.phase === "updating" &&
-      value.targetVersion !== null &&
-      value.targetVersion === completedTargetRef.current
-    ) {
-      setUpdatingSince(null);
-      setStalledDismissed(false);
-      return;
-    }
-    // Keep the completion marker through idle snapshots. A rolling deployment
-    // may still route a later request back to the draining process. A new
-    // active phase for any target is the point where the marker is obsolete.
-    if (value.phase !== "idle") {
-      completedTargetRef.current = null;
-      setCompletedTarget(null);
-    }
-    if (value.phase === "updating") {
-      ambiguousNowUntilRef.current = null;
-      setUpdatingSince((current) => current ?? Date.now());
-      return;
-    }
-    if (value.phase === "countdown") {
-      // A countdown whose deadline already passed is not resolved: the
-      // deadline-path cutover is still relaying to Rome Cloud, so a local
-      // updating state must not flap back.
-      if (deadlineElapsed(status)) return;
-      // A *live* countdown normally resolves the phase (fresh offer, or a
-      // cross-tab defer) — except inside the ambiguous-`/now` grace window,
-      // where the server may still be mid-relay behind this very countdown
-      // and about to die; clearing here could strand the restart unseen.
-      const grace = ambiguousNowUntilRef.current;
-      if (grace !== null && Date.now() < grace) return;
-    }
-    // `idle`, or a live countdown with no ambiguity left: fully resolved.
-    ambiguousNowUntilRef.current = null;
-    setUpdatingSince(null);
+  const beginUpdating = useCallback((targetVersion: string | null) => {
+    const current = updatingAttemptRef.current;
+    if (current !== null && current.targetVersion === targetVersion) return;
+    const attempt = { targetVersion, startedAt: Date.now() };
+    updatingAttemptRef.current = attempt;
+    setUpdatingAttempt(attempt);
     setStalledDismissed(false);
+    persistUpdatingAttempt(attempt);
   }, []);
+
+  const clearUpdating = useCallback(() => {
+    updatingAttemptRef.current = null;
+    setUpdatingAttempt(null);
+    persistUpdatingAttempt(null);
+  }, []);
+
+  const applySnapshot = useCallback(
+    (value: ServerUpgradeStatus) => {
+      const status: UpgradeStatus = { ...value, receivedAt: Date.now() };
+      setServer(status);
+      if (
+        value.phase === "updating" &&
+        value.targetVersion !== null &&
+        value.targetVersion === completedTargetRef.current
+      ) {
+        clearUpdating();
+        setStalledDismissed(false);
+        return;
+      }
+      // Keep the completion marker through idle snapshots. A rolling deployment
+      // may still route a later request back to the draining process. A new
+      // active phase for any target is the point where the marker is obsolete.
+      if (value.phase !== "idle") {
+        completedTargetRef.current = null;
+        setCompletedTarget(null);
+      }
+      if (value.phase === "updating") {
+        ambiguousNowUntilRef.current = null;
+        beginUpdating(value.targetVersion);
+        return;
+      }
+      if (value.phase === "countdown") {
+        // A countdown whose deadline already passed is not resolved: the
+        // deadline-path cutover is still relaying to Rome Cloud, so a local
+        // updating state must not flap back.
+        if (deadlineElapsed(status)) {
+          beginUpdating(value.targetVersion);
+          return;
+        }
+        // A *live* countdown normally resolves the phase (fresh offer, or a
+        // cross-tab defer) — except inside the ambiguous-`/now` grace window,
+        // where the server may still be mid-relay behind this very countdown
+        // and about to die; clearing here could strand the restart unseen.
+        const grace = ambiguousNowUntilRef.current;
+        if (grace !== null && Date.now() < grace) return;
+      }
+      // `idle`, or a live countdown with no ambiguity left: fully resolved.
+      ambiguousNowUntilRef.current = null;
+      clearUpdating();
+      setStalledDismissed(false);
+    },
+    [beginUpdating, clearUpdating],
+  );
 
   const inUpdating = updatingSince !== null;
   const serverActive =
@@ -240,7 +290,7 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
           ) {
             completedTargetRef.current = parsed.targetVersion;
             setCompletedTarget(parsed.targetVersion);
-            setUpdatingSince(null);
+            clearUpdating();
             setStalledDismissed(false);
           }
         }
@@ -260,7 +310,7 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
       controller.abort();
       if (pollTimer !== null) window.clearTimeout(pollTimer);
     };
-  }, [pollMs, applySnapshot]);
+  }, [pollMs, applySnapshot, clearUpdating]);
 
   let state: UpgradeBannerState | null = null;
   if (updatingSince !== null) {
@@ -269,7 +319,7 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
         ? null
         : {
             phase: stalled ? "stalled" : "updating",
-            targetVersion: server?.targetVersion ?? null,
+            targetVersion: updatingAttempt?.targetVersion ?? null,
             deadline: null,
             serverNow: server?.serverNow ?? Date.now(),
             receivedAt: server?.receivedAt ?? Date.now(),
@@ -292,16 +342,16 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
       setTick((n) => n + 1);
       const current = serverRef.current;
       if (
-        updatingSinceRef.current === null &&
+        updatingAttemptRef.current === null &&
         current !== null &&
         current.phase === "countdown" &&
         deadlineElapsed(current)
       ) {
-        setUpdatingSince(Date.now());
+        beginUpdating(current.targetVersion);
       }
     }, 1000);
     return () => window.clearInterval(id);
-  }, [bannerVisible]);
+  }, [bannerVisible, beginUpdating]);
 
   const act = useCallback(
     async (verb: "now" | "defer"): Promise<boolean> => {
@@ -346,7 +396,7 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
         if (verb === "now" && mountedRef.current && serverRef.current?.phase === "countdown") {
           ambiguousNowUntilRef.current = Date.now() + UPGRADE_VERB_TIMEOUT_MS;
           pollGenerationRef.current += 1;
-          setUpdatingSince((current) => current ?? Date.now());
+          beginUpdating(serverRef.current.targetVersion);
           return true;
         }
         return false;
@@ -354,7 +404,7 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
         window.clearTimeout(deadline);
       }
     },
-    [applySnapshot],
+    [applySnapshot, beginUpdating],
   );
   const updateNow = useCallback(() => act("now"), [act]);
   const defer = useCallback(() => act("defer"), [act]);
