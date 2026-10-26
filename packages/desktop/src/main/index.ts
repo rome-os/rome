@@ -1,6 +1,6 @@
 import { release } from "os";
 import { existsSync } from "fs";
-import { app, BrowserWindow, net, shell } from "electron";
+import { app, BrowserWindow, net, powerSaveBlocker, shell } from "electron";
 import { initDatabase } from "./db/database";
 import { createLogger } from "./logger";
 import {
@@ -36,6 +36,7 @@ import type { CloudAccount } from "./cloud/account";
 import { createCloudAccount, deviceName } from "./cloud/electron";
 import { DeviceHost, type DeviceStatus } from "./cloud/device-host";
 import { adoptLoginShellPath } from "./cloud/login-path";
+import { KeepAwake } from "./keep-awake";
 import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler } from "./protocol";
 
 const log = createLogger("main");
@@ -144,13 +145,16 @@ async function bootstrap() {
         : null;
     // Only a Rome Cloud launch connects this computer. Switching to the VM
     // restarts the app, so a VM launch never connects it or changes its PATH.
+    const keepAwake = new KeepAwake(powerSaveBlocker);
     const device = {
       status: (): DeviceStatus => deviceHost?.status() ?? { state: "off" },
       start: async () => {
         if (controller.activeTarget().kind === "remote") await deviceHost?.start();
+        keepAwake.sync(device.status());
       },
       stop: async () => {
         await deviceHost?.stop();
+        keepAwake.release();
       },
       setEnabled: async (enabled: boolean) => {
         writeDeviceEnabled(enabled);

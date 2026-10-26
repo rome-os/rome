@@ -418,6 +418,11 @@ The menu cannot remove this computer. It links to Rome Cloud, which can. The app
 card's requests only from the top frame of that Rome's origin. Other pages in its
 window, and the Rome in a browser, cannot read or change the device.
 
+While the computer is on as a device, the app keeps its display from sleeping,
+and macOS does not idle-sleep while the display stays on. The hold lasts through
+reconnects. Turning the device off, signing out, or quitting the app releases
+it. Closing the lid or choosing Sleep still sleeps the computer.
+
 The app keeps its credential in its own encrypted store and never reads the CLI's
 configuration directory. `rome-node connect` on the same computer is a separate
 device. Each configuration directory holds one identity, so `ROME_NODE_CONFIG_DIR`
