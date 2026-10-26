@@ -356,8 +356,8 @@ async function sendableAccount(
   channels: ChannelsService,
   channel: string,
 ): Promise<ChannelSummary> {
-  const target = await romeAccountNamed(channels, channel, (summary) => summary.sendable);
-  if (!target) throw new Error(`No Talk connection registered for "${channel}"`);
+  const target = await romeAccountNamed(channels, channel);
+  if (!target?.sendable) throw new Error(`No Talk connection registered for "${channel}"`);
   return target;
 }
 

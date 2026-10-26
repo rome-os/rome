@@ -270,6 +270,26 @@ describe("fetch_channel_history", () => {
       expect(query).toHaveBeenCalledWith(account, expect.anything());
     });
 
+    it("counts only the accounts Rome holds, and reads a disconnected one by its name", async () => {
+      const held = { platform: "lark", id: "ou_new" };
+      const query = rs.fn<ChannelsService["query"]>().mockResolvedValue([]);
+      const action = createAction(actionConfig, {
+        channelsService: {
+          // The first account was disconnected, and its channel stays behind.
+          list: async () => [
+            { name: "released", platform: "lark", sendable: false },
+            { name: "connected", account: held, platform: "lark", sendable: true },
+          ],
+          send: async (_account: unknown, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      });
+
+      expect((await action.execute({ channel: "lark" })).status).toBe("ok");
+      expect((await action.execute({ channel: "released" })).status).toBe("ok");
+      expect(query.mock.calls.map(([account]) => account)).toEqual([held, "released"]);
+    });
+
     it("refuses a platform where Rome has several accounts", async () => {
       const { query, action } = platformDeps("first", "second");
 
