@@ -1422,7 +1422,7 @@ describe("App connection broker", () => {
           requestId: "request-engine-unavailable",
           input: { workspaceId: "one", title: "Not sent", body: "private" },
         }),
-      ).rejects.toMatchObject({ detail: { code: "capability_unavailable", retryable: true } });
+      ).rejects.toMatchObject({ detail: { code: "capability_unavailable", retryable: false } });
       expect(h.invocations).toHaveLength(0);
       const [stored] = await h.db.select().from(appConnectionInvocations);
       expect(stored).toMatchObject({

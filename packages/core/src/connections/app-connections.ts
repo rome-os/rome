@@ -861,7 +861,11 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       true,
     );
     if (failed) await this.audit(invocation, approval, code);
-    return failure(code, "The connection operation could not complete.", true);
+    return failure(
+      code,
+      "The connection operation could not complete.",
+      invocation.sideEffects === "read-only",
+    );
   }
 
   private validateInput(
