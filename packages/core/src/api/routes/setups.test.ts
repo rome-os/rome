@@ -526,6 +526,21 @@ describe("teardown serialization (#4)", () => {
   });
 });
 
+describe("a dashboard tab loaded before the grant rename", () => {
+  it("still finds the finished setup's grant under conferral", async () => {
+    const { app } = harness();
+    const started = await start(app);
+    const done = await submitInput(app, started.json.cid, "good");
+
+    const state = ((await done.json()) as { state: Record<string, unknown> }).state;
+    expect(state.status).toBe("done");
+    expect(state.conferral).toEqual(state.grant);
+    const polled = await app.request(`/setups/${started.json.cid}`);
+    const polledState = ((await polled.json()) as { state: Record<string, unknown> }).state;
+    expect(polledState.conferral).toEqual(polledState.grant);
+  });
+});
+
 describe("another account", () => {
   function severalAccountsHarness() {
     const harnessed = harness();

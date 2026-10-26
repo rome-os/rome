@@ -24,8 +24,16 @@ import { isUnconnectedAccount } from "../../connections/unconnected-accounts.js"
 import type { ApiDeps } from "../deps.js";
 import { createLogger } from "../../logger.js";
 import { requireSetupManager, requireConnectionRegistry } from "../helpers.js";
+import type { SetupState } from "../../connections/setup/types.js";
 
 const log = createLogger("setups");
+
+/** The state as the wire carries it. A finished setup also carries its grant
+ *  under `conferral`, the field's old name, because a dashboard tab loaded
+ *  before an upgrade still reads it. Remove the alias once those tabs are gone. */
+function wireState(state: SetupState) {
+  return state.status === "done" ? { ...state, conferral: state.grant } : state;
+}
 
 /** Resolve what a setup start addresses. `:id` is either a live connection id
  *  (carry the id AND its connection kind so the terminal write imports into THAT
@@ -137,7 +145,7 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     try {
       const started = await manager.start(target, grant, { force });
       c.header("Cache-Control", "no-store");
-      return c.json(started);
+      return c.json({ ...started, state: wireState(started.state) });
     } catch (err) {
       if (err instanceof NoSetupError) {
         return c.json({ error: "No setup for this grant." }, 404);
@@ -152,7 +160,7 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     const state = manager.state(c.req.param("cid"));
     if (!state) return c.json({ error: "Unknown setup." }, 404);
     c.header("Cache-Control", "no-store");
-    return c.json({ state });
+    return c.json({ state: wireState(state) });
   });
 
   // Feed the guardian's answers to a setup awaiting input.
@@ -173,7 +181,7 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     c.header("Cache-Control", "no-store");
     // Idempotent against late/double delivery: a non-accepted input is a 409 so
     // the client re-polls state rather than retrying.
-    return c.json(outcome, outcome.accepted ? 200 : 409);
+    return c.json({ ...outcome, state: wireState(outcome.state) }, outcome.accepted ? 200 : 409);
   });
 
   // Resume a setup suspended at a `redirect` verb, correlated by the OAuth
@@ -227,6 +235,7 @@ export function setupsRoutes(deps: ApiDeps): Hono {
         connectionKind: resumed.connectionKind,
         service: resumed.connectionKind,
         ...outcome,
+        state: wireState(outcome.state),
       },
       outcome.accepted ? 200 : 409,
     );
@@ -241,7 +250,7 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     if (!pending) return c.json({ error: "Unknown setup." }, 404);
     const state = await pending;
     c.header("Cache-Control", "no-store");
-    return c.json({ state });
+    return c.json({ state: wireState(state) });
   });
 
   return app;
