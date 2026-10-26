@@ -1,4 +1,4 @@
-import type { IpcRpc } from "./ipc.js";
+import type { IpcCallContext, IpcRpc } from "./ipc.js";
 import { z } from "zod";
 import { runWithHookInvocationContext } from "../core/hook-recursion.js";
 import type { EmailInboundResult } from "../channels/email-control.js";
@@ -31,6 +31,7 @@ import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
+import type { AppConnectionBrokerPort } from "../connections/app-connections.js";
 
 const AppIdSchema = z.string().min(1);
 
@@ -170,6 +171,25 @@ const SessionContinueParams = z.object({
   prompt: z.string(),
 });
 
+const AppConnectionsListParams = z
+  .object({
+    cursor: z.string().optional(),
+    limit: z.number().int().positive().max(50).optional(),
+  })
+  .strict();
+const AppConnectionsIdentityParams = z
+  .object({ connectionId: z.string().min(1), identity: z.string().min(1) })
+  .strict();
+const AppConnectionsOperationsParams = AppConnectionsIdentityParams.extend({
+  cursor: z.string().optional(),
+  limit: z.number().int().positive().max(50).optional(),
+}).strict();
+const AppConnectionsInvokeParams = AppConnectionsIdentityParams.extend({
+  operation: z.string().min(1),
+  input: z.unknown().optional(),
+  requestId: z.string().optional(),
+}).strict();
+
 function parseParams<T extends z.ZodType>(method: string, schema: T, params: unknown): z.infer<T> {
   const result = schema.safeParse(params);
   if (result.success) return result.data;
@@ -237,13 +257,19 @@ export interface WorkerRpcServices {
   cloudProfile: CloudProfileService;
   /** System-only: how `system:send_message` turns an agent's name into its id. */
   agentNames: AgentNamesService;
+  appConnections: AppConnectionBrokerPort;
+  /** Resolve the owner from the action that the Core IPC boundary captured. */
+  appIdForAction: (actionName: string) => string | null;
 }
 
 export class WorkerRpcServer {
-  private readonly handlers: ReadonlyMap<string, (params: unknown) => unknown>;
+  private readonly handlers: ReadonlyMap<
+    string,
+    (params: unknown, context?: IpcCallContext) => unknown
+  >;
 
   constructor(private services: WorkerRpcServices) {
-    this.handlers = new Map<string, (params: unknown) => unknown>(
+    this.handlers = new Map<string, (params: unknown, context?: IpcCallContext) => unknown>(
       Object.entries({
         "channels.list": () => this.services.channelsService.list(),
         "channels.send": (params) => this.handleChannelsSend(params),
@@ -302,6 +328,14 @@ export class WorkerRpcServer {
           const { body } = parseParams("notify.send", NotifySendParams, params);
           return this.services.notify.send(body !== undefined ? { body } : undefined);
         },
+        "connections.app.list": (params, context) =>
+          this.handleAppConnections("list", params, context),
+        "connections.app.describe": (params, context) =>
+          this.handleAppConnections("describe", params, context),
+        "connections.app.operations": (params, context) =>
+          this.handleAppConnections("operations", params, context),
+        "connections.app.invoke": (params, context) =>
+          this.handleAppConnections("invoke", params, context),
       }),
     );
   }
@@ -309,7 +343,7 @@ export class WorkerRpcServer {
   /** Serve every method on a worker's IPC channel. */
   register(rpc: IpcRpc): void {
     for (const [method, handler] of this.handlers) {
-      rpc.handle(method, async (params) => await handler(params));
+      rpc.handle(method, async (params, context) => await handler(params, context));
     }
   }
 
@@ -323,6 +357,47 @@ export class WorkerRpcServer {
     const handler = this.handlers.get(method);
     if (!handler) throw new Error(`Unknown WorkerRPC method: ${method}`);
     return await handler(params);
+  }
+
+  private async handleAppConnections(
+    method: "list" | "describe" | "operations" | "invoke",
+    params: unknown,
+    context?: IpcCallContext,
+  ): Promise<unknown> {
+    const actionName = context?.callerActionName;
+    const appId = actionName ? this.services.appIdForAction(actionName) : null;
+    if (!appId) {
+      return {
+        ok: false,
+        error: {
+          code: "access_denied",
+          message: "Connection access requires an App-owned action context.",
+          retryable: false,
+        },
+      };
+    }
+    switch (method) {
+      case "list":
+        return await this.services.appConnections.list(
+          appId,
+          parseParams("connections.app.list", AppConnectionsListParams, params),
+        );
+      case "describe":
+        return await this.services.appConnections.describe(
+          appId,
+          parseParams("connections.app.describe", AppConnectionsIdentityParams, params),
+        );
+      case "operations":
+        return await this.services.appConnections.operations(
+          appId,
+          parseParams("connections.app.operations", AppConnectionsOperationsParams, params),
+        );
+      case "invoke":
+        return await this.services.appConnections.invoke(
+          appId,
+          parseParams("connections.app.invoke", AppConnectionsInvokeParams, params),
+        );
+    }
   }
 
   private async handleAppsCreate(params: unknown): Promise<unknown> {

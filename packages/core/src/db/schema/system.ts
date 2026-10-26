@@ -899,8 +899,88 @@ export const executionJournal = sqliteTable(
   ],
 );
 
+
+export const appConnectionAccess = sqliteTable(
+  "app_connection_access",
+  {
+    appId: text("app_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    identity: text("identity").notNull(),
+    operation: text("operation").notNull(),
+    approval: text("approval", { enum: ["required", "not_required"] }).notNull(),
+    constraints: text("constraints", { mode: "json" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }),
+    revision: integer("revision").notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.appId, table.connectionId, table.identity, table.operation],
+    }),
+    index("idx_app_connection_access_app").on(table.appId, table.connectionId),
+  ],
+);
+
+export const appConnectionInvocations = sqliteTable(
+  "app_connection_invocations",
+  {
+    id: text("id").primaryKey(),
+    appId: text("app_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    identity: text("identity").notNull(),
+    operation: text("operation").notNull(),
+    requestIdHash: text("request_id_hash"),
+    inputHash: text("input_hash").notNull(),
+    input: text("input", { mode: "json" }),
+    sideEffects: text("side_effects", { enum: ["read-only", "write"] }).notNull(),
+    accessRevision: integer("access_revision").notNull(),
+    status: text("status", {
+      enum: [
+        "ready",
+        "pending_approval",
+        "running",
+        "succeeded",
+        "failed",
+        "rejected",
+        "outcome_unknown",
+      ],
+    }).notNull(),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_app_connection_invocation_request")
+      .on(table.appId, table.requestIdHash)
+      .where(sql`${table.requestIdHash} IS NOT NULL`),
+  ],
+);
+
+export const appConnectionAudit = sqliteTable(
+  "app_connection_audit",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    appId: text("app_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    identity: text("identity").notNull(),
+    operation: text("operation").notNull(),
+    accessRevision: integer("access_revision"),
+    approval: text("approval", {
+      enum: ["not_required", "pending", "approved", "rejected"],
+    }).notNull(),
+    executionId: text("execution_id").notNull(),
+    requestIdHash: text("request_id_hash"),
+    status: text("status").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [index("idx_app_connection_audit_app").on(table.appId, table.seq)],
+);
+
 // One row per minted Connection. A connection kind may hold several. Its one
 // grant lives in `connection_grants` below, keyed by custody (the connectionId).
+
 export const connections = sqliteTable("connections", {
   id: text("id").primaryKey(),
   connectionKind: text("connection_kind").notNull(),

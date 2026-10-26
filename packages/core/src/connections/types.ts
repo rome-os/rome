@@ -85,6 +85,8 @@ export type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runti
 export interface OperationCall {
   operation: string;
   input?: unknown;
+  /** Stable caller request id for an app-exposed write operation. */
+  requestId?: string;
 }
 export type OperationResult = unknown;
 
@@ -93,6 +95,13 @@ export interface OperationDescriptor {
   description: string;
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
+  /**
+   * Opts this operation into the restricted App SDK broker. An absent value
+   * keeps the operation Core-only.
+   */
+  appAccess?: {
+    sideEffects: "read-only" | "write";
+  };
 }
 
 /** Caller-facing Act handle. Outbound-only and synchronous. */
@@ -372,6 +381,9 @@ export interface ConnectionDescriptor {
       promptContext?: boolean;
     };
     actor: {
+      /** Static discovery contract for App SDK operations. Required when any
+       * operation opts into `appAccess`. */
+      operations?: readonly OperationDescriptor[];
       build(cred: Credential, kit: RuntimeKit): Actor;
     };
     watcher: {

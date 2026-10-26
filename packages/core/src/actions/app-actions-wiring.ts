@@ -31,6 +31,7 @@ import type { FeedbackService } from "../lib/feedback-client.js";
 import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { AgentNamesService } from "../channels/agent-names.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
+import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
 
 export interface AppActionLoadFailure {
   name: string;
@@ -81,6 +82,7 @@ interface AppActionServices {
   routinesRepo?: RoutinesRepository;
   repositories: AppRuntimeRepositories;
   favorService?: FavorService;
+  appConnections?: AppConnectionsContextFactory;
   hostExecution?: HostExecutionService;
   /** System-only: reporter provenance must come from system:send_feedback. */
   feedback?: FeedbackService;
@@ -151,6 +153,7 @@ function createAppActionRuntimeDeps(
         routinesRepo: services.routinesRepo,
         repositories: services.repositories,
         favorService: services.favorService,
+        appConnections: services.appConnections,
       }),
     } satisfies AppActionRuntimeDeps<Record<string, unknown>>,
     REMOVED_ACTION_DEPS,

@@ -58,7 +58,17 @@ import type {
   ListChatSettingsInput,
   ResetChatSettingsInput,
   UpdateChatSettingsInput,
+  AppConnectionDescription,
+  AppConnectionInvokeResult,
+  AppConnectionOperationsPage,
+  AppConnectionPage,
 } from "@rome-os/app-runtime";
+import type {
+  AppConnectionBrokerPort,
+  AppConnectionBrokerResult,
+  AppConnectionsContextFactory,
+} from "../connections/app-connections.js";
+import { BoundAppConnections } from "../connections/app-connections.js";
 
 /** apps.* operations install/pack on the main process — minutes, not seconds. */
 const APP_INSTALL_RPC_TIMEOUT_MS = 3 * 60 * 1000;
@@ -72,6 +82,46 @@ const BACKEND_TURN_RPC_TIMEOUT_MS = 30 * 60 * 1000;
  * RPC timeout above that HTTP budget; 150s provides 30s headroom and overrides
  * callMain's 30s default. */
 const NOTIFY_RPC_TIMEOUT_MS = 150 * 1000;
+
+export class AppConnectionsProxy implements AppConnectionBrokerPort, AppConnectionsContextFactory {
+  forApp(appId: string) {
+    return new BoundAppConnections(appId, this);
+  }
+
+  list(
+    _appId: string,
+    input: { cursor?: string; limit?: number } = {},
+  ): Promise<AppConnectionBrokerResult<AppConnectionPage>> {
+    return callMain("connections.app.list", input);
+  }
+
+  describe(
+    _appId: string,
+    input: { connectionId: string; identity: string },
+  ): Promise<AppConnectionBrokerResult<AppConnectionDescription>> {
+    return callMain("connections.app.describe", input);
+  }
+
+  operations(
+    _appId: string,
+    input: { connectionId: string; identity: string; cursor?: string; limit?: number },
+  ): Promise<AppConnectionBrokerResult<AppConnectionOperationsPage>> {
+    return callMain("connections.app.operations", input);
+  }
+
+  invoke(
+    _appId: string,
+    input: {
+      connectionId: string;
+      identity: string;
+      operation: string;
+      input?: unknown;
+      requestId?: string;
+    },
+  ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>> {
+    return callMain("connections.app.invoke", input, { timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS });
+  }
+}
 
 /**
  * Worker-side stand-in for the main-process `RoutineEngine`. Implements the

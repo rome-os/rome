@@ -101,6 +101,52 @@ The caller is the request identity an app observes: the [guardian](people.md#gua
 
 - **[Actor](actions.md#actor)** — the actor is stamped on every action execution in the chain. The caller is what one app observes for the request it handles.
 
+## Connection access
+
+An app uses an existing [Connection](../domains/connections.md#connection) through
+`ctx.connections`. Core brokers the call; the app never receives the provider
+credential, client, or unrestricted transport. Provider grants say what the guardian
+has conferred on Rome. App access says which installed app may use one conferred
+identity for one operation.
+
+**Contracts:**
+
+- Access defaults to denied. A Core-owned policy names the app, Connection, identity,
+  operation, approval mode, optional input constraints, and optional expiry. Disabling
+  or removing the app revokes its policies.
+- A provider operation is invisible until its Connection descriptor explicitly opts it
+  into app access. A policy cannot expose an arbitrary HTTP request, provider client,
+  credential read, or global Connection mutation.
+- `list`, `describe`, and `operations` reveal only Connections and identities covered by
+  the app's active policies. Their pages and payloads are bounded. `operations`
+  distinguishes provider support from permission to invoke.
+- Core derives the app id from the executing app artifact. An app cannot supply it in a
+  request. In a cross-app Action call, the callee runs with the callee app's access;
+  caller fields do not transfer the caller's access or let it claim the callee's id. A
+  system Action has no app connection access unless Core built a context for a concrete
+  app entry point.
+- Core validates the operation schema and every policy constraint before execution. A
+  resource constraint that cannot be resolved from the input denies the call instead of
+  broadening it.
+- Invocation uses the Action engine for approval and execution. A write requires a
+  stable request id. Reusing it never repeats the effect, and an interrupted write whose
+  provider outcome is unknown is not retried automatically.
+- Core rechecks the policy revision and the provider grant immediately before calling
+  the live capability. Revocation, expiry, degradation, or replacement cannot leave a
+  captured authority usable.
+- The audit trail records attribution, authorization and approval outcomes, an execution
+  id, and a hash of the request id. It does not record credentials, operation input, or
+  provider output.
+- This boundary governs supported runtime paths in the trusted-plugin model. It is not a
+  sandbox against arbitrary code already executing in the Core process.
+
+**Not to be confused with:**
+
+- **Provider grant** — the guardian's authorization for Rome to reach an external
+  identity. App access neither duplicates nor owns that credential.
+- **Connection setup** — the guardian flow that creates or repairs a provider grant.
+  Apps cannot start setup through `ctx.connections`.
+
 ## Lockfile
 
 Durable state for every applied app lives in a single per-profile lockfile. Each entry records the app's source, enabled flag, terminal state, installed hash and version, and last error. See [`architecture/app-lifecycle.md`](../architecture/app-lifecycle.md) for the components that maintain it.

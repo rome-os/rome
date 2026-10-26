@@ -113,6 +113,7 @@ import { PoliciesRepository } from "./db/repositories/policies.js";
 import { WebChatRepository } from "./db/repositories/webchat.js";
 import { ActionExecutionsRepository } from "./db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
+import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
 import { ensureSentinelPersons } from "./db/ensure-sentinel-persons.js";
 import { AgentLoader } from "./core/agent-loader.js";
@@ -238,11 +239,12 @@ import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
+import { AppConnectionBroker } from "./connections/app-connections.js";
 import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
 import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
 import { createOgImageStore } from "./apps/og/store.js";
-import type { ResolvedApp } from "./apps/state.js";
+import { isResolvedApp, type ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./apps/api.js";
 import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
@@ -369,6 +371,7 @@ async function main() {
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const usageOutboxRepo = new UsageOutboxRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
+  const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
   const routinesRepo = new RoutinesRepository(db);
   const routineRunsRepo = new RoutineRunsRepository(db);
@@ -678,6 +681,17 @@ async function main() {
       onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
     },
   );
+  const appConnections = new AppConnectionBroker(
+    connectionRegistry,
+    appConnectionAccessRepo,
+    actionEngine,
+  );
+  appConnections.registerActions(actionRegistry);
+  appCatalog.subscribe(async function appConnectionAccessLifecycle(event) {
+    if (!isResolvedApp(event.current)) {
+      await appConnectionAccessRepo.revokeApp(event.appId);
+    }
+  });
   // The "openai" provider runs over the codex app-server JSON-RPC surface
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
@@ -742,6 +756,7 @@ async function main() {
     routinesRepo,
     repositories: appRuntimeRepositories,
     favorService,
+    appConnections,
   };
   const lifecycleDispatcher = createAgentLifecycleDispatcher({
     appRuntimeServices: lifecycleAppRuntimeServices,
@@ -1008,6 +1023,7 @@ async function main() {
     agentRunner,
     backendTurnRunner,
     resolveContinuationWorkingDir,
+    appConnections,
   );
 
   // Real push sender in the main process (holds the durable instance token);
@@ -1107,6 +1123,7 @@ async function main() {
       routinesRepo,
       repositories: appRuntimeRepositories,
       favorService,
+      appConnections,
       hostExecution,
       feedback: feedbackClient,
       cloudProfile: cloudProfileClient,
@@ -1121,6 +1138,7 @@ async function main() {
       routinesRepo,
       repositories: appRuntimeRepositories,
       favorService,
+      appConnections,
       hostExecution,
       feedback: feedbackClient,
       cloudProfile: cloudProfileClient,
@@ -1154,6 +1172,7 @@ async function main() {
     routinesRepo,
     repositories: appRuntimeRepositories,
     favorService,
+    appConnections,
   });
   const relayDrainer = new RelayDrainer(relayDrains, async (drain, event) => {
     const res = await relayDispatcher.dispatch(
@@ -1560,6 +1579,11 @@ async function main() {
     feedback: feedbackClient,
     cloudProfile: cloudProfileClient,
     agentNames: agentNameResolver,
+    appConnections,
+    appIdForAction: (actionName) => {
+      const metadata = actionRegistry.getMetadata(actionName);
+      return metadata?.ownerType === "app" ? metadata.ownerId : null;
+    },
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();
@@ -1732,6 +1756,7 @@ async function main() {
       relayDrainer,
       bootVersionReport,
       favorService,
+      appConnections,
       systemUpgradeService,
       isCloudAuthEnabled,
       loginUsage: usageRecorder,

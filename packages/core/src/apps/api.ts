@@ -18,6 +18,7 @@ import {
 } from "./context.js";
 import type { RomeAppViewer } from "../lib/visitor-session.js";
 import type { FavorService } from "../favors/types.js";
+import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
 
 export type { RomeAppApiHandler, RomeAppApiRequest, RomeAppCaller } from "@rome-os/app-runtime";
 
@@ -44,6 +45,7 @@ export class AppApiDispatcher {
       routinesRepo?: RoutinesRepository;
       repositories: AppRuntimeRepositories;
       favorService?: FavorService;
+      appConnections?: AppConnectionsContextFactory;
     },
   ) {}
 
@@ -73,6 +75,7 @@ export class AppApiDispatcher {
         routinesRepo: this.services.routinesRepo,
         repositories: this.services.repositories,
         favorService: this.services.favorService,
+        appConnections: this.services.appConnections,
         whenWorkersBusy: whenWorkersBusyFor(request.caller),
       }),
     );

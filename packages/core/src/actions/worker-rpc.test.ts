@@ -18,6 +18,7 @@ import {
 } from "../core/hook-recursion.js";
 import type { ActionResult } from "./types.js";
 import type { ActionWorkerPayload } from "./worker-protocol.js";
+import { actionExecutionContext } from "./context.js";
 import {
   ACTION_ROOT_DISPATCH_METHOD,
   ActionWorkerCoordinator,
@@ -94,6 +95,8 @@ function makeServer(
     channelsService?: unknown;
     connectionRegistry?: unknown;
     agentNames?: unknown;
+    appConnections?: unknown;
+    appIdForAction?: (actionName: string) => string | null;
   } = {},
 ) {
   const eventBus = overrides.eventBus ?? new EventBus();
@@ -131,6 +134,8 @@ function makeServer(
     connectionRegistry: overrides.connectionRegistry,
     channelOf: (connection: { service: string }) => connection.service,
     agentNames: overrides.agentNames,
+    appConnections: overrides.appConnections,
+    appIdForAction: overrides.appIdForAction ?? (() => null),
   } as unknown as WorkerRpcServices;
   return {
     server: new WorkerRpcServer(services),
@@ -142,6 +147,58 @@ function makeServer(
     routineEngine,
   };
 }
+
+describe("WorkerRpcServer App connection identity", () => {
+  it("derives the App from the Core-captured action and rejects a spoofed App id", async () => {
+    const list = rs.fn(async (appId: string) => ({
+      ok: true,
+      value: { connections: [{ connectionId: appId }] },
+    }));
+    const appConnections = {
+      list,
+      describe: rs.fn(),
+      operations: rs.fn(),
+      invoke: rs.fn(),
+    };
+    const { server } = makeServer({
+      appConnections,
+      appIdForAction: (actionName) => (actionName === "app-b:work" ? "app-b" : null),
+    });
+    const worker = connect(server);
+    const store = {
+      actionName: "app-b:work",
+      executionId: "execution-1",
+      rootExecutionId: "execution-1",
+      initiator: "app:app-a",
+    };
+
+    const result = await actionExecutionContext.run(store, () =>
+      worker.call("connections.app.list", { limit: 1 }),
+    );
+    expect(result).toEqual({
+      ok: true,
+      value: { connections: [{ connectionId: "app-b" }] },
+    });
+    expect(list).toHaveBeenCalledWith("app-b", { limit: 1 });
+
+    const spoofed = await actionExecutionContext.run(store, () =>
+      rpc(worker, "connections.app.list", { limit: 1, callerAppId: "app-a" }),
+    );
+    expect(spoofed.error).toContain("invalid params");
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it("denies a connection RPC outside an App-owned action", async () => {
+    const list = rs.fn();
+    const { server } = makeServer({
+      appConnections: { list, describe: rs.fn(), operations: rs.fn(), invoke: rs.fn() },
+      appIdForAction: () => null,
+    });
+    const result = await connect(server).call("connections.app.list", {});
+    expect(result).toMatchObject({ ok: false, error: { code: "access_denied" } });
+    expect(list).not.toHaveBeenCalled();
+  });
+});
 
 describe("WorkerRpcServer param validation", () => {
   it("forwards a pinned Store source to create without an install call", async () => {

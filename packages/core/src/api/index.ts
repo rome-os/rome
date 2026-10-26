@@ -79,6 +79,7 @@ import { routinesRoutes } from "./routes/routines.js";
 import { eventCatalogRoutes } from "./routes/event-catalog.js";
 import { favorRoutes } from "./routes/favors.js";
 import { sessionsRoutes } from "./routes/sessions.js";
+import { appConnectionAccessRoutes } from "./routes/app-connection-access.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
@@ -159,6 +160,7 @@ export function buildApp(
   api.route("/", appApiPublicRoutes(deps));
   api.route("/", integrationsRoutes(deps));
   api.route("/", connectionsRoutes(deps));
+  api.route("/", appConnectionAccessRoutes(deps));
   api.route("/", channelAccountsRoutes(deps));
   api.route("/", setupsRoutes(deps));
   api.route("/", capabilityDiscoveryRoutes(hostCapabilityDiscoverySource));

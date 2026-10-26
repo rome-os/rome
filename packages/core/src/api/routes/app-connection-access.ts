@@ -1,0 +1,135 @@
+import { Hono } from "hono";
+import { z } from "zod";
+import { isResolvedApp } from "../../apps/state.js";
+import { AppConnectionAccessRepository } from "../../db/repositories/app-connection-access.js";
+import type { ApiDeps } from "../deps.js";
+import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
+
+const ConstraintSchema = z
+  .object({
+    inputPointer: z.string().refine((value) => value === "" || value.startsWith("/")),
+    allowedValues: z
+      .array(z.union([z.string(), z.number(), z.boolean()]))
+      .min(1)
+      .max(100),
+  })
+  .strict();
+
+const PutAccessSchema = z
+  .object({
+    approval: z.enum(["required", "not_required"]),
+    constraints: z.array(ConstraintSchema).max(20).default([]),
+    expiresAt: z.string().datetime().nullable().optional(),
+  })
+  .strict();
+
+const AuditQuerySchema = z.object({
+  cursor: z.coerce.number().int().nonnegative().default(0),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
+  const app = new Hono();
+  const repo = new AppConnectionAccessRepository(deps.db);
+
+  app.get("/app-connection-access/:appId", async (c) => {
+    const policies = await repo.listActiveForApp(c.req.param("appId"));
+    return c.json({
+      policies: policies.map((policy) => ({
+        ...policy,
+        expiresAt: policy.expiresAt?.toISOString() ?? null,
+        createdAt: policy.createdAt.toISOString(),
+        updatedAt: policy.updatedAt.toISOString(),
+      })),
+    });
+  });
+
+  app.get("/app-connection-access/:appId/audit", async (c) => {
+    const query = AuditQuerySchema.safeParse(c.req.query());
+    if (!query.success) return c.json({ error: "Invalid pagination." }, 400);
+    const rows = await repo.listAuditForApp(
+      c.req.param("appId"),
+      query.data.cursor,
+      query.data.limit + 1,
+    );
+    const selected = rows.slice(0, query.data.limit);
+    return c.json({
+      events: selected.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
+      ...(rows.length > selected.length ? { nextCursor: selected.at(-1)!.seq } : {}),
+    });
+  });
+
+  app.put("/app-connection-access/:appId/:connectionId/:identity/:operation", async (c) => {
+    if (!isSameOriginMutationRequest(c.req.raw)) return c.json({ error: "Forbidden" }, 403);
+    const target = resolveTarget(deps, {
+      appId: c.req.param("appId"),
+      connectionId: c.req.param("connectionId"),
+      identity: c.req.param("identity"),
+      operation: c.req.param("operation"),
+    });
+    if (!target.ok) return c.json({ error: target.error }, target.status);
+    const parsed = PutAccessSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Invalid access policy." }, 400);
+    const expiresAt = parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null;
+    if (expiresAt && expiresAt <= new Date()) {
+      return c.json({ error: "expiresAt must be in the future." }, 400);
+    }
+    const policy = await repo.put({
+      ...target.value,
+      approval: parsed.data.approval,
+      constraints: parsed.data.constraints,
+      expiresAt,
+    });
+    return c.json({
+      policy: {
+        ...policy,
+        expiresAt: policy.expiresAt?.toISOString() ?? null,
+        revokedAt: policy.revokedAt?.toISOString() ?? null,
+        createdAt: policy.createdAt.toISOString(),
+        updatedAt: policy.updatedAt.toISOString(),
+      },
+    });
+  });
+
+  app.delete("/app-connection-access/:appId/:connectionId/:identity/:operation", async (c) => {
+    if (!isSameOriginMutationRequest(c.req.raw)) return c.json({ error: "Forbidden" }, 403);
+    const revoked = await repo.revoke(
+      c.req.param("appId"),
+      c.req.param("connectionId"),
+      c.req.param("identity"),
+      c.req.param("operation"),
+    );
+    return revoked ? c.body(null, 204) : c.json({ error: "Access policy not found." }, 404);
+  });
+
+  return app;
+}
+
+function resolveTarget(
+  deps: ApiDeps,
+  target: { appId: string; connectionId: string; identity: string; operation: string },
+): { ok: true; value: typeof target } | { ok: false; status: 404 | 409 | 503; error: string } {
+  if (!isResolvedApp(deps.appCatalog.get(target.appId))) {
+    return { ok: false, status: 404, error: "App not found or disabled." };
+  }
+  if (!deps.connectionRegistry) {
+    return { ok: false, status: 503, error: "Connections are unavailable." };
+  }
+  const connection = deps.connectionRegistry
+    .all()
+    .find((candidate) => candidate.id === target.connectionId);
+  if (!connection) return { ok: false, status: 404, error: "Connection not found." };
+  const descriptor = deps.connectionRegistry.getDescriptor(connection.connectionKind);
+  if (!descriptor?.capabilities.actor) {
+    return { ok: false, status: 409, error: "Connection does not support Act." };
+  }
+  const actor = descriptor.capabilities.actor;
+  if (descriptor.grant !== target.identity) {
+    return { ok: false, status: 409, error: "Identity cannot be isolated for App access." };
+  }
+  const operation = actor.operations?.find((candidate) => candidate.name === target.operation);
+  if (!operation?.appAccess) {
+    return { ok: false, status: 404, error: "App-accessible operation not found." };
+  }
+  return { ok: true, value: target };
+}
