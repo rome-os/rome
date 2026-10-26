@@ -25,12 +25,12 @@ flowchart LR
     Participation -- reads --> Chats
     Participation -- speaks --> Chats
     Participation -- starts a turn --> Agents
-    Connections -. which agent speaks through this account .-> Agents
+    Chats -. which agent speaks through this account .-> Agents
     People -- platform and account --> Chats
     Participation -- who is this --> People
 ```
 
-Connections carry messages between chats and Rome. Participation sits between Chats and Agents: it reads the chat's record, speaks back into it, and starts an agent's turn. The dashed line is the link the guardian sets after connecting an account, as a separate step: which agent speaks through it. An account may have none. Chats follows the definitions of Connections and Agents and changes neither. Connections and Agents do not depend on each other.
+Connections carry messages between chats and Rome. Participation sits between Chats and Agents: it reads the chat's record, speaks back into it, and starts an agent's turn. The dashed line is the link the guardian sets on a [connected account](chats.md#connected-account) after connecting it, as a separate step: which agent speaks through it. An account may have none. Chats follows the definitions of Connections and Agents and changes neither, and Connections never names an agent. Connections and Agents do not depend on each other.
 
 People follows Chats for platform and account and changes neither. Participation asks People who a sender is and gets a person with their bond level, or nobody. People never decides what happens to a message. Connections and People do not depend on each other, so a disconnect removes nothing from People.
 
@@ -49,7 +49,7 @@ Each word has a heading, its meaning in one or two sentences, and the rules that
 
 The language is the model. The code holds most of it and owes the rest. A reader of `main` can rely on:
 
-- An account that takes an agent exists only while connected and is never reclaimed by the next connection. Email and WhatsApp accounts, which take no agent, keep their record across a reconnect.
+- An account that takes an agent exists only while connected and is never reclaimed by the next connection.
 - Rome listens to an account that takes an agent only while one is linked. An account that takes no agent is always listened to.
 - A newly connected account starts with no agent. Rome never links one on its own, and the guardian links it afterwards.
 - An agent can be linked to any number of accounts, several on one platform included, and an account has one agent in storage.
@@ -75,7 +75,7 @@ Diffs still owed to the model, each a change of its own:
 
 - Chat replaces conversation in the dashboard, the docs and the code.
 - The per-chat agent override is removed, with a migration.
-- The own-account and delegate kinds of link are stored and shown.
+- The own-account and delegate kinds of link follow from the kind of connection and are shown.
 - One group is one chat across all of Rome's accounts in it.
 - A Feishu person is one account across all of Rome's Feishu accounts, by the tenant-wide id.
 - The participants of a chat are the platform's member list.
@@ -93,7 +93,9 @@ Diffs still owed to the model, each a change of its own:
 - The guardian can delete a person.
 - A delegate link is stored and shown as the agent of its person.
 - People's labels and docs say platform where they say channel.
-- Neither the account record nor the connection names the other.
+- Chats keeps a connected account by its connection, holding only its agent, and the channel record goes.
+- Email and WhatsApp accounts end at disconnect like every other, and connecting again starts a fresh connected account.
+- Linking, switching and unlinking name the connected account by its connection. Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
 - A fix that reaches another account is refused for the sign-ins such as GitHub too.
 - Connecting through a sign-in such as GitHub is one step too. A sign-in Rome rejects leaves no connection behind.
 - A connection holds one grant, and renewing or fixing replaces it whole.
