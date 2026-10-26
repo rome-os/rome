@@ -90,12 +90,12 @@ Every channel is connected through **one server-owned setup protocol** ([decisio
 
 - **Setup is uniform.** Enabling any channel drives the same generic surface (a conferral setup addressed by connection + grant). Setup proves provider credentials, while a link in People says who a sender is. A connected account hears strangers before any account is linked to the guardian.
 - **The dashboard renders setups generically.** The connect UI is a single standard renderer plus a small set of registered custom components for the few steps that need bespoke presentation (e.g. rendering a QR image). Adding a channel adds neither a connect route nor a per-service connect card.
-- **An account exists only while it is connected.** Adding another account of a service runs that service's setup for a new account, and the account and its channel come into being only when the setup connects it, so an abandoned add leaves nothing behind. Disconnecting the last grant of an account whose service names its accounts (Telegram, Discord, Feishu, Slack bots, the signed-in Telegram user) removes the account and releases its channel. Any other Connection stays after its last grant goes.
+- **An account exists only while it is connected.** Adding another account of a service runs that service's setup for a new account, and the account and its channel come into being only when the setup connects it, so an abandoned add leaves nothing behind. Disconnecting the last grant of an account whose service names its accounts (Telegram, Discord, Feishu, Slack, the signed-in Telegram user) removes the account and releases its channel. Any other Connection stays after its last grant goes.
 - **Post-connection configuration is not setup.** Config and feature surfaces that operate *after* a channel is linked — Discord per-channel agent routing, the Telegram personal-account dialog list — live under their own named routes, separate from the setup protocol and never part of connecting.
 
-## Slack bots
+## Slack accounts
 
-A Slack bot is one of Rome's accounts with one agent ([`slack-bot.ts`](../../packages/core/src/connections/integrations/slack-bot.ts)). Slack gives an app exactly one bot in a workspace, so each bot is its own Slack app, and two agents in one workspace are two apps. It is a separate service from `slack`, the Rome Cloud connection that acts in a workspace for the guardian.
+A Slack account made for an agent is one of Rome's accounts with one agent ([`slack-bot.ts`](../../packages/core/src/connections/integrations/slack-bot.ts)). What Slack calls a bot is such an account, and these docs say account ([Account](../domains/chats.md#account)). Slack gives an app exactly one bot in a workspace, so each account is its own Slack app, and two agents in one workspace are two apps. It is a separate service from `slack`, the Rome Cloud connection that acts in a workspace for the guardian.
 
 ### Invariants
 

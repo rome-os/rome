@@ -192,20 +192,20 @@ const SLACK_TOKEN_FIELDS: SetupFormField[] = [
   { name: "appToken", label: "App-Level Token (xapp-)", secret: true },
 ];
 
-async function promptBotName(interact: SetupInteraction): Promise<string> {
+async function promptAccountName(interact: SetupInteraction): Promise<string> {
   let error: string | undefined;
   for (;;) {
     const answers = await interact.prompt({
       instructions:
-        "Each Slack bot is its own Slack app. Name the bot the way people in your workspace should see it, usually after the agent that answers as it.",
-      fields: [{ name: "name", label: "Bot name", secret: false }],
+        "Each Slack account is its own Slack app. Name the account the way people in your workspace should see it, usually after the agent that answers as it.",
+      fields: [{ name: "name", label: "Account name", secret: false }],
       ...(error ? { error } : {}),
     });
     const name = (answers.name ?? "").trim();
     if (name && name.length <= SLACK_APP_NAME_MAX) return name;
     error = name
       ? `Slack app names are at most ${SLACK_APP_NAME_MAX} characters.`
-      : "Enter a name for the bot.";
+      : "Enter a name for the account.";
   }
 }
 
@@ -231,16 +231,16 @@ function createAppForm(name: string): SetupForm {
     ],
     links: [{ label: `Create ${name} in Slack`, url: slackCreateAppUrl(name) }],
     fields: SLACK_TOKEN_FIELDS,
-    note: "A free Slack workspace allows ten apps in total, so each agent's bot counts toward that limit.",
+    note: "A free Slack workspace allows ten apps in total, so each agent's account counts toward that limit.",
   };
 }
 
 const RENEW_APP_FORM: SetupForm = {
   instructions:
-    "Reconnect the bot's existing Slack app. A new app would be a different bot, so paste fresh tokens from the same one.",
+    "Reconnect the account's existing Slack app. A new app would be a different account, so paste fresh tokens from the same one.",
   steps: [
     {
-      text: "Open your Slack apps from the link below and pick this bot's app.",
+      text: "Open your Slack apps from the link below and pick this account's app.",
     },
     {
       text: "If the app was removed from the workspace, reinstall it from the Install App page.",
@@ -263,7 +263,7 @@ export function makeSlackBotSetup(deps: {
   return async (interact, ctx) => {
     // A new app is a new bot, which a renewal must refuse, so renewing skips
     // the name and the create link and asks the existing app for its tokens.
-    const name = ctx.renewing ? undefined : await promptBotName(interact);
+    const name = ctx.renewing ? undefined : await promptAccountName(interact);
     let error: string | undefined;
     let material: { botToken: string; appToken: string };
     let profile: SlackBotGrantProfile;
@@ -288,7 +288,7 @@ export function makeSlackBotSetup(deps: {
       }
     }
 
-    const handle = profile.botUsername ? `@${profile.botUsername}` : (name ?? "The bot");
+    const handle = profile.botUsername ? `@${profile.botUsername}` : (name ?? "The account");
     return {
       credential: { material, expiresAt: "never" },
       profile,
