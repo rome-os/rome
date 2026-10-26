@@ -225,7 +225,7 @@ describe("feishu talk lifecycle", () => {
     const conn = await registry.connect("feishu");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["app"] });
 
-    await registry.importCredential(conn.id, "app", validCred());
+    await registry.confer(conn.connectionKind, conn.id, "app", validCred());
     await flush();
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     expect(channel.connected).toBe(true);
@@ -395,7 +395,7 @@ describe("feishu app-auth fault drives renew-once-then-degrade", () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     registry.register(makeDescriptor(channel));
     const conn = await registry.connect("feishu");
-    await registry.importCredential(conn.id, "app", validCred());
+    await registry.confer(conn.connectionKind, conn.id, "app", validCred());
     await flush();
     expect(conn.status().talk).toEqual({ state: "unlocked" });
 
@@ -411,7 +411,7 @@ describe("feishu app-auth fault drives renew-once-then-degrade", () => {
       reUnlocked = c;
     });
     channel.connectError = null;
-    await registry.importCredential(conn.id, "app", {
+    await registry.confer(conn.connectionKind, conn.id, "app", {
       material: { appId: "cli_x", appSecret: "fresh", domain: "feishu" },
       expiresAt: "never",
     });

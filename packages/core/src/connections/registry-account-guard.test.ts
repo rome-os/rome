@@ -112,7 +112,7 @@ describe("ConnectionRegistry.confer account guard", () => {
         degraded: { at: new Date(0), reason: "token revoked upstream" },
       }));
 
-      await registry.importCredential(first.id, "bot", credentialFor("t-2"));
+      await registry.confer(first.connectionKind, first.id, "bot", credentialFor("t-2"));
 
       const grant = await ledger.getGrant(first.id);
       expect(grant).toMatchObject({ state: "authorized" });

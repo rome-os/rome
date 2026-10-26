@@ -22,10 +22,20 @@ describe("removeUnconnectedAccounts", () => {
     const telegram = makePasteTalk();
     registry.register({ ...telegram.descriptor, severalAccounts: true });
     const connected = await registry.connect("fake-telegram");
-    await registry.importCredential(connected.id, "bot", telegram.validCredential());
+    await registry.confer(
+      connected.connectionKind,
+      connected.id,
+      "bot",
+      telegram.validCredential(),
+    );
     const neverConnected = await registry.connectAnother("fake-telegram");
     const disconnected = await registry.connectAnother("fake-telegram");
-    await registry.importCredential(disconnected.id, "bot", telegram.validCredential());
+    await registry.confer(
+      disconnected.connectionKind,
+      disconnected.id,
+      "bot",
+      telegram.validCredential(),
+    );
     await registry.revoke(disconnected.id, "bot");
 
     const removed = await removeUnconnectedAccounts(registry);

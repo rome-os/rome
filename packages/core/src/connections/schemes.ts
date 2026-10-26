@@ -84,7 +84,7 @@ export function tokenPaste(opts: {
  *
  * Conferral is route-driven, exactly like WhatsApp pairing: the OAuth round-trip
  * runs in the browser + the `/oauth/{provider}/start` → `/oauth/redeem` routes,
- * which finish the flow with `importCredential`. There is no headless conferral
+ * which finish the flow through the registry's `confer`. There is no headless conferral
  * (guardian-interaction machinery is absent this phase), so `confer()`
  * throws — the route is the conferral driver.
  *

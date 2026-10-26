@@ -21,7 +21,7 @@ type SimpleEntity = string | number;
  * `displayName`/`phoneNumber`), or the connect timestamp; there is no config, so
  * this is NEVER persisted to a settings row. The login ceremony
  * returns it to the route, which splits it into the grant's credential material
- * and profile and writes both into the ledger via a single `importCredential`.
+ * and profile and writes both into the ledger via a single `confer`.
  */
 export interface TelegramUserSettings {
   apiId: number;

@@ -501,7 +501,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(provider)));
     const conn = await registry.connect("email");
-    await registry.importCredential(conn.id, "inbox", validCred());
+    await registry.confer(conn.connectionKind, conn.id, "inbox", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     const received: ChannelMessage[] = [];
@@ -525,7 +525,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(provider)));
     const conn = await registry.connect("email");
-    await registry.importCredential(conn.id, "inbox", validCred());
+    await registry.confer(conn.connectionKind, conn.id, "inbox", validCred());
     const raw = JSON.stringify(buildEvent());
     const result = await registry.ingest(conn.id, {
       rawBody: raw,

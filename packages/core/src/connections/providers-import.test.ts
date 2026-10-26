@@ -32,6 +32,7 @@ import { createTestDb } from "../test/helpers.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "../lib/oauth-providers.js";
 import type { OAuthTokenBundle } from "../lib/oauth-token-bundle.js";
+import { DifferentAccountError } from "./errors.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import {
@@ -234,14 +235,12 @@ describe("grantProfileFromBundle", () => {
 });
 
 describe("a malformed conferral fails loudly and stores nothing", () => {
-  it("importProviderBundle rejects and the grant keeps no credential or profile", async () => {
+  it("importProviderBundle rejects and leaves no connection behind", async () => {
     const registry = makeRegistry(freshDb());
     await expect(
       importProviderBundle(registry, "github", { accessToken: "gho" }, { login: 42 }),
     ).rejects.toThrow();
-    const rec = await grantProfile(registry, "github");
-    expect(rec?.credential).toBeUndefined();
-    expect(rec?.profile).toBeUndefined();
+    expect(registry.find("github")).toEqual([]);
   });
 });
 
@@ -405,5 +404,45 @@ describe.each(BUNDLES)("importProviderBundle [%s]", (provider, grant, bundle) =>
     const registry = makeRegistry(freshDb(), []);
     const imported = await importProviderBundle(registry, provider, bundle);
     expect(imported).toBe(false);
+  });
+});
+
+describe("a sign-in fix reaches the same account", () => {
+  it("refuses a redeem for another account and keeps the one connected", async () => {
+    const registry = makeRegistry(freshDb());
+    await importProviderBundle(registry, "github", { accessToken: "gho-1" }, { subject: "42" });
+
+    await expect(
+      importProviderBundle(registry, "github", { accessToken: "gho-2" }, { subject: "99" }),
+    ).rejects.toBeInstanceOf(DifferentAccountError);
+
+    const rec = await grantProfile(registry, "github");
+    expect(rec?.profile).toMatchObject({ subject: "42" });
+    expect(rec?.credential?.material).toMatchObject({ kind: "inline" });
+    expect(registry.find("github")).toHaveLength(1);
+  });
+});
+
+describe("a redeem racing a disconnect", () => {
+  it("waits for the disconnect, then connects afresh", async () => {
+    const registry = makeRegistry(freshDb());
+    await importProviderBundle(registry, "github", { accessToken: "gho-1" }, { subject: "42" });
+    const [old] = registry.find("github");
+
+    const disconnect = registry.disconnect(old!.id);
+    const redeem = importProviderBundle(
+      registry,
+      "github",
+      { accessToken: "gho-2" },
+      { subject: "42" },
+    );
+    await Promise.all([disconnect, redeem]);
+
+    // The redeem never lands on the connection being removed, so its
+    // credential and custody belong to a connection that stays.
+    const connections = registry.find("github");
+    expect(connections).toHaveLength(1);
+    expect(connections[0]!.id).not.toBe(old!.id);
+    expect(connections[0]!.auth.grants().user).toBe("authorized");
   });
 });

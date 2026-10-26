@@ -204,7 +204,7 @@ describe.each(
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
 
-    await registry.importCredential(conn.id, grant, credential(material));
+    await registry.confer(conn.connectionKind, conn.id, grant, credential(material));
     expect(conn.auth.grants()[grant]).toBe("authorized");
 
     await conn.auth.revoke(grant);
@@ -217,7 +217,7 @@ describe.each(
     const registry = new ConnectionRegistry({ ledger });
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
-    await registry.importCredential(conn.id, grant, credential(material));
+    await registry.confer(conn.connectionKind, conn.id, grant, credential(material));
 
     // Second registry over the SAME ledger: boot rehydration restores the grant.
     const registry2 = new ConnectionRegistry({ ledger });
@@ -237,7 +237,7 @@ describe.each(
     const conn = await registry.connect(provider);
     // A bundle that carried an explicit expiry, now past (google's tokens
     // always do; github/slack only if the provider ever sends one).
-    await registry.importCredential(conn.id, grant, {
+    await registry.confer(conn.connectionKind, conn.id, grant, {
       material,
       expiresAt: new Date(Date.now() - 60_000),
     });
@@ -344,7 +344,7 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     const registry = new ConnectionRegistry({ ledger });
     registry.register(makeOAuthProviderDescriptor("shopify", setupDeps(refresh)));
     const conn = await registry.connect("shopify");
-    await registry.importCredential(conn.id, "store", {
+    await registry.confer(conn.connectionKind, conn.id, "store", {
       material: { accessToken: "shpat_old", refreshToken: "shprt_old" },
       expiresAt: new Date(Date.now() + expiresInMs),
     });

@@ -197,9 +197,9 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
       metadata: null,
     });
     const registry = makeRegistry();
-    // Force the sole write to fail. The connection is minted first, so it exists —
-    // but its grant must NOT reach authorized, and custody must never fire.
-    rs.spyOn(registry, "importCredential").mockRejectedValueOnce(new Error("ledger down"));
+    // Force the conferral to fail: the grant must NOT reach authorized, and
+    // custody must never fire.
+    rs.spyOn(registry, "confer").mockRejectedValueOnce(new Error("ledger down"));
 
     const res = await postRedeem(makeDeps(registry));
 
