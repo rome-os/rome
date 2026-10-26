@@ -935,7 +935,7 @@ describe("App connection broker", () => {
     }
   });
 
-  it("keeps a live write in progress and recovers a crash orphan as outcome unknown", async () => {
+  it("recovers unstarted and uncertain crash-orphaned writes", async () => {
     const h = harness();
     try {
       const connection = await connect(h, "docs");
@@ -961,6 +961,22 @@ describe("App connection broker", () => {
         accessRevision: policy.revision,
       });
       await h.access.transitionInvocation("running-write", ["ready"], "running");
+      const readyRequestId = "request-ready-write";
+      const readyInput = { workspaceId: "one", title: "Ready", body: "private" };
+      h.access.createOrGetInvocation({
+        id: "ready-write",
+        appId: "app-a",
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.create",
+        requestIdHash: createHash("sha256").update(readyRequestId).digest("hex"),
+        inputHash: createHash("sha256")
+          .update(JSON.stringify({ body: "private", title: "Ready", workspaceId: "one" }))
+          .digest("hex"),
+        input: readyInput,
+        sideEffects: "write",
+        accessRevision: policy.revision,
+      });
       const request = {
         connectionId: connection.id,
         identity: "account",
@@ -972,13 +988,29 @@ describe("App connection broker", () => {
       await expect(h.broker.forApp("app-a").invoke(request)).rejects.toMatchObject({
         detail: { code: "request_in_progress", retryable: true },
       });
-      expect(await h.access.recoverInterruptedInvocations()).toBe(1);
+      expect(await h.access.recoverInterruptedInvocations()).toBe(2);
       expect(await h.broker.forApp("app-a").invoke(request)).toEqual({
         status: "outcome_unknown",
         executionId: "running-write",
       });
+      expect(
+        await h.broker.forApp("app-a").invoke({
+          ...request,
+          requestId: readyRequestId,
+          input: readyInput,
+        }),
+      ).toEqual({
+        status: "duplicate",
+        executionId: "ready-write",
+        outcome: "failed",
+        errorCode: "capability_unavailable",
+      });
       expect(await h.access.getInvocation("running-write")).toMatchObject({
         status: "outcome_unknown",
+        input: null,
+      });
+      expect(await h.access.getInvocation("ready-write")).toMatchObject({
+        status: "failed",
         input: null,
       });
     } finally {

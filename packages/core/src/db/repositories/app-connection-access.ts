@@ -483,16 +483,29 @@ export class AppConnectionAccessRepository {
   }
 
   async recoverInterruptedInvocations(now = new Date()): Promise<number> {
-    const result = await this.db
-      .update(appConnectionInvocations)
-      .set({
-        status: "outcome_unknown",
-        errorCode: "outcome_unknown",
-        input: null,
-        updatedAt: now,
-      })
-      .where(eq(appConnectionInvocations.status, "running"));
-    return Number(result.changes ?? 0);
+    return this.db.transaction((tx) => {
+      const unstarted = tx
+        .update(appConnectionInvocations)
+        .set({
+          status: "failed",
+          errorCode: "capability_unavailable",
+          input: null,
+          updatedAt: now,
+        })
+        .where(eq(appConnectionInvocations.status, "ready"))
+        .run();
+      const uncertain = tx
+        .update(appConnectionInvocations)
+        .set({
+          status: "outcome_unknown",
+          errorCode: "outcome_unknown",
+          input: null,
+          updatedAt: now,
+        })
+        .where(eq(appConnectionInvocations.status, "running"))
+        .run();
+      return Number(unstarted.changes ?? 0) + Number(uncertain.changes ?? 0);
+    });
   }
 
   async pruneExpiredData(before: Date): Promise<{ invocations: number; audits: number }> {
