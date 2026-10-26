@@ -83,8 +83,8 @@ import { appConnectionAccessRoutes } from "./routes/app-connection-access.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
-import { accountLinkOf } from "../channels/account-links.js";
-import { readAccountAgent } from "../channels/account-agents.js";
+import { accountLinkOf, connectionKindOf } from "../channels/account-links.js";
+import { byChannel, readAccountAgent } from "../channels/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
@@ -211,15 +211,18 @@ export function buildApp(
     deps.db,
     accountLinkOf(deps.connectionRegistry),
   );
-  const sessionChannelAgents = {
-    records: sessionChannelRecords,
+  const sessionAccountAgents = {
+    kindOf: connectionKindOf(deps.connectionRegistry),
+    linkOf: accountLinkOf(deps.connectionRegistry),
     accounts: new ConnectedAccountsRepository(deps.db),
   };
   const sessionQueries = new SessionQueryService({
     repository: new SessionQueryRepository(deps.db),
     agentLoader: deps.agentLoader,
     appCatalog: deps.appCatalog,
-    accountAgentOf: (channel) => readAccountAgent(sessionChannelAgents, deps.agentLoader, channel),
+    accountAgentOf: byChannel(sessionChannelRecords, (connectionId) =>
+      readAccountAgent(sessionAccountAgents, deps.agentLoader, connectionId),
+    ),
     // A channel with no record answers no agent, so the records are every
     // channel that can.
     channelNames: () => sessionChannelRecords.all().map((record) => record.id),

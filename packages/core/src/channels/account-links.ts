@@ -19,3 +19,14 @@ export function accountLinkOf(
 /** For a caller that never claims, releases or links a channel, such as the
  *  action worker, which reads only which kind a channel is. */
 export const noAccountLinks: AccountLinkOf = () => null;
+
+/** The kind of the connection Rome holds by `connectionId`, or null for none. */
+export type ConnectionKindOf = (connectionId: string) => string | null;
+
+/** The kind of each connection `registry` holds. */
+export function connectionKindOf(
+  registry: Pick<ConnectionRegistry, "all"> | undefined,
+): ConnectionKindOf {
+  return (connectionId) =>
+    registry?.all().find((connection) => connection.id === connectionId)?.connectionKind ?? null;
+}

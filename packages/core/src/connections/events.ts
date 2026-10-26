@@ -19,9 +19,11 @@ export interface ConnectionRef {
  *    `account` are the grant's, and absent when it was minted holding no grant.
  *  - `fixed`: a conferral replaced the grant of a connection that already
  *    existed. `account` is the account the new grant reaches, when it names one.
+ *  - `broken`: the platform stopped accepting the grant. The connection keeps
+ *    its account, and Rome neither hears nor speaks through it until a fix.
  *  - `revoked`: the connection's grant was revoked, so it reaches no account
- *    until a conferral fills it again. Disconnecting revokes, then removes.
- *  - `disconnected`: the connection was removed. */
+ *    until a conferral fills it again.
+ *  - `disconnected`: the connection and its grant were removed. */
 export type ConnectionEvent =
   | {
       kind: "connected";
@@ -30,6 +32,7 @@ export type ConnectionEvent =
       account?: GrantAccount;
     }
   | { kind: "fixed"; connection: ConnectionRef; account?: GrantAccount }
+  | { kind: "broken"; connection: ConnectionRef; reason: string }
   | { kind: "revoked"; connection: ConnectionRef }
   | { kind: "disconnected"; connection: ConnectionRef };
 

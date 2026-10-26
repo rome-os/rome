@@ -50,7 +50,7 @@ describe("connection events", () => {
     }
   });
 
-  it("raises revoked, then disconnected, when the connection is disconnected", async () => {
+  it("raises disconnected alone when the connection is disconnected", async () => {
     const { registry, fixture, heard, close } = setup();
     try {
       const connection = await registry.confer(
@@ -61,9 +61,9 @@ describe("connection events", () => {
       );
       heard.length = 0;
 
-      await expect(registry.disconnect(connection.id)).resolves.toBe(true);
+      await registry.disconnect(connection.id);
 
-      expect(heard).toEqual(["revoked fake-telegram", "disconnected fake-telegram"]);
+      expect(heard).toEqual(["disconnected fake-telegram"]);
     } finally {
       close();
     }
@@ -84,6 +84,32 @@ describe("connection events", () => {
         state: "unauthorized",
       });
       expect(connection.isUnlocked("talk")).toBe(false);
+    } finally {
+      close();
+    }
+  });
+
+  it("leaves the connection as it was when the disconnect's subscriber throws", async () => {
+    const { registry, repository, fixture, close } = setup((event) => {
+      if (event.kind === "disconnected") throw new Error("injected subscriber failure");
+    });
+    try {
+      const connection = await registry.confer(
+        "fake-telegram",
+        undefined,
+        "bot",
+        fixture.validCredential(),
+      );
+
+      await expect(registry.disconnect(connection.id)).rejects.toThrow(
+        "injected subscriber failure",
+      );
+
+      expect(registry.get(connection.id)).toBe(connection);
+      expect(connection.isUnlocked("talk")).toBe(true);
+      await expect(repository.grantOf(connection.id)).resolves.toMatchObject({
+        state: "authorized",
+      });
     } finally {
       close();
     }

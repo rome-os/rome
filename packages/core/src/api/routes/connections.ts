@@ -16,7 +16,7 @@ import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-provide
 import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
 import type { GrantValue } from "../../connections/grant.js";
-import { reachedAccount } from "../../connections/registry.js";
+import { reachedAccount } from "../../connections/connection.js";
 import type {
   Capability,
   CapabilityStatus,
@@ -366,14 +366,9 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     // `done` first, then the disconnect wins as the final state). The
     // disconnect itself runs inside that section.
     await deps.setupManager?.cancelActive(conn.id, name);
-    const removed = await registry.disconnect(conn.id);
+    await registry.disconnect(conn.id);
     c.header("Cache-Control", "no-store");
-    return c.json({
-      ok: true,
-      connection: removed
-        ? null
-        : await serializeConnection(registry, conn, deps.setupManager ?? null, channels, accounts),
-    });
+    return c.json({ ok: true, connection: null });
   });
 
   app.delete("/connections/:id", async (c) => {

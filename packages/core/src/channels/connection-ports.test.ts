@@ -379,14 +379,16 @@ describe("connection ports for a service's later channels", () => {
   });
 });
 
-describe("a channel Rome does not listen to", () => {
+describe("a Connection Rome does not listen to", () => {
   function setup(listenedAtFirst: boolean) {
     const { db } = createTestDb();
     const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
     let listened = listenedAtFirst;
-    const listeners: Array<(channel: string) => void> = [];
+    const listeners: Array<(connectionId: string) => void> = [];
+    // The service's one Connection, once connected.
+    const held = () => registry.find("fake-telegram")[0]?.id;
     const admitted: string[] = [];
     const deps: ConnectionPortsDeps = {
       registry,
@@ -396,7 +398,7 @@ describe("a channel Rome does not listen to", () => {
         return true;
       },
       listening: {
-        listens: (channel) => channel === "fake-telegram" && listened,
+        listens: (connectionId) => connectionId === held() && listened,
         onChange: (listener) => listeners.push(listener),
       },
     };
@@ -405,9 +407,9 @@ describe("a channel Rome does not listen to", () => {
     ports.inbound!.subscribe(async (event) => {
       heard.push(event.message.messageId);
     });
-    const listen = (to: boolean, channel = "fake-telegram") => {
+    const listen = (to: boolean, connectionId = held() ?? "") => {
       listened = to;
-      for (const listener of listeners) listener(channel);
+      for (const listener of listeners) listener(connectionId);
     };
     const deliver = async (id: string) => {
       fx.talkerFactory.instances.at(-1)!.state.deliver!({
@@ -450,12 +452,12 @@ describe("a channel Rome does not listen to", () => {
     expect(heard).toEqual(["m1", "m3"]);
   });
 
-  it("ignores a change to another channel", async () => {
+  it("ignores a change to another Connection", async () => {
     const { registry, fx, heard, listen, deliver } = setup(false);
     const connection = await registry.connect("fake-telegram");
     await registry.confer(connection.connectionKind, connection.id, "bot", fx.validCredential());
 
-    listen(true, "fake-telegram-2");
+    listen(true, "another-connection");
     await deliver("m1");
 
     expect(heard).toEqual([]);
