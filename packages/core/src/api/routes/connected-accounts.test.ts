@@ -48,9 +48,9 @@ describe("connected account routes", () => {
       all: () => held,
       getDescriptor: (kind: string) => ({ link: testAccountLinkOf(kind) ?? undefined }),
     } as unknown as ApiDeps["connectionRegistry"];
-    const changed: Array<string | null> = [];
+    const changed: string[] = [];
     const accountListening = {
-      changed: (channels: Iterable<string | null>) => changed.push(...channels),
+      changed: (connectionIds: Iterable<string>) => changed.push(...connectionIds),
     };
     const app = new Hono().route(
       "/",
@@ -84,20 +84,20 @@ describe("connected account routes", () => {
     expect(accounts.agentOf("c1")).toBe("sales:agent");
   });
 
-  it("passes the channel of only the account a link touched on to the listening", async () => {
+  it("passes only the account a link touched on to the listening", async () => {
     const { connect, link, changed } = setup();
     connect({ id: "c1", connectionKind: "telegram" }, "telegram");
     connect({ id: "c2", connectionKind: "telegram_user" }, "telegram_user");
     await link("c1", "sales:agent");
-    expect(changed).toEqual(["telegram"]);
+    expect(changed).toEqual(["c1"]);
 
     changed.length = 0;
     await link("c2", "sales:agent");
-    expect(changed).toEqual(["telegram_user"]);
+    expect(changed).toEqual(["c2"]);
 
     changed.length = 0;
     await link("c2", null);
-    expect(changed).toEqual(["telegram_user"]);
+    expect(changed).toEqual(["c2"]);
   });
 
   it("passes nothing on when a link is refused", async () => {

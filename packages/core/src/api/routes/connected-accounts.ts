@@ -9,14 +9,13 @@ import type {
 } from "@rome/api-types/connected-accounts";
 import { Hono } from "hono";
 import { z } from "zod";
-import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import {
   ConnectedAccountNotFound,
   ConnectedAccountsRepository,
 } from "../../db/repositories/connected-accounts.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { AccountNotLinkable, linkAccountAgent } from "../../channels/account-agents.js";
-import { accountLinkOf } from "../../channels/account-links.js";
+import { accountLinkOf, connectionKindOf } from "../../channels/account-links.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -29,10 +28,8 @@ export function connectedAccountsRoutes(
 ): Hono {
   const app = new Hono();
   const linkOf = accountLinkOf(deps.connectionRegistry);
-  const channels = new ChannelRecordsRepository(deps.db, linkOf);
   const accounts = new ConnectedAccountsRepository(deps.db);
-  const kindOf = (connectionId: string): string | null =>
-    deps.connectionRegistry?.all().find((conn) => conn.id === connectionId)?.connectionKind ?? null;
+  const kindOf = connectionKindOf(deps.connectionRegistry);
 
   // Link an agent to a connected account, or unlink it with `null`. Only this
   // account changes: the agent keeps every other account it is linked to.
@@ -58,8 +55,7 @@ export function connectedAccountsRoutes(
     const id = c.req.param("id");
     try {
       const linked = linkAccountAgent(kindOf, linkOf, accounts, id, agent);
-      // Inbound ports listen by channel until the connection id replaces it.
-      deps.accountListening.changed([channels.idOf(id)]);
+      deps.accountListening.changed([id]);
       const result: LinkAccountAgentResult = {
         account: { id, agent: linked.agent, link: linked.link },
       };

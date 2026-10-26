@@ -91,11 +91,11 @@ import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./channels/webchat-channel.js";
 import { claimChannels, recordChannelAccounts } from "./channels/claim-channels.js";
 import { domainOf, domainOfGrant } from "./channels/platform.js";
-import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
+import { AccountListening, accountAgentResolver, byChannel } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
-import { accountLinkOf } from "./channels/account-links.js";
+import { accountLinkOf, connectionKindOf } from "./channels/account-links.js";
 import { ConnectionPacing } from "./channels/delivery/connection-pacing.js";
 import { ReplyStreams } from "./channels/delivery/streams.js";
 import { replyStreamingSwitch } from "./channels/delivery/streaming-switch.js";
@@ -305,10 +305,15 @@ async function main() {
     accountLinkOf(connectionRegistry)(kind),
   );
   const connectedAccounts = new ConnectedAccountsRepository(db);
-  const channelAgents = { records: channelRecords, accounts: connectedAccounts };
+  // Read on each call, so the registry built below answers it.
+  const accountAgents = {
+    kindOf: (connectionId: string) => connectionKindOf(connectionRegistry)(connectionId),
+    linkOf: (kind: string) => accountLinkOf(connectionRegistry)(kind),
+    accounts: connectedAccounts,
+  };
   // Rome listens to an account of a linkable connection kind only while it has an
-  // agent: each channel's inbound port reads this, and a link tells it.
-  const accountListening = new AccountListening(channelAgents);
+  // agent: each inbound port reads this by connection, and a link tells it.
+  const accountListening = new AccountListening(accountAgents);
   // The connection kind a channel name belongs to. Whatever is keyed by connection kind, such
   // as a descriptor, a channel policy, or a person's link, reads it.
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
@@ -1292,7 +1297,9 @@ async function main() {
   //
   // Register every built-in descriptor now (before load()/import), threading the
   // runtime deps the factories need from here where the repos/adapters exist.
-  const accountAgentOf = accountAgentResolver(channelAgents, agentLoader);
+  const accountAgentOf = accountAgentResolver(accountAgents, agentLoader);
+  // The hook still names an account by its channel.
+  const channelAgentOf = byChannel(channelRecords, accountAgentOf);
   const { RomeCloudMailProvider } = await import("./lib/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
@@ -1308,11 +1315,7 @@ async function main() {
     },
     listAgents: () => Array.from(agentLoader.getAll().keys()),
     hasAgent: (name) => agentLoader.has(name),
-    // A Connection with no channel record backs no channel, so nothing answers it.
-    accountAgentOf: (connectionId) => {
-      const channel = channelRecords.idOf(connectionId);
-      return channel === null ? null : accountAgentOf(channel);
-    },
+    accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
       mapGuardianToChannel(personMappingRepo, "whatsapp", selfJid).catch((err) => {
@@ -1385,8 +1388,8 @@ async function main() {
         conversationSettings: appChatSettings,
         chatStop: hookChatStop,
         channels: hookChannels,
-        accountAgentOf,
-        linkedAgentOf: accountAgentOf,
+        accountAgentOf: channelAgentOf,
+        linkedAgentOf: channelAgentOf,
       });
       if (loadedHook) {
         messageHook = loadedHook;
@@ -1427,8 +1430,8 @@ async function main() {
           conversationSettings: appChatSettings,
           chatStop: hookChatStop,
           channels: hookChannels,
-          accountAgentOf,
-          linkedAgentOf: accountAgentOf,
+          accountAgentOf: channelAgentOf,
+          linkedAgentOf: channelAgentOf,
         },
         getCurrent: () => messageHook,
         setCurrent: (hook) => {

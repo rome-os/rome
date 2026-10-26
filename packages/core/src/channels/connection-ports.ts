@@ -54,19 +54,19 @@ export interface ConnectionPortsDeps {
   channelOf: ChannelOf;
   /** Paces a send while reply streaming is on, and backs the `replies` port. */
   pacing?: ConnectionPacing;
-  /** Which channels the inbound port hears. Absent, every channel is heard. */
+  /** Which Connections the inbound port hears. Absent, every one is heard. */
   listening?: InboundListening;
 }
 
 /**
- * Whether a channel's inbound port hears its Connections now. `onChange` tells
- * each port the name of a channel whose answer may have changed, and the port
+ * Whether an inbound port hears a Connection now, by its id. `onChange` tells
+ * each port the id of a Connection whose answer may have changed, and the port
  * reads `listens` again. A port reads `listens` when a Connection unlocks and
  * on each change, never per message.
  */
 export interface InboundListening {
-  listens(channel: string): boolean;
-  onChange(listener: (channel: string) => void): void;
+  listens(connectionId: string): boolean;
+  onChange(listener: (connectionId: string) => void): void;
 }
 
 /** The name of the channel a Connection backs, or null when it backs none.
@@ -103,7 +103,7 @@ export interface ConnectionPorts {
  * its first channel.
  *
  * Building the ports subscribes the inbound port to the channel's talkers for
- * the registry's lifetime, while `deps.listening` listens to the channel, and
+ * the registry's lifetime, while `deps.listening` hears each Connection, and
  * admission runs once per message for each subscription. So build one set per
  * registry and channel, as `channelList` does: a second set would run
  * admission twice.
@@ -453,7 +453,8 @@ function connectionInbound(backing: Backing): ChannelInbound {
       for (const buffers of subscriptions) buffers.push(conversation, event);
     };
 
-  const listens = (): boolean => deps.listening?.listens(channel) ?? true;
+  const listens = (connection: Connection): boolean =>
+    deps.listening?.listens(connection.id) ?? true;
 
   // Admission runs whether or not anyone subscribes yet: the Agents channel
   // links an agent to the guardian even before the inbox hears it. A channel that is
@@ -469,7 +470,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
       detach();
       attached.delete(id);
     }
-    if (!listens()) return;
+    if (!listens(connection)) return;
     const dispatch = dispatchFrom(connection.id);
     const detach = connection.hearTalker((message) =>
       admission.deliver(connection, message, dispatch),
@@ -493,19 +494,18 @@ function connectionInbound(backing: Backing): ChannelInbound {
     }
   });
 
-  // A channel starts listening on the Connections unlocked now, and stops by
-  // dropping every talker subscription. The subscribers stay, so a channel
-  // listened to again reaches the same handlers.
+  // A Connection starts being heard once unlocked, and stops by dropping its
+  // talker subscription. The subscribers stay, so a Connection heard again
+  // reaches the same handlers.
   deps.listening?.onChange((changed) => {
-    if (changed !== channel) return;
-    if (!listens()) {
-      for (const detach of attached.values()) detach();
-      attached.clear();
+    const connection = connectionsOf(backing).find((each) => each.id === changed);
+    if (!connection) return;
+    if (!listens(connection)) {
+      attached.get(connection.id)?.();
+      attached.delete(connection.id);
       return;
     }
-    for (const connection of connectionsOf(backing)) {
-      if (!attached.has(connection.id)) attach(connection);
-    }
+    if (!attached.has(connection.id)) attach(connection);
   });
 
   return {
