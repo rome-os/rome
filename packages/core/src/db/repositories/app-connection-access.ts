@@ -7,7 +7,7 @@ import {
   appConnectionInvocations,
   connectionGrants,
 } from "../schema.js";
-import type { DrizzleDb } from "../index.js";
+import type { DrizzleDb, DrizzleTx } from "../index.js";
 
 export type AppConnectionApproval = "required" | "not_required";
 export type AppConnectionSideEffects = "read-only" | "write";
@@ -43,6 +43,67 @@ function toAccessRecord(row: typeof appConnectionAccess.$inferSelect): AppConnec
     ...row,
     constraints: row.constraints as AppConnectionResourceConstraint[],
   };
+}
+
+function rejectPendingInvocations(
+  tx: DrizzleTx,
+  scope: {
+    appId: string;
+    connectionId?: string;
+    identity?: string;
+    operation?: string;
+    beforeRevision?: number;
+  },
+  now: Date,
+): void {
+  const matchesScope = and(
+    eq(appConnectionInvocations.appId, scope.appId),
+    scope.connectionId === undefined
+      ? undefined
+      : eq(appConnectionInvocations.connectionId, scope.connectionId),
+    scope.identity === undefined
+      ? undefined
+      : eq(appConnectionInvocations.identity, scope.identity),
+    scope.operation === undefined
+      ? undefined
+      : eq(appConnectionInvocations.operation, scope.operation),
+    scope.beforeRevision === undefined
+      ? undefined
+      : lt(appConnectionInvocations.accessRevision, scope.beforeRevision),
+  );
+  const pending = tx
+    .select()
+    .from(appConnectionInvocations)
+    .where(
+      and(matchesScope, inArray(appConnectionInvocations.status, ["ready", "pending_approval"])),
+    )
+    .all();
+  tx.update(appConnectionInvocations)
+    .set({ status: "rejected", errorCode: "access_denied", input: null, updatedAt: now })
+    .where(
+      and(matchesScope, inArray(appConnectionInvocations.status, ["ready", "pending_approval"])),
+    )
+    .run();
+  tx.update(appConnectionInvocations)
+    .set({ input: null, updatedAt: now })
+    .where(and(matchesScope, eq(appConnectionInvocations.status, "running")))
+    .run();
+  for (const invocation of pending) {
+    tx.insert(appConnectionAudit)
+      .values({
+        appId: invocation.appId,
+        connectionId: invocation.connectionId,
+        identity: invocation.identity,
+        operation: invocation.operation,
+        accessRevision: invocation.accessRevision,
+        approval: "rejected",
+        executionId: invocation.id,
+        requestIdHash: invocation.requestIdHash,
+        status: "access_denied",
+        createdAt: now,
+      })
+      .run();
+  }
 }
 
 export class AppConnectionAccessRepository {
@@ -172,37 +233,52 @@ export class AppConnectionAccessRepository {
     });
   }
 
-  private async putUnlocked(input: Parameters<AppConnectionAccessRepository["put"]>[0]) {
+  private putUnlocked(input: Parameters<AppConnectionAccessRepository["put"]>[0]) {
     const now = new Date();
-    await this.db
-      .insert(appConnectionAccess)
-      .values({
-        ...input,
-        expiresAt: input.expiresAt ?? null,
-        revision: 1,
-        revokedAt: null,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [
-          appConnectionAccess.appId,
-          appConnectionAccess.connectionId,
-          appConnectionAccess.identity,
-          appConnectionAccess.operation,
-        ],
-        set: {
-          sideEffects: input.sideEffects,
-          approval: input.approval,
-          constraints: input.constraints,
-          grantConferralEpoch: input.grantConferralEpoch,
+    return this.db.transaction((tx) => {
+      const policy = tx
+        .insert(appConnectionAccess)
+        .values({
+          ...input,
           expiresAt: input.expiresAt ?? null,
-          revision: sql`${appConnectionAccess.revision} + 1`,
+          revision: 1,
           revokedAt: null,
+          createdAt: now,
           updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [
+            appConnectionAccess.appId,
+            appConnectionAccess.connectionId,
+            appConnectionAccess.identity,
+            appConnectionAccess.operation,
+          ],
+          set: {
+            sideEffects: input.sideEffects,
+            approval: input.approval,
+            constraints: input.constraints,
+            grantConferralEpoch: input.grantConferralEpoch,
+            expiresAt: input.expiresAt ?? null,
+            revision: sql`${appConnectionAccess.revision} + 1`,
+            revokedAt: null,
+            updatedAt: now,
+          },
+        })
+        .returning()
+        .get();
+      rejectPendingInvocations(
+        tx,
+        {
+          appId: input.appId,
+          connectionId: input.connectionId,
+          identity: input.identity,
+          operation: input.operation,
+          beforeRevision: policy.revision,
         },
-      });
-    return (await this.get(input.appId, input.connectionId, input.identity, input.operation))!;
+        now,
+      );
+      return toAccessRecord(policy);
+    });
   }
 
   async revoke(
@@ -214,17 +290,6 @@ export class AppConnectionAccessRepository {
     return await this.appLifecycle.runExclusive(appId, () =>
       this.db.transaction((tx) => {
         const now = new Date();
-        const key = and(
-          eq(appConnectionInvocations.appId, appId),
-          eq(appConnectionInvocations.connectionId, connectionId),
-          eq(appConnectionInvocations.identity, identity),
-          eq(appConnectionInvocations.operation, operation),
-        );
-        const pending = tx
-          .select()
-          .from(appConnectionInvocations)
-          .where(and(key, inArray(appConnectionInvocations.status, ["ready", "pending_approval"])))
-          .all();
         const result = tx
           .update(appConnectionAccess)
           .set({
@@ -243,30 +308,7 @@ export class AppConnectionAccessRepository {
           )
           .run();
         if (Number(result.changes ?? 0) === 0) return false;
-        tx.update(appConnectionInvocations)
-          .set({ status: "rejected", errorCode: "access_denied", input: null, updatedAt: now })
-          .where(and(key, inArray(appConnectionInvocations.status, ["ready", "pending_approval"])))
-          .run();
-        tx.update(appConnectionInvocations)
-          .set({ input: null, updatedAt: now })
-          .where(and(key, eq(appConnectionInvocations.status, "running")))
-          .run();
-        for (const invocation of pending) {
-          tx.insert(appConnectionAudit)
-            .values({
-              appId: invocation.appId,
-              connectionId: invocation.connectionId,
-              identity: invocation.identity,
-              operation: invocation.operation,
-              accessRevision: invocation.accessRevision,
-              approval: "rejected",
-              executionId: invocation.id,
-              requestIdHash: invocation.requestIdHash,
-              status: "access_denied",
-              createdAt: now,
-            })
-            .run();
-        }
+        rejectPendingInvocations(tx, { appId, connectionId, identity, operation }, now);
         return true;
       }),
     );
@@ -279,16 +321,6 @@ export class AppConnectionAccessRepository {
   private revokeAppUnlocked(appId: string): number {
     return this.db.transaction((tx) => {
       const now = new Date();
-      const pending = tx
-        .select()
-        .from(appConnectionInvocations)
-        .where(
-          and(
-            eq(appConnectionInvocations.appId, appId),
-            inArray(appConnectionInvocations.status, ["ready", "pending_approval"]),
-          ),
-        )
-        .all();
       const result = tx
         .update(appConnectionAccess)
         .set({
@@ -298,40 +330,7 @@ export class AppConnectionAccessRepository {
         })
         .where(and(eq(appConnectionAccess.appId, appId), isNull(appConnectionAccess.revokedAt)))
         .run();
-      tx.update(appConnectionInvocations)
-        .set({ status: "rejected", errorCode: "access_denied", input: null, updatedAt: now })
-        .where(
-          and(
-            eq(appConnectionInvocations.appId, appId),
-            inArray(appConnectionInvocations.status, ["ready", "pending_approval"]),
-          ),
-        )
-        .run();
-      tx.update(appConnectionInvocations)
-        .set({ input: null, updatedAt: now })
-        .where(
-          and(
-            eq(appConnectionInvocations.appId, appId),
-            eq(appConnectionInvocations.status, "running"),
-          ),
-        )
-        .run();
-      for (const invocation of pending) {
-        tx.insert(appConnectionAudit)
-          .values({
-            appId: invocation.appId,
-            connectionId: invocation.connectionId,
-            identity: invocation.identity,
-            operation: invocation.operation,
-            accessRevision: invocation.accessRevision,
-            approval: "rejected",
-            executionId: invocation.id,
-            requestIdHash: invocation.requestIdHash,
-            status: "access_denied",
-            createdAt: now,
-          })
-          .run();
-      }
+      rejectPendingInvocations(tx, { appId }, now);
       return Number(result.changes ?? 0);
     });
   }
@@ -536,9 +535,7 @@ export class AppConnectionAccessRepository {
       const interrupted = tx
         .select()
         .from(appConnectionInvocations)
-        .where(
-          inArray(appConnectionInvocations.status, ["ready", "pending_approval", "running"]),
-        )
+        .where(inArray(appConnectionInvocations.status, ["ready", "pending_approval", "running"]))
         .all();
       let recovered = 0;
       for (const invocation of interrupted) {

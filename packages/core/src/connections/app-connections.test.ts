@@ -546,6 +546,62 @@ describe("App connection broker", () => {
     }
   });
 
+  it("rejects an outstanding invocation when its access policy is replaced", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+        approval: "required",
+      });
+      const request = {
+        connectionId: connection.id,
+        identity: "account",
+        operation: "documents.create",
+        requestId: "request-replaced-policy",
+        input: { workspaceId: "one", title: "Old policy", body: "private" },
+      } as const;
+      const pending = await h.broker.forApp("app-a").invoke(request);
+      if (pending.status !== "pending_approval") throw new Error("expected approval");
+
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+        approval: "not_required",
+      });
+
+      expect(await h.broker.forApp("app-a").invoke(request)).toEqual({
+        status: "duplicate",
+        executionId: pending.executionId,
+        outcome: "failed",
+        errorCode: "access_denied",
+      });
+      expect(await h.access.getInvocation(pending.executionId)).toMatchObject({
+        status: "rejected",
+        errorCode: "access_denied",
+        input: null,
+      });
+      expect(
+        await h.actionRegistry
+          .get("core:app_connection_write")!
+          .execute({ invocationId: pending.executionId }),
+      ).toMatchObject({ status: "error", error: expect.stringContaining("not runnable") });
+      expect(await h.access.listAuditForApp("app-a")).toContainEqual(
+        expect.objectContaining({
+          approval: "rejected",
+          executionId: pending.executionId,
+          status: "access_denied",
+        }),
+      );
+      expect(h.invocations).toHaveLength(0);
+    } finally {
+      h.close();
+    }
+  });
+
   it("preserves the originating session when a worker requests approval", async () => {
     const h = harness();
     try {
@@ -1287,9 +1343,7 @@ describe("App connection broker", () => {
           {
             approval: "pending",
             executionId: "orphaned-pending-write",
-            requestIdHash: createHash("sha256")
-              .update("orphaned-pending-write")
-              .digest("hex"),
+            requestIdHash: createHash("sha256").update("orphaned-pending-write").digest("hex"),
             status: "capability_unavailable",
           },
         ]),
