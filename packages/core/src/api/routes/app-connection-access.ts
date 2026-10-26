@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { isResolvedApp } from "../../apps/state.js";
+import { appAccessibleOperations } from "../../connections/app-connections.js";
 import { AppConnectionAccessRepository } from "../../db/repositories/app-connection-access.js";
 import type { ApiDeps } from "../deps.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
@@ -135,19 +136,12 @@ function resolveTarget(
     .all()
     .find((candidate) => candidate.id === target.connectionId);
   if (!connection) return { ok: false, status: 404, error: "Connection not found." };
-  const descriptor = deps.connectionRegistry.getDescriptor(connection.connectionKind);
-  if (!descriptor?.capabilities.actor) {
-    return { ok: false, status: 409, error: "Connection does not support Act." };
+  const operations = appAccessibleOperations(deps.connectionRegistry, connection, target.identity);
+  if (!operations.ok) {
+    return { ok: false, status: 409, error: operations.error.message };
   }
-  const actor = descriptor.capabilities.actor;
-  if (descriptor.grant !== target.identity) {
-    return { ok: false, status: 409, error: "Identity cannot be isolated for App access." };
-  }
-  const operation = actor.operations?.find((candidate) => candidate.name === target.operation);
-  if (
-    !operation?.appAccess ||
-    (operation.appAccess.sideEffects === "write" && !operation.appAccess.approvalPreview)
-  ) {
+  const operation = operations.value.find((candidate) => candidate.name === target.operation);
+  if (!operation?.appAccess) {
     return { ok: false, status: 404, error: "App-accessible operation not found." };
   }
   return { ok: true, value: { ...target, sideEffects: operation.appAccess.sideEffects } };

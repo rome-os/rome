@@ -120,11 +120,13 @@ identity for one operation.
 - `list`, `describe`, and `operations` reveal only Connections and identities covered by
   the app's active policies. Their pages and payloads are bounded. `operations`
   distinguishes provider support from permission to invoke.
-- Core derives the app id from the executing app artifact. An app cannot supply it in a
-  request. In a cross-app Action call, the callee runs with the callee app's access;
-  caller fields do not transfer the caller's access or let it claim the callee's id. A
-  system Action has no app connection access unless Core built a context for a concrete
-  app entry point.
+- The host worker runtime stamps the executing Action from Core-owned execution context,
+  and Core maps that registered Action to its owning App. App request fields cannot
+  select an App id. In a cross-app Action call, the callee runs with the callee App's
+  access; caller fields do not transfer the caller's access or let it claim the callee's
+  id. A system Action has no App connection access unless Core built a context for a
+  concrete App entry point. This binding assumes the trusted-plugin model described
+  below, not a hostile worker process.
 - Core validates the operation schema and every policy constraint before execution. A
   resource constraint that cannot be resolved from the input denies the call instead of
   broadening it.

@@ -736,24 +736,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     connection: Connection,
     identity: string,
   ): AppConnectionBrokerResult<readonly OperationDescriptor[]> {
-    const descriptor = this.registry.getDescriptor(connection.connectionKind);
-    if (!descriptor?.capabilities.actor) {
-      return failure("capability_unavailable", "This connection cannot act.");
-    }
-    const actor = descriptor.capabilities.actor;
-    if (descriptor.grant !== identity) {
-      return failure("identity_not_found", "The identity cannot be isolated for App access.");
-    }
-    const operations = actor.operations ?? connection.act?.operations() ?? [];
-    return {
-      ok: true,
-      value: operations.filter(
-        (operation) =>
-          operation.appAccess &&
-          (operation.appAccess.sideEffects === "read-only" ||
-            operation.appAccess.approvalPreview !== undefined),
-      ),
-    };
+    return appAccessibleOperations(this.registry, connection, identity);
   }
 
   private validateInput(
@@ -855,6 +838,30 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       });
     }
   }
+}
+
+export function appAccessibleOperations(
+  registry: Pick<ConnectionRegistry, "getDescriptor">,
+  connection: Pick<Connection, "connectionKind" | "act">,
+  identity: string,
+): AppConnectionBrokerResult<readonly OperationDescriptor[]> {
+  const descriptor = registry.getDescriptor(connection.connectionKind);
+  if (!descriptor?.capabilities.actor) {
+    return failure("capability_unavailable", "This connection cannot act.");
+  }
+  if (descriptor.grant !== identity) {
+    return failure("identity_not_found", "The identity cannot be isolated for App access.");
+  }
+  const operations = descriptor.capabilities.actor.operations ?? connection.act?.operations() ?? [];
+  return {
+    ok: true,
+    value: operations.filter(
+      (operation) =>
+        operation.appAccess &&
+        (operation.appAccess.sideEffects === "read-only" ||
+          operation.appAccess.approvalPreview !== undefined),
+    ),
+  };
 }
 
 function summary(connection: Connection) {
