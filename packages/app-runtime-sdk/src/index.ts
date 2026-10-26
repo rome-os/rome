@@ -2318,6 +2318,8 @@ export interface AppConnectionSummary {
   connectionId: string;
   connectionKind: string;
   label: string;
+  /** Provider identity to pass to describe, operations, and invoke. */
+  identity: string;
   health: AppConnectionHealth;
 }
 

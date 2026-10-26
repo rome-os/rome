@@ -243,7 +243,10 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
       value: {
         connections: selected.flatMap((id) => {
           const connection = byId.get(id);
-          return connection ? [summary(connection)] : [];
+          const identity = connection
+            ? this.registry.getDescriptor(connection.connectionKind)?.grant
+            : undefined;
+          return connection && identity ? [summary(connection, identity)] : [];
         }),
         ...(hasMore ? { nextCursor: Buffer.from(selected.at(-1)!).toString("base64url") } : {}),
       },
@@ -281,7 +284,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     return {
       ok: true,
       value: {
-        connection: summary(connection),
+        connection: summary(connection, input.identity),
         identity: identity.value,
         act: describeAct(connection),
       },
@@ -562,7 +565,17 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         if (typeof args.invocationId !== "string") {
           return { status: "error", error: "Missing connection invocation id." };
         }
-        return { status: "ok", data: await this.execute(args.invocationId, mode) };
+        const result = await this.execute(args.invocationId, mode);
+        if (mode === "write") {
+          if (!result.ok) return { status: "error", error: result.error.message };
+          if (result.value.status === "outcome_unknown") {
+            return {
+              status: "error",
+              error: "The provider outcome is unknown. Do not retry this request.",
+            };
+          }
+        }
+        return { status: "ok", data: result };
       },
       preview: async (args) => await this.preview(args),
     };
@@ -956,11 +969,12 @@ export function appAccessibleOperations(
   };
 }
 
-function summary(connection: Connection) {
+function summary(connection: Connection, identity: string) {
   return {
     connectionId: connection.id,
     connectionKind: connection.connectionKind,
     label: connection.label,
+    identity,
     health:
       connection.state() === "working"
         ? ("working" as const)

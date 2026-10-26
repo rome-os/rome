@@ -207,23 +207,65 @@ export class AppConnectionAccessRepository {
     identity: string,
     operation: string,
   ): Promise<boolean> {
-    const result = await this.db
-      .update(appConnectionAccess)
-      .set({
-        revokedAt: new Date(),
-        revision: sql`${appConnectionAccess.revision} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(appConnectionAccess.appId, appId),
-          eq(appConnectionAccess.connectionId, connectionId),
-          eq(appConnectionAccess.identity, identity),
-          eq(appConnectionAccess.operation, operation),
-          isNull(appConnectionAccess.revokedAt),
-        ),
-      );
-    return Number(result.changes ?? 0) > 0;
+    return await this.appLifecycle.runExclusive(appId, () =>
+      this.db.transaction((tx) => {
+        const now = new Date();
+        const key = and(
+          eq(appConnectionInvocations.appId, appId),
+          eq(appConnectionInvocations.connectionId, connectionId),
+          eq(appConnectionInvocations.identity, identity),
+          eq(appConnectionInvocations.operation, operation),
+        );
+        const pending = tx
+          .select()
+          .from(appConnectionInvocations)
+          .where(and(key, inArray(appConnectionInvocations.status, ["ready", "pending_approval"])))
+          .all();
+        const result = tx
+          .update(appConnectionAccess)
+          .set({
+            revokedAt: now,
+            revision: sql`${appConnectionAccess.revision} + 1`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(appConnectionAccess.appId, appId),
+              eq(appConnectionAccess.connectionId, connectionId),
+              eq(appConnectionAccess.identity, identity),
+              eq(appConnectionAccess.operation, operation),
+              isNull(appConnectionAccess.revokedAt),
+            ),
+          )
+          .run();
+        if (Number(result.changes ?? 0) === 0) return false;
+        tx.update(appConnectionInvocations)
+          .set({ status: "rejected", errorCode: "access_denied", input: null, updatedAt: now })
+          .where(and(key, inArray(appConnectionInvocations.status, ["ready", "pending_approval"])))
+          .run();
+        tx.update(appConnectionInvocations)
+          .set({ input: null, updatedAt: now })
+          .where(and(key, eq(appConnectionInvocations.status, "running")))
+          .run();
+        for (const invocation of pending) {
+          tx.insert(appConnectionAudit)
+            .values({
+              appId: invocation.appId,
+              connectionId: invocation.connectionId,
+              identity: invocation.identity,
+              operation: invocation.operation,
+              accessRevision: invocation.accessRevision,
+              approval: "rejected",
+              executionId: invocation.id,
+              requestIdHash: invocation.requestIdHash,
+              status: "access_denied",
+              createdAt: now,
+            })
+            .run();
+        }
+        return true;
+      }),
+    );
   }
 
   async revokeApp(appId: string): Promise<number> {
@@ -449,7 +491,6 @@ export class AppConnectionAccessRepository {
       .get();
     return Boolean(
       current &&
-        current.grant.state !== "unauthorized" &&
         policyCurrentForInvocation(current.policy, current.grant, invocation, approval, now),
     );
   }
@@ -570,11 +611,12 @@ function policyCurrentForInvocation(
   return Boolean(
     policy &&
       grant &&
+      grant.state === "authorized" &&
       policy.revokedAt === null &&
       (policy.expiresAt === null || policy.expiresAt > now) &&
       policy.revision === invocation.accessRevision &&
       policy.approval === approval &&
-      ((grant.conferralEpoch !== null && policy.grantConferralEpoch === grant.conferralEpoch) ||
-        (grant.state === "unauthorized" && grant.conferralEpoch === null)),
+      grant.conferralEpoch !== null &&
+      policy.grantConferralEpoch === grant.conferralEpoch,
   );
 }

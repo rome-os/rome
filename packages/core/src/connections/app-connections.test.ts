@@ -11,7 +11,7 @@ import { createRomeAppContext, type RomeAppRuntimeServices } from "../apps/conte
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ResolvedApp } from "../apps/state.js";
 import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
-import { appConnectionAccess, appConnectionInvocations } from "../db/schema.js";
+import { appConnectionAccess, appConnectionInvocations, connectionGrants } from "../db/schema.js";
 import { createActionEngineRepos, createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
@@ -257,7 +257,7 @@ describe("App connection broker", () => {
 
       expect(await h.broker.forApp("app-c").list()).toEqual({ connections: [] });
       expect((await h.broker.forApp("app-a").list()).connections).toEqual([
-        expect.objectContaining({ connectionId: first.id, label: "first" }),
+        expect.objectContaining({ connectionId: first.id, label: "first", identity: "account" }),
       ]);
       expect((await h.broker.forApp("app-b").list()).connections).toEqual([
         expect.objectContaining({ connectionId: second.id, label: "second" }),
@@ -472,8 +472,8 @@ describe("App connection broker", () => {
         input: null,
       });
       expect(await approvalAction.execute({ invocationId: result.executionId })).toMatchObject({
-        status: "ok",
-        data: { ok: false, error: { code: "access_denied" } },
+        status: "error",
+        error: expect.stringContaining("not runnable"),
       });
       expect(h.invocations).toHaveLength(1);
 
@@ -488,10 +488,15 @@ describe("App connection broker", () => {
       await h.access.revoke("app-a", connection.id, "account", "documents.create");
       const denied = await approvalAction.execute({ invocationId: second.executionId });
       expect(denied).toMatchObject({
-        status: "ok",
-        data: { ok: false, error: { code: "access_denied" } },
+        status: "error",
+        error: expect.stringContaining("not runnable"),
       });
       expect(h.invocations).toHaveLength(1);
+      expect(await h.access.getInvocation(second.executionId)).toMatchObject({
+        status: "rejected",
+        errorCode: "access_denied",
+        input: null,
+      });
     } finally {
       h.close();
     }
@@ -644,6 +649,24 @@ describe("App connection broker", () => {
         errorCode: "approval_rejected",
         input: null,
       });
+
+      const denied = await invoke("request-denied-after-approval");
+      if (!denied.ok || denied.value.status !== "pending_approval") {
+        throw new Error("expected approval");
+      }
+      await h.access.revoke("app-a", connection.id, "account", "documents.create");
+      await h.approvals.resolvePending(denied.value.approval.approvalId, "approve", "guardian");
+      await handler.onApproved(denied.value.approval.approvalId);
+      expect(prompts.at(-1)).toContain("failed with error");
+      expect(prompts.at(-1)).not.toContain("executed successfully");
+      expect(emitted).toContainEqual(
+        expect.objectContaining({ type: "tool_result", isError: true }),
+      );
+      expect(await h.access.getInvocation(denied.value.executionId)).toMatchObject({
+        status: "rejected",
+        errorCode: "access_denied",
+        input: null,
+      });
     } finally {
       h.close();
     }
@@ -729,6 +752,42 @@ describe("App connection broker", () => {
           identity: "account",
           operation: "documents.create",
           requestId: "request-revoked-before-provider",
+          input: { workspaceId: "one", title: "Must not run", body: "private" },
+        }),
+      ).rejects.toMatchObject({ detail: { code: "access_denied" } });
+      expect(h.invocations).toHaveLength(0);
+    } finally {
+      h.close();
+    }
+  });
+
+  it("rejects a grant degraded between the execution checks and provider I/O", async () => {
+    const h = harness();
+    try {
+      const connection = await connect(h, "docs");
+      await grant(h, {
+        appId: "app-a",
+        connectionId: connection.id,
+        operation: "documents.create",
+      });
+      const isCurrent = h.access.isInvocationPolicyCurrent.bind(h.access);
+      rs.spyOn(h.access, "isInvocationPolicyCurrent").mockImplementationOnce(
+        (invocation, approval, now) => {
+          h.db
+            .update(connectionGrants)
+            .set({ state: "degraded" })
+            .where(eq(connectionGrants.custody, connection.id))
+            .run();
+          return isCurrent(invocation, approval, now);
+        },
+      );
+
+      await expect(
+        h.broker.forApp("app-a").invoke({
+          connectionId: connection.id,
+          identity: "account",
+          operation: "documents.create",
+          requestId: "request-degraded-before-provider",
           input: { workspaceId: "one", title: "Must not run", body: "private" },
         }),
       ).rejects.toMatchObject({ detail: { code: "access_denied" } });

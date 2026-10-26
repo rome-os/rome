@@ -25,7 +25,7 @@ The credential a connection relies on: a Feishu app's id and secret, a bot token
 
 - A grant names the account it reaches: the platform and the platform's own id, as the platform reported them when access was given. A kind of connection with no platform, such as GitHub, names the account by the external system's own id for it.
 - A grant may expire.
-- A grant has no identity of its own. Two grants with the same credential, account and expiry are the same grant. Renewing or fixing replaces the grant whole.
+- A grant has no guardian-facing identity of its own. Core gives each conferral an opaque epoch only so dependent access can stay bound to the authority the guardian conferred. Renewal keeps that epoch. Fixing or conferring the grant again replaces the epoch and revokes dependent App access, even when the credential still reaches the same account.
 - Grants are outside envoy and keep their current contracts ([Connections and grants](../adrs/channels-and-connectors-are-one-connection.md)).
 
 ## Connection kind
