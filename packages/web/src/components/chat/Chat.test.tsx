@@ -100,14 +100,14 @@ rs.mock("@/components/agent-trace/TraceDrawer", () => ({
     onClose,
   }: {
     target: { kind: string } | null;
-    outlet?: HTMLElement | null;
+    outlet: HTMLElement | null;
     onClose: () => void;
   }) =>
     target ? (
       <button
         type="button"
         data-testid="trace-drawer"
-        data-outlet={outlet === undefined ? "overlay" : outlet === null ? "pending" : "tab"}
+        data-outlet={outlet ? "tab" : "pending"}
         onClick={onClose}
       >
         {target.kind}
@@ -282,8 +282,21 @@ rs.mock("@/lib/chat-api", () => {
   };
 });
 
+// A stand-in tool pane that follows the mocked saved pane state. A test that
+// supplies its own provider inside `children` overrides it.
+function pane(children: ReactNode) {
+  const host: ToolTraceHost = {
+    outlet: null,
+    paneOpen: !appsPanel.collapsed,
+    setPaneCollapsed: appsPanel.setCollapsed,
+    reveal: rs.fn(),
+    set: rs.fn(),
+  };
+  return <ToolTraceContext.Provider value={host}>{children}</ToolTraceContext.Provider>;
+}
+
 function renderChat(children: ReactNode, live?: LiveEventsClient) {
-  const routed = <MemoryRouter>{children}</MemoryRouter>;
+  const routed = <MemoryRouter>{pane(children)}</MemoryRouter>;
   return render(
     live ? (
       <LiveEventsClientContext.Provider value={live}>{routed}</LiveEventsClientContext.Provider>
@@ -391,7 +404,13 @@ describe("Chat missing-session detection", () => {
 
 describe("Chat trace in the tool pane", () => {
   function host(outlet: HTMLElement | null = null) {
-    return { outlet, reveal: rs.fn(), set: rs.fn() } satisfies ToolTraceHost;
+    return {
+      outlet,
+      paneOpen: true,
+      setPaneCollapsed: rs.fn(),
+      reveal: rs.fn(),
+      set: rs.fn(),
+    } satisfies ToolTraceHost;
   }
   const withHost = (toolTrace: ToolTraceHost, element: ReactNode) => (
     <ToolTraceContext.Provider value={toolTrace}>{element}</ToolTraceContext.Provider>
@@ -412,6 +431,21 @@ describe("Chat trace in the tool pane", () => {
     });
     // The pane draws the trace, so the chat no longer reserves room for a drawer.
     expect(screen.getByTestId("trace-drawer").getAttribute("data-outlet")).toBe("pending");
+  });
+
+  it("shows the expand control from the pane's open state, which counts a trace-held pane", async () => {
+    const user = userEvent.setup();
+    const toolTrace = { ...host(), paneOpen: false };
+    const { rerender } = renderChat(withHost(toolTrace, <Chat sessionId="session-1" />));
+    await user.click(screen.getByRole("button", { name: "chat.expandTools" }));
+    expect(toolTrace.setPaneCollapsed).toHaveBeenCalledWith(false);
+
+    rerender(
+      <MemoryRouter>
+        {withHost({ ...toolTrace, paneOpen: true }, <Chat sessionId="session-1" />)}
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("button", { name: "chat.expandTools" })).toBeNull();
   });
 
   it("hands the pane's outlet to the drawer", async () => {
@@ -441,13 +475,6 @@ describe("Chat trace in the tool pane", () => {
     await user.click(screen.getByRole("button", { name: "open stored trace" }));
     unmount();
     expect(toolTrace.set).toHaveBeenLastCalledWith(expect.any(String), null);
-  });
-
-  it("falls back to the overlay drawer outside a tool workspace", async () => {
-    const user = userEvent.setup();
-    renderChat(<Chat sessionId="session-1" />);
-    await user.click(screen.getByRole("button", { name: "open stored trace" }));
-    expect(screen.getByTestId("trace-drawer").getAttribute("data-outlet")).toBe("overlay");
   });
 });
 
@@ -487,18 +514,10 @@ describe("Chat agent identity", () => {
     await user.click(screen.getByRole("button", { name: "chat.expandTools" }));
     expect(appsPanel.setCollapsed).toHaveBeenCalledWith(false);
     appsPanel.collapsed = false;
-    rerender(
-      <MemoryRouter>
-        <Chat sessionId="session-1" />
-      </MemoryRouter>,
-    );
+    rerender(<MemoryRouter>{pane(<Chat sessionId="session-1" />)}</MemoryRouter>);
     expect(screen.queryByRole("button", { name: "chat.expandTools" })).toBeNull();
     appsPanel.collapsed = true;
-    rerender(
-      <MemoryRouter>
-        <Chat sessionId="session-1" />
-      </MemoryRouter>,
-    );
+    rerender(<MemoryRouter>{pane(<Chat sessionId="session-1" />)}</MemoryRouter>);
     expect(screen.getByRole("button", { name: "chat.expandTools" })).toBeTruthy();
   });
 

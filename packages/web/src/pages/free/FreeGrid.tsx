@@ -39,6 +39,7 @@ import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
+import { useToolTrace } from "./tool-trace";
 import { getWidgetFullHref } from "./widget-links";
 import { useSessionNames } from "./use-session-names";
 import {
@@ -130,6 +131,32 @@ function WidgetContent({
     default:
       return null;
   }
+}
+
+// The mobile header's pane toggle. It follows the pane's effective open state,
+// which includes a pane a trace holds open, and collapses or expands for real.
+function ToolsToggle({ unread }: { unread: boolean }) {
+  const { t } = useTranslation("common");
+  const { paneOpen, setPaneCollapsed } = useToolTrace();
+  return (
+    <IconButton
+      size="md"
+      label={t(paneOpen ? "chat.collapseTools" : "chat.expandTools")}
+      aria-expanded={paneOpen}
+      icon={
+        <span className="relative">
+          {paneOpen ? <PanelRightClose /> : <PanelRightOpen />}
+          {!paneOpen && unread && (
+            <span
+              className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
+              aria-label={t("chat.toolUpdated")}
+            />
+          )}
+        </span>
+      }
+      onClick={() => setPaneCollapsed(paneOpen)}
+    />
+  );
 }
 
 export function FreeGrid() {
@@ -375,71 +402,61 @@ export function FreeGrid() {
               initialDraftText={initialDraftText}
               initialSkillName={initialSkillName}
             />
-          </ToolWorkspace>
-
-          <SlotContent name="mobileHeader">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <SessionAvatar
-                iconUrl={pinnedAgentMention?.iconUrl}
-                label={pinnedAgentMention?.appLabel}
-                model={model}
-                reasoningEffort={reasoningEffort}
-              />
-              <span className="truncate text-ui text-foreground">
-                {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
-              </span>
-              {sessionName?.trim() && pinnedAgentMention && (
-                <span className="shrink-0 truncate text-aux text-muted-foreground">
-                  {pinnedAgentMention.appLabel}
-                </span>
-              )}
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton
-                  size="md"
-                  label={t("nav.more")}
-                  icon={<MoreHorizontal />}
-                  className="text-muted-foreground hover:text-foreground"
+            {/* A portal: it renders in the mobile header, and sits here so it
+                reads the pane's open state. */}
+            <SlotContent name="mobileHeader">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <SessionAvatar
+                  iconUrl={pinnedAgentMention?.iconUrl}
+                  label={pinnedAgentMention?.appLabel}
+                  model={model}
+                  reasoningEffort={reasoningEffort}
                 />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {chatSessionId && (
-                  <DropdownMenuItem onSelect={() => void handlePinSession()}>
-                    {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-                    {pinnedAt ? t("navbar.unpin", { ns: "chat" }) : t("navbar.pin", { ns: "chat" })}
-                  </DropdownMenuItem>
-                )}
-                {chatSessionId && (
-                  <DropdownMenuItem onSelect={() => eventBus.emit("share:start", {})}>
-                    <Share2 className="size-4" />
-                    {t("share.title", { ns: "chat", defaultValue: "Share chat" })}
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem variant="destructive" onSelect={() => void handleDeleteSession()}>
-                  <Trash2 className="size-4" />
-                  {t("recentChats.delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <IconButton
-              size="md"
-              label={t(toolView.collapsed ? "chat.expandTools" : "chat.collapseTools")}
-              aria-expanded={!toolView.collapsed}
-              icon={
-                <span className="relative">
-                  {toolView.collapsed ? <PanelRightOpen /> : <PanelRightClose />}
-                  {toolView.collapsed && toolView.unreadIds.length > 0 && (
-                    <span
-                      className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
-                      aria-label={t("chat.toolUpdated")}
-                    />
-                  )}
+                <span className="truncate text-ui text-foreground">
+                  {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
                 </span>
-              }
-              onClick={() => setToolsCollapsed(!toolView.collapsed)}
-            />
-          </SlotContent>
+                {sessionName?.trim() && pinnedAgentMention && (
+                  <span className="shrink-0 truncate text-aux text-muted-foreground">
+                    {pinnedAgentMention.appLabel}
+                  </span>
+                )}
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton
+                    size="md"
+                    label={t("nav.more")}
+                    icon={<MoreHorizontal />}
+                    className="text-muted-foreground hover:text-foreground"
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {chatSessionId && (
+                    <DropdownMenuItem onSelect={() => void handlePinSession()}>
+                      {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+                      {pinnedAt
+                        ? t("navbar.unpin", { ns: "chat" })
+                        : t("navbar.pin", { ns: "chat" })}
+                    </DropdownMenuItem>
+                  )}
+                  {chatSessionId && (
+                    <DropdownMenuItem onSelect={() => eventBus.emit("share:start", {})}>
+                      <Share2 className="size-4" />
+                      {t("share.title", { ns: "chat", defaultValue: "Share chat" })}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => void handleDeleteSession()}
+                  >
+                    <Trash2 className="size-4" />
+                    {t("recentChats.delete")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <ToolsToggle unread={toolView.unreadIds.length > 0} />
+            </SlotContent>
+          </ToolWorkspace>
         </WorkspaceContextRegistryContext.Provider>
       </WorkspaceStoreContext.Provider>
     </WorkspaceEventBusContext.Provider>

@@ -159,29 +159,32 @@ export function ToolWorkspace({
   // The Trace tab is view state, not layout: it lives here, never reaches
   // `use-free-cells`, and so is not saved with the session. Selecting it leaves
   // the store's `activeId` alone, so the app tab that was active before is
-  // still the one the store holds. Closing the Trace tab therefore restores it
-  // by clearing `traceSelected`; only the collapsed state needs a record.
+  // still the one the store holds, and closing the Trace tab restores it by
+  // clearing `traceSelected`.
   //
-  // Rules for the pane, all keyed on whether the Trace tab is selected when the
-  // trace ends:
-  // - Opening expands a collapsed pane, remembering that it was collapsed.
-  // - Ending while selected collapses the pane again if it was collapsed
-  //   before. Ending while an app tab is selected removes the Trace tab only,
-  //   because the user has moved on to the pane.
-  // - The pane's own collapse button just collapses. The tab stays, and
-  //   expanding shows it again.
+  // The pane's expansion is view state too. The store's `collapsed` is saved per
+  // session and written through the module-global active session, so a trace
+  // must never write it: a write could land on another session after a switch,
+  // and a reload would bring back a pane that nothing fills. Instead, a trace
+  // opened over a collapsed pane sets `traceHoldsOpen`, and the pane renders
+  // open while the tab exists. Ending the trace clears the flag, and the pane
+  // falls back to the session's stored state: a collapsed pane is collapsed
+  // again, an open pane stays open on its previous app tab.
+  // - The pane's collapse button clears the flag and collapses for real. The
+  //   tab stays, and expanding shows it again.
+  // - Choosing an app tab or adding an app expands the pane for real, through
+  //   the store, because the user has moved on to the pane. The flag is then
+  //   redundant and clears, so the app stays visible after the trace closes.
   const [trace, setTrace] = useState<{ owner: string; streaming: boolean } | null>(null);
   const [traceSelected, setTraceSelected] = useState(false);
+  const [traceHoldsOpen, setTraceHoldsOpen] = useState(false);
   const traceOwnerRef = useRef<string | null>(null);
   const traceCloseRef = useRef<(() => void) | null>(null);
-  const restoreCollapsedRef = useRef<boolean | null>(null);
-  const latest = useRef({ view, setCollapsed, traceSelected });
-  latest.current = { view, setCollapsed, traceSelected };
+  const latest = useRef({ view, setCollapsed });
+  latest.current = { view, setCollapsed };
 
   const reveal = useCallback(() => {
-    const { view: current, setCollapsed: collapse } = latest.current;
-    restoreCollapsedRef.current ??= current.collapsed;
-    if (current.collapsed) collapse(false);
+    if (latest.current.view.collapsed) setTraceHoldsOpen(true);
     setTraceSelected(true);
   }, []);
 
@@ -191,11 +194,8 @@ export function ToolWorkspace({
         if (traceOwnerRef.current !== owner) return;
         traceOwnerRef.current = null;
         traceCloseRef.current = null;
-        const wasCollapsed = restoreCollapsedRef.current;
-        restoreCollapsedRef.current = null;
-        const { setCollapsed: collapse, traceSelected: selected } = latest.current;
-        if (selected && wasCollapsed) collapse(true);
         setTraceSelected(false);
+        setTraceHoldsOpen(false);
         setTrace(null);
         return;
       }
@@ -220,15 +220,25 @@ export function ToolWorkspace({
     setTraceSelected(false);
   }, [view.activeId]);
 
+  // A real expansion supersedes the hold.
+  useEffect(() => {
+    if (!view.collapsed) setTraceHoldsOpen(false);
+  }, [view.collapsed]);
+
+  const open = !view.collapsed || (trace !== null && traceHoldsOpen);
+  const setPaneCollapsed = useCallback((collapsed: boolean) => {
+    setTraceHoldsOpen(false);
+    latest.current.setCollapsed(collapsed);
+  }, []);
+
   const traceActive = trace !== null && traceSelected;
   const traceHost = useMemo<ToolTraceHost>(
-    () => ({ outlet, reveal, set: setTraceTab }),
-    [outlet, reveal, setTraceTab],
+    () => ({ outlet, paneOpen: open, setPaneCollapsed, reveal, set: setTraceTab }),
+    [outlet, open, setPaneCollapsed, reveal, setTraceTab],
   );
   const sorted = [...placements].sort((a, b) => a.order - b.order);
   const hasTabs = sorted.length > 0 || trace !== null;
   const compact = width < COMPACT_WIDTH;
-  const open = !view.collapsed;
   const activeWidget = traceActive
     ? undefined
     : sorted.find((widget) => widget.id === view.activeId);
@@ -341,7 +351,7 @@ export function ToolWorkspace({
         label={t("chat.collapseTools")}
         aria-expanded={true}
         icon={<PanelRightClose />}
-        onClick={() => setCollapsed(true)}
+        onClick={() => setPaneCollapsed(true)}
       />
     </>
   );
@@ -503,16 +513,19 @@ export function ToolWorkspace({
                   {content(widget, resizing)}
                 </TabsContent>
               ))}
-            {/* Kept mounted while the trace exists, so its scroll position and
-              live following survive switching to an app tab. The trace's owner
-              portals its body into the outlet. */}
+            {/* Kept mounted while the trace exists, and hidden with `visibility`
+              rather than `display`, so its scroll position and live following
+              survive switching to an app tab. `display: none` would reset the
+              scroller. The panel is absolutely positioned, so hiding it takes
+              no layout space, and a hidden element takes no pointer events. The
+              trace's owner portals its body into the outlet. */}
             {trace && (
               <TabsContent
                 value={TRACE_TAB_ID}
                 forceMount
                 inert={!traceActive}
                 aria-hidden={!traceActive}
-                style={{ display: traceActive ? undefined : "none" }}
+                style={{ visibility: traceActive ? undefined : "hidden" }}
                 className="absolute inset-0 overflow-hidden"
               >
                 <div ref={setOutlet} className="flex h-full min-h-0 flex-col" />

@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
@@ -9,6 +9,7 @@ import { SlotOutlet, SlotProvider } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { ToolWorkspace } from "./ToolWorkspace";
 import { useToolTrace } from "./tool-trace";
+import * as store from "./use-free-cells";
 import type { ToolView, WidgetPlacement } from "./use-free-cells";
 
 rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: [] }) }));
@@ -214,6 +215,7 @@ function TraceOwner({ streaming = false, id = "chat" }: { streaming?: boolean; i
   useEffect(() => {
     set?.(id, open ? { streaming, onClose: () => setOpen(false) } : null);
   }, [set, id, open, streaming]);
+  useEffect(() => () => set?.(id, null), [set, id]);
   return (
     <>
       <button
@@ -298,7 +300,7 @@ describe("ToolWorkspace Trace tab", () => {
     expect(screen.queryByRole("textbox", { name: "Draft a" })).toBeNull();
   });
 
-  it("expands a collapsed pane to show the trace and collapses it again on close", async () => {
+  it("shows the trace over a collapsed pane without writing the pane state, and falls back on close", async () => {
     const user = userEvent.setup();
     const setCollapsed = rs.fn();
     render(
@@ -309,13 +311,13 @@ describe("ToolWorkspace Trace tab", () => {
     );
     expect(screen.queryByRole("tab")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Open trace chat" }));
-    expect(setCollapsed).toHaveBeenLastCalledWith(false);
     expect(screen.getByRole("tab", { name: "Trace" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("Trace body first")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Close Trace" }));
-    expect(setCollapsed).toHaveBeenLastCalledWith(true);
     expect(screen.queryByRole("tab")).toBeNull();
     expect(screen.queryByText("Trace body first")).toBeNull();
+    expect(setCollapsed).not.toHaveBeenCalled();
   });
 
   it("returns to the app tab that was active before the trace, leaving the pane open", async () => {
@@ -391,13 +393,44 @@ describe("ToolWorkspace Trace tab", () => {
 
   it("collapsing the pane keeps the tab, and expanding shows it again", async () => {
     const user = userEvent.setup();
-    render(<TraceHarness />);
+    const setCollapsed = rs.fn();
+    render(<TraceHarness setCollapsed={setCollapsed} />);
     await user.click(screen.getByRole("button", { name: "Open trace chat" }));
     await user.click(screen.getByRole("button", { name: "Hide apps" }));
+    expect(setCollapsed).toHaveBeenCalledWith(true);
     expect(screen.queryByRole("tabpanel")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Expand pane" }));
     expect(screen.getByRole("tab", { name: "Trace" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("Trace body first")).toBeTruthy();
+  });
+
+  it("collapses a pane the trace held open when its own collapse button is used", async () => {
+    const user = userEvent.setup();
+    const setCollapsed = rs.fn();
+    render(
+      <TraceHarness
+        initial={{ activeId: "a", collapsed: true, unreadIds: [] }}
+        setCollapsed={setCollapsed}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Open trace chat" }));
+    await user.click(screen.getByRole("button", { name: "Hide apps" }));
+    expect(screen.queryByRole("tabpanel")).toBeNull();
+    expect(setCollapsed).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps the hidden Trace panel's scroller out of display:none", async () => {
+    const user = userEvent.setup();
+    render(<TraceHarness />);
+    await user.click(screen.getByRole("button", { name: "Open trace chat" }));
+    const panel = screen.getByText("Trace body first").closest('[role="tabpanel"]') as HTMLElement;
+    expect(panel.style.visibility).toBe("");
+
+    await user.click(screen.getByRole("tab", { name: "desktop" }));
+    expect(panel.style.visibility).toBe("hidden");
+    expect(panel.style.display).toBe("");
+    expect(panel.hasAttribute("inert")).toBe(true);
     expect(screen.getByText("Trace body first")).toBeTruthy();
   });
 
@@ -410,7 +443,7 @@ describe("ToolWorkspace Trace tab", () => {
     expect(screen.queryByLabelText("Live")).toBeNull();
   });
 
-  it("does not offer the empty apps state for a trace alone, and collapses on close", async () => {
+  it("does not offer the empty apps state for a trace alone, and falls back to collapsed on close", async () => {
     const user = userEvent.setup();
     const setCollapsed = rs.fn();
     render(
@@ -426,10 +459,13 @@ describe("ToolWorkspace Trace tab", () => {
     expect(screen.getByText("Trace body first")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Close Trace" }));
-    expect(setCollapsed).toHaveBeenLastCalledWith(true);
+    expect(setCollapsed).not.toHaveBeenCalled();
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "No apps open" })).toBeNull();
+    expect(screen.queryByRole("separator")).toBeNull();
   });
 
-  it("leaves the pane open when the user is on an app tab as the trace ends", async () => {
+  it("keeps the pane open for an app the user chose while the trace held it open", async () => {
     const user = userEvent.setup();
     const setCollapsed = rs.fn();
     render(
@@ -440,10 +476,10 @@ describe("ToolWorkspace Trace tab", () => {
     );
     await user.click(screen.getByRole("button", { name: "Open trace chat" }));
     await user.click(screen.getByRole("tab", { name: "projects" }));
-    setCollapsed.mockClear();
     await user.click(screen.getByRole("button", { name: "Close Trace" }));
 
     expect(setCollapsed).not.toHaveBeenCalled();
+    expect(screen.getByRole("separator")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "projects" }).getAttribute("aria-selected")).toBe(
       "true",
     );
@@ -487,5 +523,105 @@ describe("ToolWorkspace Trace tab", () => {
 
     const end = screen.getByTestId("titlebar-end");
     expect(end.querySelector('[role="tab"]')?.textContent).toBe("Trace");
+  });
+});
+
+// The same pane driven by the real, session-scoped tool view store.
+describe("ToolWorkspace Trace tab against the saved tool view", () => {
+  function StoreWorkspace({ owner = true }: { owner?: boolean }) {
+    const cells = store.useFreeCells();
+    return (
+      <ToolWorkspace
+        placements={cells.placements}
+        view={cells.toolView}
+        selectTool={cells.selectTool}
+        setCollapsed={cells.setToolsCollapsed}
+        addWidget={cells.addWidget}
+        removeWidget={cells.removeWidget}
+        label={(widget) => widget.type}
+        icon={() => null}
+        content={(widget) => <ToolContent id={widget.id} />}
+        fullHref={() => null}
+      >
+        {owner && <TraceOwner />}
+      </ToolWorkspace>
+    );
+  }
+
+  const savedViews = () =>
+    Object.fromEntries(
+      Object.keys(localStorage)
+        .filter((key) => key.startsWith("rome:tool-view:"))
+        .map((key) => [key, localStorage.getItem(key)]),
+    );
+
+  beforeEach(() => {
+    rs.stubGlobal("fetch", rs.fn().mockResolvedValue(new Response(null, { status: 200 })));
+    store.setActiveSession("reset");
+    store.setActiveSession(null);
+    localStorage.clear();
+  });
+
+  it("never writes the pane's saved state when a trace opens over a collapsed pane", async () => {
+    const user = userEvent.setup();
+    store.setActiveSession("A");
+    render(<StoreWorkspace />);
+    await user.click(screen.getByRole("button", { name: "Open trace chat" }));
+
+    expect(screen.getByRole("tab", { name: "Trace" })).toBeTruthy();
+    expect(screen.getByText("Trace body first")).toBeTruthy();
+    expect(savedViews()).toEqual({});
+  });
+
+  it("returns to collapsed with nothing persisted when the trace closes", async () => {
+    const user = userEvent.setup();
+    store.setActiveSession("A");
+    render(<StoreWorkspace />);
+    await user.click(screen.getByRole("button", { name: "Open trace chat" }));
+    await user.click(screen.getByRole("button", { name: "Close Trace" }));
+
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.queryByRole("separator")).toBeNull();
+    expect(savedViews()).toEqual({});
+  });
+
+  it("leaves another session's expanded pane alone when the old chat unregisters after a switch", async () => {
+    const user = userEvent.setup();
+    store.setActiveSession("B");
+    act(() => store.setToolsCollapsed(false));
+    const before = savedViews();
+    expect(JSON.parse(before["rome:tool-view:B"] as string).collapsed).toBe(false);
+
+    store.setActiveSession("A");
+    const { rerender } = render(<StoreWorkspace />);
+    await user.click(screen.getByRole("button", { name: "Open trace chat" }));
+    // FreeGrid switches the store first; the old chat's cleanup runs after.
+    act(() => store.setActiveSession("B"));
+    rerender(<StoreWorkspace owner={false} />);
+
+    expect(screen.queryByRole("tab", { name: "Trace" })).toBeNull();
+    expect(screen.getByRole("separator")).toBeTruthy();
+    expect(savedViews()).toEqual(before);
+  });
+
+  it("saves the pane open when the user picks an app tab while the trace holds it open", async () => {
+    const user = userEvent.setup();
+    store.setActiveSession("A");
+    act(() => {
+      store.autoPlaceProjects(true);
+      store.setToolsCollapsed(true);
+    });
+    expect(JSON.parse(savedViews()["rome:tool-view:A"] as string).collapsed).toBe(true);
+    render(<StoreWorkspace />);
+    await user.click(screen.getByRole("button", { name: "Open trace chat" }));
+    expect(JSON.parse(savedViews()["rome:tool-view:A"] as string).collapsed).toBe(true);
+
+    await user.click(screen.getByRole("tab", { name: "projects" }));
+    expect(JSON.parse(savedViews()["rome:tool-view:A"] as string).collapsed).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Close Trace" }));
+    expect(screen.getByRole("separator")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "projects" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
   });
 });

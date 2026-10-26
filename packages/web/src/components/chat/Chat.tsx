@@ -312,9 +312,9 @@ export function Chat({
   const presentationMode = usePresentationMode();
   // `null` outside the workspace shell; sends simply skip injection.
   const workspaceContextRegistry = useWorkspaceContextRegistry();
-  const { toolView, setToolsCollapsed } = useFreeCells();
-  // The tool pane's Trace tab. Null outside a workspace, where the trace falls
-  // back to the standalone overlay.
+  const { toolView } = useFreeCells();
+  // The tool pane: its Trace tab shows this chat's trace, and its open state
+  // includes a pane a trace holds open.
   const toolTrace = useToolTrace();
   // Multiple sessions are in scope at once. Pick the right one deliberately:
   //   • mainSessionId  — the session THIS <Chat> owns: the prop, or the one its
@@ -1835,19 +1835,19 @@ export function Chat({
   }, [floorSessionId, runningTurnId]);
 
   // Open the live trace drawer on demand (e.g. via the trace trigger button).
-  const revealTrace = toolTrace?.reveal;
+  const revealTrace = toolTrace.reveal;
   const openLiveTraceDrawer = useCallback(() => {
     const target = buildLiveTraceTarget();
     if (!target) return;
     liveDismissedRef.current = null;
     setTraceDrawerTarget(target);
-    revealTrace?.();
+    revealTrace();
   }, [buildLiveTraceTarget, revealTrace]);
 
   const openStoredTraceDrawer = useCallback(
     (target: TraceDrawerTarget) => {
       setTraceDrawerTarget(target);
-      revealTrace?.();
+      revealTrace();
     },
     [revealTrace],
   );
@@ -1865,7 +1865,7 @@ export function Chat({
         },
         dumpHref: `/api/sessions/${encodeURIComponent(node.sessionId)}/turns/${encodeURIComponent(node.turnId)}/trace.json`,
       });
-      revealTrace?.();
+      revealTrace();
     },
     [revealTrace],
   );
@@ -1896,18 +1896,18 @@ export function Chat({
   // button calls back into `closeTraceDrawer`, so closing there and closing
   // from here end the same way.
   const traceOwner = useId();
-  const setToolTrace = toolTrace?.set;
+  const setToolTrace = toolTrace.set;
   const traceOpen = traceDrawerTarget !== null;
   const traceStreaming = traceDrawerTarget?.kind === "live" && traceDrawerTarget.streaming;
   const closeTraceRef = useRef(closeTraceDrawer);
   closeTraceRef.current = closeTraceDrawer;
   useEffect(() => {
-    setToolTrace?.(
+    setToolTrace(
       traceOwner,
       traceOpen ? { streaming: traceStreaming, onClose: () => closeTraceRef.current() } : null,
     );
   }, [setToolTrace, traceOwner, traceOpen, traceStreaming]);
-  useEffect(() => () => setToolTrace?.(traceOwner, null), [setToolTrace, traceOwner]);
+  useEffect(() => () => setToolTrace(traceOwner, null), [setToolTrace, traceOwner]);
 
   const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
 
@@ -1970,12 +1970,12 @@ export function Chat({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-      {toolView.collapsed && (
+      {!toolTrace.paneOpen && (
         <IconButton
           size="sm"
           data-coach="add-widget"
           aria-expanded={false}
-          onClick={() => setToolsCollapsed(false)}
+          onClick={() => toolTrace.setPaneCollapsed(false)}
           label={t("chat.expandTools", { ns: "common" })}
           icon={
             <span className="relative">
@@ -2234,7 +2234,7 @@ export function Chat({
         <TraceDrawer
           target={traceDrawerTarget}
           onClose={closeTraceDrawer}
-          outlet={toolTrace ? toolTrace.outlet : undefined}
+          outlet={toolTrace.outlet}
           renderInlineBlock={(block, key) =>
             renderSingleEntry(block, key, {
               onApprovalResolved: refreshActiveSession,
