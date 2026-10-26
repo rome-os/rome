@@ -26,7 +26,7 @@ rs.mock("../../lib/provider-token-files.js", () => ({
 
 import { SetupManager } from "../../connections/setup/manager.js";
 import type { SetupFn } from "../../connections/setup/types.js";
-import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makePasteTalk } from "../../connections/test-fixtures.js";
 import {
@@ -86,7 +86,7 @@ function fakePersonRepo(): PersonMappingRepository {
 function harness() {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
   const fixture = makePasteTalk();
   fixture.descriptor.connectionKind = "fake-telegram";
   fixture.descriptor.auth.setup = setupFn;
@@ -203,7 +203,7 @@ describe("POST /setups/:cid/input", () => {
     // Terminal conferral minted the connection and imported the credential.
     const conn = registry.find("fake-telegram")[0];
     expect(conn).toBeDefined();
-    const grant = await registry.getLedger().getGrant(conn.id);
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
   });
 
@@ -260,7 +260,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
   function feishuHarness(overrides: Parameters<typeof feishuDeps>[0] = {}) {
     const { db, close } = createTestDb();
     openDbs.push(close);
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const personRepo = {
       findByChannelUser: async () => null,
       findByBondLevel: async () => [{ id: "guardian", channelMappings: [] }],
@@ -344,7 +344,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
 
     const conn = registry.find("feishu")[0];
     expect(conn).toBeDefined();
-    const grant = await registry.getLedger().getGrant(conn.id);
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.profile).toEqual({ appId: "cli_abc", domain: "lark", appType: "manual" });
     expect(personRepo.writeChannelMapping).not.toHaveBeenCalled();
@@ -390,7 +390,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("done");
     });
     const conn = registry.find("feishu")[0];
-    const grant = await registry.getLedger().getGrant(conn.id);
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.profile).toEqual({ appId: "cli_minted", domain: "lark", appType: "agent_ready" });
   });
@@ -443,7 +443,7 @@ describe("addressed-connection targeting (#3)", () => {
 
     // Same connection got authorized; no second connection was minted.
     expect(registry.find("fake-telegram")).toHaveLength(1);
-    const grant = await registry.getLedger().getGrant(conn.id);
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
   });
 
@@ -456,7 +456,7 @@ describe("addressed-connection targeting (#3)", () => {
 
     const connected = registry.find("fake-telegram").filter((conn) => conn.id !== leftover.id);
     expect(connected).toHaveLength(1);
-    expect((await registry.getLedger().getGrant(leftover.id))?.state).toBe("unauthorized");
+    expect((await registry.grantOf(leftover.id))?.state).toBe("unauthorized");
   });
 
   it("refuses a setup into an account a failed removal left behind, and removes it", async () => {
@@ -499,7 +499,7 @@ describe("teardown serialization (#4)", () => {
     const first = await start(app);
     await submitInput(app, first.json.cid, "good");
     const conn = registry.find("fake-telegram")[0];
-    expect((await registry.getLedger().getGrant(conn.id))?.state).toBe("authorized");
+    expect((await registry.grantOf(conn.id))?.state).toBe("authorized");
 
     // A second setup on the same connection, left in-flight (awaiting input).
     const second = await start(app, conn.id);
@@ -517,7 +517,7 @@ describe("teardown serialization (#4)", () => {
     expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("cancelled");
     // ...and the account, which held no other grant, is gone.
     expect(registry.find("fake-telegram")).toEqual([]);
-    expect(await registry.getLedger().getGrant(conn.id)).toBeNull();
+    expect(await registry.grantOf(conn.id)).toBeNull();
 
     // Completing the cancelled setup is a no-op (409) and never re-imports.
     const late = await submitInput(app, second.json.cid, "good");
@@ -552,7 +552,7 @@ describe("another account", () => {
     expect(accounts).toHaveLength(2);
     const minted = accounts.find((account) => account.id !== existing.id);
     expect(state.conferral?.connectionId).toBe(minted?.id);
-    expect((await registry.getLedger().getGrant(existing.id))?.state).toBe("authorized");
+    expect((await registry.grantOf(existing.id))?.state).toBe("authorized");
   });
 
   it("leaves no account behind when the new account's setup is cancelled", async () => {
@@ -598,7 +598,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
   function oauthHarness(fakes: OAuthFakes = {}) {
     const { db, close } = createTestDb();
     openDbs.push(close);
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     registry.register(
       makeOAuthProviderDescriptor("github", {
         beginRedirect: fakes.beginRedirect ?? (async () => AUTHORIZE_URL),
@@ -664,7 +664,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     await pollDone(app, json.cid);
     const conn = registry.find("github")[0];
     expect(conn).toBeDefined();
-    const grant = await registry.getLedger().getGrant(conn.id);
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     // Stored as the inline-custody envelope (`toPersisted`).
     expect(

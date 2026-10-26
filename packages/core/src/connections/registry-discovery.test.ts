@@ -7,10 +7,11 @@
 //
 // The suite runs against the drizzle-backed ledger (fresh test db per test).
 
+import { NO_GRANT } from "./grant.js";
 import { describe, it, expect } from "@rstest/core";
 import { sendThrough } from "../channels/connection-ports.js";
 import { ConnectionRegistry } from "./registry.js";
-import { DrizzleGrantLedger } from "./ledger-db.js";
+import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { createTestDb } from "../test/helpers.js";
 import type { ChatId } from "@rome-os/app-runtime";
 import {
@@ -19,19 +20,19 @@ import {
   makeInboundMessage,
   CredentialRejected,
 } from "./test-fixtures.js";
-import type { GrantLedger } from "./ledger.js";
+import type { ConnectionsRepository } from "./repository.js";
 import type { Connection } from "./types.js";
 
 // Ledger factory — a fresh drizzle-backed ledger per test
 
-function makeLedger(): GrantLedger {
-  return new DrizzleGrantLedger(createTestDb().db);
+function makeLedger(): ConnectionsRepository {
+  return new DrizzleConnectionsRepository(createTestDb().db);
 }
 
 // Helpers
 
-function makeRegistry(ledger: GrantLedger): ConnectionRegistry {
-  return new ConnectionRegistry({ ledger });
+function makeRegistry(ledger: ConnectionsRepository): ConnectionRegistry {
+  return new ConnectionRegistry({ repository: ledger });
 }
 
 // Scenario 1 — talk unlocked by its grant; onUnlocked fires; talk roundtrip
@@ -321,7 +322,7 @@ describe("scenario 14: ledger invariants", () => {
 
     const conn = await reg.connect("fake-discord");
 
-    const botRow = await ledger.getGrant(conn.id);
+    const botRow = await ledger.grantOf(conn.id);
 
     expect(botRow).not.toBeNull();
     expect(botRow!.state).toBe("unauthorized");
@@ -335,7 +336,7 @@ describe("scenario 14: ledger invariants", () => {
 
     const conn = await reg.connect("fake-discord");
 
-    const botRow = await ledger.getGrant(conn.id);
+    const botRow = await ledger.grantOf(conn.id);
     expect(botRow!.credential).toBeUndefined();
   });
 
@@ -348,7 +349,7 @@ describe("scenario 14: ledger invariants", () => {
     const conn = await reg.connect("fake-discord");
     await reg.confer(conn.connectionKind, conn.id, "bot", botCredential());
 
-    const botRow = await ledger.getGrant(conn.id);
+    const botRow = await ledger.grantOf(conn.id);
     expect(botRow!.state).toBe("authorized");
     expect(botRow!.credential).toBeDefined();
   });
@@ -362,12 +363,12 @@ describe("scenario 14: ledger invariants", () => {
     const conn = await reg.connect("fake-discord");
 
     // Verify grant rows exist first.
-    expect(await ledger.getGrant(conn.id)).not.toBeNull();
+    expect(await ledger.grantOf(conn.id)).not.toBeNull();
 
     await reg.remove(conn.id);
 
     // Grant row must be gone after deletion.
-    const afterBot = await ledger.getGrant(conn.id);
+    const afterBot = await ledger.grantOf(conn.id);
     expect(afterBot).toBeNull();
   });
 });
@@ -452,12 +453,15 @@ describe("scenario 18: load() with unregistered service rows", () => {
     const ledger = makeLedger();
 
     // Manually insert a connection for a service that won't be registered.
-    await ledger.createConnection({
-      id: "orphan-conn-1",
-      connectionKind: "ghost-service",
-      label: "ghost",
-      createdAt: new Date(),
-    });
+    ledger.transaction((tx) =>
+      ledger.save(tx, {
+        id: "orphan-conn-1",
+        connectionKind: "ghost-service",
+        label: "ghost",
+        createdAt: new Date(),
+        grant: NO_GRANT,
+      }),
+    );
 
     const reg = makeRegistry(ledger);
     // Register a DIFFERENT service, not "ghost-service".
@@ -472,12 +476,15 @@ describe("scenario 18: load() with unregistered service rows", () => {
     const ledger = makeLedger();
 
     // Insert an orphan.
-    await ledger.createConnection({
-      id: "orphan-conn-2",
-      connectionKind: "ghost-service-2",
-      label: "ghost2",
-      createdAt: new Date(),
-    });
+    ledger.transaction((tx) =>
+      ledger.save(tx, {
+        id: "orphan-conn-2",
+        connectionKind: "ghost-service-2",
+        label: "ghost2",
+        createdAt: new Date(),
+        grant: NO_GRANT,
+      }),
+    );
 
     const reg = makeRegistry(ledger);
     const { descriptor, validCredential } = makePasteTalk();
@@ -503,12 +510,15 @@ describe("scenario 18: load() with unregistered service rows", () => {
   it("all() does not include orphaned unknown-service connections after load", async () => {
     const ledger = makeLedger();
 
-    await ledger.createConnection({
-      id: "orphan-conn-3",
-      connectionKind: "totally-unknown",
-      label: "unknown",
-      createdAt: new Date(),
-    });
+    ledger.transaction((tx) =>
+      ledger.save(tx, {
+        id: "orphan-conn-3",
+        connectionKind: "totally-unknown",
+        label: "unknown",
+        createdAt: new Date(),
+        grant: NO_GRANT,
+      }),
+    );
 
     const reg = makeRegistry(ledger);
     await reg.load();

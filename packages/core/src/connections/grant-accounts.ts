@@ -10,34 +10,34 @@ const log = createLogger("connections");
  * Record the account each held grant reaches, for the boot pass. A grant
  * conferred before grants named their account holds a profile and no account.
  * The oldest connection keeps an account two connections reach, and the other
- * grant is logged and left without one, as is a grant the ledger refuses.
+ * grant is logged and left without one, as is a grant the store refuses.
  * Answers how many grants it recorded.
  */
 export async function recordGrantAccounts(
-  registry: Pick<ConnectionRegistry, "getDescriptor" | "getLedger">,
+  registry: Pick<ConnectionRegistry, "getDescriptor" | "getRepository">,
 ): Promise<number> {
-  const ledger = registry.getLedger();
-  const connections = (await ledger.listConnections()).sort(
-    (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
-  );
+  const store = registry.getRepository();
   let recorded = 0;
-  for (const conn of connections) {
+  for (const conn of await store.all()) {
     const descriptor = registry.getDescriptor(conn.connectionKind);
     if (!descriptor) continue;
-    const grant = await ledger.getGrant(conn.id);
-    if (!grant || grant.account || grant.state === "unauthorized") continue;
+    const grant = conn.grant;
+    if (grant.account || grant.state === "unauthorized") continue;
     const account = reachedAccount(descriptor, grant);
     if (!account) continue;
     try {
-      const other = await ledger.connectionReaching(account, conn.id);
+      const other = await store.reaching(account, conn.id);
       if (other) {
         log.warn("a grant reaches an account another connection reaches", { id: conn.id, other });
         continue;
       }
-      await ledger.updateGrant(conn.id, (current) => ({ ...current, account }));
+      await store.update(conn.id, (current) => ({
+        ...current,
+        grant: { ...current.grant, account },
+      }));
       recorded++;
     } catch (error) {
-      // A row the ledger refuses must not keep Rome from starting.
+      // A grant the store refuses must not keep Rome from starting.
       log.warn("could not record the account a grant reaches", { id: conn.id, error });
     }
   }

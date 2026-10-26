@@ -2,14 +2,14 @@
 //
 // Covers:
 //   Scenario 11 — Subscription gating (both directions)
-//   Scenario 12 — Rehydration on DrizzleGrantLedger
+//   Scenario 12 — Rehydration on DrizzleConnectionsRepository
 //   Scenario 13 — kit.persist write-through
 //   Extra: remove(id) stops instances and cascades the connection's grants
 //   Extra: externalCustody — ledger row kind "external", no secret, build
 //          receives resolver-produced material; also after rehydration.
 
 import { describe, it, expect } from "@rstest/core";
-import { DrizzleGrantLedger } from "./ledger-db.js";
+import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import { createTestDb } from "../test/helpers.js";
 import {
@@ -20,13 +20,13 @@ import {
   makeExternalCustody,
   makeRecordingSleep,
 } from "./test-fixtures.js";
-import type { GrantLedger } from "./ledger.js";
+import type { ConnectionsRepository } from "./repository.js";
 
 // Ledger factory — a fresh drizzle-backed ledger per test
 
-function makeLedger(): { ledger: GrantLedger; close: () => void } {
+function makeLedger(): { ledger: ConnectionsRepository; close: () => void } {
   const { db, close } = createTestDb();
-  return { ledger: new DrizzleGrantLedger(db), close };
+  return { ledger: new DrizzleConnectionsRepository(db), close };
 }
 
 // Scenario 11 — Subscription gating (both directions)
@@ -39,7 +39,10 @@ describe("Scenario 11 — subscription gating", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, watcherFactory, userCredential } = makeGatedWatch();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
       await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
@@ -57,7 +60,10 @@ describe("Scenario 11 — subscription gating", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, watcherFactory, userCredential } = makeGatedWatch();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
       await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
@@ -80,7 +86,10 @@ describe("Scenario 11 — subscription gating", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, watcherFactory, userCredential } = makeGatedWatch();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
       await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
@@ -106,7 +115,10 @@ describe("Scenario 11 — subscription gating", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, watcherFactory, userCredential } = makeGatedWatch();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
       await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
@@ -131,7 +143,10 @@ describe("Scenario 11 — subscription gating", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, userCredential } = makeGatedWatch();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
       await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
@@ -156,8 +171,8 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       const { descriptor: desc, talkerFactory: tf1, validCredential } = makePasteTalk();
 
       // Registry A: connect + import
-      const ledgerA = new DrizzleGrantLedger(db);
-      const registryA = new ConnectionRegistry({ ledger: ledgerA });
+      const ledgerA = new DrizzleConnectionsRepository(db);
+      const registryA = new ConnectionRegistry({ repository: ledgerA });
       registryA.register(desc);
       const connA = await registryA.connect("fake-telegram", "my-telegram");
       await registryA.confer(connA.connectionKind, connA.id, "bot", validCredential());
@@ -165,9 +180,9 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       const connAId = connA.id;
 
       // Registry B: fresh registry over same db, same descriptor
-      const ledgerB = new DrizzleGrantLedger(db);
+      const ledgerB = new DrizzleConnectionsRepository(db);
       const { descriptor: desc2, talkerFactory: tf2 } = makePasteTalk();
-      const registryB = new ConnectionRegistry({ ledger: ledgerB });
+      const registryB = new ConnectionRegistry({ repository: ledgerB });
       registryB.register(desc2);
       await registryB.load();
 
@@ -186,7 +201,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
     }
   });
 
-  // Rehydration detects expiry at load and renews. DrizzleGrantLedger reconstitutes
+  // Rehydration detects expiry at load and renews. DrizzleConnectionsRepository reconstitutes
   // PersistedCredential.expiresAt back into a Date (the credential column is JSON, so
   // SQLite hands back an ISO string) so isExpired() sees the same shape as in-memory.
   it("expired credential at load: renewable scheme → renewed at load", async () => {
@@ -195,8 +210,8 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       // Build a descriptor with a renewable scheme (1 success)
       const { descriptor, actorFactory } = makeRenewableAct({ successCount: 1 });
 
-      const ledgerA = new DrizzleGrantLedger(db);
-      const registryA = new ConnectionRegistry({ ledger: ledgerA });
+      const ledgerA = new DrizzleConnectionsRepository(db);
+      const registryA = new ConnectionRegistry({ repository: ledgerA });
       registryA.register(descriptor);
       const connA = await registryA.connect("fake-github");
 
@@ -209,7 +224,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       const connAId = connA.id;
 
       // Registry B: load — should renew expired credential at load
-      const ledgerB = new DrizzleGrantLedger(db);
+      const ledgerB = new DrizzleConnectionsRepository(db);
       const {
         descriptor: desc2,
         actorFactory: af2,
@@ -217,7 +232,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       } = makeRenewableAct({
         successCount: 1,
       });
-      const registryB = new ConnectionRegistry({ ledger: ledgerB });
+      const registryB = new ConnectionRegistry({ repository: ledgerB });
       registryB.register(desc2);
       await registryB.load();
 
@@ -237,15 +252,15 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
   });
 
   // A "re-confer" scheme can't renew a past-expiry credential at load, so it degrades —
-  // exercising the same DrizzleGrantLedger date reconstitution as the renewable case above.
+  // exercising the same DrizzleConnectionsRepository date reconstitution as the renewable case above.
   it("expired credential at load: re-confer scheme → degraded at load", async () => {
     const { db, close } = createTestDb();
     try {
       // renewableAct with successCount=0 → always re-confer on renew
       const { descriptor } = makeRenewableAct({ successCount: 0 });
 
-      const ledgerA = new DrizzleGrantLedger(db);
-      const registryA = new ConnectionRegistry({ ledger: ledgerA });
+      const ledgerA = new DrizzleConnectionsRepository(db);
+      const registryA = new ConnectionRegistry({ repository: ledgerA });
       registryA.register(descriptor);
       const connA = await registryA.connect("fake-github");
 
@@ -258,9 +273,9 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       const connAId = connA.id;
 
       // Registry B: load — renew returns "re-confer" → degraded
-      const ledgerB = new DrizzleGrantLedger(db);
+      const ledgerB = new DrizzleConnectionsRepository(db);
       const { descriptor: desc2 } = makeRenewableAct({ successCount: 0 });
-      const registryB = new ConnectionRegistry({ ledger: ledgerB });
+      const registryB = new ConnectionRegistry({ repository: ledgerB });
       registryB.register(desc2);
       await registryB.load();
 
@@ -278,14 +293,14 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
     try {
       // Registry A: create a connection for "fake-github" service
       const { descriptor } = makeRenewableAct();
-      const ledgerA = new DrizzleGrantLedger(db);
-      const registryA = new ConnectionRegistry({ ledger: ledgerA });
+      const ledgerA = new DrizzleConnectionsRepository(db);
+      const registryA = new ConnectionRegistry({ repository: ledgerA });
       registryA.register(descriptor);
       await registryA.connect("fake-github");
 
       // Registry B: has NO registered descriptor for "fake-github"
-      const ledgerB = new DrizzleGrantLedger(db);
-      const registryB = new ConnectionRegistry({ ledger: ledgerB });
+      const ledgerB = new DrizzleConnectionsRepository(db);
+      const registryB = new ConnectionRegistry({ repository: ledgerB });
       // Don't register any descriptor
 
       // Should not throw
@@ -305,7 +320,10 @@ describe("Scenario 13 — kit.persist write-through", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, talkerFactory, validCredential } = makePasteTalk();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-telegram");
       await registry.confer(conn.connectionKind, conn.id, "bot", validCredential());
@@ -343,7 +361,10 @@ describe("Scenario 13 — kit.persist write-through", () => {
       // Need a fresh service name since "fake-telegram" is already registered
       const desc2patched = { ...desc2, connectionKind: "fake-telegram-persist" };
 
-      const registry2 = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry2 = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry2.register(desc2patched);
       const conn2 = await registry2.connect("fake-telegram-persist");
       await registry2.confer(conn2.connectionKind, conn2.id, "bot", vc2());
@@ -365,7 +386,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       expect(unlocksBefore.length).toBe(unlockCountBefore);
 
       // Ledger was updated: the grant's credential has the new material
-      const grantRow = await ledger.getGrant(conn2.id);
+      const grantRow = await ledger.grantOf(conn2.id);
       expect(grantRow).not.toBeNull();
       expect(grantRow!.credential).not.toBeNull();
       expect(grantRow!.credential!.material).toEqual({
@@ -400,7 +421,10 @@ describe("Scenario 13 — kit.persist write-through", () => {
         },
       };
 
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-telegram");
       await registry.confer(conn.connectionKind, conn.id, "bot", validCredential());
@@ -438,7 +462,10 @@ describe("remove(id) — teardown and cascade", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, talkerFactory, validCredential } = makePasteTalk();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-telegram");
       await registry.confer(conn.connectionKind, conn.id, "bot", validCredential());
@@ -463,7 +490,10 @@ describe("remove(id) — teardown and cascade", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, watcherFactory, userCredential } = makeGatedWatch();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github-watch");
       await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
@@ -487,7 +517,7 @@ describe("remove(id) — teardown and cascade", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, actorFactory, userCredential } = makeRenewableAct();
-      const registry = new ConnectionRegistry({ ledger });
+      const registry = new ConnectionRegistry({ repository: ledger });
       registry.register(descriptor);
       const conn = await registry.connect("fake-github");
       await registry.confer(conn.connectionKind, conn.id, "user", userCredential());
@@ -510,7 +540,7 @@ describe("stopAll() awaits each transport drain", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, talkerFactory, validCredential } = makePasteTalk();
-      const registry = new ConnectionRegistry({ ledger });
+      const registry = new ConnectionRegistry({ repository: ledger });
       registry.register(descriptor);
       const conn = await registry.connect("fake-telegram");
       await registry.confer(conn.connectionKind, conn.id, "bot", validCredential());
@@ -535,7 +565,7 @@ describe("stopAll() awaits each transport drain", () => {
     const { ledger, close } = makeLedger();
     try {
       const fixture = makePasteTalk({ asyncStop: true });
-      const registry = new ConnectionRegistry({ ledger });
+      const registry = new ConnectionRegistry({ repository: ledger });
       registry.register(fixture.descriptor);
       const conn = await registry.connect("fake-telegram");
       await registry.confer(conn.connectionKind, conn.id, "bot", fixture.validCredential());
@@ -560,14 +590,17 @@ describe("external custody", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, externalCredential } = makeExternalCustody();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-composio");
 
       // Import an external credential (function-valued material)
       await registry.confer(conn.connectionKind, conn.id, "account", externalCredential());
 
-      const grantRow = await ledger.getGrant(conn.id);
+      const grantRow = await ledger.grantOf(conn.id);
       expect(grantRow).not.toBeNull();
       expect(grantRow!.credential).not.toBeNull();
       expect(grantRow!.credential!.material.kind).toBe("external");
@@ -592,7 +625,10 @@ describe("external custody", () => {
         externalCredential,
         resolveExternalCallCount,
       } = makeExternalCustody();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-composio");
 
@@ -638,25 +674,25 @@ describe("external custody", () => {
       } = makeExternalCustody();
 
       // Registry A: connect + import external cred
-      const ledgerA = new DrizzleGrantLedger(db);
-      const registryA = new ConnectionRegistry({ ledger: ledgerA });
+      const ledgerA = new DrizzleConnectionsRepository(db);
+      const registryA = new ConnectionRegistry({ repository: ledgerA });
       registryA.register(descriptor);
       const connA = await registryA.connect("fake-composio");
       await registryA.confer(connA.connectionKind, connA.id, "account", externalCredential());
       const connAId = connA.id;
 
-      const rowBeforeReload = await ledgerA.getGrant(connAId);
+      const rowBeforeReload = await ledgerA.grantOf(connAId);
       expect(rowBeforeReload!.credential!.material.kind).toBe("external");
 
       // Registry B: rehydrate
-      const ledgerB = new DrizzleGrantLedger(db);
+      const ledgerB = new DrizzleConnectionsRepository(db);
       const {
         descriptor: desc2,
         actorFactory: af2,
         externalMaterial: em2,
         resolveExternalCallCount: rc2,
       } = makeExternalCustody();
-      const registryB = new ConnectionRegistry({ ledger: ledgerB });
+      const registryB = new ConnectionRegistry({ repository: ledgerB });
       registryB.register(desc2);
       await registryB.load();
 
@@ -706,7 +742,10 @@ describe("custody follows grant state", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, custody, userCredential } = makeCustodyGrant();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-oauth-provider");
       // No custody before any grant is authorized.
@@ -733,7 +772,10 @@ describe("custody follows grant state", () => {
     const { ledger, close } = makeLedger();
     try {
       const { descriptor, custody, userCredential } = makeCustodyGrant();
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-oauth-provider");
       await registry.confer(conn.connectionKind, conn.id, "user", userCredential(), {
@@ -754,9 +796,9 @@ describe("custody follows grant state", () => {
     const { db, close } = createTestDb();
     try {
       const { descriptor, userScheme } = makeCustodyGrant({ successCount: 0 });
-      const ledgerA = new DrizzleGrantLedger(db);
+      const ledgerA = new DrizzleConnectionsRepository(db);
       const registryA = new ConnectionRegistry({
-        ledger: ledgerA,
+        repository: ledgerA,
         backoff: { baseMs: 1, maxMs: 1 },
       });
       registryA.register(descriptor);
@@ -770,7 +812,7 @@ describe("custody follows grant state", () => {
       // Fresh registry over the same ledger: load() finds the expired credential.
       const { descriptor: desc2, custody: custody2 } = makeCustodyGrant({ successCount: 0 });
       const registryB = new ConnectionRegistry({
-        ledger: new DrizzleGrantLedger(db),
+        repository: new DrizzleConnectionsRepository(db),
         backoff: { baseMs: 1, maxMs: 1 },
       });
       registryB.register(desc2);
@@ -789,7 +831,9 @@ describe("custody follows grant state", () => {
     const { db, close } = createTestDb();
     try {
       const { descriptor, userCredential } = makeCustodyGrant();
-      const registryA = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+      const registryA = new ConnectionRegistry({
+        repository: new DrizzleConnectionsRepository(db),
+      });
       registryA.register(descriptor);
       const conn = await registryA.connect("fake-oauth-provider");
       await registryA.confer(conn.connectionKind, conn.id, "user", userCredential(), {
@@ -799,7 +843,9 @@ describe("custody follows grant state", () => {
       // Boot: a fresh registry over the same ledger re-materializes custody in
       // process (the container's tmpfs was wiped) — profile intact.
       const { descriptor: desc2, custody: custody2 } = makeCustodyGrant();
-      const registryB = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+      const registryB = new ConnectionRegistry({
+        repository: new DrizzleConnectionsRepository(db),
+      });
       registryB.register(desc2);
       await registryB.load();
 
@@ -819,7 +865,10 @@ describe("custody follows grant state", () => {
     try {
       const { descriptor, custody, userCredential } = makeCustodyGrant();
       custody.nextSyncError = new Error("tmpfs gone");
-      const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        backoff: { baseMs: 1, maxMs: 1 },
+      });
       registry.register(descriptor);
       const conn = await registry.connect("fake-oauth-provider");
 

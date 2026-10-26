@@ -42,7 +42,7 @@ rs.mock("../../lib/oauth-providers.js", () => ({
 }));
 
 import { createTestDb, type TestDb } from "../../test/helpers.js";
-import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { importProviderBundle } from "../../connections/providers-import.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
@@ -57,15 +57,15 @@ function openDb(): TestDb["db"] {
   return db;
 }
 
-function makeLedger(): DrizzleGrantLedger {
-  return new DrizzleGrantLedger(openDb());
+function makeLedger(): DrizzleConnectionsRepository {
+  return new DrizzleConnectionsRepository(openDb());
 }
 
 /** A registry with all three providers registered and `provider` authorized. */
 async function makeAuthorizedRegistry(
   provider: "github" | "slack" | "google",
 ): Promise<ConnectionRegistry> {
-  const registry = new ConnectionRegistry({ ledger: makeLedger() });
+  const registry = new ConnectionRegistry({ repository: makeLedger() });
   for (const p of ["github", "slack", "google"] as const) {
     registry.register(makeOAuthProviderDescriptor(p));
   }

@@ -34,7 +34,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { COOKIE_NAME, createGuardianSession } from "../../lib/auth.js";
 import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 import { SHOPIFY_INSTALL_URL } from "../../lib/oauth-providers.js";
-import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { ApiDeps } from "../deps.js";
@@ -149,7 +149,7 @@ describe("GET /oauth/shopify/start", () => {
   });
 
   it("redeems a route-started connect into the Shopify grant and lands on the Shopify card", async () => {
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     registry.register(makeOAuthProviderDescriptor("shopify"));
     const deps = {
       db,
@@ -209,7 +209,7 @@ describe("GET /oauth/shopify/start", () => {
 
     const conn = registry.find("shopify")[0];
     expect(conn?.auth.grants().store).toBe("authorized");
-    const grant = await registry.getLedger().getGrant(conn!.id);
+    const grant = await registry.grantOf(conn!.id);
     expect(grant?.profile).toMatchObject({
       login: "acme.myshopify.com",
       scopes: ["read_products", "write_products"],

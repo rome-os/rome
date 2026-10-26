@@ -24,7 +24,7 @@ import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createTestDb } from "../../test/helpers.js";
 import type { MailProvider, RomeMailEvent, RomeMailMessage } from "../../lib/rome-cloud-mail.js";
 import { ConnectionRegistry } from "../registry.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { SetupManager } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral } from "../setup/types.js";
@@ -227,23 +227,23 @@ function makeSetupApp() {
   // throws, so the whole conferral transaction rolls back AFTER provisioning
   // succeeded — the placeholder mint reverts with it.
   let grantWriteFailures = 0;
-  const realLedger = new DrizzleGrantLedger(testDb);
+  const realLedger = new DrizzleConnectionsRepository(testDb);
   const ledger = new Proxy(realLedger, {
     get(target, prop, receiver) {
-      if (prop === "writeGrant") {
-        return (...args: Parameters<DrizzleGrantLedger["writeGrant"]>) => {
-          if (grantWriteFailures > 0) {
+      if (prop === "save") {
+        return (...args: Parameters<DrizzleConnectionsRepository["save"]>) => {
+          if (grantWriteFailures > 0 && args[1].grant.state !== "unauthorized") {
             grantWriteFailures--;
-            throw new Error("ledger write failed (injected)");
+            throw new Error("store write failed (injected)");
           }
-          return target.writeGrant(...args);
+          return target.save(...args);
         };
       }
       const value = Reflect.get(target, prop, receiver);
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
-  const registry = new ConnectionRegistry({ ledger });
+  const registry = new ConnectionRegistry({ repository: ledger });
   const personMappingRepo = {
     findByChannelUser: async () => null,
     findByBondLevel: async () => [],

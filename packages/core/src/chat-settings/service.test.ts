@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatDescriptor, ChatId, ChatRef } from "@rome-os/app-runtime";
 import type { TalkDirectory } from "../connections/types.js";
 import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
 import type { Channels } from "../channels/channel.js";
@@ -78,7 +78,9 @@ describe("ChatSettingsService", () => {
 
   async function setup(onChanged = rs.fn()) {
     testDb = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(
       directoryDescriptor("discord", (connectionId) => [
         {
@@ -631,7 +633,9 @@ describe("ChatSettingsService", () => {
 
   it("paginates beyond a bounded live directory first page", async () => {
     testDb = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(
       directoryDescriptor("discord", (connectionId) =>
         Array.from({ length: 5 }, (_, index) => ({
@@ -673,7 +677,9 @@ describe("ChatSettingsService", () => {
 
   it("hydrates only the requested page and skips persisted native threads early", async () => {
     testDb = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(directoryDescriptor("discord", () => []));
     const discord = await connectLive(registry, "discord");
     const repository = new ChatSettingsRepository(testDb.db);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type { GrantRecord } from "../connections/ledger.js";
+import type { GrantRecord } from "../connections/grant.js";
 import { domainOf, domainOfGrant, platformOf } from "./platform.js";
 
 describe("platformOf", () => {

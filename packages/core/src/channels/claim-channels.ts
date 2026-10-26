@@ -4,7 +4,7 @@
  */
 
 import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
-import type { GrantLedger } from "../connections/ledger.js";
+import type { ConnectionRegistry } from "../connections/registry.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import type { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
@@ -50,7 +50,7 @@ export async function claimChannels(
 export async function recordChannelAccounts(
   db: DrizzleDb,
   records: Pick<ChannelRecordsRepository, "all" | "recordAccount">,
-  ledger: Pick<GrantLedger, "getGrant">,
+  grants: Pick<ConnectionRegistry, "grantOf">,
 ): Promise<void> {
   const unknown = records
     .all()
@@ -58,7 +58,7 @@ export async function recordChannelAccounts(
   if (unknown.length === 0) return;
   const accounts = await Promise.all(
     unknown.map(async (record) => {
-      const grant = await ledger.getGrant(record.connectionId!);
+      const grant = await grants.grantOf(record.connectionId!);
       return grant && grant.state !== "unauthorized" ? grant.account : undefined;
     }),
   );

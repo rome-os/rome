@@ -14,8 +14,8 @@
 
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
-import { DrizzleGrantLedger } from "./ledger-db.js";
-import type { GrantLedger } from "./ledger.js";
+import { DrizzleConnectionsRepository } from "./repository-db.js";
+import type { ConnectionsRepository } from "./repository.js";
 import { ConnectionRegistry } from "./registry.js";
 import { makePasteTalk } from "./test-fixtures.js";
 import type { GrantCustody } from "./types.js";
@@ -47,8 +47,8 @@ function makeGatedCustody(): { custody: GrantCustody; release: () => void } {
   return { custody, release };
 }
 
-function makeLedger(): GrantLedger {
-  return new DrizzleGrantLedger(createTestDb().db);
+function makeLedger(): ConnectionsRepository {
+  return new DrizzleConnectionsRepository(createTestDb().db);
 }
 
 describe("per-grant lock: same-grant mutations serialize", () => {
@@ -62,7 +62,7 @@ describe("per-grant lock: same-grant mutations serialize", () => {
     // is queued behind the conferral and applies last — revoke wins.
     const { custody, release } = makeGatedCustody();
     const ledger = makeLedger();
-    const registry = new ConnectionRegistry({ ledger });
+    const registry = new ConnectionRegistry({ repository: ledger });
     const fx = makePasteTalk();
     registry.register({ ...fx.descriptor, custody });
     const conn = await registry.connect("fake-telegram");
@@ -80,7 +80,7 @@ describe("per-grant lock: same-grant mutations serialize", () => {
     // Later-issued revoke wins: memory and ledger agree on unauthorized, no cred.
     expect(conn.auth.grants().bot).toBe("unauthorized");
     expect(conn.isUnlocked("talk")).toBe(false);
-    const rec = await ledger.getGrant(conn.id);
+    const rec = await ledger.grantOf(conn.id);
     expect(rec?.state).toBe("unauthorized");
     expect(rec?.credential).toBeUndefined();
   });
@@ -96,7 +96,10 @@ describe("per-grant lock: same-grant mutations serialize", () => {
     // connect() takes tick 1 (createdAt); each conferral takes two (a createdAt
     // for a mint, then its conferredAt), so #1 stamps tick 3 and #2 tick 5.
     let tick = 0;
-    const registry = new ConnectionRegistry({ ledger, clock: () => new Date(1000 * ++tick) });
+    const registry = new ConnectionRegistry({
+      repository: ledger,
+      clock: () => new Date(1000 * ++tick),
+    });
     const fx = makePasteTalk();
     registry.register({ ...fx.descriptor, custody });
     const conn = await registry.connect("fake-telegram");
@@ -121,7 +124,7 @@ describe("per-grant lock: same-grant mutations serialize", () => {
     await Promise.all([first, second]);
 
     // The final ledger row is the SECOND conferral's complete triple.
-    const rec = await ledger.getGrant(conn.id);
+    const rec = await ledger.grantOf(conn.id);
     expect(rec?.state).toBe("authorized");
     expect(rec?.credential?.material).toEqual({ kind: "inline", record: { token: "tok2" } });
     expect(rec?.profile).toEqual({ login: "two" });
@@ -143,7 +146,7 @@ describe("per-connection lock: independent connections do not serialize", () => 
     const fx = makePasteTalk();
     // Gate only connection A's conferral.
     const { custody, release } = makeGatedCustody();
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register({ ...fx.descriptor, custody });
     registry.register({ ...fx.descriptor, connectionKind: "fake-signal" });
     const connA = await registry.connect("fake-telegram");

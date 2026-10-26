@@ -7,7 +7,7 @@ import {
 } from "../../lib/rome-cloud-agents.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { StreamFault } from "../types.js";
 import {
@@ -228,7 +228,7 @@ describe("agents channel", () => {
       throw rejected;
     };
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(createTestDb().db),
+      repository: new DrizzleConnectionsRepository(createTestDb().db),
     });
     registry.register(makeAgentsDescriptor(client));
     const conn = await registry.connect("agents");

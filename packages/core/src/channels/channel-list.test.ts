@@ -8,7 +8,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkHistory } from "../connections/types.js";
 import { ConnectionRegistry } from "../connections/registry.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { tokenPaste } from "../connections/schemes.js";
 import type { Connection, ConnectionDescriptor, Talker } from "../connections/types.js";
 import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
@@ -95,7 +95,9 @@ describe("channelList", () => {
     connectionAccounts?: Record<string, Accounts>,
   ) {
     testDb = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     for (const descriptor of descriptors) registry.register(descriptor);
     // The Connection ids the channel ports hear a talker on.
     const subscribed: string[] = [];
@@ -238,7 +240,7 @@ describe("channelList", () => {
     const error = rs.fn();
     const logger = { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error };
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(testDb.db),
+      repository: new DrizzleConnectionsRepository(testDb.db),
       logger: logger as never,
     });
     // Offers a history read but does not declare one, so its channel would
@@ -264,7 +266,7 @@ describe("channelList", () => {
     const warn = rs.fn();
     const logger = { debug: rs.fn(), info: rs.fn(), warn, error: rs.fn() };
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(testDb.db),
+      repository: new DrizzleConnectionsRepository(testDb.db),
       logger: logger as never,
     });
     const service = talkKind("telegram");
@@ -613,7 +615,9 @@ describe("joinLaterChannel", () => {
   it("joins a second Connection's channel once, and its first message reaches a subscriber once", async () => {
     testDb = createTestDb();
     const service = talkKind("telegram");
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(service.descriptor);
     const first = await registry.connect("telegram");
     const channelOf = (connection: Pick<Connection, "id" | "connectionKind">) =>
@@ -668,7 +672,9 @@ describe("joinLaterChannel", () => {
       codec: plainText,
       create: async () => ({ messageId: "m", chatId: "c" }),
     });
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(service.descriptor);
     const connection = await registry.connect("telegram");
     await registry.confer(connection.connectionKind, connection.id, "bot", {

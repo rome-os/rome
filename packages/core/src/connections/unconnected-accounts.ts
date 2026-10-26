@@ -12,10 +12,10 @@ const log = createLogger("connections");
  *  channel. Every kind of connection ends this way, email, WhatsApp and the
  *  sign-ins such as GitHub included. */
 export async function isUnconnectedAccount(
-  registry: Pick<ConnectionRegistry, "getLedger">,
+  registry: Pick<ConnectionRegistry, "grantOf">,
   conn: Pick<Connection, "id" | "connectionKind">,
 ): Promise<boolean> {
-  const grant = await registry.getLedger().getGrant(conn.id);
+  const grant = await registry.grantOf(conn.id);
   return grant?.state === "unauthorized";
 }
 
@@ -29,7 +29,7 @@ export async function isUnconnectedAccount(
  * kept.
  */
 export async function removeUnconnectedAccounts(
-  registry: Pick<ConnectionRegistry, "all" | "getLedger" | "remove">,
+  registry: Pick<ConnectionRegistry, "all" | "grantOf" | "remove">,
 ): Promise<string[]> {
   const removed: string[] = [];
   for (const conn of registry.all()) {

@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId, OutgoingMessage, ChannelMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
 import { installTestClock } from "../../test/kit/index.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { Credential, ProfileRecord, SecretRecord, StreamFault, Talker } from "../types.js";
@@ -461,7 +461,7 @@ const PROFILE = telegramUserProfileFromSettings(SETTINGS) as ProfileRecord;
 
 function makeRegistry(): ConnectionRegistry {
   const { db } = createTestDb();
-  const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
   registry.register(makeTelegramUserDescriptor({ probeIntervalMs: 1000 }));
   return registry;
 }
@@ -490,7 +490,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
       // surface then reads needs-reconnect + reason off the ledger.
       expect(conn.auth.grants().session).toBe("degraded");
       expect(conn.isUnlocked("talk")).toBe(false);
-      const grant = await registry.getLedger().getGrant(conn.id);
+      const grant = await registry.grantOf(conn.id);
       expect(grant?.state).toBe("degraded");
       // The status surface reads `degradedReason` off this — a non-empty reason
       // naming the credential rejection (the registry's renew-once-then-degrade

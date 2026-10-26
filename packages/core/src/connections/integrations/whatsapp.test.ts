@@ -14,7 +14,7 @@ import {
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { Credential, RuntimeKit, SecretRecord, StreamFault } from "../types.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
@@ -29,10 +29,10 @@ const openDbs: Array<() => void> = [];
 afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 /**
@@ -272,7 +272,7 @@ describe("whatsapp Talker fault mapping", () => {
 describe("whatsapp descriptor over a real registry", () => {
   function setup(fake: FakeWhatsAppAdapter): ConnectionRegistry {
     const { deps } = makeDeps(fake);
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(createWhatsAppDescriptor(deps));
     return registry;
   }

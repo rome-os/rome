@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
+import { NO_GRANT } from "../connections/grant.js";
 import {
   ChannelNotLinkable,
   ChannelRecordNotFound,
@@ -235,9 +236,15 @@ describe("linkChannelAgent", () => {
     const db = testDb.db;
     const records = new ChannelRecordsRepository(db);
     const accounts = new ConnectedAccountsRepository(db);
-    const ledger = new DrizzleGrantLedger(db);
+    const ledger = new DrizzleConnectionsRepository(db);
     const connect = (id: string, connectionKind: string, channel?: string) => {
-      ledger.writeConnection(db, { id, connectionKind, label: connectionKind, createdAt: NOW });
+      ledger.save(db, {
+        id,
+        connectionKind,
+        label: connectionKind,
+        createdAt: NOW,
+        grant: NO_GRANT,
+      });
       accounts.add(db, id);
       return records.claim(db, { id, connectionKind }, NOW, channel ? { id: channel } : {}).id;
     };

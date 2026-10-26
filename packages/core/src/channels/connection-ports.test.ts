@@ -15,7 +15,7 @@ import {
 import { testMessagesQueryContract } from "./messages-contract.js";
 import { ChannelNotConnected } from "./channel.js";
 import { ConnectionRegistry } from "../connections/registry.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { makePasteTalk } from "../connections/test-fixtures.js";
 import { createTestDb, kindChannelOf } from "../test/helpers.js";
 import { systemClock } from "../lib/clock.js";
@@ -311,7 +311,7 @@ describe("connection-backed messages, shared reads", () => {
 describe("connection-backed send, across epochs", () => {
   it("keeps a held direct port on whichever talker is live", async () => {
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(createTestDb().db),
+      repository: new DrizzleConnectionsRepository(createTestDb().db),
     });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
@@ -341,7 +341,7 @@ describe("connection-backed send, across epochs", () => {
 describe("connection ports for a service's later channels", () => {
   it("hears and sends on each channel through its own Connection", async () => {
     const { db } = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
     const first = await registry.connect("fake-telegram");
@@ -382,7 +382,7 @@ describe("connection ports for a service's later channels", () => {
 describe("a channel Rome does not listen to", () => {
   function setup(listenedAtFirst: boolean) {
     const { db } = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
     let listened = listenedAtFirst;
@@ -486,7 +486,7 @@ describe("a channel Rome does not listen to", () => {
 describe("a Connection with no channel record", () => {
   it("backs no channel, not even its service's first", async () => {
     const { db } = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
     // The service's only Connection, so nothing else could back the channel.

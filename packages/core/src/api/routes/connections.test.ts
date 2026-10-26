@@ -9,7 +9,7 @@
 
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { tokenPaste } from "../../connections/schemes.js";
 import {
@@ -17,6 +17,7 @@ import {
   makeGatedWatch,
   makePasteTalk,
   makeRenewableAct,
+  updateGrant,
 } from "../../connections/test-fixtures.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
 import { domainOf } from "../../channels/platform.js";
@@ -28,10 +29,10 @@ import type { ApiDeps } from "../deps.js";
 import { connectionsRoutes } from "./connections.js";
 
 const openDbs: Array<() => void> = [];
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 afterEach(() => {
@@ -68,7 +69,7 @@ function makePasteTalkWithProfile() {
 
 describe("GET /connections", () => {
   it("lists every connection with grants, capabilities, and revived display", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     const telegram = makePasteTalkWithProfile();
     const discord = makeBotAll();
     registry.register(telegram.descriptor);
@@ -127,19 +128,19 @@ describe("GET /connections", () => {
   it("shows a degraded grant as broken, with every capability locked", async () => {
     const ledger = makeLedger();
     {
-      const setup = new ConnectionRegistry({ ledger });
+      const setup = new ConnectionRegistry({ repository: ledger });
       const fixture = makeBotAll();
       setup.register(fixture.descriptor);
       const conn = await setup.connect("fake-discord", "Discord");
       await setup.confer(conn.connectionKind, conn.id, "bot", fixture.botCredential());
-      await ledger.updateGrant(conn.id, (current) => ({
+      await updateGrant(ledger, conn.id, (current) => ({
         ...current,
         state: "degraded",
         degraded: { at: new Date("2026-07-13T00:00:00Z"), reason: "token revoked upstream" },
       }));
     }
     // Fresh registry over the same ledger — the boot-shaped path to a degraded grant.
-    const registry = new ConnectionRegistry({ ledger });
+    const registry = new ConnectionRegistry({ repository: ledger });
     registry.register(makeBotAll().descriptor);
     await registry.load();
 
@@ -154,7 +155,7 @@ describe("GET /connections", () => {
   });
 
   it("surfaces needs-subscription for a gated watch with no active subscription", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     const gated = makeGatedWatch();
     registry.register(gated.descriptor);
     const conn = await registry.connect("fake-github-watch");
@@ -176,7 +177,7 @@ describe("GET /connections", () => {
   });
 
   it("lists an offerable placeholder for a registered service with no connection row", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     const telegram = makePasteTalkWithProfile();
     const discord = makeBotAll();
     registry.register(telegram.descriptor);
@@ -220,7 +221,7 @@ describe("GET /connections", () => {
     const prev = process.env.SHOW_GOOGLE_OAUTH;
     delete process.env.SHOW_GOOGLE_OAUTH;
     try {
-      const registry = new ConnectionRegistry({ ledger: makeLedger() });
+      const registry = new ConnectionRegistry({ repository: makeLedger() });
       // Both descriptors register unconditionally (existing accounts must
       // import regardless), but only enabled providers are connect invitations.
       for (const provider of ["github", "google"]) {
@@ -245,7 +246,7 @@ describe("GET /connections", () => {
     const prev = process.env.PANTHEON_BASE_ORIGIN;
     process.env.PANTHEON_BASE_ORIGIN = "https://rome-cloud.example";
     try {
-      const registry = new ConnectionRegistry({ ledger: makeLedger() });
+      const registry = new ConnectionRegistry({ repository: makeLedger() });
       registry.register({
         connectionKind: "github",
         grant: "user",
@@ -271,7 +272,7 @@ describe("GET /connections", () => {
 describe("GET /connections/:id", () => {
   it("returns the list shape plus per-grant detail, normalized to ISO strings", async () => {
     const registry = new ConnectionRegistry({
-      ledger: makeLedger(),
+      repository: makeLedger(),
       clock: () => new Date("2026-07-13T12:00:00Z"),
     });
     const fixture = makeBotAll();
@@ -302,12 +303,12 @@ describe("GET /connections/:id", () => {
 
   it("carries the degraded reason in grant detail", async () => {
     const ledger = makeLedger();
-    const registry = new ConnectionRegistry({ ledger });
+    const registry = new ConnectionRegistry({ repository: ledger });
     const fixture = makeBotAll();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-discord", "Discord");
     await registry.confer(conn.connectionKind, conn.id, "bot", fixture.botCredential());
-    await ledger.updateGrant(conn.id, (current) => ({
+    await updateGrant(ledger, conn.id, (current) => ({
       ...current,
       state: "degraded",
       degraded: { at: new Date("2026-07-13T00:00:00Z"), reason: "token revoked upstream" },
@@ -322,7 +323,7 @@ describe("GET /connections/:id", () => {
   });
 
   it("404s an unknown connection id", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     const res = await makeApp(registry).request("/connections/nope");
     expect(res.status).toBe(404);
   });
@@ -330,7 +331,7 @@ describe("GET /connections/:id", () => {
 
 describe("DELETE /connections/:id/grants/:name", () => {
   it("revokes the grant, stops its capabilities and ends the connection", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     const fixture = makeBotAll();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-discord", "Discord");
@@ -350,9 +351,9 @@ describe("DELETE /connections/:id/grants/:name", () => {
     const { db, close } = createTestDb();
     openDbs.push(close);
     const records = new ChannelRecordsRepository(db);
-    const ledger = new DrizzleGrantLedger(db);
+    const ledger = new DrizzleConnectionsRepository(db);
     const registry = new ConnectionRegistry({
-      ledger,
+      repository: ledger,
       onMint: (tx, record) => {
         records.claim(tx, record, record.createdAt);
       },
@@ -371,12 +372,12 @@ describe("DELETE /connections/:id/grants/:name", () => {
     expect(res.status).toBe(200);
     expect((await res.json()).connection).toBeNull();
     expect(registry.find("fake-telegram")).toEqual([]);
-    expect(await ledger.listConnections()).toEqual([]);
+    expect(await ledger.all()).toEqual([]);
     expect(records.idOf(conn.id)).toBeNull();
   });
 
   it("answers a second disconnect of the same account as done", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     const fixture = makePasteTalk();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-telegram");
@@ -393,7 +394,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
   });
 
   it("ends a sign-in connection too, which has no Talk", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     const fixture = makeRenewableAct();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-github");
@@ -410,7 +411,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
   });
 
   it("404s an unknown grant name and an unknown connection", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeBotAll().descriptor);
     const conn = await registry.connect("fake-discord", "Discord");
 
@@ -429,7 +430,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
   });
 
   it("rejects cross-site requests without revoking", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     const fixture = makeBotAll();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-discord", "Discord");
@@ -452,7 +453,7 @@ describe("GET /connections accounts", () => {
     openDbs.push(close);
     const records = new ChannelRecordsRepository(db);
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(db),
+      repository: new DrizzleConnectionsRepository(db),
       onMint: (tx, record) => {
         records.claim(tx, record, record.createdAt);
       },
@@ -482,7 +483,7 @@ describe("GET /connections accounts", () => {
     openDbs.push(close);
     const records = new ChannelRecordsRepository(db);
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(db),
+      repository: new DrizzleConnectionsRepository(db),
       onMint: (tx, record, profile) => {
         records.claim(tx, { ...record, domain: domainOf(profile) }, record.createdAt);
       },
@@ -505,7 +506,7 @@ describe("GET /connections accounts", () => {
     openDbs.push(close);
     const records = new ChannelRecordsRepository(db);
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(db),
+      repository: new DrizzleConnectionsRepository(db),
       onMint: (tx, record) => {
         records.claim(tx, record, record.createdAt);
       },
@@ -535,7 +536,7 @@ describe("GET /connections accounts", () => {
     openDbs.push(close);
     const records = new ChannelRecordsRepository(db);
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(db),
+      repository: new DrizzleConnectionsRepository(db),
       onMint: (tx, record) => {
         records.claim(tx, record, record.createdAt);
       },
@@ -554,7 +555,7 @@ describe("GET /connections accounts", () => {
 describe("DELETE /connections/:id", () => {
   it("removes the connection from the list and the ledger", async () => {
     const ledger = makeLedger();
-    const registry = new ConnectionRegistry({ ledger });
+    const registry = new ConnectionRegistry({ repository: ledger });
     const fixture = makePasteTalkWithProfile();
     registry.register(fixture.descriptor);
     const conn = await registry.connect("fake-telegram", "Telegram");
@@ -574,13 +575,13 @@ describe("DELETE /connections/:id", () => {
     expect(list.connections).toHaveLength(1);
     expect(list.connections[0].id).toBeNull();
     expect(list.connections[0].service).toBe("fake-telegram");
-    expect(await ledger.listConnections()).toEqual([]);
+    expect(await ledger.all()).toEqual([]);
     // The live talk epoch was torn down with the connection.
     expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(1);
   });
 
   it("404s an unknown connection and rejects cross-site requests", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makePasteTalk().descriptor);
     const conn = await registry.connect("fake-telegram");
 
@@ -609,7 +610,7 @@ describe("guardian links across a disconnect", () => {
   ])("keeps the guardian link when the %s teardown removes Rome's access", async (teardown) => {
     const { db, close } = createTestDb();
     openDbs.push(close);
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const fixture = makeBotAll();
     fixture.descriptor.connectionKind = "discord";
     registry.register(fixture.descriptor);

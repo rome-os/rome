@@ -34,8 +34,8 @@ rs.mock("../../lib/provider-token-files.js", () => ({
 
 import type { OAuthProvider } from "../../lib/oauth-providers.js";
 import { createTestDb } from "../../test/helpers.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
-import type { GrantLedger } from "../ledger.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
+import type { ConnectionsRepository } from "../repository.js";
 import { ConnectionRegistry } from "../registry.js";
 import { RenewalUnavailable } from "../errors.js";
 import type { SetupContext, SetupForm, SetupInteraction } from "../setup/types.js";
@@ -50,13 +50,13 @@ function credential(material: Record<string, string>): Credential {
   return { material, expiresAt: "never" };
 }
 
-// A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
+// A fresh drizzle-backed connections repository per test;
 // opened DBs are closed after each test.
 const openDbs: Array<() => void> = [];
-function makeLedger(): GrantLedger {
+function makeLedger(): ConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 const CASES: Array<[OAuthProvider, string, Record<string, string>]> = [
@@ -171,7 +171,7 @@ describe.each(
   });
 
   it(`declares one \`${grant}\` grant and no capabilities (state-only phase)`, async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
 
@@ -200,7 +200,7 @@ describe.each(
   });
 
   it("authorizes the grant on import and relocks it on revoke", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
 
@@ -214,13 +214,13 @@ describe.each(
   it("rehydrates the authorized grant on a fresh registry over the same ledger", async () => {
     const ledger = makeLedger();
 
-    const registry = new ConnectionRegistry({ ledger });
+    const registry = new ConnectionRegistry({ repository: ledger });
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
     await registry.confer(conn.connectionKind, conn.id, grant, credential(material));
 
     // Second registry over the SAME ledger: boot rehydration restores the grant.
-    const registry2 = new ConnectionRegistry({ ledger });
+    const registry2 = new ConnectionRegistry({ repository: ledger });
     registry2.register(makeOAuthProviderDescriptor(provider));
     await registry2.load();
 
@@ -232,7 +232,7 @@ describe.each(
   it("degrades an EXPIRED credential at load: romeCloudOAuth renew answers re-confer", async () => {
     const ledger = makeLedger();
 
-    const registry = new ConnectionRegistry({ ledger });
+    const registry = new ConnectionRegistry({ repository: ledger });
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
     // A bundle that carried an explicit expiry, now past (google's tokens
@@ -246,7 +246,7 @@ describe.each(
     // Boot: load() sees the expired credential, renews once via the scheme —
     // romeCloudOAuth has no refresh exchange, so renew() answers "re-confer"
     // and the grant degrades until the guardian re-runs the OAuth flow.
-    const registry2 = new ConnectionRegistry({ ledger });
+    const registry2 = new ConnectionRegistry({ repository: ledger });
     registry2.register(makeOAuthProviderDescriptor(provider));
     await registry2.load();
 
@@ -337,11 +337,11 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
   }
 
   async function connectedRegistry(
-    ledger: GrantLedger,
+    ledger: ConnectionsRepository,
     refresh: (refreshToken: string) => Promise<Credential>,
     expiresInMs: number,
   ) {
-    const registry = new ConnectionRegistry({ ledger });
+    const registry = new ConnectionRegistry({ repository: ledger });
     registry.register(makeOAuthProviderDescriptor("shopify", setupDeps(refresh)));
     const conn = await registry.connect("shopify");
     await registry.confer(conn.connectionKind, conn.id, "store", {
@@ -351,8 +351,8 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     return { registry, conn };
   }
 
-  async function storedAccessToken(ledger: GrantLedger, connectionId: string) {
-    const record = await ledger.getGrant(connectionId);
+  async function storedAccessToken(ledger: ConnectionsRepository, connectionId: string) {
+    const record = await ledger.grantOf(connectionId);
     const material = record?.credential?.material;
     return material?.kind === "inline" ? material.record.accessToken : undefined;
   }
@@ -362,7 +362,7 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     const refresh = rs.fn(async () => renewed());
     const { conn } = await connectedRegistry(ledger, refresh, -60_000);
 
-    const registry2 = new ConnectionRegistry({ ledger });
+    const registry2 = new ConnectionRegistry({ repository: ledger });
     registry2.register(makeOAuthProviderDescriptor("shopify", setupDeps(refresh)));
     await registry2.load();
 
@@ -441,7 +441,7 @@ describe("expiring OAuth grant renewal [shopify, drizzle ledger]", () => {
     });
     await connectedRegistry(ledger, unavailable, -60_000);
 
-    const registry2 = new ConnectionRegistry({ ledger });
+    const registry2 = new ConnectionRegistry({ repository: ledger });
     registry2.register(makeOAuthProviderDescriptor("shopify", setupDeps(unavailable)));
     await registry2.load();
 

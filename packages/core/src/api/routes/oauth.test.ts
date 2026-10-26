@@ -58,23 +58,23 @@ rs.mock("../../lib/oauth-providers.js", () => ({
 }));
 
 import { createTestDb } from "../../test/helpers.js";
-import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { ApiDeps } from "../deps.js";
 import { oauthRoutes } from "./oauth.js";
 
-// A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
+// A fresh drizzle-backed connections repository per test;
 // opened DBs are closed after each test.
 const openDbs: Array<() => void> = [];
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 function makeRegistry(): ConnectionRegistry {
-  const registry = new ConnectionRegistry({ ledger: makeLedger() });
+  const registry = new ConnectionRegistry({ repository: makeLedger() });
   for (const provider of ["github", "slack", "google"] as const) {
     registry.register(makeOAuthProviderDescriptor(provider));
   }
@@ -126,7 +126,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     const conn = registry.find("github")[0];
     expect(conn).toBeDefined();
     expect(conn.auth.grants().user).toBe("authorized");
-    const grant = await registry.getLedger().getGrant(conn.id);
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.profile).toMatchObject({ login: "octocat", scopes: ["repo", "read:org"] });
     // Custody ran off the grant transition (not the route), driven by the grant's
     // secret material + non-secret profile.
@@ -163,7 +163,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     const conn = registry.find("slack")[0];
     expect(conn).toBeDefined();
     expect(conn.auth.grants().workspace).toBe("authorized");
-    const grant = await registry.getLedger().getGrant(conn.id);
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.profile).toMatchObject({ teamId: "T123" });
     expect(registry.find("github")).toHaveLength(0);
   });

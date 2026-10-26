@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
+import { NO_GRANT } from "../../connections/grant.js";
+import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { connections } from "../schema.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { ConnectedAccountNotFound, ConnectedAccountsRepository } from "./connected-accounts.js";
@@ -17,10 +18,16 @@ describe("ConnectedAccountsRepository", () => {
   function setup() {
     testDb = createTestDb();
     const db = testDb.db;
-    const ledger = new DrizzleGrantLedger(db);
+    const ledger = new DrizzleConnectionsRepository(db);
     const accounts = new ConnectedAccountsRepository(db);
     const connect = (id: string, connectionKind = "telegram") =>
-      ledger.writeConnection(db, { id, connectionKind, label: connectionKind, createdAt: NOW });
+      ledger.save(db, {
+        id,
+        connectionKind,
+        label: connectionKind,
+        createdAt: NOW,
+        grant: NO_GRANT,
+      });
     return { db, accounts, connect };
   }
 
