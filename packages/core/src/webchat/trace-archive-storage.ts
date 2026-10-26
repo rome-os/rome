@@ -65,10 +65,7 @@ export class TraceArchiveStorage {
     file: string,
     data: ArchiveFile,
     onRemoteTarget?: (location: string) => void,
-    remoteRequired = false,
   ): Promise<string | null> {
-    if (remoteRequired && !(this.options.token ?? getInstanceToken)())
-      throw new Error("Trace archive upload awaits instance token");
     const response = await this.request("POST", "/upload-url", {
       sessionId: traceArchiveSessionKey(data.manifest.sessionId),
       archiveId: data.manifest.archiveId,

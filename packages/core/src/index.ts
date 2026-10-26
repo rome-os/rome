@@ -1929,6 +1929,8 @@ async function main() {
     shuttingDown = true;
     const shutdownLog = createLogger("shutdown");
     shutdownLog.info("shutting down", { signal });
+    unsubscribeArchiveDelete();
+    await stopTraceArchiveMaintenance();
     nodeDevices.close();
 
     if (internalApi) {
@@ -1982,8 +1984,6 @@ async function main() {
     codexProvider.close();
     shutdownLog.info("Codex app-server stopped");
 
-    unsubscribeArchiveDelete();
-    await stopTraceArchiveMaintenance();
     clearInterval(journalCleanupInterval);
     shutdownLog.info("journal cleanup timer stopped");
 

@@ -494,7 +494,7 @@ describe("trace archives (real SQLite and worker)", () => {
     expect(count()).toBe(12);
   });
 
-  it("pauses once on low disk without adding a discarded record for every candidate", async () => {
+  it("skips low-disk sessions without accumulating discarded records", async () => {
     seed("one");
     seed("two");
     let exports = 0;
@@ -504,7 +504,7 @@ describe("trace archives (real SQLite and worker)", () => {
     };
     await archiver({ worker }).runPass();
     await archiver({ worker }).runPass();
-    expect(exports).toBe(2);
+    expect(exports).toBe(4);
     expect(archiveRows()).toEqual([]);
     expect(count()).toBe(12);
   });
@@ -529,6 +529,32 @@ describe("trace archives (real SQLite and worker)", () => {
       traceArchived: true,
     });
   }, 30000);
+
+  it("isolates a missing stored file from healthy sessions", async () => {
+    seed("broken");
+    await exportOnly("broken");
+    repo.update("archive", { status: "stored" });
+    await rm(traceArchiveFile(root, "broken", "archive"));
+    seed("healthy");
+    const stats = await archiver().runPass();
+    expect(stats).toMatchObject({ failures: 1, sessions: 1 });
+    expect(repo.get("archive")?.status).toBe("stored");
+    expect(count()).toBe(11);
+  });
+
+  it("archives a smaller session when the oldest session trips its raw-size disk guard", async () => {
+    seed("big", undefined, old - 1);
+    seed("small");
+    const worker = async (input: ArchiveWorkerInput) => {
+      if (input.action === "export" && input.sessionId === "big")
+        throw new Error("Trace archive low disk");
+      return runArchiveWorker(input);
+    };
+    const stats = await archiver({ worker }).runPass();
+    expect(stats).toMatchObject({ failures: 1, sessions: 1 });
+    expect(archiveRows()).toHaveLength(1);
+    expect(count()).toBe(11);
+  });
 
   it("message deletion and project deletion queue archive cleanup in their own transactions", async () => {
     seed("messages");
@@ -696,6 +722,7 @@ describe("Pantheon + signed PUT contract", () => {
       succeed();
       await archiver({ storage }).runPass();
       expect(archiveRows()[0].status).toBe("pruned");
+      expect(repo.get(archiveRows()[0].id)?.uploadMayFinish).toBe(failure === "PUT");
     });
   }
   it("chat deletion removes local files and durably retries remote deletion without blocking the chat", async () => {
@@ -819,6 +846,78 @@ describe("Pantheon + signed PUT contract", () => {
       fetch: async () => new Response(JSON.stringify({ error: "unconfigured" }), { status: 200 }),
     });
     await expect(storage.deleteSession("session", true)).rejects.toThrow("not confirmed");
+  });
+
+  it("retains deletion intent when a failed PUT commits after DELETE", async () => {
+    seed();
+    let origin = "";
+    let objectExists = false;
+    let deletes = 0;
+    server = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      if (req.method === "POST") {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        res.writeHead(200, { "Content-Type": "application/json" }).end(
+          JSON.stringify({
+            url: origin + "/put",
+            method: "PUT",
+            headers: { "Content-Length": String(body.bytes), "Content-MD5": body.md5 },
+            objectKey: "key",
+            expiresAt: now.toISOString(),
+          }),
+        );
+      } else if (req.method === "PUT") {
+        await webchat.deleteSession("session");
+        res.destroy();
+      } else {
+        deletes++;
+        objectExists = false;
+        res
+          .writeHead(200, { "Content-Type": "application/json" })
+          .end(JSON.stringify({ deleted: 0 }));
+      }
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const storage = new TraceArchiveStorage({ token: () => "test", origin: () => origin });
+    const job = archiver({ storage });
+    await job.runPass();
+    expect(deletes).toBe(1);
+    expect(repo.deletes()).toEqual(["session"]);
+    expect(archiveRows()).toEqual([]);
+    objectExists = true;
+    await job.runPass();
+    expect(deletes).toBe(2);
+    expect(objectExists).toBe(false);
+    expect(repo.deletes()).toEqual(["session"]);
+    expect(repo.hasRemoteArchives("session")).toBe(true);
+  });
+
+  it("falls back locally without forgetting an earlier uncertain remote upload", async () => {
+    seed();
+    const { storage, succeed } = await cloud(200, "", 500);
+    await archiver({ storage }).runPass();
+    await archiver().runPass();
+    const row = repo.get(archiveRows()[0].id)!;
+    expect(row.location).toMatch(/^local:/);
+    expect(row.uploadMayFinish).toBe(true);
+    expect(row.status).toBe("pruned");
+    await webchat.deleteSession("session");
+    await archiver().cleanupDeletedChats();
+    expect(repo.deletes()).toEqual(["session"]);
+    succeed();
+    await archiver({ storage }).cleanupDeletedChats();
+    expect(archiveRows()).toEqual([]);
+    expect(repo.deletes()).toEqual(["session"]);
+    seed(
+      "session",
+      [{ type: "tool_result", content: "new generation stays intact" }],
+      Math.floor(now.getTime() / 1000),
+    );
+    expect((await archiver({ storage }).runPass()).sessions).toBe(0);
+    expect(count()).toBe(1);
   });
 
   it("a delete during a PUT cannot leave an object uploaded after the remote deletion", async () => {

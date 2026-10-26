@@ -75,9 +75,9 @@ export class TraceArchivesRepository {
     return Boolean(
       this.sqlite
         .prepare(
-          "SELECT 1 FROM rome_trace_archives WHERE session_id = ? AND location LIKE 's3:%' LIMIT 1",
+          "SELECT 1 FROM rome_trace_archives WHERE session_id = ? AND (location LIKE 's3:%' OR upload_may_finish = 1) UNION ALL SELECT 1 FROM rome_trace_archive_deletes WHERE session_id = ? AND remote_uncertain = 1 LIMIT 1",
         )
-        .get(sessionId),
+        .get(sessionId, sessionId),
     );
   }
   pendingBytes(): number {
@@ -181,12 +181,28 @@ export class TraceArchivesRepository {
       }[]
     ).map((r) => r.session_id);
   }
-  finishDelete(sessionId: string) {
-    this.sqlite.transaction(() => {
+  /** An ambiguous PUT may finish after DELETE. Keep its privacy tombstone across every restart. */
+  finishDelete(sessionId: string): boolean {
+    return this.sqlite.transaction(() => {
+      const uncertain = Boolean(
+        this.sqlite
+          .prepare(
+            "SELECT 1 FROM rome_trace_archives WHERE session_id = ? AND upload_may_finish = 1 UNION ALL SELECT 1 FROM rome_trace_archive_deletes WHERE session_id = ? AND remote_uncertain = 1 LIMIT 1",
+          )
+          .get(sessionId, sessionId),
+      );
       this.sqlite.prepare("DELETE FROM rome_trace_archives WHERE session_id = ?").run(sessionId);
-      this.sqlite
-        .prepare("DELETE FROM rome_trace_archive_deletes WHERE session_id = ?")
-        .run(sessionId);
+      if (uncertain)
+        this.sqlite
+          .prepare(
+            "UPDATE rome_trace_archive_deletes SET remote_uncertain = 1 WHERE session_id = ?",
+          )
+          .run(sessionId);
+      else
+        this.sqlite
+          .prepare("DELETE FROM rome_trace_archive_deletes WHERE session_id = ?")
+          .run(sessionId);
+      return !uncertain;
     })();
   }
 

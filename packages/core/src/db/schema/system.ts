@@ -772,6 +772,7 @@ export const romeTraceArchives = sqliteTable(
     location: text("location").notNull(),
     bytes: integer("bytes").notNull(),
     sha256: text("sha256").notNull(),
+    uploadMayFinish: integer("upload_may_finish", { mode: "boolean" }).notNull().default(false),
     manifest: text("manifest"),
     blockCount: integer("block_count").notNull(),
     messageCount: integer("message_count").notNull(),
@@ -785,6 +786,7 @@ export const romeTraceArchives = sqliteTable(
 // No session FK: the privacy retry must survive deletion of the chat itself.
 export const romeTraceArchiveDeletes = sqliteTable("rome_trace_archive_deletes", {
   sessionId: text("session_id").primaryKey(),
+  remoteUncertain: integer("remote_uncertain", { mode: "boolean" }).notNull().default(false),
 });
 
 // SQL reads these for usage, model, status and subagent rollups. Any SQL that

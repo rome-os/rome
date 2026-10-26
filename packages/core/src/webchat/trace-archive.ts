@@ -23,6 +23,11 @@ function failureReason(error: unknown): string {
       ? error.name
       : "unknown";
 }
+class ArchiveStorageFailure extends Error {
+  constructor(error: unknown) {
+    super(failureReason(error));
+  }
+}
 const PENDING_LIMIT = 5 * 1024 ** 3;
 
 export function traceArchiveFile(root: string, sessionId: string, archiveId: string): string {
@@ -169,8 +174,7 @@ export class TraceArchiver {
         await rm(dirname(file), { recursive: true, force: true });
         const remoteRequired = repo.hasRemoteArchives(sessionId);
         await this.storage.deleteSession(sessionId, remoteRequired);
-        repo.finishDelete(sessionId);
-        attempted.delete(sessionId);
+        if (repo.finishDelete(sessionId)) attempted.delete(sessionId);
       } catch (error) {
         failures++;
         log.warn("chat archive deletion will retry", { sessionId, reason: failureReason(error) });
@@ -182,10 +186,11 @@ export class TraceArchiver {
   private async discard(row: TraceArchive) {
     await rm(this.file(row), { force: true });
     await rm(`${this.file(row)}.tmp`, { force: true });
-    if (row.location.startsWith("s3:")) {
+    if (row.location.startsWith("s3:") || row.uploadMayFinish) {
       // The fixed Cloud API deletes a whole session prefix, not one object. Never erase valid archives.
       if (this.options.repo.hasRetainedArchives(row.sessionId)) return;
       await this.storage.deleteSession(row.sessionId, true);
+      if (row.uploadMayFinish) return;
     }
     this.options.repo.remove(row.id);
   }
@@ -220,15 +225,18 @@ export class TraceArchiver {
         messageCount: manifest.messageIds.length,
         manifest: JSON.stringify(manifest),
       });
-      const location = await this.storage.store(
-        file,
-        data,
-        (target) => {
+      let earlierUnsettledPut = false;
+      const location = await this.storage
+        .store(file, data, (target) => {
           // A lost PUT response is ambiguous. Keep enough state to retry privacy deletion even without a token.
-          repo.update(row.id, { location: target });
-        },
-        row.location.startsWith("s3:"),
-      );
+          earlierUnsettledPut = repo.get(row.id)?.uploadMayFinish ?? false;
+          repo.update(row.id, { location: target, uploadMayFinish: true });
+        })
+        .catch((error) => {
+          throw new ArchiveStorageFailure(error);
+        });
+      // A confirmed response settles this PUT, not an earlier request whose response was lost.
+      if (location && !earlierUnsettledPut) repo.update(row.id, { uploadMayFinish: false });
       // A deletion during the PUT must not be undone by the store completion.
       if (repo.get(row.id)?.status === "discarded") {
         repo.update(row.id, {
@@ -266,6 +274,7 @@ export class TraceArchiver {
       return;
     }
     while (!this.stopped) {
+      if (repo.get(row.id)?.status !== "stored") return;
       const batch = repo.pruneBatch(row.id);
       stats.bytesDeleted += batch.bytes;
       stats.rowsDeleted += batch.rows;
@@ -299,6 +308,8 @@ export class TraceArchiver {
         this.deleteAttempts.clear();
         stats.failures += await this.cleanup();
         const failedSessions = new Set<string>();
+        let storageUnavailable = false;
+        let lowDiskLogged = false;
         for (const row of repo.listPending()) {
           if (this.stopped) break;
           try {
@@ -306,14 +317,16 @@ export class TraceArchiver {
           } catch (error) {
             stats.failures++;
             failedSessions.add(row.sessionId);
+            if (error instanceof ArchiveStorageFailure) storageUnavailable = true;
             log.warn("trace archive resume will retry", {
               archiveId: row.id,
               reason: failureReason(error),
             });
+            if (storageUnavailable) break;
           }
         }
         for (const candidate of repo.candidates(this.now())) {
-          if (this.stopped || failedSessions.size || repo.pendingBytes() >= PENDING_LIMIT) break;
+          if (this.stopped || storageUnavailable || repo.pendingBytes() >= PENDING_LIMIT) break;
           if (
             failedSessions.has(candidate.sessionId) ||
             this.options.isRunning?.(candidate.sessionId)
@@ -365,11 +378,16 @@ export class TraceArchiver {
             stats.failures++;
             if (error instanceof Error && error.message === "Trace archive low disk") {
               await this.discard(repo.get(id)!);
-              log.warn("trace archive pass paused for low disk");
-              break;
+              if (!lowDiskLogged) log.warn("trace archive sessions skipped for low disk");
+              lowDiskLogged = true;
+              continue;
             }
             log.warn("trace archive will retry", { archiveId: id, reason: failureReason(error) });
-            break;
+            if (error instanceof ArchiveStorageFailure) break;
+          }
+          if (this.cleanupRequested) {
+            this.cleanupRequested = false;
+            stats.failures += await this.cleanup();
           }
           await setImmediate();
         }
