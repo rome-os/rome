@@ -950,7 +950,8 @@ async function main() {
       // through, or of the connection kind a host names when that account is
       // not known yet.
       isGuardian: async (service, senderId) => {
-        const platform = accounts.accountOf(input.ref.connectionId)?.platform ?? platformOf(service);
+        const platform =
+          accounts.accountOf(input.ref.connectionId)?.platform ?? platformOf(service);
         return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
       },
     });
