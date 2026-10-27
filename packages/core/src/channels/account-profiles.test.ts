@@ -186,7 +186,20 @@ describe("channelPlatforms", () => {
   };
   const platformOfChannel = channelPlatforms(records);
 
-  it("reads a channel's own record, then the channel a link key reaches, then the kind", () => {
+  it("reads the channel a name reaches before a leftover record of that name", () => {
+    const leftover = channelPlatforms({
+      // A disconnected Feishu app left its `feishu` row behind.
+      platformOf: (id: string) =>
+        id === LARK_CHANNEL ? "lark" : id === "feishu" ? "feishu" : null,
+      channelOfLink: (link: string) =>
+        link === "feishu" || link === LARK_CHANNEL ? LARK_CHANNEL : null,
+    });
+
+    expect(leftover("feishu")).toBe("lark");
+    expect(leftover(LARK_CHANNEL)).toBe("lark");
+  });
+
+  it("reads the channel a link key reaches, then a record of the name, then the kind", () => {
     expect(platformOfChannel(LARK_CHANNEL)).toBe("lark");
     expect(platformOfChannel("feishu")).toBe("lark");
     expect(platformOfChannel("telegram")).toBe("telegram");

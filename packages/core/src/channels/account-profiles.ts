@@ -143,18 +143,23 @@ export class AccountProfiles {
  *
  * A row may name a channel by its id, or, as a person's link does, by the
  * connection kind it was made on. A second Feishu app's channel has an opaque
- * id and its links say `feishu`, so a link key reads the platform of the one
- * channel it reaches. Only a name no record answers for falls back to the
+ * id and its links say `feishu`, so a name reads the platform of the one
+ * channel it reaches now, before any record that merely carries the name: a
+ * `feishu` row left by a disconnected Feishu app must not outvote the Lark app
+ * the link reaches. A channel id reaches its own channel. Only where a name
+ * reaches no one channel does a record of that name answer, and then the
  * connection kind's own platform, which cannot tell Lark from Feishu.
  */
 export function channelPlatforms(
   records: Pick<ChannelRecordsRepository, "platformOf" | "channelOfLink">,
 ): (channel: string) => string {
   return (channel) => {
-    const own = records.platformOf(channel);
-    if (own) return own;
     const reached = records.channelOfLink(channel);
-    return (reached ? records.platformOf(reached) : null) ?? platformOf(channel);
+    return (
+      (reached ? records.platformOf(reached) : null) ??
+      records.platformOf(channel) ??
+      platformOf(channel)
+    );
   };
 }
 
