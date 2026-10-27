@@ -134,4 +134,27 @@ describe("AccountNames", () => {
     expect(await withMatrix.displayName("matrix", "@ada:matrix.org")).toBe("Ada on Matrix");
     expect(await withMatrix.displayName("matrix", "@grace:matrix.org")).toBe("@grace:matrix.org");
   });
+  it("reads the profile cache after the mirror and before what the sentinel log kept", async () => {
+    const cache = {
+      displayNames: async (addresses: Array<{ channel: string; channelUserId: string }>) =>
+        addresses.map((address) =>
+          address.channelUserId === "5512345" || address.channelUserId === PHONE
+            ? "From the cache"
+            : null,
+        ),
+    };
+    const withCache = new AccountNames(
+      { whatsapp: new WhatsAppAccounts(whatsAppStore) },
+      sentinelLogRepo,
+      cache,
+    );
+
+    expect(
+      await withCache.displayNames([
+        { channel: "whatsapp", channelUserId: PHONE },
+        { channel: "telegram", channelUserId: "5512345" },
+        { channel: "telegram", channelUserId: "5599999" },
+      ]),
+    ).toEqual(["Ada Lovelace", "From the cache", "5599999"]);
+  });
 });

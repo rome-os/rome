@@ -680,6 +680,13 @@
       "when": 1793064686569,
       "tag": "0097_dismissed_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "6",
+      "when": 1793075035756,
+      "tag": "0098_account_profiles",
+      "breakpoints": true
     }
   ]
 }

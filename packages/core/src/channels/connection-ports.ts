@@ -61,6 +61,10 @@ export interface ConnectionPortsDeps {
    *  the one it arrived on. Absent, or null for a Connection, a message names
    *  none. */
   accountOf?: (connectionId: string) => Account | null;
+  /** Hears each inbound message an admitted sender sends, before anything
+   *  else does, so what the sender called themselves reaches the account
+   *  profile cache (account-profiles.ts). Must not throw. */
+  heard?: (message: ChannelMessage) => void;
 }
 
 /**
@@ -445,18 +449,17 @@ function connectionInbound(backing: Backing): ChannelInbound {
   const dispatchFrom =
     (connectionId: string) =>
     async (message: ChannelMessage): Promise<void> => {
-      if (!isAnswerable(message)) return;
       // A talker delivers the channel's own record, inbound, named after its
       // connection kind. The event names the channel and the account it
       // arrived on.
       const account = deps.accountOf?.(connectionId) ?? null;
+      const named: ChannelMessage = { ...message, channel, ...(account ? { account } : {}) };
+      // A message with nothing to answer still says who sent it.
+      deps.heard?.(named);
+      if (!isAnswerable(message)) return;
       const event: InboundEvent = {
         kind: "message",
-        message: {
-          ...message,
-          channel,
-          ...(account ? { account } : {}),
-        },
+        message: named,
         ref: { connectionId, chatId: message.chatId },
       };
       // A Connection id is a UUID, so the first colon ends it.

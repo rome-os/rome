@@ -7,6 +7,7 @@
 // have none at all.
 
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
+import type { AccountProfiles } from "./account-profiles.js";
 import type { Accounts } from "./accounts.js";
 import { addressBooks, type Channels } from "./channel.js";
 
@@ -21,11 +22,13 @@ export class AccountNames {
   constructor(
     private readonly providers: Readonly<Record<string, Pick<Accounts, "resolve">>>,
     private readonly senderNames: Pick<SentinelLogRepository, "listLatestDisplayNames">,
+    private readonly profiles?: Pick<AccountProfiles, "displayNames">,
   ) {}
 
   /**
-   * The name its platform holds, then the name its sender put on a message,
-   * then the identifier itself — never an empty string, so a caller always has
+   * The name its platform holds, then the name the account profile cache
+   * learned for it, then the name its sender put on a message, then the
+   * identifier itself — never an empty string, so a caller always has
    * something to render.
    *
    * A channel that addresses one account several ways answers its platform's
@@ -46,7 +49,8 @@ export class AccountNames {
    * This is the call a directory read wants. Every mirror is asked at once, so
    * a channel that answers from a read of its whole address book serves the
    * page from one such read rather than one per row, and the sentinel log is
-   * read once, and only where a mirror left a name unanswered.
+   * read once, and only where a mirror left a name unanswered. The profile
+   * cache is read the same way, before the sentinel log.
    */
   async displayNames(accounts: Array<{ channel: string; channelUserId: string }>) {
     const mirrored = await Promise.all(
@@ -54,8 +58,16 @@ export class AccountNames {
         (account) => this.providers[account.channel]?.resolve(account.channelUserId) ?? null,
       ),
     );
-    const names = mirrored.map((account) => named(account?.name));
+    let names = mirrored.map((account) => named(account?.name));
     if (names.every((name) => name != null)) return names as string[];
+
+    if (this.profiles) {
+      const unanswered = accounts.filter((_, i) => names[i] == null);
+      const learned = await this.profiles.displayNames(unanswered);
+      let next = 0;
+      names = names.map((name) => name ?? learned[next++]);
+      if (names.every((name) => name != null)) return names as string[];
+    }
 
     const sent = await this.readSenderNames();
     return names.map((name, i) => name ?? sent.get(key(accounts[i])) ?? accounts[i].channelUserId);
@@ -77,8 +89,9 @@ export class AccountNames {
 export function createAccountNames(deps: {
   channels: Channels;
   sentinelLogRepo: SentinelLogRepository;
+  profiles?: Pick<AccountProfiles, "displayNames">;
 }): AccountNames {
-  return new AccountNames(addressBooks(deps.channels), deps.sentinelLogRepo);
+  return new AccountNames(addressBooks(deps.channels), deps.sentinelLogRepo, deps.profiles);
 }
 
 const key = (account: { channel: string; channelUserId: string }) =>
