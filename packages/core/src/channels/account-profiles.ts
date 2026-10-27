@@ -11,7 +11,6 @@ import type { Account, ChannelMessage } from "@rome-os/app-runtime";
 import type { AccountProfilesRepository } from "../db/repositories/account-profiles.js";
 import { createLogger } from "../logger.js";
 import type { Accounts } from "./accounts.js";
-import type { PlatformOfChannel } from "./channel.js";
 
 const log = createLogger("account-profiles");
 
@@ -32,9 +31,6 @@ export class AccountProfiles {
       AccountProfilesRepository,
       "fromAddressBook" | "fromMessage" | "profilesOf"
     >,
-    /** The platform a channel's accounts live on, for a message that does
-     *  not name the account it arrived on. */
-    private readonly platformOfChannel: PlatformOfChannel,
   ) {}
 
   /**
@@ -71,8 +67,9 @@ export class AccountProfiles {
 
   /**
    * Learn what an inbound message's sender called themselves. The sender is on
-   * the platform of the account the message arrived on, or of its channel
-   * where Rome does not know that account. A platform an address book fills
+   * the platform of the account the message arrived on, so a message that
+   * names no account, such as one on a channel Rome serves itself, teaches
+   * nothing. A platform an address book fills
    * learns nothing from messages: a sender's address there may be an alias of
    * an account the book keys by another, and the book already holds the name.
    * Never throws: a profile is a cache, and failing to fill it must not hold
@@ -81,14 +78,14 @@ export class AccountProfiles {
   heard(
     message: Pick<
       ChannelMessage,
-      "channel" | "account" | "direction" | "senderId" | "senderDisplayName" | "senderUsername"
+      "account" | "direction" | "senderId" | "senderDisplayName" | "senderUsername"
     >,
   ): void {
-    if (message.direction !== "inbound" || !message.senderId) return;
+    if (message.direction !== "inbound" || !message.senderId || !message.account) return;
     const displayName = notAnId(named(message.senderDisplayName), message.senderId);
     const handle = named(message.senderUsername);
     if (!displayName && !handle) return;
-    const platform = message.account?.platform ?? this.platformOfChannel(message.channel);
+    const { platform } = message.account;
     if (this.booked.has(platform)) return;
     this.repo
       .fromMessage({ platform, id: message.senderId }, { displayName, handle, avatarUrl: null })

@@ -68,5 +68,26 @@ describe("appPersonMapping", () => {
 
   it("answers null for an account nobody holds", async () => {
     expect(await app.findByChannelUser("telegram", "tg-nobody")).toBeNull();
+    expect(await app.findByAccount!({ platform: "telegram", id: "tg-nobody" })).toBeNull();
+  });
+
+  it("links and finds a person by the account an app names", async () => {
+    // A channel name that would read as another platform, to show the account
+    // is taken as it is.
+    app = appPersonMapping(people, () => "elsewhere");
+    const id = await app.create({
+      displayName: "Alice",
+      bondLevel: "inner-circle",
+      accounts: [{ platform: "lark", id: "ou_alice" }],
+    });
+    await app.addAccount!(id, { platform: "telegram", id: "1001" });
+
+    expect((await app.findByAccount!({ platform: "lark", id: "ou_alice" }))?.id).toBe(id);
+    expect((await app.findByAccount!({ platform: "telegram", id: "1001" }))?.accounts).toEqual(
+      expect.arrayContaining([
+        { platform: "lark", id: "ou_alice" },
+        { platform: "telegram", id: "1001" },
+      ]),
+    );
   });
 });

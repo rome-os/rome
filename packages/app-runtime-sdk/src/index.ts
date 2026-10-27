@@ -2727,6 +2727,9 @@ export interface PersonRecord {
  */
 export interface PersonMappingRepository {
   findByChannelUser(channel: string, channelUserId: string): Promise<PersonRecord | null>;
+  /** The person linked to `account`, or null when none is. Absent from a host
+   *  that predates it. */
+  findByAccount?(account: Account): Promise<PersonRecord | null>;
   findByName(displayName: string): Promise<PersonRecord[]>;
   findByNameFuzzy(displayName: string): Promise<PersonRecord | null>;
   findByBondLevel(
@@ -2738,6 +2741,9 @@ export interface PersonMappingRepository {
     profilePath?: string;
     approved?: boolean;
     channelMappings?: { channel: string; channelUserId: string }[];
+    /** Accounts to link, beside any `channelMappings`. Ignored by a host that
+     *  predates it. */
+    accounts?: Account[];
   }): Promise<string>;
   addChannelMapping(
     personId: string,
@@ -2745,6 +2751,9 @@ export interface PersonMappingRepository {
     channelUserId: string,
     displayName?: string,
   ): Promise<unknown>;
+  /** Link `account` to the person `personId`. Absent from a host that
+   *  predates it. */
+  addAccount?(personId: string, account: Account): Promise<unknown>;
 }
 
 /**
@@ -2797,6 +2806,10 @@ export interface SentinelLogRepository {
     messageId: string;
     channel: string;
     channelUserId: string;
+    /** The sender's account. When given, the entry names it rather than the
+     *  platform of `channel` and `channelUserId`. Ignored by a host that
+     *  predates it. */
+    account?: Account;
     displayName?: string;
     threadId?: string;
     text?: string;

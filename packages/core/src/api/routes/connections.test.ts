@@ -503,6 +503,7 @@ describe("GET /connections accounts", () => {
     registry.register({ ...telegram.descriptor, connectionKind: "feishu", severalAccounts: true });
     const lark = await registry.giveGrant("feishu", undefined, "bot", telegram.validCredential(), {
       domain: "lark",
+      botId: "cli_lark",
     });
 
     const { connections } = await (await makeApp(registry, { db }).request("/connections")).json();
@@ -510,6 +511,7 @@ describe("GET /connections accounts", () => {
     expect(connections.find((each: { id: string }) => each.id === lark.id)).toMatchObject({
       channel: records.idOf(lark.id),
       platform: "lark",
+      account: { platform: "lark", id: "cli_lark" },
     });
   });
 

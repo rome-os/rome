@@ -347,7 +347,7 @@ async function main() {
   const sentinelLogRepo = new SentinelLogRepository(db, platformOfChannel);
   // What each platform says about the accounts Rome meets. The two address
   // books fill it after each sync and once now, so a dropped cache is rebuilt.
-  const accountProfiles = new AccountProfiles(new AccountProfilesRepository(db), platformOfChannel);
+  const accountProfiles = new AccountProfiles(new AccountProfilesRepository(db));
   const refreshWhatsAppProfiles = () =>
     accountProfiles.refresh(platformOf("whatsapp"), whatsAppAccounts);
   const refreshLinkedInProfiles = () =>
@@ -946,9 +946,13 @@ async function main() {
   const chatStop: ChatStopHandler = (input) =>
     stopActiveConversationTurn(input, {
       turns: agentTurnStreamRegistry,
-      isGuardian: async (channel, senderId) =>
-        (await peopleRepo.byAccount({ platform: platformOfChannel(channel), id: senderId }))
-          ?.bondLevel === "guardian",
+      // The sender is on the platform of the account the chat is reached
+      // through, or of the connection kind a host names when that account is
+      // not known yet.
+      isGuardian: async (service, senderId) => {
+        const platform = accounts.accountOf(input.ref.connectionId)?.platform ?? platformOf(service);
+        return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
+      },
     });
   const subagentExecutionService = createSubagentExecutionService({
     webchatRepo,

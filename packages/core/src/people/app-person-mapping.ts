@@ -4,8 +4,9 @@
 // The SDK's names are a published contract, so they stay as apps know them:
 // `channelMappings` on each person and `addChannelMapping` for a link. This is
 // the one place they are translated, so the repository itself speaks People's
-// language. An app names an account by the channel it heard it on, and People
-// by the platform, so a channel an app passes is read as its platform here.
+// language. An app names an account either as the `Account` value or, as it
+// did before accounts, by the channel it heard it on. People names it by the
+// platform, so a channel an app passes is read as its platform here.
 
 import type { PersonMappingRepository, PersonRecord } from "@rome-os/app-runtime";
 import { platformOf } from "@rome/api-types/platform";
@@ -49,14 +50,26 @@ export function appPersonMapping(
     async findByBondLevel(bondLevel) {
       return (await people.byBondLevel(bondLevel)).map(toRecord);
     },
-    create({ channelMappings, ...person }) {
+    async findByAccount({ platform, id }) {
+      const person = await people.byAccount({ platform, id });
+      return person && toRecord(person);
+    },
+    create({ channelMappings, accounts, ...person }) {
       return people.create({
         ...person,
-        links: channelMappings?.map((mapping) => accountOn(mapping.channel, mapping.channelUserId)),
+        links: [
+          ...(channelMappings ?? []).map((mapping) =>
+            accountOn(mapping.channel, mapping.channelUserId),
+          ),
+          ...(accounts ?? []).map(({ platform, id }) => ({ platform, id })),
+        ],
       });
     },
     async addChannelMapping(personId, channel, channelUserId) {
       return people.linkStated(accountOn(channel, channelUserId), personId);
+    },
+    async addAccount(personId, { platform, id }) {
+      return people.linkStated({ platform, id }, personId);
     },
   };
 }

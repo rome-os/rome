@@ -29,7 +29,6 @@ import type {
 import type { SetupManager } from "../../connections/setup/manager.js";
 import {
   ChannelRecordsRepository,
-  type ChannelRecord,
 } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import { accountLinkOf } from "../../channels/account-links.js";
@@ -155,11 +154,12 @@ function buildConnectionView(
   conn: Connection,
   record: GrantValue | null,
   manager: SetupManager | null,
-  channel: ChannelRecord | null,
+  channel: string | null,
   agent: string | null,
 ): ConnectionView {
   const revive = registry.getDescriptor(conn.connectionKind)?.reviveProfile;
   const link = registry.getDescriptor(conn.connectionKind)?.link ?? null;
+  const account = accountView(registry.getDescriptor(conn.connectionKind), record);
   const grants = conn.auth.grants();
 
   const display: Record<GrantName, GrantDisplayView | null> = {};
@@ -187,9 +187,9 @@ function buildConnectionView(
     capabilities: wireCapabilities(conn.status()),
     connect: connectHint(conn.connectionKind),
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
-    channel: channel?.id ?? null,
-    platform: channel?.platform ?? null,
-    account: accountView(registry.getDescriptor(conn.connectionKind), record),
+    channel,
+    platform: account?.platform ?? null,
+    account,
     // Null means silent, so a connection kind that takes no link reports none.
     agent: link === null ? undefined : agent,
     link,
@@ -228,7 +228,7 @@ async function serializeConnection(
     conn,
     await loadGrant(registry, conn),
     manager,
-    channels.byConnection(conn.id),
+    channels.byConnection(conn.id)?.id ?? null,
     accounts.agentOf(conn.id),
   );
 }
@@ -353,7 +353,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
           conn,
           record,
           deps.setupManager ?? null,
-          channels.byConnection(conn.id),
+          channels.byConnection(conn.id)?.id ?? null,
           accounts.agentOf(conn.id),
         ),
         grantDetails: buildGrantDetails(conn, record),

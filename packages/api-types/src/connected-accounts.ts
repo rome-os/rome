@@ -23,8 +23,8 @@ export interface ConnectionAccountFields {
    *  and later ones get an opaque id. Null for placeholders and services
    *  without a Talk. Commands name the connection, never this. */
   channel?: string | null;
-  /** Platform of the channel this Connection backs (`telegram`, `lark`).
-   *  Null where `channel` is null. */
+  /** Platform of the account this Connection reaches (`telegram`, `lark`),
+   *  as `account` names it. Null until the grant reports an account. */
   platform?: string | null;
   /** The account the connection's grant reaches, or null until the grant
    *  reports one, and for placeholders. */

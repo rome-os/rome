@@ -41,6 +41,15 @@ describe("SentinelLogRepository", () => {
     expect(rows[0].reviewed).toBe(false);
   });
 
+  it("names the account an app passes rather than its channel's platform", async () => {
+    const id = await repo.create(
+      makeEntry({ channel: "lark-bot", account: { platform: "lark", id: "ou_ada" } }),
+    );
+
+    const [row] = await testDb.db.select().from(sentinelLog).where(eq(sentinelLog.id, id));
+    expect(row).toMatchObject({ channel: "lark-bot", platform: "lark", channelUserId: "ou_ada" });
+  });
+
   it("findUnreviewed() returns only unreviewed entries", async () => {
     const id1 = await repo.create(makeEntry({ messageId: "msg-1" }));
     await repo.create(makeEntry({ messageId: "msg-2" }));

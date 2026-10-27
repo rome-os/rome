@@ -5,13 +5,13 @@ import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { AccountProfiles, refreshingAfter } from "./account-profiles.js";
 import { WhatsAppAccounts } from "./whatsapp-accounts.js";
 
-const PLATFORMS: Record<string, string> = { telegram_user: "telegram", telegram: "telegram" };
-
 /** Resolves once the background work `refresh` and `heard` start has landed. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
+const on = (platform: string) => ({ platform, id: "rome" });
+
 const inbound = (overrides: Record<string, unknown> = {}) => ({
-  channel: "telegram_user",
+  account: on("telegram"),
   direction: "inbound" as const,
   senderId: "1001",
   senderDisplayName: "Ada",
@@ -27,32 +27,28 @@ describe("AccountProfiles", () => {
   beforeEach(() => {
     testDb = createTestDb();
     repo = new AccountProfilesRepository(testDb.db);
-    profiles = new AccountProfiles(repo, (channel) => PLATFORMS[channel] ?? channel);
+    profiles = new AccountProfiles(repo);
   });
 
   afterEach(() => {
     testDb.close();
   });
 
-  it("learns a sender under the platform of the channel it wrote on", async () => {
+  it("learns a sender under the platform of the account the message arrived on", async () => {
     profiles.heard(inbound());
+    profiles.heard(inbound({ account: on("lark"), senderId: "ou_ada" }));
     await settle();
 
     expect(await profiles.displayNames([{ platform: "telegram", id: "1001" }])).toEqual(["Ada"]);
-  });
-
-  it("takes the platform of the account a message arrived on over its channel's", async () => {
-    profiles.heard(inbound({ channel: "lark-bot", account: { platform: "lark", id: "ou_rome" } }));
-    await settle();
-
-    expect(await repo.profilesOf([{ platform: "lark", id: "1001" }])).toEqual([
+    expect(await repo.profilesOf([{ platform: "lark", id: "ou_ada" }])).toEqual([
       { displayName: "Ada", handle: "ada", avatarUrl: null },
     ]);
   });
 
-  it("learns nothing from an outbound message, a message with no sender, or a blank name", async () => {
+  it("learns nothing from an outbound message, a message with no sender or account, or a blank name", async () => {
     profiles.heard(inbound({ direction: "outbound" }));
     profiles.heard(inbound({ senderId: "" }));
+    profiles.heard(inbound({ account: undefined }));
     profiles.heard(inbound({ senderId: "1002", senderDisplayName: "  ", senderUsername: "" }));
     await settle();
 
@@ -67,7 +63,6 @@ describe("AccountProfiles", () => {
   it("takes no name that only echoes the sender's id", async () => {
     profiles.heard(
       inbound({
-        channel: "telegram_user",
         senderId: "1001",
         senderDisplayName: "1001",
         senderUsername: undefined,
@@ -75,7 +70,7 @@ describe("AccountProfiles", () => {
     );
     profiles.heard(
       inbound({
-        channel: "email",
+        account: on("email"),
         senderId: "unauthenticated:ada@example.com",
         senderDisplayName: "ada@example.com",
         senderUsername: undefined,
@@ -83,7 +78,7 @@ describe("AccountProfiles", () => {
     );
     profiles.heard(
       inbound({
-        channel: "wechat",
+        account: on("wechat"),
         senderId: "wxid_ada@im.wechat",
         senderDisplayName: "wxid_ada",
         senderUsername: undefined,
@@ -136,7 +131,7 @@ describe("AccountProfiles", () => {
 
     // The same account, named by its LID alias rather than the book's id.
     profiles.heard(
-      inbound({ channel: "whatsapp", senderId: "88817260077@lid", senderDisplayName: "ada" }),
+      inbound({ account: on("whatsapp"), senderId: "88817260077@lid", senderDisplayName: "ada" }),
     );
     await settle();
 

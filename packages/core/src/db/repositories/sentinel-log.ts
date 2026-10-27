@@ -9,9 +9,9 @@ import type { DrizzleDb } from "../index.js";
  * The triage record: what the sentinel decided about each message it saw.
  *
  * An entry names the channel the message arrived on, as apps write it, and the
- * sender's account, which is the platform of that channel and the sender's id
- * there. The platform is read when the entry is written, so the account reads
- * never ask which platform a channel was on.
+ * sender's account: the account an app passes, or else the platform of that
+ * channel and the sender's id there. The platform is settled when the entry is
+ * written, so the account reads never ask which platform a channel was on.
  */
 export class SentinelLogRepository {
   constructor(
@@ -23,6 +23,7 @@ export class SentinelLogRepository {
     messageId: string;
     channel: string;
     channelUserId: string;
+    account?: Account;
     displayName?: string;
     threadId?: string;
     text?: string;
@@ -35,8 +36,8 @@ export class SentinelLogRepository {
       id,
       messageId: data.messageId,
       channel: data.channel,
-      platform: this.platformOfChannel(data.channel),
-      channelUserId: data.channelUserId,
+      platform: data.account?.platform ?? this.platformOfChannel(data.channel),
+      channelUserId: data.account?.id ?? data.channelUserId,
       displayName: data.displayName ?? null,
       threadId: data.threadId ?? null,
       text: data.text ?? null,
