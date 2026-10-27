@@ -6076,6 +6076,68 @@ describe("Webchat API", () => {
       expect((await lastUser())[0]).toMatchObject({ messageId: "b1", text: "First bubble." });
     });
 
+    describe("a Concierge message of several bubbles", () => {
+      const lead = "Here it is";
+      const report = "# Report\n\nThree options.";
+      const forward = [
+        { type: "text", content: lead },
+        {
+          type: "text",
+          content: report,
+          format: "long",
+          forwardedFrom: { chatId: "task-1", title: "Flights" },
+        },
+      ];
+
+      it("persists and sends only the lead-in when the client names it", async () => {
+        const { seed, send, lastUser } = await setup({ agentName: "concierge", id: "concierge" });
+        await seed("m1", "assistant", forward, "t1");
+
+        expect((await send({ replyToMessageId: "m1", replyQuote: lead })).status).toBe(200);
+
+        expect((await lastUser())[0]).toMatchObject({ messageId: "m1", text: lead });
+        expect(prompts[0]).toContain(`Assistant: ${lead}\n</reply_context>`);
+        expect(prompts[0]).not.toContain("Three options");
+      });
+
+      it("persists and sends only the report when the client names it", async () => {
+        const { seed, send, lastUser } = await setup({ agentName: "concierge", id: "concierge" });
+        await seed("m1", "assistant", forward, "t1");
+
+        expect((await send({ replyToMessageId: "m1", replyQuote: report })).status).toBe(200);
+
+        expect((await lastUser())[0].text).toBe(report);
+        expect(prompts[0]).not.toContain(lead);
+      });
+
+      it("cuts a long bubble to 1000 characters with an ellipsis, as a whole message is", async () => {
+        const { seed, send, lastUser } = await setup({ agentName: "concierge", id: "concierge" });
+        const long = "x".repeat(1500);
+        await seed(
+          "m1",
+          "assistant",
+          [
+            { type: "text", content: lead },
+            { type: "text", content: long },
+          ],
+          "t1",
+        );
+
+        expect((await send({ replyToMessageId: "m1", replyQuote: long })).status).toBe(200);
+
+        const quote = (await lastUser())[0].text as string;
+        expect(quote).toHaveLength(1000);
+        expect(quote.endsWith("…")).toBe(true);
+      });
+
+      it("rejects a quote that is not in the message", async () => {
+        const { seed, send } = await setup({ agentName: "concierge", id: "concierge" });
+        await seed("m1", "assistant", forward, "t1");
+
+        expect((await send({ replyToMessageId: "m1", replyQuote: "Paris" })).status).toBe(400);
+      });
+    });
+
     it("quotes a task chat card as one line", async () => {
       const { seed, send, lastUser } = await setup({ agentName: "concierge", id: "concierge" });
       await seed(

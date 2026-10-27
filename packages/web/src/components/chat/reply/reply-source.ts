@@ -11,6 +11,17 @@ export interface ReplySource {
   name?: string;
   /** The text a whole-message reply quotes. */
   text: string;
+  /**
+   * Whether the message holds several bubbles. A reply to one of them quotes
+   * that bubble's own text, since the server's snapshot of the message would
+   * join them all. A selection still takes precedence.
+   */
+  ownBubble?: boolean;
+  /**
+   * The element a selection must lie in to be quoted. Defaults to the
+   * message's anchor, which a message of several bubbles gives to the first.
+   */
+  scope?: () => Element | null;
 }
 
 /**

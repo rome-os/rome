@@ -13,6 +13,9 @@
       "failed": "Stopped with an error",
       "idle": "Done"
     },
+    "openForwardedChat": "Open task chat {{title}}",
+    "showFullText": "Show full text",
+    "showLess": "Show less",
     "openTaskChat": "Open",
     "messageDetails": "Message details",
     "composerMenu": "Add files or change the model",

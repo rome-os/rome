@@ -1,7 +1,10 @@
 import { memo, useMemo, type ReactNode } from "react";
+import type { ForwardedFrom } from "@rome/api-types/chat";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
+import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleContent";
 import { ConciergeBubble } from "@/components/chat/ConciergeBubble";
+import { ForwardedChip } from "@/components/chat/ForwardedChip";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
 import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
@@ -11,7 +14,7 @@ import type { ReplySource } from "@/components/chat/reply/reply-source";
 import type { ConciergeEntry, ConciergeItem } from "@/components/chat/concierge-groups";
 import { isSettledUserMessage } from "@/components/chat/reply/reply-source";
 import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
-import type { ChatMessage } from "@/lib/chat-types";
+import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
 // The same bubble reparses nothing while the transcript re-renders around it;
@@ -54,9 +57,25 @@ const GuardianBubble = memo(
     prev.arrival === next.arrival,
 );
 
+// Core stores a text part's origin as it was written, so it is read as unknown.
+function forwardedOrigin(value: unknown): ForwardedFrom | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { chatId, title } = value as Partial<ForwardedFrom>;
+  return typeof chatId === "string" && typeof title === "string" ? { chatId, title } : undefined;
+}
+
+// The task chat a text part was forwarded from, when it carries one.
+function originOf(part: TranscriptPart): ForwardedFrom | undefined {
+  return part.type === "text" && "forwardedFrom" in part
+    ? forwardedOrigin(part.forwardedFrom)
+    : undefined;
+}
+
 // Each `say` call is its own message, so each text part is its own bubble. A
-// long message is the same bubble with markdown that reads as a document.
-// Cards render as they do anywhere.
+// long message is the same bubble with markdown that reads as a document, cut
+// with a toggle when it is tall. A forwarded report is a bubble of its own with
+// a quote's gray left edge and a chip that names its task chat; the intro that
+// came with it is the bubble above. Task chat cards render as they do anywhere.
 function AgentEntry({
   entry,
   actions,
@@ -76,11 +95,16 @@ function AgentEntry({
   const firstBubble = parts.findIndex(
     (part) => part.type === "task_chat" || (part.type === "text" && part.content.trim()),
   );
+  // A message of several bubbles replies to one bubble's text, not to all of it.
+  const bubbles = parts.filter(
+    (part) => part.type === "task_chat" || (part.type === "text" && part.content.trim()),
+  ).length;
   const replyTo = (text: string): ReplySource => ({
     messageId: message.id,
     sessionId: message.sessionId,
     author: "agent",
     text,
+    ...(bubbles > 1 ? { ownBubble: true } : {}),
   });
   return parts.map((part, index) => {
     const key = `${message.id}:${index}`;
@@ -118,6 +142,7 @@ function AgentEntry({
     }
     if (!part.content.trim()) return null;
     const long = "format" in part && part.format === "long";
+    const forwardedFrom = originOf(part);
     return (
       <ConciergeBubble
         key={key}
@@ -132,10 +157,24 @@ function AgentEntry({
         reply={replyTo(part.content)}
         anchorId={index === firstBubble ? message.id : undefined}
       >
-        <ChatBubble tone="received" {...arrival(message.id)}>
-          <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks={!long}>
-            {part.content}
-          </Markdown>
+        <ChatBubble
+          tone="received"
+          data-concierge-bubble
+          className={forwardedFrom ? "border-l-3 border-l-muted-foreground" : undefined}
+          {...arrival(message.id)}
+        >
+          {forwardedFrom ? (
+            <ForwardedChip chatId={forwardedFrom.chatId} title={forwardedFrom.title} />
+          ) : null}
+          <CollapsibleBubbleContent>
+            <Markdown
+              className="min-w-0 text-foreground"
+              compact={false}
+              preserveSoftBreaks={!long}
+            >
+              {part.content}
+            </Markdown>
+          </CollapsibleBubbleContent>
         </ChatBubble>
       </ConciergeBubble>
     );

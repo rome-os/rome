@@ -33,7 +33,11 @@ export function ReplyButton({
       icon={<Reply />}
       className={cn("text-muted-foreground hover:text-foreground", className)}
       onClick={() => {
-        const quote = selectedQuote(findMessageAnchor(document, source.messageId), source.text);
+        const selected = selectedQuote(
+          source.scope?.() ?? findMessageAnchor(document, source.messageId),
+          source.text,
+        );
+        const quote = selected ?? (source.ownBubble ? source.text : undefined);
         draft.set({
           messageId: source.messageId,
           author: source.author,
