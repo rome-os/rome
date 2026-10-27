@@ -23,12 +23,13 @@ import {
   type StreamAccount,
 } from "@rome/api-types/people";
 import type { Account } from "@rome-os/app-runtime";
-import type { Message } from "@rome/api-types/message";
+import { compareMessages, type Message } from "@rome/api-types/message";
 import type { AccountNames } from "../channels/account-names.js";
 import { foldAccounts } from "../channels/account-fold.js";
 import {
   addressBooks,
-  channelsOn,
+  storedOn,
+  type RecordedOn,
   type Channels,
   type PlatformOfChannel,
 } from "../channels/channel.js";
@@ -37,7 +38,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { assignAccountHeads } from "./timeline.js";
-import { personMessageStores } from "./timeline-sources.js";
+import { perChannel, personMessageStores } from "./timeline-sources.js";
 
 export interface AccountDirectoryDeps {
   /** Every channel Rome mirrors — the address books this folds, and the stores
@@ -47,6 +48,9 @@ export interface AccountDirectoryDeps {
   sentinelLogRepo: Pick<SentinelLogRepository, "listSenders">;
   accountNames: Pick<AccountNames, "displayNames">;
   platformOfChannel: PlatformOfChannel;
+  /** Every channel recorded on a platform, released ones included, so a
+   *  history told to a disconnected account still reads. */
+  recordedOn?: RecordedOn;
   /** Where the message stores live. Read by the stream alone — the contacts
    *  list never reaches a history. */
   db: DrizzleDb;
@@ -140,21 +144,33 @@ async function readHeads(
   const heads = new Map<string, Message>();
   // An account is read under every channel on its platform, as a person's
   // timeline is (`timelineAccounts`).
-  const storedUnder = (platform: string) =>
-    channelsOn(deps.channels, deps.platformOfChannel, platform);
-  for (const round of rounds(accounts)) {
+  const stored = new Map<string, string[]>();
+  const storedUnder = (platform: string) => {
+    let names = stored.get(platform);
+    if (!names) {
+      names = storedOn(deps.channels, deps.platformOfChannel, platform, deps.recordedOn);
+      stored.set(platform, names);
+    }
+    return names;
+  };
+  const cost = (account: DirectoryAccount) =>
+    account.addresses.length * Math.max(storedUnder(account.channel).length, 1);
+  for (const round of rounds(accounts, cost)) {
+    // Asked once per channel the account is stored under, as a timeline reads
+    // it (`perChannel`), and previewed by the newest of those heads.
     const asked = new Map<MessageAccount, DirectoryAccount>(
-      round.map((account) => [
-        {
+      round.flatMap((account) =>
+        perChannel({
           channel: account.channel,
           addresses: account.addresses,
           storedUnder: storedUnder(account.channel),
-        },
-        account,
-      ]),
+        }).map((read) => [read, account] as const),
+      ),
     );
-    for (const [account, owned] of await assignAccountHeads(stores, [...asked.keys()])) {
-      heads.set(headKey(asked.get(account)!), owned.head);
+    for (const [read, owned] of await assignAccountHeads(stores, [...asked.keys()])) {
+      const key = headKey(asked.get(read)!);
+      const held = heads.get(key);
+      if (!held || compareMessages(owned.head, held) < 0) heads.set(key, owned.head);
     }
   }
   return heads;
@@ -174,10 +190,11 @@ function streamRows(
 }
 
 /**
- * How many addresses one round of ownership reads covers.
+ * How many stored addresses one round of ownership reads covers: each address
+ * once per channel it may be stored under.
  *
  * A SQL store answers a whole round in one statement, binding a bounded handful
- * of variables per address in it, and SQLite refuses any statement carrying
+ * of variables per stored address in it, and SQLite refuses any statement carrying
  * more than 32,766 of them. This is the one read that asks about a whole
  * address book at once, and an address book is thousands of contacts — so
  * asking about all of them in a single round is a stream that fails outright on
@@ -188,32 +205,37 @@ function streamRows(
  * the grouping that makes a directory cost one pass instead of one per row
  * still holds, just per round rather than once.
  *
- * Bounded here rather than inside the stores: the ceiling is a property of the
- * statement a store builds, but only a caller knows it is about to ask about
- * every account there is, and a store cannot chunk work it is handed a call at
- * a time.
+ * The SQL stores also split a batch that would outgrow one statement
+ * (`messages-sql.ts`), so the rounds are not what keeps a read under the
+ * ceiling. They keep each pass, and what it holds in memory, bounded for the
+ * one read that asks about every account there is.
  */
 const ADDRESSES_PER_ROUND = 1000;
 
 /**
  * The accounts split into rounds no wider than {@link ADDRESSES_PER_ROUND}.
  *
- * By addresses rather than by accounts because that is what the stores are
- * scoped by: an account reachable three ways costs three times what one
- * reachable a single way does. An account wider than a whole round still gets
- * one of its own rather than being dropped.
+ * By stored addresses rather than by accounts because that is what the stores
+ * are scoped by: an account reachable three ways costs three times what one
+ * reachable a single way does, and an account on a platform where Rome has
+ * held several channels costs that again per channel. An account wider than a
+ * whole round still gets one of its own rather than being dropped.
  */
-function* rounds(accounts: readonly DirectoryAccount[]): Generator<DirectoryAccount[]> {
+function* rounds(
+  accounts: readonly DirectoryAccount[],
+  cost: (account: DirectoryAccount) => number,
+): Generator<DirectoryAccount[]> {
   let round: DirectoryAccount[] = [];
-  let addresses = 0;
+  let width = 0;
   for (const account of accounts) {
-    if (round.length > 0 && addresses + account.addresses.length > ADDRESSES_PER_ROUND) {
+    const wide = cost(account);
+    if (round.length > 0 && width + wide > ADDRESSES_PER_ROUND) {
       yield round;
       round = [];
-      addresses = 0;
+      width = 0;
     }
     round.push(account);
-    addresses += account.addresses.length;
+    width += wide;
   }
   if (round.length > 0) yield round;
 }

@@ -11,7 +11,7 @@ import {
 import { peopleRoutes } from "./people.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
-import { romeAgentMessages } from "../../db/schema.js";
+import { channels as channelRows, romeAgentMessages } from "../../db/schema.js";
 
 // GET /people/:id/messages — one person's history merged across every account
 // they are linked to. These tests pin what the merge answers over real stores:
@@ -753,6 +753,37 @@ describe("People API", () => {
     expect(person.messageCount).toBe(0);
     expect(person.latest).toBeNull();
   });
+
+  // An account's history is read under every channel Rome has held on its
+  // platform, so a listing asks about each account once per channel. With
+  // channels released over time that outgrows one statement.
+  it("lists many people on a platform Rome has held many channels on", async () => {
+    for (let i = 0; i < 6; i++) {
+      testDb.db
+        .insert(channelRows)
+        .values({
+          id: `tg-released-${i}`,
+          connectionKind: "telegram",
+          platform: "telegram",
+          createdAt: new Date(i),
+        })
+        .run();
+    }
+    const PEOPLE = 1000;
+    for (let i = 0; i < PEOPLE; i++) {
+      await deps.peopleRepo.create({
+        displayName: `Telegram ${i}`,
+        bondLevel: "other",
+        approved: true,
+        links: [{ platform: "telegram", id: `tg-many-${i}` }],
+      });
+    }
+
+    const res = await app.request("/people");
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as PeopleList).people.length).toBeGreaterThanOrEqual(PEOPLE);
+  }, 60_000);
 
   async function fetchTimelineFor(id: string): Promise<TimelinePage> {
     const res = await app.request(`/people/${id}/messages?limit=300`);

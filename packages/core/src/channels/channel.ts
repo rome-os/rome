@@ -209,6 +209,28 @@ export function channelsOn(
     .map((channel) => channel.name);
 }
 
+/** The names of every channel on a platform a record keeps, built or not. */
+export type RecordedOn = (platform: string) => readonly string[];
+
+/**
+ * Every name an account's history on `platform` may be stored under: the
+ * channels built on it, then the recorded ones no longer built. A channel
+ * released by a disconnect is not built, but its messages stay in Rome's
+ * stores under its name.
+ */
+export function storedOn(
+  channels: Channels,
+  platformOfChannel: PlatformOfChannel,
+  platform: string,
+  recordedOn?: RecordedOn,
+): string[] {
+  const names = channelsOn(channels, platformOfChannel, platform);
+  for (const name of recordedOn?.(platform) ?? []) {
+    if (!names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
 /** The channels' own stores that answer per-account reads, in the channels'
  *  order. Rome's stores — the agent transcript, the sentinel log — are not
  *  here: they belong to no channel, and a read that wants them appends them

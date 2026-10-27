@@ -10,7 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { latestDynamic, type StreamAccount } from "@rome/api-types/people";
-import { romeAgentMessages, romeSessions } from "../db/schema.js";
+import { channels as channelRows, romeAgentMessages, romeSessions } from "../db/schema.js";
 import {
   buildTestDeps,
   countingDb,
@@ -270,5 +270,65 @@ describe("readAccountStream", () => {
     // Split into rounds, not into one read per account: a few passes per store,
     // nowhere near the thousands a per-row read would cost.
     expect(counted.passes() - before).toBeLessThan(20);
+  }, 60_000);
+
+  // Every channel Rome has held on a platform is a place an account's history
+  // may be stored, released ones included, so each address is asked about once
+  // per channel. A round sized by addresses alone outgrows one statement here.
+  it("answers an address book on a platform Rome has held many channels on", async () => {
+    const RELEASED = 6;
+    for (let i = 0; i < RELEASED; i++) {
+      testDb.db
+        .insert(channelRows)
+        .values({
+          id: `wa-released-${i}`,
+          connectionKind: "whatsapp",
+          platform: "whatsapp",
+          createdAt: new Date(i),
+        })
+        .run();
+    }
+    const CONTACTS = 1000;
+    const jid = (i: number) => `1666${String(i).padStart(7, "0")}@s.whatsapp.net`;
+    await deps.whatsAppStoreRepo.upsertContacts(
+      Array.from({ length: CONTACTS }, (_, i) => ({
+        jid: jid(i),
+        phoneNumber: `1666${String(i).padStart(7, "0")}`,
+        name: `Contact ${i}`,
+      })),
+    );
+    // No contact has a line in the WhatsApp mirror, so every one is asked of
+    // Rome's own stores under each of the platform's seven channels. One of
+    // them spoke to the newest released account.
+    const last = jid(CONTACTS - 1);
+    const sessionId = `wa-released-${RELEASED - 1}:${last}`;
+    testDb.db
+      .insert(romeSessions)
+      .values({
+        id: sessionId,
+        name: sessionId,
+        type: "channel",
+        sourceChannel: `wa-released-${RELEASED - 1}`,
+        sourceThreadId: last,
+        sourceThreadType: "private",
+        createdAt: new Date(0),
+        activityAt: new Date(0),
+      })
+      .run();
+    testDb.db
+      .insert(romeAgentMessages)
+      .values({
+        id: "m-released",
+        sessionId,
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: "said to a released account" }]),
+        senderId: last,
+        createdAt: new Date(1_000_000),
+      })
+      .run();
+
+    const stream = await readAccountStream(deps);
+
+    expect(find(stream, "whatsapp", last)?.latest.preview).toBe("said to a released account");
   }, 60_000);
 });

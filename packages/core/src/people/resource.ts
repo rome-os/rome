@@ -166,8 +166,13 @@ function latestAtOf(
   accounts: readonly MessageAccount[] | undefined,
   link: Account,
 ): number | null {
-  const account = accounts?.find(
-    (candidate) => candidate.channel === link.platform && candidate.addresses.includes(link.id),
-  );
-  return (account && heads.get(account)?.timestamp) ?? null;
+  // One account is read once per channel it is stored under, so its newest
+  // entry is the newest of those reads.
+  const latest = (accounts ?? [])
+    .filter(
+      (candidate) => candidate.channel === link.platform && candidate.addresses.includes(link.id),
+    )
+    .map((candidate) => heads.get(candidate)?.timestamp ?? null)
+    .filter((timestamp) => timestamp !== null);
+  return latest.length > 0 ? Math.max(...latest) : null;
 }

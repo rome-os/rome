@@ -10,6 +10,7 @@ import type {
   TimelinePage,
 } from "@rome/api-types/people";
 import { peopleRoutes } from "./people.js";
+import { accountsRoutes } from "./accounts.js";
 import {
   createTestConnections,
   createTestDb,
@@ -946,6 +947,96 @@ describe("People on an account whose channel id is opaque", () => {
     expect((await res.json()) as SendRefusal).toMatchObject({ send: "not-connected" });
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
     expect((await timeline()).entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
+  });
+
+  // A disconnect releases the channel and the next boot builds none for it,
+  // but what Ada said to that account stays stored under its name.
+  it("still reads the history told to an account Rome has disconnected", async () => {
+    testDb.db.delete(connectionGrants).where(eq(connectionGrants.custody, "test:telegram")).run();
+    testDb.db
+      .update(channelRows)
+      .set({ connectionId: null })
+      .where(eq(channelRows.id, OPAQUE))
+      .run();
+    const rebooted: TestDeps = {
+      ...deps,
+      channels: channelList({
+        db: deps.db,
+        whatsAppAccounts: deps.whatsAppAccounts,
+        linkedInAccounts: deps.linkedInAccounts,
+      }),
+    };
+    app = new Hono().route("/", peopleRoutes(rebooted)).route("/", accountsRoutes(rebooted));
+
+    expect((await timeline()).entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
+    const stream = (await (await app.request("/accounts/stream")).json()) as {
+      accounts: Array<{ channel: string; channelUserId: string }>;
+    };
+    expect(stream.accounts).toContainEqual(
+      expect.objectContaining({ channel: "telegram", channelUserId: ADA }),
+    );
+  });
+
+  // Two of Rome's accounts hold Ada's history in two different stores: an old
+  // transcript under a released account, and a recent exchange only the
+  // sentinel triaged under the live one. Each channel's history comes from its
+  // own store, so neither hides the other.
+  it("reads each of Rome's accounts' history from the store that holds it", async () => {
+    testDb.db.delete(romeAgentMessages).run();
+    testDb.db
+      .insert(channelRows)
+      .values({
+        id: "tg-old",
+        connectionKind: "telegram",
+        platform: "telegram",
+        createdAt: new Date(0),
+      })
+      .run();
+    const oldSession = channelChatId("tg-old", ADA);
+    testDb.db
+      .insert(romeSessions)
+      .values({
+        id: oldSession,
+        name: oldSession,
+        type: "channel",
+        sourceChannel: "tg-old",
+        sourceThreadId: ADA,
+        sourceThreadType: "private",
+        createdAt: new Date(0),
+        activityAt: new Date(0),
+      })
+      .run();
+    testDb.db
+      .insert(romeAgentMessages)
+      .values({
+        id: "m-old",
+        sessionId: oldSession,
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: "said long ago" }]),
+        senderId: ADA,
+        createdAt: new Date(1_000_000),
+      })
+      .run();
+    await deps.sentinelLogRepo.create({
+      messageId: "tg-recent",
+      channel: OPAQUE,
+      channelUserId: ADA,
+      displayName: "Ada",
+      text: "said just now",
+      action: "escalated",
+    });
+
+    expect((await timeline()).entries.map((entry) => entry.body)).toEqual([
+      "said just now",
+      "said long ago",
+    ]);
+    expect((await person()).latest?.preview).toBe("said just now");
+    const stream = (await (
+      await new Hono().route("/", accountsRoutes(deps)).request("/accounts/stream")
+    ).json()) as { accounts: Array<{ channelUserId: string; latest: { preview: string } }> };
+    expect(stream.accounts.find((row) => row.channelUserId === ADA)?.latest.preview).toBe(
+      "said just now",
+    );
   });
 
   describe("naming the account a send goes out from", () => {
