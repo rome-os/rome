@@ -187,6 +187,20 @@ export class ChannelRecordsRepository {
       : null;
   }
 
+  /** Every channel that records Rome's account `account`, backed or not,
+   *  oldest first: the ones what it sent is stored under. */
+  channelsOf(account: Account): string[] {
+    return this.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(
+        and(eq(channels.platform, account.platform), eq(channels.platformAccountId, account.id)),
+      )
+      .orderBy(asc(channels.createdAt))
+      .all()
+      .map((row) => row.id);
+  }
+
   /** The id of the channel `connectionId` backs, or null for none. */
   idOf(connectionId: string): string | null {
     const cached = this.ids.get(connectionId);

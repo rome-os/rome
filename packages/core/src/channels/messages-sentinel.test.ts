@@ -1,3 +1,4 @@
+import { platformOf } from "@rome/api-types/platform";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { DrizzleDb } from "../db/index.js";
 import { romeSessions, sentinelLog } from "../db/schema.js";
@@ -37,6 +38,7 @@ function row(
     id,
     messageId: `msg-${id}`,
     channel: fields.channel ?? CHANNEL,
+    platform: platformOf(fields.channel ?? CHANNEL),
     channelUserId: fields.channelUserId ?? DIRECT,
     threadId: fields.threadId ?? null,
     text: fields.text,

@@ -1,3 +1,4 @@
+import { platformOf } from "@rome/api-types/platform";
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
@@ -39,7 +40,7 @@ describe("AccountNames", () => {
     testDb = createTestDb();
     whatsAppStore = new WhatsAppStoreRepository(testDb.db);
     linkedInStore = new LinkedInStoreRepository(testDb.db);
-    sentinelLogRepo = new SentinelLogRepository(testDb.db);
+    sentinelLogRepo = new SentinelLogRepository(testDb.db, platformOf);
     names = createAccountNames({
       channels: channelList({
         db: testDb.db,

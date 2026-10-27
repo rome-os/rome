@@ -98,12 +98,15 @@ export interface ApiDeps {
    *  reads either store directly. */
   channels: Channels;
   /** The platform a channel's accounts live on, for a row that still names a
-   *  channel: a sentinel log row, an outbox row. */
+   *  channel, such as a message store's. */
   platformOfChannel: PlatformOfChannel;
   /** The channels of Rome's accounts on a platform a send may go out from. */
   sendersOn: SendersOn;
   /** Rome's own account on a channel, which a send names as `from`. */
   accountOf: ChannelRecordsRepository["accountOf"];
+  /** The channels that record one of Rome's accounts, which what it sent is
+   *  stored under. */
+  channelsOf: ChannelRecordsRepository["channelsOf"];
   /** What each platform calls an account, over every address book Rome mirrors
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */

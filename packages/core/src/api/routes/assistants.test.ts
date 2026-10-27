@@ -113,7 +113,7 @@ describe("Assistants API", () => {
 
   it("clears a delivered send from the outbox when the chat is read", async () => {
     await send(DOT, { text: "Summarise today's PRs" });
-    const inFlight = () => deps.outboxRepo.forAccounts([{ channel: "agents", channelUserId: DOT }]);
+    const inFlight = () => deps.outboxRepo.forAccounts([{ platform: "agents", id: DOT }]);
     expect(await inFlight()).toHaveLength(1);
 
     await app.request(`/assistants/${DOT}/messages`);
@@ -128,9 +128,7 @@ describe("Assistants API", () => {
       state: "failed",
       error: "not reachable",
     });
-    expect(await deps.outboxRepo.forAccounts([{ channel: "agents", channelUserId: DOT }])).toEqual(
-      [],
-    );
+    expect(await deps.outboxRepo.forAccounts([{ platform: "agents", id: DOT }])).toEqual([]);
 
     // The same id replays the refusal rather than sending again.
     const replay = (await (

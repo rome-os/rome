@@ -1,7 +1,9 @@
 import { and, eq, gt, inArray, lt, lte, or, type SQL } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
-import { outboundMessages, outboundSendReceipts, type StoredOutboxMessage } from "../schema.js";
+import type { Account } from "@rome-os/app-runtime";
+import type { OutboxMessage } from "@rome/api-types/people";
+import { outboundMessages, outboundSendReceipts } from "../schema.js";
 import type { DrizzleDb, DrizzleTx } from "../index.js";
 
 /**
@@ -18,16 +20,19 @@ import type { DrizzleDb, DrizzleTx } from "../index.js";
 
 export interface OutboxRow {
   id: string;
-  channel: string;
-  channelUserId: string;
+  /** The account the message is for: its platform and the platform's id for
+   *  it. */
+  platform: string;
+  accountId: string;
   chatId: string;
   text: string;
   state: "sending" | "unconfirmed" | "failed";
   providerMessageId: string | null;
   error: string | null;
-  /** The channel id of Rome's account the message goes out from, or null on a
-   *  row written before it was recorded. */
-  from: string | null;
+  /** Rome's account the message goes out from, or null for a send whose
+   *  channel knew no account. Both are null or neither is. */
+  fromPlatform: string | null;
+  fromAccountId: string | null;
   createdAt: Date;
   /** When the row last changed state. A retry moves this and not `createdAt`,
    *  so "how long has this been in flight" is asked of the attempt rather than
@@ -66,25 +71,12 @@ function settledBefore(now: Date): Date {
   return new Date(Math.floor((now.getTime() - SETTLES_WITHIN_MS) / 1000) * 1000);
 }
 
-export interface OutboxAccount {
-  channel: string;
-  channelUserId: string;
-}
-
-export type { StoredOutboxMessage };
-
 export class OutboxRepository {
   constructor(private readonly db: DrizzleDb) {}
 
   /** Record the attempt before it is made, so a process that dies mid-send
    *  leaves evidence rather than silence. */
-  async open(input: {
-    channel: string;
-    channelUserId: string;
-    chatId: string;
-    text: string;
-    from?: string | null;
-  }): Promise<OutboxRow> {
+  async open(input: OutboxInput): Promise<OutboxRow> {
     const claimed = await this.openOnce({ ...input, id: uuid() });
     if (!claimed.created) throw new Error("Generated send id already exists");
     return claimed.row;
@@ -92,20 +84,18 @@ export class OutboxRepository {
 
   /** Only a new claim may call the provider. Active rows and unexpired receipts
    * both own their ids, including across concurrent cleanup and send requests. */
-  async openOnce(input: {
-    id: string;
-    channel: string;
-    channelUserId: string;
-    chatId: string;
-    text: string;
-    from?: string | null;
-  }): Promise<
-    { row: OutboxRow; created: true } | { message: StoredOutboxMessage; created: false }
-  > {
+  async openOnce(
+    input: OutboxInput & { id: string },
+  ): Promise<{ row: OutboxRow; created: true } | { message: OutboxMessage; created: false }> {
     const now = new Date();
-    const row = {
-      ...input,
-      from: input.from ?? null,
+    const row: OutboxRow = {
+      id: input.id,
+      platform: input.to.platform,
+      accountId: input.to.id,
+      chatId: input.chatId,
+      text: input.text,
+      fromPlatform: input.from?.platform ?? null,
+      fromAccountId: input.from?.id ?? null,
       state: "sending" as const,
       providerMessageId: null,
       error: null,
@@ -221,15 +211,11 @@ export class OutboxRepository {
   }
 
   /** A replayable response, even after delivery cleanup or discard. */
-  async findSend(id: string): Promise<StoredOutboxMessage | null> {
+  async findSend(id: string): Promise<OutboxMessage | null> {
     return this.recordedSend(this.db, id, new Date());
   }
 
-  private recordedSend(
-    db: DrizzleDb | DrizzleTx,
-    id: string,
-    now: Date,
-  ): StoredOutboxMessage | null {
+  private recordedSend(db: DrizzleDb | DrizzleTx, id: string, now: Date): OutboxMessage | null {
     const active = db.select().from(outboundMessages).where(eq(outboundMessages.id, id)).get();
     if (active) return outboxMessage(active);
     const receipt = db
@@ -269,23 +255,12 @@ export class OutboxRepository {
     );
   }
 
-  /** Every open row addressed to one of `addresses` on any channel, oldest
-   *  first. For a caller that reads which account a row names itself. */
-  async forAddresses(addresses: readonly string[]): Promise<OutboxRow[]> {
-    if (addresses.length === 0) return [];
-    const rows = await this.db
-      .select()
-      .from(outboundMessages)
-      .where(inArray(outboundMessages.channelUserId, [...new Set(addresses)]));
-    return rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  }
-
   /** Every open row for a set of accounts, oldest first — the order they were
    *  written in, which is the order they were meant to arrive in. */
-  async forAccounts(accounts: readonly OutboxAccount[]): Promise<OutboxRow[]> {
+  async forAccounts(accounts: readonly Account[]): Promise<OutboxRow[]> {
     if (accounts.length === 0) return [];
-    const channels = [...new Set(accounts.map((a) => a.channel))];
-    const addresses = [...new Set(accounts.map((a) => a.channelUserId))];
+    const platforms = [...new Set(accounts.map((a) => a.platform))];
+    const ids = [...new Set(accounts.map((a) => a.id))];
     // Narrowed by the index and then filtered exactly: the two `IN`s together
     // admit pairs nobody asked for when a person holds several accounts.
     const rows = await this.db
@@ -293,28 +268,49 @@ export class OutboxRepository {
       .from(outboundMessages)
       .where(
         and(
-          inArray(outboundMessages.channel, channels),
-          inArray(outboundMessages.channelUserId, addresses),
+          inArray(outboundMessages.platform, platforms),
+          inArray(outboundMessages.accountId, ids),
         ),
       );
-    const wanted = new Set(accounts.map((a) => `${a.channel}\n${a.channelUserId}`));
+    const wanted = new Set(accounts.map((a) => `${a.platform}\n${a.id}`));
     return rows
-      .filter((row) => wanted.has(`${row.channel}\n${row.channelUserId}`))
+      .filter((row) => wanted.has(`${row.platform}\n${row.accountId}`))
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   }
 }
 
-export function outboxMessage(row: OutboxRow, now = new Date()): StoredOutboxMessage {
+/** A send as it is opened: the account it is for, the chat the channel
+ *  resolved that account to, and Rome's account it goes out from, if known. */
+export interface OutboxInput {
+  to: Account;
+  chatId: string;
+  text: string;
+  from?: Account | null;
+}
+
+/** The account a row is for. */
+export function recipientOf(row: OutboxRow): Account {
+  return { platform: row.platform, id: row.accountId };
+}
+
+/** Rome's account a row went out from, or null when its channel knew none. */
+export function senderOf(row: OutboxRow): Account | null {
+  return row.fromPlatform !== null && row.fromAccountId !== null
+    ? { platform: row.fromPlatform, id: row.fromAccountId }
+    : null;
+}
+
+export function outboxMessage(row: OutboxRow, now = new Date()): OutboxMessage {
   return {
     id: row.id,
-    channel: row.channel,
-    channelUserId: row.channelUserId,
+    channel: row.platform,
+    channelUserId: row.accountId,
     text: row.text,
     timestamp: Math.floor(row.createdAt.getTime() / 1000),
     state: row.state,
     ref: row.providerMessageId ? `${row.chatId}:${row.providerMessageId}` : null,
     error: row.error,
-    from: row.from,
+    from: senderOf(row),
     dismissable: isDismissable(row, now),
   };
 }

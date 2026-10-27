@@ -1,16 +1,23 @@
+import type { Account } from "@rome-os/app-runtime";
 import { eq, inArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
+import type { PlatformOfChannel } from "../../channels/channel.js";
 import { sentinelLog } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 
-/** One sender the triage record has seen, as the account reads name them. */
-export interface SentinelSender {
-  channel: string;
-  channelUserId: string;
-}
-
+/**
+ * The triage record: what the sentinel decided about each message it saw.
+ *
+ * An entry names the channel the message arrived on, as apps write it, and the
+ * sender's account, which is the platform of that channel and the sender's id
+ * there. The platform is read when the entry is written, so the account reads
+ * never ask which platform a channel was on.
+ */
 export class SentinelLogRepository {
-  constructor(private db: DrizzleDb) {}
+  constructor(
+    private readonly db: DrizzleDb,
+    private readonly platformOfChannel: PlatformOfChannel,
+  ) {}
 
   async create(data: {
     messageId: string;
@@ -28,6 +35,7 @@ export class SentinelLogRepository {
       id,
       messageId: data.messageId,
       channel: data.channel,
+      platform: this.platformOfChannel(data.channel),
       channelUserId: data.channelUserId,
       displayName: data.displayName ?? null,
       threadId: data.threadId ?? null,
@@ -45,38 +53,34 @@ export class SentinelLogRepository {
   }
 
   /**
-   * The newest name each sender has put on a message, one row per (channel,
-   * channel user id). Senders who have never carried a name are absent, and no
+   * The newest name each sender has put on a message, one row per account. Senders who have never carried a name are absent, and no
    * row carries an empty one.
    *
    * Read whole rather than one sender at a time: the callers are directory
    * reads that name every account they list.
    */
-  async listLatestDisplayNames(): Promise<
-    Array<{ channel: string; channelUserId: string; displayName: string }>
-  > {
+  async listLatestDisplayNames(): Promise<Array<{ account: Account; displayName: string }>> {
     // Bare display_name rides SQLite's guarantee that with a lone MAX()
     // aggregate the other selected columns come from the row that supplied the
     // max — i.e. the newest message names the sender. The max is taken over the
     // named rows alone, so a later message that carried no name leaves the name
     // the sender last gave standing.
     const rows = (await this.db.all(sql`
-      SELECT channel, channel_user_id AS channelUserId, display_name AS displayName,
+      SELECT platform, channel_user_id AS id, display_name AS displayName,
              MAX(created_at) AS namedAt
       FROM sentinel_log
       WHERE display_name IS NOT NULL AND trim(display_name) <> ''
-      GROUP BY channel, channel_user_id
+      GROUP BY platform, channel_user_id
     `)) as Array<Record<string, unknown>>;
     return rows.map((row) => ({
-      channel: String(row.channel),
-      channelUserId: String(row.channelUserId),
+      account: { platform: String(row.platform), id: String(row.id) },
       displayName: String(row.displayName),
     }));
   }
 
   /**
-   * Every sender the log has seen, one row per (channel, channel user id), in
-   * no particular order.
+   * Every sender the log has seen, one row per account, in no particular
+   * order.
    *
    * The triage record is the only record Rome keeps for a channel it mirrors no
    * address book for, so this is what tells an account read that a sender is an
@@ -88,23 +92,16 @@ export class SentinelLogRepository {
    * Read whole rather than one sender at a time, for the reason
    * {@link listLatestDisplayNames} gives.
    */
-  async listSenders(): Promise<SentinelSender[]> {
+  async listSenders(): Promise<Account[]> {
     const rows = (await this.db.all(sql`
-      SELECT DISTINCT channel, channel_user_id AS channelUserId
+      SELECT DISTINCT platform, channel_user_id AS id
       FROM sentinel_log
     `)) as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
-      channel: String(row.channel),
-      channelUserId: String(row.channelUserId),
-    }));
+    return rows.map((row) => ({ platform: String(row.platform), id: String(row.id) }));
   }
 
   async markReviewed(ids: string[]) {
     if (ids.length === 0) return;
     await this.db.update(sentinelLog).set({ reviewed: true }).where(inArray(sentinelLog.id, ids));
   }
-}
-
-export function createSentinelLogRepository(db: DrizzleDb) {
-  return new SentinelLogRepository(db);
 }

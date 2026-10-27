@@ -25,10 +25,6 @@ export class AccountNames {
     private readonly providers: Readonly<Record<string, Pick<Accounts, "resolve">>>,
     private readonly senderNames: Pick<SentinelLogRepository, "listLatestDisplayNames">,
     private readonly profiles?: Pick<AccountProfiles, "displayNames">,
-    /** The sentinel log names the channel a sender wrote on, so its names are
-     *  read as accounts through this. Absent, the platform of the connection
-     *  kind a channel is named after. */
-    private readonly platformOfChannel: PlatformOfChannel = platformOf,
   ) {}
 
   /**
@@ -82,12 +78,7 @@ export class AccountNames {
     const senderNames = new Map<string, string>();
     for (const row of await this.senderNames.listLatestDisplayNames()) {
       const name = named(row.displayName);
-      if (name) {
-        senderNames.set(
-          key({ platform: this.platformOfChannel(row.channel), id: row.channelUserId }),
-          name,
-        );
-      }
+      if (name) senderNames.set(key(row.account), name);
     }
     return senderNames;
   }
@@ -101,12 +92,10 @@ export function createAccountNames(deps: {
   platformOfChannel?: PlatformOfChannel;
   profiles?: Pick<AccountProfiles, "displayNames">;
 }): AccountNames {
-  const platformOfChannel = deps.platformOfChannel ?? platformOf;
   return new AccountNames(
-    addressBooks(deps.channels, platformOfChannel),
+    addressBooks(deps.channels, deps.platformOfChannel ?? platformOf),
     deps.sentinelLogRepo,
     deps.profiles,
-    platformOfChannel,
   );
 }
 

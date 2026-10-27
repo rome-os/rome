@@ -1,3 +1,4 @@
+import { platformOf } from "@rome/api-types/platform";
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { SentinelLogRepository } from "./sentinel-log.js";
@@ -10,7 +11,7 @@ describe("SentinelLogRepository", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new SentinelLogRepository(testDb.db);
+    repo = new SentinelLogRepository(testDb.db, platformOf);
   });
 
   afterEach(() => {
@@ -88,7 +89,7 @@ describe("SentinelLogRepository", () => {
       const senders = await repo.listSenders();
       expect(
         senders
-          .map((sender) => `${sender.channel}:${sender.channelUserId}`)
+          .map((sender) => `${sender.platform}:${sender.id}`)
           .sort((left, right) => left.localeCompare(right)),
       ).toEqual(["telegram:a", "telegram:b", "whatsapp:a"]);
     });
@@ -99,7 +100,7 @@ describe("SentinelLogRepository", () => {
       // The callers are account reads: they name an account and preview nothing,
       // so a newest message or a count here would be work no reader renders.
       const [sender] = await repo.listSenders();
-      expect(Object.keys(sender).sort()).toEqual(["channel", "channelUserId"]);
+      expect(Object.keys(sender).sort()).toEqual(["id", "platform"]);
     });
 
     it("answers nothing for an empty log", async () => {

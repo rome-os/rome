@@ -211,8 +211,10 @@ export const outboundMessages = sqliteTable(
   "outbound_messages",
   {
     id: text("id").primaryKey(),
-    channel: text("channel").notNull(),
-    channelUserId: text("channel_user_id").notNull(),
+    /** The account the message is for: the platform and the platform's own id
+     *  for it. */
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
     /** The chat the channel resolved the address to, kept so a retry does
      *  not have to ask again. */
     chatId: text("chat_id").notNull(),
@@ -223,31 +225,24 @@ export const outboundMessages = sqliteTable(
      *  carries, which is how the read knows the row has landed. */
     providerMessageId: text("provider_message_id"),
     error: text("error"),
-    /** The channel id of Rome's account the message goes out from. A retry
-     *  sends from it again, and the row lands only on a message stored under
-     *  it. Null on a row written before it was recorded. */
-    from: text("from_channel"),
+    /** Rome's account the message goes out from, by its platform and id. A
+     *  retry sends from it again, and the row lands only on a message stored
+     *  under it. Null on a row whose sending account was never known, which
+     *  no retry can then go out from. */
+    fromPlatform: text("from_platform"),
+    fromAccountId: text("from_account_id"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
-  (table) => [index("idx_outbound_account").on(table.channel, table.channelUserId)],
+  (table) => [index("idx_outbound_account").on(table.platform, table.accountId)],
 );
-
-/**
- * A send as the outbox stores it and a receipt keeps it: the wire message,
- * still naming the channel the row was addressed on and the channel it went
- * out from. People reads both as accounts when it answers
- * (`people/outbox.ts`), since a row keeps channel names until the outbox is
- * re-keyed.
- */
-export type StoredOutboxMessage = Omit<OutboxMessage, "from"> & { from?: string | null };
 
 /** Outbox removal retains the response for the retry window in docs/concepts/people.md#outbox. */
 export const outboundSendReceipts = sqliteTable(
   "outbound_send_receipts",
   {
     id: text("id").primaryKey(),
-    response: text("response", { mode: "json" }).$type<StoredOutboxMessage>().notNull(),
+    response: text("response", { mode: "json" }).$type<OutboxMessage>().notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [index("idx_outbound_send_receipts_expiry").on(table.expiresAt)],
@@ -405,7 +400,11 @@ export const linkedinThreadParticipants = sqliteTable(
 export const sentinelLog = sqliteTable("sentinel_log", {
   id: text("id").primaryKey(),
   messageId: text("message_id").notNull(),
+  /** The channel the message arrived on, as it was named then. */
   channel: text("channel").notNull(),
+  /** The sender's account: this platform and `channel_user_id`, its id there.
+   *  Written when the entry is, so nothing reads `channel` to find it. */
+  platform: text("platform").notNull(),
   channelUserId: text("channel_user_id").notNull(),
   displayName: text("display_name"),
   threadId: text("thread_id"),

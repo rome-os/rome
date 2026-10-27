@@ -564,7 +564,9 @@ export async function buildTestDeps(
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
-  const sentinelLogRepo = new SentinelLogRepository(db);
+  const sentinelLogRepo = new SentinelLogRepository(db, (name) =>
+    channelRecords.platformOfChannel(name),
+  );
   const connections = createTestConnections(transports);
   const channels = testChannels({ db, whatsAppAccounts, linkedInAccounts }, connections);
   const accountNames = createAccountNames({
@@ -756,6 +758,7 @@ export async function buildTestDeps(
     platformOfChannel: (name: string) => channelRecords.platformOfChannel(name),
     sendersOn: (platform: string) => channelRecords.sendersOn(platform),
     accountOf: (channel: string) => channelRecords.accountOf(channel),
+    channelsOf: (account) => channelRecords.channelsOf(account),
     accountNames,
     assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,
