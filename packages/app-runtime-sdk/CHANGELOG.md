@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.9.2](https://github.com/rome-os/rome/compare/app-runtime-v0.9.1...app-runtime-v0.9.2) (2026-10-27)
+
+
+### Features
+
+* **chat:** close the composer while a card is the only way to answer ([#1275](https://github.com/rome-os/rome/issues/1275)) ([dbd1fea](https://github.com/rome-os/rome/commit/dbd1feae47b3196286cc4f6831c89694b9a1c518))
+
 ## [0.9.1](https://github.com/rome-os/rome/compare/app-runtime-v0.9.0...app-runtime-v0.9.1) (2026-10-27)
 
 
