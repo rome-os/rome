@@ -1,9 +1,7 @@
 import { memo, useMemo } from "react";
-import { CircleAlert, CircleHelp, CircleSlash } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { ChatBubble } from "@/components/chat/ChatBubble";
-import Markdown from "@/components/chat/ChatMarkdown";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
+import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
 import type { ChatMessage } from "@/lib/chat-types";
 import { userMessageText } from "@/components/chat/chat-view";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
@@ -22,57 +20,18 @@ export const UserMessage = memo(
     const { data: viewer } = useDashboardIdentity();
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
     const timestamp = useMemo(() => formatMessageTimestamp(msg.createdAt), [msg.createdAt]);
-    const undelivered =
-      msg.inputState === "failed" || msg.inputState === "unknown" || msg.inputState === "cancelled";
-    const pending =
-      msg.inputState === "queued" ||
-      msg.inputState === "submitted" ||
-      msg.inputState === "accepted";
-    const statusLabel =
-      msg.inputState && msg.inputState !== "consumed"
-        ? t(`inputState.${msg.inputState}`)
-        : undefined;
     // Some user turns carry only a structured part with no text (e.g. an
     // interaction_result, whose inline component re-renders its own read-only
     // state), so suppress the empty bubble.
     if (!text) return null;
     const own = sentByViewer(msg.sender, viewer);
-    // A delivered or pending message is the primary bubble. One that never
-    // reached the agent drops to the muted bubble, so its state border and
-    // icon read.
     const bubble = (
-      <ChatBubble
-        tone={undelivered ? "muted" : own ? "sent" : "received"}
-        className={cn(
-          "max-w-[70%] transition-colors motion-reduce:transition-none",
-          !own && "self-start",
-          undelivered && "flex items-start gap-2",
-          // A pending bubble is the normal bubble, breathing until the agent
-          // takes the input in (see `.rome-bubble-pending` in globals.css).
-          pending && "rome-bubble-pending",
-          msg.inputState === "cancelled" && "border-dashed border-border bg-transparent",
-          msg.inputState === "failed" && "border-destructive/50",
-          msg.inputState === "unknown" && "border-warning/50",
-        )}
-        title={statusLabel}
-        aria-busy={pending || undefined}
-      >
-        {msg.inputState === "failed" ? (
-          <CircleAlert className="mt-1 size-4 shrink-0 text-destructive" aria-hidden="true" />
-        ) : msg.inputState === "unknown" ? (
-          <CircleHelp className="mt-1 size-4 shrink-0 text-warning" aria-hidden="true" />
-        ) : msg.inputState === "cancelled" ? (
-          <CircleSlash className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        ) : null}
-        <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
-          {text}
-        </Markdown>
-      </ChatBubble>
-    );
-    const status = (
-      <span className="sr-only" role="status">
-        {statusLabel}
-      </span>
+      <UserMessageBubble
+        msg={msg}
+        text={text}
+        own={own}
+        className={cn("max-w-[70%]", !own && "self-start")}
+      />
     );
     // Timestamp + copy under the bubble. Hover-revealed on pointer devices,
     // always visible on touch. Precision tracks recency: time of day today,
@@ -101,7 +60,6 @@ export const UserMessage = memo(
           footer={actions}
         >
           {bubble}
-          {status}
         </MessageRow>
       );
     }
@@ -109,7 +67,6 @@ export const UserMessage = memo(
       <div className="group mb-4 flex items-start justify-end gap-2">
         <div className="flex min-w-0 flex-1 flex-col items-end">
           {bubble}
-          {status}
           {actions}
         </div>
         {msg.sender ? <SenderAvatar sender={msg.sender} /> : null}

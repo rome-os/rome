@@ -14,6 +14,7 @@
       "idle": "已完成"
     },
     "openTaskChat": "打开",
+    "messageDetails": "消息详情",
     "composerMenu": "添加文件或切换模型",
     "placeholder": "发消息",
     "empty": {
