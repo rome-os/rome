@@ -271,9 +271,13 @@ export async function readAccountDirectory(
     deps.peopleRepo.dismissals(),
   ]);
 
+  const heard = senders.map((sender) => ({
+    platform: deps.platformOfChannel(sender.channel),
+    id: sender.channelUserId,
+  }));
   const links = persons.flatMap((person) => person.links.map((link) => ({ ...link, person })));
   const fold = await foldAccounts(addressBooks(deps.channels, deps.platformOfChannel), {
-    stored: [...senders, ...links, ...dismissals],
+    stored: [...heard, ...links, ...dismissals],
   });
 
   /** Who holds each account, decided once before any row is built. */
@@ -297,7 +301,7 @@ export async function readAccountDirectory(
   };
 
   for (const account of fold.accounts) observe(account.platform, account.id, account.aliases);
-  for (const sender of senders) observe(sender.platform, sender.id);
+  for (const sender of heard) observe(sender.platform, sender.id);
   for (const link of links) {
     const key = observe(link.platform, link.id);
     const held = linkOf.get(key);

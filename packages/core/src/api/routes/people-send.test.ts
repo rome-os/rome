@@ -20,7 +20,7 @@ import {
   type TestDeps,
 } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
-import { OutboxRepository } from "../../db/repositories/outbox.js";
+import { OutboxRepository, type StoredOutboxMessage } from "../../db/repositories/outbox.js";
 import {
   channels as channelRows,
   connectionGrants,
@@ -220,17 +220,12 @@ describe("People send API", () => {
     const replayed = await send(body);
     expect(replayed.status).toBe(202);
     expect(await replayed.json()).toEqual(original);
-    // The receipt keeps the send as the wire answered it: from no account,
-    // since the channel records none.
-    expect(
-      await deps.outboxRepo.openOnce({
-        id: body.id,
-        to: { platform: "telegram", id: TG },
-        channel: "telegram",
-        chatId: row.chatId,
-        text: body.text,
-      }),
-    ).toEqual({ created: false, message: { ...original, from: null } });
+    // The receipt keeps the channel the send went out on, which the wire
+    // answers as Rome's account there: none, since the channel records none.
+    expect(await deps.outboxRepo.openOnce({ ...body, chatId: row.chatId })).toEqual({
+      created: false,
+      message: { ...original, from: "telegram" },
+    });
     expect(await deps.outboxRepo.find(body.id)).toBeNull();
     expect(await outbox()).toEqual([]);
     expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
@@ -302,7 +297,7 @@ describe("People send API", () => {
     } satisfies OutboxMessage;
     await testDb.db.insert(outboundSendReceipts).values({
       id,
-      response: legacy as OutboxMessage,
+      response: legacy as StoredOutboxMessage,
       expiresAt: new Date(Date.now() + SEND_IDEMPOTENCY_RETENTION_MS),
     });
 
@@ -337,25 +332,6 @@ describe("People send API", () => {
     expect(((await retried.json()) as OutboxMessage).id).toBe(failed!.id);
     expect(await outbox()).toEqual([]);
     expect((await timeline()).entries.map((entry) => entry.body)).toContain("will fail");
-  });
-
-  // The row's channel knew no account, so nothing proves another channel that
-  // knows none is the one that sent it. A retry may not move there.
-  it("retries a send from no known account only on the channel it went out on", async () => {
-    const row = await deps.outboxRepo.open({
-      to: { platform: "telegram", id: TG },
-      channel: "tg-since-removed",
-      chatId: TG,
-      text: "from a channel that is gone",
-    });
-    await deps.outboxRepo.refused(row.id, "provider down");
-
-    const retried = await app.request(`/people/${personId}/outbox/${row.id}/retry`, {
-      method: "POST",
-    });
-    expect(retried.status).toBe(202);
-    expect(((await retried.json()) as OutboxMessage).state).toBe("failed");
-    expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
   });
 
   it("discards a failed send when the guardian gives up on it", async () => {
@@ -480,8 +456,8 @@ describe("People send API — delivery bookkeeping", () => {
 
   it("recovers a send whose process died before the channel answered", async () => {
     const row = await deps.outboxRepo.open({
-      to: { platform: "whatsapp", id: LID },
       channel: "whatsapp",
+      channelUserId: LID,
       chatId: LID,
       text: "stranded",
     });
@@ -538,8 +514,8 @@ describe("People send API — delivery bookkeeping", () => {
 
   it("will not discard a send while the channel has not answered", async () => {
     const row = await deps.outboxRepo.open({
-      to: { platform: "whatsapp", id: LID },
       channel: "whatsapp",
+      channelUserId: LID,
       chatId: LID,
       text: "still going",
     });
@@ -684,8 +660,8 @@ describe("People send API — delivery bookkeeping", () => {
 
     it("never offers a send the channel has not answered", async () => {
       const row = await deps.outboxRepo.open({
-        to: { platform: "telegram", id: "tg-unmirrored" },
         channel: "telegram",
+        channelUserId: "tg-unmirrored",
         chatId: "tg-unmirrored",
         text: "still going",
       });
@@ -1075,7 +1051,7 @@ describe("People on an account whose channel id is opaque", () => {
       expect(res.status).toBe(202);
       const message = (await res.json()) as OutboxMessage;
       expect(message.from).toEqual(ME);
-      expect((await deps.outboxRepo.find(message.id))?.fromAccountId).toBe(ME.id);
+      expect((await deps.outboxRepo.find(message.id))?.from).toBe(OPAQUE);
       expect(deps.transports.get("telegram")?.sentMessages).toEqual([
         { chatId: ADA, message: { text: "from the opaque account" } },
       ]);
@@ -1131,11 +1107,11 @@ describe("People on an account whose channel id is opaque", () => {
         .where(eq(connectionGrants.custody, "test:telegram-second"))
         .run();
       const row = await deps.outboxRepo.open({
-        to: { platform: "telegram", id: ADA },
-        channel: "tg-second",
+        channel: "telegram",
+        channelUserId: ADA,
         chatId: ADA,
         text: "from a removed account",
-        from: SECOND,
+        from: "tg-second",
       });
       await deps.outboxRepo.refused(row.id, "provider down");
 
@@ -1150,35 +1126,13 @@ describe("People on an account whose channel id is opaque", () => {
       expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
     });
 
-    // Reconnecting an account gives it a fresh channel. A retry goes out from
-    // the same account on that channel, and lands under it.
-    it("confirms a retry that goes out on the account's new channel", async () => {
+    // A row from before the sending account was recorded went out from the
+    // channel its link names. The service-named account is gone and an opaque
+    // one replaced it, so a retry is refused rather than moved.
+    it("retries a row from before the sender was recorded only from its own channel", async () => {
       const row = await deps.outboxRepo.open({
-        to: { platform: "telegram", id: ADA },
-        channel: "tg-before-reconnect",
-        chatId: ADA,
-        text: "sent before the reconnect",
-        from: ME,
-      });
-      await deps.outboxRepo.refused(row.id, "provider down");
-
-      const retried = await app.request(`/people/${personId}/outbox/${row.id}/retry`, {
-        method: "POST",
-      });
-      expect(((await retried.json()) as OutboxMessage).state).toBe("unconfirmed");
-      expect((await deps.outboxRepo.find(row.id))?.channel).toBe(OPAQUE);
-      const outboxRes = await app.request(`/people/${personId}/outbox`);
-      expect(((await outboxRes.json()) as OutboxPage).messages).toEqual([]);
-    });
-
-    // A row whose channel knew no account went out from a channel that still
-    // knew none. The platform's one channel now knows its account, which may
-    // not be the one the row went out from, so a retry is refused rather than
-    // moved.
-    it("retries a row from no known account only from a channel that knows none", async () => {
-      const row = await deps.outboxRepo.open({
-        to: { platform: "telegram", id: ADA },
         channel: "telegram",
+        channelUserId: ADA,
         chatId: ADA,
         text: "from the old account",
       });
@@ -1192,42 +1146,24 @@ describe("People on an account whose channel id is opaque", () => {
       expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
     });
 
-    // Disconnecting the account clears it from its channel's record, but the
-    // transcript of the send is still stored under that channel.
-    it("confirms a send after the account it went out from is disconnected", async () => {
-      const res = await post({ text: "before the disconnect", from: ME });
-      expect(res.status).toBe(202);
-      testDb.db
-        .update(channelRows)
-        .set({ platformAccountId: null, connectionId: null })
-        .where(eq(channelRows.id, OPAQUE))
-        .run();
-
-      const outboxRes = await app.request(`/people/${personId}/outbox`);
-      expect(((await outboxRes.json()) as OutboxPage).messages).toEqual([]);
-    });
-
     // Two of Rome's accounts may hand out the same provider message id. A row
     // lands only on a message stored under the account it went out from.
     it("confirms a row only against the account it went out from", async () => {
       connectSecond();
       const sessionId = channelChatId(OPAQUE, ADA);
-      const sentFrom = async (
-        from: { platform: string; id: string },
-        providerMessageId: string,
-      ) => {
+      const sentFrom = async (from: string, providerMessageId: string) => {
         const row = await deps.outboxRepo.open({
-          to: { platform: "telegram", id: ADA },
-          channel: from.id === ME.id ? OPAQUE : "tg-second",
+          channel: "telegram",
+          channelUserId: ADA,
           chatId: ADA,
-          text: `sent from ${from.id}`,
+          text: `sent from ${from}`,
           from,
         });
         await deps.outboxRepo.accepted(row.id, providerMessageId);
         return row.id;
       };
-      const elsewhere = await sentFrom(SECOND, "pm-shared");
-      const here = await sentFrom(ME, "pm-here");
+      const elsewhere = await sentFrom("tg-second", "pm-shared");
+      const here = await sentFrom(OPAQUE, "pm-here");
       // What the opaque account holds: a message under each provider id.
       for (const providerMessageId of ["pm-shared", "pm-here"]) {
         testDb.db

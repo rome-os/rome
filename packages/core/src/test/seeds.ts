@@ -1,4 +1,3 @@
-import { platformOf } from "@rome/api-types/platform";
 import { randomUUID } from "node:crypto";
 import type { DrizzleDb } from "../db/index.js";
 import { PeopleRepository } from "../db/repositories/people.js";
@@ -158,7 +157,7 @@ async function seedApprovalsBaseline(db: DrizzleDb) {
 }
 
 async function seedSentinelLogBaseline(db: DrizzleDb) {
-  const repo = new SentinelLogRepository(db, platformOf);
+  const repo = new SentinelLogRepository(db);
 
   const repliedId = await repo.create({
     messageId: "msg-replied-1",

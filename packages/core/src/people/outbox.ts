@@ -16,13 +16,18 @@ import {
   STRANDED_SEND_ERROR,
   type OutboxMessage,
 } from "@rome/api-types/people";
+import { platformOf } from "@rome/api-types/platform";
 import { createLogger } from "../logger.js";
 import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 import { channelChatId } from "../db/repositories/webchat.js";
 import { conversationPlatformMessageId } from "../db/repositories/webchat.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
-import type { OutboxRepository, OutboxRow } from "../db/repositories/outbox.js";
-import { outboxMessage, recipientOf, senderOf } from "../db/repositories/outbox.js";
+import type {
+  OutboxRepository,
+  OutboxRow,
+  StoredOutboxMessage,
+} from "../db/repositories/outbox.js";
+import { outboxMessage } from "../db/repositories/outbox.js";
 import {
   resolveSendTarget,
   sendersOf,
@@ -101,14 +106,16 @@ export async function sendToAccount(
   id?: string,
   from?: Account,
 ): Promise<SendResult> {
-  const replay = (message: OutboxMessage): SendResult =>
-    matchesSendRequest(message, {
+  const replay = (stored: StoredOutboxMessage): SendResult => {
+    const message = answered(deps, stored);
+    return matchesSendRequest(message, {
       ...wireOf(account),
       text,
       ...(from === undefined ? {} : { from }),
     })
       ? { ok: true, message }
       : { ok: false, error: "That send id belongs to a different message" };
+  };
   if (id) {
     const existing = await deps.outboxRepo.findSend(id);
     if (existing) return replay(existing);
@@ -122,14 +129,14 @@ export async function sendToAccount(
   const resolution = await resolveSendTarget(deps, account, sender);
   if (!resolution.ok) return { ok: false, send: resolution.send };
 
-  // The row records Rome's account the channel holds, so a retry goes out
-  // from it again and from no other (`senderChannel`).
+  // The row names the channel it went out on, as every row written before
+  // links named a platform does, so one rule reads them all (`accountOfRow`).
   const input = {
-    to: account,
     channel: resolution.target.channel,
+    channelUserId: account.id,
     chatId: resolution.target.chatId,
     text,
-    from: deps.accountOf?.(resolution.target.channel) ?? null,
+    from: resolution.target.channel,
   };
   const claimed = id ? await deps.outboxRepo.openOnce({ ...input, id }) : null;
   if (claimed && !claimed.created) return replay(claimed.message);
@@ -150,18 +157,28 @@ function senderNamed(deps: OutboxDeps, platform: string, from: Account): string 
 }
 
 /**
- * The channel a retry of `row` goes out on: the one that holds Rome's account
- * the row went out from. A row whose channel knew no account goes out on that
- * same channel, and only while it can still send and still knows none, since
- * one that has learned an account cannot be told apart from another account.
- * Null when neither holds.
+ * A stored send as the wire answers it. A row names channels, the one it was
+ * addressed on and the one it went out from, and People names accounts: the
+ * account it went to is on the platform of the channel it went out on, and
+ * the account it went out from is Rome's account on that channel.
  */
-function senderChannel(deps: OutboxDeps, row: OutboxRow): string | null {
-  const from = senderOf(row);
-  if (from) return senderNamed(deps, row.platform, from);
-  const stillSends = sendersOf(deps, row.platform).includes(row.channel);
-  return stillSends && !deps.accountOf?.(row.channel) ? row.channel : null;
+function answered(deps: OutboxDeps, message: StoredOutboxMessage): OutboxMessage {
+  const { from, ...rest } = message;
+  return {
+    ...rest,
+    channel: (deps.platformOfChannel ?? platformOf)(from ?? message.channel),
+    // A receipt written before rows recorded it has none, and answers none.
+    ...(from === undefined ? {} : { from: from ? (deps.accountOf?.(from) ?? null) : null }),
+  };
 }
+
+/** The account a row was sent to, read the same way. */
+function accountOfRow(deps: OutboxDeps, row: OutboxRow): Account {
+  return { platform: (deps.platformOfChannel ?? platformOf)(sentFrom(row)), id: row.channelUserId };
+}
+
+const wire = (deps: OutboxDeps, row: OutboxRow, now?: Date) =>
+  answered(deps, outboxMessage(row, now));
 
 /**
  * Send a `sending` row and record whichever way it went. Shared by the first
@@ -185,7 +202,7 @@ async function attempt(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await deps.outboxRepo.refused(row.id, message);
-    return outboxMessage({ ...row, state: "failed", error: message });
+    return wire(deps, { ...row, state: "failed", error: message });
   }
 
   await deps.outboxRepo.accepted(row.id, receipt.messageId);
@@ -204,14 +221,14 @@ async function attempt(
   } catch (error) {
     log.warn("outbound message delivered but recording failed", {
       outboxId: row.id,
-      channel: target.channel,
+      channel: row.channel,
       error: error instanceof Error ? error.message : String(error),
     });
   }
 
   // `accepted` restarted the row's clock, and the window a discard waits out
   // runs from it.
-  return outboxMessage({
+  return wire(deps, {
     ...row,
     state: "unconfirmed",
     providerMessageId: receipt.messageId,
@@ -236,26 +253,18 @@ export async function retrySend(
   const row = await deps.outboxRepo.reopen(id);
   if (row === null) return null;
   // From the account it went out from the first time, and no other.
-  const sender = senderChannel(deps, row);
-  const resolution =
-    sender === null
-      ? ({ ok: false, send: "not-connected" } as const)
-      : await resolveSendTarget(deps, recipientOf(row), sender);
+  const resolution = await resolveSendTarget(deps, accountOfRow(deps, row), sentFrom(row));
   if (!resolution.ok) {
-    const error = `cannot send from ${sender ?? "an account Rome no longer holds"}: ${resolution.send}`;
+    const error = `cannot send on ${sentFrom(row)}: ${resolution.send}`;
     await deps.outboxRepo.refused(row.id, error);
-    return outboxMessage({ ...row, state: "failed", error });
+    return wire(deps, { ...row, state: "failed", error });
   }
   if (resolution.target.chatId !== row.chatId) {
     const error = "The account's conversation changed. Discard this reply and compose a new one.";
     await deps.outboxRepo.refused(row.id, error);
-    return outboxMessage({ ...row, state: "failed", error });
+    return wire(deps, { ...row, state: "failed", error });
   }
-  // The account may be back on a channel of its own since, and this attempt's
-  // transcript is stored under the channel it goes out on now.
-  const channel = resolution.target.channel;
-  if (channel !== row.channel) await deps.outboxRepo.movedTo(row.id, channel);
-  return attempt(deps, { ...row, channel }, resolution.target);
+  return attempt(deps, row, resolution.target);
 }
 
 /** Give up on a failed send of this person's. Answers whether there was one to
@@ -277,7 +286,7 @@ async function heldBy(
 ): Promise<boolean> {
   const row = await deps.outboxRepo.find(id);
   if (row === null) return false;
-  const sentTo = recipientOf(row);
+  const sentTo = accountOfRow(deps, row);
   return accounts.some(
     (account) => account.platform === sentTo.platform && account.id === sentTo.id,
   );
@@ -321,11 +330,11 @@ export async function readOutbox(
   stores: readonly AccountMessages[],
   accounts: readonly MessageAccount[],
 ): Promise<OutboxMessage[]> {
-  const rows = await deps.outboxRepo.forAccounts(
-    accounts.flatMap((account) =>
-      account.addresses.map((id) => ({ platform: account.channel, id })),
-    ),
-  );
+  // Read by address and kept by the account each row names, since a row names
+  // channels and an account is on a platform.
+  const rows = (
+    await deps.outboxRepo.forAddresses(accounts.flatMap((account) => account.addresses))
+  ).filter((row) => landsOn(accounts, accountOfRow(deps, row)) !== undefined);
   if (rows.length === 0) return [];
 
   // A row still `sending` long after its attempt began is one whose process
@@ -343,7 +352,7 @@ export async function readOutbox(
   }
 
   const awaiting = rows.filter((row) => row.state === "unconfirmed");
-  if (awaiting.length === 0) return rows.map((row) => outboxMessage(row, now));
+  if (awaiting.length === 0) return rows.map((row) => wire(deps, row, now));
 
   // Each row is looked for under the account it went out from and nowhere
   // else, so a message another of Rome's accounts holds under the same
@@ -363,7 +372,7 @@ export async function readOutbox(
   };
   const arrived = await Promise.all(
     awaiting.map(async (row) => {
-      const account = landingAccount(accounts, row);
+      const account = landingAccount(deps, accounts, row);
       const refs = await refsOn(account);
       return refsFor(row, account).some((ref) => refs.has(ref));
     }),
@@ -379,7 +388,7 @@ export async function readOutbox(
   await Promise.all(landed.map((row) => deps.outboxRepo.remove(row.id)));
 
   const cleared = new Set(landed.map((row) => row.id));
-  return rows.filter((row) => !cleared.has(row.id)).map((row) => outboxMessage(row, now));
+  return rows.filter((row) => !cleared.has(row.id)).map((row) => wire(deps, row, now));
 }
 
 /**
@@ -413,9 +422,16 @@ function refsFor(row: OutboxRow, account: MessageAccount): string[] {
     `${row.chatId}:${messageId}`,
     ...new Set(account.addresses.map((address) => `${address}:${messageId}`)),
   ];
-  const sessionId = channelChatId(row.channel, row.chatId);
+  const sessionId = channelChatId(sentFrom(row), row.chatId);
   refs.push(`agent:${conversationPlatformMessageId(sessionId, messageId)}`);
   return refs;
+}
+
+/** The channel of the account a row went out from. A row written before that
+ *  was recorded went out from the channel it names, since People then reached
+ *  no other. */
+function sentFrom(row: OutboxRow): string {
+  return row.from ?? row.channel;
 }
 
 /** The account among `accounts` that `sentTo` is an address of. */
@@ -426,13 +442,17 @@ function landsOn(accounts: readonly MessageAccount[], sentTo: Account): MessageA
 }
 
 /** This row's account, with every address the platform folds onto it, the
- *  row's own included, read under the channel the row went out on. Falls back
- *  to the row's own address for a platform that folds nothing. */
-function landingAccount(accounts: readonly MessageAccount[], row: OutboxRow): MessageAccount {
-  const sentTo = recipientOf(row);
+ *  row's own included, read under the channel the row went out from. Falls
+ *  back to the row's own address for a platform that folds nothing. */
+function landingAccount(
+  deps: OutboxDeps,
+  accounts: readonly MessageAccount[],
+  row: OutboxRow,
+): MessageAccount {
+  const sentTo = accountOfRow(deps, row);
   const account = landsOn(accounts, sentTo) ?? {
     channel: sentTo.platform,
     addresses: [sentTo.id],
   };
-  return { ...account, storedUnder: [row.channel] };
+  return { ...account, storedUnder: [sentFrom(row)] };
 }

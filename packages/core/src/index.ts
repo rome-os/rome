@@ -344,7 +344,7 @@ async function main() {
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
-  const sentinelLogRepo = new SentinelLogRepository(db, platformOfChannel);
+  const sentinelLogRepo = new SentinelLogRepository(db);
   // What each platform says about the accounts Rome meets. The two address
   // books fill it after each sync and once now, so a dropped cache is rebuilt.
   const accountProfiles = new AccountProfiles(new AccountProfilesRepository(db), platformOfChannel);
