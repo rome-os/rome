@@ -429,6 +429,42 @@ describe("TraceDrawer following a running subagent", () => {
     expect(screen.queryByText("trace.drawer.live")).toBeNull();
   });
 
+  it("drops the stored trace of the previous target when a running subagent is opened", async () => {
+    const turnId = `drawer-turn-${(seq += 1)}`;
+    const onFollowingChange = rs.fn();
+    const stored: TraceDrawerTarget = {
+      kind: "stored",
+      messageId: "message-a",
+      sessionId: "session-a",
+      turnId: "turn-a",
+      summary: { distinctApps: [], totalSteps: 2, invocationCounts: {} },
+    };
+    const { rerender } = render(drawer(stored));
+    await waitFor(() => expect(screen.getByTestId("calls").textContent).toBe("Read,Edit"));
+
+    rerender(drawer(turnTarget(turnId, true), onFollowingChange));
+    // Nothing of target A is left while B runs, even before B's first step.
+    await waitFor(() => expect(screen.queryByTestId("calls")).toBeNull());
+    await waitFor(() => expect(streams.has(turnId)).toBe(true));
+    await act(async () => {
+      (streams.get(turnId) as FakeTurnStream).send(
+        "segment_upsert",
+        runSegment("run-b", [{ tool: "Bash", input: {} }]),
+      );
+    });
+    expect((await screen.findByTestId("calls")).textContent).toBe("Bash");
+    expect(screen.getByText("trace.drawer.live")).toBeTruthy();
+    expect(onFollowingChange).toHaveBeenLastCalledWith(true);
+
+    // When B ends, its own stored trace is fetched, not A's.
+    traceFetch.mockClear();
+    await act(async () => {
+      (streams.get(turnId) as FakeTurnStream).send("done", { success: true });
+    });
+    await waitFor(() => expect(traceFetch).toHaveBeenCalledTimes(1));
+    expect(String(traceFetch.mock.calls[0][0])).toContain(`/turns/${turnId}/trace`);
+  });
+
   it("fetches a finished subagent once and opens no stream", async () => {
     const turnId = `drawer-turn-${(seq += 1)}`;
     render(drawer(turnTarget(turnId, false)));

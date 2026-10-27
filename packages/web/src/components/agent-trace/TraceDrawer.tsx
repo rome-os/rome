@@ -189,7 +189,18 @@ export function TraceDrawer({
       loadedTargetKeyRef.current = null;
       return;
     }
-    if (followingTurn) return;
+    if (followingTurn) {
+      // Following a running turn replaces whatever the previous target left
+      // behind (a stored trace, an archived or error state), and the stored
+      // trace loads afresh once the stream ends.
+      setRemoteTrace(null);
+      setArchived(false);
+      setError(null);
+      setLoading(false);
+      loadedKeyRef.current = null;
+      loadedTargetKeyRef.current = null;
+      return;
+    }
     const key = `${remoteTargetKey}:${includeSubagentUsage}:${retryNonce}`;
     if (loadedKeyRef.current === key) return;
     let cancelled = false;
