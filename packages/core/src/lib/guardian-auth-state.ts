@@ -1,7 +1,6 @@
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { guardianAuth, persons } from "../db/schema.js";
-import { STRANGER_PERSON_ID, STRANGER_PERSON_DISPLAY_NAME } from "../constants.js";
 import type { DrizzleDb } from "../db/index.js";
 import { proveIdentity, type ProveIdentityResult } from "./instance-identity.js";
 import { createLogger } from "../logger.js";
@@ -36,17 +35,6 @@ export async function createCloudGuardian(
     avatarUrl: avatarUrl ?? null,
     createdAt: new Date(),
   });
-
-  await db
-    .insert(persons)
-    .values({
-      id: STRANGER_PERSON_ID,
-      displayName: STRANGER_PERSON_DISPLAY_NAME,
-      bondLevel: "other",
-      approved: true,
-      createdAt: new Date(),
-    })
-    .onConflictDoNothing();
 }
 
 export interface GuardianAuthState {

@@ -246,6 +246,7 @@ function makeSetupApp() {
   const registry = new ConnectionRegistry({ repository: ledger });
   const peopleRepo = {
     byAccount: async () => null,
+    isDismissed: async () => false,
     byBondLevel: async () => [],
   } as unknown as ApiDeps["peopleRepo"];
   registry.register(

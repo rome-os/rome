@@ -10,7 +10,7 @@ const log = createLogger("guardian-mapping");
  * Called on connect for channels that surface the guardian's self address
  * (WhatsApp pairing today) and by the channels routes/descriptors. Returns
  * `true` when a mapping was created or re-canonicalized, `false` when the
- * channel user was already mapped or no guardian person exists.
+ * channel user was already mapped or dismissed, or no guardian person exists.
  */
 export async function mapGuardianToChannel(
   repo: PeopleRepository,
@@ -20,6 +20,10 @@ export async function mapGuardianToChannel(
   const existing = await repo.byAccount({ channel, channelUserId });
   if (existing) {
     log.info("channel user already mapped", { channel, channelUserId, personId: existing.id });
+    return false;
+  }
+  if (await repo.isDismissed({ channel, channelUserId })) {
+    log.info("channel user was dismissed, not mapping", { channel, channelUserId });
     return false;
   }
 
@@ -87,7 +91,7 @@ function staleAddress(
  * The decided guardian-mapping write, computed from async reads BEFORE a
  * transaction opens so the write itself can be a single synchronous statement
  * inside a caller-owned transaction (see {@link applyGuardianMappingWithinTx}).
- * `noop` covers "already mapped" and "no guardian person" — the same skip cases
+ * `noop` covers "already mapped", "dismissed" and "no guardian person" — the same skip cases
  * {@link mapGuardianToChannel} returns `false` for.
  */
 export type GuardianMappingPlan =
@@ -116,8 +120,9 @@ export async function planGuardianMapping(
   channel: string,
   channelUserId: string,
 ): Promise<GuardianMappingPlan> {
-  const existing = await repo.byAccount({ channel, channelUserId });
-  if (existing) return { op: "noop" };
+  const account = { channel, channelUserId };
+  if (await repo.byAccount(account)) return { op: "noop" };
+  if (await repo.isDismissed(account)) return { op: "noop" };
 
   const guardians = await repo.byBondLevel("guardian");
   if (guardians.length === 0) return { op: "noop" };

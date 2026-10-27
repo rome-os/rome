@@ -1,8 +1,6 @@
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { STRANGER_PERSON_ID } from "../constants.js";
 import { toAgentInboundMessage } from "../connections/integrations/agents.js";
-import { ensureSentinelPersons } from "../db/ensure-sentinel-persons.js";
 import { PeopleRepository } from "../db/repositories/people.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { persons } from "../db/schema.js";
@@ -41,7 +39,6 @@ describe("linking same-account agents to the guardian", () => {
     testDb = createTestDb();
     people = new PeopleRepository(testDb.db, identityConnectionKindOf);
     settings = new SettingsRepository(testDb.db);
-    await ensureSentinelPersons(people);
     testDb.db
       .insert(persons)
       .values({ id: "owner", displayName: "Owner", bondLevel: "guardian", createdAt: new Date() })
@@ -76,13 +73,12 @@ describe("linking same-account agents to the guardian", () => {
   });
 
   it("keeps a dismissal", async () => {
-    await people.linkStated({ channel: "agents", channelUserId: "ep-atlas" }, STRANGER_PERSON_ID);
+    await people.dismiss({ channel: "agents", channelUserId: "ep-atlas" });
 
     await link(message("ep-atlas"));
 
-    expect((await people.byAccount({ channel: "agents", channelUserId: "ep-atlas" }))?.id).toBe(
-      STRANGER_PERSON_ID,
-    );
+    expect(await people.byAccount({ channel: "agents", channelUserId: "ep-atlas" })).toBeNull();
+    expect(await people.isDismissed({ channel: "agents", channelUserId: "ep-atlas" })).toBe(true);
   });
 
   it("keeps a link to another person", async () => {

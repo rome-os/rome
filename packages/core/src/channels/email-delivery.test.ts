@@ -82,6 +82,7 @@ async function harness(overrides: Partial<MailProvider> = {}) {
     } as unknown as SettingsRepository,
     peopleRepo: {
       byAccount: async () => null,
+      isDismissed: async () => false,
       byBondLevel: async () => [],
     } as unknown as PeopleRepository,
     config: { address: "rome@example.com", inboundSecret: "secret" },

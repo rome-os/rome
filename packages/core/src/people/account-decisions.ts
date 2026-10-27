@@ -1,14 +1,9 @@
 // The two writes that decide an account: dismiss it, or restore it to nobody's
-// decision. What they mean is the account contract's (@rome/api-types/people);
-// where they are stored is the stranger sentinel, which is what "dismissed" has
-// always been in this database.
-//
-// Neither verb invents storage. A dismissal is a channel mapping onto the
-// sentinel — the row the dismiss verb has always written — and a
-// restore is that row's removal. What is new is that both are addressed at an
-// account rather than at the sentinel, and that neither can reach an account a
-// real person holds: linking and unlinking are that account's verbs, and a
-// dismissal that quietly displaced a placement would lose the guardian's work.
+// decision. What they mean is the account contract's (@rome/api-types/people).
+// A dismissal is its own record keyed by the account, and a restore is that
+// record's removal. Neither can reach an account a person holds: linking and
+// unlinking are that account's verbs, and a dismissal that quietly displaced a
+// placement would lose the guardian's work.
 //
 // The account, not the address. A channel that reaches one account several
 // ways is folded by `readAccountDirectory`, so a caller holding any address of
@@ -20,10 +15,10 @@ import {
   accountPresentation,
   accountRef,
   linkConflict,
+  type AccountLink,
   type DirectoryAccount,
   type LinkConflict,
 } from "@rome/api-types/people";
-import { STRANGER_PERSON_DISPLAY_NAME, STRANGER_PERSON_ID } from "../constants.js";
 import { readAccountDirectory, type AccountDirectoryDeps } from "./account-directory.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 
@@ -53,10 +48,10 @@ export type AccountDecision =
   | { unknown: true };
 
 /**
- * File an account under the stranger sentinel.
+ * Dismiss an account: decide it belongs to nobody the guardian tracks.
  *
  * Idempotent: an account already dismissed is answered as dismissed and not
- * written again, so a double-click cannot leave two claims on one account.
+ * written again.
  */
 export async function dismissAccount(
   deps: AccountDecisionDeps,
@@ -73,20 +68,18 @@ export async function dismissAccount(
 
   if (account.state !== "dismissed") {
     // And what is true at the moment of writing. The read above cannot see a
-    // placement that lands after it, so the write is a compare-and-swap rather
-    // than a re-point: a dismissal is a link onto the sentinel, and it is
-    // claimed on the same terms as any other link — declaring no owner to take
-    // it from, which is a claim only an account nobody holds can satisfy.
-    // Without that, a link arriving in the gap would be re-pointed onto the
-    // sentinel and lost, which is the harm the refusal above exists to prevent
+    // placement that lands after it, so the write checks for a link in the
+    // same transaction that records the dismissal, and refuses one it finds.
+    // Without that, a link arriving in the gap would sit beside a dismissal of
+    // the same account, which is the harm the refusal above exists to prevent
     // reached by a different route.
     const claim = await deps.peopleRepo.dismiss({
       channel: account.channel,
       channelUserId: account.channelUserId,
     });
     if (!claim.linked) {
-      // A claim that names no owner to take the account from is refused only
-      // by someone holding it, so there is always a person to name here.
+      // A dismissal is refused only by someone holding the account, so there is
+      // always a person to name here.
       if (!claim.holder) {
         throw new Error(`dismissing ${accountRef(account)} was refused by nobody`);
       }
@@ -99,10 +92,7 @@ export async function dismissAccount(
     }
   }
 
-  return decided(account, {
-    personId: STRANGER_PERSON_ID,
-    displayName: STRANGER_PERSON_DISPLAY_NAME,
-  });
+  return decided(account, { dismissed: true });
 }
 
 /**
@@ -127,9 +117,8 @@ export async function restoreAccount(
     // was made by, and an account still claimed by one of its other addresses
     // would read as dismissed the moment the fold ran again.
     //
-    // No conditional claim to lose here: the release is already scoped to the
-    // sentinel's own rows, so a link landing in the same gap is not a row this
-    // write can touch.
+    // No conditional claim to lose here: the release touches dismissals only,
+    // so a link landing in the same gap is not a row this write can touch.
     await deps.peopleRepo.restore(account.channel, account.addresses);
   }
 
@@ -140,9 +129,8 @@ export async function restoreAccount(
  * The person a refusal names, or null when the account is nobody's and a write
  * may proceed.
  *
- * Read off the account's presentation rather than its stored link, so the owner
- * can never be the stranger sentinel: a dismissed account presents as
- * "dismissed" with no person, and a dismissal is what these two verbs are for.
+ * Read off the account's presentation, which the directory decided across
+ * every address of the account.
  */
 function heldBy(account: DirectoryAccount): { id: string; displayName: string } | null {
   if (account.state !== "linked" || account.personId == null) return null;
@@ -183,12 +171,8 @@ async function locate(
  * book to learn what this function already holds would buy nothing but a second
  * chance to disagree with the read that made the decision.
  *
- * The link goes through the same presentation seam a directory row does, which
- * is what keeps the sentinel off the wire here.
+ * The link goes through the same presentation seam a directory row does.
  */
-function decided(
-  account: DirectoryAccount,
-  link: { personId: string; displayName: string } | null,
-): AccountDecision {
+function decided(account: DirectoryAccount, link: AccountLink | null): AccountDecision {
   return { account: { ...account, ...accountPresentation(link) } };
 }

@@ -223,6 +223,7 @@ function guardianPersonRepo(channelUserId: string): PeopleRepository {
             links: [{ channel: "feishu", channelUserId }],
           }
         : null,
+    isDismissed: async () => false,
     byBondLevel: async () => [
       {
         id: "guardian",

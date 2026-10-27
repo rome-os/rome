@@ -15,7 +15,6 @@
 // @rstest-environment jsdom
 import { afterAll, beforeAll, expect, test } from "@rstest/core";
 import { setupServer } from "msw/node";
-import { STRANGER_PERSON_ID } from "@rome/api-types/persons";
 import { peopleHandlers } from "../../../mock/handlers/people-api";
 
 const server = setupServer(...peopleHandlers);
@@ -40,19 +39,18 @@ const call = async (method: string, path: string, body?: unknown): Promise<any> 
 };
 
 test("proposed /people contract walkthrough", async () => {
-  // Curated list: no sentinel, Ray holds two accounts.
+  // Curated list: Ray holds two accounts.
   let r = await call("GET", "/api/people");
   expect(r.status).toBe(200);
-  expect(r.body.people.map((p: { id: string }) => p.id)).not.toContain(STRANGER_PERSON_ID);
   const ray = r.body.people.find((p: { id: string }) => p.id === "ray-oster");
   expect(ray.accounts).toHaveLength(2);
   // Counts ride the listing and cover the whole match.
   expect(r.body.counts.all).toBe(r.body.people.length);
 
-  // The sentinel is not addressable as a person.
-  r = await call("GET", `/api/people/${STRANGER_PERSON_ID}`);
+  // An id naming no person is not addressable.
+  r = await call("GET", "/api/people/nobody-here");
   expect(r.status).toBe(404);
-  r = await call("POST", `/api/people/${STRANGER_PERSON_ID}/accounts`, {
+  r = await call("POST", "/api/people/nobody-here/accounts", {
     channel: "telegram",
     channelUserId: JULES_TG,
   });

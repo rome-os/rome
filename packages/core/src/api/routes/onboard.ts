@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { v4 as uuidv4 } from "uuid";
 import { guardianAuth, persons } from "../../db/schema.js";
-import { STRANGER_PERSON_ID, STRANGER_PERSON_DISPLAY_NAME } from "../../constants.js";
 import { COOKIE_NAME, hashPassword, issueGuardianSession, verifySession } from "../../lib/auth.js";
 import { resolveAndRecordAccount } from "../../lib/guardian-auth-state.js";
 import { resolveBootstrapState } from "../../lib/bootstrap-state.js";
@@ -85,17 +84,6 @@ export function onboardRoutes(deps: ApiDeps): Hono {
       passwordHash,
       createdAt: new Date(),
     });
-
-    await deps.db
-      .insert(persons)
-      .values({
-        id: STRANGER_PERSON_ID,
-        displayName: STRANGER_PERSON_DISPLAY_NAME,
-        bondLevel: "other",
-        approved: true,
-        createdAt: new Date(),
-      })
-      .onConflictDoNothing();
 
     await applySetupDefaults(userId, {
       db: deps.db,
