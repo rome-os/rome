@@ -25,6 +25,15 @@ export interface Link {
   channelUserId: string;
 }
 
+/**
+ * One of a person's links. `delegate` is set on a
+ * [delegate link](docs/domains/people.md#delegate-link): the account is an
+ * agent's, acting for this person. Absent on the person's own accounts.
+ */
+export interface PersonLink extends Link {
+  delegate?: true;
+}
+
 /** Someone the guardian knows, with every account linked to them. */
 export interface Person {
   id: string;
@@ -33,7 +42,7 @@ export interface Person {
   profilePath: string | null;
   approved: boolean;
   createdAt: Date;
-  links: Link[];
+  links: PersonLink[];
 }
 
 /** A person as {@link PeopleRepository.create} takes them. */
@@ -117,7 +126,7 @@ export type DeleteResult =
 
 type PersonRow = typeof persons.$inferSelect;
 
-function toPerson(row: PersonRow, links: Link[]): Person {
+function toPerson(row: PersonRow, links: PersonLink[]): Person {
   return {
     id: row.id,
     displayName: row.displayName,
@@ -261,7 +270,11 @@ export class PeopleRepository {
         row,
         links
           .filter((link) => link.personId === row.id)
-          .map((link) => ({ channel: link.channel, channelUserId: link.channelUserId })),
+          .map((link) => ({
+            channel: link.channel,
+            channelUserId: link.channelUserId,
+            ...(link.delegate ? { delegate: true as const } : {}),
+          })),
       ),
     );
   }
@@ -464,6 +477,32 @@ export class PeopleRepository {
     displayName?: string,
     exec: SqliteExec = this.db,
   ): string {
+    return this.claim(account, personId, displayName, false, exec);
+  }
+
+  /**
+   * Link an agent's account to the person behind the agent, because a
+   * platform says the agent is theirs, as a
+   * [delegate link](docs/domains/people.md#delegate-link). Rome Cloud says so
+   * for the guardian's own agents.
+   *
+   * Claims on the same terms as {@link linkStated}, and marks the link a
+   * delegate whether it was new or re-pointed. Returns the link row's id.
+   */
+  linkDelegate(account: Link, personId: string, displayName?: string): string {
+    return this.claim(account, personId, displayName, true, this.db);
+  }
+
+  /** The claim {@link linkStated} and {@link linkDelegate} share. Only a
+   *  delegate claim writes the mark, so a platform's statement about an
+   *  account's owner never clears one. */
+  private claim(
+    account: Link,
+    personId: string,
+    displayName: string | undefined,
+    delegate: boolean,
+    exec: SqliteExec,
+  ): string {
     const channel = this.connectionKindOf(account.channel);
     this.releaseDismissals(exec, channel, [account.channelUserId]);
     const row = exec
@@ -474,11 +513,13 @@ export class PeopleRepository {
         channel,
         channelUserId: account.channelUserId,
         displayName: displayName ?? null,
+        delegate,
       })
       .onConflictDoUpdate({
         target: [channelMappings.channel, channelMappings.channelUserId],
         set: {
           personId,
+          ...(delegate ? { delegate } : {}),
           // The display name is the channel's, and every caller that has one
           // took it from an inbound message. A caller without one is reporting
           // no news, not a rename, so the stored name stands.

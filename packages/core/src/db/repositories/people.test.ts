@@ -649,6 +649,40 @@ describe("PeopleRepository", () => {
     });
   });
 
+  describe("linkDelegate()", () => {
+    it("marks the link a delegate, and the mark rides along when the guardian moves it", async () => {
+      const agent = { channel: "agents", channelUserId: "agt-atlas" };
+      const owner = await repo.create({ displayName: "Owner", bondLevel: "guardian" });
+      const alice = await repo.create({ displayName: "Alice", bondLevel: "other" });
+
+      await repo.linkDelegate(agent, owner, "atlas");
+
+      expect((await repo.byAccount(agent))!.links).toEqual([{ ...agent, delegate: true }]);
+      // Still an agent's account, whoever the guardian says is behind it.
+      expect(await repo.move(agent, owner, alice)).toEqual({ linked: true });
+      expect((await repo.byId(alice))!.links).toEqual([{ ...agent, delegate: true }]);
+    });
+
+    it("is never cleared by a platform's statement about the same account", async () => {
+      const agent = { channel: "agents", channelUserId: "agt-atlas" };
+      const owner = await repo.create({ displayName: "Owner", bondLevel: "guardian" });
+      await repo.linkDelegate(agent, owner);
+
+      repo.linkStated(agent, owner, "atlas renamed");
+
+      expect((await repo.byId(owner))!.links).toEqual([{ ...agent, delegate: true }]);
+    });
+
+    it("leaves a link the guardian makes by hand unmarked", async () => {
+      const agent = { channel: "agents", channelUserId: "agt-friend" };
+      const alice = await repo.create({ displayName: "Alice", bondLevel: "other" });
+
+      await repo.link(agent, alice);
+
+      expect((await repo.byId(alice))!.links).toEqual([agent]);
+    });
+  });
+
   describe("delete()", () => {
     it("deletes a person and returns their accounts to strangers", async () => {
       const tg = { channel: "telegram", channelUserId: "tg-alice" };

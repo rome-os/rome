@@ -98,6 +98,7 @@ function personResource(person: PersonFixture): PersonResource {
       // names a channel and not an address, so it cannot say which of two
       // accounts on one channel was the recent one.
       latestAt: accountTimeline(a)[0]?.timestamp ?? null,
+      ...(a.delegate ? { delegate: true as const } : {}),
     })),
     // Timeline entries, not records: the contract pins a person's count to the
     // history GET /api/people/:id/messages pages.

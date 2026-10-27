@@ -100,6 +100,7 @@ async function serialize(
         send: sendStates[index] ?? ("not-connected" as AccountSendState),
         latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], mapping),
         from: deps.sendersOfLink?.(mapping.channel) ?? [mapping.channel],
+        ...(mapping.delegate ? { delegate: true as const } : {}),
       };
     }),
     memoryPath: memoryPaths[i],

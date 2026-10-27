@@ -106,7 +106,7 @@ interface PersonFixture {
   id: string;
   displayName: string;
   bondLevel: string;
-  channelMappings: { channel: string; channelUserId: string }[];
+  channelMappings: { channel: string; channelUserId: string; delegate?: true }[];
 }
 
 /**
@@ -148,6 +148,9 @@ export const persons: PersonFixture[] = [
       { channel: "feishu", channelUserId: "ou_7c3e19d2aa" },
       // Longer than a phone row, so the row's wrapping is exercised.
       { channel: "email", channelUserId: "guardian.work.account@example-company.com" },
+      // One of the guardian's own Rome Cloud agents, which Rome links to them
+      // as a delegate link.
+      { channel: "agents", channelUserId: "agt_atlas", delegate: true },
     ],
   },
   {

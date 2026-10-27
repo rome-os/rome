@@ -113,6 +113,9 @@ export const channelMappings = sqliteTable(
     channel: text("channel").notNull(),
     channelUserId: text("channel_user_id").notNull(),
     displayName: text("display_name"),
+    /** A [delegate link](docs/domains/people.md#delegate-link): the account is
+     *  an agent's, acting for the person it is linked to. */
+    delegate: integer("delegate", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     // One account belongs to exactly one person. Held in the database rather

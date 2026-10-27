@@ -17,7 +17,12 @@ export type AppPersonMapping = PersonMappingRepository & {
 
 function toRecord(person: Person): PersonRecord {
   const { links, ...rest } = person;
-  return { ...rest, channelMappings: links };
+  // The SDK's mapping is the account and nothing else, so the delegate mark
+  // stays People's until the SDK publishes it.
+  return {
+    ...rest,
+    channelMappings: links.map(({ channel, channelUserId }) => ({ channel, channelUserId })),
+  };
 }
 
 export function appPersonMapping(people: PeopleRepository): AppPersonMapping {

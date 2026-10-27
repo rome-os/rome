@@ -150,6 +150,9 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
                     channel={account.channel}
                   >
                     <span className="font-mono tabular-nums">{accountHandle(account)}</span>
+                    {/* A delegate link is someone's agent, not the person, and
+                        the pill says so where the account is named. */}
+                    {account.delegate && <span>· {t("detail.delegate")}</span>}
                   </ChannelPill>
                 ))
               )}

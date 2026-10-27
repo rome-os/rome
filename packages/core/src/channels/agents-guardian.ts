@@ -4,7 +4,9 @@
  * person has signed in to Rome Cloud from ChatGPT, and it is Cloud, not the
  * sender, that marks a message `sameAccount`. So the first message from such an agent
  * links its `agents` account to the guardian before the inbox resolves the
- * sender, and the dot speaks as the guardian from that message on.
+ * sender, and the dot speaks as the guardian from that message on. The link is
+ * a delegate link (docs/domains/people.md#delegate-link), so a reader knows it
+ * is the guardian's agent talking and not the guardian.
  *
  * Only an account nobody has decided about is linked. A link to anyone, a
  * dismissal, or an earlier automatic link the guardian has since removed all
@@ -30,7 +32,7 @@ function isSameAccount(message: ChannelMessage): boolean {
 }
 
 export function createAgentsGuardianLink(deps: {
-  peopleRepo: Pick<PeopleRepository, "byAccount" | "isDismissed" | "byBondLevel" | "linkStated">;
+  peopleRepo: Pick<PeopleRepository, "byAccount" | "isDismissed" | "byBondLevel" | "linkDelegate">;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
   channel: string;
 }) {
@@ -52,7 +54,7 @@ export function createAgentsGuardianLink(deps: {
     // unlinked, which is the guardian's call to change. The other order could
     // leave a link that the guardian's unlink does not keep removed.
     await deps.settingsRepo.set(AGENTS_GUARDIAN_LINKED_KEY, [...linked, agent]);
-    await deps.peopleRepo.linkStated(account, guardian.id, message.senderDisplayName);
+    await deps.peopleRepo.linkDelegate(account, guardian.id, message.senderDisplayName);
     log.info("linked a same-account agent to the guardian", { agentId: agent });
   }
 

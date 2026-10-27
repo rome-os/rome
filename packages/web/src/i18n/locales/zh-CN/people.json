@@ -132,7 +132,8 @@
     "missingTitle": "找不到这个人",
     "missingBody": "该人物可能已被合并到其他人名下或已被删除。返回人物页面即可找到他们。",
     "linkDescription": "你选择的账号将归属到此人名下，其历史记录也会并入这条时间线。",
-    "noAccounts": "暂无账号"
+    "noAccounts": "暂无账号",
+    "delegate": "代理"
   },
   "send": {
     "to": "发送至",

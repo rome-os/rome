@@ -57,6 +57,10 @@ describe("linking same-account agents to the guardian", () => {
     const person = await people.byAccount({ channel: "agents", channelUserId: "ep-atlas" });
     expect(person?.id).toBe("owner");
     expect(person?.bondLevel).toBe("guardian");
+    // A delegate link: the guardian's agent, not the guardian.
+    expect(person?.links).toEqual([
+      { channel: "agents", channelUserId: "ep-atlas", delegate: true },
+    ]);
   });
 
   it("never links another account's agent, even one sharing a name with the guardian's", async () => {

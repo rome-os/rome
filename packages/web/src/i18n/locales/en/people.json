@@ -132,7 +132,8 @@
     "missingTitle": "That person is not here",
     "missingBody": "This person may have been merged into someone else or deleted. Head back to People to find them.",
     "linkDescription": "The account you pick starts resolving to this person, and its history joins this timeline.",
-    "noAccounts": "No accounts yet"
+    "noAccounts": "No accounts yet",
+    "delegate": "agent"
   },
   "send": {
     "to": "To",

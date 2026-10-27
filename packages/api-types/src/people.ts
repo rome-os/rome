@@ -793,6 +793,12 @@ export interface LinkedAccount {
    * predates it.
    */
   from?: string[];
+  /**
+   * True on a delegate link (docs/domains/people.md#delegate-link): the account
+   * is an agent's, acting for this person, so whoever reads it is talking to
+   * their agent and not to them. Absent on the person's own accounts.
+   */
+  delegate?: true;
 }
 
 /**

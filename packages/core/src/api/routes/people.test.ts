@@ -1265,6 +1265,40 @@ describe("People updates", () => {
   });
 });
 
+// A delegate link reads as one, so the page can say it is someone's agent.
+describe("People delegate links", () => {
+  let testDb: TestDb;
+  let deps: TestDeps;
+  let app: Hono;
+  let baseline: BaselineIds;
+
+  beforeEach(async () => {
+    testDb = createTestDb();
+    baseline = await seedBaseline(testDb.db);
+    deps = await buildTestDeps(testDb.db);
+    app = new Hono().route("/", peopleRoutes(deps));
+  });
+
+  afterEach(() => testDb.close());
+
+  it("marks the agent's account and leaves the person's own unmarked", async () => {
+    const guardian = baseline.persons.guardianId;
+    deps.peopleRepo.linkDelegate(
+      { channel: "agents", channelUserId: "agt-atlas" },
+      guardian,
+      "atlas",
+    );
+
+    const person = (await (await app.request(`/people/${guardian}`)).json()) as PersonResource;
+
+    const marks = Object.fromEntries(
+      person.accounts.map((account) => [account.channelUserId, account.delegate ?? false]),
+    );
+    expect(marks["agt-atlas"]).toBe(true);
+    expect(marks["tg-guardian"]).toBe(false);
+  });
+});
+
 // DELETE /people/:id — the guardian deletes a person. What these pin is that
 // the person and every link go together, that the accounts become strangers
 // rather than dismissals, and that the guardian cannot be deleted.
