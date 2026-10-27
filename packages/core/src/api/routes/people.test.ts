@@ -1296,6 +1296,11 @@ describe("People delegate links", () => {
     );
     expect(marks["agt-atlas"]).toBe(true);
     expect(marks["tg-guardian"]).toBe(false);
+
+    // The listing carries the same mark as the single read.
+    const list = (await (await app.request("/people")).json()) as PeopleList;
+    const listed = list.people.find((p) => p.id === guardian);
+    expect(listed?.accounts.find((a) => a.channelUserId === "agt-atlas")?.delegate).toBe(true);
   });
 });
 

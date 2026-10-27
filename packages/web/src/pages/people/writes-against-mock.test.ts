@@ -97,6 +97,21 @@ describe("People writes, against the contract's own handlers", () => {
     expect(merged).toMatchObject({ ok: true, value: { id: survivor.value.id } });
   });
 
+  it("carries a delegate link's mark when the account is moved to someone else", async () => {
+    const agent = { channel: "agents", channelUserId: "agt_atlas" };
+    const taker = await createPerson({ displayName: "Atlas Owner" }, t);
+    expect(taker.ok).toBe(true);
+    if (!taker.ok) return;
+
+    const moved = await linkAccount(taker.value.id, { ...agent, transferFrom: "mock-guardian" }, t);
+
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    expect(moved.value.accounts).toContainEqual(
+      expect.objectContaining({ ...agent, delegate: true }),
+    );
+  });
+
   it("deletes a person, leaving their account free to link again, and keeps the guardian", async () => {
     const account = { channel: "telegram", channelUserId: "990001" };
     const doomed = await createPerson({ displayName: "Nell Deleted", accounts: [account] }, t);

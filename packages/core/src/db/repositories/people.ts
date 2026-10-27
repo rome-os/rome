@@ -6,7 +6,7 @@ import { eq, and, sql, ne, like, inArray, exists, notExists } from "drizzle-orm"
 import { v4 as uuid } from "uuid";
 import { persons, channelMappings, dismissedAccounts } from "../schema.js";
 import type { ConnectionKindOfChannel } from "./channel-records.js";
-import type { DrizzleDb, SqliteExec } from "../index.js";
+import { type DrizzleDb, inTransaction, type SqliteExec } from "../index.js";
 import {
   generatePersonSlug,
   nextAvailablePersonId,
@@ -126,6 +126,15 @@ export type DeleteResult =
 
 type PersonRow = typeof persons.$inferSelect;
 
+/** A stored link as a reader gets it, the delegate mark only where it is set. */
+function toPersonLink(row: typeof channelMappings.$inferSelect): PersonLink {
+  return {
+    channel: row.channel,
+    channelUserId: row.channelUserId,
+    ...(row.delegate ? { delegate: true as const } : {}),
+  };
+}
+
 function toPerson(row: PersonRow, links: PersonLink[]): Person {
   return {
     id: row.id,
@@ -235,9 +244,7 @@ export class PeopleRepository {
         person = toPerson(row.person, []);
         byPerson.set(row.person.id, person);
       }
-      if (row.link) {
-        person.links.push({ channel: row.link.channel, channelUserId: row.link.channelUserId });
-      }
+      if (row.link) person.links.push(toPersonLink(row.link));
     }
     return [...byPerson.values()];
   }
@@ -266,16 +273,7 @@ export class PeopleRepository {
         ),
       );
     return rows.map((row) =>
-      toPerson(
-        row,
-        links
-          .filter((link) => link.personId === row.id)
-          .map((link) => ({
-            channel: link.channel,
-            channelUserId: link.channelUserId,
-            ...(link.delegate ? { delegate: true as const } : {}),
-          })),
-      ),
+      toPerson(row, links.filter((link) => link.personId === row.id).map(toPersonLink)),
     );
   }
 
@@ -468,8 +466,9 @@ export class PeopleRepository {
    * platform's statement about whose account it is outranks an earlier link.
    * Claiming is one statement, not a read followed by a write, so a second
    * writer re-points the link instead of adding a rival one, whatever order
-   * the two arrive in. A dismissal of the account goes with it. Returns the
-   * link row's id.
+   * the two arrive in. A dismissal of the account goes with it, in the same
+   * transaction, and the link keeps the dismissal's name when the caller has
+   * none. Returns the link row's id.
    */
   linkStated(
     account: Link,
@@ -503,7 +502,15 @@ export class PeopleRepository {
     delegate: boolean,
     exec: SqliteExec,
   ): string {
+    // Called without a transaction, it opens its own: releasing the dismissal
+    // and writing the link are one decision, and a link that fails must leave
+    // the dismissal standing.
+    if (!inTransaction(this.db)) {
+      return this.db.transaction((tx) => this.claim(account, personId, displayName, delegate, tx));
+    }
     const channel = this.connectionKindOf(account.channel);
+    // On this connection, so it reads inside the caller's transaction.
+    const dismissedAs = this.dismissalOf(account)?.displayName ?? null;
     this.releaseDismissals(exec, channel, [account.channelUserId]);
     const row = exec
       .insert(channelMappings)
@@ -512,7 +519,7 @@ export class PeopleRepository {
         personId,
         channel,
         channelUserId: account.channelUserId,
-        displayName: displayName ?? null,
+        displayName: displayName ?? dismissedAs,
         delegate,
       })
       .onConflictDoUpdate({
