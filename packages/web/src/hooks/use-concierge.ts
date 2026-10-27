@@ -10,6 +10,26 @@ export const CONCIERGE_CHAT_ID = "concierge";
 export const TASK_CHAT_TRIGGER_KIND = "concierge";
 /** The setting that turns Concierge on, under Settings → Experimental. */
 const EXPERIMENTAL_CONCIERGE_SETTING_KEY = "experimentalConcierge";
+/** The Concierge chat and its unread count; invalidate it to recount. */
+export const CONCIERGE_SESSION_QUERY_KEY = ["concierge-session"] as const;
+/** The server stops counting unread messages here; the badge reads 99+ at it. */
+export const CONCIERGE_UNREAD_CAP = 100;
+
+interface ConciergeSession {
+  id: string;
+  /** Agent messages since the guardian last read the chat, at most {@link CONCIERGE_UNREAD_CAP}. */
+  unread: number;
+}
+
+function useConciergeSession(enabled: boolean) {
+  return useQuery({
+    queryKey: CONCIERGE_SESSION_QUERY_KEY,
+    enabled,
+    staleTime: 0,
+    queryFn: ({ signal }) =>
+      fetchJson<ConciergeSession>("/api/concierge/session", { signal, fallback: "" }),
+  });
+}
 
 export interface ConciergeChat {
   /** `CONCIERGE_CHAT_ID` once the chat exists, else null: Concierge is off or not loaded yet. */
@@ -25,13 +45,7 @@ export interface ConciergeChat {
 export function useConciergeChat(): ConciergeChat {
   const { data: settings, isPending: settingsPending } = useSettings();
   const enabled = settings?.[EXPERIMENTAL_CONCIERGE_SETTING_KEY] === true;
-  const { isSuccess, isPending } = useQuery({
-    queryKey: ["concierge-session"],
-    enabled,
-    staleTime: 0,
-    queryFn: ({ signal }) =>
-      fetchJson<{ id: string }>("/api/concierge/session", { signal, fallback: "" }),
-  });
+  const { isSuccess, isPending } = useConciergeSession(enabled);
   return {
     chatId: enabled && isSuccess ? CONCIERGE_CHAT_ID : null,
     loading: settingsPending || (enabled && isPending),
@@ -41,4 +55,9 @@ export function useConciergeChat(): ConciergeChat {
 /** The Concierge chat's id, or null while Concierge is off or not loaded yet. */
 export function useConciergeChatId(): string | null {
   return useConciergeChat().chatId;
+}
+
+/** How many agent messages the Concierge chat got since it was last read; 0 while `chatId` is null. */
+export function useConciergeUnread(chatId: string | null): number {
+  return useConciergeSession(chatId !== null).data?.unread ?? 0;
 }

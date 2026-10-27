@@ -13,6 +13,8 @@ import {
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
 import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
+import { chatSessionTopicName } from "@rome/api-types/live-events";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { RecentChats } from "./RecentChats";
 
 // Concierge's chat id comes from its own query, which these tests do not
@@ -172,6 +174,97 @@ describe("RecentChats", () => {
     expect(within(task).getByRole("img", { name: "Started by Concierge" })).toBeTruthy();
     // The Concierge chat itself stays out of the list.
     expect(screen.getAllByRole("link", { name: "Concierge" })).toHaveLength(1);
+  });
+
+  describe("Concierge unread badge", () => {
+    const server = { unread: 0 };
+    const conciergeCalls = (spy: { mock: { calls: unknown[][] } }) =>
+      spy.mock.calls.filter(([input]) => String(input) === "/api/concierge/session").length;
+    const mockConcierge = () =>
+      rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const body = url.startsWith("/api/chat/sessions")
+          ? []
+          : url === "/api/concierge/session"
+            ? { id: "concierge", unread: server.unread }
+            : null;
+        if (body === null) return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch);
+
+    beforeEach(() => {
+      concierge.chatId = "concierge";
+      server.unread = 0;
+      FakeWebSocket.instances = [];
+    });
+
+    it("counts unread messages", async () => {
+      server.unread = 3;
+      mockConcierge();
+      renderRecentChats();
+      expect(
+        await screen.findByRole("link", { name: "Concierge, 3 unread messages" }),
+      ).toBeTruthy();
+    });
+
+    it("shows no badge at 0", async () => {
+      const fetchSpy = mockConcierge();
+      renderRecentChats();
+      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
+      await act(async () => {});
+      expect(await screen.findByRole("link", { name: "Concierge" })).toBeTruthy();
+      expect(document.querySelector("[data-concierge-unread]")).toBeNull();
+    });
+
+    it("caps the count at 99+", async () => {
+      server.unread = 100;
+      mockConcierge();
+      renderRecentChats();
+      const entry = await screen.findByRole("link", { name: "Concierge, 99+ unread messages" });
+      expect(entry.querySelector("[data-concierge-unread]")?.textContent).toContain("99+");
+    });
+
+    it("shows no badge on the Concierge page", async () => {
+      server.unread = 3;
+      const fetchSpy = mockConcierge();
+      renderRecentChats("/chat/concierge");
+      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
+      await act(async () => {});
+      expect(screen.getByRole("link", { name: "Concierge" })).toBeTruthy();
+      expect(document.querySelector("[data-concierge-unread]")).toBeNull();
+    });
+
+    it("recounts on a new Concierge message and on a read in this tab", async () => {
+      const fetchSpy = mockConcierge();
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBe(1));
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      expect(socket.sent).toContainEqual({
+        type: "subscribe",
+        topic: chatSessionTopicName("concierge"),
+      });
+
+      server.unread = 1;
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: chatSessionTopicName("concierge"),
+          event: "message_insert",
+          data: { id: "m1", sessionId: "concierge", role: "assistant" },
+        }),
+      );
+      expect(await screen.findByRole("link", { name: "Concierge, 1 unread message" })).toBeTruthy();
+
+      server.unread = 0;
+      act(() => emitSessionsChanged());
+      await waitFor(() => expect(document.querySelector("[data-concierge-unread]")).toBeNull());
+    });
   });
 
   it("defaults to All chats and persists a scope toggle across remounts", async () => {

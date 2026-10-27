@@ -1806,6 +1806,25 @@ export class WebChatRepository {
   }
 
   /**
+   * How many agent messages the chat got since it was last read, counting at
+   * most `cap`. A chat with no read mark has none. `created_at` has one-second
+   * precision, so a message in the same second as the read mark counts as read.
+   */
+  async countUnreadAgentMessages(id: string, cap: number): Promise<number> {
+    const rows = await this.db.all<{ count: number }>(sql`
+      select count(*) as "count" from (
+        select 1 from ${romeAgentMessages}
+        join ${romeSessions} on ${romeSessions.id} = ${romeAgentMessages.sessionId}
+        where ${romeAgentMessages.sessionId} = ${id}
+          and ${romeAgentMessages.role} = 'assistant'
+          and ${romeSessions.lastSeenActivityAt} is not null
+          and ${romeAgentMessages.createdAt} > ${romeSessions.lastSeenActivityAt}
+        limit ${cap}
+      )`);
+    return Number(rows[0]?.count ?? 0);
+  }
+
+  /**
    * A branch whose first answer completed on its own provider thread stops
    * being special: it becomes an ordinary chat, listed and managed like any
    * other. It takes its own address in place of the parent's it copied, and

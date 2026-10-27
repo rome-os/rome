@@ -1929,6 +1929,61 @@ describe("WebChatRepository", () => {
     });
   });
 
+  describe("countUnreadAgentMessages", () => {
+    beforeEach(async () => {
+      rs.useFakeTimers();
+      rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
+      await repo.createSession("chat", "Chat");
+      rs.setSystemTime(new Date("2029-01-01T00:00:01.000Z"));
+    });
+
+    it("counts each agent message since the last read, and nothing else", async () => {
+      await repo.addBackendMessage("chat", "turn-1", [{ type: "text", content: "On it." }]);
+      await repo.addBackendMessage("chat", "turn-1", [
+        { type: "task_chat", chatId: "task", title: "Task" },
+      ]);
+      await repo.addMessage("user-1", "chat", "user", "[]", "turn-1");
+      await repo.appendTraceBlocks({
+        messageId: "trace-1",
+        sessionId: "chat",
+        turnId: "turn-1",
+        startSeq: 0,
+        blocks: [{ type: "thinking", content: "private" }],
+      });
+      await repo.addMessage("note-1", "chat", "notification", "[]");
+      await repo.addBackendMessage("other-chat", "turn-1", [{ type: "text", content: "Hi." }]);
+
+      await expect(repo.countUnreadAgentMessages("chat", 100)).resolves.toBe(2);
+    });
+
+    it("resets on read and counts only what came after", async () => {
+      await repo.addBackendMessage("chat", "turn-1", [{ type: "text", content: "One." }]);
+      await repo.markSessionRead("chat");
+      await expect(repo.countUnreadAgentMessages("chat", 100)).resolves.toBe(0);
+
+      rs.setSystemTime(new Date("2029-01-01T00:00:02.000Z"));
+      await repo.addBackendMessage("chat", "turn-2", [{ type: "text", content: "Two." }]);
+      await expect(repo.countUnreadAgentMessages("chat", 100)).resolves.toBe(1);
+    });
+
+    it("stops counting at the cap", async () => {
+      for (let index = 0; index < 5; index += 1) {
+        await repo.addBackendMessage("chat", "turn-1", [{ type: "text", content: `${index}` }]);
+      }
+      await expect(repo.countUnreadAgentMessages("chat", 3)).resolves.toBe(3);
+    });
+
+    it("counts none for a chat without a read mark or an unknown chat", async () => {
+      await repo.addBackendMessage("chat", "turn-1", [{ type: "text", content: "Hi." }]);
+      await testDb.db
+        .update(romeSessions)
+        .set({ lastSeenActivityAt: null })
+        .where(eq(romeSessions.id, "chat"));
+      await expect(repo.countUnreadAgentMessages("chat", 100)).resolves.toBe(0);
+      await expect(repo.countUnreadAgentMessages("missing", 100)).resolves.toBe(0);
+    });
+  });
+
   describe("archive", () => {
     it("archives and unarchives a webchat session", async () => {
       const archivedAt = new Date("2026-07-14T12:00:00.000Z");

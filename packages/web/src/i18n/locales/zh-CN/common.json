@@ -42,6 +42,8 @@
     "title": "最近对话",
     "newChat": "新对话",
     "concierge": "Concierge",
+    "conciergeUnread_one": "Concierge，{{label}} 条未读消息",
+    "conciergeUnread_other": "Concierge，{{label}} 条未读消息",
     "startedByConcierge": "由 Concierge 发起",
     "empty": "还没有对话",
     "rowStatus": {

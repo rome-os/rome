@@ -43,6 +43,8 @@
     "newChat": "New chat",
     "empty": "No chats yet",
     "concierge": "Concierge",
+    "conciergeUnread_one": "Concierge, {{label}} unread message",
+    "conciergeUnread_other": "Concierge, {{label}} unread messages",
     "startedByConcierge": "Started by Concierge",
     "rowStatus": {
       "waiting": "Waiting for you",

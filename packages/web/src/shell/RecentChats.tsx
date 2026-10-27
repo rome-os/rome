@@ -47,8 +47,8 @@ import {
 } from "@/hooks/use-concierge";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
-import { RomeLogo } from "@/components/logo";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
+import { ConciergeEntry } from "./ConciergeEntry";
 import { emitSessionsChanged, useArchiveSession, usePinSession } from "@/lib/session-events";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
@@ -1136,20 +1136,7 @@ export function RecentChats({
             <span className="flex-1 truncate">{t("recentChats.newChat")}</span>
           </Link>
           {conciergeChatId ? (
-            <Link
-              to={`/chat/${conciergeChatId}`}
-              className={`${LINK_CLASS} ${
-                activeSessionId === conciergeChatId ? ACTIVE_CLASS : IDLE_CLASS
-              }`}
-            >
-              <span
-                className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
-                aria-hidden
-              >
-                <RomeLogo className="size-4 shrink-0" aria-hidden />
-              </span>
-              <span className="flex-1 truncate">{t("recentChats.concierge")}</span>
-            </Link>
+            <ConciergeEntry chatId={conciergeChatId} active={activeSessionId === conciergeChatId} />
           ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2 scrollbar-idle-hidden">
