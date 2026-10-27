@@ -6,7 +6,7 @@ import { eq, and, sql, ne, like, inArray, exists, notExists } from "drizzle-orm"
 import { v4 as uuid } from "uuid";
 import { persons, channelMappings, dismissedAccounts } from "../schema.js";
 import type { ConnectionKindOfChannel } from "./channel-records.js";
-import type { DrizzleDb, SqliteExec } from "../index.js";
+import { type DrizzleDb, inTransaction, type SqliteExec } from "../index.js";
 import {
   generatePersonSlug,
   nextAvailablePersonId,
@@ -455,8 +455,9 @@ export class PeopleRepository {
    * platform's statement about whose account it is outranks an earlier link.
    * Claiming is one statement, not a read followed by a write, so a second
    * writer re-points the link instead of adding a rival one, whatever order
-   * the two arrive in. A dismissal of the account goes with it. Returns the
-   * link row's id.
+   * the two arrive in. A dismissal of the account goes with it, in the same
+   * transaction, and the link keeps the dismissal's name when the caller has
+   * none. Returns the link row's id.
    */
   linkStated(
     account: Link,
@@ -464,7 +465,15 @@ export class PeopleRepository {
     displayName?: string,
     exec: SqliteExec = this.db,
   ): string {
+    // Called without a transaction, it opens its own: releasing the dismissal
+    // and writing the link are one decision, and a link that fails must leave
+    // the dismissal standing.
+    if (!inTransaction(this.db)) {
+      return this.db.transaction((tx) => this.linkStated(account, personId, displayName, tx));
+    }
     const channel = this.connectionKindOf(account.channel);
+    // On this connection, so it reads inside the caller's transaction.
+    const dismissedAs = this.dismissalOf(account)?.displayName ?? null;
     this.releaseDismissals(exec, channel, [account.channelUserId]);
     const row = exec
       .insert(channelMappings)
@@ -473,7 +482,7 @@ export class PeopleRepository {
         personId,
         channel,
         channelUserId: account.channelUserId,
-        displayName: displayName ?? null,
+        displayName: displayName ?? dismissedAs,
       })
       .onConflictDoUpdate({
         target: [channelMappings.channel, channelMappings.channelUserId],
