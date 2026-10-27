@@ -13,12 +13,12 @@ import { accountHandle } from "./send-model";
 // neutral everywhere — a channel is a glyph on this page, never a color.
 
 const LEVEL_LABEL_KEY: Record<RowLevel, string> = {
-  unknown: "levels.unknown",
+  stranger: "levels.stranger",
   guardian: "levels.guardian",
   "inner-circle": "levels.innerCircle",
   acquaintance: "levels.acquaintance",
   other: "levels.other",
-  stranger: "levels.stranger",
+  dismissed: "levels.dismissed",
 };
 
 export function levelLabelKey(level: RowLevel): string {
@@ -38,7 +38,7 @@ const ROW_GRID = "grid grid-cols-[2rem_minmax(0,1fr)_auto]";
  *
  * Only a person's row opens a dossier: a dossier is a merged history, and a
  * history is what a person has. An account nobody has placed carries its own
- * evidence on the row instead — see {@link UnknownRow}.
+ * evidence on the row instead — see {@link StrangerRow}.
  */
 export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void }) {
   const { t } = useTranslation("people");
@@ -90,7 +90,7 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
  * rather than as a wall of buttons. Hover is not a thing on touch screens, so
  * there they stay put.
  */
-export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.ReactNode }) {
+export function StrangerRow({ row, actions }: { row: PeopleRow; actions?: React.ReactNode }) {
   const { t } = useTranslation("people");
   const handle = rowHandle(row);
   const channel = row.accounts[0]?.channel;

@@ -5,9 +5,8 @@ import { fetchJson } from "@/lib/fetch-json";
 const PEOPLE_QUERY_KEY = ["people"] as const;
 
 /**
- * Every curated person, as `GET /api/people` serves them. Never the stranger
- * sentinel — the route withholds it — and the guardian is included, so a
- * caller offering people to speak *as* filters them out itself.
+ * Every curated person, as `GET /api/people` serves them. The guardian is
+ * included, so a caller offering people to speak *as* filters them out itself.
  *
  * A failed read answers an empty listing rather than an error: the subscribers
  * are optional affordances on the composer, and a person list nobody could

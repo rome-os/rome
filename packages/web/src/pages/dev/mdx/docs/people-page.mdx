@@ -3,7 +3,7 @@ import {
   DirectoryDemo,
   PersonPageDemo,
   StreamDemo,
-  UnknownDemo,
+  StrangerDemo,
   ViewSwitcherDemo,
 } from "./people-demo";
 
@@ -27,7 +27,7 @@ ships with, so switching the theme re-renders the design rather than a picture o
 > mockup, version `monochrome-channel-glyphs`.
 
 Every specimen renders the page's own components against literal fixtures — the
-same `StreamRow`, `UnknownRow`, `DirectoryRow`, avatar and glyph set the roster
+same `StreamRow`, `StrangerRow`, `DirectoryRow`, avatar and glyph set the roster
 draws with, wired to nothing. A specimen that drew its own rows would go on
 looking right after the page stopped, which is the one thing a live note exists
 to prevent.
@@ -52,7 +52,7 @@ that `role="radio"` on a plain button promises and does not have.
 </Specimen>
 
 `All` means the **placed** people: it holds back both unplaced ends of the ladder, so
-Unknown and Stranger are each entered on purpose. The Unknown chip carries a count
+Stranger and Dismissed are each entered on purpose. The Stranger chip carries a count
 when senders are waiting.
 
 <Invariant>
@@ -60,8 +60,8 @@ when senders are waiting.
   happened to load — the account read is paged, so a count taken over page one would
   report no waiting senders whenever placed people fill it. Which accounts it counts is
   the view's own read: the stream counts the ones something has happened on, so its
-  Unknown is the senders waiting on a decision, while the directory counts the whole
-  contacts list, so its Unknown is everyone Rome has not placed.
+  Stranger is the senders waiting on a decision, while the directory counts the whole
+  contacts list, so its Stranger is everyone Rome has not placed.
 </Invariant>
 
 ---
@@ -80,23 +80,23 @@ page. A row here exists to get you to a conversation.
 
 ---
 
-## Unknown — the placement view
+## Stranger — the placement view
 
-The Unknown chip keeps dense rows: channel pill, number or handle, message count,
+The Stranger chip keeps dense rows: platform pill, number or handle, message count,
 preview, and the `⋯` menu. The placement decision runs on that evidence, so all of it
 is on the row rather than a click away. Placing a sender takes it off the view, and
 the chip's count drops because the next read says so.
 
-<Specimen title="Unknown rows">
-  <UnknownDemo />
+<Specimen title="Stranger rows">
+  <StrangerDemo />
 </Specimen>
 
-Stranger keeps the same dense row and offers `Restore`. A restore is decided on the
+Dismissed keeps the same dense row and offers `Restore`. A restore is decided on the
 evidence a placement is decided on — what the sender actually sent — so it gets the
 row rather than a roster line with a button on it.
 
 <Invariant>
-  Unknown and Stranger are positions on one ladder, and they are still not one
+  Stranger and Dismissed are positions on one ladder, and they are still not one
   gesture. Placing a sender creates a person or links onto one; dismissing is a state
   the *account* is in, so it names no target and its way back is `restore` rather than
   a move off a sentinel. The union page generated a row's targets from its level
@@ -109,7 +109,7 @@ row rather than a roster line with a button on it.
 ## Directory — the contacts list
 
 Everyone Rome knows grouped by bond, ordered by name within each group, with live
-counts and three columns (avatar, name plus identifier, `⋯`) — no channel badges, no
+counts and three columns (avatar, name plus identifier, `⋯`) — no platform badges, no
 preview, no message count. The directory read carries none of that, which is what
 makes this a contacts list rather than a second stream. Click a row to open the
 person, and click the avatar to select. A selection raises the bulk bar, whose choices
@@ -122,10 +122,10 @@ it.
 
 The guardian row is fixed: not moved, not merged, not selected. Nobody else is held
 back — a contact the address book synced and nobody has ever heard from is in the
-Unknown group like any other account, because looking someone up is what this view is
+Stranger group like any other account, because looking someone up is what this view is
 for. An account nobody has decided about admits the same three placement gestures
 here that it admits on the stream, folded behind a `⋯` menu at the end of its row —
-the Unknown group can hold a whole synced address book, and a row of buttons per
+the Stranger group can hold a whole synced address book, and a row of buttons per
 contact would out-shout the roster the view exists to read.
 
 ---
@@ -156,24 +156,24 @@ appears in a label only once it disambiguates.
 
 ---
 
-## Channels are glyphs, never colors
+## Platforms are glyphs, never colors
 
-`CHANNEL_META` ships a name and an icon per channel, drawn in `currentColor` at muted
+`CHANNEL_META` ships a name and an icon per platform, drawn in `currentColor` at muted
 foreground. The name is the network's — `wechat_user`, the guardian's own client, is
-"WeChat" like any other WeChat account — and a channel with no entry is titled from its
+"WeChat" like any other WeChat account — and a platform with no entry is titled from its
 id rather than printed as one.
 
-<Specimen title="Channel glyphs">
+<Specimen title="Platform glyphs">
   <ChannelGlyphSet />
 </Specimen>
 
 <Invariant>
-  Status hues stay reserved for status semantics, and there are more channels than a
-  palette has room for. A channel contributed by a Rome App gets the generic glyph
+  Status hues stay reserved for status semantics, and there are more platforms than a
+  palette has room for. A platform contributed by a Rome App gets the generic glyph
   rather than an undefined color.
 </Invariant>
 
-Avatars are neutral everywhere for the same reason — tinting an avatar by channel
+Avatars are neutral everywhere for the same reason — tinting an avatar by platform
 would be a second, contradictory color vocabulary on the same row.
 
 ---
@@ -193,7 +193,7 @@ a bond.
 | A write holds its rows until the refetch lands, not until the request returns | A gesture that reports itself done at the response leaves the row it acted on standing for as long as the read takes, which reads as a write that did nothing |
 | One call covers every address the row stands for | A WhatsApp contact answers to both its phone jid and its `@lid` jid; which of those are one account is the server's answer, given once in `addresses`, so the client names the account and the fold travels with it |
 
-The last one is what replaced a client-side fan-out. The union page acted per channel
+The last one is what replaced a client-side fan-out. The union page acted per platform
 and made the follow-up calls best-effort, because the first call had already committed
 and a failed second one must not report a saved change as a failed one. There is no
 follow-up now: the account is one thing, and the write either landed on it or did not.
@@ -214,7 +214,7 @@ follow-up now: the account is one thing, and the write either landed on it or di
   short. The real fix is paging each group independently.
 - The chip rail stays lit while a search is active, though the search has taken over
   from it.
-- Only WhatsApp can send. Other channels appear in the composer's select, disabled,
+- Only WhatsApp can send. Other platforms appear in the composer's select, disabled,
   until a send path exists.
 - The `⋯` row menu and the bulk bar are drawn in the specimens and not on the page. A
   bulk gesture is N writes behind one confirmation, and the contract has no verb that

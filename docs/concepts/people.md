@@ -58,7 +58,7 @@ An account is a party on an external messaging platform — a Telegram user, a W
 - An account is identified by its [channel](../architecture/channels.md) plus its own [address](#address). The same pair always names the same account.
 - Rome never creates or deletes an account. Platforms own the account lifecycle, and Rome learns of accounts from inbound messages.
 - An account resolves to a person only through its [link](#link). An account with no link resolves to no one.
-- An account is in exactly one of three states: unlinked, linked, or dismissed. Dismissal records that the account belongs to no one the guardian tracks. A dismissed account stays out of discovery until the guardian restores or links it.
+- An account is in exactly one of three states: unlinked (a [stranger](../domains/people.md#stranger)), linked, or dismissed. Dismissal records that the account belongs to no one the guardian tracks. A dismissed account stays out of discovery until the guardian restores or links it.
 - The state is derived from the account's link. No surface stores or reports a state that can disagree with the link behind it.
 - The guardian's own accounts on a platform are accounts like any other, linked to the guardian.
 

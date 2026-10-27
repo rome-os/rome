@@ -8,9 +8,8 @@
  * because the two listings are two views of one store and a write visible to
  * only one of them is the bug this walkthrough is for.
  *
- * The other contract pinned here: the stranger sentinel never crosses the
- * wire. Dismissal reads as `state: "dismissed"` with a null person, and no
- * /api/people route resolves the sentinel id.
+ * The other contract pinned here: a dismissal names nobody. It reads as
+ * `state: "dismissed"` with a null person.
  */
 // @rstest-environment jsdom
 import { afterAll, beforeAll, expect, test } from "@rstest/core";
@@ -182,15 +181,14 @@ test("proposed /people contract walkthrough", async () => {
   expect(r.status).toBe(200);
   expect(r.body.accounts).toHaveLength(1);
 
-  // The account state machine, sentinel never on the wire:
-  // unlinked -> dismissed. The response carries the state, not the sentinel.
+  // The account state machine: unlinked -> dismissed. The response carries
+  // the state and names nobody.
   r = await call("POST", `/api/accounts/telegram/${JULES_TG}/dismiss`);
   expect(r.status).toBe(200);
   expect(r.body.state).toBe("dismissed");
   expect(r.body.personId).toBeNull();
   expect(r.body.personName).toBeNull();
-  // Dismissed accounts leave discovery, appear under ?state=dismissed, and the
-  // legacy store shows the same fact as a sentinel mapping (one store).
+  // Dismissed accounts leave discovery and appear under ?state=dismissed.
   r = await call("GET", "/api/accounts?state=unlinked");
   expect(r.body.accounts.map((a: { channelUserId: string }) => a.channelUserId)).not.toContain(
     JULES_TG,
@@ -199,8 +197,8 @@ test("proposed /people contract walkthrough", async () => {
   expect(r.body.accounts.map((a: { channelUserId: string }) => a.channelUserId)).toContain(
     JULES_TG,
   );
-  // Dismissal is stored as a link onto the sentinel, and that is exactly what
-  // never crosses the wire: the row says "dismissed" and names nobody.
+  // A dismissal is a decision about the account, not a person: the row says
+  // "dismissed" and names nobody.
   expect(
     r.body.accounts.find((a: { channelUserId: string }) => a.channelUserId === JULES_TG),
   ).toMatchObject({ state: "dismissed", personId: null });

@@ -21,12 +21,12 @@
     "days": "{{count}}d ago"
   },
   "levels": {
-    "unknown": "Unknown",
+    "stranger": "Stranger",
     "guardian": "Guardian",
     "innerCircle": "Inner circle",
     "acquaintance": "Acquaintance",
     "other": "Other",
-    "stranger": "Stranger"
+    "dismissed": "Dismissed"
   },
   "channels": {
     "telegram": "Telegram",
@@ -64,12 +64,12 @@
     "close": "Close",
     "create": "Create",
     "link": "Link",
-    "markStranger": "Treat as stranger",
+    "dismiss": "Dismiss",
     "createProfile": "Create profile",
     "creating": "Creating…",
     "linkSubmit": "Link",
     "linking": "Linking…",
-    "markingStranger": "Marking…",
+    "dismissing": "Dismissing…",
     "restore": "Restore",
     "restoring": "Restoring…",
     "transfer": "Move it here",
@@ -87,7 +87,7 @@
   },
   "merge": {
     "title": "Merge into another person",
-    "description": "Their channels move onto the person you pick, and the duplicate row goes away.",
+    "description": "Their accounts move onto the person you pick, and the duplicate row goes away.",
     "selectLabel": "Person to merge into",
     "confirm": "Merge",
     "searchPlaceholder": "Search by name, phone, or handle",
@@ -185,9 +185,9 @@
       "heldBy": "Held by"
     }
   },
-  "strangerConfirm": {
-    "title": "Treat {{name}} as a stranger?",
-    "description": "{{name}} no longer appears under {{section}}. Restore them anytime from the Stranger view."
+  "dismissConfirm": {
+    "title": "Dismiss {{name}}?",
+    "description": "{{name}} no longer appears under {{section}}. Restore them anytime from the Dismissed view."
   },
   "transfer": {
     "title": "Move this account?",

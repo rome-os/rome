@@ -47,17 +47,17 @@ export type PeopleFilter = "all" | RowLevel;
  * ends of the ladder too, so a queue and a dismissal are each entered on
  * purpose rather than sitting in the default view.
  *
- * Unknown comes last and the rail pushes it to the far end, because it is not
+ * Stranger comes last and the rail pushes it to the far end, because it is not
  * a peer of the chips before it: those name a bond the guardian has already
- * given, and Unknown is the queue of accounts still waiting for one.
+ * given, and Stranger is the queue of accounts still waiting for one.
  */
 export const FILTER_ORDER: PeopleFilter[] = [
   "all",
   "inner-circle",
   "acquaintance",
   "other",
+  "dismissed",
   "stranger",
-  "unknown",
 ];
 
 /**
@@ -219,7 +219,7 @@ export function peopleRows(
       kind: "account",
       id: accountRef(account),
       displayName: account.displayName,
-      level: account.state === "dismissed" ? "stranger" : "unknown",
+      level: account.state === "dismissed" ? "dismissed" : "stranger",
       accounts: [
         {
           channel: account.channel,
@@ -301,7 +301,7 @@ export function compareRowsByName(a: PeopleRow, b: PeopleRow): number {
  *  says — `directoryGroups` states the directory's narrower rule itself. */
 export function rowMatchesFilter(row: PeopleRow, filter: PeopleFilter): boolean {
   return filter === "all"
-    ? row.level !== "unknown" && row.level !== "stranger"
+    ? row.level !== "stranger" && row.level !== "dismissed"
     : row.level === filter;
 }
 
@@ -351,8 +351,8 @@ export interface PeopleGroup {
  * "All" is the guardian's own row, then the people the guardian has placed:
  * the three assignable levels. The guardian's row leads because it is where
  * they read which accounts are theirs. The ladder's other positions each
- * answer a different question — Unknown is the accounts still waiting on a
- * decision, Stranger is what was decided against — so each is entered on
+ * answer a different question — Stranger is the accounts still waiting on a
+ * decision, Dismissed is what was decided against — so each is entered on
  * purpose rather than padding the list somebody scrolls to look a contact up
  * in.
  *
@@ -392,7 +392,7 @@ export type LevelCounts = Record<RowLevel, number>;
  * over what happened to arrive would report no waiting senders whenever placed
  * people filled page one.
  *
- * What "unknown" counts is the account read's own answer, and the two views
+ * What "stranger" counts is the account read's own answer, and the two views
  * hand this different ones on purpose: the directory's read is the whole
  * contacts list, so it counts everyone Rome has not placed, while the stream's
  * is the accounts something has happened on, so it counts the senders actually
@@ -409,7 +409,7 @@ export function levelCounts(people: PersonCounts, accounts: AccountCounts): Leve
     "inner-circle": people["inner-circle"],
     acquaintance: people.acquaintance,
     other: people.other,
-    stranger: accounts.dismissed,
-    unknown: accounts.unlinked,
+    dismissed: accounts.dismissed,
+    stranger: accounts.unlinked,
   };
 }

@@ -21,12 +21,12 @@
     "days": "{{count}} 天前"
   },
   "levels": {
-    "unknown": "未知",
+    "stranger": "陌生人",
     "guardian": "守护者",
     "innerCircle": "核心圈",
     "acquaintance": "熟人",
     "other": "其他",
-    "stranger": "陌生人"
+    "dismissed": "已忽略"
   },
   "channels": {
     "telegram": "Telegram",
@@ -64,12 +64,12 @@
     "close": "关闭",
     "create": "创建",
     "link": "关联",
-    "markStranger": "视为陌生人",
+    "dismiss": "忽略",
     "createProfile": "创建资料",
     "creating": "创建中…",
     "linkSubmit": "关联",
     "linking": "关联中…",
-    "markingStranger": "标记中…",
+    "dismissing": "忽略中…",
     "restore": "恢复",
     "restoring": "恢复中…",
     "transfer": "移到这里",
@@ -87,7 +87,7 @@
   },
   "merge": {
     "title": "合并到另一位人物",
-    "description": "他们的渠道会转移到你选择的人物名下，重复的条目将被移除。",
+    "description": "他们的账号会转移到你选择的人物名下，重复的条目将被移除。",
     "selectLabel": "要合并到的人物",
     "confirm": "合并",
     "searchPlaceholder": "按姓名、电话或账号搜索",
@@ -185,9 +185,9 @@
       "heldBy": "当前归属"
     }
   },
-  "strangerConfirm": {
-    "title": "将 {{name}} 视为陌生人？",
-    "description": "{{name}} 将不再出现在{{section}}中。随时可在“陌生人”视图中恢复。"
+  "dismissConfirm": {
+    "title": "忽略 {{name}}？",
+    "description": "{{name}} 将不再出现在{{section}}中。随时可在“已忽略”视图中恢复。"
   },
   "transfer": {
     "title": "移动这个账号？",

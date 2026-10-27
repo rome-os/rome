@@ -57,25 +57,26 @@ import { compareCodePoints, type Message } from "./message.js";
 /**
  * Every position on the bond ladder a surface renders, in display order.
  *
- * "unknown" and "stranger" are positions on the same ladder as the curated
+ * "stranger" and "dismissed" are positions on the same ladder as the curated
  * bonds, not separate kinds of thing, and neither is ever stored on a person:
- * an account is unknown by having no link, and a stranger by being dismissed.
- * Both are read off the account's link and dismissal.
+ * they are the two states of an account nobody is behind
+ * (docs/domains/people.md#account). A stranger has no link and no dismissal,
+ * and a dismissed account has a dismissal. Both are read off the account.
  */
 export const BOND_LADDER = [
-  "unknown",
+  "stranger",
   "guardian",
   "inner-circle",
   "acquaintance",
   "other",
-  "stranger",
+  "dismissed",
 ] as const;
 
 export type BondLadderLevel = (typeof BOND_LADDER)[number];
 
 /** A level a person row can actually hold: the ladder minus its two computed
  *  positions. */
-export type PlacedBondLevel = Exclude<BondLadderLevel, "unknown" | "stranger">;
+export type PlacedBondLevel = Exclude<BondLadderLevel, "stranger" | "dismissed">;
 
 /**
  * The levels a guardian may place a person at.
@@ -98,7 +99,9 @@ export function isAssignableBondLevel(value: unknown): value is AssignableBondLe
  * from every group.
  */
 export function normalizeBondLevel(raw: string): PlacedBondLevel {
-  return (BOND_LADDER as readonly string[]).includes(raw) && raw !== "unknown" && raw !== "stranger"
+  return (BOND_LADDER as readonly string[]).includes(raw) &&
+    raw !== "stranger" &&
+    raw !== "dismissed"
     ? (raw as PlacedBondLevel)
     : "other";
 }
