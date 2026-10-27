@@ -41,11 +41,14 @@ WHERE `named`.`name` IS NOT NULL;
 -- written before that was recorded. The account it is for is on that channel's
 -- platform, which is how People read it until now. Its sender is the account
 -- that channel's record knows; a channel that knows none leaves it null, and
--- such a row retries only from a channel that still knows none.
+-- such a row retries only from that same channel while it still knows none.
+-- The channel stays on the row, since Rome's transcript of the send is stored
+-- under it whatever the channel later learns or forgets about its account.
 CREATE TABLE `__new_outbound_messages` (
 	`id` text PRIMARY KEY NOT NULL,
 	`platform` text NOT NULL,
 	`account_id` text NOT NULL,
+	`channel` text NOT NULL,
 	`chat_id` text NOT NULL,
 	`text` text NOT NULL,
 	`state` text NOT NULL,
@@ -57,9 +60,9 @@ CREATE TABLE `__new_outbound_messages` (
 	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
-INSERT INTO `__new_outbound_messages` (`id`, `platform`, `account_id`, `chat_id`, `text`, `state`,
+INSERT INTO `__new_outbound_messages` (`id`, `platform`, `account_id`, `channel`, `chat_id`, `text`, `state`,
   `provider_message_id`, `error`, `from_platform`, `from_account_id`, `created_at`, `updated_at`)
-SELECT `o`.`id`, `s`.`platform`, `o`.`channel_user_id`, `o`.`chat_id`, `o`.`text`, `o`.`state`,
+SELECT `o`.`id`, `s`.`platform`, `o`.`channel_user_id`, `s`.`name`, `o`.`chat_id`, `o`.`text`, `o`.`state`,
   `o`.`provider_message_id`, `o`.`error`,
   CASE WHEN `s`.`account_id` IS NULL THEN NULL ELSE `s`.`platform` END,
   `s`.`account_id`, `o`.`created_at`, `o`.`updated_at`

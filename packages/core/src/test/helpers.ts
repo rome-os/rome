@@ -758,7 +758,6 @@ export async function buildTestDeps(
     platformOfChannel: (name: string) => channelRecords.platformOfChannel(name),
     sendersOn: (platform: string) => channelRecords.sendersOn(platform),
     accountOf: (channel: string) => channelRecords.accountOf(channel),
-    channelsOf: (account) => channelRecords.channelsOf(account),
     accountNames,
     assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,

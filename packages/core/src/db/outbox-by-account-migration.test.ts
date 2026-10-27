@@ -72,7 +72,7 @@ describe("the outbox by account migration", () => {
     expect(
       sqlite
         .prepare(
-          "SELECT id, platform, account_id, from_platform, from_account_id FROM outbound_messages ORDER BY id",
+          "SELECT id, platform, account_id, channel, from_platform, from_account_id FROM outbound_messages ORDER BY id",
         )
         .all(),
     ).toEqual([
@@ -80,6 +80,7 @@ describe("the outbox by account migration", () => {
         id: "agents",
         platform: "agents",
         account_id: "agent-1",
+        channel: "agents",
         from_platform: null,
         from_account_id: null,
       },
@@ -87,6 +88,7 @@ describe("the outbox by account migration", () => {
         id: "from-opaque",
         platform: "telegram",
         account_id: "ada",
+        channel: OPAQUE,
         from_platform: "telegram",
         from_account_id: "tg-me",
       },
@@ -94,6 +96,7 @@ describe("the outbox by account migration", () => {
         id: "no-account",
         platform: "wechat",
         account_id: "wx-bob",
+        channel: "wechat_user",
         from_platform: null,
         from_account_id: null,
       },
@@ -103,6 +106,7 @@ describe("the outbox by account migration", () => {
         id: "unrecorded",
         platform: "telegram",
         account_id: "ada",
+        channel: "telegram",
         from_platform: null,
         from_account_id: null,
       },

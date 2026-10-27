@@ -24,6 +24,9 @@ export interface OutboxRow {
    *  it. */
   platform: string;
   accountId: string;
+  /** The channel it went out on, which Rome's transcript of it is stored
+   *  under. */
+  channel: string;
   chatId: string;
   text: string;
   state: "sending" | "unconfirmed" | "failed";
@@ -92,6 +95,7 @@ export class OutboxRepository {
       id: input.id,
       platform: input.to.platform,
       accountId: input.to.id,
+      channel: input.channel,
       chatId: input.chatId,
       text: input.text,
       fromPlatform: input.from?.platform ?? null,
@@ -279,10 +283,12 @@ export class OutboxRepository {
   }
 }
 
-/** A send as it is opened: the account it is for, the chat the channel
- *  resolved that account to, and Rome's account it goes out from, if known. */
+/** A send as it is opened: the account it is for, the channel it goes out on
+ *  and the chat that channel resolved the account to, and Rome's account it
+ *  goes out from, if known. */
 export interface OutboxInput {
   to: Account;
+  channel: string;
   chatId: string;
   text: string;
   from?: Account | null;

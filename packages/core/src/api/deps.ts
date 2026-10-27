@@ -104,9 +104,6 @@ export interface ApiDeps {
   sendersOn: SendersOn;
   /** Rome's own account on a channel, which a send names as `from`. */
   accountOf: ChannelRecordsRepository["accountOf"];
-  /** The channels that record one of Rome's accounts, which what it sent is
-   *  stored under. */
-  channelsOf: ChannelRecordsRepository["channelsOf"];
   /** What each platform calls an account, over every address book Rome mirrors
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */

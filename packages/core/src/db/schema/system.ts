@@ -215,6 +215,10 @@ export const outboundMessages = sqliteTable(
      *  for it. */
     platform: text("platform").notNull(),
     accountId: text("account_id").notNull(),
+    /** The channel the message went out on, as it was named then. Rome's
+     *  transcript of the send is stored under it, and it stays true when the
+     *  channel later forgets or learns its account. */
+    channel: text("channel").notNull(),
     /** The chat the channel resolved the address to, kept so a retry does
      *  not have to ask again. */
     chatId: text("chat_id").notNull(),

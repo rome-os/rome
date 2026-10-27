@@ -1820,7 +1820,6 @@ async function main() {
       platformOfChannel,
       sendersOn: (platform: string) => channelRecords.sendersOn(platform),
       accountOf: (channel: string) => channelRecords.accountOf(channel),
-      channelsOf: (account) => channelRecords.channelsOf(account),
       accountNames,
       assistants: listedAgents,
       webchatRepo,

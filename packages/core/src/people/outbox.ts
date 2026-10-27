@@ -77,10 +77,6 @@ export interface OutboxDeps extends SendDeps {
   /** Rome's own account on a channel, which a send names as `from`. Absent,
    *  no channel answers to one. */
   accountOf?: ChannelRecordsRepository["accountOf"];
-  /** The channels that record one of Rome's accounts, which what it sent is
-   *  stored under. Absent, a row is looked for under every channel a send on
-   *  its platform may go out from. */
-  channelsOf?: ChannelRecordsRepository["channelsOf"];
 }
 
 export type SendResult =
@@ -130,6 +126,7 @@ export async function sendToAccount(
   // from it again and from no other (`senderChannel`).
   const input = {
     to: account,
+    channel: resolution.target.channel,
     chatId: resolution.target.chatId,
     text,
     from: deps.accountOf?.(resolution.target.channel) ?? null,
@@ -154,17 +151,16 @@ function senderNamed(deps: OutboxDeps, platform: string, from: Account): string 
 
 /**
  * The channel a retry of `row` goes out on: the one that holds Rome's account
- * the row went out from. A row whose channel knew no account goes out on the
- * platform's one channel, and only while that channel still knows none, since
- * one that knows its account cannot be told apart from another account.
+ * the row went out from. A row whose channel knew no account goes out on that
+ * same channel, and only while it can still send and still knows none, since
+ * one that has learned an account cannot be told apart from another account.
  * Null when neither holds.
  */
 function senderChannel(deps: OutboxDeps, row: OutboxRow): string | null {
   const from = senderOf(row);
   if (from) return senderNamed(deps, row.platform, from);
-  const senders = sendersOf(deps, row.platform);
-  const only = senders.length === 1 ? senders[0] : undefined;
-  return only !== undefined && !deps.accountOf?.(only) ? only : null;
+  const stillSends = sendersOf(deps, row.platform).includes(row.channel);
+  return stillSends && !deps.accountOf?.(row.channel) ? row.channel : null;
 }
 
 /**
@@ -363,7 +359,7 @@ export async function readOutbox(
   };
   const arrived = await Promise.all(
     awaiting.map(async (row) => {
-      const account = landingAccount(deps, accounts, row);
+      const account = landingAccount(accounts, row);
       const refs = await refsOn(account);
       return refsFor(row, account).some((ref) => refs.has(ref));
     }),
@@ -398,7 +394,7 @@ export async function readOutbox(
  * the other. Predicting only the address we sent to left the row waiting on a
  * ref that would never appear, which is a send accepted and then stuck.
  *
- * The transcript form names the channel the send went out on, one of those
+ * The transcript form names the channel the send went out on, which
  * `landingAccount` reads the account under.
  *
  * All of them need the provider's id, so a channel offering `directMessaging`
@@ -413,10 +409,8 @@ function refsFor(row: OutboxRow, account: MessageAccount): string[] {
     `${row.chatId}:${messageId}`,
     ...new Set(account.addresses.map((address) => `${address}:${messageId}`)),
   ];
-  for (const channel of account.storedUnder ?? []) {
-    const sessionId = channelChatId(channel, row.chatId);
-    refs.push(`agent:${conversationPlatformMessageId(sessionId, messageId)}`);
-  }
+  const sessionId = channelChatId(row.channel, row.chatId);
+  refs.push(`agent:${conversationPlatformMessageId(sessionId, messageId)}`);
   return refs;
 }
 
@@ -428,29 +422,13 @@ function landsOn(accounts: readonly MessageAccount[], sentTo: Account): MessageA
 }
 
 /** This row's account, with every address the platform folds onto it, the
- *  row's own included, read under the channels of Rome's account it went out
- *  from. Falls back to the row's own address for a platform that folds
- *  nothing. */
-function landingAccount(
-  deps: OutboxDeps,
-  accounts: readonly MessageAccount[],
-  row: OutboxRow,
-): MessageAccount {
+ *  row's own included, read under the channel the row went out on. Falls back
+ *  to the row's own address for a platform that folds nothing. */
+function landingAccount(accounts: readonly MessageAccount[], row: OutboxRow): MessageAccount {
   const sentTo = recipientOf(row);
   const account = landsOn(accounts, sentTo) ?? {
     channel: sentTo.platform,
     addresses: [sentTo.id],
   };
-  return { ...account, storedUnder: sentUnder(deps, row) };
-}
-
-/**
- * The channels what `row` sent is stored under: every one that has recorded
- * Rome's account it went out from. A row whose channel knew no account went
- * out on one of the platform's channels that knows none.
- */
-function sentUnder(deps: OutboxDeps, row: OutboxRow): string[] {
-  const from = senderOf(row);
-  if (from) return deps.channelsOf?.(from) ?? sendersOf(deps, row.platform);
-  return sendersOf(deps, row.platform).filter((channel) => !deps.accountOf?.(channel));
+  return { ...account, storedUnder: [row.channel] };
 }
