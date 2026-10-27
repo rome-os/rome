@@ -2,11 +2,13 @@
 // links, and the account verbs that move a link between persons.
 // Vocabulary: docs/domains/people.md.
 
-import { eq, and, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
+import { readdir } from "node:fs/promises";
+import { eq, and, or, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { persons, channelMappings, dismissedAccounts } from "../schema.js";
 import type { ConnectionKindOfChannel } from "./channel-records.js";
 import { type DrizzleDb, inTransaction, type SqliteExec } from "../index.js";
+import { getRelationshipDir } from "../../profile-memory.js";
 import {
   generatePersonSlug,
   nextAvailablePersonId,
@@ -718,18 +720,16 @@ export class PeopleRepository {
     const base = generatePersonSlug(displayName);
     if (!base) return uuid();
 
-    const existing = await this.db
+    const rows = await this.db
       .select({ id: persons.id })
       .from(persons)
-      .where(eq(persons.id, base));
-    if (existing.length === 0) return base;
+      .where(or(eq(persons.id, base), like(persons.id, `${base}-%`)));
+    // A deleted or merged-away person's profile stays in Memory under their
+    // id, and a profile is found by id. So that id stays retired: a new person
+    // minted onto it would open with prose about somebody else.
+    const profiled = await profiledIds(base);
 
-    const conflicts = await this.db
-      .select({ id: persons.id })
-      .from(persons)
-      .where(like(persons.id, `${base}-%`));
-
-    return nextAvailablePersonId(base, [base, ...conflicts.map((row) => row.id)]);
+    return nextAvailablePersonId(base, [...rows.map((row) => row.id), ...profiled]);
   }
 
   /**
@@ -839,4 +839,14 @@ export class PeopleRepository {
       })
       .run();
   }
+}
+
+/** The ids `base` or `base-N` that have a profile in the relationship
+ *  directory, whether or not anyone holds them now. */
+async function profiledIds(base: string): Promise<string[]> {
+  const files = await readdir(getRelationshipDir()).catch(() => [] as string[]);
+  return files
+    .filter((file) => file.endsWith(".md"))
+    .map((file) => file.slice(0, -".md".length))
+    .filter((id) => id === base || id.startsWith(`${base}-`));
 }

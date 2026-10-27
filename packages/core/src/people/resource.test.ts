@@ -91,4 +91,15 @@ describe("A person's memory profile", () => {
     expect(await memoryPathOf("Nadia Petrova")).toBe(null);
     expect(await memoryPathOf("Guardian")).toBe(null);
   });
+
+  it("never hands a deleted person's profile to a new person of the same name", async () => {
+    const first = await deps.peopleRepo.create({ displayName: "Wei Chen", bondLevel: "other" });
+    writeProfile(`${first}.md`);
+    await deps.peopleRepo.delete(first);
+
+    const second = await deps.peopleRepo.create({ displayName: "Wei Chen", bondLevel: "other" });
+
+    expect(second).not.toBe(first);
+    expect(await memoryPathOf("Wei Chen")).toBeNull();
+  });
 });
