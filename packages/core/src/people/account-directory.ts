@@ -28,7 +28,8 @@ import type { AccountNames } from "../channels/account-names.js";
 import { foldAccounts } from "../channels/account-fold.js";
 import {
   addressBooks,
-  channelsOn,
+  storedOn,
+  type RecordedOn,
   type Channels,
   type PlatformOfChannel,
 } from "../channels/channel.js";
@@ -47,6 +48,9 @@ export interface AccountDirectoryDeps {
   sentinelLogRepo: Pick<SentinelLogRepository, "listSenders">;
   accountNames: Pick<AccountNames, "displayNames">;
   platformOfChannel: PlatformOfChannel;
+  /** Every channel recorded on a platform, released ones included, so a
+   *  history told to a disconnected account still reads. */
+  recordedOn?: RecordedOn;
   /** Where the message stores live. Read by the stream alone — the contacts
    *  list never reaches a history. */
   db: DrizzleDb;
@@ -140,8 +144,15 @@ async function readHeads(
   const heads = new Map<string, Message>();
   // An account is read under every channel on its platform, as a person's
   // timeline is (`timelineAccounts`).
-  const storedUnder = (platform: string) =>
-    channelsOn(deps.channels, deps.platformOfChannel, platform);
+  const stored = new Map<string, string[]>();
+  const storedUnder = (platform: string) => {
+    let names = stored.get(platform);
+    if (!names) {
+      names = storedOn(deps.channels, deps.platformOfChannel, platform, deps.recordedOn);
+      stored.set(platform, names);
+    }
+    return names;
+  };
   for (const round of rounds(accounts)) {
     const asked = new Map<MessageAccount, DirectoryAccount>(
       round.map((account) => [

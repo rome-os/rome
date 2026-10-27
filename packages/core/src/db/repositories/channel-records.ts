@@ -179,6 +179,21 @@ export class ChannelRecordsRepository {
     return recorded.filter((record) => record.connectionId !== null).map((record) => record.id);
   }
 
+  /**
+   * Every channel ever recorded on `platform`, oldest first, released ones
+   * included: the names an account's history there may be stored under. A
+   * released channel is not built, but what was said on it stays.
+   */
+  namesOn(platform: string): string[] {
+    return this.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(eq(channels.platform, platform))
+      .orderBy(asc(channels.createdAt))
+      .all()
+      .map((row) => row.id);
+  }
+
   /** Rome's own account on channel `id`, or null while its record knows none. */
   accountOf(id: string): Account | null {
     const record = this.byId(id);

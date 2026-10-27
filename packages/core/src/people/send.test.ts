@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatId, ChannelDirectMessaging } from "@rome-os/app-runtime";
 import { type Channel, ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
-import { readSendStates, resolveSendTarget } from "./send.js";
+import { readSendStates, resolveSendTarget, sendersOf } from "./send.js";
 
 function channel(name: string, send: ChannelSend | null): Channel {
   return { name, send, inbound: null, accounts: null, messages: null, directory: null };
@@ -100,6 +100,27 @@ describe("a link on a platform Rome holds accounts on", () => {
     expect(named.ok && named.target.channel).toBe("tg-second");
     // Either account can reach the person, so the person reads as sendable.
     expect(await readSendStates(deps, [link])).toEqual(["yes"]);
+  });
+
+  // The personal WeChat account only reads. Beside the WeChat bot, a send
+  // goes out from the bot, and the read-only account is never offered.
+  it("never counts a read-only account among the accounts a send may go out from", async () => {
+    const deps = {
+      channels: [open("wechat"), channel("wechat_user", null)],
+      sendersOn: (platform: string) => (platform === "wechat" ? ["wechat", "wechat_user"] : null),
+    };
+    const contact = { platform: "wechat", id: "wxid_a" };
+
+    expect(sendersOf(deps, "wechat")).toEqual(["wechat"]);
+    const resolution = await resolveSendTarget(deps, contact);
+    expect(resolution.ok && resolution.target.channel).toBe("wechat");
+    // With the personal account alone, the contact reads as one Rome cannot
+    // write to, not as one it is not connected to.
+    const readOnly = {
+      channels: [channel("wechat_user", null)],
+      sendersOn: (platform: string) => (platform === "wechat" ? ["wechat_user"] : null),
+    };
+    expect(await readSendStates(readOnly, [contact])).toEqual(["unsupported"]);
   });
 
   it("reads as not connected while Rome holds no account on the platform", async () => {

@@ -8,7 +8,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import type { OutboxRepository } from "../db/repositories/outbox.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
-import type { Channels, PlatformOfChannel } from "../channels/channel.js";
+import type { Channels, PlatformOfChannel, RecordedOn } from "../channels/channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { AccountNames } from "../channels/account-names.js";
 import type { ExternalAgents } from "../channels/agents-accounts.js";
@@ -100,6 +100,9 @@ export interface ApiDeps {
   /** The platform a channel's accounts live on, for a row that still names a
    *  channel: a sentinel log row, an outbox row. */
   platformOfChannel: PlatformOfChannel;
+  /** Every channel recorded on a platform, released ones included: where a
+   *  history told to a disconnected account is still stored. */
+  recordedOn: RecordedOn;
   /** The channels of Rome's accounts on a platform a send may go out from. */
   sendersOn: SendersOn;
   /** Rome's own account on a channel, which a send names as `from`. */

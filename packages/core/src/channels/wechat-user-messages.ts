@@ -98,6 +98,16 @@ function directAddresses(accounts: readonly MessageAccount[]): string[] {
   ];
 }
 
+/** The account name the timeline shows these messages under: the platform
+ *  the asking accounts are on, as the SQL and memory stores answer. Every
+ *  account read here is on one platform, since this store holds one channel. */
+function shownAs(accounts: readonly MessageAccount[]): string {
+  return (
+    accounts.find((account) => heldOn(account).includes(WECHAT_USER_CHANNEL))?.channel ??
+    WECHAT_USER_CHANNEL
+  );
+}
+
 /**
  * `Messages` over the personal WeChat store, read live through the reader.
  *
@@ -131,7 +141,7 @@ export function wechatUserMessages(reader: WechatUserReader): Messages {
 function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
   async function windowFor(
     addresses: readonly string[],
-    opts: { before?: Message | null; limit: number },
+    opts: { before?: Message | null; limit: number; source: string },
   ): Promise<Message[]> {
     const before = opts.before ? new Date(opts.before.timestamp * 1000) : undefined;
     const perConversation = await Promise.all(
@@ -143,7 +153,9 @@ function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
             limit: opts.limit,
             includeBoundaryTies: true,
           })
-          .then((messages) => messages.map(toMessage))
+          .then((messages) =>
+            messages.map((message) => ({ ...toMessage(message), source: opts.source })),
+          )
           .catch(() => [] as Message[]),
       ),
     );
@@ -187,7 +199,13 @@ function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
     async read({ accounts, after, limit }: MessageRead): Promise<Message[]> {
       const addresses = directAddresses(accounts);
       if (addresses.length === 0) return [];
-      const all = await windowFor(addresses, { before: after ?? null, limit: windowSize(limit) });
+      // Projected before the page is cut, so the cursor, which carries the
+      // projected source, settles ties against the same values.
+      const all = await windowFor(addresses, {
+        before: after ?? null,
+        limit: windowSize(limit),
+        source: shownAs(accounts),
+      });
       return page(all, after, limit);
     },
 
@@ -205,7 +223,8 @@ function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
       if (addresses.length === 0) return null;
       const activity = await reader.lastActivity().catch(() => null);
       const heads = await Promise.all(addresses.map((chatId) => newestIn(chatId, activity)));
-      return heads.filter((head) => head !== null).sort(compareMessages)[0] ?? null;
+      const head = heads.filter((head) => head !== null).sort(compareMessages)[0];
+      return head ? { ...head, source: shownAs(accounts) } : null;
     },
   };
 }

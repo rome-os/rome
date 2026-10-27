@@ -52,10 +52,18 @@ export interface SendDeps {
  * stored, since a Connection that ends changes the answer and writes no link.
  */
 export function sendersOf(deps: SendDeps, platform: string): string[] {
-  return (
+  const senders =
     deps.sendersOn?.(platform) ??
-    channelsOn(deps.channels, deps.platformOfChannel ?? platformOf, platform)
+    channelsOn(deps.channels, deps.platformOfChannel ?? platformOf, platform);
+  // A channel with no send port, such as the read-only personal WeChat, can
+  // never send, so beside one that can it is no candidate. One not built right
+  // now may be again, and stays. A platform only read-only channels hold keeps
+  // them, so it reads as unsupported rather than as not connected.
+  const readOnly = new Set(
+    deps.channels.filter((channel) => channel.send === null).map((channel) => channel.name),
   );
+  const writable = senders.filter((sender) => !readOnly.has(sender));
+  return writable.length > 0 ? writable : senders;
 }
 
 /** A resolved target: the channel it is on, that channel's send port, and the

@@ -17,7 +17,8 @@ import { platformOf } from "@rome/api-types/platform";
 import { foldAccounts, type AccountFold, type AddressBooks } from "../channels/account-fold.js";
 import {
   addressBooks,
-  channelsOn,
+  storedOn,
+  type RecordedOn,
   messageStores,
   type Channels,
   type PlatformOfChannel,
@@ -76,7 +77,7 @@ export function personMessageStores(deps: {
  * directory of people must not pay for one read per row.
  */
 export async function timelineAccounts(
-  deps: { channels: Channels; platformOfChannel?: PlatformOfChannel },
+  deps: { channels: Channels; platformOfChannel?: PlatformOfChannel; recordedOn?: RecordedOn },
   groups: readonly (readonly Account[])[],
 ): Promise<MessageAccount[][]> {
   const links = groups.flat();
@@ -84,7 +85,15 @@ export async function timelineAccounts(
   const fold = await foldAccounts(booksNamed(deps.channels, platformOfChannel, links), {
     stored: links,
   });
-  const storedUnder = (platform: string) => channelsOn(deps.channels, platformOfChannel, platform);
+  const stored = new Map<string, string[]>();
+  const storedUnder = (platform: string) => {
+    let names = stored.get(platform);
+    if (!names) {
+      names = storedOn(deps.channels, platformOfChannel, platform, deps.recordedOn);
+      stored.set(platform, names);
+    }
+    return names;
+  };
   return groups.map((group) => accountsOf(fold, storedUnder, group));
 }
 

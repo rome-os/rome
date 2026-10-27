@@ -754,6 +754,7 @@ export async function buildTestDeps(
     linkedInAccounts,
     channels,
     platformOfChannel: (name: string) => channelRecords.platformOfChannel(name),
+    recordedOn: (platform: string) => channelRecords.namesOn(platform),
     sendersOn: (platform: string) => channelRecords.sendersOn(platform),
     accountOf: (channel: string) => channelRecords.accountOf(channel),
     accountNames,

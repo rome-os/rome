@@ -10,6 +10,7 @@ import type {
   TimelinePage,
 } from "@rome/api-types/people";
 import { peopleRoutes } from "./people.js";
+import { accountsRoutes } from "./accounts.js";
 import {
   createTestConnections,
   createTestDb,
@@ -922,6 +923,34 @@ describe("People on an account whose channel id is opaque", () => {
     expect((await res.json()) as SendRefusal).toMatchObject({ send: "not-connected" });
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
     expect((await timeline()).entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
+  });
+
+  // A disconnect releases the channel and the next boot builds none for it,
+  // but what Ada said to that account stays stored under its name.
+  it("still reads the history told to an account Rome has disconnected", async () => {
+    testDb.db.delete(connectionGrants).where(eq(connectionGrants.custody, "test:telegram")).run();
+    testDb.db
+      .update(channelRows)
+      .set({ connectionId: null })
+      .where(eq(channelRows.id, OPAQUE))
+      .run();
+    const rebooted: TestDeps = {
+      ...deps,
+      channels: channelList({
+        db: deps.db,
+        whatsAppAccounts: deps.whatsAppAccounts,
+        linkedInAccounts: deps.linkedInAccounts,
+      }),
+    };
+    app = new Hono().route("/", peopleRoutes(rebooted)).route("/", accountsRoutes(rebooted));
+
+    expect((await timeline()).entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
+    const stream = (await (await app.request("/accounts/stream")).json()) as {
+      accounts: Array<{ channel: string; channelUserId: string }>;
+    };
+    expect(stream.accounts).toContainEqual(
+      expect.objectContaining({ channel: "telegram", channelUserId: ADA }),
+    );
   });
 
   describe("naming the account a send goes out from", () => {
