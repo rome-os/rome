@@ -8,16 +8,21 @@ import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { BlockActions } from "@/components/chat/MessageList";
 import { userMessageText } from "@/components/chat/chat-view";
 import type { ConciergeEntry, ConciergeItem } from "@/components/chat/concierge-groups";
+import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
 // The same bubble reparses nothing while the transcript re-renders around it;
 // a message's identity changes on every reload, so compare what it shows.
 const GuardianBubble = memo(
-  function GuardianBubble({ msg }: { msg: ChatMessage }) {
+  function GuardianBubble({ msg, arrival }: { msg: ChatMessage; arrival?: number }) {
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
     return (
-      <div data-timeline-anchor={msg.id} className="flex min-w-0 max-w-full flex-col items-end">
+      <div
+        data-timeline-anchor={msg.id}
+        className="flex min-w-0 max-w-full flex-col items-end"
+        data-arrival={arrival}
+      >
         <ConciergeBubble side="end" copyText={text} createdAt={msg.createdAt} feedbackTurn={null}>
           <UserMessageBubble msg={msg} text={text} own />
         </ConciergeBubble>
@@ -27,7 +32,8 @@ const GuardianBubble = memo(
   (prev, next) =>
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
-    prev.msg.inputState === next.msg.inputState,
+    prev.msg.inputState === next.msg.inputState &&
+    prev.arrival === next.arrival,
 );
 
 // Each `say` call is its own message, so each text part is its own bubble. A
@@ -37,9 +43,11 @@ function AgentEntry({
   entry,
   actions,
   rateable,
+  arrival,
 }: {
   entry: ConciergeEntry;
   actions: BlockActions;
+  arrival: ArrivalProps;
   /** Whether the entry's turn is over and feedback is on. */
   rateable: boolean;
 }) {
@@ -73,7 +81,7 @@ function AgentEntry({
             : null
         }
       >
-        <ChatBubble tone="received">
+        <ChatBubble tone="received" {...arrival(message.id)}>
           <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks={!long}>
             {part.content}
           </Markdown>
@@ -93,12 +101,15 @@ export function ConciergeGroup({
   actions,
   runningTurnId,
   feedback,
+  arrival,
   typing,
 }: {
   group: Extract<ConciergeItem, { kind: "group" }>;
   actions: BlockActions;
   runningTurnId: string | null;
   feedback: boolean;
+  /** Marks the bubbles that arrived while the transcript is open. */
+  arrival: ArrivalProps;
   typing: ReactNode;
 }) {
   return (
@@ -110,13 +121,18 @@ export function ConciergeGroup({
     >
       {group.entries.map((entry) =>
         group.sender === "guardian" ? (
-          <GuardianBubble key={entry.message.id} msg={entry.message} />
+          <GuardianBubble
+            key={entry.message.id}
+            msg={entry.message}
+            arrival={arrival(entry.message.id)["data-arrival"]}
+          />
         ) : (
           <AgentEntry
             key={entry.message.id}
             entry={entry}
             actions={actions}
             rateable={feedback && (!runningTurnId || entry.message.turnId !== runningTurnId)}
+            arrival={arrival}
           />
         ),
       )}

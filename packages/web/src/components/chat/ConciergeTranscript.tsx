@@ -7,6 +7,7 @@ import type { BlockActions, LivePreview } from "@/components/chat/MessageList";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
 import type { ChatRow } from "@/components/chat/chat-view";
 import { buildConciergeItems } from "@/components/chat/concierge-groups";
+import { useBubbleArrivals } from "@/components/chat/use-bubble-arrivals";
 
 function TypingBubble() {
   const { t } = useTranslation("chat");
@@ -49,6 +50,9 @@ export function ConciergeTranscript({
     () => buildConciergeItems(rows, { typing: live.isStreaming }),
     [rows, live.isStreaming],
   );
+  const arrival = useBubbleArrivals(
+    items.flatMap((item) => (item.kind === "group" ? item.entries.map((e) => e.message.id) : [])),
+  );
   return (
     // Padding outside, width cap inside: the composer floor's geometry, so the
     // messages and the composer share both edges at every width. The inner
@@ -58,6 +62,9 @@ export function ConciergeTranscript({
         ref={contentRef}
         data-chat-transcript
         className="@container mx-auto flex max-w-5xl flex-col gap-4 pb-4"
+        role="log"
+        aria-relevant="additions"
+        aria-busy={live.isStreaming || undefined}
       >
         {items.map((item) => {
           if (item.kind === "separator")
@@ -71,6 +78,7 @@ export function ConciergeTranscript({
               actions={actions}
               runningTurnId={runningTurnId}
               feedback={feedback}
+              arrival={arrival}
               typing={<TypingBubble />}
             />
           );
