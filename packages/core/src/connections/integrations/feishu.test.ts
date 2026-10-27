@@ -125,6 +125,7 @@ class FakeLarkChannel {
 function fakePersonRepo(): PeopleRepository {
   return {
     byAccount: async () => null,
+    isDismissed: async () => false,
     byBondLevel: async () => [],
     linkStated: async () => "id",
   } as unknown as PeopleRepository;

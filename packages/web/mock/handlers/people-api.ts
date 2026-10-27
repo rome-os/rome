@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import { STRANGER_PERSON_ID, protectedPersonReason } from "@rome/api-types/persons";
+import { protectedPersonReason } from "@rome/api-types/persons";
 import {
   accountPresentation,
   comparePeople,
@@ -50,6 +50,8 @@ import {
   nameForAccount,
   nextPersonId,
   ownerOf,
+  dismissalOf,
+  dismissedAccounts,
   personTimeline,
   persons,
   recordDelivered,
@@ -69,9 +71,8 @@ import {
  * against the contract module like every other handler here, so the dashboard
  * cannot be built against a shape production does not answer with.
  *
- * The stranger sentinel is implementation, not contract: dismissal is stored
- * as a link to the sentinel row, presented as `state: "dismissed"` through
- * `accountPresentation`, and no /api/people route addresses the sentinel.
+ * A dismissal is its own record (`dismissedAccounts`), presented as
+ * `state: "dismissed"` through `accountPresentation`.
  */
 
 function sendState({ channel, channelUserId }: AccountRef): AccountSendState {
@@ -118,7 +119,13 @@ function directoryRow(ref: AccountRef): DirectoryAccount {
     channelUserId: ref.channelUserId,
     addresses: [ref.channelUserId],
     displayName: nameForAccount(ref.channel, ref.channelUserId),
-    ...accountPresentation(owner ? { personId: owner.id, displayName: owner.displayName } : null),
+    ...accountPresentation(
+      owner
+        ? { personId: owner.id, displayName: owner.displayName }
+        : dismissalOf(ref.channel, ref.channelUserId) >= 0
+          ? { dismissed: true }
+          : null,
+    ),
   };
 }
 
@@ -137,6 +144,7 @@ function observedAccounts(): AccountRef[] {
     seen.set(`${channel}\n${channelUserId}`, { channel, channelUserId });
   };
   for (const p of persons) for (const m of p.channelMappings) add(m.channel, m.channelUserId);
+  for (const d of dismissedAccounts) add(d.channel, d.channelUserId);
   for (const s of sentinelSenders) add(s.channel, s.channelUserId);
   for (const c of whatsappContacts) if (!c.isGroup) add("whatsapp", c.jid);
   return [...seen.values()];
@@ -158,11 +166,7 @@ function readState(params: URLSearchParams): { state: AccountState | null } | { 
   return { state };
 }
 
-/** The sentinel is structure: no /api/people route resolves it. */
-const findVisiblePerson = (id: string) =>
-  id === STRANGER_PERSON_ID ? undefined : persons.find((p) => p.id === id);
-
-const strangerRow = () => persons.find((p) => p.id === STRANGER_PERSON_ID);
+const findVisiblePerson = (id: string) => persons.find((p) => p.id === id);
 
 const notFound = (what: string) => HttpResponse.json({ error: `Unknown ${what}` }, { status: 404 });
 
@@ -195,15 +199,15 @@ function link(
 ): { ok: true } | { status: number; body: Record<string, unknown> } {
   const owner = ownerOf(ref.channel, ref.channelUserId);
   if (owner?.id === person.id) return { ok: true }; // idempotent re-link
-  if (owner && owner.id !== STRANGER_PERSON_ID && owner.id !== transferFrom) {
+  if (owner && owner.id !== transferFrom) {
     return { status: 409, body: linkConflict(ref, owner) };
   }
-  if (transferFrom && owner?.id !== transferFrom && owner?.id !== STRANGER_PERSON_ID) {
+  if (transferFrom && owner?.id !== transferFrom) {
     return {
       status: 409,
       body: {
         error: "transferFrom does not match the account's current owner",
-        linkedPersonId: owner && owner.id !== STRANGER_PERSON_ID ? owner.id : null,
+        linkedPersonId: owner ? owner.id : null,
       },
     };
   }
@@ -212,6 +216,8 @@ function link(
       (m) => !(m.channel === ref.channel && m.channelUserId === ref.channelUserId),
     );
   }
+  const dismissal = dismissalOf(ref.channel, ref.channelUserId);
+  if (dismissal >= 0) dismissedAccounts.splice(dismissal, 1);
   person.channelMappings.push({ channel: ref.channel, channelUserId: ref.channelUserId });
   return { ok: true };
 }
@@ -421,8 +427,6 @@ function readOutbox(person: PersonFixture): OutboxMessage[] {
 }
 
 export const peopleHandlers = [
-  // Curated people only — the sentinel's holdings surface on /api/accounts as
-  // dismissed rows, never as a person.
   http.get("/api/people", ({ request }) => {
     const params = new URL(request.url).searchParams;
     const q = (params.get("q") ?? "").trim();
@@ -433,10 +437,7 @@ export const peopleHandlers = [
     }
     // Counts cover everything the query matches; `?level=` narrows the rows
     // alone, so every chip keeps its number while one is selected.
-    const matching = persons
-      .filter((p) => p.id !== STRANGER_PERSON_ID)
-      .map(personResource)
-      .filter((p) => !q || personMatchesQuery(p, q));
+    const matching = persons.map(personResource).filter((p) => !q || personMatchesQuery(p, q));
     const rows = matching.filter((p) => !level || personMatchesLevel(p, level)).sort(comparePeople);
     return HttpResponse.json({ people: rows, counts: countPeople(matching) } satisfies PeopleList);
   }),
@@ -500,13 +501,9 @@ export const peopleHandlers = [
   http.post("/api/accounts/:channel/:channelUserId/dismiss", ({ params }) => {
     const ref = refFromParams(params);
     const owner = ownerOf(ref.channel, ref.channelUserId);
-    if (owner && owner.id !== STRANGER_PERSON_ID) {
-      return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
-    }
-    const sentinel = strangerRow();
-    if (!sentinel) return notFound("account");
-    if (!owner) {
-      sentinel.channelMappings.push({ channel: ref.channel, channelUserId: ref.channelUserId });
+    if (owner) return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
+    if (dismissalOf(ref.channel, ref.channelUserId) < 0) {
+      dismissedAccounts.push({ channel: ref.channel, channelUserId: ref.channelUserId });
     }
     return HttpResponse.json(directoryRow(ref));
   }),
@@ -516,14 +513,9 @@ export const peopleHandlers = [
   http.post("/api/accounts/:channel/:channelUserId/restore", ({ params }) => {
     const ref = refFromParams(params);
     const owner = ownerOf(ref.channel, ref.channelUserId);
-    if (owner && owner.id !== STRANGER_PERSON_ID) {
-      return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
-    }
-    if (owner) {
-      owner.channelMappings = owner.channelMappings.filter(
-        (m) => !(m.channel === ref.channel && m.channelUserId === ref.channelUserId),
-      );
-    }
+    if (owner) return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
+    const dismissal = dismissalOf(ref.channel, ref.channelUserId);
+    if (dismissal >= 0) dismissedAccounts.splice(dismissal, 1);
     return HttpResponse.json(directoryRow(ref));
   }),
 
@@ -549,9 +541,7 @@ export const peopleHandlers = [
     // if any named account is held by a real person — never a half-made person.
     for (const ref of accounts) {
       const owner = ownerOf(ref.channel, ref.channelUserId);
-      if (owner && owner.id !== STRANGER_PERSON_ID) {
-        return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
-      }
+      if (owner) return HttpResponse.json(linkConflict(ref, owner), { status: 409 });
     }
     const created: PersonFixture = {
       id: nextPersonId(body.displayName),

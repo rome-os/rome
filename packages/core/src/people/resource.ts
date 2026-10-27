@@ -4,15 +4,10 @@
 // Here rather than in the route because every write on this surface answers
 // with the person it changed — create, link, unlink, transfer, dismiss, merge —
 // so a serializer living in one handler is a serializer the next five copy.
-//
-// The stranger sentinel is a row in the persons table that every dismissed
-// account is linked to, not someone the guardian knows. It is excluded here,
-// once, so no route can serve it by forgetting to.
 
 import { readdir } from "node:fs/promises";
 import type { AccountSendState, PersonResource } from "@rome/api-types/people";
 import type { Message } from "@rome/api-types/message";
-import { STRANGER_PERSON_ID } from "../constants.js";
 import { getRelationshipDir, personProfileFileName, RELATIONSHIP_DIR } from "../profile-memory.js";
 import type { AccountNames } from "../channels/account-names.js";
 import type { Channels } from "../channels/channel.js";
@@ -40,10 +35,7 @@ export type PersonRow = Awaited<ReturnType<PeopleRepository["all"]>>[number];
 
 /** Every curated person. */
 export async function readPeople(deps: PeopleReadDeps): Promise<PersonResource[]> {
-  const persons = (await deps.peopleRepo.all()).filter(
-    (person) => person.id !== STRANGER_PERSON_ID,
-  );
-  return serialize(deps, persons);
+  return serialize(deps, await deps.peopleRepo.all());
 }
 
 /** One curated person, or null when the id names none. */
@@ -52,13 +44,13 @@ export async function readPerson(deps: PeopleReadDeps, id: string): Promise<Pers
   return person && (await serialize(deps, [person]))[0];
 }
 
-/** The person an id names, as stored — for a caller that needs the mappings
- *  rather than the resource. Null for the sentinel, which is structure. */
+/** The person an id names, as stored — for a caller that needs the links
+ *  rather than the resource. */
 export async function findPerson(
   deps: Pick<PeopleReadDeps, "peopleRepo">,
   id: string,
 ): Promise<PersonRow | null> {
-  return id === STRANGER_PERSON_ID ? null : await deps.peopleRepo.byId(id);
+  return deps.peopleRepo.byId(id);
 }
 
 /**

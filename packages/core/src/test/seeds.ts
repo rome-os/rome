@@ -7,7 +7,6 @@ import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
-import { STRANGER_PERSON_ID } from "../constants.js";
 import { GUARDIAN_PROFILE_PATH } from "../profile-memory.js";
 
 /** Maps every channel to itself. Valid only where no connection kind has a later channel. */
@@ -39,7 +38,6 @@ export interface BaselineIds {
     innerCircleId: string;
     acquaintanceId: string;
     otherId: string;
-    strangerId: string;
   };
   approvals: {
     pendingId: string;
@@ -120,14 +118,7 @@ async function seedPersonsBaseline(db: DrizzleDb) {
     links: [{ channel: "whatsapp", channelUserId: "wa-carol" }],
   });
 
-  const strangerId = STRANGER_PERSON_ID;
-  await repo.createWithId(strangerId, {
-    displayName: "Stranger",
-    bondLevel: "other",
-    approved: true,
-  });
-
-  return { guardianId, innerCircleId, acquaintanceId, otherId, strangerId };
+  return { guardianId, innerCircleId, acquaintanceId, otherId };
 }
 
 async function seedApprovalsBaseline(db: DrizzleDb) {

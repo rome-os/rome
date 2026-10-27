@@ -85,6 +85,7 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
 function fakePersonRepo(linkStated = rs.fn(() => "id")): PeopleRepository {
   return {
     byAccount: async () => null,
+    isDismissed: async () => false,
     byBondLevel: async () => [{ id: "guardian", links: [] }],
     readdress: () => {},
     linkStated,

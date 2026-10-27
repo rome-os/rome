@@ -276,6 +276,7 @@ describe("EmailAdapter.send", () => {
       } as unknown as SettingsRepository,
       peopleRepo: {
         byAccount: async () => null,
+        isDismissed: async () => false,
         byBondLevel: async () => [],
       } as unknown as PeopleRepository,
       config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
@@ -505,6 +506,7 @@ describe("EmailAdapter.start guardian resolution", () => {
     } as unknown as SettingsRepository;
     const peopleRepo = {
       byAccount: rs.fn(async () => null),
+      isDismissed: async () => false,
       byBondLevel: rs.fn(async () => []),
       linkStated: rs.fn(async () => {}),
     } as unknown as PeopleRepository;
@@ -544,6 +546,7 @@ describe("EmailAdapter.start guardian resolution", () => {
     } as unknown as SettingsRepository;
     const peopleRepo = {
       byAccount: rs.fn(async () => null),
+      isDismissed: async () => false,
       byBondLevel: rs.fn(async () => []),
       linkStated: rs.fn(async () => {}),
     } as unknown as PeopleRepository;
@@ -578,6 +581,7 @@ describe("EmailAdapter.start guardian resolution", () => {
     } as unknown as SettingsRepository;
     const peopleRepo = {
       byAccount: rs.fn(async () => null),
+      isDismissed: async () => false,
       byBondLevel: rs.fn(async () => []),
       linkStated: rs.fn(async () => {}),
     } as unknown as PeopleRepository;

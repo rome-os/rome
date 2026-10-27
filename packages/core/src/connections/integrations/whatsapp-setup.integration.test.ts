@@ -73,6 +73,7 @@ function harness() {
   );
   const peopleRepo = {
     byAccount: async () => null,
+    isDismissed: async () => false,
     byBondLevel: async () => [],
   } as unknown as PeopleRepository;
   const setupManager = new SetupManager({ registry, peopleRepo });

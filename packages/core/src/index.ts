@@ -123,7 +123,6 @@ import { ActionExecutionsRepository } from "./db/repositories/action-executions.
 import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
-import { ensureSentinelPersons } from "./db/ensure-sentinel-persons.js";
 import { AgentLoader } from "./core/agent-loader.js";
 import { SessionManager } from "./core/session-manager.js";
 import { PromptBuilder } from "./core/prompt-builder.js";
@@ -406,8 +405,6 @@ async function main() {
   if (interrupted.executions > 0 || interrupted.routineRuns > 0) {
     log.warn("Ended runs a stopped Rome process left running", interrupted);
   }
-
-  await ensureSentinelPersons(peopleRepo);
 
   // Connection registry (use side). Descriptors are registered here at boot, but
   // the load()/import that hydrate + rebuild live connections run LATER — after

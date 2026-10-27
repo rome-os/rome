@@ -39,10 +39,6 @@ export type MergePeopleResult =
  * First-class rather than N transfers and a delete: each of those steps
  * re-attributes a slice of history, and a merge that stops halfway leaves the
  * guardian with two people who each hold part of one person's past.
- *
- * The stranger sentinel is addressable on neither side. It is the row every
- * dismissal maps onto rather than someone the guardian knows, so a caller
- * naming it gets the answer every other route gives for it — nobody is there.
  */
 export async function mergePeople(
   deps: PeopleMergeDeps,
@@ -60,13 +56,8 @@ export async function mergePeople(
 /** The sentence a refused merge answers with, from the rule that refused it. */
 function refusal(reason: MergeRefusal): MergePeopleResult {
   switch (reason) {
-    // An id naming nobody and an id naming structure read alike from outside:
-    // the sentinel is not a person a caller may merge or merge away, and
-    // saying so in different words would tell a caller it exists.
     case "unknown-target":
     case "unknown-source":
-    case "sentinel-target":
-    case "sentinel-source":
       return { unknown: true };
     case "guardian-source":
       return { refused: "the guardian cannot be merged away" };

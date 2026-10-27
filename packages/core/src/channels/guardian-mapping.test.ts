@@ -31,6 +31,17 @@ describe("guardian channel mapping", () => {
       .sort();
   }
 
+  it("leaves an account the guardian dismissed alone, on both paths", async () => {
+    await repo.dismiss({ channel: "telegram", channelUserId: "tg-dismissed" });
+
+    expect(await mapGuardianToChannel(repo, "telegram", "tg-dismissed")).toBe(false);
+    expect(await planGuardianMapping(repo, "telegram", "tg-dismissed")).toEqual({ op: "noop" });
+    expect(await accounts("telegram")).toEqual([]);
+    expect(await repo.isDismissed({ channel: "telegram", channelUserId: "tg-dismissed" })).toBe(
+      true,
+    );
+  });
+
   it("re-canonicalizes the guardian's only account on the channel", async () => {
     await repo.linkStated(
       { channel: "whatsapp", channelUserId: "15551234567:8@s.whatsapp.net" },

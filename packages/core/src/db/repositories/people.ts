@@ -4,10 +4,9 @@
 
 import { eq, and, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { persons, channelMappings } from "../schema.js";
+import { persons, channelMappings, dismissedAccounts } from "../schema.js";
 import type { ConnectionKindOfChannel } from "./channel-records.js";
 import type { DrizzleDb, SqliteExec } from "../index.js";
-import { STRANGER_PERSON_ID } from "../../constants.js";
 import {
   generatePersonSlug,
   nextAvailablePersonId,
@@ -53,6 +52,12 @@ export type PersonChanges = Partial<{
   approved: boolean;
 }>;
 
+/** A dismissed account, with the channel's name for it when it was
+ *  dismissed. */
+export interface Dismissal extends Link {
+  displayName: string | null;
+}
+
 /** An account cleared for a person to take, with the channel-side name that
  *  travels with it. */
 interface Claim extends Link {
@@ -72,9 +77,8 @@ export interface AccountHolder extends Link {
  * caller has to name them, because the guardian decides whether to move the
  * account and cannot decide without knowing whose it is.
  *
- * A dismissed account has no holder. Dismissal files an account under the
- * stranger sentinel, which is structure rather than a person, so naming its
- * sender releases it with nothing to refuse.
+ * A dismissed account has no holder. A dismissal names no person, so naming
+ * its sender takes the account with nothing to refuse.
  */
 export class AccountHeldError extends Error {
   constructor(readonly holder: AccountHolder) {
@@ -100,16 +104,9 @@ export type LinkResult = { linked: true } | { linked: false; holder: AccountHold
  *  contract's rather than this table's. */
 export type MergeResult = { merged: true; links: number } | { merged: false; reason: MergeRefusal };
 
-/** Why a merge did not happen. "sentinel-*" and "unknown-*" both describe an
- *  id that names nobody a caller may address, and "guardian-source" a person
- *  who exists and stays. */
-export type MergeRefusal =
-  | "same-person"
-  | "unknown-target"
-  | "unknown-source"
-  | "guardian-source"
-  | "sentinel-source"
-  | "sentinel-target";
+/** Why a merge did not happen. "unknown-*" describes an id that names nobody,
+ *  and "guardian-source" a person who exists and stays. */
+export type MergeRefusal = "same-person" | "unknown-target" | "unknown-source" | "guardian-source";
 
 type PersonRow = typeof persons.$inferSelect;
 
@@ -127,11 +124,13 @@ function toPerson(row: PersonRow, links: Link[]): Person {
 
 /**
  * The people the guardian knows, each loaded whole with their links, and the
- * dismissals filed against the stranger sentinel.
+ * accounts the guardian dismissed.
  *
  * Reads answer {@link Person}. Writes on an account take a {@link Link} and
- * hold the rule that one account has at most one link, which the unique index
- * on the links table backstops. Writes that a caller enlists in its own
+ * hold two rules: one account has at most one link, which the unique index on
+ * the links table backstops, and an account is linked or dismissed, never
+ * both, which every write that links an account keeps by deleting its
+ * dismissal in the same transaction. Writes that a caller enlists in its own
  * transaction take an executor last, defaulting to this repository's database.
  */
 export class PeopleRepository {
@@ -183,17 +182,12 @@ export class PeopleRepository {
     return this.withLinks(rows);
   }
 
-  /** The first person named `displayName` in any case, never the sentinel. */
+  /** The first person named `displayName` in any case. */
   async byNameIgnoringCase(displayName: string): Promise<Person | null> {
     const row = this.db
       .select()
       .from(persons)
-      .where(
-        and(
-          sql`LOWER(${persons.displayName}) = LOWER(${displayName})`,
-          ne(persons.id, STRANGER_PERSON_ID),
-        ),
-      )
+      .where(sql`LOWER(${persons.displayName}) = LOWER(${displayName})`)
       .get();
     return row ? (await this.withLinks([row]))[0] : null;
   }
@@ -232,6 +226,17 @@ export class PeopleRepository {
     return [...byPerson.values()];
   }
 
+  /** Every dismissed account. */
+  async dismissals(): Promise<Dismissal[]> {
+    return this.db.select().from(dismissedAccounts);
+  }
+
+  /** Whether the guardian dismissed the account. Who is this answers nobody
+   *  for it, the same as for a stranger. */
+  async isDismissed(account: Link): Promise<boolean> {
+    return this.dismissalOf(account) != null;
+  }
+
   /** `rows` as persons, each with their links. */
   private async withLinks(rows: PersonRow[]): Promise<Person[]> {
     if (rows.length === 0) return [];
@@ -257,9 +262,9 @@ export class PeopleRepository {
   /**
    * Create a person and link their accounts, both or neither.
    *
-   * An account filed under the stranger sentinel is a dismissal rather than a
-   * placement, so naming its sender releases it. An account a real person
-   * holds stays held: this throws {@link AccountHeldError} instead of stealing
+   * A dismissed account is taken, its dismissal deleted: naming its sender is
+   * the answer the dismissal declined to give. An account a person holds stays
+   * held: this throws {@link AccountHeldError} instead of stealing
    * it, because creating a person is not a move. The refusal is a rollback,
    * not a partial write — a person committed without their account would be
    * unreachable and permanent, since {@link byName} would then reject every
@@ -332,20 +337,9 @@ export class PeopleRepository {
       const source = rows.find((row) => row.id === from);
       if (!target) return { merged: false, reason: "unknown-target" };
       if (!source) return { merged: false, reason: "unknown-source" };
-      // The guardian anchors the ladder and the sentinel holds every
-      // dismissal, so neither may be merged away. The sentinel is refused as a
-      // target too: it is structure rather than someone a duplicate belongs
-      // to, and absorbing a person into it would read every account they hold
-      // as dismissed.
-      const sourceIsStructure = protectedPersonReason(source);
-      if (sourceIsStructure) {
-        return {
-          merged: false,
-          reason: sourceIsStructure === "guardian" ? "guardian-source" : "sentinel-source",
-        };
-      }
-      if (protectedPersonReason(target) === "stranger-sentinel") {
-        return { merged: false, reason: "sentinel-target" };
+      // The guardian anchors the ladder, so they may not be merged away.
+      if (protectedPersonReason(source) === "guardian") {
+        return { merged: false, reason: "guardian-source" };
       }
 
       const moved = tx
@@ -362,8 +356,7 @@ export class PeopleRepository {
   /**
    * Link an account nobody holds to `personId`.
    *
-   * Claims an unlinked account, one only dismissed onto the sentinel, or one
-   * this person already holds, which is the same request arriving twice. An
+   * Claims a stranger, a dismissed account, or one this person already holds, which is the same request arriving twice. An
    * account another person holds is refused and its holder named: taking it is
    * {@link move}, the guardian's explicit act.
    */
@@ -384,13 +377,25 @@ export class PeopleRepository {
   }
 
   /**
-   * Dismiss an account nobody holds: file it under the stranger sentinel.
+   * Dismiss an account nobody holds. Dismissing an account already dismissed
+   * is the same request arriving twice, and lands.
    *
-   * Claimed on the same terms as {@link link}, so an account a person holds is
-   * refused and named rather than re-pointed onto the sentinel and lost.
+   * Decided on the same terms as {@link link}, in one transaction: an account a
+   * person holds is refused and its holder named, rather than its link
+   * dropped and the person lost.
    */
   async dismiss(account: Link): Promise<LinkResult> {
-    return this.swap(account, null, STRANGER_PERSON_ID);
+    const channel = this.connectionKindOf(account.channel);
+    const { channelUserId } = account;
+    return this.db.transaction((tx): LinkResult => {
+      const holder = this.holderOf(account, tx);
+      if (holder) return { linked: false, holder };
+      tx.insert(dismissedAccounts)
+        .values({ channel, channelUserId, displayName: null })
+        .onConflictDoNothing()
+        .run();
+      return { linked: true };
+    });
   }
 
   /**
@@ -400,8 +405,8 @@ export class PeopleRepository {
    * Every address in one statement because they are one decision: a channel
    * can reach an account several ways, a dismissal is stored against whichever
    * one the guardian dismissed it by, and an undo that committed some of them
-   * would leave the account still dismissed by the address it missed. Scoped to
-   * the sentinel, so an address a person holds is left where it is.
+   * would leave the account still dismissed by the address it missed. Links
+   * are not touched, so an address a person holds is left where it is.
    */
   async restore(channel: string, addresses: readonly string[]): Promise<number> {
     return this.releaseDismissals(this.db, channel, addresses);
@@ -415,7 +420,8 @@ export class PeopleRepository {
    * platform's statement about whose account it is outranks an earlier link.
    * Claiming is one statement, not a read followed by a write, so a second
    * writer re-points the link instead of adding a rival one, whatever order
-   * the two arrive in. Returns the link row's id.
+   * the two arrive in. A dismissal of the account goes with it. Returns the
+   * link row's id.
    */
   linkStated(
     account: Link,
@@ -424,6 +430,7 @@ export class PeopleRepository {
     exec: SqliteExec = this.db,
   ): string {
     const channel = this.connectionKindOf(account.channel);
+    this.releaseDismissals(exec, channel, [account.channelUserId]);
     const row = exec
       .insert(channelMappings)
       .values({
@@ -499,6 +506,18 @@ export class PeopleRepository {
         ),
       )
       .run();
+    // A dismissal of `to` yields on the same terms: the account is about to be
+    // this person's, and a linked account is never also dismissed.
+    exec
+      .delete(dismissedAccounts)
+      .where(
+        and(
+          eq(dismissedAccounts.channel, channel),
+          eq(dismissedAccounts.channelUserId, to),
+          exists(rePointed),
+        ),
+      )
+      .run();
 
     // Whoever still holds `to` after that yield is this person, so the re-point
     // has nothing left to do and says so rather than colliding on the index.
@@ -529,7 +548,7 @@ export class PeopleRepository {
    * Drop the account's link. Named `from`, only that person's link goes, and
    * the result reports whether it was theirs to drop, which is the only way a
    * caller can tell an unlink from a no-op. Unnamed, whoever holds it loses
-   * it, a dismissal included.
+   * it. Either way the account becomes a stranger.
    */
   async unlink(account: Link, from?: string): Promise<boolean> {
     const channel = this.connectionKindOf(account.channel);
@@ -548,9 +567,10 @@ export class PeopleRepository {
 
   /**
    * Take the account for `to` if `expected` holds it at the moment of the
-   * write, where a null `expected` is a claim on an account nobody holds — an
-   * unlinked one, one only dismissed onto the sentinel, or one `to` already
-   * holds. Every other case refuses and names the holder.
+   * write, where a null `expected` is a claim on an account nobody holds — a
+   * stranger, a dismissed account, or one `to` already holds. Every other case
+   * refuses and names the holder. A dismissal of the account goes with a
+   * landed swap.
    */
   private swap(account: Link, expected: string | null, to: string): LinkResult {
     const channel = this.connectionKindOf(account.channel);
@@ -573,13 +593,9 @@ export class PeopleRepository {
         )
         .get();
 
-      // A dismissal is a link onto the sentinel rather than a placement, so it
-      // holds the account against nobody: naming its sender takes it back, on
-      // the same terms as {@link resolveClaims}.
-      const holder: AccountHolder | null =
-        link && link.personId !== STRANGER_PERSON_ID
-          ? { channel, channelUserId, personId: link.personId, personName: link.personName }
-          : null;
+      const holder: AccountHolder | null = link
+        ? { channel, channelUserId, personId: link.personId, personName: link.personName }
+        : null;
 
       const swapped =
         expected === null
@@ -587,12 +603,21 @@ export class PeopleRepository {
           : holder?.personId === expected;
       if (!swapped) return { linked: false, holder };
 
+      const dismissal = this.dismissalOf(account, tx);
+      this.releaseDismissals(tx, channel, [channelUserId]);
       if (link == null) {
         // The channel's name for the account is not this caller's to supply —
         // a link names an account, and what to call it comes from the provider
-        // directory at read time.
+        // directory at read time. A dismissal's name carries over, the way a
+        // move keeps the link's.
         tx.insert(channelMappings)
-          .values({ id: uuid(), personId: to, channel, channelUserId, displayName: null })
+          .values({
+            id: uuid(),
+            personId: to,
+            channel,
+            channelUserId,
+            displayName: dismissal?.displayName ?? null,
+          })
           .run();
       } else if (link.personId !== to) {
         // The row moves rather than being replaced, so the channel-side name it
@@ -626,16 +651,15 @@ export class PeopleRepository {
 
   /**
    * Settle who may take each account, before any transaction opens, so a
-   * refusal can name the holder. An account filed under the stranger sentinel
-   * is a dismissal rather than a placement, so it is released to whoever names
-   * its sender; one a real person holds is refused. The unique index still
+   * refusal can name the holder. A dismissed account is released to whoever
+   * names its sender; one a person holds is refused. The unique index still
    * backstops a rival claim landing between this read and the write.
    */
   private async resolveClaims(accounts: (Link & { displayName?: string })[]): Promise<Claim[]> {
     const claims: Claim[] = [];
     for (const account of accounts) {
-      const held = await this.holderOf(account);
-      if (held && held.personId !== STRANGER_PERSON_ID) {
+      const held = this.holderOf(account);
+      if (held) {
         throw new AccountHeldError({
           channel: account.channel,
           channelUserId: account.channelUserId,
@@ -647,8 +671,8 @@ export class PeopleRepository {
         channel: this.connectionKindOf(account.channel),
         channelUserId: account.channelUserId,
         // The name belongs to the channel, so a caller with none to offer
-        // carries the dismissed row's forward rather than clearing it.
-        displayName: account.displayName ?? held?.displayName ?? null,
+        // carries the dismissal's forward rather than clearing it.
+        displayName: account.displayName ?? this.dismissalOf(account)?.displayName ?? null,
       });
     }
     return claims;
@@ -663,9 +687,8 @@ export class PeopleRepository {
       .run();
   }
 
-  /** Delete the sentinel's links on these addresses: their dismissals. Scoped
-   *  to the sentinel deliberately: an account a real person holds is a
-   *  placement, and leaving it in place lets the unique index turn an attempt
+  /** Delete the dismissals of these addresses. Links are never touched, so an
+   *  account a person holds stays placed and the unique index turns an attempt
    *  to take it into a rollback rather than a silent theft. */
   private releaseDismissals(
     exec: SqliteExec,
@@ -675,24 +698,22 @@ export class PeopleRepository {
     if (addresses.length === 0) return 0;
     channel = this.connectionKindOf(channel);
     return exec
-      .delete(channelMappings)
+      .delete(dismissedAccounts)
       .where(
         and(
-          eq(channelMappings.channel, channel),
-          inArray(channelMappings.channelUserId, [...addresses]),
-          eq(channelMappings.personId, STRANGER_PERSON_ID),
+          eq(dismissedAccounts.channel, channel),
+          inArray(dismissedAccounts.channelUserId, [...addresses]),
         ),
       )
       .run().changes;
   }
 
-  /** The link row holding an account and the name of the person holding it,
-   *  or null when nobody holds it. The join loses nothing — every link
-   *  references a person row. */
-  private async holderOf(account: Link) {
+  /** The person holding an account, or null when nobody does. The join loses
+   *  nothing — every link references a person row. */
+  private holderOf(account: Link, exec: Pick<DrizzleDb, "select"> = this.db): AccountHolder | null {
     const channel = this.connectionKindOf(account.channel);
-    const row = this.db
-      .select({ link: channelMappings, personName: persons.displayName })
+    const row = exec
+      .select({ personId: channelMappings.personId, personName: persons.displayName })
       .from(channelMappings)
       .innerJoin(persons, eq(channelMappings.personId, persons.id))
       .where(
@@ -702,7 +723,24 @@ export class PeopleRepository {
         ),
       )
       .get();
-    return row ? { ...row.link, personName: row.personName } : null;
+    return row ? { channel, channelUserId: account.channelUserId, ...row } : null;
+  }
+
+  /** The account's dismissal, or null when it is not dismissed. */
+  private dismissalOf(account: Link, exec: Pick<DrizzleDb, "select"> = this.db): Dismissal | null {
+    const channel = this.connectionKindOf(account.channel);
+    return (
+      exec
+        .select()
+        .from(dismissedAccounts)
+        .where(
+          and(
+            eq(dismissedAccounts.channel, channel),
+            eq(dismissedAccounts.channelUserId, account.channelUserId),
+          ),
+        )
+        .get() ?? null
+    );
   }
 
   private insertPerson(exec: SqliteExec, id: string, data: NewPerson): void {

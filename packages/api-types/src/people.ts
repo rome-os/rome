@@ -48,7 +48,6 @@
 // other's fields and neither order can be resumed with the other's position.
 
 import { compareCodePoints, type Message } from "./message.js";
-import { STRANGER_PERSON_ID } from "./persons.js";
 
 // ---------------------------------------------------------------------------
 // The bond ladder
@@ -59,8 +58,8 @@ import { STRANGER_PERSON_ID } from "./persons.js";
  *
  * "unknown" and "stranger" are positions on the same ladder as the curated
  * bonds, not separate kinds of thing, and neither is ever stored on a person:
- * an account is unknown by having no link, and dismissed by being linked to
- * the stranger sentinel. Both are read off the links.
+ * an account is unknown by having no link, and a stranger by being dismissed.
+ * Both are read off the account's link and dismissal.
  */
 export const BOND_LADDER = [
   "unknown",
@@ -305,8 +304,8 @@ export interface AccountDynamic {
  *
  * "unlinked" is the absence of a decision rather than one Rome writes down: an
  * account it has observed and nobody has placed. The other two are decisions —
- * a link onto a person, and a dismissal, which files the account under the
- * stranger sentinel.
+ * a link onto a person, and a dismissal, which says the account belongs to
+ * nobody the guardian tracks and names no person.
  *
  * The three partition the directory, so their counts sum to it.
  */
@@ -330,22 +329,17 @@ export interface AccountPresentation {
   personName: string | null;
 }
 
+/** What the guardian decided about an account: the person it is linked to,
+ *  or that they dismissed it. */
+export type AccountLink = { personId: string; displayName: string } | { dismissed: true };
+
 /**
- * Read a link the way every surface has to read it.
- *
- * The stranger sentinel is a row in the persons table that every dismissed
- * account is mapped onto, not someone the guardian knows. So a dismissal
- * answers a state and no person: a caller handed the sentinel's id would render
- * it as a person, open a timeline merging everyone ever dismissed, and address
- * writes at a row no write may touch.
+ * Read a link the way every surface has to read it. A dismissal answers a state
+ * and no person: it is a decision about the account, and nobody is behind it.
  */
-export function accountPresentation(
-  link: { personId: string; displayName: string } | null | undefined,
-): AccountPresentation {
+export function accountPresentation(link: AccountLink | null | undefined): AccountPresentation {
   if (link == null) return { state: "unlinked", personId: null, personName: null };
-  if (link.personId === STRANGER_PERSON_ID) {
-    return { state: "dismissed", personId: null, personName: null };
-  }
+  if ("dismissed" in link) return { state: "dismissed", personId: null, personName: null };
   return { state: "linked", personId: link.personId, personName: link.displayName };
 }
 
@@ -384,7 +378,7 @@ export interface DirectoryAccount {
    */
   displayName: string;
   state: AccountState;
-  /** Never the stranger sentinel's id — see {@link accountPresentation}. */
+  /** The linked person, or null when the account is a stranger or dismissed. */
   personId: string | null;
   personName: string | null;
 }
@@ -880,10 +874,6 @@ export interface PersonResource {
  * Unpaged, unlike the account directory: curated people are entered one at a
  * time by a guardian, so the listing is bounded by hand. The account directory
  * is a mirrored address book of thousands and pages.
- *
- * The stranger sentinel never appears. It is a row in the persons table that
- * dismissed accounts are linked to — structure, not someone the guardian knows
- * — and `GET /api/people/:id` answers 404 for its id.
  */
 export interface PeopleList {
   people: PersonResource[];
@@ -1134,8 +1124,8 @@ export function parseLinkAccountRequest(body: unknown): LinkAccountRequest | nul
 
 /**
  * The 409 body for a refused link or dismissal: names the current owner so the
- * caller can render the conflict and offer an explicit transfer. Never the
- * stranger sentinel — a dismissal-held account never conflicts.
+ * caller can render the conflict and offer an explicit transfer. A dismissed
+ * account never conflicts: a dismissal holds the account against nobody.
  *
  * The owner is null in one case: a `transferFrom` naming someone who does not
  * hold the account, where the account is now held by nobody. The caller's view

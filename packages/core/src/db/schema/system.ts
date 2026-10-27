@@ -123,6 +123,25 @@ export const channelMappings = sqliteTable(
   ],
 );
 
+/**
+ * The accounts the guardian dismissed: decided to belong to nobody they track
+ * (docs/domains/people.md#account). A dismissal is a decision about an
+ * account, not a person, so it is keyed by the account the way a link is and
+ * names no one. An account is linked or dismissed, never both: every write
+ * that links an account deletes its dismissal in the same transaction.
+ */
+export const dismissedAccounts = sqliteTable(
+  "dismissed_accounts",
+  {
+    channel: text("channel").notNull(),
+    channelUserId: text("channel_user_id").notNull(),
+    // The channel's name for the account when it was dismissed, carried onto
+    // the link if the guardian later says who the account is.
+    displayName: text("display_name"),
+  },
+  (table) => [primaryKey({ columns: [table.channel, table.channelUserId] })],
+);
+
 // A durable mirror of the WhatsApp contact list, chats, and recent message
 // history, fed by Baileys' history sync (`messaging-history.set`) on connect
 // and kept current by the ongoing `contacts.*` / `chats.*` / `messages.upsert`

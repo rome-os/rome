@@ -10,7 +10,6 @@ import {
 import { accountsRoutes } from "./accounts.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
-import { STRANGER_PERSON_ID } from "../../constants.js";
 
 // The two account reads over one set of sources — the links, the sentinel log
 // and the channel mirrors. GET /accounts is the contacts list: every account
@@ -87,11 +86,7 @@ describe("Accounts API", () => {
       text: "buy my coin",
       action: "ignored",
     });
-    await deps.peopleRepo.linkStated(
-      { channel: "telegram", channelUserId: DISMISSED_SENDER },
-      STRANGER_PERSON_ID,
-      "Spammer",
-    );
+    await deps.peopleRepo.dismiss({ channel: "telegram", channelUserId: DISMISSED_SENDER });
   });
 
   afterEach(() => testDb.close());
@@ -324,9 +319,6 @@ describe("Accounts API", () => {
     expect(dismissed.state).toBe("dismissed");
     expect(dismissed.personId).toBeNull();
     expect(dismissed.personName).toBeNull();
-    // Not merely absent from that row: the sentinel is not a person, so its id
-    // may not reach a client on any row of any page.
-    expect(JSON.stringify(page)).not.toContain(STRANGER_PERSON_ID);
   });
 
   it("filters the listing by state, and answers 400 for a state that is not one", async () => {

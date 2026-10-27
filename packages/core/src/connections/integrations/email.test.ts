@@ -133,6 +133,7 @@ function makeSettingsRepo(
 function makePersonMappingRepo(): PeopleRepository {
   return {
     byAccount: async () => null,
+    isDismissed: async () => false,
     byBondLevel: async () => [],
   } as unknown as PeopleRepository;
 }

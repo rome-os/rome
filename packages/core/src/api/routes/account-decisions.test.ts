@@ -12,8 +12,7 @@ import { accountsRoutes } from "./accounts.js";
 import { dismissAccount, type AccountDecisionDeps } from "../../people/account-decisions.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
-import { channelMappings } from "../../db/schema.js";
-import { STRANGER_PERSON_DISPLAY_NAME, STRANGER_PERSON_ID } from "../../constants.js";
+import { channelMappings, dismissedAccounts } from "../../db/schema.js";
 
 // Dismiss and restore are the two writes that move an account between "nobody
 // has decided about this" and "the guardian does not want to hear from it".
@@ -100,11 +99,7 @@ describe("Account dismiss and restore", () => {
       text: "buy my coin",
       action: "ignored",
     });
-    await deps.peopleRepo.linkStated(
-      { channel: "telegram", channelUserId: DISMISSED_SENDER },
-      STRANGER_PERSON_ID,
-      "Spammer",
-    );
+    await deps.peopleRepo.dismiss({ channel: "telegram", channelUserId: DISMISSED_SENDER });
   });
 
   afterEach(() => testDb.close());
@@ -143,6 +138,19 @@ describe("Account dismiss and restore", () => {
       )
       .all();
 
+  /** Every dismissal row the pair holds. */
+  const dismissalRows = (channel: string, channelUserId: string) =>
+    testDb.db
+      .select()
+      .from(dismissedAccounts)
+      .where(
+        and(
+          eq(dismissedAccounts.channel, channel),
+          eq(dismissedAccounts.channelUserId, channelUserId),
+        ),
+      )
+      .all();
+
   it("moves an unlinked account to dismissed, and repeating the write changes nothing", async () => {
     const first = await decision("whatsapp", TALKING_JID, "dismiss");
     expect(first).toMatchObject({
@@ -157,15 +165,16 @@ describe("Account dismiss and restore", () => {
     // it now says.
     expect(first).toEqual(find(await fetchPage("?state=dismissed"), `whatsapp:${TALKING_JID}`));
 
-    const stored = mappingRows("whatsapp", TALKING_JID);
+    // A dismissal, and no link: nobody is behind the account.
+    const stored = dismissalRows("whatsapp", TALKING_JID);
     expect(stored).toHaveLength(1);
-    expect(stored[0].personId).toBe(STRANGER_PERSON_ID);
+    expect(mappingRows("whatsapp", TALKING_JID)).toHaveLength(0);
 
     // Idempotent: the second call answers the same state and leaves the same
-    // row behind, rather than a second claim on the same account.
+    // row behind.
     const second = await decision("whatsapp", TALKING_JID, "dismiss");
     expect(second).toEqual(first);
-    expect(mappingRows("whatsapp", TALKING_JID)).toEqual(stored);
+    expect(dismissalRows("whatsapp", TALKING_JID)).toEqual(stored);
   });
 
   it("moves a dismissed account back to unlinked, and repeating the write changes nothing", async () => {
@@ -180,11 +189,11 @@ describe("Account dismiss and restore", () => {
     // Still observed, and still listed — restoring an account un-decides it,
     // it does not delete what Rome saw.
     expect(first).toEqual(find(await fetchPage(), `telegram:${DISMISSED_SENDER}`));
-    expect(mappingRows("telegram", DISMISSED_SENDER)).toHaveLength(0);
+    expect(dismissalRows("telegram", DISMISSED_SENDER)).toHaveLength(0);
 
     const second = await decision("telegram", DISMISSED_SENDER, "restore");
     expect(second).toEqual(first);
-    expect(mappingRows("telegram", DISMISSED_SENDER)).toHaveLength(0);
+    expect(dismissalRows("telegram", DISMISSED_SENDER)).toHaveLength(0);
   });
 
   it("refuses to dismiss an account a person holds, naming the owner", async () => {
@@ -237,21 +246,6 @@ describe("Account dismiss and restore", () => {
     expect(after.counts).toEqual(before.counts);
   });
 
-  it("never puts the sentinel on the wire, in any answer either verb gives", async () => {
-    const bodies = await Promise.all(
-      [
-        await decide("whatsapp", TALKING_JID, "dismiss"),
-        await decide("whatsapp", TALKING_JID, "restore"),
-        await decide("whatsapp", LINKED_JID, "dismiss"),
-        await decide("telegram", DISMISSED_SENDER, "restore"),
-      ].map((res) => res.text()),
-    );
-    for (const body of bodies) {
-      expect(body).not.toContain(STRANGER_PERSON_ID);
-      expect(body).not.toContain(STRANGER_PERSON_DISPLAY_NAME);
-    }
-  });
-
   it("loses the race rather than stealing a link placed after the read that cleared it", async () => {
     // The interleaving the refusal has to survive: the directory read that
     // decides the account answers before a rival's link lands, so the write
@@ -273,6 +267,7 @@ describe("Account dismiss and restore", () => {
           });
           return stale;
         },
+        dismissals: repo.dismissals.bind(repo),
         dismiss: repo.dismiss.bind(repo),
         restore: repo.restore.bind(repo),
       },
@@ -313,7 +308,7 @@ describe("Account dismiss and restore", () => {
     const decided = await decision("linkedin", urn, "dismiss");
     expect(decided.channelUserId).toBe(urn);
     expect(decided.state).toBe("dismissed");
-    expect(mappingRows("linkedin", urn)).toHaveLength(1);
+    expect(dismissalRows("linkedin", urn)).toHaveLength(1);
 
     // And unescaped, which is what the identifier's wildcard segment is for: a
     // caller that did not escape a "/" is naming an account that exists, and a
@@ -321,13 +316,13 @@ describe("Account dismiss and restore", () => {
     const raw = await app.request(`/accounts/linkedin/${urn}/restore`, { method: "POST" });
     expect(raw.status).toBe(200);
     expect(((await raw.json()) as DirectoryAccount).state).toBe("unlinked");
-    expect(mappingRows("linkedin", urn)).toHaveLength(0);
+    expect(dismissalRows("linkedin", urn)).toHaveLength(0);
   });
 
   it("answers 404 for a pair nothing has ever observed, rather than minting an account", async () => {
     const res = await decide("telegram", "never-seen-you", "dismiss");
     expect(res.status).toBe(404);
-    expect(mappingRows("telegram", "never-seen-you")).toHaveLength(0);
+    expect(dismissalRows("telegram", "never-seen-you")).toHaveLength(0);
   });
 
   it("decides the account, whichever of its addresses names it", async () => {
@@ -349,7 +344,7 @@ describe("Account dismiss and restore", () => {
     expect(find(await fetchPage("?includeSilent=true"), `whatsapp:${PHONE_JID}`)?.state).toBe(
       "unlinked",
     );
-    expect(mappingRows("whatsapp", PHONE_JID)).toHaveLength(0);
-    expect(mappingRows("whatsapp", LID_JID)).toHaveLength(0);
+    expect(dismissalRows("whatsapp", PHONE_JID)).toHaveLength(0);
+    expect(dismissalRows("whatsapp", LID_JID)).toHaveLength(0);
   });
 });

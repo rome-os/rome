@@ -6,7 +6,6 @@ import { PeopleRepository } from "../db/repositories/people.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { MailProvider } from "../lib/rome-cloud-mail.js";
 import { createTestDb, identityConnectionKindOf, type TestDb } from "../test/helpers.js";
-import { STRANGER_PERSON_ID } from "../constants.js";
 import { persons } from "../db/schema.js";
 import { EmailAdapter } from "./email.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./guardian-link-code.js";
@@ -67,12 +66,6 @@ describe("guardian link admission", () => {
       .values([
         { id: "owner", displayName: "Owner", bondLevel: "guardian", createdAt: new Date() },
         { id: "li", displayName: "Li", bondLevel: "acquaintance", createdAt: new Date() },
-        {
-          id: STRANGER_PERSON_ID,
-          displayName: "Stranger",
-          bondLevel: "other",
-          createdAt: new Date(),
-        },
       ])
       .run();
     codes = new GuardianLinkCodes();
@@ -104,7 +97,7 @@ describe("guardian link admission", () => {
   });
 
   it("links a dismissed account, and refuses to move one linked to someone else", async () => {
-    await repo.linkStated({ channel: "telegram", channelUserId: "123" }, STRANGER_PERSON_ID);
+    await repo.dismiss({ channel: "telegram", channelUserId: "123" });
     expect(await admit("bot", "telegram", message(codes.issue().code))).toBe(false);
     expect((await repo.byAccount({ channel: "telegram", channelUserId: "123" }))?.id).toBe("owner");
 

@@ -75,6 +75,7 @@ const setupFn: SetupFn = async (interact) => {
 function fakePersonRepo(): PeopleRepository {
   return {
     byAccount: async () => null,
+    isDismissed: async () => false,
     byBondLevel: async () => [{ id: "guardian", links: [] }],
     // The terminal grant applies the guardian mapping through the synchronous
     // write helpers enlisted in its transaction — not the async setters.
@@ -263,6 +264,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const personRepo = {
       byAccount: async () => null,
+      isDismissed: async () => false,
       byBondLevel: async () => [{ id: "guardian", links: [] }],
       // The terminal grant applies the guardian mapping through the synchronous
       // write helpers enlisted in its transaction — not the async setters.

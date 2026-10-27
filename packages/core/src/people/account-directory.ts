@@ -1,7 +1,7 @@
 // Every account Rome has observed, in the shape the account contract puts on
-// the wire (@rome/api-types/people). Three sources, folded into one list: the
-// links the guardian has made, the sentinel log's senders, and the address
-// books Rome mirrors.
+// the wire (@rome/api-types/people). Four sources, folded into one list: the
+// links and dismissals the guardian has made, the sentinel log's senders, and
+// the address books Rome mirrors.
 //
 // An account is one person on one channel, whatever addresses that channel
 // reaches them at. Which of them fold together is the channel's own answer,
@@ -16,11 +16,11 @@ import {
   accountPresentation,
   compareCodePoints,
   latestDynamic,
+  type AccountLink,
   type DirectoryAccount,
   type StreamAccount,
 } from "@rome/api-types/people";
 import type { Message } from "@rome/api-types/message";
-import { STRANGER_PERSON_ID } from "../constants.js";
 import type { AccountNames } from "../channels/account-names.js";
 import { foldAccounts } from "../channels/account-fold.js";
 import { addressBooks, type Channels } from "../channels/channel.js";
@@ -34,19 +34,12 @@ export interface AccountDirectoryDeps {
   /** Every channel Rome mirrors — the address books this folds, and the stores
    *  the stream reads a history from. */
   channels: Channels;
-  peopleRepo: Pick<PeopleRepository, "all">;
+  peopleRepo: Pick<PeopleRepository, "all" | "dismissals">;
   sentinelLogRepo: Pick<SentinelLogRepository, "listSenders">;
   accountNames: Pick<AccountNames, "displayNames">;
   /** Where the message stores live. Read by the stream alone — the contacts
    *  list never reaches a history. */
   db: DrizzleDb;
-}
-
-/** The link an account carries, before {@link accountPresentation} decides how
- *  it renders. */
-interface AccountLink {
-  personId: string;
-  displayName: string;
 }
 
 /**
@@ -220,7 +213,7 @@ function* rounds(accounts: readonly DirectoryAccount[]): Generator<DirectoryAcco
 export async function readAccountDirectory(
   deps: AccountDirectoryDeps,
 ): Promise<DirectoryAccount[]> {
-  const [senders, persons] = await Promise.all([
+  const [senders, persons, dismissals] = await Promise.all([
     // The triage record, for the senders it is the only source of: a channel
     // Rome mirrors no address book for has no other row saying the account
     // exists. Only that it saw them is read here; what they said is a message
@@ -229,13 +222,14 @@ export async function readAccountDirectory(
     // One statement, so an account moving between two people mid-read cannot
     // land under both of them.
     deps.peopleRepo.all(),
+    deps.peopleRepo.dismissals(),
   ]);
 
   const mappings = persons.flatMap((person) =>
     person.links.map((mapping) => ({ ...mapping, person })),
   );
   const fold = await foldAccounts(addressBooks(deps.channels), {
-    stored: [...senders, ...mappings],
+    stored: [...senders, ...mappings, ...dismissals],
   });
 
   /** Who holds each account, decided once before any row is built. */
@@ -269,8 +263,14 @@ export async function readAccountDirectory(
   for (const mapping of mappings) {
     const key = observe(mapping.channel, mapping.channelUserId);
     const held = linkOf.get(key);
-    if (held && !outranks(mapping.person.id, held.personId)) continue;
+    if (held && !outranks(mapping.person.id, held)) continue;
     linkOf.set(key, { personId: mapping.person.id, displayName: mapping.person.displayName });
+  }
+  // A dismissal of one address never hides a link on another address of the
+  // same account: a placement the guardian made is what the row should say.
+  for (const dismissal of dismissals) {
+    const key = observe(dismissal.channel, dismissal.channelUserId);
+    if (!linkOf.has(key)) linkOf.set(key, { dismissed: true });
   }
 
   const rows = [...observed];
@@ -287,17 +287,12 @@ export async function readAccountDirectory(
 }
 
 /**
- * Whether a claim on an account beats the one already held.
+ * Whether a link on an account beats the one already held.
  *
- * A real person outranks the stranger sentinel. The unique index already holds
- * one mapping per identifier, but two mappings can name two addresses of one
- * account, and that account is one row: a placement the guardian made is what
- * it should say, and reading the dismissal of a second address instead would
- * hide someone they already placed. Among real people the lowest id wins, so
- * the answer does not depend on read order.
+ * The unique index holds one link per address, but two links can name two
+ * addresses of one account, and that account is one row. The lowest person id
+ * wins, so the answer does not depend on read order.
  */
-function outranks(personId: string, held: string): boolean {
-  if (personId === STRANGER_PERSON_ID) return false;
-  if (held === STRANGER_PERSON_ID) return true;
-  return compareCodePoints(personId, held) < 0;
+function outranks(personId: string, held: AccountLink): boolean {
+  return "dismissed" in held || compareCodePoints(personId, held.personId) < 0;
 }

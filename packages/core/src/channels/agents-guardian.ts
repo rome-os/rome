@@ -30,7 +30,7 @@ function isSameAccount(message: ChannelMessage): boolean {
 }
 
 export function createAgentsGuardianLink(deps: {
-  peopleRepo: Pick<PeopleRepository, "byAccount" | "byBondLevel" | "linkStated">;
+  peopleRepo: Pick<PeopleRepository, "byAccount" | "isDismissed" | "byBondLevel" | "linkStated">;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
   channel: string;
 }) {
@@ -40,7 +40,10 @@ export function createAgentsGuardianLink(deps: {
 
   async function link(message: ChannelMessage): Promise<void> {
     const agent = message.senderId;
-    if (await deps.peopleRepo.byAccount({ channel: deps.channel, channelUserId: agent })) return;
+    const account = { channel: deps.channel, channelUserId: agent };
+    // Never over the guardian's own decision, a link or a dismissal.
+    if (await deps.peopleRepo.byAccount(account)) return;
+    if (await deps.peopleRepo.isDismissed(account)) return;
     const linked = (await deps.settingsRepo.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [];
     if (linked.includes(agent)) return;
     const [guardian] = await deps.peopleRepo.byBondLevel("guardian");
@@ -49,11 +52,7 @@ export function createAgentsGuardianLink(deps: {
     // unlinked, which is the guardian's call to change. The other order could
     // leave a link that the guardian's unlink does not keep removed.
     await deps.settingsRepo.set(AGENTS_GUARDIAN_LINKED_KEY, [...linked, agent]);
-    await deps.peopleRepo.linkStated(
-      { channel: deps.channel, channelUserId: agent },
-      guardian.id,
-      message.senderDisplayName,
-    );
+    await deps.peopleRepo.linkStated(account, guardian.id, message.senderDisplayName);
     log.info("linked a same-account agent to the guardian", { agentId: agent });
   }
 

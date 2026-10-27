@@ -1,9 +1,4 @@
-import {
-  generatePersonSlug,
-  nextAvailablePersonId,
-  STRANGER_PERSON_DISPLAY_NAME,
-  STRANGER_PERSON_ID,
-} from "@rome/api-types/persons";
+import { generatePersonSlug, nextAvailablePersonId } from "@rome/api-types/persons";
 import { whatsAppDisplayName } from "@rome/api-types/people";
 import { compareMessages, type Message } from "@rome/api-types/message";
 
@@ -214,17 +209,20 @@ export const persons: PersonFixture[] = [
     bondLevel: "inner-circle",
     channelMappings: [],
   },
-  {
-    // The sentinel row core seeds at boot, carrying one already-dismissed
-    // sender. `/api/people` withholds it and `/api/accounts` surfaces its
-    // holdings as dismissed rows — it is here to keep those honest, not to be
-    // looked at.
-    id: STRANGER_PERSON_ID,
-    displayName: STRANGER_PERSON_DISPLAY_NAME,
-    bondLevel: "other",
-    channelMappings: [{ channel: "telegram", channelUserId: "770144238" }],
-  },
 ];
+
+// Accounts the guardian dismissed: decided to belong to nobody they track. One
+// already-dismissed sender keeps the dismissed rows of `/api/accounts` honest.
+export const dismissedAccounts: { channel: string; channelUserId: string }[] = [
+  { channel: "telegram", channelUserId: "770144238" },
+];
+
+/** The index of the account's dismissal, or -1 when it is not dismissed. */
+export function dismissalOf(channel: string, channelUserId: string): number {
+  return dismissedAccounts.findIndex(
+    (account) => account.channel === channel && account.channelUserId === channelUserId,
+  );
+}
 
 // Senders seen in `sentinel_log`. `?state=unlinked` on the account directory
 // is the half of these with no row in `channel_mappings`, so this list is the
