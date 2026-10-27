@@ -148,6 +148,77 @@ describe("useTurnStream", () => {
       expect(result.current.error).toBeNull();
     });
 
+    it("keeps the shown snapshot while a reconnect replays history, and swaps once caught up", async () => {
+      const first = new FakeTurnStream();
+      const second = new FakeTurnStream();
+      const streams = [first, second];
+      respond = async () => streams.shift()?.response ?? new Response(null, { status: 404 });
+      const { result } = renderHook(() => useTurnStream("replay-turn-1"));
+      await act(async () => {
+        first.send("segment_upsert", runSegment("run-1", [{ tool: "Bash", input: {} }]));
+        first.send("segment_upsert", runSegment("run-2", [{ tool: "Read", input: {} }]));
+        first.send("summary_update", stepsSummary(7));
+        first.close();
+      });
+      await waitFor(() => expect(result.current.error).toBe("Stream closed"));
+      await waitFor(() => expect(calls).toHaveLength(2), RETRY_WAIT);
+
+      // The server starts over: a zero-step summary, then older versions, in separate chunks.
+      await act(async () => second.send("summary_update", stepsSummary(0)));
+      await act(async () => second.send("segment_upsert", runSegment("run-1", [])));
+      await act(async () => second.send("summary_update", stepsSummary(3)));
+      await act(async () => new Promise((r) => setTimeout(r, 20)));
+      expect(result.current.summary?.totalSteps).toBe(7);
+      expect(result.current.segments.map((s) => s.id)).toEqual(["run-1", "run-2"]);
+      const shown = result.current.segments[0];
+      expect(shown.kind === "run" && shown.blocks).toHaveLength(1);
+
+      await act(async () => {
+        second.send("segment_upsert", runSegment("run-2", [{ tool: "Read", input: {} }]));
+        second.send("summary_update", stepsSummary(8));
+      });
+      await waitFor(() => expect(result.current.summary?.totalSteps).toBe(8));
+      expect(result.current.done).toBe(false);
+    });
+
+    it("ends without losing the shown snapshot when the replay ends before catching up", async () => {
+      const first = new FakeTurnStream();
+      const second = new FakeTurnStream();
+      const streams = [first, second];
+      respond = async () => streams.shift()?.response ?? new Response(null, { status: 404 });
+      const { result } = renderHook(() => useTurnStream("replay-turn-2"));
+      await act(async () => {
+        first.send("summary_update", stepsSummary(7));
+        first.close();
+      });
+      await waitFor(() => expect(calls).toHaveLength(2), RETRY_WAIT);
+      await act(async () => {
+        second.send("summary_update", stepsSummary(0));
+        second.send("done", { success: true });
+      });
+      await waitFor(() => expect(result.current.done).toBe(true));
+      expect(result.current.summary?.totalSteps).toBe(7);
+    });
+
+    it.each([401, 403])("stops retrying on HTTP %i and keeps the snapshot", async (status) => {
+      const first = new FakeTurnStream();
+      const outcomes: (() => Promise<Response>)[] = [
+        async () => first.response,
+        async () => new Response("{}", { status }),
+      ];
+      respond = () => (outcomes.shift() ?? (async () => first.response))();
+      const { result } = renderHook(() => useTurnStream(`denied-turn-${status}`));
+      await act(async () => {
+        first.send("summary_update", stepsSummary(4));
+        first.close();
+      });
+      await waitFor(() => expect(result.current.error).toBe(`HTTP ${status}`), RETRY_WAIT);
+      expect(result.current.done).toBe(true);
+      expect(result.current.summary?.totalSteps).toBe(4);
+      await act(async () => new Promise((r) => setTimeout(r, 1_300)));
+      expect(calls).toHaveLength(2);
+    });
+
     it("stops retrying once the last reader leaves", async () => {
       respond = () => Promise.reject(new Error("offline"));
       const { result, unmount } = renderHook(() => useTurnStream("child-turn-5"));

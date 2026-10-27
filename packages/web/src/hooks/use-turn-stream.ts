@@ -74,13 +74,23 @@ function applyEvents(state: TurnStreamState, events: { event: string; data: stri
   return { ...state, segments, summary, done, endedAt };
 }
 
-function end(entry: Entry) {
+function end(entry: Entry, error: string | null = null) {
   setState(entry, {
     ...entry.state,
     done: true,
     endedAt: entry.state.endedAt ?? Date.now(),
-    error: null,
+    error,
   });
+}
+
+// A reconnect replays the turn from its start, so its early events are older
+// than what the readers already show. They are applied to a copy and swapped in
+// once the copy has caught up.
+function caughtUp(replay: TurnStreamState, shown: TurnStreamState) {
+  return (
+    (replay.summary?.totalSteps ?? 0) >= (shown.summary?.totalSteps ?? 0) &&
+    replay.segments.length >= shown.segments.length
+  );
 }
 
 /** Reads one connection. Resolves true when the turn ended, false on a transport failure. */
@@ -92,7 +102,16 @@ async function readOnce(turnId: string, entry: Entry): Promise<boolean> {
       end(entry);
       return true;
     }
+    if (response.status === 401 || response.status === 403) {
+      // Retrying cannot succeed. The last snapshot stays, the run is treated as
+      // over for this reader (the clock stops, the drawer asks for the stored
+      // trace, which surfaces the same error with its own retry).
+      void response.body?.cancel().catch(() => {});
+      end(entry, `HTTP ${response.status}`);
+      return true;
+    }
     if (!response.ok || !response.body) {
+      void response.body?.cancel().catch(() => {});
       setState(entry, { ...entry.state, error: `HTTP ${response.status}` });
       return false;
     }
@@ -100,6 +119,8 @@ async function readOnce(turnId: string, entry: Entry): Promise<boolean> {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let replay: TurnStreamState | null =
+      entry.state.summary || entry.state.segments.length > 0 ? IDLE : null;
     while (!entry.state.done) {
       const chunk = await reader.read();
       if (chunk.done) break;
@@ -108,7 +129,19 @@ async function readOnce(turnId: string, entry: Entry): Promise<boolean> {
       if (boundary < 0) continue;
       const complete = buffer.slice(0, boundary + 2);
       buffer = buffer.slice(boundary + 2);
-      setState(entry, applyEvents(entry.state, parseSSEEvents(complete)));
+      const events = parseSSEEvents(complete);
+      if (!replay) {
+        setState(entry, applyEvents(entry.state, events));
+        continue;
+      }
+      replay = applyEvents(replay, events);
+      if (caughtUp(replay, entry.state)) {
+        setState(entry, replay);
+        replay = null;
+      } else if (replay.done) {
+        // Ended before catching up: keep what is shown, the stored trace is the record.
+        end(entry);
+      }
     }
     await reader.cancel().catch(() => {});
     if (entry.state.done) return true;
