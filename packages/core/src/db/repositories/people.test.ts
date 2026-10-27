@@ -634,6 +634,26 @@ describe("PeopleRepository", () => {
       expect((await repo.byAccount(account))?.id).toBe(alice);
     });
 
+    it("keeps the dismissal when a stated link fails, and its name when one lands", async () => {
+      const account = { channel: "telegram", channelUserId: "tg-bob" };
+      await dismiss("telegram", "tg-bob", "Bob from work");
+
+      // No such person: the link fails, and the dismissal must not go with it.
+      expect(() => repo.linkStated(account, "nobody")).toThrow();
+      expect(await repo.isDismissed(account)).toBe(true);
+
+      const bob = await repo.create({ displayName: "Bob", bondLevel: "other" });
+      repo.linkStated(account, bob);
+
+      expect(await repo.isDismissed(account)).toBe(false);
+      const row = testDb.db
+        .select({ displayName: channelMappings.displayName })
+        .from(channelMappings)
+        .where(eq(channelMappings.channelUserId, "tg-bob"))
+        .get();
+      expect(row?.displayName).toBe("Bob from work");
+    });
+
     it("restores only dismissals, never an address a person holds", async () => {
       const alice = await repo.create({
         displayName: "Alice",
