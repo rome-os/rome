@@ -708,6 +708,13 @@
       "when": 1793100440995,
       "tag": "0101_outbox_by_account",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "6",
+      "when": 1793121384012,
+      "tag": "0102_drop_outbox",
+      "breakpoints": true
     }
   ]
 }

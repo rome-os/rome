@@ -81,7 +81,7 @@ An [agent](../concepts/agents.md) can be linked to one of Rome's accounts, which
 - The Feishu group settings card starts on the group's own agent choice, or on the agent that answers when the group has none. A Save that keeps the agent the card showed leaves the group's choice as it is. So the card cannot pin a group to the account's current agent, and the group keeps following the link.
 - A channel of a service that takes no link, such as webchat, email or the Cloud `agents` channel, keeps its chats' agent choice, and main answers by default.
 - An agent's shell commands act as the Discord account of the channel the agent's chat came in on. A chat on another service's channel, such as webchat, acts as the first Discord account that can act. The channel is the agent's own claim, so any agent can act as any of Rome's Discord accounts. Agents are trusted with every one of them, and a second account is not a boundary between the agents linked to each.
-- People keys an account by its [platform](../domains/chats.md#platform), not by its channel or its [connection kind](../domains/connections.md#connection-kind). A signed-in Telegram and the Telegram bot hear the same Telegram account, and Feishu and Lark are two platforms. An address on a platform resolves to the same person across Rome's accounts there when the platform gives that person one address across them. Telegram and Discord do. Slack does within one workspace: its member ids are issued per workspace, so a Slack address carries its workspace, and the same person in two workspaces is two accounts. Feishu does not: its sender id is issued per app, so a guardian is linked again on a second Feishu account. A person's timeline reads the account's conversations with every one of Rome's accounts on its platform. A send names the one it goes out from, and Rome never picks among them ([outbox](../concepts/people.md#outbox)).
+- People keys an account by its [platform](../domains/chats.md#platform), not by its channel or its [connection kind](../domains/connections.md#connection-kind). A signed-in Telegram and the Telegram bot hear the same Telegram account, and Feishu and Lark are two platforms. An address on a platform resolves to the same person across Rome's accounts there when the platform gives that person one address across them. Telegram and Discord do. Slack does within one workspace: its member ids are issued per workspace, so a Slack address carries its workspace, and the same person in two workspaces is two accounts. Feishu does not: its sender id is issued per app, so a guardian is linked again on a second Feishu account. A person's timeline reads the account's conversations with every one of Rome's accounts on its platform. A send names the one it goes out from, and Rome never picks among them ([sending](../concepts/people.md#sending)).
 
 ## Connection setup
 
@@ -110,7 +110,7 @@ A Slack bot is one of Rome's accounts with one agent ([`slack-bot.ts`](../../pac
 
 ## LinkedIn replies
 
-LinkedIn replies use the shared [People outbox](../concepts/people.md#outbox) and the browser session that reads the inbox.
+LinkedIn replies use the shared [People send](../concepts/people.md#sending) and the browser session that reads the inbox.
 
 ### Invariants
 

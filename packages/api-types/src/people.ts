@@ -9,10 +9,7 @@
 //   POST   /api/people              -> PersonResource (201) | LinkConflict (409)
 //   POST   /api/people/:id/accounts -> PersonResource | LinkConflict (409)
 //   DELETE /api/people/:id/accounts/:channel/:channelUserId -> PersonResource
-//   GET    /api/people/:id/outbox   -> OutboxPage
-//   POST   /api/people/:id/messages -> OutboxMessage (202) | SendRefusal (409)
-//   POST   /api/people/:id/outbox/:messageId/retry -> OutboxMessage (202)
-//   DELETE /api/people/:id/outbox/:messageId       -> 204
+//   POST   /api/people/:id/messages -> SentMessage (200) | SendRefusal (409) | { error } (502)
 //
 // The rest are request types that lead, with the backend following (issues
 // #64, #65):
@@ -1252,7 +1249,7 @@ export function whatsAppDisplayName(contact: {
 }
 
 // ---------------------------------------------------------------------------
-// Sending, and the outbox a send lives in until it lands
+// Sending
 // ---------------------------------------------------------------------------
 
 /**
@@ -1269,11 +1266,6 @@ export function whatsAppDisplayName(contact: {
  * account, and it is a default on screen rather than a decision off it.
  */
 export interface SendMessageRequest {
-  /** Optional UUID v4 idempotency key. A client creates one for each composed
-   * message and reuses it only when repeating that request. The same id,
-   * account, and text returns its recorded response until 24 hours after
-   * outbox removal. */
-  id?: string;
   channel: string;
   channelUserId: string;
   text: string;
@@ -1295,18 +1287,11 @@ function accountOf(value: unknown): Account | null {
   return named.platform && named.id && isChannelIdentifier(named.platform) ? named : null;
 }
 
-/** A send's id as a client spells it: a UUID v4. */
-export const SEND_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-
 export function parseSendMessageRequest(
   body: unknown,
 ): { request: SendMessageRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "body must be an object" };
   const raw = body as Record<string, unknown>;
-  if (raw.id !== undefined && (typeof raw.id !== "string" || !SEND_ID_PATTERN.test(raw.id))) {
-    return { error: "id must be a UUID v4" };
-  }
   const channel = typeof raw.channel === "string" ? raw.channel.trim() : "";
   const channelUserId = typeof raw.channelUserId === "string" ? raw.channelUserId.trim() : "";
   const text = typeof raw.text === "string" ? raw.text.trim() : "";
@@ -1323,7 +1308,6 @@ export function parseSendMessageRequest(
   }
   return {
     request: {
-      ...(raw.id === undefined ? {} : { id: raw.id as string }),
       channel,
       channelUserId,
       text,
@@ -1332,88 +1316,25 @@ export function parseSendMessageRequest(
   };
 }
 
-/** A repeated send id may only refer to its original account and text, and,
- *  when the request names the account it goes out from, that account. */
-export function matchesSendRequest(message: OutboxMessage, request: SendMessageRequest): boolean {
-  return (
-    message.channel === request.channel &&
-    message.channelUserId === request.channelUserId &&
-    message.text === request.text &&
-    (request.from === undefined ||
-      (message.from?.platform === request.from.platform && message.from.id === request.from.id))
-  );
-}
-
-/** Receipt lifetime after delivery cleanup or explicit discard, in milliseconds. */
-export const SEND_IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000;
-
 /** Long enough for anything a person types, short enough that no adapter has to
  *  defend itself against a megabyte. Channels with tighter limits of their own
  *  still chunk or refuse downstream. */
 export const SEND_MESSAGE_MAX_LENGTH = 8000;
 
 /**
- * Where a send is between the guardian pressing Send and the message appearing
- * on the timeline.
+ * `POST /api/people/:id/messages` answered: the channel took the message.
  *
- * - `sending` — handed to the channel, no answer yet.
- * - `unconfirmed` — the channel accepted it and named it, but it has not
- *   surfaced in the store the timeline reads. Normally under a second; a state
- *   at all because "we sent it and cannot see it" is a thing that happens and
- *   is worth saying rather than papering over.
- * - `failed` — the channel refused. The only state a guardian can act on, and
- *   the only one that persists without something else having gone wrong.
+ * Not a {@link Message}. The message joins the timeline on the next read, and
+ * nothing here is to be deduped against it: `ref` names the entry it becomes
+ * at the address it was sent to, and a channel that folds several addresses
+ * onto one account may deliver under another of them.
  */
-export type OutboxState = "sending" | "unconfirmed" | "failed";
-
-/**
- * One message Rome is still trying to deliver.
- *
- * Deliberately not a {@link Message} with a status on it. A message is
- * something that happened; these have not, and some never will. Two nouns keep
- * the message contract — its `ref` uniqueness and the ordering its cursor is
- * written against — free of rows that may yet be withdrawn, and keep each
- * account owned by exactly one store.
- *
- * `ref` is the entry this message would become at the address it was sent to.
- * It is a hint and not a key: a channel that folds several addresses onto one
- * account may deliver under another of them, and then the landed entry carries
- * that address instead. Recognizing an arrival is the server's job, which is
- * why it enumerates every folded address and why a client must not dedupe the
- * timeline against this value — the row is gone from the outbox by the time
- * there is anything to dedupe against.
- */
-export interface OutboxMessage {
-  id: string;
-  channel: string;
-  channelUserId: string;
-  text: string;
-  /** Epoch seconds of the attempt, which is also the entry's timestamp once it
-   *  lands. */
-  timestamp: number;
-  state: OutboxState;
-  /** The entry this would become at the address it was sent to, or null while
-   *  the channel has not named the message yet. A hint — see above. */
+export interface SentMessage {
+  /** The entry this becomes at the address it was sent to, or null when the
+   *  channel named no message. */
   ref: string | null;
-  /** Why the channel refused, for a `failed` row. Provider text, shown as
-   *  detail beneath copy the dashboard owns. */
-  error: string | null;
-  /** Rome's account the message went out from. Null for a row written before
-   *  Rome recorded it, or one whose channel knows no account, and absent from
-   *  a core that predates it. */
-  from?: Account | null;
-  /** Whether `DELETE /api/people/:id/outbox/:messageId` would take this row
-   *  when it was read. The server answers it from inputs it does not send, so
-   *  a client offers Discard from this and does not re-derive it. Always
-   *  false on a replayed send whose row has already left the outbox. */
-  dismissable: boolean;
-}
-
-/** `GET /api/people/:id/outbox` — every send of this person's that has not
- *  reached their timeline. Unpaged: an outbox with enough rows to page is an
- *  incident, not a listing. */
-export interface OutboxPage {
-  messages: OutboxMessage[];
+  /** Epoch seconds of the send. */
+  timestamp: number;
 }
 
 /**
@@ -1443,9 +1364,3 @@ export function sendRefusalMessage(send: Exclude<AccountSendState, "yes">): stri
       return "Rome has no conversation open with that account";
   }
 }
-
-/** The `error` the server writes on a send whose process died before the
- *  channel answered. Not a provider message, and deliberately equivocal: Rome
- *  does not know whether it went out. */
-export const STRANDED_SEND_ERROR =
-  "Rome stopped before the channel answered; this may or may not have been sent";

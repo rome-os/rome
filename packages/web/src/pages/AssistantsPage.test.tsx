@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import type { Assistant } from "@rome/api-types/assistants";
 import type { Message } from "@rome/api-types/message";
-import type { OutboxState, TimelinePage } from "@rome/api-types/people";
+import type { TimelinePage } from "@rome/api-types/people";
 import "@/i18n";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { AssistantsPage } from "./AssistantsPage";
@@ -41,23 +41,17 @@ let listed: Assistant[] | "fail" = [];
 /** How many reads of older history fail before one succeeds. */
 let olderFailures = 0;
 /** Each send the page posted. */
-const sends: { id: string; text: string }[] = [];
+const sends: { text: string }[] = [];
 
 interface ServeOptions {
-  /** The state every answered send reports, in order; the last one repeats. */
-  sendStates?: OutboxState[];
-  /** How many sends the server takes without its answer reaching the page. */
-  loseResponses?: number;
-  /** Hold the first send's answer until the test releases it. */
-  holdFirstResponse?: boolean;
+  /** How many sends the channel refuses before it takes one. */
+  refuse?: number;
+  /** How many sends never reach the server. */
+  loseRequests?: number;
 }
 
-/** Releases a held answer. */
-let releaseHeld: (() => void) | null = null;
-
 function serve(assistants: Assistant[] | "fail", options: ServeOptions = {}) {
-  const { sendStates = ["unconfirmed"], loseResponses = 0, holdFirstResponse = false } = options;
-  releaseHeld = null;
+  const { refuse = 0, loseRequests = 0 } = options;
   listed = assistants;
   latest = {
     [DOT]: { entries: [inbound("d1", "Q3 draft?", 1)], nextCursor: null },
@@ -67,39 +61,23 @@ function serve(assistants: Assistant[] | "fail", options: ServeOptions = {}) {
   olderFailures = 0;
   sends.length = 0;
   let lost = 0;
-  let answered = 0;
+  let refused = 0;
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
     const url = String(input);
     if (init?.method === "POST" && url.endsWith("/messages")) {
-      const body = JSON.parse(String(init.body)) as { id: string; text: string };
-      sends.push(body);
-      if (holdFirstResponse && sends.length === 1) {
-        await new Promise<void>((resolve) => {
-          releaseHeld = resolve;
-        });
-      }
-      if (lost < loseResponses) {
+      if (lost < loseRequests) {
         lost++;
         throw new TypeError("Failed to fetch");
       }
-      const state = sendStates[Math.min(answered++, sendStates.length - 1)]!;
-      return Response.json(
-        {
-          id: body.id,
-          channel: "agents",
-          channelUserId: DOT,
-          text: body.text,
-          timestamp: 3,
-          state,
-          ref: null,
-          error: state === "failed" ? "not reachable" : null,
-          dismissable: false,
-        },
-        { status: 202 },
-      );
+      sends.push(JSON.parse(String(init.body)) as { text: string });
+      if (refused < refuse) {
+        refused++;
+        return Response.json({ error: "not reachable" }, { status: 502 });
+      }
+      return Response.json({ ref: "agents:3", timestamp: 3 });
     }
     if (url === "/api/assistants") {
       return listed === "fail"
@@ -256,8 +234,8 @@ describe("AssistantsPage", () => {
     expect(screen.getByText("First")).toBeTruthy();
   }, 15_000);
 
-  it("gives a refused send's draft back and sends it again as a new message", async () => {
-    serve([assistant(DOT, "Research dot", "dot")], { sendStates: ["failed", "unconfirmed"] });
+  it("gives a refused send's draft back with the channel's words, and sends it again", async () => {
+    serve([assistant(DOT, "Research dot", "dot")], { refuse: 1 });
     const user = userEvent.setup();
     renderPage();
 
@@ -268,56 +246,20 @@ describe("AssistantsPage", () => {
 
     await user.type(box, "{Enter}");
     await waitFor(() => expect(sends).toHaveLength(2));
-    // The refused id would replay the refusal.
-    expect(sends[1]!.id).not.toBe(sends[0]!.id);
+    expect(sends[1]).toEqual({ text: "Are you there?" });
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(""));
   });
 
-  it("sends again under the same id when the first answer was lost", async () => {
-    serve([assistant(DOT, "Research dot", "dot")], { loseResponses: 1 });
+  it("gives the draft back when the send never reached the server", async () => {
+    serve([assistant(DOT, "Research dot", "dot")], { loseRequests: 1 });
     const user = userEvent.setup();
     renderPage();
 
     const box = await screen.findByPlaceholderText("Message Research dot");
     await user.type(box, "Ship it{Enter}");
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe("Ship it"));
-    await user.type(box, "{Enter}");
-    await waitFor(() => expect(sends).toHaveLength(2));
-    // The server may have taken the first, so the retry replays it.
-    expect(sends[1]!.id).toBe(sends[0]!.id);
+    expect(sends).toHaveLength(0);
   });
-
-  it("sends the same text twice as two messages when the first is still in flight", async () => {
-    serve([assistant(DOT, "Research dot", "dot")], { holdFirstResponse: true });
-    const user = userEvent.setup();
-    renderPage();
-
-    const box = await screen.findByPlaceholderText("Message Research dot");
-    await user.type(box, "ok{Enter}");
-    await waitFor(() => expect(sends).toHaveLength(1));
-    await user.type(box, "ok{Enter}");
-    await waitFor(() => expect(sends).toHaveLength(2));
-    expect(sends[1]!.id).not.toBe(sends[0]!.id);
-    releaseHeld?.();
-  });
-
-  it("follows a replayed send still on its way until the channel answers", async () => {
-    serve([assistant(DOT, "Research dot", "dot")], {
-      loseResponses: 1,
-      sendStates: ["sending", "failed"],
-    });
-    const user = userEvent.setup();
-    renderPage();
-
-    const box = await screen.findByPlaceholderText("Message Research dot");
-    await user.type(box, "Ship it{Enter}");
-    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe("Ship it"));
-    await user.type(box, "{Enter}");
-
-    // Asked again under the same id until it settles, and the refusal shows.
-    expect(await screen.findByText("not reachable", {}, { timeout: 4_000 })).toBeTruthy();
-    expect(sends.map((send) => send.id)).toEqual([sends[0]!.id, sends[0]!.id, sends[0]!.id]);
-    expect((box as HTMLTextAreaElement).value).toBe("Ship it");
-  }, 10_000);
 
   it("names a kind it has no mark for, as Rome Cloud spells it", async () => {
     serve([assistant(DOT, "Grok", "grok")]);

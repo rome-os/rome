@@ -3,10 +3,9 @@ import { Hono } from "hono";
 import { eq, sql } from "drizzle-orm";
 import type {
   LinkedAccount,
-  OutboxMessage,
-  OutboxPage,
   PersonResource,
   SendRefusal,
+  SentMessage,
   TimelinePage,
 } from "@rome/api-types/people";
 import { peopleRoutes } from "./people.js";
@@ -20,25 +19,21 @@ import {
   type TestDeps,
 } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
-import { OutboxRepository } from "../../db/repositories/outbox.js";
 import {
   channels as channelRows,
   connectionGrants,
-  outboundSendReceipts,
   romeAgentMessages,
   romeSessions,
 } from "../../db/schema.js";
 import { channelList } from "../../channels/channel-list.js";
 import { channelChatId } from "../../db/session-kind.js";
 import { conversationPlatformMessageId } from "../../db/repositories/webchat.js";
-import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
 
-// Sending to a person, and the outbox a send lives in until it arrives.
+// Sending to a person.
 //
-// What these pin is the pair of rules the surface rests on: a send names the
-// account it is for and Rome never chooses one, and a row leaves the outbox by
-// being observed on the timeline rather than by anything remembering to clear
-// it.
+// What these pin is the rule the surface rests on: a send names the account it
+// is for and Rome never chooses one, and the answer says whether the channel
+// took the message, with the channel's own words when it did not.
 
 const TG = "tg-send-target";
 const OTHER_TG = "tg-someone-else";
@@ -73,11 +68,6 @@ describe("People send API", () => {
       body: JSON.stringify(body),
     });
 
-  const outbox = async (id = personId): Promise<OutboxMessage[]> => {
-    const res = await app.request(`/people/${id}/outbox`);
-    return ((await res.json()) as OutboxPage).messages;
-  };
-
   const timeline = async (id = personId): Promise<TimelinePage> => {
     const res = await app.request(`/people/${id}/messages`);
     return (await res.json()) as TimelinePage;
@@ -89,19 +79,14 @@ describe("People send API", () => {
     return person.accounts.find((account) => account.channel === channel)!;
   };
 
-  it("sends to the account the request names, and answers the row it became", async () => {
+  it("sends to the account the request names, and answers that the channel took it", async () => {
     const res = await send({ channel: "telegram", channelUserId: TG, text: "on my way" });
 
-    // 202: the channel took it. Whether it arrived is a different question and
-    // the outbox is where it is asked.
-    expect(res.status).toBe(202);
-    const message = (await res.json()) as OutboxMessage;
-    expect(message).toMatchObject({
-      channel: "telegram",
-      channelUserId: TG,
-      text: "on my way",
-      state: "unconfirmed",
-    });
+    expect(res.status).toBe(200);
+    const sent = (await res.json()) as SentMessage;
+    expect(sent.ref).toMatch(new RegExp(`^${TG}:`));
+    expect(sent.timestamp).toBeGreaterThan(0);
+    expect((await timeline()).entries.map((entry) => entry.body)).toContain("on my way");
 
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([
       { chatId: TG, message: { text: "on my way" } },
@@ -115,52 +100,6 @@ describe("People send API", () => {
     // guardian addressed someone, and delivering to anyone else is worse than
     // refusing.
     expect(res.status).toBe(400);
-    expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
-  });
-
-  it("claims a client send id once across concurrent requests", async () => {
-    const body = { id: crypto.randomUUID(), channel: "telegram", channelUserId: TG, text: "hello" };
-    const responses = await Promise.all([send(body), send(body)]);
-    expect(responses.map((response) => response.status)).toEqual([202, 202]);
-    for (const response of responses) {
-      expect(await response.json()).toMatchObject({ id: body.id, text: "hello" });
-    }
-    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
-    expect((await send(body)).status).toBe(202);
-    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
-  });
-
-  it("delivers identical messages when they have distinct send ids", async () => {
-    const body = { channel: "telegram", channelUserId: TG, text: "ok" };
-    const responses = await Promise.all([
-      send({ ...body, id: crypto.randomUUID() }),
-      send({ ...body, id: crypto.randomUUID() }),
-    ]);
-
-    expect(responses.map((response) => response.status)).toEqual([202, 202]);
-    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(2);
-  });
-
-  it("refuses reuse of a send id for different text or another account", async () => {
-    const body = { id: crypto.randomUUID(), channel: "telegram", channelUserId: TG, text: "hello" };
-    expect((await send(body)).status).toBe(202);
-    expect((await send({ ...body, text: "different" })).status).toBe(409);
-    const anotherPerson = await deps.peopleRepo.create({
-      displayName: "Another target",
-      bondLevel: "acquaintance",
-      approved: true,
-      links: [{ platform: "telegram", id: OTHER_TG }],
-    });
-    expect((await send({ ...body, channelUserId: OTHER_TG }, anotherPerson)).status).toBe(409);
-    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
-  });
-
-  it("validates a supplied send id before contacting the provider", async () => {
-    for (const id of [null, 7, "", "not-a-uuid"]) {
-      expect(
-        (await send({ id, channel: "telegram", channelUserId: TG, text: "hello" })).status,
-      ).toBe(400);
-    }
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
   });
 
@@ -189,185 +128,18 @@ describe("People send API", () => {
     expect((await send({ channel: "telegram", channelUserId: TG, text: "  " })).status).toBe(400);
   });
 
-  it("clears the outbox row once the message is on the timeline", async () => {
-    await send({ channel: "telegram", channelUserId: TG, text: "landed" });
+  // Nothing is kept for a message the channel did not take: the guardian still
+  // holds the text, and sending it again is a new send.
+  it("answers a refused send with the channel's words, and records nothing", async () => {
+    rs.spyOn(deps.transports.get("telegram")!, "send").mockRejectedValue(
+      new Error("provider rejected"),
+    );
 
-    // Telegram keeps no mirror of its own, so Rome's transcript of the send is
-    // what the timeline reads — and the row is on it immediately.
-    const entries = (await timeline()).entries;
-    expect(entries.map((entry) => entry.body)).toContain("landed");
-    expect(entries[0]?.direction).toBe("outbound");
+    const res = await send({ channel: "telegram", channelUserId: TG, text: "will fail" });
 
-    // Nothing was told the send had arrived. The read noticed.
-    expect(await outbox()).toEqual([]);
-  });
-
-  it("replays a delivered send after outbox cleanup and repository recreation", async () => {
-    const body = {
-      id: crypto.randomUUID(),
-      channel: "telegram",
-      channelUserId: TG,
-      text: "landed once",
-    };
-    const response = await send(body);
-    const original = await response.json();
-    const row = (await deps.outboxRepo.find(body.id))!;
-    expect(await outbox()).toEqual([]);
-    expect(await deps.outboxRepo.find(body.id)).toBeNull();
-
-    deps.outboxRepo = new OutboxRepository(testDb.db);
-    app = new Hono().route("/", peopleRoutes(deps));
-    const replayed = await send(body);
-    expect(replayed.status).toBe(202);
-    expect(await replayed.json()).toEqual(original);
-    // The receipt keeps the send as the wire answered it: from no account,
-    // since the channel records none.
-    expect(
-      await deps.outboxRepo.openOnce({
-        id: body.id,
-        to: { platform: "telegram", id: TG },
-        channel: "telegram",
-        chatId: row.chatId,
-        text: body.text,
-      }),
-    ).toEqual({ created: false, message: { ...original, from: null } });
-    expect(await deps.outboxRepo.find(body.id)).toBeNull();
-    expect(await outbox()).toEqual([]);
-    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
-    expect((await timeline()).entries.filter((entry) => entry.body === body.text)).toHaveLength(1);
-    expect((await send({ ...body, text: "different message" })).status).toBe(409);
-  });
-
-  it("retains a receipt for 24 hours after cleanup, then permits a new send", async () => {
-    rs.useFakeTimers({ toFake: ["Date"] });
-    const startedAt = Date.now();
-    rs.setSystemTime(startedAt);
-    const body = {
-      id: crypto.randomUUID(),
-      channel: "telegram",
-      channelUserId: TG,
-      text: "receipt expiry",
-    };
-    const original = await (await send(body)).json();
-    const removedAt = startedAt + 10_000;
-    rs.setSystemTime(removedAt);
-    expect(await outbox()).toEqual([]);
-
-    rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS - 1);
-    expect(await (await send(body)).json()).toEqual(original);
-    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
-
-    rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS);
-    expect(await deps.outboxRepo.findSend(body.id)).toBeNull();
-    expect((await send(body)).status).toBe(202);
-    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(2);
-  });
-
-  it("retains a discarded send's response without retrying the provider", async () => {
-    const provider = rs
-      .spyOn(deps.transports.get("telegram")!, "send")
-      .mockRejectedValue(new Error("refused"));
-    const body = {
-      id: crypto.randomUUID(),
-      channel: "telegram",
-      channelUserId: TG,
-      text: "discarded",
-    };
-    const original = await (await send(body)).json();
-    const discarded = await app.request(`/people/${personId}/outbox/${body.id}`, {
-      method: "DELETE",
-    });
-    expect(discarded.status).toBe(204);
-    expect(await deps.outboxRepo.find(body.id)).toBeNull();
-    // The replay is the same send, except that its row is gone and so is
-    // anything to discard.
-    expect(original).toMatchObject({ state: "failed", dismissable: true });
-    expect(await (await send(body)).json()).toEqual({ ...original, dismissable: false });
-    expect(await outbox()).toEqual([]);
-    expect(provider).toHaveBeenCalledTimes(1);
-  });
-
-  it("replays a receipt written before rows carried dismissable as not dismissable", async () => {
-    const id = crypto.randomUUID();
-    const { dismissable: _, ...legacy } = {
-      id,
-      channel: "telegram",
-      channelUserId: TG,
-      text: "sent last release",
-      timestamp: Math.floor(Date.now() / 1000),
-      state: "unconfirmed",
-      ref: null,
-      error: null,
-      dismissable: false,
-    } satisfies OutboxMessage;
-    await testDb.db.insert(outboundSendReceipts).values({
-      id,
-      response: legacy as OutboxMessage,
-      expiresAt: new Date(Date.now() + SEND_IDEMPOTENCY_RETENTION_MS),
-    });
-
-    const replayed = await send({ id, channel: "telegram", channelUserId: TG, text: legacy.text });
-    expect(await replayed.json()).toEqual({ ...legacy, dismissable: false });
-  });
-
-  it("keeps a refused send in the outbox, and retries it under its own id", async () => {
-    const refused = rs
-      .spyOn(deps.transports.get("telegram")!, "send")
-      .mockRejectedValue(new Error("provider rejected"));
-
-    await send({ channel: "telegram", channelUserId: TG, text: "will fail" });
-
-    // Durable, unlike the first design where a failed send existed only in
-    // whatever the client held in memory.
-    const [failed] = await outbox();
-    expect(failed).toMatchObject({
-      state: "failed",
-      error: "provider rejected",
-      text: "will fail",
-    });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "provider rejected" });
     expect((await timeline()).entries.map((entry) => entry.body)).not.toContain("will fail");
-
-    // The retry succeeds and reuses the row, so the conversation does not grow
-    // a second message the guardian never wrote.
-    refused.mockRestore();
-    const retried = await app.request(`/people/${personId}/outbox/${failed!.id}/retry`, {
-      method: "POST",
-    });
-    expect(retried.status).toBe(202);
-    expect(((await retried.json()) as OutboxMessage).id).toBe(failed!.id);
-    expect(await outbox()).toEqual([]);
-    expect((await timeline()).entries.map((entry) => entry.body)).toContain("will fail");
-  });
-
-  // The row's channel knew no account, so nothing proves another channel that
-  // knows none is the one that sent it. A retry may not move there.
-  it("retries a send from no known account only on the channel it went out on", async () => {
-    const row = await deps.outboxRepo.open({
-      to: { platform: "telegram", id: TG },
-      channel: "tg-since-removed",
-      chatId: TG,
-      text: "from a channel that is gone",
-    });
-    await deps.outboxRepo.refused(row.id, "provider down");
-
-    const retried = await app.request(`/people/${personId}/outbox/${row.id}/retry`, {
-      method: "POST",
-    });
-    expect(retried.status).toBe(202);
-    expect(((await retried.json()) as OutboxMessage).state).toBe("failed");
-    expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
-  });
-
-  it("discards a failed send when the guardian gives up on it", async () => {
-    rs.spyOn(deps.transports.get("telegram")!, "send").mockRejectedValue(new Error("nope"));
-    await send({ channel: "telegram", channelUserId: TG, text: "abandon me" });
-    const [failed] = await outbox();
-
-    const res = await app.request(`/people/${personId}/outbox/${failed!.id}`, {
-      method: "DELETE",
-    });
-    expect(res.status).toBe(204);
-    expect(await outbox()).toEqual([]);
   });
 
   it("says on the person read whether each account can be written to", async () => {
@@ -391,9 +163,7 @@ describe("People send API", () => {
   });
 });
 
-// Regressions found in review of #208. Each one is a way the outbox could
-// disagree with what actually happened to a message.
-describe("People send API — delivery bookkeeping", () => {
+describe("People send API — after the channel answers", () => {
   let testDb: TestDb;
   let deps: TestDeps;
   let app: Hono;
@@ -425,40 +195,6 @@ describe("People send API — delivery bookkeeping", () => {
     });
   });
 
-  const outbox = async (): Promise<OutboxMessage[]> => {
-    const res = await app.request(`/people/${personId}/outbox`);
-    return ((await res.json()) as OutboxPage).messages;
-  };
-
-  it("clears a row whose echo lands under the account's other address", async () => {
-    const res = await app.request(`/people/${personId}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "sent to the lid" }),
-    });
-    expect(res.status).toBe(202);
-    const sent = (await res.json()) as OutboxMessage;
-    const providerId = sent.ref!.split(":").pop()!;
-
-    // WhatsApp echoes Rome's own message back, and the chat it hangs off is the
-    // phone JID rather than the LID the send named. Predicting only the address
-    // sent to would leave this row waiting on a ref that never appears.
-    await deps.whatsAppStoreRepo.upsertMessages([
-      {
-        id: providerId,
-        chatJid: PN,
-        senderJid: PN,
-        fromMe: true,
-        timestamp: new Date(),
-        type: "text",
-        text: "sent to the lid",
-        hasMedia: false,
-      },
-    ]);
-
-    expect(await outbox()).toEqual([]);
-  });
-
   it("keeps a delivered send delivered when Rome's own record of it fails", async () => {
     // The provider accepted the message: it is out on a network Rome does not
     // own. A local write failing afterwards cannot take it back, and reporting
@@ -473,285 +209,7 @@ describe("People send API — delivery bookkeeping", () => {
       body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "went out anyway" }),
     });
 
-    expect(res.status).toBe(202);
-    expect((await res.json()) as OutboxMessage).toMatchObject({ state: "unconfirmed" });
-    expect((await outbox())[0]).toMatchObject({ state: "unconfirmed" });
-  });
-
-  it("recovers a send whose process died before the channel answered", async () => {
-    const row = await deps.outboxRepo.open({
-      to: { platform: "whatsapp", id: LID },
-      channel: "whatsapp",
-      chatId: LID,
-      text: "stranded",
-    });
-    // Older than the window a send is given to answer in.
-    testDb.db.run(
-      sql`UPDATE outbound_messages SET updated_at = ${Math.floor(Date.now() / 1000) - 3600} WHERE id = ${row.id}`,
-    );
-
-    // Not cleared — the message may well have gone out — but no longer stuck:
-    // it says what happened and can be tried again.
-    const [recovered] = await outbox();
-    expect(recovered).toMatchObject({ id: row.id, state: "failed" });
-    expect(recovered!.error).toMatch(/may or may not have been sent/);
-
-    const retried = await app.request(`/people/${personId}/outbox/${row.id}/retry`, {
-      method: "POST",
-    });
-    expect(retried.status).toBe(202);
-  });
-
-  it("will not retry or discard a row belonging to somebody else", async () => {
-    const otherId = await deps.peopleRepo.create({
-      displayName: "Somebody Else",
-      bondLevel: "other",
-      approved: true,
-      links: [{ platform: "telegram", id: "tg-elsewhere" }],
-    });
-    rs.spyOn(deps.transports.get("telegram")!, "send").mockRejectedValue(new Error("nope"));
-    await app.request(`/people/${otherId}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        channel: "telegram",
-        channelUserId: "tg-elsewhere",
-        text: "theirs",
-      }),
-    });
-    const res = await app.request(`/people/${otherId}/outbox`);
-    const [theirs] = ((await res.json()) as OutboxPage).messages;
-
-    // A message id is not a capability. The person in the path owns the outbox
-    // the request is addressing.
-    expect(
-      (await app.request(`/people/${personId}/outbox/${theirs!.id}/retry`, { method: "POST" }))
-        .status,
-    ).toBe(404);
-    expect(
-      (await app.request(`/people/${personId}/outbox/${theirs!.id}`, { method: "DELETE" })).status,
-    ).toBe(404);
-
-    const still = await app.request(`/people/${otherId}/outbox`);
-    expect(((await still.json()) as OutboxPage).messages).toHaveLength(1);
-  });
-
-  it("will not discard a send while the channel has not answered", async () => {
-    const row = await deps.outboxRepo.open({
-      to: { platform: "whatsapp", id: LID },
-      channel: "whatsapp",
-      chatId: LID,
-      text: "still going",
-    });
-    // The one state where Rome does not yet know what happened. Dropping the
-    // row here would lose the only record of a call that is still outstanding.
-    const res = await app.request(`/people/${personId}/outbox/${row.id}`, { method: "DELETE" });
-    expect(res.status).toBe(404);
-    expect(await outbox()).toHaveLength(1);
-  });
-
-  it("dismisses a delivered send Rome never managed to record", async () => {
-    // Telegram keeps no mirror, so Rome's own transcript is how a sent message
-    // reaches the timeline. If that write fails the message is delivered and
-    // will never appear, and the row would otherwise be a phantom the guardian
-    // can neither retry nor dismiss.
-    deps.webchatRepo.recordOutboundConversationMessage = async () => {
-      throw new Error("disk is full");
-    };
-    const tgPersonId = await deps.peopleRepo.create({
-      displayName: "Unmirrored",
-      bondLevel: "other",
-      approved: true,
-      links: [{ platform: "telegram", id: "tg-unmirrored" }],
-    });
-    await app.request(`/people/${tgPersonId}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        channel: "telegram",
-        channelUserId: "tg-unmirrored",
-        text: "delivered but unseen",
-      }),
-    });
-
-    const listing = await app.request(`/people/${tgPersonId}/outbox`);
-    const [stuck] = ((await listing.json()) as OutboxPage).messages;
-    expect(stuck).toMatchObject({ state: "unconfirmed" });
-
-    // Fresh, it is an ordinary row that usually clears itself, and dismissing
-    // it would race the clearing.
-    expect(
-      (await app.request(`/people/${tgPersonId}/outbox/${stuck!.id}`, { method: "DELETE" })).status,
-    ).toBe(404);
-
-    // Past the window a message lands in, it is a phantom and the guardian gets
-    // a way out.
-    testDb.db.run(
-      sql`UPDATE outbound_messages SET updated_at = ${Math.floor(Date.now() / 1000) - 3600} WHERE id = ${stuck!.id}`,
-    );
-    const res = await app.request(`/people/${tgPersonId}/outbox/${stuck!.id}`, {
-      method: "DELETE",
-    });
-    expect(res.status).toBe(204);
-    const after = await app.request(`/people/${tgPersonId}/outbox`);
-    expect(((await after.json()) as OutboxPage).messages).toEqual([]);
-  });
-
-  describe("whether a row is dismissable", () => {
-    afterEach(() => {
-      rs.useRealTimers();
-    });
-
-    const MINUTE = 60_000;
-    const startedAt = Date.UTC(2026, 0, 1);
-    let tgPersonId: string;
-
-    // Telegram keeps no mirror, and with Rome's own record failing an accepted
-    // send never lands: the one case where an unconfirmed row outlives the
-    // window and Discard is its way out.
-    beforeEach(async () => {
-      rs.useFakeTimers({ toFake: ["Date"] });
-      rs.setSystemTime(startedAt);
-      deps.webchatRepo.recordOutboundConversationMessage = async () => {
-        throw new Error("disk is full");
-      };
-      tgPersonId = await deps.peopleRepo.create({
-        displayName: "Unmirrored",
-        bondLevel: "other",
-        approved: true,
-        links: [{ platform: "telegram", id: "tg-unmirrored" }],
-      });
-    });
-
-    const sendUnmirrored = (text: string) =>
-      app.request(`/people/${tgPersonId}/messages`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channel: "telegram", channelUserId: "tg-unmirrored", text }),
-      });
-    const readRow = async (): Promise<OutboxMessage | undefined> => {
-      const res = await app.request(`/people/${tgPersonId}/outbox`);
-      return ((await res.json()) as OutboxPage).messages[0];
-    };
-    const discard = async (id: string) =>
-      (await app.request(`/people/${tgPersonId}/outbox/${id}`, { method: "DELETE" })).status;
-
-    it("measures a retried row from its retry, not its first attempt", async () => {
-      const refused = rs
-        .spyOn(deps.transports.get("telegram")!, "send")
-        .mockRejectedValue(new Error("nope"));
-      const failed = (await (await sendUnmirrored("retried")).json()) as OutboxMessage;
-      expect(failed).toMatchObject({ state: "failed", dismissable: true });
-
-      refused.mockRestore();
-      rs.setSystemTime(startedAt + 4 * MINUTE);
-      const retried = await app.request(`/people/${tgPersonId}/outbox/${failed.id}/retry`, {
-        method: "POST",
-      });
-      expect(await retried.json()).toMatchObject({ state: "unconfirmed", dismissable: false });
-
-      // Past the window counted from the first attempt, inside the one counted
-      // from the retry. The row says what DELETE will answer.
-      rs.setSystemTime(startedAt + 6 * MINUTE);
-      expect(await readRow()).toMatchObject({ state: "unconfirmed", dismissable: false });
-      expect(await discard(failed.id)).toBe(404);
-
-      rs.setSystemTime(startedAt + 10 * MINUTE);
-      expect(await readRow()).toMatchObject({ state: "unconfirmed", dismissable: true });
-      expect(await discard(failed.id)).toBe(204);
-    });
-
-    it("measures an accepted row from when the channel answered", async () => {
-      // A slow provider: the row is opened at the start and accepted two
-      // minutes later, and the window starts at the acceptance.
-      const transport = deps.transports.get("telegram")!;
-      const deliver = transport.send.bind(transport);
-      rs.spyOn(transport, "send").mockImplementation(async (...args) => {
-        rs.setSystemTime(startedAt + 2 * MINUTE);
-        return deliver(...args);
-      });
-      const sent = (await (await sendUnmirrored("slow channel")).json()) as OutboxMessage;
-      expect(sent).toMatchObject({ state: "unconfirmed", dismissable: false });
-
-      rs.setSystemTime(startedAt + 6 * MINUTE);
-      expect(await readRow()).toMatchObject({ dismissable: false });
-      expect(await discard(sent.id)).toBe(404);
-
-      rs.setSystemTime(startedAt + 8 * MINUTE);
-      expect(await readRow()).toMatchObject({ dismissable: true });
-      expect(await discard(sent.id)).toBe(204);
-    });
-
-    it("never offers a send the channel has not answered", async () => {
-      const row = await deps.outboxRepo.open({
-        to: { platform: "telegram", id: "tg-unmirrored" },
-        channel: "telegram",
-        chatId: "tg-unmirrored",
-        text: "still going",
-      });
-      rs.setSystemTime(startedAt + 4 * MINUTE);
-      expect(await readRow()).toMatchObject({ id: row.id, state: "sending", dismissable: false });
-      expect(await discard(row.id)).toBe(404);
-    });
-  });
-
-  it("never leaves a delivered message with no record when discard races retry", async () => {
-    const transport = deps.transports.get("whatsapp")!;
-    const refused = rs.spyOn(transport, "send").mockRejectedValue(new Error("nope"));
-    await app.request(`/people/${personId}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "contested" }),
-    });
-    const [failed] = await outbox();
-
-    transport.sentMessages.length = 0;
-    refused.mockRestore();
-
-    // Whichever wins is fine. What must never happen is the discard passing a
-    // `failed` check, the retry claiming the row in between, and the delete
-    // then removing a row whose message is already on its way.
-    await Promise.all([
-      app.request(`/people/${personId}/outbox/${failed!.id}/retry`, { method: "POST" }),
-      app.request(`/people/${personId}/outbox/${failed!.id}`, { method: "DELETE" }),
-    ]);
-
-    expect(transport.sentMessages.length).toBeLessThanOrEqual(1);
-    if (transport.sentMessages.length === 1) {
-      // Somewhere, not necessarily the outbox: a message that reached the
-      // timeline has left the outbox legitimately, and that is the row doing
-      // its job rather than being lost. What must never happen is a delivered
-      // message the guardian can find no trace of.
-      const res = await app.request(`/people/${personId}/messages`);
-      const onTimeline = ((await res.json()) as { entries: { body: string | null }[] }).entries;
-      const stillQueued = await outbox();
-      expect(
-        onTimeline.some((entry) => entry.body === "contested") || stillQueued.length === 1,
-      ).toBe(true);
-    }
-  });
-
-  it("sends once when a failed row is retried twice at the same moment", async () => {
-    const transport = deps.transports.get("whatsapp")!;
-    const refused = rs.spyOn(transport, "send").mockRejectedValue(new Error("nope"));
-    await app.request(`/people/${personId}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "retry me once" }),
-    });
-    const [failed] = await outbox();
-
-    refused.mockRestore();
-
-    // A double-clicked Retry. Reading the state and then writing would let both
-    // requests past, and the guardian's one message would arrive twice.
-    const both = await Promise.all([
-      app.request(`/people/${personId}/outbox/${failed!.id}/retry`, { method: "POST" }),
-      app.request(`/people/${personId}/outbox/${failed!.id}/retry`, { method: "POST" }),
-    ]);
-
-    expect(both.map((r) => r.status).sort()).toEqual([202, 404]);
-    expect(transport.sentMessages).toHaveLength(1);
+    expect(res.status).toBe(200);
   });
 
   it("answers no-conversation when the channel throws looking for a thread", async () => {
@@ -895,7 +353,7 @@ describe("People on an account whose channel id is opaque", () => {
       body: JSON.stringify({ channel: "telegram", channelUserId: ADA, text: "hi Ada" }),
     });
 
-    expect(res.status).toBe(202);
+    expect(res.status).toBe(200);
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([
       { chatId: ADA, message: { text: "hi Ada" } },
     ]);
@@ -914,8 +372,6 @@ describe("People on an account whose channel id is opaque", () => {
       channelChatId(OPAQUE, ADA),
       channelChatId(OPAQUE, ADA),
     ]);
-    const outboxRes = await app.request(`/people/${personId}/outbox`);
-    expect(((await outboxRes.json()) as OutboxPage).messages).toEqual([]);
   });
 
   // Rome never picks among its accounts on a platform: with a second one
@@ -1069,13 +525,10 @@ describe("People on an account whose channel id is opaque", () => {
       expect((await person()).accounts[0]?.from).toEqual([ME, SECOND]);
     });
 
-    it("sends from the account it names, and the outbox row records it", async () => {
+    it("sends from the account it names", async () => {
       const res = await post({ text: "from the opaque account", from: ME });
 
-      expect(res.status).toBe(202);
-      const message = (await res.json()) as OutboxMessage;
-      expect(message.from).toEqual(ME);
-      expect((await deps.outboxRepo.find(message.id))?.fromAccountId).toBe(ME.id);
+      expect(res.status).toBe(200);
       expect(deps.transports.get("telegram")?.sentMessages).toEqual([
         { chatId: ADA, message: { text: "from the opaque account" } },
       ]);
@@ -1098,155 +551,10 @@ describe("People on an account whose channel id is opaque", () => {
 
       expect((await post({ text: "which one?" })).status).toBe(409);
       const res = await post({ text: "from the first", from: ME });
-      expect(res.status).toBe(202);
-      expect(((await res.json()) as OutboxMessage).from).toEqual(ME);
+      expect(res.status).toBe(200);
       expect(deps.transports.get("telegram")?.sentMessages).toEqual([
         { chatId: ADA, message: { text: "from the first" } },
       ]);
-    });
-
-    it("replays a recorded send after the account it went out from is removed", async () => {
-      const body = {
-        id: "5d0c4b1e-2f3a-4e5b-9c6d-7e8f9a0b1c2d",
-        text: "from the opaque account",
-        from: ME,
-      };
-      const first = await post(body);
-      expect(first.status).toBe(202);
-      const sent = (await first.json()) as OutboxMessage;
-
-      testDb.db.delete(connectionGrants).where(eq(connectionGrants.custody, "test:telegram")).run();
-      const again = await post(body);
-      expect(again.status).toBe(202);
-      expect(((await again.json()) as OutboxMessage).id).toBe(sent.id);
-      expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
-    });
-
-    // The link reaches the opaque account alone now, but the row went out from
-    // another one, so a retry may not move it there.
-    it("retries only from the account the row went out from", async () => {
-      connectSecond();
-      testDb.db
-        .delete(connectionGrants)
-        .where(eq(connectionGrants.custody, "test:telegram-second"))
-        .run();
-      const row = await deps.outboxRepo.open({
-        to: { platform: "telegram", id: ADA },
-        channel: "tg-second",
-        chatId: ADA,
-        text: "from a removed account",
-        from: SECOND,
-      });
-      await deps.outboxRepo.refused(row.id, "provider down");
-
-      const retried = await app.request(`/people/${personId}/outbox/${row.id}/retry`, {
-        method: "POST",
-      });
-      expect(retried.status).toBe(202);
-      expect((await retried.json()) as OutboxMessage).toMatchObject({
-        state: "failed",
-        from: SECOND,
-      });
-      expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
-    });
-
-    // Reconnecting an account gives it a fresh channel. A retry goes out from
-    // the same account on that channel, and lands under it.
-    it("confirms a retry that goes out on the account's new channel", async () => {
-      const row = await deps.outboxRepo.open({
-        to: { platform: "telegram", id: ADA },
-        channel: "tg-before-reconnect",
-        chatId: ADA,
-        text: "sent before the reconnect",
-        from: ME,
-      });
-      await deps.outboxRepo.refused(row.id, "provider down");
-
-      const retried = await app.request(`/people/${personId}/outbox/${row.id}/retry`, {
-        method: "POST",
-      });
-      expect(((await retried.json()) as OutboxMessage).state).toBe("unconfirmed");
-      expect((await deps.outboxRepo.find(row.id))?.channel).toBe(OPAQUE);
-      const outboxRes = await app.request(`/people/${personId}/outbox`);
-      expect(((await outboxRes.json()) as OutboxPage).messages).toEqual([]);
-    });
-
-    // A row whose channel knew no account went out from a channel that still
-    // knew none. The platform's one channel now knows its account, which may
-    // not be the one the row went out from, so a retry is refused rather than
-    // moved.
-    it("retries a row from no known account only from a channel that knows none", async () => {
-      const row = await deps.outboxRepo.open({
-        to: { platform: "telegram", id: ADA },
-        channel: "telegram",
-        chatId: ADA,
-        text: "from the old account",
-      });
-      await deps.outboxRepo.refused(row.id, "provider down");
-
-      const retried = await app.request(`/people/${personId}/outbox/${row.id}/retry`, {
-        method: "POST",
-      });
-      expect(retried.status).toBe(202);
-      expect(((await retried.json()) as OutboxMessage).state).toBe("failed");
-      expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
-    });
-
-    // Disconnecting the account clears it from its channel's record, but the
-    // transcript of the send is still stored under that channel.
-    it("confirms a send after the account it went out from is disconnected", async () => {
-      const res = await post({ text: "before the disconnect", from: ME });
-      expect(res.status).toBe(202);
-      testDb.db
-        .update(channelRows)
-        .set({ platformAccountId: null, connectionId: null })
-        .where(eq(channelRows.id, OPAQUE))
-        .run();
-
-      const outboxRes = await app.request(`/people/${personId}/outbox`);
-      expect(((await outboxRes.json()) as OutboxPage).messages).toEqual([]);
-    });
-
-    // Two of Rome's accounts may hand out the same provider message id. A row
-    // lands only on a message stored under the account it went out from.
-    it("confirms a row only against the account it went out from", async () => {
-      connectSecond();
-      const sessionId = channelChatId(OPAQUE, ADA);
-      const sentFrom = async (
-        from: { platform: string; id: string },
-        providerMessageId: string,
-      ) => {
-        const row = await deps.outboxRepo.open({
-          to: { platform: "telegram", id: ADA },
-          channel: from.id === ME.id ? OPAQUE : "tg-second",
-          chatId: ADA,
-          text: `sent from ${from.id}`,
-          from,
-        });
-        await deps.outboxRepo.accepted(row.id, providerMessageId);
-        return row.id;
-      };
-      const elsewhere = await sentFrom(SECOND, "pm-shared");
-      const here = await sentFrom(ME, "pm-here");
-      // What the opaque account holds: a message under each provider id.
-      for (const providerMessageId of ["pm-shared", "pm-here"]) {
-        testDb.db
-          .insert(romeAgentMessages)
-          .values({
-            id: conversationPlatformMessageId(sessionId, providerMessageId),
-            sessionId,
-            role: "notification",
-            content: JSON.stringify([{ type: "text", content: providerMessageId }]),
-            senderId: "rome",
-            createdAt: new Date(),
-          })
-          .run();
-      }
-
-      const outboxRes = await app.request(`/people/${personId}/outbox`);
-      const ids = ((await outboxRes.json()) as OutboxPage).messages.map((message) => message.id);
-      expect(ids).toEqual([elsewhere]);
-      expect(ids).not.toContain(here);
     });
   });
 });

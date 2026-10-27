@@ -145,13 +145,11 @@
     "submit": "发送",
     "retry": "重试",
     "discard": "放弃这条消息",
-    "outbox": {
-      "label": "发件箱"
+    "pending": {
+      "label": "未发送"
     },
     "state": {
-      "sending": "发送中",
-      "unconfirmed": "已发出，尚未确认",
-      "stopped": "Rome 已停止尝试发送这条消息"
+      "sending": "发送中"
     },
     "refusal": {
       "notConnected": "{{channel}} 未连接，Rome 无法从这里发送。请在设置中连接。",

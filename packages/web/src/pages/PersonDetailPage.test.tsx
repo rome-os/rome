@@ -4,7 +4,6 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { OutboxMessage } from "@rome/api-types/people";
 import type { Message } from "@rome/api-types/message";
 import {
   countPeople,
@@ -144,7 +143,6 @@ const HELD_BY_ANOTHER: DirectoryAccount = {
 
 /** Whatever a write put on the wire, read back for assertions. */
 interface WriteBody {
-  id?: string;
   displayName?: string;
   bondLevel?: string;
   channel?: string;
@@ -170,44 +168,20 @@ function mockApi(
     accounts?: DirectoryAccount[];
     writes?: "fail";
     /**
-     * How the channel answers a send. `"land"` accepts it and surfaces it on
-     * the timeline a read later, which is how a row leaves the outbox;
-     * `"refuse"` is the 409 a client that raced a disconnect earns; `"fail"` is
-     * the channel taking it and rejecting it, which is the one state that
-     * persists and the only one a guardian can act on.
+     * How the channel answers a send. `"land"` takes it, and Rome's copy is on
+     * the timeline by the next read; `"refuse"` is the 409 a client that raced
+     * a disconnect earns; `"fail"` is the channel refusing it, which comes back
+     * as a 502 in the channel's words; `"network"` never reaches the server.
+     * A test may change it between attempts.
      */
     send?: "land" | "refuse" | "fail" | "network";
     sendWait?: Promise<void>;
-    sendResponseWait?: Promise<void>;
-    /**
-     * How the retry route answers. `"refuse"` is the 404 for a row no longer
-     * this reader's to send — claimed by a concurrent retry, or already
-     * discarded. `"fail"` is the request itself going wrong, which has changed
-     * nothing and is the guardian's to try again.
-     */
-    retry?: "refuse" | "fail";
-    /** Rows already in the outbox when the page opens — how a send stranded by
-     *  an earlier process reaches a reader. */
-    outbox?: OutboxMessage[];
   } = {},
 ) {
   const calls: FetchCall[] = [];
   const person = typeof options.person === "object" ? { ...options.person } : { ...PERSON };
-  // The server's two stores, kept as two: a row is on the timeline or in the
-  // outbox, never both and never neither. Nothing here marks a row delivered —
-  // it moves between the stores, and the reads report where it is.
-  const outbox: OutboxMessage[] = [...(options.outbox ?? [])];
+  /** What Rome said through the send route, which the timeline read finds. */
   const delivered: Message[] = [];
-  /** The channel took it and its mirror now holds it — which is what puts it on
-   *  the timeline, and therefore what takes it out of the outbox. */
-  const accept = (row: OutboxMessage) =>
-    delivered.unshift({
-      source: row.channel,
-      timestamp: row.timestamp,
-      body: row.text,
-      direction: "outbound",
-      ref: row.ref!,
-    });
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -228,40 +202,18 @@ function mockApi(
       if (options.send === "refuse") {
         return json({ error: "That channel is not connected", send: "not-connected" }, 409);
       }
-      const row: OutboxMessage = {
-        id: body?.id ?? `outbox-${outbox.length + 1}`,
-        channel: String(body?.channel),
-        channelUserId: String(body?.channelUserId),
-        text: String(body?.text),
-        timestamp: NOW,
-        state: options.send === "fail" ? "failed" : "unconfirmed",
-        ref: `sent-${outbox.length + 1}`,
-        error: options.send === "fail" ? "the channel rejected this message" : null,
-        dismissable: options.send === "fail",
-      };
-      outbox.push(row);
-      if (options.send === "land") accept(row);
-      await options.sendResponseWait;
-      return json(row, 202);
-    }
-    if (method === "POST" && path.endsWith("/retry")) {
-      const row = outbox.find((candidate) => path.includes(candidate.id));
-      // Only a failed row of theirs is retryable, and the state is what claims
-      // it: the second of two retries finds a row no longer theirs to send.
-      if (options.retry === "fail") return json({ error: "retry store unavailable" }, 500);
-      if (!row || row.state !== "failed" || options.retry === "refuse") {
-        return json({ error: "No failed message of theirs with that id" }, 404);
+      if (options.send === "fail") {
+        return json({ error: "the channel rejected this message" }, 502);
       }
-      // A retry reuses the row, so it never reads as a second message the
-      // guardian did not write.
-      Object.assign(row, { state: "unconfirmed", error: null, dismissable: false });
-      if (options.send !== "fail") accept(row);
-      return json(row, 202);
-    }
-    if (method === "DELETE" && path.includes("/outbox/")) {
-      const at = outbox.findIndex((candidate) => path.endsWith(candidate.id));
-      if (at !== -1) outbox.splice(at, 1);
-      return { ok: true, status: 204, json: async () => null } as Response;
+      const ref = `sent-${delivered.length + 1}`;
+      delivered.unshift({
+        source: String(body?.channel),
+        timestamp: NOW,
+        body: String(body?.text),
+        direction: "outbound",
+        ref,
+      });
+      return json({ ref, timestamp: NOW });
     }
 
     if (method !== "GET") {
@@ -290,17 +242,6 @@ function mockApi(
         return json(person);
       }
       return json({ error: "Unknown route" }, 404);
-    }
-
-    if (path.endsWith("/outbox")) {
-      // The read that clears a row, and the comparison the route makes: a row
-      // is gone once its `ref` is on the timeline. Nothing marks one delivered,
-      // so there is no callback to miss and the two reads cannot disagree.
-      const arrived = new Set(delivered.map((entry) => entry.ref));
-      for (let i = outbox.length - 1; i >= 0; i -= 1) {
-        if (outbox[i]!.ref !== null && arrived.has(outbox[i]!.ref!)) outbox.splice(i, 1);
-      }
-      return json({ messages: [...outbox] });
     }
 
     if (url.includes("/messages")) {
@@ -813,7 +754,7 @@ describe("PersonDetailPage back link consumes the dossier's history entry", () =
   });
 });
 
-// The composer, the outbox and the switcher — the half of this page that writes.
+// The composer, the pending sends and the switcher — the half of this page that writes.
 //
 // What is under test is the one rule the design turns on: Rome never picks a
 // recipient out of sight. So the target is on screen before Send is pressed, the
@@ -832,7 +773,7 @@ describe("PersonDetailPage, sending", () => {
     expect(box).toHaveProperty("value", "");
     expect(document.activeElement).toBe(box);
     await user.keyboard("{Enter}");
-    const pending = screen.getByRole("list", { name: "Outbox" });
+    const pending = screen.getByRole("list", { name: "Not sent" });
     expect(within(pending).getByText("on my way")).toBeTruthy();
     expect(within(pending).getByRole("status").textContent).toBe("Sending");
     expect(within(pending).queryByRole("button")).toBeNull();
@@ -840,28 +781,9 @@ describe("PersonDetailPage, sending", () => {
 
     await user.type(box, "see you soon");
     await act(async () => gate.resolve());
-    await waitFor(() => expect(screen.queryByRole("list", { name: "Outbox" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Not sent" })).toBeNull());
     expect(screen.getAllByText("on my way")).toHaveLength(1);
     expect(box).toHaveProperty("value", "see you soon");
-  });
-
-  it("joins a polled server row to its local request before the POST returns", async () => {
-    const user = userEvent.setup();
-    const gate = Promise.withResolvers<void>();
-    mockApi({ sendResponseWait: gate.promise });
-    const { queryClient } = renderPage();
-    const box = await screen.findByRole("textbox", { name: "Message text" });
-    await user.type(box, "on my way{Enter}");
-    expect(screen.getByText("Sending")).toBeTruthy();
-
-    await act(async () => {
-      await queryClient.invalidateQueries({ queryKey: ["person-outbox"] });
-    });
-    expect(screen.getAllByText("on my way")).toHaveLength(1);
-    expect(await screen.findByText("Sent, not confirmed yet")).toBeTruthy();
-    expect(screen.queryByText("Sending")).toBeNull();
-    await act(async () => gate.resolve());
-    expect(screen.getAllByText("on my way")).toHaveLength(1);
   });
 
   it("keeps concurrent sends distinct even when their text is identical", async () => {
@@ -873,9 +795,7 @@ describe("PersonDetailPage, sending", () => {
     await user.type(box, "hello{Enter}");
     await user.type(box, "hello{Enter}");
 
-    const posts = calls.filter((call) => call.method === "POST");
-    expect(posts).toHaveLength(2);
-    expect(posts[0]!.body!.id).not.toBe(posts[1]!.body!.id);
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(2);
     expect(screen.getAllByText("hello")).toHaveLength(2);
     await act(async () => gate.resolve());
     await waitFor(() => expect(screen.queryByText("Sending")).toBeNull());
@@ -893,13 +813,13 @@ describe("PersonDetailPage, sending", () => {
     await user.type(box, "see you soon");
     await act(async () => gate.resolve());
 
-    const pending = screen.getByRole("list", { name: "Outbox" });
+    const pending = screen.getByRole("list", { name: "Not sent" });
     expect(within(pending).getByText("on my way")).toBeTruthy();
     expect(within(pending).getByRole("alert")).toBeTruthy();
     expect(box).toHaveProperty("value", "see you soon");
     options.send = "land";
     await user.click(within(pending).getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(screen.queryByRole("list", { name: "Outbox" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Not sent" })).toBeNull());
     const posts = calls.filter((call) => call.method === "POST");
     expect(posts).toHaveLength(2);
     expect(posts[1]!.body).toEqual(posts[0]!.body);
@@ -912,7 +832,7 @@ describe("PersonDetailPage, sending", () => {
     renderPage();
     await user.type(await screen.findByRole("textbox", { name: "Message text" }), "hello{Enter}");
     await user.click(await screen.findByRole("button", { name: "Discard this message" }));
-    expect(screen.queryByRole("list", { name: "Outbox" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Not sent" })).toBeNull();
     expect(calls.filter((call) => call.method !== "GET")).toHaveLength(1);
   });
 
@@ -955,12 +875,12 @@ describe("PersonDetailPage, sending", () => {
       text: "on my way",
     });
 
-    // It lives in the outbox until the timeline has it, then leaves on its own.
-    // Nothing here marks it delivered: the reads are re-asked and they answer.
+    // It shows as sending until the channel answers, and then it is on the
+    // timeline the send settled.
     await waitFor(
       () => {
         expect(screen.getByText("on my way")).toBeTruthy();
-        expect(screen.queryByRole("list", { name: "Outbox" })).toBeNull();
+        expect(screen.queryByRole("list", { name: "Not sent" })).toBeNull();
       },
       { timeout: 4000 },
     );
@@ -989,93 +909,29 @@ describe("PersonDetailPage, sending", () => {
     expect(sent?.body).toMatchObject({ channel: "telegram", channelUserId: "418820113" });
   });
 
-  it("keeps a refused send with the channel's words, and retries it under its own id", async () => {
+  it("keeps a refused send with the channel's words, and sends it again on Retry", async () => {
     const user = userEvent.setup();
-    const calls = mockApi({ send: "fail" });
+    const options: { send: "fail" | "land" } = { send: "fail" };
+    const calls = mockApi(options);
     renderPage();
 
     await screen.findByRole("heading", { name: "Wei Chen" });
     await user.type(screen.getByRole("textbox", { name: "Message text" }), "are you there");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
-    // A failed row stays until the guardian acts on it — the one outbox state
-    // that persists, and the only one they can do anything about.
-    const outbox = await screen.findByRole("list", { name: "Outbox" });
-    expect(within(outbox).getByText("are you there")).toBeTruthy();
-    expect(within(outbox).getByText("the channel rejected this message")).toBeTruthy();
+    // A refused send stays until the guardian acts on it. Rome kept no record
+    // of it, so this page is the only place it can be tried again.
+    const pending = await screen.findByRole("list", { name: "Not sent" });
+    expect(within(pending).getByText("are you there")).toBeTruthy();
+    expect(within(pending).getByText("the channel rejected this message")).toBeTruthy();
 
-    await user.click(within(outbox).getByRole("button", { name: "Retry" }));
-
-    const retry = await waitFor(() =>
-      calls.find((call) => call.method === "POST" && call.url.endsWith("/retry")),
-    );
-    // The row's own id: a retry is the same message again, not a second one the
-    // guardian never wrote.
-    const original = calls.find((call) => call.method === "POST" && call.url.endsWith("/messages"));
-    expect(retry?.url).toContain(`/outbox/${original?.body?.id}/retry`);
-    expect(
-      calls.filter((call) => call.url.endsWith("/messages") && call.method === "POST"),
-    ).toHaveLength(1);
-  });
-
-  it("renders a send Rome was stranded on in the server's own equivocal words", async () => {
-    // The one error text on this surface that is not a provider message. Rome
-    // does not know whether the message went out, and the row says exactly that
-    // rather than flattening it to "refused" — a guardian deciding whether to
-    // send it again is deciding on this sentence.
-    const stranded = "Rome stopped before the channel answered; this may or may not have been sent";
-    mockApi({
-      outbox: [
-        {
-          id: "outbox-stranded",
-          channel: "whatsapp",
-          channelUserId: "6591881123@s.whatsapp.net",
-          text: "are we still on for six",
-          timestamp: NOW - 400,
-          state: "failed",
-          ref: null,
-          error: stranded,
-          dismissable: true,
-        },
-      ],
-    });
-    renderPage();
-
-    const outbox = await screen.findByRole("list", { name: "Outbox" });
-    expect(within(outbox).getByText("are we still on for six")).toBeTruthy();
-    expect(within(outbox).getByText(stranded)).toBeTruthy();
-    // And it is actionable, which is why the read marks it rather than leaving
-    // it spinning where nothing can move it.
-    expect(within(outbox).getByRole("button", { name: "Retry" })).toBeTruthy();
-    expect(within(outbox).getByRole("button", { name: "Discard this message" })).toBeTruthy();
-  });
-
-  it("stays quiet when a retry loses a race, and leaves the row actionable", async () => {
-    const user = userEvent.setup();
-    const calls = mockApi({ send: "fail", retry: "refuse" });
-    renderPage();
-
-    await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.type(screen.getByRole("textbox", { name: "Message text" }), "are you there");
-    await user.click(screen.getByRole("button", { name: "Send" }));
-
-    const outbox = await screen.findByRole("list", { name: "Outbox" });
-    await user.click(within(outbox).getByRole("button", { name: "Retry" }));
-
-    await waitFor(() => expect(calls.some((call) => call.url.endsWith("/retry"))).toBe(true));
-
-    // The winner is sending the message correctly, so the loser has nothing to
-    // report. It re-reads the outbox instead, and hands the row's gestures back
-    // rather than leaving a row nobody can act on.
-    await waitFor(() => {
-      expect(
-        within(screen.getByRole("list", { name: "Outbox" })).getByRole("button", { name: "Retry" }),
-      ).toHaveProperty("disabled", false);
-    });
-    expect(
-      calls.filter((call) => call.method === "GET" && call.url.endsWith("/outbox")).length,
-    ).toBeGreaterThan(1);
-    expect(screen.queryByText(/No failed message/)).toBeNull();
+    options.send = "land";
+    await user.click(within(pending).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Not sent" })).toBeNull());
+    const posts = calls.filter((call) => call.method === "POST" && call.url.endsWith("/messages"));
+    expect(posts).toHaveLength(2);
+    expect(posts[1]!.body).toEqual(posts[0]!.body);
+    expect(await screen.findByText("are you there")).toBeTruthy();
   });
 
   it("keeps a refused message under its original account when the target changes", async () => {
@@ -1098,86 +954,11 @@ describe("PersonDetailPage, sending", () => {
     await user.click(await screen.findByRole("menuitem", { name: /Telegram/ }));
     expect(screen.getByText(/Telegram · 418820113/)).toBeTruthy();
     expect(
-      within(screen.getByRole("list", { name: "Outbox" })).getByText("on my way"),
+      within(screen.getByRole("list", { name: "Not sent" })).getByText("on my way"),
     ).toBeTruthy();
     expect(refusal).toBeTruthy();
     await user.click(screen.getByRole("radio", { name: "Telegram" }));
-    expect(screen.queryByRole("list", { name: "Outbox" })).toBeNull();
-  });
-
-  it("says why a retry could not be made, and leaves the row actionable", async () => {
-    const user = userEvent.setup();
-    mockApi({ send: "fail", retry: "fail" });
-    renderPage();
-
-    await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.type(screen.getByRole("textbox", { name: "Message text" }), "are you there");
-    await user.click(screen.getByRole("button", { name: "Send" }));
-
-    const outbox = await screen.findByRole("list", { name: "Outbox" });
-    await user.click(within(outbox).getByRole("button", { name: "Retry" }));
-
-    // A gesture that never reached the server has changed nothing and is the
-    // guardian's to try again — and this row is the only place the attempt can
-    // be made, so it says what happened rather than going quiet.
-    expect(
-      await within(screen.getByRole("list", { name: "Outbox" })).findByRole("status"),
-    ).toBeTruthy();
-
-    // And it stays usable. An outbox with nothing in flight has stopped
-    // polling, so a row left disabled here is one nothing else recovers.
-    const rows = screen.getByRole("list", { name: "Outbox" });
-    expect(within(rows).getByRole("button", { name: "Retry" })).toHaveProperty("disabled", false);
-    expect(within(rows).getByRole("button", { name: "Discard this message" })).toHaveProperty(
-      "disabled",
-      false,
-    );
-  });
-
-  it("gives a stuck unconfirmed row a way out, and a fresh one none", async () => {
-    // The server's answer decides, not the row's age. A retried row keeps the
-    // timestamp of its first attempt while the window runs from the retry, so
-    // the fresh row here is the older of the two.
-    const stuck = {
-      id: "outbox-stuck",
-      channel: "whatsapp",
-      channelUserId: "6591881123@s.whatsapp.net",
-      text: "delivered but never seen",
-      timestamp: NOW - 60,
-      state: "unconfirmed" as const,
-      ref: "sent-stuck",
-      error: null,
-      dismissable: true,
-    };
-    mockApi({
-      outbox: [
-        stuck,
-        {
-          ...stuck,
-          id: "outbox-fresh",
-          text: "just went out",
-          timestamp: NOW - 3600,
-          dismissable: false,
-        },
-      ],
-    });
-    renderPage();
-
-    const outbox = await screen.findByRole("list", { name: "Outbox" });
-    const rows = within(outbox).getAllByRole("listitem");
-    const stuckRow = rows.find((row) => row.textContent?.includes("delivered but never seen"))!;
-    const freshRow = rows.find((row) => row.textContent?.includes("just went out"))!;
-
-    // Past the landing window nothing will move it on its own, so dismissing it
-    // is the only exit it has. Retry is not offered — a refusal is what can be
-    // tried again, and this was accepted.
-    expect(within(stuckRow).getByRole("button", { name: "Discard this message" })).toBeTruthy();
-    expect(within(stuckRow).queryByRole("button", { name: "Retry" })).toBeNull();
-
-    // Inside the window it is ordinary and about to clear itself, so there is
-    // nothing to offer — and the route would refuse it anyway.
-    expect(within(freshRow).queryByRole("button", { name: "Discard this message" })).toBeNull();
-    expect(within(freshRow).queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Not sent" })).toBeNull();
   });
 
   it("replaces the composer with the reason when the account cannot be written to", async () => {

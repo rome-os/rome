@@ -13,7 +13,6 @@ import {
   personMatchesQuery,
   sendRefusalMessage,
   timelinePageLimit,
-  type OutboxPage,
   type PeopleList,
   type SendRefusal,
   type LinkCodeResponse,
@@ -25,9 +24,9 @@ import { platformOf } from "@rome/api-types/platform";
 import { createPerson } from "../../people/create.js";
 import { deletePerson } from "../../people/delete.js";
 import { mergePeople } from "../../people/merge.js";
-import { discardSend, readOutbox, retrySend, sendToAccount } from "../../people/outbox.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
+import { sendToAccount, type SendResult } from "../../people/send.js";
 import { readPersonTimeline } from "../../people/timeline.js";
 import { personMessageStores, timelineAccounts } from "../../people/timeline-sources.js";
 import { accountOfWire, wireOf } from "../../people/wire.js";
@@ -186,10 +185,12 @@ export function peopleRoutes(deps: ApiDeps): Hono {
   /**
    * Say something to one of this person's accounts.
    *
-   * 202 rather than 200: the channel taking a message is not the message
-   * arriving, and the body says which of those has happened. A refusal answers
-   * the same `send` state the person read carries, so a client that raced a
-   * disconnect renders the reason it would already have shown.
+   * One channel call inside the request. 200 once the channel took the
+   * message, 502 with the channel's own words when it refused, so the composer
+   * keeps the text and the guardian sends again. A refusal Rome makes before
+   * asking the channel answers the same `send` state the person read carries,
+   * so a client that raced a disconnect renders the reason it would already
+   * have shown.
    */
   app.post("/people/:id/messages", async (c) => {
     const person = await findPerson(deps, c.req.param("id"));
@@ -212,69 +213,12 @@ export function peopleRoutes(deps: ApiDeps): Hono {
 
     // The account the message goes out from has to be one of Rome's accounts
     // on the link's platform. Rome never substitutes another for it.
-    // `sendToAccount` checks it for a new send.
+    // `sendToAccount` checks it.
     // TODO(people-send-from dashboard PR): require `from` once the dashboard
     // sends it. Until then a send without it goes out from Rome's only account
     // on the platform, and is refused while Rome holds several.
-    const result = await sendToAccount(
-      deps,
-      account,
-      parsed.request.text,
-      parsed.request.id,
-      parsed.request.from,
-    );
-    if (!result.ok && "invalid" in result) return c.json({ error: result.invalid }, 400);
-    if (!result.ok && "error" in result) return c.json({ error: result.error }, 409);
-    return result.ok
-      ? c.json(result.message, 202)
-      : c.json(
-          { error: sendRefusalMessage(result.send), send: result.send } satisfies SendRefusal,
-          409,
-        );
-  });
-
-  /** Every send of this person's still in flight. Unpaged — an outbox long
-   *  enough to page is an incident rather than a listing. */
-  app.get("/people/:id/outbox", async (c) => {
-    const person = await findPerson(deps, c.req.param("id"));
-    if (!person) return c.json({ error: "Unknown person" }, 404);
-
-    const [accounts] = await timelineAccounts(deps, [person.links]);
-    return c.json({
-      messages: await readOutbox(deps, personMessageStores(deps), accounts),
-    } satisfies OutboxPage);
-  });
-
-  /**
-   * Try a failed send again. Under its own id, so a retry never reads as a
-   * second message the guardian did not write.
-   *
-   * Both outbox mutations are scoped to the person in the path. A message id
-   * is not a capability, and the person named is the one whose outbox this is
-   * — a row of somebody else's reached through this address is a 404, not a
-   * shortcut.
-   */
-  app.post("/people/:id/outbox/:messageId/retry", async (c) => {
-    const person = await findPerson(deps, c.req.param("id"));
-    if (!person) return c.json({ error: "Unknown person" }, 404);
-
-    const message = await retrySend(deps, person.links, c.req.param("messageId"));
-    return message
-      ? c.json(message, 202)
-      : c.json({ error: "No failed message of theirs with that id" }, 404);
-  });
-
-  /** Give up on a send. The only way a row leaves the outbox without having
-   *  been observed on the timeline. Refused only while the provider call is
-   *  outstanding, since until it answers nobody knows what happened. */
-  app.delete("/people/:id/outbox/:messageId", async (c) => {
-    const person = await findPerson(deps, c.req.param("id"));
-    if (!person) return c.json({ error: "Unknown person" }, 404);
-
-    const discarded = await discardSend(deps, person.links, c.req.param("messageId"));
-    return discarded
-      ? c.body(null, 204)
-      : c.json({ error: "No dismissable message of theirs with that id" }, 404);
+    const result = await sendToAccount(deps, account, parsed.request.text, parsed.request.from);
+    return respondToSend(c, result);
   });
 
   app.get("/people/:id/messages", async (c) => {
@@ -315,4 +259,15 @@ export function peopleRoutes(deps: ApiDeps): Hono {
 async function respondWithPerson(deps: ApiDeps, c: Context, id: string) {
   const person = await readPerson(deps, id);
   return person ? c.json(person) : c.json({ error: "Unknown person" }, 404);
+}
+
+/** The one answer every send route gives, so the dashboard reads one shape. */
+export function respondToSend(c: Context, result: SendResult) {
+  if (result.ok) return c.json(result.sent, 200);
+  if ("invalid" in result) return c.json({ error: result.invalid }, 400);
+  if ("error" in result) return c.json({ error: result.error }, 502);
+  return c.json(
+    { error: sendRefusalMessage(result.send), send: result.send } satisfies SendRefusal,
+    409,
+  );
 }

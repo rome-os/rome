@@ -11,7 +11,6 @@ import {
 import { sql } from "drizzle-orm";
 import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DeviceFolder } from "@rome/api-types/devices";
-import type { OutboxMessage } from "@rome/api-types/people";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
@@ -186,71 +185,6 @@ export const waContacts = sqliteTable("wa_contacts", {
   firstSyncedAt: integer("first_synced_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
-
-/**
- * Messages Rome is still trying to deliver — the
- * [outbox](docs/concepts/people.md).
- *
- * Not a message store, and deliberately not part of the timeline. A row here
- * is a send that has not happened yet and may never; a timeline entry is one
- * that did. Keeping them apart is what lets `Message`'s `ref` stay unique
- * and its ordering stay total — a cursor cannot be written across rows that may
- * still be withdrawn — and what keeps each account owned by exactly one message
- * store rather than two that disagree.
- *
- * A row leaves by being delivered: once `provider_message_id` names a message
- * the channel's own store holds, the entry is on the timeline and the row is
- * redundant. Nothing has to remember to clear it, because the read derives
- * that (`src/people/outbox.ts`).
- *
- * Addressed by the account rather than by the person, because that is what a
- * send names. A merge moves the link, and this row keeps pointing at the
- * address it was sent to, which stays true whoever ends up holding it.
- */
-export const outboundMessages = sqliteTable(
-  "outbound_messages",
-  {
-    id: text("id").primaryKey(),
-    /** The account the message is for: the platform and the platform's own id
-     *  for it. */
-    platform: text("platform").notNull(),
-    accountId: text("account_id").notNull(),
-    /** The channel the message went out on, as it was named then. Rome's
-     *  transcript of the send is stored under it, and it stays true when the
-     *  channel later forgets or learns its account. */
-    channel: text("channel").notNull(),
-    /** The chat the channel resolved the address to, kept so a retry does
-     *  not have to ask again. */
-    chatId: text("chat_id").notNull(),
-    text: text("text").notNull(),
-    state: text("state", { enum: ["sending", "unconfirmed", "failed"] }).notNull(),
-    /** The channel's own id for the message, once it has taken it. Null while
-     *  sending and after a failure. Half of the ref the delivered entry
-     *  carries, which is how the read knows the row has landed. */
-    providerMessageId: text("provider_message_id"),
-    error: text("error"),
-    /** Rome's account the message goes out from, by its platform and id. A
-     *  retry sends from it again, and the row lands only on a message stored
-     *  under it. Null on a row whose sending account was never known, which
-     *  no retry can then go out from. */
-    fromPlatform: text("from_platform"),
-    fromAccountId: text("from_account_id"),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
-  },
-  (table) => [index("idx_outbound_account").on(table.platform, table.accountId)],
-);
-
-/** Outbox removal retains the response for the retry window in docs/concepts/people.md#outbox. */
-export const outboundSendReceipts = sqliteTable(
-  "outbound_send_receipts",
-  {
-    id: text("id").primaryKey(),
-    response: text("response", { mode: "json" }).$type<OutboxMessage>().notNull(),
-    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-  },
-  (table) => [index("idx_outbound_send_receipts_expiry").on(table.expiresAt)],
-);
 
 export const waChats = sqliteTable("wa_chats", {
   jid: text("jid").primaryKey(),

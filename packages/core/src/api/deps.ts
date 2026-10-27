@@ -6,7 +6,6 @@ import type { ConciergeService } from "../concierge/service.js";
 import type { ActionLoader } from "../actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
-import type { OutboxRepository } from "../db/repositories/outbox.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { Channels, PlatformOfChannel, RecordedOn } from "../channels/channel.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
@@ -116,10 +115,6 @@ export interface ApiDeps {
    *  other Romes. */
   assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
-  /** Messages Rome is still trying to deliver — the People surface's
-   *  outbox. Separate from every message store on purpose: a row here is a
-   *  send that has not happened yet. */
-  outboxRepo: OutboxRepository;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;

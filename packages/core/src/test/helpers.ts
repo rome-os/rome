@@ -56,7 +56,6 @@ import { PeopleRepository } from "../db/repositories/people.js";
 import { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
-import { OutboxRepository } from "../db/repositories/outbox.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
@@ -273,9 +272,8 @@ export class FakeTransport {
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     this.sentMessages.push({ chatId, message });
-    // A message id, the way every real talker answers with one. The outbox
-    // recognizes a delivered message by it, so a Talk that named nothing
-    // would make every send untrackable in tests and only in tests.
+    // A message id, the way every real talker answers with one, so Rome's
+    // transcript of a send is recorded under it as it is in production.
     return { chatId, messageId: `sent-${++sentCount}` };
   }
 
@@ -560,7 +558,6 @@ export async function buildTestDeps(
   const peopleRepo = new PeopleRepository(db);
   const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
-  const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
@@ -749,7 +746,6 @@ export async function buildTestDeps(
     sessionsRepo,
     peopleRepo,
     guardianLinkCodes: new GuardianLinkCodes(),
-    outboxRepo,
     whatsAppStoreRepo,
     whatsAppAccounts,
     linkedInStoreRepo,

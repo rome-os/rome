@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import type { AssistantList } from "@rome/api-types/assistants";
-import type { OutboxMessage, TimelinePage } from "@rome/api-types/people";
+import type { TimelinePage } from "@rome/api-types/people";
 import { assistantsRoutes } from "./assistants.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
@@ -91,8 +91,7 @@ describe("Assistants API", () => {
 
   it("sends the guardian's line to the assistant and puts it on the chat", async () => {
     const res = await send(DOT, { text: "Summarise today's PRs" });
-    expect(res.status).toBe(202);
-    expect(((await res.json()) as OutboxMessage).channel).toBe("agents");
+    expect(res.status).toBe(200);
 
     expect(deps.transports.get("agents")!.sentMessages).toMatchObject([
       { chatId: DOT, message: { text: "Summarise today's PRs" } },
@@ -111,31 +110,15 @@ describe("Assistants API", () => {
     expect(first!.lastMessageAt).not.toBeNull();
   });
 
-  it("clears a delivered send from the outbox when the chat is read", async () => {
-    await send(DOT, { text: "Summarise today's PRs" });
-    const inFlight = () => deps.outboxRepo.forAccounts([{ platform: "agents", id: DOT }]);
-    expect(await inFlight()).toHaveLength(1);
-
-    await app.request(`/assistants/${DOT}/messages`);
-    expect(await inFlight()).toEqual([]);
-  });
-
-  it("discards a refused send, so the guardian's retry is a new message", async () => {
+  it("answers a refused send with the channel's error, and keeps nothing", async () => {
     rs.spyOn(deps.transports.get("agents")!, "send").mockRejectedValue(new Error("not reachable"));
-    const id = crypto.randomUUID();
-    const res = await send(DOT, { text: "Are you there?", id });
-    expect((await res.json()) as OutboxMessage).toMatchObject({
-      state: "failed",
-      error: "not reachable",
-    });
-    expect(await deps.outboxRepo.forAccounts([{ platform: "agents", id: DOT }])).toEqual([]);
-
-    // The same id replays the refusal rather than sending again.
-    const replay = (await (
-      await send(DOT, { text: "Are you there?", id })
-    ).json()) as OutboxMessage;
-    expect(replay.state).toBe("failed");
-    expect(deps.transports.get("agents")!.send).toHaveBeenCalledOnce();
+    const res = await send(DOT, { text: "Are you there?" });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "not reachable" });
+    const timeline = (await (
+      await app.request(`/assistants/${DOT}/messages`)
+    ).json()) as TimelinePage;
+    expect(timeline.entries).toEqual([]);
   });
 
   it("refuses an address that is not an agent id", async () => {

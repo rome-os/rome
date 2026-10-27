@@ -6,7 +6,7 @@ import {
   type AssistantList,
 } from "@rome/api-types/assistants";
 import type { Message } from "@rome/api-types/message";
-import type { OutboxMessage, TimelinePage } from "@rome/api-types/people";
+import type { SentMessage, TimelinePage } from "@rome/api-types/people";
 
 // Assistants: a Dot and a Muse listed by Rome Cloud. The Dot has a short chat
 // with Rome; Muse has none yet, so the empty chat and writing first are both
@@ -78,8 +78,6 @@ const chats = new Map<string, Message[]>([
   ],
 ]);
 
-let sent = 0;
-
 function line(agentId: string, direction: Message["direction"], at: number, body: string): Message {
   const name = assistants.find((assistant) => assistant.agentId === agentId)?.name ?? null;
   return {
@@ -122,19 +120,6 @@ export const assistantHandlers = [
     const at = Math.floor(Date.now() / 1000);
     const entry = line(agentId, "outbound", at, parsed.request.text);
     chats.set(agentId, [...(chats.get(agentId) ?? []), entry]);
-    return HttpResponse.json(
-      {
-        id: parsed.request.id ?? `mock-send-${++sent}`,
-        channel: "agents",
-        channelUserId: agentId,
-        text: parsed.request.text,
-        timestamp: at,
-        state: "unconfirmed",
-        ref: entry.ref,
-        error: null,
-        dismissable: false,
-      } satisfies OutboxMessage,
-      { status: 202 },
-    );
+    return HttpResponse.json({ ref: entry.ref, timestamp: at } satisfies SentMessage);
   }),
 ];

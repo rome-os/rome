@@ -427,8 +427,7 @@ export { channelChatId };
 
 /** The row id a recorded outbound message takes when the provider named it.
  *  Derived rather than random so a caller that knows the provider's id can
- *  predict the timeline `ref` the message will carry — which is how the
- *  outbox knows a send has landed (`src/people/outbox.ts`). */
+ *  predict the timeline `ref` the message will carry. */
 export function conversationPlatformMessageId(
   sessionId: string,
   platformMessageId: string,
@@ -1188,7 +1187,7 @@ export class WebChatRepository {
     turnId?: string;
     knownToProvider: boolean;
   }): Promise<void> {
-    // Sender-supplied content (send_message, the outbox): only the host may
+    // Sender-supplied content (send_message, a People send): only the host may
     // author routine cards, so a forged one never reaches the transcript.
     input = { ...input, content: stripHostOnlyPartsFromContent(input.content) };
     if (input.platformMessageId) {

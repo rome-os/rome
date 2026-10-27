@@ -82,7 +82,6 @@ import { SessionsRepository } from "./db/repositories/sessions.js";
 import { PeopleRepository } from "./db/repositories/people.js";
 import { appPersonMapping } from "./people/app-person-mapping.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
-import { OutboxRepository } from "./db/repositories/outbox.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
@@ -340,7 +339,6 @@ async function main() {
   const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
   const peopleRepo = new PeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
-  const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
@@ -1815,7 +1813,6 @@ async function main() {
       actionLoader,
       peopleRepo,
       guardianLinkCodes,
-      outboxRepo,
       channels,
       platformOfChannel,
       recordedOn: (platform: string) => channelRecords.namesOn(platform),

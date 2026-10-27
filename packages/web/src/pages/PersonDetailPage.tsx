@@ -22,7 +22,7 @@ import { usePerson } from "./people/use-roster";
  * Who they are on top — name, bond, the accounts that resolve to this person —
  * and everything said to or by them below. This file owns the header and the
  * one read behind it, `GET /api/people/:id`; the conversation under it is
- * `people/conversation.tsx`, which owns the timeline, the outbox and the
+ * `people/conversation.tsx`, which owns the timeline, the pending sends and the
  * composer together because the three are one surface and settle as one.
  *
  * The management gestures the design puts on this card — the bond select, Link

@@ -13,20 +13,20 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { ChannelGlyph, ChannelPill, channelLabel } from "./channel-meta";
 import { Composer } from "./composer";
 import { clockTime, dayLabel, navigatorLocale, startOfDay } from "./format";
-import { Outbox } from "./outbox";
+import { PendingSends } from "./pending-sends";
 import {
   ALL_ACCOUNTS,
   accountSegments,
   segmentAccount,
   segmentEntries,
-  segmentOutbox,
+  segmentSends,
 } from "./send-model";
-import { usePersonOutbox, usePersonTimeline } from "./use-roster";
+import { usePersonTimeline } from "./use-roster";
 import { useConversationSends } from "./use-conversation-sends";
 
 /**
- * A person's conversation: what has been said, what Rome is still trying to
- * say, and the box for saying the next thing.
+ * A person's conversation: what has been said, what this page has not managed
+ * to send yet, and the box for saying the next thing.
  *
  * Two views, both able to send. "All" is the merged timeline the dossier has
  * always shown, with a composer whose target is named on screen and changed in
@@ -41,8 +41,7 @@ import { useConversationSends } from "./use-conversation-sends";
 export function PersonConversation({ person }: { person: PersonResource }) {
   const { t } = useTranslation("people");
   const timeline = usePersonTimeline(person.id);
-  const outbox = usePersonOutbox(person.id);
-  const sends = useConversationSends(person.id, outbox.messages);
+  const sends = useConversationSends(person.id);
 
   const segments = useMemo(() => accountSegments(person.accounts), [person.accounts]);
   const [segment, setSegment] = useState<string>(ALL_ACCOUNTS);
@@ -94,12 +93,10 @@ export function PersonConversation({ person }: { person: PersonResource }) {
         )}
       </div>
 
-      <Outbox
-        personId={person.id}
-        messages={segmentOutbox(outbox.messages, scoped)}
-        localMessages={segmentOutbox(sends.messages, scoped)}
-        onRetryLocal={sends.retry}
-        onDiscardLocal={sends.discard}
+      <PendingSends
+        sends={segmentSends(sends.sends, scoped)}
+        onRetry={sends.retry}
+        onDiscard={sends.discard}
       />
 
       {timeline.isPending ? (

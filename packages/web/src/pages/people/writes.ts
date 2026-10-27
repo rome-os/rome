@@ -4,9 +4,9 @@ import type {
   DirectoryAccount,
   LinkAccountRequest,
   LinkConflict,
-  OutboxMessage,
   PersonResource,
   SendMessageRequest,
+  SentMessage,
   SendRefusal,
   UpdatePersonRequest,
 } from "@rome/api-types/people";
@@ -48,15 +48,9 @@ export type WriteOutcome<T, C = LinkConflict> =
   | {
       ok: false;
       message: string;
-      /**
-       * What the server answered, absent when nothing was reached.
-       *
-       * Beside the message rather than instead of it: every caller has a line
-       * to render and most have nothing to say about the code. It is here for
-       * the ones that do — a 404 on an outbox gesture means the row is not
-       * this reader's to act on, which is a different thing from a write that
-       * failed, and only the status tells the two apart.
-       */
+      /** What the server answered, absent when nothing was reached. Beside the
+       *  message rather than instead of it: every caller has a line to render,
+       *  and only some have anything to say about the code. */
       status?: number;
     };
 
@@ -95,7 +89,9 @@ function accountPath(account: AccountRef): string {
  * with an `{ error }` naming what is wrong with it, which is what the guardian
  * needs. A 5xx body carries the same shape and not the same meaning: the API
  * error handler serializes an unhandled exception as `{ error: err.message }`,
- * so trusting it would put a raw SQLite or repository message on screen.
+ * so trusting it would put a raw SQLite or repository message on screen. The
+ * send route's 502 is the exception a caller opts into: Rome raises it only to
+ * pass on a channel's refusal.
  */
 async function send<T, C = LinkConflict>(
   url: string,
@@ -105,6 +101,8 @@ async function send<T, C = LinkConflict>(
    *  Defaults to the link conflict every account-moving verb answers with. */
   readConflict: (payload: unknown) => C | null = (payload) =>
     isLinkConflict(payload) ? (payload as C) : null,
+  /** `channelErrors`: a 502 body is a channel's refusal, read as copy. */
+  options: { channelErrors?: boolean } = {},
 ): Promise<WriteOutcome<T, C>> {
   const response = await fetch(url, {
     method: init.method,
@@ -123,7 +121,9 @@ async function send<T, C = LinkConflict>(
     if (conflict !== null) return { ok: false, conflict };
   }
   const status = response.status;
-  if (status >= 500) return { ok: false, message: t("errors.requestFailed"), status };
+  const fromChannel = options.channelErrors === true && status === 502;
+  if (status >= 500 && !fromChannel)
+    return { ok: false, message: t("errors.requestFailed"), status };
   const error = (payload as { error?: unknown } | null)?.error;
   return {
     ok: false,
@@ -213,47 +213,21 @@ export function updatePerson(
  * `POST /api/people/:id/messages`. The account is in the body, always — the
  * contract has no shape of this request that omits it.
  *
- * Answers the outbox row the send became, never a delivered message: the
- * channel taking a message is not the message arriving, and only a later read
- * of the outbox can see the second one.
+ * One call: it answers once the channel has taken the message or refused it.
+ * A refusal's 502 carries the channel's own words, which are the only account
+ * of what went wrong, so they are the message rather than the generic line
+ * other 5xx answers get.
  */
 export function sendMessage(
   personId: string,
   request: SendMessageRequest,
   t: TFunction<"people">,
-): Promise<WriteOutcome<OutboxMessage, SendRefusal>> {
+): Promise<WriteOutcome<SentMessage, SendRefusal>> {
   return send(
     `/api/people/${encodeURIComponent(personId)}/messages`,
     { method: "POST", json: request },
     t,
     (payload) => (isSendRefusal(payload) ? payload : null),
-  );
-}
-
-/** `POST /api/people/:id/outbox/:messageId/retry`. Under the failed row's own
- *  id, so a retry never reads as a second message the guardian did not write. */
-export function retrySend(
-  personId: string,
-  messageId: string,
-  t: TFunction<"people">,
-): Promise<WriteOutcome<OutboxMessage>> {
-  return send(
-    `/api/people/${encodeURIComponent(personId)}/outbox/${encodeURIComponent(messageId)}/retry`,
-    { method: "POST" },
-    t,
-  );
-}
-
-/** `DELETE /api/people/:id/outbox/:messageId`. The only way a row leaves the
- *  outbox without having been delivered. */
-export function discardSend(
-  personId: string,
-  messageId: string,
-  t: TFunction<"people">,
-): Promise<WriteOutcome<void>> {
-  return send(
-    `/api/people/${encodeURIComponent(personId)}/outbox/${encodeURIComponent(messageId)}`,
-    { method: "DELETE" },
-    t,
+    { channelErrors: true },
   );
 }

@@ -627,19 +627,12 @@ export function accountTimeline(ref: AccountRef): Message[] {
 }
 
 /**
- * What Rome has said through the send route and the channel has since surfaced.
- *
- * The mock's stand-in for the store a real channel's mirror would put a
- * delivered message into. It is a store of its own rather than a flag on an
- * outbox row for the reason the contract gives: an outbox row is exactly a send
- * whose message is not on the timeline yet, so the outbox read has to be able
- * to look the message up here and find it — the same comparison the route runs,
- * rather than a delivery bit someone remembered to set.
+ * What Rome has said through the send route: the mock's stand-in for Rome's
+ * own transcript of a send the channel took.
  */
 const deliveredEntries: (Message & { channelUserId: string })[] = [];
 
-/** Put a sent message where the timeline will find it. The `ref` is the one the
- *  outbox row is waiting on, which is what clears the row. */
+/** Put a sent message where the timeline will find it. */
 export function recordDelivered(
   account: AccountRef,
   entry: Omit<Message, "source" | "direction">,

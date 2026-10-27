@@ -1,6 +1,6 @@
-# People: Guardian, Visitor, Persons, Accounts, Addresses, Links & Outbox
+# People: Guardian, Visitor, Persons, Accounts, Addresses, Links & Sending
 
-What person, guardian, bond level, account, link and stranger mean is in the [People](../domains/people.md) domain language. This page holds the engineering contracts behind those words, and the words of its own: visitor, address and outbox.
+What person, guardian, bond level, account, link and stranger mean is in the [People](../domains/people.md) domain language. This page holds the engineering contracts behind those words, and the words of its own: visitor and address.
 
 ## Guardian
 
@@ -103,28 +103,18 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 - **[Bond level](#bond-levels)** — a bond level grades trust in a person. A link attributes an account to a person.
 - **Connection** — a connection joins the Rome instance to a service. A link joins an account to a person.
 
-## Outbox
+## Sending
 
-The outbox holds messages Rome has been asked to send and has not yet seen arrive. A message leaves it by appearing on the recipient's [timeline](#account). Nothing marks one delivered.
+A send names its account and Rome's account, and fails loudly. It is one call to the channel, answered in the request: the channel took the message and Rome's copy is on the [timeline](#account), or the channel refused it and the request says why. Rome keeps no record of a send beyond that copy, so a refused send is the client's to retry or drop.
 
 **Contracts:**
 
 - A send names the [account](#account) it is for. Rome never chooses one on the guardian's behalf, on any evidence: a timeline entry names its channel and not its address, so no rule can tell two accounts on one channel apart, and reaching for a second channel when the first is down delivers somewhere nobody picked. A surface may preselect an account, and must show which one it picked.
 - A send leaves no doubt about either end. It names the person's account it goes to, and `from` names which of [Rome's accounts](messaging.md#romes-accounts) it goes out from. `from` names Rome's account by its platform and the platform's own id, as any account is named. The person read lists, as `from` on each account, Rome's accounts on that account's platform that can be named. A `from` that is not among them is refused, and Rome never substitutes another account for it.
-- The outbox row names its [account](#account) and the account a send went out from, each by its platform and the platform's own id. It also keeps the channel the send went out on. A retry goes out from that account again and from no other. The row counts as arrived only on a message stored under that channel, which stays true after the channel forgets or learns its account. A send whose channel knew no account of Rome's records none, and its retry goes out only on that same channel while it still knows none.
 - Rome never picks among its own accounts on one platform. A link keys an account by its platform, so a send that names no `from` goes out only while Rome holds exactly one account on that platform that can send. While Rome holds several, the account reads as sendable, since a send may name any of them, but a send that names none is refused as `not-connected`. The account's timeline reads its conversations with every one of Rome's accounts on the platform. A send without `from` stays accepted only until the dashboard names it on every send.
 - A channel can be sent to only if it says so. Its `send` port's `direct` answering null is the whole declaration, so a channel Rome mirrors but cannot write to needs no flag of its own.
-- An outbox row is exactly a send whose message is not on the timeline yet. It is derived from that comparison rather than cleared by anything, so no delivery callback can be missed and the two reads cannot disagree.
-- A message is recognized as arrived by the id the channel gave back, never by its text or its timing. A channel offering direct messaging must return one.
-- A failed send stays until the guardian retries it or discards it. A retry reuses the row, so it never reads as a second message they did not write.
-- Each row says whether it can be discarded, as `dismissable`. A failed row always can be. An accepted row can be once five minutes have passed since its latest attempt was accepted, because by then it was delivered and will not be seen. A row still waiting on the channel never can be. The server computes the field from the same rule its discard enforces, and a client offers Discard from it without deriving it again.
-- A client may name a send with an optional UUID v4 idempotency key. It creates one key for each composed message and reuses it only when repeating that request. The key joins a local sending row to the server outbox. Repeating the same key, account, and text returns its recorded response without sending again. Reusing a key with another account or text is refused.
-- Removing an outbox row saves its response in a separate receipt in the same transaction. Receipts survive restarts and expire 24 hours after delivery cleanup or explicit discard. New sends and outbox removals prune expired receipts. After expiry, the same id can start a new send.
-
-**Not to be confused with:**
-
-- **Timeline** — a timeline entry is a message that happened. An outbox row is one that has not, and may never.
-- **[Link](#link)** — a link says who an account belongs to. An outbox row is addressed to the account itself, so a merge moving the link leaves it true.
+- A send that cannot go out is refused before the channel is called, with a 409 naming why (`SendRefusal`). A send the channel refuses answers 502 with the channel's own words. A send the channel took answers 200, even when Rome then fails to record its copy, since the message went out and a retry would send it twice.
+- There is no idempotency key. A client that lost the answer to a send cannot tell whether it went out, and a retry may send it twice. Delivery guarantees come back with Chats.
 
 ## Bond levels
 

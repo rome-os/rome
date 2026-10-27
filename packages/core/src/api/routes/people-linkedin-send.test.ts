@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
-import type {
-  OutboxMessage,
-  OutboxPage,
-  PersonResource,
-  TimelinePage,
-} from "@rome/api-types/people";
+import type { PersonResource, TimelinePage } from "@rome/api-types/people";
 import { createLinkedInDescriptor } from "../../connections/integrations/linkedin.js";
 import type { Credential, RuntimeKit } from "../../connections/types.js";
 import type { OpencliResult } from "../../channels/linkedin-cli.js";
@@ -83,19 +78,14 @@ describe("LinkedIn replies through People", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ channel: "linkedin", channelUserId: MEMBER, text: reply.text }),
     });
-  const outbox = async () =>
-    (await (await app.request(`/people/${person}/outbox`)).json()) as OutboxPage;
 
-  it("exposes the shared composer and reconciles the provider receipt with the mirrored timeline", async () => {
+  it("exposes the shared composer and puts the provider's receipt on the mirrored timeline", async () => {
     const resource = (await (await app.request(`/people/${person}`)).json()) as PersonResource;
     expect(resource.accounts[0].send).toBe("yes");
     expect(run).not.toHaveBeenCalled();
     const response = await post();
-    expect(response.status).toBe(202);
-    expect(await response.json()).toMatchObject({
-      state: "unconfirmed",
-      ref: `${THREAD}:${reply.message_id}`,
-    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ref: `${THREAD}:${reply.message_id}` });
     expect(run).toHaveBeenCalledWith(
       [
         "linkedin",
@@ -121,37 +111,21 @@ describe("LinkedIn replies through People", () => {
       direction: "outbound",
       body: reply.text,
     });
-    expect((await outbox()).messages).toEqual([]);
   });
 
-  it("keeps a failed reply and retries the same outbox row", async () => {
+  it("answers a failed reply with LinkedIn's error, and sends nothing more", async () => {
     run.mockResolvedValueOnce({ code: 1, stdout: "", stderr: "LinkedIn rejected the reply" });
-    const failed = (await (await post()).json()) as OutboxMessage;
-    expect(failed.state).toBe("failed");
-    expect((await outbox()).messages[0].id).toBe(failed.id);
-    const response = await app.request(`/people/${person}/outbox/${failed.id}/retry`, {
-      method: "POST",
-    });
-    expect(await response.json()).toMatchObject({ id: failed.id, state: "unconfirmed" });
-    expect((await outbox()).messages).toEqual([]);
-    expect(run).toHaveBeenCalledTimes(2);
+    const response = await post();
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: expect.any(String) });
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps acceptance when the local mirror write fails, then clears on a provider echo by id", async () => {
-    const upsert = rs
-      .spyOn(deps.linkedInStoreRepo, "upsertMessages")
-      .mockRejectedValueOnce(new Error("disk unavailable"));
-    expect(await (await post()).json()).toMatchObject({ state: "unconfirmed" });
-    expect((await outbox()).messages).toHaveLength(1);
-    upsert.mockRestore();
-    await deps.linkedInStoreRepo.upsertMessages([
-      { threadId: THREAD, messageId: "same-text-other-id", senderIsSelf: true, text: reply.text },
-    ]);
-    expect((await outbox()).messages).toHaveLength(1);
-    await deps.linkedInStoreRepo.upsertMessages([
-      { threadId: THREAD, messageId: reply.message_id, senderIsSelf: true, text: reply.text },
-    ]);
-    expect((await outbox()).messages).toEqual([]);
+  it("answers a reply LinkedIn took as sent when the local mirror write fails", async () => {
+    rs.spyOn(deps.linkedInStoreRepo, "upsertMessages").mockRejectedValueOnce(
+      new Error("disk unavailable"),
+    );
+    expect((await post()).status).toBe(200);
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -159,22 +133,5 @@ describe("LinkedIn replies through People", () => {
     await deps.linkedInStoreRepo.markThreadSynced(THREAD, { isGroup: true });
     expect((await post()).status).toBe(409);
     expect(run).not.toHaveBeenCalled();
-  });
-
-  it("does not retarget a failed reply when the direct conversation changes", async () => {
-    run.mockRejectedValueOnce(new Error("offline"));
-    const failed = (await (await post()).json()) as OutboxMessage;
-    rs.spyOn(deps.linkedInStoreRepo, "findReplyTarget").mockResolvedValue({
-      threadId: "different-thread",
-      threadUrl: "https://www.linkedin.com/messaging/thread/different-thread/",
-      participantId: MEMBER,
-      selfParticipantId: SELF,
-    });
-    await app.request(`/people/${person}/outbox/${failed.id}/retry`, { method: "POST" });
-    expect((await outbox()).messages[0]).toMatchObject({
-      state: "failed",
-      error: expect.stringContaining("conversation changed"),
-    });
-    expect(run).toHaveBeenCalledTimes(1);
   });
 });

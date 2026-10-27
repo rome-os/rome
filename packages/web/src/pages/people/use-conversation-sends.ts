@@ -1,63 +1,48 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { OutboxMessage } from "@rome/api-types/people";
 import { channelLabel } from "./channel-meta";
 import { sendRefusalKey } from "./send-copy";
 import { usePeopleWrites } from "./use-writes";
 import type { AccountRef } from "./writes";
 import { randomUUID } from "@/lib/random-uuid";
 
-interface LocalSend {
+/**
+ * A send this page has asked for and the server has not answered for yet, or
+ * one the channel refused. This page's own: the server keeps no record of a
+ * send beyond the copy it puts on the timeline once the channel took it.
+ */
+export interface PendingSend extends AccountRef {
+  /** This page's own key for the row, never sent. */
   id: string;
-  message: OutboxMessage;
+  text: string;
+  state: "sending" | "failed";
+  /** What stopped it, on a failed send: the channel's own words, or the reason
+   *  the channel could not be written to. */
+  error: string | null;
 }
 
-/** Local requests join the server outbox without changing its cached rows or counts.
- * Accepted requests retain the server id until the refreshed reads settle. */
-export function useConversationSends(personId: string, serverMessages: readonly OutboxMessage[]) {
+/** The sends this page has made and not yet seen land. A send that lands
+ *  leaves, since its message is on the timeline the send settled; a failed one
+ *  stays until the guardian retries or discards it. */
+export function useConversationSends(personId: string) {
   const { t } = useTranslation("people");
   const writes = usePeopleWrites();
-  const [requests, setRequests] = useState<LocalSend[]>([]);
+  const [sends, setSends] = useState<PendingSend[]>([]);
   const active = useRef(new Set<string>());
 
-  useEffect(() => {
-    const serverIds = new Set(serverMessages.map((message) => message.id));
-    if (serverIds.size === 0) return;
-    // Once a read observes the row, polling owns it even if the POST response
-    // is still in flight. A later delivery must not reveal its local copy again.
-    setRequests((current) => {
-      const remaining = current.filter((request) => !serverIds.has(request.id));
-      return remaining.length === current.length ? current : remaining;
-    });
-  }, [serverMessages]);
+  const patch = (id: string, change: Partial<PendingSend>) =>
+    setSends((current) => current.map((send) => (send.id === id ? { ...send, ...change } : send)));
 
   function discard(id: string) {
-    setRequests((current) => current.filter((request) => request.id !== id));
+    setSends((current) => current.filter((send) => send.id !== id));
   }
 
   async function attempt(id: string, account: AccountRef, text: string) {
     if (active.current.has(id)) return;
     active.current.add(id);
-    setRequests((current) =>
-      current.map((request) =>
-        request.id === id
-          ? {
-              ...request,
-              message: { ...request.message, state: "sending", error: null, dismissable: false },
-            }
-          : request,
-      ),
-    );
+    patch(id, { state: "sending", error: null });
     try {
-      const outcome = await writes.say(personId, account, text, {
-        id,
-        onAccepted: (message) => {
-          // Keep the server's answer visible while the refreshed reads settle.
-          setRequests((current) =>
-            current.map((request) => (request.id === id ? { ...request, message } : request)),
-          );
-        },
-      });
+      const outcome = await writes.say(personId, account, text);
       if (outcome.ok) {
         discard(id);
         return;
@@ -66,44 +51,30 @@ export function useConversationSends(personId: string, serverMessages: readonly 
         "conflict" in outcome
           ? t(sendRefusalKey(outcome.conflict.send), { channel: channelLabel(t, account.channel) })
           : outcome.message;
-      setRequests((current) =>
-        current.map((request) =>
-          request.id === id
-            ? {
-                ...request,
-                message: { ...request.message, state: "failed", error, dismissable: true },
-              }
-            : request,
-        ),
-      );
+      patch(id, { state: "failed", error });
     } finally {
       active.current.delete(id);
     }
   }
 
   return {
-    messages: requests.map((request) => request.message),
+    sends,
     send(account: AccountRef, text: string) {
       const id = randomUUID();
-      const message: OutboxMessage = {
+      const send: PendingSend = {
         id,
         channel: account.channel,
         channelUserId: account.channelUserId,
         text,
-        timestamp: Math.floor(Date.now() / 1000),
         state: "sending",
-        ref: null,
         error: null,
-        dismissable: false,
       };
-      setRequests((current) => [{ id, message }, ...current]);
+      setSends((current) => [send, ...current]);
       void attempt(id, account, text);
     },
     retry(id: string) {
-      const request = requests.find((candidate) => candidate.id === id);
-      if (request?.message.state === "failed") {
-        void attempt(id, request.message, request.message.text);
-      }
+      const send = sends.find((candidate) => candidate.id === id);
+      if (send?.state === "failed") void attempt(id, send, send.text);
     },
     discard,
   };

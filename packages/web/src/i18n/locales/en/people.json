@@ -145,13 +145,11 @@
     "submit": "Send",
     "retry": "Retry",
     "discard": "Discard this message",
-    "outbox": {
-      "label": "Outbox"
+    "pending": {
+      "label": "Not sent"
     },
     "state": {
-      "sending": "Sending",
-      "unconfirmed": "Sent, not confirmed yet",
-      "stopped": "Rome stopped trying to send this"
+      "sending": "Sending"
     },
     "refusal": {
       "notConnected": "{{channel}} isn't connected, so Rome can't send there. Connect it in Settings.",

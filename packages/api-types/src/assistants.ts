@@ -3,8 +3,6 @@
 // (docs/domains/chats.md#assistant). The dashboard shows their chats on one
 // Assistants page and writes to them as the guardian, which wakes no agent.
 
-import { SEND_ID_PATTERN } from "./people.js";
-
 /** What kind of assistant Rome Cloud says it is. Cloud may add kinds before
  *  this Rome knows them, so any other string is kept and shown as it is. */
 export type AssistantKind = "dot" | "muse" | "rome" | (string & {});
@@ -47,8 +45,6 @@ export function compareAssistants(a: Assistant, b: Assistant): number {
 
 export interface AssistantSendRequest {
   text: string;
-  /** The client's id for this send, so a repeated request is one message. */
-  id?: string;
 }
 
 export function parseAssistantSendRequest(
@@ -56,13 +52,8 @@ export function parseAssistantSendRequest(
 ): { request: AssistantSendRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "body must be an object" };
   const raw = body as Record<string, unknown>;
-  if (raw.id !== undefined && (typeof raw.id !== "string" || !SEND_ID_PATTERN.test(raw.id))) {
-    return { error: "id must be a UUID v4" };
-  }
   if (typeof raw.text !== "string" || raw.text.trim() === "") {
     return { error: "text must be a non-empty string" };
   }
-  return {
-    request: { text: raw.text, ...(typeof raw.id === "string" ? { id: raw.id } : {}) },
-  };
+  return { request: { text: raw.text } };
 }

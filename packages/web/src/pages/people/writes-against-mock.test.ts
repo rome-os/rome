@@ -1,21 +1,18 @@
 // @rstest-environment jsdom
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { afterAll, beforeAll, describe, expect, it } from "@rstest/core";
 import { setupServer } from "msw/node";
 import type { TFunction } from "i18next";
 import i18n from "@/i18n";
 import { peopleHandlers } from "../../../mock/handlers/people-api";
-import type { OutboxPage, TimelinePage } from "@rome/api-types/people";
-import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
+import type { TimelinePage } from "@rome/api-types/people";
 import { fetchJson } from "@/lib/fetch-json";
 import {
   createPerson,
   deletePerson,
-  discardSend,
   dismissAccount,
   linkAccount,
   mergePeople,
   restoreAccount,
-  retrySend,
   sendMessage,
   updatePerson,
 } from "./writes";
@@ -133,12 +130,9 @@ describe("People writes, against the contract's own handlers", () => {
   });
 });
 
-// The send verbs, against the same handlers.
-//
-// The outbox is the one read on this surface that clears itself, and it clears
-// by comparing its rows against the timeline rather than by being told. A client
-// asserting that against a stub of its own would only be asserting its own
-// reading of the rule; this asserts it against something that implements it.
+// The send verb, against the same handlers: one call that answers once the
+// channel took the message, with Rome's copy already on the timeline, or with
+// the channel's refusal.
 
 const RAY = "ray-oster";
 /** Ray's Telegram account, which the fixture ledger can be written to. */
@@ -147,212 +141,41 @@ const RAY_TELEGRAM = { channel: "telegram", channelUserId: "418820113" };
  *  messaging, which is the `unsupported` refusal. */
 const ARVIND = { channel: "linkedin", channelUserId: "ACoAAArvind01" };
 
-const readOutbox = (personId: string) =>
-  fetchJson<OutboxPage>(`/api/people/${personId}/outbox`, { fallback: "outbox unavailable" });
-
-/** Read the outbox until it answers what the caller is waiting for — the same
- *  poll a reader of the page makes, and the read that clears a landed row.
- *  Moves the faked clock 50ms between reads, because the mock outbox advances
- *  its rows by `Date.now()` alone. */
-async function outboxUntil(
-  personId: string,
-  done: (page: OutboxPage) => boolean,
-): Promise<OutboxPage> {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    const page = await readOutbox(personId);
-    if (done(page)) return page;
-    rs.setSystemTime(Date.now() + 50);
-  }
-  throw new Error("the outbox never reached the state under test");
-}
-
-const holds = (page: OutboxPage, id: string) => page.messages.some((m) => m.id === id);
+const timelineOf = (personId: string) =>
+  fetchJson<TimelinePage>(`/api/people/${personId}/messages`, {
+    fallback: "timeline unavailable",
+  });
 
 describe("Sending, against the contract's own handlers", () => {
-  beforeEach(() => {
-    rs.useFakeTimers({ toFake: ["Date"] });
-  });
-  afterEach(() => {
-    rs.useRealTimers();
-  });
-
-  it("retains delivered send receipts through cleanup and expires them after 24 hours", async () => {
-    const startedAt = Date.now();
-    const request = { ...RAY_TELEGRAM, id: crypto.randomUUID(), text: "mock receipt lifecycle" };
-    const sent = await sendMessage(RAY, request, t);
-    expect(sent.ok).toBe(true);
-    if (!sent.ok) return;
-    const removedAt = startedAt + 10_000;
-    rs.setSystemTime(removedAt);
-    expect(holds(await readOutbox(RAY), request.id)).toBe(false);
-    const replayed = await sendMessage(RAY, request, t);
-    expect(replayed).toMatchObject({ ok: true, value: { id: request.id, state: "unconfirmed" } });
-    expect(holds(await readOutbox(RAY), request.id)).toBe(false);
-    expect(await sendMessage(RAY, { ...request, text: "changed" }, t)).toMatchObject({
-      ok: false,
-    });
-    const timeline = await fetchJson<TimelinePage>(`/api/people/${RAY}/messages`, {
-      fallback: "timeline unavailable",
-    });
-    expect(timeline.entries.filter((entry) => entry.body === request.text)).toHaveLength(1);
-
-    rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS - 1);
-    expect(await sendMessage(RAY, request, t)).toEqual(replayed);
-    rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS);
-    expect(await sendMessage(RAY, request, t)).toMatchObject({
-      ok: true,
-      value: { state: "sending" },
-    });
-    expect(holds(await readOutbox(RAY), request.id)).toBe(true);
-  });
-
-  it("keeps a receipt when a failed mock send is discarded", async () => {
-    const startedAt = Date.now();
-    const request = { ...RAY_TELEGRAM, id: crypto.randomUUID(), text: "fail discarded receipt" };
-    expect(await sendMessage(RAY, request, t)).toMatchObject({ ok: true });
-    rs.setSystemTime(startedAt + 10_000);
-    const failed = (await readOutbox(RAY)).messages.find((message) => message.id === request.id)!;
-    expect(failed).toMatchObject({ state: "failed", dismissable: true });
-    expect(await discardSend(RAY, request.id, t)).toMatchObject({ ok: true });
-    // The same send replayed, with nothing left to discard.
-    expect(await sendMessage(RAY, request, t)).toEqual({
-      ok: true,
-      value: { ...failed, dismissable: false },
-    });
-    expect(holds(await readOutbox(RAY), request.id)).toBe(false);
-  });
-
-  it("holds a send in the outbox, and lets it go once it is on the timeline", async () => {
+  it("answers once the channel took it, with the message already on the timeline", async () => {
     const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "on my way" }, t);
-    expect(sent.ok).toBe(true);
-    if (!sent.ok) return;
-    // Never delivered on the way out: the channel taking a message is not the
-    // message arriving, and the body says which of the two has happened.
-    expect(sent.value.state).toBe("sending");
+    expect(sent).toMatchObject({ ok: true, value: { ref: expect.any(String) } });
 
-    const inFlight = await outboxUntil(RAY, (page) => holds(page, sent.value.id));
-    expect(inFlight.messages.find((m) => m.id === sent.value.id)?.text).toBe("on my way");
-
-    // And it leaves on its own. Nothing cleared it — the read compared the two
-    // stores and found the message in the other one.
-    await outboxUntil(RAY, (page) => !holds(page, sent.value.id));
-
-    const timeline = await fetchJson<{ entries: { body: string | null }[] }>(
-      `/api/people/${RAY}/messages`,
-      { fallback: "timeline unavailable" },
-    );
-    expect(timeline.entries.some((entry) => entry.body === "on my way")).toBe(true);
+    const timeline = await timelineOf(RAY);
+    expect(timeline.entries.filter((entry) => entry.body === "on my way")).toHaveLength(1);
   });
 
-  it("keeps a refused send, and clears it on a retry that reuses the row", async () => {
-    const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "fail this one" }, t);
-    expect(sent.ok).toBe(true);
-    if (!sent.ok) return;
+  it("answers a refused send with the channel's words, and keeps nothing", async () => {
+    const refused = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "fail this one" }, t);
+    expect(refused).toEqual({
+      ok: false,
+      message: "the channel rejected this message",
+      status: 502,
+    });
+    expect((await timelineOf(RAY)).entries.some((e) => e.body === "fail this one")).toBe(false);
 
-    const failed = await outboxUntil(RAY, (page) =>
-      page.messages.some((m) => m.id === sent.value.id && m.state === "failed"),
-    );
-    // The channel's own words, shown as detail under copy the dashboard owns.
-    expect(failed.messages.find((m) => m.id === sent.value.id)?.error).toBeTruthy();
-
-    const retried = await retrySend(RAY, sent.value.id, t);
-    expect(retried).toMatchObject({ ok: true, value: { id: sent.value.id } });
-
-    // The same row throughout, so a retry never reads as a second message the
-    // guardian did not write.
-    await outboxUntil(RAY, (page) => !holds(page, sent.value.id));
+    // A retry is the same request again, and this time it goes through.
+    expect(await sendMessage(RAY, { ...RAY_TELEGRAM, text: "fail this one" }, t)).toMatchObject({
+      ok: true,
+    });
+    expect((await timelineOf(RAY)).entries.some((e) => e.body === "fail this one")).toBe(true);
   });
 
-  it("discards a refused send — the one way a row leaves undelivered", async () => {
-    const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "fail and forget" }, t);
-    expect(sent.ok).toBe(true);
-    if (!sent.ok) return;
-
-    await outboxUntil(RAY, (page) =>
-      page.messages.some((m) => m.id === sent.value.id && m.state === "failed"),
-    );
-    expect(await discardSend(RAY, sent.value.id, t)).toMatchObject({ ok: true });
-    expect(holds(await readOutbox(RAY), sent.value.id)).toBe(false);
-  });
-
-  it("sends a LinkedIn reply through the shared outbox and timeline", async () => {
+  it("sends a LinkedIn reply onto the shared timeline", async () => {
     const sent = await sendMessage("arvind-srivastav", { ...ARVIND, text: "LinkedIn reply" }, t);
     expect(sent.ok).toBe(true);
-    if (!sent.ok) return;
-    await outboxUntil("arvind-srivastav", (page) => !holds(page, sent.value.id));
-    const response = await fetch("/api/people/arvind-srivastav/messages");
-    const timeline = (await response.json()) as TimelinePage;
+    const timeline = await timelineOf("arvind-srivastav");
     expect(timeline.entries.some((entry) => entry.body === "LinkedIn reply")).toBe(true);
-  });
-
-  it("lets one of two retries of a row win, so a double click sends once", async () => {
-    const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "fail then retry twice" }, t);
-    expect(sent.ok).toBe(true);
-    if (!sent.ok) return;
-    await outboxUntil(RAY, (page) =>
-      page.messages.some((m) => m.id === sent.value.id && m.state === "failed"),
-    );
-
-    // Both reach the route; the state is what claims the row, so the second
-    // finds a row that is no longer theirs to send. Sending the guardian's
-    // message twice is the exact harm the outbox is arranged around.
-    const [first, second] = await Promise.all([
-      retrySend(RAY, sent.value.id, t),
-      retrySend(RAY, sent.value.id, t),
-    ]);
-    expect([first!.ok, second!.ok].filter(Boolean)).toHaveLength(1);
-  });
-
-  it("refuses a retry of a row still in flight, and a discard of one too", async () => {
-    const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "still going" }, t);
-    expect(sent.ok).toBe(true);
-    if (!sent.ok) return;
-
-    // A send that may yet arrive is not the guardian's to retry or to drop the
-    // record of — losing it would leave them with no account of the message.
-    expect(await retrySend(RAY, sent.value.id, t)).toMatchObject({ ok: false });
-    expect(await discardSend(RAY, sent.value.id, t)).toMatchObject({ ok: false });
-    await outboxUntil(RAY, (page) => !holds(page, sent.value.id));
-  });
-
-  it("lets a delivered-but-unseen send be discarded once it is past the window", async () => {
-    // The phantom the rule exists for: the channel took it, the message never
-    // reached the timeline, and nothing will ever move the row. On a channel
-    // with no mirror of its own this is the only way out it has.
-    const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "wedged forever" }, t);
-    expect(sent.ok).toBe(true);
-    if (!sent.ok) return;
-
-    const stuck = await outboxUntil(RAY, (page) =>
-      page.messages.some((m) => m.id === sent.value.id && m.state === "unconfirmed"),
-    );
-    expect(stuck.messages.find((m) => m.id === sent.value.id)).toMatchObject({
-      error: null,
-      dismissable: true,
-    });
-
-    // Not retryable — a refusal is what can be tried again, and this was
-    // accepted — but dismissable, because it has outlived the landing window.
-    // The row said so, and the route agrees.
-    expect(await retrySend(RAY, sent.value.id, t)).toMatchObject({ ok: false });
-    expect(await discardSend(RAY, sent.value.id, t)).toMatchObject({ ok: true });
-    expect(holds(await readOutbox(RAY), sent.value.id)).toBe(false);
-  });
-
-  it("refuses an outbox row of somebody else's, reached through this person", async () => {
-    const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "fail for the scope check" }, t);
-    expect(sent.ok).toBe(true);
-    if (!sent.ok) return;
-    await outboxUntil(RAY, (page) =>
-      page.messages.some((m) => m.id === sent.value.id && m.state === "failed"),
-    );
-
-    // A message id is not a capability. The person in the path is whose outbox
-    // it is, and Ray's row is not reachable through Sam's.
-    expect(await retrySend("sam-okafor", sent.value.id, t)).toMatchObject({ ok: false });
-    expect(await discardSend("sam-okafor", sent.value.id, t)).toMatchObject({ ok: false });
-    expect(holds(await readOutbox(RAY), sent.value.id)).toBe(true);
-    await discardSend(RAY, sent.value.id, t);
   });
 
   it("refuses an account the person does not hold, before anything is sent", async () => {
