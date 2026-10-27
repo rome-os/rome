@@ -9,7 +9,7 @@ import { randomUUID } from "@/lib/random-uuid";
 /**
  * A send this page has asked for and the server has not answered for yet, or
  * one the channel refused. This page's own: the server keeps no record of a
- * send beyond the copy it puts on the timeline once the channel took it.
+ * send beyond its own copy of a message the channel took.
  */
 export interface PendingSend extends AccountRef {
   /** This page's own key for the row, never sent. */
@@ -21,9 +21,10 @@ export interface PendingSend extends AccountRef {
   error: string | null;
 }
 
-/** The sends this page has made and not yet seen land. A send that lands
- *  leaves, since its message is on the timeline the send settled; a failed one
- *  stays until the guardian retries or discards it. */
+/** The sends this page has made and not yet seen answered. A send the channel
+ *  took leaves, and its message shows on the timeline once the store that
+ *  answers for the conversation has it; a failed one stays until the guardian
+ *  retries or discards it. */
 export function useConversationSends(personId: string) {
   const { t } = useTranslation("people");
   const writes = usePeopleWrites();

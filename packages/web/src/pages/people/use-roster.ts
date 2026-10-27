@@ -48,6 +48,12 @@ export const TIMELINE_KEY = "person-timeline";
 
 const ROSTER_POLL_MS = 30_000;
 
+// How often an open conversation re-reads its timeline. A send answers once the
+// channel took the message, and on a channel with a mirror of its own the
+// message reaches the timeline when the mirror's copy arrives, which can be
+// after the read the send settled.
+const TIMELINE_POLL_MS = 5_000;
+
 // How long the search box settles before its term reaches the wire. Long enough
 // that a typed word is one request rather than one per letter, short enough
 // that the pause is not read as the page having stopped.
@@ -276,6 +282,7 @@ export function usePersonTimeline(id: string | undefined) {
   const query = useInfiniteQuery<TimelinePage>({
     queryKey: [TIMELINE_KEY, id],
     enabled: id != null,
+    refetchInterval: TIMELINE_POLL_MS,
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
     queryFn: ({ signal, pageParam }) => {
