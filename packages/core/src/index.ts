@@ -159,7 +159,7 @@ import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
-import { stopActiveConversationTurn } from "./core/chat-stop.js";
+import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
 import { EventBus } from "./events/event-bus.js";
 import { EventService } from "./events/event-service.js";
@@ -946,12 +946,11 @@ async function main() {
   const chatStop: ChatStopHandler = (input) =>
     stopActiveConversationTurn(input, {
       turns: agentTurnStreamRegistry,
-      // The sender is on the platform of the account the chat is reached
-      // through, or of the connection kind a host names when that account is
-      // not known yet.
       isGuardian: async (service, senderId) => {
-        const platform =
-          accounts.accountOf(input.ref.connectionId)?.platform ?? platformOf(service);
+        const platform = stopSenderPlatform(input.ref, service, {
+          accountOf: (connectionId) => accounts.accountOf(connectionId),
+          platformOfChannel,
+        });
         return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
       },
     });
