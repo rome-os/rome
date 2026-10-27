@@ -202,10 +202,10 @@ function streamRows(
  * the grouping that makes a directory cost one pass instead of one per row
  * still holds, just per round rather than once.
  *
- * Bounded here rather than inside the stores: the ceiling is a property of the
- * statement a store builds, but only a caller knows it is about to ask about
- * every account there is, and a store cannot chunk work it is handed a call at
- * a time.
+ * The SQL stores also split a batch that would outgrow one statement
+ * (`messages-sql.ts`), so the rounds are not what keeps a read under the
+ * ceiling. They keep each pass, and what it holds in memory, bounded for the
+ * one read that asks about every account there is.
  */
 const ADDRESSES_PER_ROUND = 1000;
 

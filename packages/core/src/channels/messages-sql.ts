@@ -201,6 +201,40 @@ const COUNT_ONLY = 0;
 const nothing = (): JobResult => ({ entries: [], total: 0 });
 
 /**
+ * The variables one statement may bind, kept under SQLite's ceiling of 32,766
+ * with room to spare. A job binds four per key in the scope table, about one
+ * more per key in the view and seven for its row of the ask table; a view that
+ * names a key twice still fits.
+ */
+const VARIABLES_PER_STATEMENT = 30_000;
+const variablesOf = (job: Job) => job.keys.length * 6 + 7;
+
+/**
+ * The batch as statements that each fit {@link VARIABLES_PER_STATEMENT}: one
+ * statement for the jobs raised in a tick, split only when that many would not
+ * bind at once. Every reader of the stores gets the bound, so none has to size
+ * its own calls by how many channels an account may be stored under. A job
+ * wider than a whole statement still runs alone rather than being dropped.
+ */
+async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobResult[]> {
+  const results: JobResult[] = [];
+  let chunk: Job[] = [];
+  let variables = 0;
+  for (const job of jobs) {
+    const wide = variablesOf(job);
+    if (chunk.length > 0 && variables + wide > VARIABLES_PER_STATEMENT) {
+      results.push(...(await runStatement(options, chunk)));
+      chunk = [];
+      variables = 0;
+    }
+    chunk.push(job);
+    variables += wide;
+  }
+  if (chunk.length > 0) results.push(...(await runStatement(options, chunk)));
+  return results;
+}
+
+/**
  * One statement for a whole batch.
  *
  * The jobs enter the query as two tables of their own — which keys each asked
@@ -208,7 +242,7 @@ const nothing = (): JobResult => ({ entries: [], total: 0 });
  * so the rows are scoped, ranked and cut per job inside a single pass rather
  * than once per job.
  */
-async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobResult[]> {
+async function runStatement(options: SqlMessagesOptions, jobs: Job[]): Promise<JobResult[]> {
   const asked = jobs.flatMap((job, index) => job.keys.map((entry) => ({ index, ...entry })));
   if (asked.length === 0) return jobs.map(nothing);
 
