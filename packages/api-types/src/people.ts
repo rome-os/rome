@@ -1324,8 +1324,10 @@ export const SEND_MESSAGE_MAX_LENGTH = 8000;
 /**
  * `POST /api/people/:id/messages` answered: the channel took the message.
  *
- * Not a {@link Message}. The message joins the timeline on the next read, and
- * nothing here is to be deduped against it: `ref` names the entry it becomes
+ * Not a {@link Message}. The message joins the timeline once the store that
+ * answers for its conversation holds it: Rome's own record, or on a channel
+ * with a mirror, the mirror's copy, which may arrive after this answer.
+ * Nothing here is to be deduped against it: `ref` names the entry it becomes
  * at the address it was sent to, and a channel that folds several addresses
  * onto one account may deliver under another of them.
  */

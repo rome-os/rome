@@ -176,12 +176,18 @@ function mockApi(
      */
     send?: "land" | "refuse" | "fail" | "network";
     sendWait?: Promise<void>;
+    /** `"late"`: a sent message reaches the timeline only on a read after the
+     *  one the send settled, as a channel's mirror echo can. */
+    echo?: "late";
   } = {},
 ) {
   const calls: FetchCall[] = [];
   const person = typeof options.person === "object" ? { ...options.person } : { ...PERSON };
   /** What Rome said through the send route, which the timeline read finds. */
   const delivered: Message[] = [];
+  /** Sent messages whose echo has not landed yet, each with the timeline reads
+   *  still to pass before it does. */
+  const echoing: { entry: Message; reads: number }[] = [];
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -205,14 +211,16 @@ function mockApi(
       if (options.send === "fail") {
         return json({ error: "the channel rejected this message" }, 502);
       }
-      const ref = `sent-${delivered.length + 1}`;
-      delivered.unshift({
+      const ref = `sent-${delivered.length + echoing.length + 1}`;
+      const entry: Message = {
         source: String(body?.channel),
         timestamp: NOW,
         body: String(body?.text),
         direction: "outbound",
         ref,
-      });
+      };
+      if (options.echo === "late") echoing.push({ entry, reads: 1 });
+      else delivered.unshift(entry);
       return json({ ref, timestamp: NOW });
     }
 
@@ -248,6 +256,11 @@ function mockApi(
       if (options.entries === "fail") return json({ error: "timeline unavailable" }, 500);
       const cursor = new URL(url, "http://localhost").searchParams.get("cursor");
       if (cursor) return json({ entries: options.older ?? [], nextCursor: null });
+      for (const pending of [...echoing]) {
+        if (pending.reads-- > 0) continue;
+        echoing.splice(echoing.indexOf(pending), 1);
+        delivered.unshift(pending.entry);
+      }
       return json({
         entries: [...delivered, ...(options.entries ?? ENTRIES)],
         nextCursor: options.nextCursor ?? null,
@@ -885,6 +898,22 @@ describe("PersonDetailPage, sending", () => {
       { timeout: 4000 },
     );
   });
+
+  it("shows a sent message whose channel's copy lands after the send answered", async () => {
+    // A channel with a mirror of its own answers for its conversation from the
+    // mirror, whose echo can arrive after the read the send settled. The open
+    // conversation keeps reading, so the message still shows up.
+    const user = userEvent.setup();
+    mockApi({ send: "land", echo: "late" });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.type(screen.getByRole("textbox", { name: "Message text" }), "on my way{Enter}");
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Not sent" })).toBeNull());
+    expect(screen.queryByText("on my way")).toBeNull();
+
+    expect(await screen.findByText("on my way", {}, { timeout: 8_000 })).toBeTruthy();
+  }, 15_000);
 
   it("offers no picker inside an account view, because the view is the target", async () => {
     const user = userEvent.setup();

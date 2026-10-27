@@ -10,7 +10,7 @@ import type { PendingSend } from "./use-conversation-sends";
  *
  * Its own block above the timeline rather than rows inside it, because it makes
  * a different claim — "not sent" is not "this happened". A send the channel
- * took leaves this block as its message joins the timeline.
+ * took leaves this block, and the timeline shows it once its copy is read.
  *
  * The rows are this page's alone. Rome keeps no record of a send it could not
  * make, so a refused send lives until the guardian retries or discards it, or

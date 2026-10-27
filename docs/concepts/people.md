@@ -105,7 +105,7 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 
 ## Sending
 
-A send names its account and Rome's account, and fails loudly. It is one call to the channel, answered in the request: the channel took the message and Rome's copy is on the [timeline](#account), or the channel refused it and the request says why. Rome keeps no record of a send beyond that copy, so a refused send is the client's to retry or drop.
+A send names its account and Rome's account, and fails loudly. It is one call to the channel, answered in the request: the channel took the message, or the channel refused it and the request says why. A message the channel took joins the [timeline](#account) once the store that answers for its conversation holds it. Rome records its own copy before answering, and a channel with a mirror of its own answers for the conversation with the mirror's copy, which may land after the send answered, so a client keeps reading the timeline while it is open. Rome keeps no record of a send beyond that copy, so a refused send is the client's to retry or drop.
 
 **Contracts:**
 
