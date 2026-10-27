@@ -9,7 +9,7 @@ Someone the guardian knows: an entry in their phone book. The guardian is one of
 - Two persons are the same person when they are the same entry. Nothing on a platform makes two persons one. Only the guardian does, by merging them.
 - A person exists from the moment the guardian creates them, by name or from an account. They stop existing when the guardian deletes them or merges them into another.
 - The guardian **creates**, **renames**, **merges** and **deletes** a person. A merge makes two persons one, and the links of the one that goes move onto the one that stays.
-- Deleting a person returns to strangers the accounts Rome has heard from. An account only linked by hand, which has never written, leaves the directory with its link and comes back the first time it writes. Every chat keeps its history, since [history belongs to the chat](chats.md#chat).
+- Deleting a person returns to strangers the accounts Rome has heard from. An account only linked by hand, which has never written, is unknown to Rome again until it writes. Every chat keeps its history, since [history belongs to the chat](chats.md#chat).
 - Every person has exactly one bond level.
 - An agent is not a person. An agent delegated by a person acts on that person's behalf, as [Delegate link](#delegate-link) says.
 
