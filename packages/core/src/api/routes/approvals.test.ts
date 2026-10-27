@@ -69,9 +69,9 @@ describe("Approvals API", () => {
       status: "rejected",
       payload: { resolution: "expired" },
     });
-    const person = await new PeopleRepository(testDb.db, identityConnectionKindOf).byAccount({
-      channel: "telegram",
-      channelUserId: "123",
+    const person = await new PeopleRepository(testDb.db).byAccount({
+      platform: "telegram",
+      id: "123",
     });
     expect(person).toBeNull();
     expect(approvalHandler.onApproved).not.toHaveBeenCalled();

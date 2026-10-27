@@ -5,8 +5,8 @@
 import { readdir } from "node:fs/promises";
 import { eq, and, or, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { persons, channelMappings, dismissedAccounts } from "../schema.js";
-import type { ConnectionKindOfChannel } from "./channel-records.js";
+import type { Account } from "@rome-os/app-runtime";
+import { persons, links, dismissedAccounts } from "../schema.js";
 import { type DrizzleDb, inTransaction, type SqliteExec } from "../index.js";
 import { getRelationshipDir } from "../../profile-memory.js";
 import {
@@ -18,14 +18,11 @@ import {
 export type BondLevel = "guardian" | "inner-circle" | "acquaintance" | "other";
 
 /**
- * The account a link names: the channel it is keyed under and the channel's
- * own id for it. The stored rows keep the `channel_mappings` table and its
- * column names; this is the shape every reader gets.
+ * The account a link names, the way Chats names it: the platform and the
+ * platform's own id for it (docs/domains/chats.md#account). One account is one
+ * link whichever of Rome's accounts met it.
  */
-export interface Link {
-  channel: string;
-  channelUserId: string;
-}
+export type Link = Account;
 
 /**
  * One of a person's links. `delegate` is set on a
@@ -63,17 +60,8 @@ export type PersonChanges = Partial<{
   approved: boolean;
 }>;
 
-/** A dismissed account, with the channel's name for it when it was
- *  dismissed. */
-export interface Dismissal extends Link {
-  displayName: string | null;
-}
-
-/** An account cleared for a person to take, with the channel-side name that
- *  travels with it. */
-interface Claim extends Link {
-  displayName: string | null;
-}
+/** A dismissed account. */
+export type Dismissal = Link;
 
 /** An account a person already holds, and the person holding it. */
 export interface AccountHolder extends Link {
@@ -93,9 +81,7 @@ export interface AccountHolder extends Link {
  */
 export class AccountHeldError extends Error {
   constructor(readonly holder: AccountHolder) {
-    super(
-      `Account ${holder.channel}:${holder.channelUserId} already belongs to person "${holder.personId}"`,
-    );
+    super(`Account ${holder.platform}:${holder.id} already belongs to person "${holder.personId}"`);
     this.name = "AccountHeldError";
   }
 }
@@ -129,10 +115,10 @@ export type DeleteResult =
 type PersonRow = typeof persons.$inferSelect;
 
 /** A stored link as a reader gets it, the delegate mark only where it is set. */
-function toPersonLink(row: typeof channelMappings.$inferSelect): PersonLink {
+function toPersonLink(row: typeof links.$inferSelect): PersonLink {
   return {
-    channel: row.channel,
-    channelUserId: row.channelUserId,
+    platform: row.platform,
+    id: row.accountId,
     ...(row.delegate ? { delegate: true as const } : {}),
   };
 }
@@ -161,18 +147,7 @@ function toPerson(row: PersonRow, links: PersonLink[]): Person {
  * transaction take an executor last, defaulting to this repository's database.
  */
 export class PeopleRepository {
-  /** `connectionKindOf` maps a channel to the connection kind a link is keyed by: People keys
-   *  an account by connection kind, so a later channel of a connection kind reads and writes
-   *  the connection kind's links. */
-  constructor(
-    private readonly db: DrizzleDb,
-    private readonly connectionKindOf: ConnectionKindOfChannel,
-  ) {}
-
-  /** The key People files a link to an account on `channel` under. */
-  linkKeyOf(channel: string): string {
-    return this.connectionKindOf(channel);
-  }
+  constructor(private readonly db: DrizzleDb) {}
 
   /** The person `id` names, or null. */
   async byId(id: string): Promise<Person | null> {
@@ -181,24 +156,17 @@ export class PeopleRepository {
   }
 
   /**
-   * Who is this: the person the account is linked to, or null. A later channel
-   * of a connection kind reads the connection kind's links: People keys an
-   * account by connection kind. Telegram and Discord give a person one id
-   * across bots. Feishu's open_id is issued per app, so a sender on a second
-   * Feishu bot is linked once there.
+   * Who is this: the person the account is linked to, or null. An account is
+   * one link whichever of Rome's accounts met it, so a Telegram sender heard by
+   * the bot and by the signed-in user is one person. Feishu's open_id is issued
+   * per app, so a sender on a second Feishu app is a second account there.
    */
   async byAccount(account: Link): Promise<Person | null> {
-    const channel = this.connectionKindOf(account.channel);
     const row = this.db
       .select({ person: persons })
-      .from(channelMappings)
-      .innerJoin(persons, eq(channelMappings.personId, persons.id))
-      .where(
-        and(
-          eq(channelMappings.channel, channel),
-          eq(channelMappings.channelUserId, account.channelUserId),
-        ),
-      )
+      .from(links)
+      .innerJoin(persons, eq(links.personId, persons.id))
+      .where(accountIs(account))
       .get();
     return row ? (await this.withLinks([row.person]))[0] : null;
   }
@@ -235,9 +203,9 @@ export class PeopleRepository {
    */
   async all(): Promise<Person[]> {
     const rows = await this.db
-      .select({ person: persons, link: channelMappings })
+      .select({ person: persons, link: links })
       .from(persons)
-      .leftJoin(channelMappings, eq(channelMappings.personId, persons.id));
+      .leftJoin(links, eq(links.personId, persons.id));
 
     const byPerson = new Map<string, Person>();
     for (const row of rows) {
@@ -253,7 +221,8 @@ export class PeopleRepository {
 
   /** Every dismissed account. */
   async dismissals(): Promise<Dismissal[]> {
-    return this.db.select().from(dismissedAccounts);
+    const rows = await this.db.select().from(dismissedAccounts);
+    return rows.map((row) => ({ platform: row.platform, id: row.accountId }));
   }
 
   /** Whether the guardian dismissed the account. Who is this answers nobody
@@ -265,17 +234,17 @@ export class PeopleRepository {
   /** `rows` as persons, each with their links. */
   private async withLinks(rows: PersonRow[]): Promise<Person[]> {
     if (rows.length === 0) return [];
-    const links = await this.db
+    const held = await this.db
       .select()
-      .from(channelMappings)
+      .from(links)
       .where(
         inArray(
-          channelMappings.personId,
+          links.personId,
           rows.map((row) => row.id),
         ),
       );
     return rows.map((row) =>
-      toPerson(row, links.filter((link) => link.personId === row.id).map(toPersonLink)),
+      toPerson(row, held.filter((link) => link.personId === row.id).map(toPersonLink)),
     );
   }
 
@@ -294,7 +263,7 @@ export class PeopleRepository {
    * settled together before the transaction opens, so one held account in a
    * list of five leaves the other four where they were.
    */
-  async create(data: NewPerson & { links?: (Link & { displayName?: string })[] }): Promise<string> {
+  async create(data: NewPerson & { links?: Link[] }): Promise<string> {
     const id = await this.mintId(data.displayName);
 
     const claims = await this.resolveClaims(data.links ?? []);
@@ -362,11 +331,7 @@ export class PeopleRepository {
         return { merged: false, reason: "guardian-source" };
       }
 
-      const moved = tx
-        .update(channelMappings)
-        .set({ personId: into })
-        .where(eq(channelMappings.personId, from))
-        .run();
+      const moved = tx.update(links).set({ personId: into }).where(eq(links.personId, from)).run();
       tx.delete(persons).where(eq(persons.id, from)).run();
 
       return { merged: true, links: moved.changes };
@@ -391,10 +356,7 @@ export class PeopleRepository {
       if (!row) return { deleted: false, reason: "unknown" };
       if (protectedPersonReason(row) === "guardian") return { deleted: false, reason: "guardian" };
 
-      const released = tx
-        .delete(channelMappings)
-        .where(eq(channelMappings.personId, personId))
-        .run();
+      const released = tx.delete(links).where(eq(links.personId, personId)).run();
       tx.delete(persons).where(eq(persons.id, personId)).run();
       return { deleted: true, links: released.changes };
     });
@@ -433,13 +395,11 @@ export class PeopleRepository {
    * dropped and the person lost.
    */
   async dismiss(account: Link): Promise<LinkResult> {
-    const channel = this.connectionKindOf(account.channel);
-    const { channelUserId } = account;
     return this.db.transaction((tx): LinkResult => {
       const holder = this.holderOf(account, tx);
       if (holder) return { linked: false, holder };
       tx.insert(dismissedAccounts)
-        .values({ channel, channelUserId, displayName: null })
+        .values({ platform: account.platform, accountId: account.id })
         .onConflictDoNothing()
         .run();
       return { linked: true };
@@ -456,8 +416,8 @@ export class PeopleRepository {
    * would leave the account still dismissed by the address it missed. Links
    * are not touched, so an address a person holds is left where it is.
    */
-  async restore(channel: string, addresses: readonly string[]): Promise<number> {
-    return this.releaseDismissals(this.db, channel, addresses);
+  async restore(platform: string, addresses: readonly string[]): Promise<number> {
+    return this.releaseDismissals(this.db, platform, addresses);
   }
 
   /**
@@ -469,16 +429,10 @@ export class PeopleRepository {
    * Claiming is one statement, not a read followed by a write, so a second
    * writer re-points the link instead of adding a rival one, whatever order
    * the two arrive in. A dismissal of the account goes with it, in the same
-   * transaction, and the link keeps the dismissal's name when the caller has
-   * none. Returns the link row's id.
+   * transaction. Returns the link row's id.
    */
-  linkStated(
-    account: Link,
-    personId: string,
-    displayName?: string,
-    exec: SqliteExec = this.db,
-  ): string {
-    return this.claim(account, personId, displayName, false, exec);
+  linkStated(account: Link, personId: string, exec: SqliteExec = this.db): string {
+    return this.claim(account, personId, false, exec);
   }
 
   /**
@@ -490,61 +444,44 @@ export class PeopleRepository {
    * Claims on the same terms as {@link linkStated}, and marks the link a
    * delegate whether it was new or re-pointed. Returns the link row's id.
    */
-  linkDelegate(account: Link, personId: string, displayName?: string): string {
-    return this.claim(account, personId, displayName, true, this.db);
+  linkDelegate(account: Link, personId: string): string {
+    return this.claim(account, personId, true, this.db);
   }
 
   /** The claim {@link linkStated} and {@link linkDelegate} share. Only a
    *  delegate claim writes the mark, so a platform's statement about an
    *  account's owner never clears one. */
-  private claim(
-    account: Link,
-    personId: string,
-    displayName: string | undefined,
-    delegate: boolean,
-    exec: SqliteExec,
-  ): string {
+  private claim(account: Link, personId: string, delegate: boolean, exec: SqliteExec): string {
     // Called without a transaction, it opens its own: releasing the dismissal
     // and writing the link are one decision, and a link that fails must leave
     // the dismissal standing.
     if (!inTransaction(this.db)) {
-      return this.db.transaction((tx) => this.claim(account, personId, displayName, delegate, tx));
+      return this.db.transaction((tx) => this.claim(account, personId, delegate, tx));
     }
-    const channel = this.connectionKindOf(account.channel);
-    // On this connection, so it reads inside the caller's transaction.
-    const dismissedAs = this.dismissalOf(account)?.displayName ?? null;
-    this.releaseDismissals(exec, channel, [account.channelUserId]);
+    this.releaseDismissals(exec, account.platform, [account.id]);
     const row = exec
-      .insert(channelMappings)
+      .insert(links)
       .values({
         id: uuid(),
         personId,
-        channel,
-        channelUserId: account.channelUserId,
-        displayName: displayName ?? dismissedAs,
+        platform: account.platform,
+        accountId: account.id,
         delegate,
       })
       .onConflictDoUpdate({
-        target: [channelMappings.channel, channelMappings.channelUserId],
-        set: {
-          personId,
-          ...(delegate ? { delegate } : {}),
-          // The display name is the channel's, and every caller that has one
-          // took it from an inbound message. A caller without one is reporting
-          // no news, not a rename, so the stored name stands.
-          displayName: sql`coalesce(excluded.${sql.raw(channelMappings.displayName.name)}, ${channelMappings.displayName})`,
-        },
+        target: [links.platform, links.accountId],
+        set: { personId, ...(delegate ? { delegate } : {}) },
       })
       // Re-pointing keeps the existing row, whose id is not the one minted
       // above. Returning the row's own id keeps the reported link real.
-      .returning({ id: channelMappings.id })
+      .returning({ id: links.id })
       .get();
     return row.id;
   }
 
   /**
-   * Re-address one of a person's accounts from `account.channelUserId` to
-   * `to`, in `exec`, leaving their other accounts on that channel alone. Heals
+   * Re-address one of a person's accounts from `account.id` to `to`, in
+   * `exec`, leaving their other accounts on that platform alone. Heals
    * a stale guardian self address (e.g. a device-suffixed WhatsApp id captured
    * before canonicalization) onto its canonical form on reconnect.
    *
@@ -554,19 +491,15 @@ export class PeopleRepository {
    * the person does not hold the account, having moved nothing.
    */
   readdress(personId: string, account: Link, to: string, exec: SqliteExec = this.db): boolean {
-    const channel = this.connectionKindOf(account.channel);
-    const from = account.channelUserId;
+    const { platform } = account;
+    const from = account.id;
     // The row this call re-points, as a subquery so the guard runs inside the
     // caller's transaction rather than as a read before it.
     const rePointed = this.db
-      .select({ id: channelMappings.id })
-      .from(channelMappings)
+      .select({ id: links.id })
+      .from(links)
       .where(
-        and(
-          eq(channelMappings.personId, personId),
-          eq(channelMappings.channel, channel),
-          eq(channelMappings.channelUserId, from),
-        ),
+        and(eq(links.personId, personId), eq(links.platform, platform), eq(links.accountId, from)),
       );
 
     // A rival holding `to` yields it, which is where {@link linkStated}'s
@@ -581,12 +514,12 @@ export class PeopleRepository {
     // being there: a `from` that went away leaves the rival holding an account
     // nothing is about to take.
     exec
-      .delete(channelMappings)
+      .delete(links)
       .where(
         and(
-          eq(channelMappings.channel, channel),
-          eq(channelMappings.channelUserId, to),
-          ne(channelMappings.personId, personId),
+          eq(links.platform, platform),
+          eq(links.accountId, to),
+          ne(links.personId, personId),
           exists(rePointed),
         ),
       )
@@ -597,8 +530,8 @@ export class PeopleRepository {
       .delete(dismissedAccounts)
       .where(
         and(
-          eq(dismissedAccounts.channel, channel),
-          eq(dismissedAccounts.channelUserId, to),
+          eq(dismissedAccounts.platform, platform),
+          eq(dismissedAccounts.accountId, to),
           exists(rePointed),
         ),
       )
@@ -607,21 +540,21 @@ export class PeopleRepository {
     // Whoever still holds `to` after that yield is this person, so the re-point
     // has nothing left to do and says so rather than colliding on the index.
     const stillHeld = this.db
-      .select({ id: channelMappings.id })
-      .from(channelMappings)
-      .where(and(eq(channelMappings.channel, channel), eq(channelMappings.channelUserId, to)));
+      .select({ id: links.id })
+      .from(links)
+      .where(and(eq(links.platform, platform), eq(links.accountId, to)));
 
     // Scoped to the one account being re-pointed, not to every account the
     // person holds on the channel: a person may hold several there, and moving
     // them all onto `to` would collide on the unique index too.
     const result = exec
-      .update(channelMappings)
-      .set({ channelUserId: to })
+      .update(links)
+      .set({ accountId: to })
       .where(
         and(
-          eq(channelMappings.personId, personId),
-          eq(channelMappings.channel, channel),
-          eq(channelMappings.channelUserId, from),
+          eq(links.personId, personId),
+          eq(links.platform, platform),
+          eq(links.accountId, from),
           notExists(stillHeld),
         ),
       )
@@ -636,16 +569,9 @@ export class PeopleRepository {
    * it. Either way the account becomes a stranger.
    */
   async unlink(account: Link, from?: string): Promise<boolean> {
-    const channel = this.connectionKindOf(account.channel);
     const result = this.db
-      .delete(channelMappings)
-      .where(
-        and(
-          eq(channelMappings.channel, channel),
-          eq(channelMappings.channelUserId, account.channelUserId),
-          from === undefined ? undefined : eq(channelMappings.personId, from),
-        ),
-      )
+      .delete(links)
+      .where(and(accountIs(account), from === undefined ? undefined : eq(links.personId, from)))
       .run();
     return result.changes > 0;
   }
@@ -658,28 +584,16 @@ export class PeopleRepository {
    * landed swap.
    */
   private swap(account: Link, expected: string | null, to: string): LinkResult {
-    const channel = this.connectionKindOf(account.channel);
-    const { channelUserId } = account;
-
     return this.db.transaction((tx): LinkResult => {
       const link = tx
-        .select({
-          id: channelMappings.id,
-          personId: channelMappings.personId,
-          personName: persons.displayName,
-        })
-        .from(channelMappings)
-        .innerJoin(persons, eq(persons.id, channelMappings.personId))
-        .where(
-          and(
-            eq(channelMappings.channel, channel),
-            eq(channelMappings.channelUserId, channelUserId),
-          ),
-        )
+        .select({ id: links.id, personId: links.personId, personName: persons.displayName })
+        .from(links)
+        .innerJoin(persons, eq(persons.id, links.personId))
+        .where(accountIs(account))
         .get();
 
       const holder: AccountHolder | null = link
-        ? { channel, channelUserId, personId: link.personId, personName: link.personName }
+        ? { ...account, personId: link.personId, personName: link.personName }
         : null;
 
       const swapped =
@@ -688,29 +602,15 @@ export class PeopleRepository {
           : holder?.personId === expected;
       if (!swapped) return { linked: false, holder };
 
-      const dismissal = this.dismissalOf(account, tx);
-      this.releaseDismissals(tx, channel, [channelUserId]);
+      this.releaseDismissals(tx, account.platform, [account.id]);
       if (link == null) {
-        // The channel's name for the account is not this caller's to supply —
-        // a link names an account, and what to call it comes from the provider
-        // directory at read time. A dismissal's name carries over, the way a
-        // move keeps the link's.
-        tx.insert(channelMappings)
-          .values({
-            id: uuid(),
-            personId: to,
-            channel,
-            channelUserId,
-            displayName: dismissal?.displayName ?? null,
-          })
+        tx.insert(links)
+          .values({ id: uuid(), personId: to, platform: account.platform, accountId: account.id })
           .run();
       } else if (link.personId !== to) {
-        // The row moves rather than being replaced, so the channel-side name it
-        // carries survives a move the way it survives a reclaim.
-        tx.update(channelMappings)
-          .set({ personId: to })
-          .where(eq(channelMappings.id, link.id))
-          .run();
+        // The row moves rather than being replaced, so a delegate mark it
+        // carries survives a move.
+        tx.update(links).set({ personId: to }).where(eq(links.id, link.id)).run();
       }
       return { linked: true };
     });
@@ -738,35 +638,20 @@ export class PeopleRepository {
    * names its sender; one a person holds is refused. The unique index still
    * backstops a rival claim landing between this read and the write.
    */
-  private async resolveClaims(accounts: (Link & { displayName?: string })[]): Promise<Claim[]> {
-    const claims: Claim[] = [];
+  private async resolveClaims(accounts: Link[]): Promise<Link[]> {
     for (const account of accounts) {
       const held = this.holderOf(account);
-      if (held) {
-        throw new AccountHeldError({
-          channel: account.channel,
-          channelUserId: account.channelUserId,
-          personId: held.personId,
-          personName: held.personName,
-        });
-      }
-      claims.push({
-        channel: this.connectionKindOf(account.channel),
-        channelUserId: account.channelUserId,
-        // The name belongs to the channel, so a caller with none to offer
-        // carries the dismissal's forward rather than clearing it.
-        displayName: account.displayName ?? this.dismissalOf(account)?.displayName ?? null,
-      });
+      if (held) throw new AccountHeldError(held);
     }
-    return claims;
+    return accounts.map(({ platform, id }) => ({ platform, id }));
   }
 
   /** Take an account {@link resolveClaims} cleared for this person. */
-  private writeClaim(exec: SqliteExec, personId: string, claim: Claim): void {
-    this.releaseDismissals(exec, claim.channel, [claim.channelUserId]);
+  private writeClaim(exec: SqliteExec, personId: string, claim: Link): void {
+    this.releaseDismissals(exec, claim.platform, [claim.id]);
     exec
-      .insert(channelMappings)
-      .values({ id: uuid(), personId, ...claim })
+      .insert(links)
+      .values({ id: uuid(), personId, platform: claim.platform, accountId: claim.id })
       .run();
   }
 
@@ -775,17 +660,16 @@ export class PeopleRepository {
    *  to take it into a rollback rather than a silent theft. */
   private releaseDismissals(
     exec: SqliteExec,
-    channel: string,
+    platform: string,
     addresses: readonly string[],
   ): number {
     if (addresses.length === 0) return 0;
-    channel = this.connectionKindOf(channel);
     return exec
       .delete(dismissedAccounts)
       .where(
         and(
-          eq(dismissedAccounts.channel, channel),
-          inArray(dismissedAccounts.channelUserId, [...addresses]),
+          eq(dismissedAccounts.platform, platform),
+          inArray(dismissedAccounts.accountId, [...addresses]),
         ),
       )
       .run().changes;
@@ -794,36 +678,28 @@ export class PeopleRepository {
   /** The person holding an account, or null when nobody does. The join loses
    *  nothing — every link references a person row. */
   private holderOf(account: Link, exec: Pick<DrizzleDb, "select"> = this.db): AccountHolder | null {
-    const channel = this.connectionKindOf(account.channel);
     const row = exec
-      .select({ personId: channelMappings.personId, personName: persons.displayName })
-      .from(channelMappings)
-      .innerJoin(persons, eq(channelMappings.personId, persons.id))
-      .where(
-        and(
-          eq(channelMappings.channel, channel),
-          eq(channelMappings.channelUserId, account.channelUserId),
-        ),
-      )
+      .select({ personId: links.personId, personName: persons.displayName })
+      .from(links)
+      .innerJoin(persons, eq(links.personId, persons.id))
+      .where(accountIs(account))
       .get();
-    return row ? { channel, channelUserId: account.channelUserId, ...row } : null;
+    return row ? { platform: account.platform, id: account.id, ...row } : null;
   }
 
   /** The account's dismissal, or null when it is not dismissed. */
   private dismissalOf(account: Link, exec: Pick<DrizzleDb, "select"> = this.db): Dismissal | null {
-    const channel = this.connectionKindOf(account.channel);
-    return (
-      exec
-        .select()
-        .from(dismissedAccounts)
-        .where(
-          and(
-            eq(dismissedAccounts.channel, channel),
-            eq(dismissedAccounts.channelUserId, account.channelUserId),
-          ),
-        )
-        .get() ?? null
-    );
+    const row = exec
+      .select()
+      .from(dismissedAccounts)
+      .where(
+        and(
+          eq(dismissedAccounts.platform, account.platform),
+          eq(dismissedAccounts.accountId, account.id),
+        ),
+      )
+      .get();
+    return row ? { platform: row.platform, id: row.accountId } : null;
   }
 
   private insertPerson(exec: SqliteExec, id: string, data: NewPerson): void {
@@ -839,6 +715,11 @@ export class PeopleRepository {
       })
       .run();
   }
+}
+
+/** The condition that picks the link naming `account`. */
+function accountIs(account: Link) {
+  return and(eq(links.platform, account.platform), eq(links.accountId, account.id));
 }
 
 /** The ids `base` or `base-N` that have a profile in the relationship

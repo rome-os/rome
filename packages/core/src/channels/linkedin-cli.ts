@@ -386,7 +386,7 @@ function emptyToNull(value: string | null | undefined): string | null {
 /**
  * Parse `linkedin thread-participants`. Rows without a member id are dropped
  * rather than stored as a blank account — `participant_id` is the primary key
- * of `linkedin_participants` and has to match `channel_mappings.channel_user_id`.
+ * of `linkedin_participants` and has to match `links.account_id`.
  *
  * An empty result is a failure, not an empty thread: the store reads an empty
  * participant set as "everyone left" and would wipe the thread's membership,

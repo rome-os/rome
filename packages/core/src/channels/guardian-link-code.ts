@@ -11,11 +11,13 @@
  */
 
 import { randomInt, timingSafeEqual } from "node:crypto";
+import type { Account } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import { createLogger } from "../logger.js";
 import type { Admission } from "./admission.js";
 import { sendThrough } from "./connection-ports.js";
+import { platformOf } from "./platform.js";
 
 const log = createLogger("guardian-link-code");
 
@@ -91,6 +93,10 @@ export function createGuardianLinkAdmission(deps: {
   codes: GuardianLinkCodes;
   peopleRepo: Pick<PeopleRepository, "byBondLevel" | "link">;
   registry: Pick<ConnectionRegistry, "get">;
+  /** The account each Connection reaches, whose platform the sender is on.
+   *  Absent, or for a Connection that reaches none yet, the platform of its
+   *  kind. */
+  accountOf?: (connectionId: string) => Account | null;
 }): Admission {
   return async (connectionId, connectionKind, message) => {
     if (!isLinkCodeMessage(message.text)) return true;
@@ -120,7 +126,10 @@ export function createGuardianLinkAdmission(deps: {
     const [guardian] = await deps.peopleRepo.byBondLevel("guardian");
     if (!guardian) return false;
     const result = await deps.peopleRepo.link(
-      { channel: connectionKind, channelUserId: message.senderId },
+      {
+        platform: deps.accountOf?.(connectionId)?.platform ?? platformOf(connectionKind),
+        id: message.senderId,
+      },
       guardian.id,
     );
     log.info("link code redeemed", { connectionId, linked: result.linked });

@@ -1,16 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/helpers.js";
+import type { PersonMappingRepository } from "@rome-os/app-runtime";
+import { createTestDb, type TestDb } from "../test/helpers.js";
 import { PeopleRepository } from "../db/repositories/people.js";
-import { appPersonMapping, type AppPersonMapping } from "./app-person-mapping.js";
+import { appPersonMapping } from "./app-person-mapping.js";
 
 describe("appPersonMapping", () => {
   let testDb: TestDb;
   let people: PeopleRepository;
-  let app: AppPersonMapping;
+  let app: PersonMappingRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
-    people = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    people = new PeopleRepository(testDb.db);
     app = appPersonMapping(people);
   });
 
@@ -18,7 +19,7 @@ describe("appPersonMapping", () => {
     testDb.close();
   });
 
-  it("answers apps with the SDK's channelMappings field", async () => {
+  it("answers apps with the SDK's channelMappings field, and accounts beside it", async () => {
     const id = await app.create({
       displayName: "Alice",
       bondLevel: "inner-circle",
@@ -35,10 +36,34 @@ describe("appPersonMapping", () => {
         { channel: "whatsapp", channelUserId: "wa-alice" },
       ]),
     );
+    expect(found?.accounts).toEqual(
+      expect.arrayContaining([
+        { platform: "telegram", id: "tg-alice" },
+        { platform: "whatsapp", id: "wa-alice" },
+      ]),
+    );
     expect(found).not.toHaveProperty("links");
     expect((await app.findByNameFuzzy("alice"))?.id).toBe(id);
     expect((await app.findByName("Alice")).map((person) => person.id)).toEqual([id]);
     expect(await app.findByBondLevel("guardian")).toEqual([]);
+  });
+
+  it("reads a channel an app names as the platform its accounts live on", async () => {
+    app = appPersonMapping(people, (channel) =>
+      channel === "telegram_user" || channel === "tg-second" ? "telegram" : channel,
+    );
+    const id = await app.create({
+      displayName: "Alice",
+      bondLevel: "inner-circle",
+      channelMappings: [{ channel: "telegram_user", channelUserId: "1001" }],
+    });
+
+    // The bot and a second bot hear the same Telegram account.
+    expect((await app.findByChannelUser("telegram", "1001"))?.id).toBe(id);
+    expect((await app.findByChannelUser("tg-second", "1001"))?.id).toBe(id);
+    expect((await app.findByChannelUser("telegram", "1001"))?.channelMappings).toEqual([
+      { channel: "telegram", channelUserId: "1001" },
+    ]);
   });
 
   it("answers null for an account nobody holds", async () => {

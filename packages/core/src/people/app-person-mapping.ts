@@ -4,31 +4,39 @@
 // The SDK's names are a published contract, so they stay as apps know them:
 // `channelMappings` on each person and `addChannelMapping` for a link. This is
 // the one place they are translated, so the repository itself speaks People's
-// language.
+// language. An app names an account by the channel it heard it on, and People
+// by the platform, so a channel an app passes is read as its platform here.
 
 import type { PersonMappingRepository, PersonRecord } from "@rome-os/app-runtime";
+import { platformOf } from "@rome/api-types/platform";
+import type { PlatformOfChannel } from "../channels/channel.js";
 import type { PeopleRepository, Person } from "../db/repositories/people.js";
-
-/** What an app reads: the SDK's contract, plus the link key the system app's
- *  send action asks for when it is there. */
-export type AppPersonMapping = PersonMappingRepository & {
-  linkKeyOf(channel: string): string;
-};
 
 function toRecord(person: Person): PersonRecord {
   const { links, ...rest } = person;
   // The SDK's mapping is the account and nothing else, so the delegate mark
   // stays People's until the SDK publishes it.
+  const accounts = links.map(({ platform, id }) => ({ platform, id }));
   return {
     ...rest,
-    channelMappings: links.map(({ channel, channelUserId }) => ({ channel, channelUserId })),
+    channelMappings: accounts.map(({ platform, id }) => ({ channel: platform, channelUserId: id })),
+    accounts,
   };
 }
 
-export function appPersonMapping(people: PeopleRepository): AppPersonMapping {
+/** `platformOfChannel` reads a channel an app names as its platform. Absent,
+ *  the platform of the connection kind a channel is named after. */
+export function appPersonMapping(
+  people: PeopleRepository,
+  platformOfChannel: PlatformOfChannel = platformOf,
+): PersonMappingRepository {
+  const accountOn = (channel: string, channelUserId: string) => ({
+    platform: platformOfChannel(channel),
+    id: channelUserId,
+  });
   return {
     async findByChannelUser(channel, channelUserId) {
-      const person = await people.byAccount({ channel, channelUserId });
+      const person = await people.byAccount(accountOn(channel, channelUserId));
       return person && toRecord(person);
     },
     async findByName(displayName) {
@@ -42,11 +50,13 @@ export function appPersonMapping(people: PeopleRepository): AppPersonMapping {
       return (await people.byBondLevel(bondLevel)).map(toRecord);
     },
     create({ channelMappings, ...person }) {
-      return people.create({ ...person, links: channelMappings });
+      return people.create({
+        ...person,
+        links: channelMappings?.map((mapping) => accountOn(mapping.channel, mapping.channelUserId)),
+      });
     },
-    async addChannelMapping(personId, channel, channelUserId, displayName) {
-      return people.linkStated({ channel, channelUserId }, personId, displayName);
+    async addChannelMapping(personId, channel, channelUserId) {
+      return people.linkStated(accountOn(channel, channelUserId), personId);
     },
-    linkKeyOf: (channel) => people.linkKeyOf(channel),
   };
 }

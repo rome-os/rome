@@ -21,6 +21,7 @@ import {
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
 import { parseMessageCursor } from "@rome/api-types/message";
+import { platformOf } from "@rome/api-types/platform";
 import { createPerson } from "../../people/create.js";
 import { deletePerson } from "../../people/delete.js";
 import { mergePeople } from "../../people/merge.js";
@@ -29,6 +30,7 @@ import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
 import { readPersonTimeline } from "../../people/timeline.js";
 import { personMessageStores, timelineAccounts } from "../../people/timeline-sources.js";
+import { accountOfWire, wireOf } from "../../people/wire.js";
 import type { ApiDeps } from "../deps.js";
 
 // The People surface. What a person and their accounts are, how the listing
@@ -138,14 +140,17 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const request = parseLinkAccountRequest(await c.req.json().catch(() => null));
     if (!request) return c.json({ error: "channel and channelUserId are required" }, 400);
 
-    const account = { channel: request.channel, channelUserId: request.channelUserId };
+    const account = accountOfWire(request);
     const result = request.transferFrom
       ? await deps.peopleRepo.move(account, request.transferFrom, person.id)
       : await deps.peopleRepo.link(account, person.id);
     if (!result.linked) {
       const { holder } = result;
       return c.json(
-        linkConflict(request, holder && { id: holder.personId, displayName: holder.personName }),
+        linkConflict(
+          wireOf(account),
+          holder && { id: holder.personId, displayName: holder.personName },
+        ),
         409,
       );
     }
@@ -167,7 +172,10 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // accounts, and reporting success would tell the caller their view was
     // right when it was stale.
     const unlinked = await deps.peopleRepo.unlink(
-      { channel: c.req.param("channel"), channelUserId: c.req.param("channelUserId") },
+      accountOfWire({
+        channel: c.req.param("channel"),
+        channelUserId: c.req.param("channelUserId"),
+      }),
       person.id,
     );
     if (!unlinked) return c.json({ error: "Unknown account" }, 404);
@@ -194,28 +202,26 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // person's address is not making a request this person's page can answer,
     // and sending anyway would deliver a message the guardian addressed to
     // someone else.
+    const account = accountOfWire(parsed.request);
     const held = person.links.some(
-      (mapping) =>
-        mapping.channel === parsed.request.channel &&
-        mapping.channelUserId === parsed.request.channelUserId,
+      (link) => link.platform === account.platform && link.id === account.id,
     );
     if (!held) {
       return c.json({ error: "That account is not linked to this person" }, 400);
     }
 
     // The account the message goes out from has to be one of Rome's accounts
-    // of the link's connection kind that can send to this account. Rome never
-    // substitutes another for it. `sendToAccount` checks it for a new send.
+    // on the link's platform. Rome never substitutes another for it.
+    // `sendToAccount` checks it for a new send.
     // TODO(people-send-from dashboard PR): require `from` once the dashboard
-    // sends it. Until then a send without it goes out from the kind's only
-    // account, and is refused while Rome holds several.
+    // sends it. Until then a send without it goes out from Rome's only account
+    // on the platform, and is refused while Rome holds several.
     const result = await sendToAccount(
       deps,
-      parsed.request,
+      account,
       parsed.request.text,
       parsed.request.id,
       parsed.request.from,
-      deps.sendersOfLink(parsed.request.channel),
     );
     if (!result.ok && "invalid" in result) return c.json({ error: result.invalid }, 400);
     if (!result.ok && "error" in result) return c.json({ error: result.error }, 409);
@@ -281,17 +287,20 @@ export function peopleRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "cursor is not a timeline cursor" }, 400);
     }
 
-    // A channel this person holds no account on answers an empty page rather
-    // than a 400: channels are open — a Rome App brings its own — so there is
-    // no set of names to check one against, and "no history there" is the true
-    // answer for every name that is not a typo.
+    // `?channel=` names a platform, as an account's `channel` does, and a kind
+    // of connection reads as its platform. One this person holds no account
+    // on answers an empty page rather than a 400: channels are open — a Rome
+    // App brings its own — so there is no set of names to check one against,
+    // and "no history there" is the true answer for every name that is not a
+    // typo.
     const channel = c.req.query("channel");
+    const platform = channel && platformOf(channel);
     const [accounts] = await timelineAccounts(deps, [person.links]);
 
     return c.json(
       await readPersonTimeline(
         personMessageStores(deps),
-        accounts.filter((account) => !channel || account.channel === channel),
+        accounts.filter((account) => !platform || account.channel === platform),
         { cursor, limit: timelinePageLimit(c.req.query("limit")) },
       ),
     );

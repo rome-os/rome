@@ -5,7 +5,7 @@
 // unlinking are that account's verbs, and a dismissal that quietly displaced a
 // placement would lose the guardian's work.
 //
-// The account, not the address. A channel that reaches one account several
+// The account, not the address. A platform that reaches one account several
 // ways is folded by `readAccountDirectory`, so a caller holding any address of
 // an account decides the account — otherwise a dismissal by the address the
 // guardian happened to see would leave the account undismissed by every other
@@ -21,16 +21,15 @@ import {
 } from "@rome/api-types/people";
 import { readAccountDirectory, type AccountDirectoryDeps } from "./account-directory.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
+import { accountOfWire, type WireAccount } from "./wire.js";
 
 export interface AccountDecisionDeps extends AccountDirectoryDeps {
   peopleRepo: AccountDirectoryDeps["peopleRepo"] & Pick<PeopleRepository, "dismiss" | "restore">;
 }
 
-/** The account a write names: any address the channel reaches it at. */
-export interface AccountRef {
-  channel: string;
-  channelUserId: string;
-}
+/** The account a write names: its platform, as the wire's `channel`, and any
+ *  address the platform reaches it at. */
+export type AccountRef = WireAccount;
 
 /**
  * What a decision came to: the account as it reads now, the person who refused
@@ -73,10 +72,7 @@ export async function dismissAccount(
     // Without that, a link arriving in the gap would sit beside a dismissal of
     // the same account, which is the harm the refusal above exists to prevent
     // reached by a different route.
-    const claim = await deps.peopleRepo.dismiss({
-      channel: account.channel,
-      channelUserId: account.channelUserId,
-    });
+    const claim = await deps.peopleRepo.dismiss(accountOfWire(account));
     if (!claim.linked) {
       // A dismissal is refused only by someone holding the account, so there is
       // always a person to name here.
@@ -151,12 +147,12 @@ async function locate(
   ref: AccountRef,
 ): Promise<DirectoryAccount | null> {
   const directory = await readAccountDirectory(deps);
+  const { platform, id } = accountOfWire(ref);
   return (
     directory.find(
       (account) =>
-        account.channel === ref.channel &&
-        (account.channelUserId === ref.channelUserId ||
-          account.addresses.includes(ref.channelUserId)),
+        account.channel === platform &&
+        (account.channelUserId === id || account.addresses.includes(id)),
     ) ?? null
   );
 }

@@ -87,7 +87,7 @@ import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
-import { AccountProfiles, channelPlatforms, refreshingAfter } from "./channels/account-profiles.js";
+import { AccountProfiles, refreshingAfter } from "./channels/account-profiles.js";
 import { AccountProfilesRepository } from "./db/repositories/account-profiles.js";
 import { platformOf } from "@rome/api-types/platform";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
@@ -332,11 +332,13 @@ async function main() {
   // agent: each inbound port reads this by connection, and a link tells it.
   const accountListening = new AccountListening(accountAgents);
   // The connection kind a channel name belongs to. Whatever is keyed by connection kind, such
-  // as a descriptor, a channel policy, or a person's link, reads it.
+  // as a descriptor or a channel policy, reads it.
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
-  const peopleRepo = new PeopleRepository(db, connectionKindOfChannel);
-  const channelOfLink = (link: string) => channelRecords.channelOfLink(link);
-  const sendersOfLink = (link: string) => channelRecords.sendersOfLink(link);
+  // The platform a channel's accounts live on, for a row that still names a
+  // channel. People keys its links by platform, and reads every such row
+  // through this.
+  const platformOfChannel = (name: string) => channelRecords.platformOfChannel(name);
+  const peopleRepo = new PeopleRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -345,10 +347,7 @@ async function main() {
   const sentinelLogRepo = new SentinelLogRepository(db);
   // What each platform says about the accounts Rome meets. The two address
   // books fill it after each sync and once now, so a dropped cache is rebuilt.
-  const accountProfiles = new AccountProfiles(
-    new AccountProfilesRepository(db),
-    channelPlatforms(channelRecords),
-  );
+  const accountProfiles = new AccountProfiles(new AccountProfilesRepository(db), platformOfChannel);
   const refreshWhatsAppProfiles = () =>
     accountProfiles.refresh(platformOf("whatsapp"), whatsAppAccounts);
   const refreshLinkedInProfiles = () =>
@@ -466,13 +465,14 @@ async function main() {
   const linkAgentToGuardian = createAgentsGuardianLink({
     peopleRepo,
     settingsRepo,
-    channel: AGENTS_KIND,
+    platform: AGENTS_KIND,
   });
   const guardianLinkCodes = new GuardianLinkCodes();
   const linkCodeAdmission = createGuardianLinkAdmission({
     codes: guardianLinkCodes,
     peopleRepo,
     registry: connectionRegistry,
+    accountOf: (connectionId) => accounts.accountOf(connectionId),
   });
   // Every sender is admitted: Rome never asks a sender to pair
   // (docs/domains/people.md#stranger). Only the guardian's link code is taken
@@ -947,8 +947,8 @@ async function main() {
     stopActiveConversationTurn(input, {
       turns: agentTurnStreamRegistry,
       isGuardian: async (channel, senderId) =>
-        (await peopleRepo.byAccount({ channel, channelUserId: senderId }))?.bondLevel ===
-        "guardian",
+        (await peopleRepo.byAccount({ platform: platformOfChannel(channel), id: senderId }))
+          ?.bondLevel === "guardian",
     });
   const subagentExecutionService = createSubagentExecutionService({
     webchatRepo,
@@ -1142,7 +1142,7 @@ async function main() {
     // Apps built before the chat rename read `conversationSettings`.
     conversationSettings: appChatSettings,
     capabilityDiscovery,
-    personMappingRepo: appPersonMapping(peopleRepo),
+    personMappingRepo: appPersonMapping(peopleRepo, platformOfChannel),
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
@@ -1474,6 +1474,7 @@ async function main() {
   const accountNames = createAccountNames({
     channels,
     sentinelLogRepo,
+    platformOfChannel,
     profiles: accountProfiles,
   });
 
@@ -1816,8 +1817,9 @@ async function main() {
       guardianLinkCodes,
       outboxRepo,
       channels,
-      channelOfLink,
-      sendersOfLink,
+      platformOfChannel,
+      sendersOn: (platform: string) => channelRecords.sendersOn(platform),
+      accountOf: (channel: string) => channelRecords.accountOf(channel),
       accountNames,
       assistants: listedAgents,
       webchatRepo,

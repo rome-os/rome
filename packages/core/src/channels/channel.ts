@@ -169,15 +169,44 @@ export interface Channel extends AppChannel {
  */
 export type Channels = readonly Channel[];
 
-/** Each channel's address book by channel name, for the callers that fold every
- *  channel's accounts at once. Channels with no address book are absent, which
- *  is what a fold reads to fall back on the addresses it already holds. */
-export function addressBooks(channels: Channels): AddressBooks {
+/** The platform a channel's accounts live on, for a caller that holds a
+ *  channel's name (`ChannelRecordsRepository.platformOfChannel`). */
+export type PlatformOfChannel = (channel: string) => string;
+
+/**
+ * Each channel's address book by the platform its accounts live on, for the
+ * callers that fold every account at once. An account is the platform's, so a
+ * book files it under the platform whichever of Rome's accounts mirrors it.
+ * Channels with no address book are absent, which is what a fold reads to fall
+ * back on the addresses it already holds. No platform has two books today;
+ * should one, the channel listed first answers for it.
+ */
+export function addressBooks(
+  channels: Channels,
+  platformOfChannel: PlatformOfChannel,
+): AddressBooks {
   const books: Record<string, Accounts> = {};
   for (const channel of channels) {
-    if (channel.accounts) books[channel.name] = channel.accounts;
+    const platform = platformOfChannel(channel.name);
+    if (channel.accounts && !books[platform]) books[platform] = channel.accounts;
   }
   return books;
+}
+
+/**
+ * The names of the channels whose accounts live on `platform`, in the
+ * channels' order: every store an account's history there may sit under, since
+ * a message is stored under the channel it arrived on and an account hears
+ * from Rome on any of Rome's accounts on its platform.
+ */
+export function channelsOn(
+  channels: Channels,
+  platformOfChannel: PlatformOfChannel,
+  platform: string,
+): string[] {
+  return channels
+    .filter((channel) => platformOfChannel(channel.name) === platform)
+    .map((channel) => channel.name);
 }
 
 /** The channels' own stores that answer per-account reads, in the channels'

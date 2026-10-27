@@ -1,16 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { DrizzleDb } from "../db/index.js";
 import { PeopleRepository } from "../db/repositories/people.js";
-import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { GUARDIAN_PROFILE_PATH } from "../profile-memory.js";
-
-/** Maps every channel to itself. Valid only where no connection kind has a later channel. */
-const identity: ConnectionKindOfChannel = (channel) => channel;
 
 /**
  * Unified, deterministic baseline seed.
@@ -85,7 +81,7 @@ export async function seedBaseline(db: DrizzleDb): Promise<BaselineIds> {
 // Baseline builders (internal — tests should call seedBaseline instead)
 
 async function seedPersonsBaseline(db: DrizzleDb) {
-  const repo = new PeopleRepository(db, identity);
+  const repo = new PeopleRepository(db);
 
   const guardianId = "guardian";
   await repo.createWithId(guardianId, {
@@ -94,28 +90,28 @@ async function seedPersonsBaseline(db: DrizzleDb) {
     profilePath: GUARDIAN_PROFILE_PATH,
     approved: true,
   });
-  repo.linkStated({ channel: "telegram", channelUserId: "tg-guardian" }, guardianId, "Guardian");
-  repo.linkStated({ channel: "webchat", channelUserId: "web-guardian" }, guardianId, "Guardian");
+  repo.linkStated({ platform: "telegram", id: "tg-guardian" }, guardianId);
+  repo.linkStated({ platform: "webchat", id: "web-guardian" }, guardianId);
 
   const innerCircleId = await repo.create({
     displayName: "Alice Inner",
     bondLevel: "inner-circle",
     approved: true,
-    links: [{ channel: "telegram", channelUserId: "tg-alice" }],
+    links: [{ platform: "telegram", id: "tg-alice" }],
   });
 
   const acquaintanceId = await repo.create({
     displayName: "Bob Acquaintance",
     bondLevel: "acquaintance",
     approved: true,
-    links: [{ channel: "telegram", channelUserId: "tg-bob" }],
+    links: [{ platform: "telegram", id: "tg-bob" }],
   });
 
   const otherId = await repo.create({
     displayName: "Carol Other",
     bondLevel: "other",
     approved: true,
-    links: [{ channel: "whatsapp", channelUserId: "wa-carol" }],
+    links: [{ platform: "whatsapp", id: "wa-carol" }],
   });
 
   return { guardianId, innerCircleId, acquaintanceId, otherId };

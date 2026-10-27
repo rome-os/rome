@@ -149,12 +149,13 @@ export function sqlMessages(options: SqlMessagesOptions): AccountMessages {
 function accountKeys(accounts: readonly MessageAccount[], channel: string | undefined): JobKey[] {
   const scope = new Map<string, JobKey>();
   for (const account of accounts) {
-    const held = heldOn(account);
-    if (held === null || (channel !== undefined && held !== channel)) continue;
-    for (const address of account.addresses) {
-      const pair = `${held}\n${address}`;
-      if (!scope.has(pair)) {
-        scope.set(pair, { channel: held, key: address, shown: account.channel });
+    for (const held of heldOn(account)) {
+      if (channel !== undefined && held !== channel) continue;
+      for (const address of account.addresses) {
+        const pair = `${held}\n${address}`;
+        if (!scope.has(pair)) {
+          scope.set(pair, { channel: held, key: address, shown: account.channel });
+        }
       }
     }
   }
@@ -163,7 +164,7 @@ function accountKeys(accounts: readonly MessageAccount[], channel: string | unde
 
 /**
  * A scope key as a job asks it, with the `source` its entries carry: the
- * account's `channel`, which is its link's key. A row is stored under the
+ * account's `channel`, which is its link's platform. A row is stored under the
  * channel it arrived on, which for an account read under `storedUnder` is
  * another name, and an entry has to name the account a reader asked about.
  * Ranking and the cursor read the same name, so a page and its cursor agree.

@@ -8,11 +8,10 @@
 // cache after it.
 
 import type { Account, ChannelMessage } from "@rome-os/app-runtime";
-import { platformOf } from "@rome/api-types/platform";
 import type { AccountProfilesRepository } from "../db/repositories/account-profiles.js";
-import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
 import type { Accounts } from "./accounts.js";
+import type { PlatformOfChannel } from "./channel.js";
 
 const log = createLogger("account-profiles");
 
@@ -33,9 +32,9 @@ export class AccountProfiles {
       AccountProfilesRepository,
       "fromAddressBook" | "fromMessage" | "profilesOf"
     >,
-    /** The platform a channel's accounts live on. A link and a sentinel row
-     *  still name an account by its channel, so a read by either translates. */
-    private readonly platformOfChannel: (channel: string) => string,
+    /** The platform a channel's accounts live on, for a message that does
+     *  not name the account it arrived on. */
+    private readonly platformOfChannel: PlatformOfChannel,
   ) {}
 
   /**
@@ -101,27 +100,9 @@ export class AccountProfiles {
       });
   }
 
-  /** The display name the cache holds for each address, positionally, or null. */
-  async displayNames(
-    addresses: Array<{ channel: string; channelUserId: string }>,
-  ): Promise<Array<string | null>> {
-    // A listing names a handful of channels across many rows, and each
-    // translation can read the channel records, so each channel is read once.
-    const platforms = new Map<string, string>();
-    const platformOf = (channel: string) => {
-      let platform = platforms.get(channel);
-      if (platform === undefined) {
-        platform = this.platformOfChannel(channel);
-        platforms.set(channel, platform);
-      }
-      return platform;
-    };
-    const profiles = await this.repo.profilesOf(
-      addresses.map((address) => ({
-        platform: platformOf(address.channel),
-        id: address.channelUserId,
-      })),
-    );
+  /** The display name the cache holds for each account, positionally, or null. */
+  async displayNames(accounts: readonly Account[]): Promise<Array<string | null>> {
+    const profiles = await this.repo.profilesOf([...accounts]);
     return profiles.map((profile) => named(profile?.displayName));
   }
 
@@ -136,31 +117,6 @@ export class AccountProfiles {
       })),
     );
   }
-}
-
-/**
- * The platform a channel's accounts live on, for a name a stored row holds.
- *
- * A row may name a channel by its id, or, as a person's link does, by the
- * connection kind it was made on. A second Feishu app's channel has an opaque
- * id and its links say `feishu`, so a name reads the platform of the one
- * channel it reaches now, before any record that merely carries the name: a
- * `feishu` row left by a disconnected Feishu app must not outvote the Lark app
- * the link reaches. A channel id reaches its own channel. Only where a name
- * reaches no one channel does a record of that name answer, and then the
- * connection kind's own platform, which cannot tell Lark from Feishu.
- */
-export function channelPlatforms(
-  records: Pick<ChannelRecordsRepository, "platformOf" | "channelOfLink">,
-): (channel: string) => string {
-  return (channel) => {
-    const reached = records.channelOfLink(channel);
-    return (
-      (reached ? records.platformOf(reached) : null) ??
-      records.platformOf(channel) ??
-      platformOf(channel)
-    );
-  };
 }
 
 /**

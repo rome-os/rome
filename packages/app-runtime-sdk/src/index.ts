@@ -2689,11 +2689,14 @@ export function upgradeWebSocket(
 }
 
 /**
- * One account linked to a person.
+ * One account linked to a person, as {@link PersonRecord.channelMappings}
+ * spells it.
  *
  * A channel mapping is a link and `channelUserId` is the account's own address
- * (docs/concepts/people.md). The names here are the published wire contract and
- * the database's, so they stay as they are.
+ * (docs/domains/people.md#link). `channel` holds the account's platform, such
+ * as `telegram` for an account Rome met through a Telegram bot or a signed-in
+ * Telegram account alike. A host that predates platform-keyed links held the
+ * kind of connection there instead.
  */
 export interface ChannelMappingRecord {
   channel: string;
@@ -2704,15 +2707,24 @@ export interface PersonRecord {
   id: string;
   displayName: string;
   bondLevel: "guardian" | "inner-circle" | "acquaintance" | "other";
+  /** Superseded by {@link PersonRecord.accounts}, which names the same links
+   *  by the {@link Account} value. Still filled. */
   channelMappings: ChannelMappingRecord[];
+  /** Every account linked to the person, as the platform and the platform's
+   *  own id. Absent from a host that predates it. */
+  accounts?: Account[];
   profilePath?: string | null;
   approved?: boolean | null;
   createdAt?: Date;
   [key: string]: unknown;
 }
 
-/** The people the host knows and the accounts linked to each. Named for the
- *  `channel_mappings` table it reads; see {@link ChannelMappingRecord}. */
+/**
+ * The people the host knows and the accounts linked to each. Named for the
+ * table it once read; see {@link ChannelMappingRecord}. A `channel` passed in
+ * names a channel, such as a message's `channel`, and the host reads it as the
+ * platform that channel's accounts live on.
+ */
 export interface PersonMappingRepository {
   findByChannelUser(channel: string, channelUserId: string): Promise<PersonRecord | null>;
   findByName(displayName: string): Promise<PersonRecord[]>;

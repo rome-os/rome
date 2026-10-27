@@ -60,7 +60,7 @@ describe("guardian link admission", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    repo = new PeopleRepository(testDb.db);
     testDb.db
       .insert(persons)
       .values([
@@ -85,27 +85,25 @@ describe("guardian link admission", () => {
   it("links the sender of a code in a direct message to the guardian, anywhere", async () => {
     const { code } = codes.issue();
     expect(await admit("bot", "discord", message(code, { channel: "discord" }))).toBe(false);
-    expect((await repo.byAccount({ channel: "discord", channelUserId: "123" }))?.id).toBe("owner");
+    expect((await repo.byAccount({ platform: "discord", id: "123" }))?.id).toBe("owner");
     await rs.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
 
     expect(await admit("wa", "whatsapp", message(codes.issue().code, { senderId: "8613" }))).toBe(
       false,
     );
-    expect((await repo.byAccount({ channel: "whatsapp", channelUserId: "8613" }))?.id).toBe(
-      "owner",
-    );
+    expect((await repo.byAccount({ platform: "whatsapp", id: "8613" }))?.id).toBe("owner");
   });
 
   it("links a dismissed account, and refuses to move one linked to someone else", async () => {
-    await repo.dismiss({ channel: "telegram", channelUserId: "123" });
+    await repo.dismiss({ platform: "telegram", id: "123" });
     expect(await admit("bot", "telegram", message(codes.issue().code))).toBe(false);
-    expect((await repo.byAccount({ channel: "telegram", channelUserId: "123" }))?.id).toBe("owner");
+    expect((await repo.byAccount({ platform: "telegram", id: "123" }))?.id).toBe("owner");
 
-    await repo.linkStated({ channel: "telegram", channelUserId: "456" }, "li");
+    await repo.linkStated({ platform: "telegram", id: "456" }, "li");
     expect(await admit("bot", "telegram", message(codes.issue().code, { senderId: "456" }))).toBe(
       false,
     );
-    expect((await repo.byAccount({ channel: "telegram", channelUserId: "456" }))?.id).toBe("li");
+    expect((await repo.byAccount({ platform: "telegram", id: "456" }))?.id).toBe("li");
   });
 
   it("leaves the code unused when it comes in mail that failed authentication", async () => {
@@ -144,9 +142,7 @@ describe("guardian link admission", () => {
     await mail.ingestInbound(raw, createHmac("sha256", "secret").update(raw).digest("hex"));
 
     expect(await admit("mail", "email", inbound[0])).toBe(false);
-    expect(
-      await repo.byAccount({ channel: "email", channelUserId: inbound[0].senderId }),
-    ).toBeNull();
+    expect(await repo.byAccount({ platform: "email", id: inbound[0].senderId })).toBeNull();
     expect(send).not.toHaveBeenCalled();
     expect(codes.redeem(code)).toBe(true);
   });
@@ -154,15 +150,15 @@ describe("guardian link admission", () => {
   it("voids a code said in a group without linking anyone", async () => {
     const { code } = codes.issue();
     expect(await admit("bot", "feishu", message(code, { thread: { kind: "group" } }))).toBe(false);
-    expect(await repo.byAccount({ channel: "feishu", channelUserId: "123" })).toBeNull();
+    expect(await repo.byAccount({ platform: "feishu", id: "123" })).toBeNull();
     expect(await admit("bot", "feishu", message(code))).toBe(false);
-    expect(await repo.byAccount({ channel: "feishu", channelUserId: "123" })).toBeNull();
+    expect(await repo.byAccount({ platform: "feishu", id: "123" })).toBeNull();
   });
 
   it("keeps a wrong code out of the chat and links no one", async () => {
     codes.issue();
     expect(await admit("bot", "slack_bot", message("ROME-AAAAAAAA"))).toBe(false);
-    expect(await repo.byAccount({ channel: "slack_bot", channelUserId: "123" })).toBeNull();
+    expect(await repo.byAccount({ platform: "slack_bot", id: "123" })).toBeNull();
     await rs.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
   });
 });

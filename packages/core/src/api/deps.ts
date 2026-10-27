@@ -8,8 +8,8 @@ import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import type { OutboxRepository } from "../db/repositories/outbox.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
-import type { Channels } from "../channels/channel.js";
-import type { ChannelOfLink, SendersOfLink } from "../db/repositories/channel-records.js";
+import type { Channels, PlatformOfChannel } from "../channels/channel.js";
+import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { AccountNames } from "../channels/account-names.js";
 import type { ExternalAgents } from "../channels/agents-accounts.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
@@ -97,12 +97,13 @@ export interface ApiDeps {
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route
    *  reads either store directly. */
   channels: Channels;
-  /** The one channel a person's link reaches, or null when Rome holds several
-   *  accounts of the service it names. */
-  channelOfLink: ChannelOfLink;
-  /** Rome's accounts a send to a person's link may name as the one it goes
-   *  out from. */
-  sendersOfLink: SendersOfLink;
+  /** The platform a channel's accounts live on, for a row that still names a
+   *  channel: a sentinel log row, an outbox row. */
+  platformOfChannel: PlatformOfChannel;
+  /** The channels of Rome's accounts on a platform a send may go out from. */
+  sendersOn: SendersOn;
+  /** Rome's own account on a channel, which a send names as `from`. */
+  accountOf: ChannelRecordsRepository["accountOf"];
   /** What each platform calls an account, over every address book Rome mirrors
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */

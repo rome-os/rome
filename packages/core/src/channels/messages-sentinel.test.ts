@@ -149,7 +149,7 @@ describe("sentinelLogMessages", () => {
 
     expect(await refs()).not.toContain("sentinel:opaque");
     const entries = await sentinelLogMessages(db).read({
-      accounts: [{ ...account, storedUnder: "tg-opaque" }],
+      accounts: [{ ...account, storedUnder: ["tg-opaque"] }],
       limit: WHOLE_HISTORY,
     });
     expect(entries.map((entry) => [entry.ref, entry.source])).toEqual([

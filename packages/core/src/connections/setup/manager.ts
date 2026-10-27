@@ -21,6 +21,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { DrizzleTx } from "../../db/index.js";
+import { platformOf } from "@rome/api-types/platform";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import {
@@ -323,8 +324,11 @@ export class SetupManager {
       // an abandoned setup leaves nothing behind.
       if (signal.aborted) throw new SetupAbortError();
       const channelUserId = given.guardianChannelUserId;
+      // The kinds that report the guardian's own address have no domain to
+      // tell a platform apart by, so the kind names it.
+      const platform = platformOf(target.connectionKind);
       const plan = channelUserId
-        ? await planGuardianMapping(this.#deps.peopleRepo, target.connectionKind, channelUserId)
+        ? await planGuardianMapping(this.#deps.peopleRepo, platform, channelUserId)
         : null;
       const opts = {
         ...(plan && channelUserId
@@ -333,7 +337,7 @@ export class SetupManager {
                 applyGuardianMappingWithinTx(
                   tx,
                   this.#deps.peopleRepo,
-                  target.connectionKind,
+                  platform,
                   channelUserId,
                   plan,
                 ),

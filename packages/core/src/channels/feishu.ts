@@ -1,3 +1,4 @@
+import { platformOf } from "./platform.js";
 import {
   createLarkChannel,
   type CardActionEvent,
@@ -159,6 +160,9 @@ export class FeishuAdapter {
   /** Unsubscribe callbacks from channel.on(), cleared on stop() so handlers
    *  don't accumulate if the adapter is ever started again. */
   private unsubscribes: Array<() => void> = [];
+  /** The platform this app's senders are accounts on: Lark for a Lark app,
+   *  Feishu otherwise. */
+  private readonly platform: string;
 
   constructor(
     config: FeishuConfig,
@@ -177,6 +181,7 @@ export class FeishuAdapter {
       }),
   ) {
     this.channel = createChannel(config);
+    this.platform = platformOf("feishu", config.domain);
     this.connectionId = config.connectionId;
     this.chatSettings = config.chatSettings;
     this.peopleRepo = config.peopleRepo;
@@ -540,7 +545,7 @@ export class FeishuAdapter {
 
   private async isGuardian(channelUserId: string): Promise<boolean> {
     if (!this.peopleRepo) return false;
-    const person = await this.peopleRepo.byAccount({ channel: "feishu", channelUserId });
+    const person = await this.peopleRepo.byAccount({ platform: this.platform, id: channelUserId });
     return person?.bondLevel === "guardian";
   }
 

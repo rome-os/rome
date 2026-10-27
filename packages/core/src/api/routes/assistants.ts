@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import type { Account } from "@rome-os/app-runtime";
 import {
   compareAssistants,
   listsAsAssistant,
@@ -46,7 +47,7 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "Rome Cloud could not be reached" }, 503);
     }
 
-    const groups = agents.map((agent) => [{ channel: AGENTS_KIND, channelUserId: agent.agentId }]);
+    const groups = agents.map((agent) => [{ platform: AGENTS_KIND, id: agent.agentId }]);
     const accounts = await timelineAccounts(deps, groups);
     const stores = personMessageStores(deps);
     const assistants = await Promise.all(
@@ -120,9 +121,9 @@ export function assistantsRoutes(deps: ApiDeps): Hono {
 
 /** The assistant's address on the agents channel. Only an agent id is one, so
  *  a name or a typo answers 404 rather than reaching the channel. */
-function addressOf(c: Context): { channel: string; channelUserId: string } | null {
+function addressOf(c: Context): Account | null {
   const agentId = c.req.param("agentId") ?? "";
-  return isAgentId(agentId) ? { channel: AGENTS_KIND, channelUserId: agentId } : null;
+  return isAgentId(agentId) ? { platform: AGENTS_KIND, id: agentId } : null;
 }
 
 function unknownAssistant(c: Context) {

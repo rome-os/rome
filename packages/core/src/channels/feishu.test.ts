@@ -215,7 +215,7 @@ function makeChatSettings(initial: ChatSettingsOverrides = {}) {
 function guardianPersonRepo(channelUserId: string): PeopleRepository {
   return {
     byAccount: async (account: Link) =>
-      account.channel === "feishu" && account.channelUserId === channelUserId
+      account.platform === "feishu" && account.id === channelUserId
         ? {
             id: "guardian",
             displayName: "Guardian",

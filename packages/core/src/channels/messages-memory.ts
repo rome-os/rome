@@ -29,10 +29,10 @@ export function memoryMessages(held: readonly HeldMessage[]): AccountMessages {
   const full = (accounts: readonly MessageAccount[]): Message[] => {
     const scope = new Map<string, string>();
     for (const account of accounts) {
-      const on = heldOn(account);
-      if (on === null) continue;
-      for (const address of account.addresses) {
-        if (!scope.has(pair(on, address))) scope.set(pair(on, address), account.channel);
+      for (const on of heldOn(account)) {
+        for (const address of account.addresses) {
+          if (!scope.has(pair(on, address))) scope.set(pair(on, address), account.channel);
+        }
       }
     }
     return held

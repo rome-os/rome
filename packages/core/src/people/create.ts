@@ -13,6 +13,7 @@ import {
 } from "@rome/api-types/people";
 import { AccountHeldError, type PeopleRepository } from "../db/repositories/people.js";
 import { readPerson, type PeopleReadDeps } from "./resource.js";
+import { accountOfWire, wireOf } from "./wire.js";
 
 export interface PeopleWriteDeps extends PeopleReadDeps {
   peopleRepo: PeopleReadDeps["peopleRepo"] & Pick<PeopleRepository, "create">;
@@ -30,8 +31,8 @@ export type CreatePersonResult = { person: PersonResource } | { conflict: LinkCo
  * duplicate instead. An account linked to a person who was never committed is
  * a link to nobody.
  *
- * A dismissed account links silently. Dismissal files an account under the
- * stranger sentinel, so a guardian naming its sender is telling Rome who that
+ * A dismissed account links silently. A dismissal names no person, so a
+ * guardian naming its sender is telling Rome who that
  * sender is, which is the answer dismissal declined to give rather than one it
  * contradicts.
  */
@@ -47,13 +48,16 @@ export async function createPerson(
       // The guardian typed this person in, so there is nobody left to approve
       // them — the same standing every person the dashboard creates has.
       approved: true,
-      links: request.accounts,
+      links: request.accounts.map(accountOfWire),
     });
   } catch (err) {
     if (err instanceof AccountHeldError) {
       const { holder } = err;
       return {
-        conflict: linkConflict(holder, { id: holder.personId, displayName: holder.personName }),
+        conflict: linkConflict(wireOf(holder), {
+          id: holder.personId,
+          displayName: holder.personName,
+        }),
       };
     }
     throw err;

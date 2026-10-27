@@ -208,7 +208,7 @@ async function buildHarness(
   const testDb = createTestDb();
   const db = testDb.db;
 
-  const people = new PeopleRepository(db, recordedConnectionKindOf(db));
+  const people = new PeopleRepository(db);
   const repos: TestRomeRepos = {
     sessions: new SessionsRepository(db),
     approvals: new ApprovalsRepository(db),

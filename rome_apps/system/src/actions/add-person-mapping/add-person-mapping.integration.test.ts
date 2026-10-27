@@ -30,9 +30,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
 
   it("add person → pending approval → approve → person.approved=true", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: appPersonMapping(
-        new PeopleRepository(testDb.db, identityConnectionKindOf),
-      ),
+      personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
@@ -51,7 +49,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
 
     // In the real system, an approval handler would update the person.
     // Simulate that by updating the person directly.
-    const personRepo = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    const personRepo = new PeopleRepository(testDb.db);
     const { persons } = await import("../../../../../packages/core/src/db/schema.js");
     const { eq } = await import("drizzle-orm");
     await testDb.db.update(persons).set({ approved: true }).where(eq(persons.id, result.personId));
@@ -62,9 +60,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
 
   it("add person → reject → person stays approved=false", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: appPersonMapping(
-        new PeopleRepository(testDb.db, identityConnectionKindOf),
-      ),
+      personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
@@ -75,7 +71,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
     expect(updatedApproval!.status).toBe("rejected");
 
     // Person should remain unapproved
-    const personRepo = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    const personRepo = new PeopleRepository(testDb.db);
     const person = await personRepo.byId(result.personId);
     expect(person!.approved).toBe(false);
   });
@@ -83,9 +79,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
   it("add duplicate display name triggers disambiguation flow", async () => {
     // Add first person
     await addPersonMapping(baseInput, {
-      personMappingRepo: appPersonMapping(
-        new PeopleRepository(testDb.db, identityConnectionKindOf),
-      ),
+      personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
@@ -97,9 +91,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
           channelUserId: "alice-456",
         },
         {
-          personMappingRepo: appPersonMapping(
-            new PeopleRepository(testDb.db, identityConnectionKindOf),
-          ),
+          personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
           approvalsRepo: new ApprovalsRepository(testDb.db),
         },
       ),
@@ -113,50 +105,43 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
         channelUserId: "alice-456",
       },
       {
-        personMappingRepo: appPersonMapping(
-          new PeopleRepository(testDb.db, identityConnectionKindOf),
-        ),
+        personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
         approvalsRepo: new ApprovalsRepository(testDb.db),
       },
     );
 
-    const personRepo = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    const personRepo = new PeopleRepository(testDb.db);
     const person = await personRepo.byId(result.personId);
     expect(person!.displayName).toBe("Alice (work)");
   });
 
   it("add second channel mapping for existing person uses same personId", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: appPersonMapping(
-        new PeopleRepository(testDb.db, identityConnectionKindOf),
-      ),
+      personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
     // Add a second channel mapping to the existing person
-    const personRepo = new PeopleRepository(testDb.db, identityConnectionKindOf);
-    await personRepo.linkStated(
-      { channel: "whatsapp", channelUserId: "alice-whatsapp" },
-      result.personId,
-    );
+    const personRepo = new PeopleRepository(testDb.db);
+    await personRepo.linkStated({ platform: "whatsapp", id: "alice-whatsapp" }, result.personId);
 
     const person = await personRepo.byId(result.personId);
     expect(person!.links).toHaveLength(2);
     expect(person!.links).toEqual(
       expect.arrayContaining([
-        { channel: "telegram", channelUserId: "alice-123" },
-        { channel: "whatsapp", channelUserId: "alice-whatsapp" },
+        { platform: "telegram", id: "alice-123" },
+        { platform: "whatsapp", id: "alice-whatsapp" },
       ]),
     );
 
     // Both mappings reference the same personId
     const foundViaTelegram = await personRepo.byAccount({
-      channel: "telegram",
-      channelUserId: "alice-123",
+      platform: "telegram",
+      id: "alice-123",
     });
     const foundViaWhatsapp = await personRepo.byAccount({
-      channel: "whatsapp",
-      channelUserId: "alice-whatsapp",
+      platform: "whatsapp",
+      id: "alice-whatsapp",
     });
 
     expect(foundViaTelegram!.id).toBe(result.personId);
@@ -165,9 +150,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
 
   it("findByChannelUser returns correct person after approval", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: appPersonMapping(
-        new PeopleRepository(testDb.db, identityConnectionKindOf),
-      ),
+      personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
@@ -177,14 +160,14 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
     await testDb.db.update(persons).set({ approved: true }).where(eq(persons.id, result.personId));
 
     // Look up by channel user
-    const personRepo = new PeopleRepository(testDb.db, identityConnectionKindOf);
-    const found = await personRepo.byAccount({ channel: "telegram", channelUserId: "alice-123" });
+    const personRepo = new PeopleRepository(testDb.db);
+    const found = await personRepo.byAccount({ platform: "telegram", id: "alice-123" });
 
     expect(found).not.toBeNull();
     expect(found!.id).toBe(result.personId);
     expect(found!.displayName).toBe("Alice");
     expect(found!.bondLevel).toBe("inner-circle");
     expect(found!.approved).toBe(true);
-    expect(found!.links).toEqual([{ channel: "telegram", channelUserId: "alice-123" }]);
+    expect(found!.links).toEqual([{ platform: "telegram", id: "alice-123" }]);
   });
 });

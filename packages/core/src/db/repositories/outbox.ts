@@ -1,7 +1,7 @@
 import { and, eq, gt, inArray, lt, lte, or, type SQL } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { SEND_IDEMPOTENCY_RETENTION_MS, type OutboxMessage } from "@rome/api-types/people";
-import { outboundMessages, outboundSendReceipts } from "../schema.js";
+import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
+import { outboundMessages, outboundSendReceipts, type StoredOutboxMessage } from "../schema.js";
 import type { DrizzleDb, DrizzleTx } from "../index.js";
 
 /**
@@ -71,6 +71,8 @@ export interface OutboxAccount {
   channelUserId: string;
 }
 
+export type { StoredOutboxMessage };
+
 export class OutboxRepository {
   constructor(private readonly db: DrizzleDb) {}
 
@@ -97,7 +99,9 @@ export class OutboxRepository {
     chatId: string;
     text: string;
     from?: string | null;
-  }): Promise<{ row: OutboxRow; created: true } | { message: OutboxMessage; created: false }> {
+  }): Promise<
+    { row: OutboxRow; created: true } | { message: StoredOutboxMessage; created: false }
+  > {
     const now = new Date();
     const row = {
       ...input,
@@ -217,11 +221,15 @@ export class OutboxRepository {
   }
 
   /** A replayable response, even after delivery cleanup or discard. */
-  async findSend(id: string): Promise<OutboxMessage | null> {
+  async findSend(id: string): Promise<StoredOutboxMessage | null> {
     return this.recordedSend(this.db, id, new Date());
   }
 
-  private recordedSend(db: DrizzleDb | DrizzleTx, id: string, now: Date): OutboxMessage | null {
+  private recordedSend(
+    db: DrizzleDb | DrizzleTx,
+    id: string,
+    now: Date,
+  ): StoredOutboxMessage | null {
     const active = db.select().from(outboundMessages).where(eq(outboundMessages.id, id)).get();
     if (active) return outboxMessage(active);
     const receipt = db
@@ -261,6 +269,17 @@ export class OutboxRepository {
     );
   }
 
+  /** Every open row addressed to one of `addresses` on any channel, oldest
+   *  first. For a caller that reads which account a row names itself. */
+  async forAddresses(addresses: readonly string[]): Promise<OutboxRow[]> {
+    if (addresses.length === 0) return [];
+    const rows = await this.db
+      .select()
+      .from(outboundMessages)
+      .where(inArray(outboundMessages.channelUserId, [...new Set(addresses)]));
+    return rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+
   /** Every open row for a set of accounts, oldest first — the order they were
    *  written in, which is the order they were meant to arrive in. */
   async forAccounts(accounts: readonly OutboxAccount[]): Promise<OutboxRow[]> {
@@ -285,7 +304,7 @@ export class OutboxRepository {
   }
 }
 
-export function outboxMessage(row: OutboxRow, now = new Date()): OutboxMessage {
+export function outboxMessage(row: OutboxRow, now = new Date()): StoredOutboxMessage {
   return {
     id: row.id,
     channel: row.channel,

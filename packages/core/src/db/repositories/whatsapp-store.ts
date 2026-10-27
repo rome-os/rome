@@ -274,8 +274,8 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
       FROM wa_threads t
       LEFT JOIN wa_contacts c ON c.jid = t.jid
       LEFT JOIN wa_chats ch ON ch.jid = t.jid
-      LEFT JOIN channel_mappings cm
-        ON cm.channel = 'whatsapp' AND cm.channel_user_id = t.jid
+      LEFT JOIN links cm
+        ON cm.platform = 'whatsapp' AND cm.account_id = t.jid
       LEFT JOIN persons p ON p.id = cm.person_id
       WHERE NOT (
         t.jid LIKE '%@lid'

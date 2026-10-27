@@ -92,7 +92,7 @@ function directAddresses(accounts: readonly MessageAccount[]): string[] {
   return [
     ...new Set(
       accounts
-        .filter((account) => heldOn(account) === WECHAT_USER_CHANNEL)
+        .filter((account) => heldOn(account).includes(WECHAT_USER_CHANNEL))
         .flatMap((account) => account.addresses),
     ),
   ];

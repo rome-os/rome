@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Account } from "@rome-os/app-runtime";
 import { and, asc, eq, isNotNull, isNull, ne, or } from "drizzle-orm";
 import type { AccountLinkOf } from "../../channels/account-links.js";
 import { platformOf } from "../../channels/platform.js";
@@ -49,13 +50,9 @@ function releaseAccount(exec: Exec, platform: string, accountId: string, keep: s
  *  connection kind's name, so a name with no record answers for itself. */
 export type ConnectionKindOfChannel = (channel: string) => string;
 
-/** The one channel a person's link reaches, or null when it reaches none.
- *  `ChannelRecordsRepository.channelOfLink` states the rule. */
-export type ChannelOfLink = (link: string) => string | null;
-
-/** The ids of Rome's accounts a send to a person's link may go out from.
- *  `ChannelRecordsRepository.sendersOfLink` states the rule. */
-export type SendersOfLink = (link: string) => string[];
+/** The channels of Rome's accounts on a platform that a send may go out from.
+ *  `ChannelRecordsRepository.sendersOn` states the rule. */
+export type SendersOn = (platform: string) => string[] | null;
 
 function toRecord(row: Omit<typeof channels.$inferSelect, "agent">): ChannelRecord {
   return {
@@ -118,10 +115,10 @@ export class ChannelRecordsRepository {
    *  moves a Connection empties it (a link moves none), and nothing is cached
    *  while a transaction is open, so a rolled-back write leaves no id behind. */
   private readonly ids = new Map<string, string | null>();
-  /** `channelOfLink` by link, read for every link on every People read. It
-   *  empties with `ids`, since only a write that moves a Connection changes
-   *  which channels are backed. */
-  private readonly links = new Map<string, string | null>();
+  /** `platformOfChannel` by channel, read for every row on every People
+   *  read. It empties with `ids`, since only a write that moves a Connection
+   *  changes a channel's platform. */
+  private readonly platforms = new Map<string, string>();
 
   /** `linkOf` says which kinds of connection take an agent, whose accounts
    *  start fresh. */
@@ -152,46 +149,42 @@ export class ChannelRecordsRepository {
   }
 
   /**
-   * The channel a person's link keyed by `link` reaches. People keys a link by
-   * connection kind, and Rome never picks among a connection kind's accounts, so:
-   *
-   * - A link naming a channel whose connection kind is another name (an opaque id)
-   *   reaches that channel.
-   * - A link naming a connection kind reaches the connection kind's one account: the one
-   *   channel of it a Connection backs. With none backed it reaches the
-   *   channel carrying the connection kind's name, as for a connection kind no record names.
-   * - With several backed, it reaches none, so null.
-   *
-   * Backed channels are counted rather than recorded ones, since a released
-   * row stays after its account is removed and is not an account.
+   * The platform channel `name`'s accounts live on: its record's, or, for a
+   * name no record holds, the platform of the connection kind it is named
+   * after. A row stored before links named a platform names a channel, and
+   * this is how it is read as an account.
    */
-  channelOfLink(link: string): string | null {
-    const cached = this.links.get(link);
+  platformOfChannel(name: string): string {
+    const cached = this.platforms.get(name);
     if (cached !== undefined) return cached;
-    const senders = this.sendersOfLink(link);
-    const reached =
-      senders.length === 0 ? link : senders.length === 1 ? (senders[0] ?? null) : null;
-    if (!inTransaction(this.db)) this.links.set(link, reached);
-    return reached;
+    const platform = this.platformOf(name) ?? platformOf(name);
+    if (!inTransaction(this.db)) this.platforms.set(name, platform);
+    return platform;
   }
 
   /**
-   * The ids of Rome's accounts a send to a person's link keyed by `link` may
-   * name to go out from, oldest first. A link naming a channel's own opaque id
-   * answers that channel while a Connection backs it. A link naming a connection kind
-   * answers each channel of the connection kind a Connection backs, or the channel
-   * carrying the connection kind's name when none is, as for a connection kind no record names.
+   * The channels of Rome's accounts on `platform` a Connection backs, oldest
+   * first: the ones a send to an account there may go out from. Rome never
+   * picks among them. Null when no record is on the platform at all, which is
+   * a platform only Rome's own channels serve, such as `webchat`: the
+   * channels named after it answer then.
    */
-  sendersOfLink(link: string): string[] {
-    const own = this.byId(link);
-    if (own && own.connectionKind !== link) return own.connectionId === null ? [] : [link];
-    const backed = reached(this.db)
-      .where(eq(channels.connectionKind, link))
+  sendersOn(platform: string): string[] | null {
+    const recorded = reached(this.db)
+      .where(eq(channels.platform, platform))
       .orderBy(asc(channels.createdAt))
       .all()
-      .map(reachedRecord)
-      .filter((record) => record.connectionId !== null);
-    return backed.length === 0 ? [link] : backed.map((record) => record.id);
+      .map(reachedRecord);
+    if (recorded.length === 0) return null;
+    return recorded.filter((record) => record.connectionId !== null).map((record) => record.id);
+  }
+
+  /** Rome's own account on channel `id`, or null while its record knows none. */
+  accountOf(id: string): Account | null {
+    const record = this.byId(id);
+    return record?.platformAccountId
+      ? { platform: record.platform, id: record.platformAccountId }
+      : null;
   }
 
   /** The id of the channel `connectionId` backs, or null for none. */
@@ -221,7 +214,7 @@ export class ChannelRecordsRepository {
    *  Connection backed is backed by none now. */
   forget(): void {
     this.ids.clear();
-    this.links.clear();
+    this.platforms.clear();
   }
 
   /**
@@ -249,7 +242,7 @@ export class ChannelRecordsRepository {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
     this.ids.clear();
-    this.links.clear();
+    this.platforms.clear();
 
     const connectionKind = connection.connectionKind;
     const platform = connection.account?.platform ?? platformOf(connectionKind, connection.domain);
@@ -310,7 +303,7 @@ export class ChannelRecordsRepository {
     // A grant given again reaches its account again, whichever it is, so what
     // the caches hold from while it was given up goes.
     this.ids.clear();
-    this.links.clear();
+    this.platforms.clear();
     const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
     if (!row || (row.platform === platform && row.platformAccountId === accountId)) return;
     releaseAccount(exec, platform, accountId, row.id);
@@ -348,7 +341,7 @@ export class ChannelRecordsRepository {
    *  (docs/domains/connections.md#connection). */
   vacate(exec: Exec, connectionId: string): void {
     this.ids.clear();
-    this.links.clear();
+    this.platforms.clear();
     const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
     if (!row) return;
     exec

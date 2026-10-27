@@ -5,7 +5,7 @@ import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { linkedInMemberIdFromProfileUrl, type LinkedInHistoryMessage } from "./linkedin-sync.js";
 
 /**
- * The `channel_mappings.channel_user_id` a LinkedIn message resolves through.
+ * The `links.account_id` a LinkedIn message resolves through.
  *
  * The bare member id is the address the mirror keys on — `linkedin_participants`
  * is primary-keyed by it and promotion writes it into the mapping — so a promoted

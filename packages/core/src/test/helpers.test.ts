@@ -29,7 +29,7 @@ describe("Test Helpers", () => {
 
       expect(tableNames).toContain("sessions");
       expect(tableNames).toContain("persons");
-      expect(tableNames).toContain("channel_mappings");
+      expect(tableNames).toContain("links");
       expect(tableNames).toContain("sentinel_log");
       expect(tableNames).toContain("approvals");
       expect(tableNames).toContain("settings");

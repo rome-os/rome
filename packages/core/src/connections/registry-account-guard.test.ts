@@ -433,11 +433,13 @@ describe("ConnectionRegistry account records", () => {
       );
       expect(next.id).not.toBe(old.id);
       expect(records.byConnection(next.id)?.platformAccountId).toBe("100");
-      // The revoked Connection backs nothing, so the kind's one link reaches
-      // the new account alone.
+      // The revoked Connection backs nothing, so a send on the platform goes
+      // out from the new account alone.
       expect(records.byConnection(old.id)).toBeNull();
       expect(records.idOf(old.id)).toBeNull();
-      expect(records.channelOfLink(SERVICE)).toBe(records.idOf(next.id));
+      expect(records.sendersOn(records.byConnection(next.id)!.platform)).toEqual([
+        records.idOf(next.id),
+      ]);
     } finally {
       close();
     }

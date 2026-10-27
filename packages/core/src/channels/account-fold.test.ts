@@ -57,8 +57,8 @@ describe("foldAccounts", () => {
 
     expect(fold.accounts).toEqual([
       {
-        channel: "whatsapp",
-        channelUserId: ada,
+        platform: "whatsapp",
+        id: ada,
         aliases: [ada, adaLid].sort(),
         name: "Ada",
       },
@@ -86,12 +86,12 @@ describe("foldAccounts", () => {
 
     const fold = await foldAccounts(
       { linkedin },
-      { stored: [{ channel: "linkedin", channelUserId: profileUrl }] },
+      { stored: [{ platform: "linkedin", id: profileUrl }] },
     );
 
     expect(linkedin.resolved).toEqual([profileUrl]);
     expect(fold.canonical("linkedin", profileUrl)).toBe("ACoAAAda0001");
-    expect(fold.accountFor("linkedin", profileUrl)?.channelUserId).toBe("ACoAAAda0001");
+    expect(fold.accountFor("linkedin", profileUrl)?.id).toBe("ACoAAAda0001");
     // The stored form stays the caller's: the fold reads it, it does not
     // publish it as an address of the account.
     expect(fold.accounts[0]?.aliases).toEqual(["ACoAAAda0001"]);
@@ -106,7 +106,7 @@ describe("foldAccounts", () => {
 
     const fold = await foldAccounts(
       { whatsapp },
-      { stored: [{ channel: "whatsapp", channelUserId: adaLid }] },
+      { stored: [{ platform: "whatsapp", id: adaLid }] },
     );
 
     expect(fold.canonical("whatsapp", adaLid)).toBe(ada);
@@ -120,8 +120,8 @@ describe("foldAccounts", () => {
       { whatsapp, linkedin },
       {
         stored: [
-          { channel: "whatsapp", channelUserId: adaLid },
-          { channel: "whatsapp", channelUserId: adaLid },
+          { platform: "whatsapp", id: adaLid },
+          { platform: "whatsapp", id: adaLid },
         ],
       },
     );

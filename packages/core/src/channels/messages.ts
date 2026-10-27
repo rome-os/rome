@@ -35,19 +35,20 @@ export interface MessageAccount {
   /** Non-empty. Order carries no meaning. */
   addresses: readonly string[];
   /**
-   * The channel the account's messages are stored under, when it is not
-   * `channel`: a link keyed by a connection kind names the connection kind, and a store keys a
-   * message by the channel it arrived on. Null when the link reaches no one
-   * channel, and a store then reads nothing for the account. Absent,
-   * `channel`. Either way an entry read for the account carries `channel` as
-   * its `source`, so a reader matches it against the account it asked about.
+   * The channels the account's messages are stored under, when they are not
+   * `channel` alone: a link names the account's platform, and a store keys a
+   * message by the channel it arrived on, so an account on a platform Rome
+   * holds several accounts on is read under each of their channels. Empty,
+   * a store reads nothing for the account. Absent, `channel`. Either way an
+   * entry read for the account carries `channel` as its `source`, so a reader
+   * matches it against the account it asked about.
    */
-  storedUnder?: string | null;
+  storedUnder?: readonly string[];
 }
 
-/** The channel a store reads `account` under, or null for none. */
-export function heldOn(account: MessageAccount): string | null {
-  return account.storedUnder === undefined ? account.channel : account.storedUnder;
+/** The channels a store reads `account` under. */
+export function heldOn(account: MessageAccount): readonly string[] {
+  return account.storedUnder ?? [account.channel];
 }
 
 export interface MessageRead {

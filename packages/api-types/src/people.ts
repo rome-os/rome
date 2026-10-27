@@ -25,7 +25,9 @@
 //
 // The vocabulary is docs/concepts/people.md's. Rome never mints an account:
 // an account is platform-owned, named by the pair (channel, channelUserId) —
-// its channel and its own address — and the only fact about who is who that
+// its platform and its own address. The field keeps the name `channel`, and a
+// core that predates platform-keyed links sent the kind of connection in it.
+// The only fact about who is who that
 // Rome contributes is which person it belongs to. So the writes here move a
 // link between people; none of them creates or destroys the account under it.
 //
@@ -48,6 +50,7 @@
 // on. Each has its own row shape and its own cursor, so neither pays for the
 // other's fields and neither order can be resumed with the other's position.
 
+import type { Account } from "@rome-os/app-runtime";
 import { compareCodePoints, type Message } from "./message.js";
 
 // ---------------------------------------------------------------------------
@@ -789,13 +792,12 @@ export interface LinkedAccount {
    */
   latestAt: number | null;
   /**
-   * The ids of Rome's own accounts a send to this account may name as
-   * `SendMessageRequest.from`: each connected account of the link's service,
-   * or the one account a link naming an account's own id reaches. A service no
-   * account record names answers its own name. Absent from a core that
-   * predates it.
+   * Rome's own accounts a send to this account may name as
+   * `SendMessageRequest.from`: each account on its platform a connection
+   * backs, oldest first. Asked when the person is read, never stored. Absent
+   * from a core that predates it.
    */
-  from?: string[];
+  from?: Account[];
   /**
    * True on a delegate link (docs/domains/people.md#delegate-link): the account
    * is an agent's, acting for this person, so whoever reads it is talking to
@@ -1276,12 +1278,21 @@ export interface SendMessageRequest {
   channelUserId: string;
   text: string;
   /**
-   * The id of Rome's account the message goes out from, one of the person's
-   * account's `LinkedAccount.from`. Rome never substitutes another account
-   * for it. Absent, the send goes out from the service's only account and is
-   * refused while the service has several.
+   * Rome's account the message goes out from, one of the person's account's
+   * `LinkedAccount.from`. Rome never substitutes another account for it.
+   * Absent, the send goes out from Rome's only account on the platform and is
+   * refused while Rome holds several there.
    */
-  from?: string;
+  from?: Account;
+}
+
+/** An `Account` as a body spells it, or null where it names none. */
+function accountOf(value: unknown): Account | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { platform, id } = value as Record<string, unknown>;
+  if (typeof platform !== "string" || typeof id !== "string") return null;
+  const named = { platform: platform.trim(), id: id.trim() };
+  return named.platform && named.id && isChannelIdentifier(named.platform) ? named : null;
 }
 
 /** A send's id as a client spells it: a UUID v4. */
@@ -1299,8 +1310,8 @@ export function parseSendMessageRequest(
   const channel = typeof raw.channel === "string" ? raw.channel.trim() : "";
   const channelUserId = typeof raw.channelUserId === "string" ? raw.channelUserId.trim() : "";
   const text = typeof raw.text === "string" ? raw.text.trim() : "";
-  const from = typeof raw.from === "string" ? raw.from.trim() : "";
-  if (raw.from !== undefined && (!from || !isChannelIdentifier(from))) {
+  const from = accountOf(raw.from);
+  if (raw.from !== undefined && !from) {
     return { error: "from must name one of Rome's accounts" };
   }
   if (!channel) return { error: "channel is required" };
@@ -1316,7 +1327,7 @@ export function parseSendMessageRequest(
       channel,
       channelUserId,
       text,
-      ...(raw.from === undefined ? {} : { from }),
+      ...(from ? { from } : {}),
     },
   };
 }
@@ -1328,7 +1339,8 @@ export function matchesSendRequest(message: OutboxMessage, request: SendMessageR
     message.channel === request.channel &&
     message.channelUserId === request.channelUserId &&
     message.text === request.text &&
-    (request.from === undefined || message.from === request.from)
+    (request.from === undefined ||
+      (message.from?.platform === request.from.platform && message.from.id === request.from.id))
   );
 }
 
@@ -1386,10 +1398,10 @@ export interface OutboxMessage {
   /** Why the channel refused, for a `failed` row. Provider text, shown as
    *  detail beneath copy the dashboard owns. */
   error: string | null;
-  /** The id of Rome's account the message went out from. Null for a row
-   *  written before Rome recorded it, and absent from a core that predates
-   *  it. */
-  from?: string | null;
+  /** Rome's account the message went out from. Null for a row written before
+   *  Rome recorded it, or one whose channel knows no account, and absent from
+   *  a core that predates it. */
+  from?: Account | null;
   /** Whether `DELETE /api/people/:id/outbox/:messageId` would take this row
    *  when it was read. The server answers it from inputs it does not send, so
    *  a client offers Discard from this and does not re-derive it. Always

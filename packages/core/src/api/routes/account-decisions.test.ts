@@ -12,7 +12,7 @@ import { accountsRoutes } from "./accounts.js";
 import { dismissAccount, type AccountDecisionDeps } from "../../people/account-decisions.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
-import { channelMappings, dismissedAccounts } from "../../db/schema.js";
+import { dismissedAccounts, links } from "../../db/schema.js";
 
 // Dismiss and restore are the two writes that move an account between "nobody
 // has decided about this" and "the guardian does not want to hear from it".
@@ -86,7 +86,7 @@ describe("Account dismiss and restore", () => {
       displayName: "Wanda Placed",
       bondLevel: "acquaintance",
       approved: true,
-      links: [{ channel: "whatsapp", channelUserId: LINKED_JID }],
+      links: [{ platform: "whatsapp", id: LINKED_JID }],
     });
 
     // An account already dismissed: a sender in the log, filed under the
@@ -99,7 +99,7 @@ describe("Account dismiss and restore", () => {
       text: "buy my coin",
       action: "ignored",
     });
-    await deps.peopleRepo.dismiss({ channel: "telegram", channelUserId: DISMISSED_SENDER });
+    await deps.peopleRepo.dismiss({ platform: "telegram", id: DISMISSED_SENDER });
   });
 
   afterEach(() => testDb.close());
@@ -132,10 +132,8 @@ describe("Account dismiss and restore", () => {
   const mappingRows = (channel: string, channelUserId: string) =>
     testDb.db
       .select()
-      .from(channelMappings)
-      .where(
-        and(eq(channelMappings.channel, channel), eq(channelMappings.channelUserId, channelUserId)),
-      )
+      .from(links)
+      .where(and(eq(links.platform, channel), eq(links.accountId, channelUserId)))
       .all();
 
   /** Every dismissal row the pair holds. */
@@ -145,8 +143,8 @@ describe("Account dismiss and restore", () => {
       .from(dismissedAccounts)
       .where(
         and(
-          eq(dismissedAccounts.channel, channel),
-          eq(dismissedAccounts.channelUserId, channelUserId),
+          eq(dismissedAccounts.platform, channel),
+          eq(dismissedAccounts.accountId, channelUserId),
         ),
       )
       .all();
@@ -263,7 +261,7 @@ describe("Account dismiss and restore", () => {
             displayName: "Rival Claimant",
             bondLevel: "other",
             approved: true,
-            links: [{ channel: "whatsapp", channelUserId: TALKING_JID }],
+            links: [{ platform: "whatsapp", id: TALKING_JID }],
           });
           return stale;
         },

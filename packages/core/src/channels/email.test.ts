@@ -531,8 +531,8 @@ describe("EmailAdapter.start guardian resolution", () => {
     );
     // The resolved address is used to seed the guardian channel mapping.
     expect(peopleRepo.byAccount).toHaveBeenCalledWith({
-      channel: "email",
-      channelUserId: "owner@example.com",
+      platform: "email",
+      id: "owner@example.com",
     });
   });
 
@@ -564,8 +564,8 @@ describe("EmailAdapter.start guardian resolution", () => {
 
     expect(resolver).not.toHaveBeenCalled();
     expect(peopleRepo.byAccount).toHaveBeenCalledWith({
-      channel: "email",
-      channelUserId: "set@example.com",
+      platform: "email",
+      id: "set@example.com",
     });
   });
 
@@ -607,8 +607,8 @@ describe("EmailAdapter.start guardian resolution", () => {
     await bootAdapter().start();
     expect((stored.email as { guardianEmail?: string }).guardianEmail).toBe("owner@example.com");
     expect(peopleRepo.byAccount).toHaveBeenLastCalledWith({
-      channel: "email",
-      channelUserId: "owner@example.com",
+      platform: "email",
+      id: "owner@example.com",
     });
   });
 });

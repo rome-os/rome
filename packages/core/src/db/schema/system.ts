@@ -95,24 +95,21 @@ export const persons = sqliteTable("persons", {
 });
 
 /**
- * Which person each account belongs to — a channel mapping is a
- * [link](docs/concepts/people.md#link), and `channel_user_id` is the account's
- * own [address](docs/concepts/people.md#address).
- *
- * The table, its columns, and its index keep the older names: renaming any of
- * them needs a migration, and `channelMappings` is also the wire field
- * `@rome-os/app-runtime` publishes on `PersonRecord`.
+ * Which person each account belongs to: a
+ * [link](docs/domains/people.md#link). It names the account the way Chats
+ * does, by the platform and the platform's own id for it
+ * (docs/domains/chats.md#account), so one account is one row whichever of
+ * Rome's accounts met it.
  */
-export const channelMappings = sqliteTable(
-  "channel_mappings",
+export const links = sqliteTable(
+  "links",
   {
     id: text("id").primaryKey(),
     personId: text("person_id")
       .references(() => persons.id)
       .notNull(),
-    channel: text("channel").notNull(),
-    channelUserId: text("channel_user_id").notNull(),
-    displayName: text("display_name"),
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
     /** A [delegate link](docs/domains/people.md#delegate-link): the account is
      *  an agent's, acting for the person it is linked to. */
     delegate: integer("delegate", { mode: "boolean" }).notNull().default(false),
@@ -122,7 +119,7 @@ export const channelMappings = sqliteTable(
     // than checked before each write: two concurrent placements of the same
     // waiting sender both read "unlinked" and both insert, and the People page
     // would then show that account under two people at once.
-    uniqueIndex("idx_channel_mappings_identity").on(table.channel, table.channelUserId),
+    uniqueIndex("idx_links_account").on(table.platform, table.accountId),
   ],
 );
 
@@ -136,13 +133,10 @@ export const channelMappings = sqliteTable(
 export const dismissedAccounts = sqliteTable(
   "dismissed_accounts",
   {
-    channel: text("channel").notNull(),
-    channelUserId: text("channel_user_id").notNull(),
-    // The channel's name for the account when it was dismissed, carried onto
-    // the link if the guardian later says who the account is.
-    displayName: text("display_name"),
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
   },
-  (table) => [primaryKey({ columns: [table.channel, table.channelUserId] })],
+  (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
 );
 
 /**
@@ -239,12 +233,21 @@ export const outboundMessages = sqliteTable(
   (table) => [index("idx_outbound_account").on(table.channel, table.channelUserId)],
 );
 
+/**
+ * A send as the outbox stores it and a receipt keeps it: the wire message,
+ * still naming the channel the row was addressed on and the channel it went
+ * out from. People reads both as accounts when it answers
+ * (`people/outbox.ts`), since a row keeps channel names until the outbox is
+ * re-keyed.
+ */
+export type StoredOutboxMessage = Omit<OutboxMessage, "from"> & { from?: string | null };
+
 /** Outbox removal retains the response for the retry window in docs/concepts/people.md#outbox. */
 export const outboundSendReceipts = sqliteTable(
   "outbound_send_receipts",
   {
     id: text("id").primaryKey(),
-    response: text("response", { mode: "json" }).$type<OutboxMessage>().notNull(),
+    response: text("response", { mode: "json" }).$type<StoredOutboxMessage>().notNull(),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [index("idx_outbound_send_receipts_expiry").on(table.expiresAt)],
@@ -362,7 +365,7 @@ export const linkedinMessages = sqliteTable(
 // stored once, not once per thread the person appears in.
 export const linkedinParticipants = sqliteTable("linkedin_participants", {
   // LinkedIn member id, bare (`ACoAA…`) — no urn: prefix and no profile URL —
-  // so it matches `channel_mappings.channel_user_id` for `channel = "linkedin"`
+  // so it matches `links.account_id` for `platform = "linkedin"`
   // and a mirrored participant can be promoted into `persons` with no
   // translation step.
   participantId: text("participant_id").primaryKey(),

@@ -37,7 +37,7 @@ describe("linking same-account agents to the guardian", () => {
 
   beforeEach(async () => {
     testDb = createTestDb();
-    people = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    people = new PeopleRepository(testDb.db);
     settings = new SettingsRepository(testDb.db);
     testDb.db
       .insert(persons)
@@ -46,7 +46,7 @@ describe("linking same-account agents to the guardian", () => {
     link = createAgentsGuardianLink({
       peopleRepo: people,
       settingsRepo: settings,
-      channel: "agents",
+      platform: "agents",
     });
   });
   afterEach(() => testDb.close());
@@ -54,35 +54,29 @@ describe("linking same-account agents to the guardian", () => {
   it("links an agent Cloud marks as in this account, before its first message is read", async () => {
     await link(message("ep-atlas"));
 
-    const person = await people.byAccount({ channel: "agents", channelUserId: "ep-atlas" });
+    const person = await people.byAccount({ platform: "agents", id: "ep-atlas" });
     expect(person?.id).toBe("owner");
     expect(person?.bondLevel).toBe("guardian");
     // A delegate link: the guardian's agent, not the guardian.
-    expect(person?.links).toEqual([
-      { channel: "agents", channelUserId: "ep-atlas", delegate: true },
-    ]);
+    expect(person?.links).toEqual([{ platform: "agents", id: "ep-atlas", delegate: true }]);
   });
 
   it("never links another account's agent, even one sharing a name with the guardian's", async () => {
     await link(message("ep-atlas"));
     await link(message("ep-friend-atlas", external));
 
-    expect((await people.byAccount({ channel: "agents", channelUserId: "ep-atlas" }))?.id).toBe(
-      "owner",
-    );
-    expect(
-      await people.byAccount({ channel: "agents", channelUserId: "ep-friend-atlas" }),
-    ).toBeNull();
+    expect((await people.byAccount({ platform: "agents", id: "ep-atlas" }))?.id).toBe("owner");
+    expect(await people.byAccount({ platform: "agents", id: "ep-friend-atlas" })).toBeNull();
     expect(await settings.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)).toEqual(["ep-atlas"]);
   });
 
   it("keeps a dismissal", async () => {
-    await people.dismiss({ channel: "agents", channelUserId: "ep-atlas" });
+    await people.dismiss({ platform: "agents", id: "ep-atlas" });
 
     await link(message("ep-atlas"));
 
-    expect(await people.byAccount({ channel: "agents", channelUserId: "ep-atlas" })).toBeNull();
-    expect(await people.isDismissed({ channel: "agents", channelUserId: "ep-atlas" })).toBe(true);
+    expect(await people.byAccount({ platform: "agents", id: "ep-atlas" })).toBeNull();
+    expect(await people.isDismissed({ platform: "agents", id: "ep-atlas" })).toBe(true);
   });
 
   it("keeps a link to another person", async () => {
@@ -90,35 +84,29 @@ describe("linking same-account agents to the guardian", () => {
       .insert(persons)
       .values({ id: "ada", displayName: "Ada", bondLevel: "acquaintance", createdAt: new Date() })
       .run();
-    await people.linkStated({ channel: "agents", channelUserId: "ep-atlas" }, "ada");
+    await people.linkStated({ platform: "agents", id: "ep-atlas" }, "ada");
 
     await link(message("ep-atlas"));
 
-    expect((await people.byAccount({ channel: "agents", channelUserId: "ep-atlas" }))?.id).toBe(
-      "ada",
-    );
+    expect((await people.byAccount({ platform: "agents", id: "ep-atlas" }))?.id).toBe("ada");
   });
 
   it("does not link again an agent the guardian unlinked, even renamed", async () => {
     await link(message("ep-atlas"));
-    expect(await people.unlink({ channel: "agents", channelUserId: "ep-atlas" }, "owner")).toBe(
-      true,
-    );
+    expect(await people.unlink({ platform: "agents", id: "ep-atlas" }, "owner")).toBe(true);
 
     await link(message("ep-atlas", { name: "nova" }));
 
-    expect(await people.byAccount({ channel: "agents", channelUserId: "ep-atlas" })).toBeNull();
+    expect(await people.byAccount({ platform: "agents", id: "ep-atlas" })).toBeNull();
   });
 
   it("links a new agent that takes the name of one the guardian unlinked", async () => {
     await link(message("ep-atlas"));
-    await people.unlink({ channel: "agents", channelUserId: "ep-atlas" }, "owner");
+    await people.unlink({ platform: "agents", id: "ep-atlas" }, "owner");
 
     await link(message("ep-atlas-2"));
 
-    expect((await people.byAccount({ channel: "agents", channelUserId: "ep-atlas-2" }))?.id).toBe(
-      "owner",
-    );
+    expect((await people.byAccount({ platform: "agents", id: "ep-atlas-2" }))?.id).toBe("owner");
   });
 
   it("records every agent when several first messages arrive at once", async () => {

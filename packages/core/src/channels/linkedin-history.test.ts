@@ -36,7 +36,7 @@ describe("LinkedIn message addressing", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    people = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    people = new PeopleRepository(testDb.db);
   });
 
   afterEach(() => {
@@ -53,20 +53,18 @@ describe("LinkedIn message addressing", () => {
       displayName: "Ada Lovelace",
       bondLevel: "acquaintance",
       approved: true,
-      links: [{ channel: "linkedin", channelUserId: "ACoAAAda0001" }],
+      links: [{ platform: "linkedin", id: "ACoAAAda0001" }],
     });
 
     const [message] = await readHistory([historyMessage()]);
-    const person = await people.byAccount({ channel: "linkedin", channelUserId: message.senderId });
+    const person = await people.byAccount({ platform: "linkedin", id: message.senderId });
 
     expect(person?.id).toBe("ada-lovelace");
   });
 
   it("does not resolve a participant nobody promoted", async () => {
     const [message] = await readHistory([historyMessage()]);
-    expect(
-      await people.byAccount({ channel: "linkedin", channelUserId: message.senderId }),
-    ).toBeNull();
+    expect(await people.byAccount({ platform: "linkedin", id: message.senderId })).toBeNull();
   });
 
   // The guardian's own mapping is granted at connect time from their public

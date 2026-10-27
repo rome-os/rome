@@ -19,9 +19,10 @@ import {
   type TestDeps,
 } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
-import { OutboxRepository } from "../../db/repositories/outbox.js";
+import { OutboxRepository, type StoredOutboxMessage } from "../../db/repositories/outbox.js";
 import {
   channels as channelRows,
+  connectionGrants,
   outboundSendReceipts,
   romeAgentMessages,
   romeSessions,
@@ -60,7 +61,7 @@ describe("People send API", () => {
       displayName: "Send Target",
       bondLevel: "acquaintance",
       approved: true,
-      links: [{ channel: "telegram", channelUserId: TG }],
+      links: [{ platform: "telegram", id: TG }],
     });
   });
 
@@ -147,7 +148,7 @@ describe("People send API", () => {
       displayName: "Another target",
       bondLevel: "acquaintance",
       approved: true,
-      links: [{ channel: "telegram", channelUserId: OTHER_TG }],
+      links: [{ platform: "telegram", id: OTHER_TG }],
     });
     expect((await send({ ...body, channelUserId: OTHER_TG }, anotherPerson)).status).toBe(409);
     expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
@@ -218,9 +219,11 @@ describe("People send API", () => {
     const replayed = await send(body);
     expect(replayed.status).toBe(202);
     expect(await replayed.json()).toEqual(original);
+    // The receipt keeps the channel the send went out on, which the wire
+    // answers as Rome's account there: none, since the channel records none.
     expect(await deps.outboxRepo.openOnce({ ...body, chatId: row.chatId })).toEqual({
       created: false,
-      message: original,
+      message: { ...original, from: "telegram" },
     });
     expect(await deps.outboxRepo.find(body.id)).toBeNull();
     expect(await outbox()).toEqual([]);
@@ -293,7 +296,7 @@ describe("People send API", () => {
     } satisfies OutboxMessage;
     await testDb.db.insert(outboundSendReceipts).values({
       id,
-      response: legacy as OutboxMessage,
+      response: legacy as StoredOutboxMessage,
       expiresAt: new Date(Date.now() + SEND_IDEMPOTENCY_RETENTION_MS),
     });
 
@@ -393,7 +396,7 @@ describe("People send API — delivery bookkeeping", () => {
       displayName: "Folded Contact",
       bondLevel: "acquaintance",
       approved: true,
-      links: [{ channel: "whatsapp", channelUserId: LID }],
+      links: [{ platform: "whatsapp", id: LID }],
     });
   });
 
@@ -479,7 +482,7 @@ describe("People send API — delivery bookkeeping", () => {
       displayName: "Somebody Else",
       bondLevel: "other",
       approved: true,
-      links: [{ channel: "telegram", channelUserId: "tg-elsewhere" }],
+      links: [{ platform: "telegram", id: "tg-elsewhere" }],
     });
     rs.spyOn(deps.transports.get("telegram")!, "send").mockRejectedValue(new Error("nope"));
     await app.request(`/people/${otherId}/messages`, {
@@ -534,7 +537,7 @@ describe("People send API — delivery bookkeeping", () => {
       displayName: "Unmirrored",
       bondLevel: "other",
       approved: true,
-      links: [{ channel: "telegram", channelUserId: "tg-unmirrored" }],
+      links: [{ platform: "telegram", id: "tg-unmirrored" }],
     });
     await app.request(`/people/${tgPersonId}/messages`, {
       method: "POST",
@@ -591,7 +594,7 @@ describe("People send API — delivery bookkeeping", () => {
         displayName: "Unmirrored",
         bondLevel: "other",
         approved: true,
-        links: [{ channel: "telegram", channelUserId: "tg-unmirrored" }],
+        links: [{ platform: "telegram", id: "tg-unmirrored" }],
       });
     });
 
@@ -759,6 +762,16 @@ describe("People send API — delivery bookkeeping", () => {
 describe("People on an account whose channel id is opaque", () => {
   const OPAQUE = "0b5c6d1e-9a8f-4c3b-8e2d-7f6a5b4c3d2e";
   const ADA = "tg-ada";
+  /** Rome's own Telegram accounts, on the opaque channel and a second one. */
+  const ME = { platform: "telegram", id: "tg-me" };
+  const SECOND = { platform: "telegram", id: "tg-me-second" };
+  /** A live grant on `custody` reaching `account`, which is what backs a
+   *  channel that knows its account. */
+  const grant = (custody: string, account: { platform: string; id: string }) =>
+    testDb.db
+      .insert(connectionGrants)
+      .values({ custody, state: "authorized", platform: account.platform, accountId: account.id })
+      .run();
   let testDb: TestDb;
   let deps: TestDeps;
   let app: Hono;
@@ -773,10 +786,12 @@ describe("People on an account whose channel id is opaque", () => {
         id: OPAQUE,
         connectionKind: "telegram",
         platform: "telegram",
+        platformAccountId: ME.id,
         connectionId: "test:telegram",
         createdAt: new Date(0),
       })
       .run();
+    grant("test:telegram", ME);
     deps = {
       ...base,
       channels: channelList({
@@ -797,7 +812,7 @@ describe("People on an account whose channel id is opaque", () => {
       displayName: "Ada",
       bondLevel: "acquaintance",
       approved: true,
-      links: [{ channel: OPAQUE, channelUserId: ADA }],
+      links: [{ platform: "telegram", id: ADA }],
     });
 
     // What Ada said to that account, as Rome's transcript holds it.
@@ -878,22 +893,25 @@ describe("People on an account whose channel id is opaque", () => {
     expect(((await outboxRes.json()) as OutboxPage).messages).toEqual([]);
   });
 
-  // Rome never picks among a service's accounts: with a second one connected,
-  // the link reaches neither, for sending or for history.
-  it("reaches none of two accounts of one connection kind", async () => {
+  // Rome never picks among its accounts on a platform: with a second one
+  // connected, the link is sendable from either, but a send has to name one.
+  // History reads across both.
+  it("sends from neither of two accounts on one platform unless the send names one", async () => {
     testDb.db
       .insert(channelRows)
       .values({
         id: "tg-second",
         connectionKind: "telegram",
         platform: "telegram",
+        platformAccountId: SECOND.id,
         connectionId: "test:telegram-second",
         createdAt: new Date(0),
       })
       .run();
+    grant("test:telegram-second", SECOND);
 
     expect((await person()).accounts).toMatchObject([
-      { channel: "telegram", channelUserId: ADA, send: "not-connected" },
+      { channel: "telegram", channelUserId: ADA, send: "yes", from: [ME, SECOND] },
     ]);
     const res = await app.request(`/people/${personId}/messages`, {
       method: "POST",
@@ -903,7 +921,7 @@ describe("People on an account whose channel id is opaque", () => {
     expect(res.status).toBe(409);
     expect((await res.json()) as SendRefusal).toMatchObject({ send: "not-connected" });
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
-    expect((await timeline()).entries).toEqual([]);
+    expect((await timeline()).entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
   });
 
   describe("naming the account a send goes out from", () => {
@@ -915,30 +933,33 @@ describe("People on an account whose channel id is opaque", () => {
       });
 
     /** A second Telegram account, connected after the first. */
-    const connectSecond = () =>
+    const connectSecond = () => {
       testDb.db
         .insert(channelRows)
         .values({
           id: "tg-second",
           connectionKind: "telegram",
           platform: "telegram",
+          platformAccountId: SECOND.id,
           connectionId: "test:telegram-second",
           createdAt: new Date(60_000),
         })
         .run();
+      grant("test:telegram-second", SECOND);
+    };
 
     it("lists the accounts a send may go out from on the person read", async () => {
-      expect((await person()).accounts[0]?.from).toEqual([OPAQUE]);
+      expect((await person()).accounts[0]?.from).toEqual([ME]);
       connectSecond();
-      expect((await person()).accounts[0]?.from).toEqual([OPAQUE, "tg-second"]);
+      expect((await person()).accounts[0]?.from).toEqual([ME, SECOND]);
     });
 
     it("sends from the account it names, and the outbox row records it", async () => {
-      const res = await post({ text: "from the opaque account", from: OPAQUE });
+      const res = await post({ text: "from the opaque account", from: ME });
 
       expect(res.status).toBe(202);
       const message = (await res.json()) as OutboxMessage;
-      expect(message.from).toBe(OPAQUE);
+      expect(message.from).toEqual(ME);
       expect((await deps.outboxRepo.find(message.id))?.from).toBe(OPAQUE);
       expect(deps.transports.get("telegram")?.sentMessages).toEqual([
         { chatId: ADA, message: { text: "from the opaque account" } },
@@ -946,7 +967,11 @@ describe("People on an account whose channel id is opaque", () => {
     });
 
     it("refuses an account of another connection kind, or one Rome does not hold", async () => {
-      for (const from of ["webchat", "telegram", "tg-unknown"]) {
+      for (const from of [
+        "telegram",
+        { platform: "webchat", id: ME.id },
+        { platform: "telegram", id: "tg-unknown" },
+      ]) {
         const res = await post({ text: "hello", from });
         expect(res.status).toBe(400);
       }
@@ -957,9 +982,9 @@ describe("People on an account whose channel id is opaque", () => {
       connectSecond();
 
       expect((await post({ text: "which one?" })).status).toBe(409);
-      const res = await post({ text: "from the first", from: OPAQUE });
+      const res = await post({ text: "from the first", from: ME });
       expect(res.status).toBe(202);
-      expect(((await res.json()) as OutboxMessage).from).toBe(OPAQUE);
+      expect(((await res.json()) as OutboxMessage).from).toEqual(ME);
       expect(deps.transports.get("telegram")?.sentMessages).toEqual([
         { chatId: ADA, message: { text: "from the first" } },
       ]);
@@ -969,17 +994,13 @@ describe("People on an account whose channel id is opaque", () => {
       const body = {
         id: "5d0c4b1e-2f3a-4e5b-9c6d-7e8f9a0b1c2d",
         text: "from the opaque account",
-        from: OPAQUE,
+        from: ME,
       };
       const first = await post(body);
       expect(first.status).toBe(202);
       const sent = (await first.json()) as OutboxMessage;
 
-      testDb.db
-        .update(channelRows)
-        .set({ connectionId: null })
-        .where(eq(channelRows.id, OPAQUE))
-        .run();
+      testDb.db.delete(connectionGrants).where(eq(connectionGrants.custody, "test:telegram")).run();
       const again = await post(body);
       expect(again.status).toBe(202);
       expect(((await again.json()) as OutboxMessage).id).toBe(sent.id);
@@ -989,6 +1010,11 @@ describe("People on an account whose channel id is opaque", () => {
     // The link reaches the opaque account alone now, but the row went out from
     // another one, so a retry may not move it there.
     it("retries only from the account the row went out from", async () => {
+      connectSecond();
+      testDb.db
+        .delete(connectionGrants)
+        .where(eq(connectionGrants.custody, "test:telegram-second"))
+        .run();
       const row = await deps.outboxRepo.open({
         channel: "telegram",
         channelUserId: ADA,
@@ -1004,7 +1030,7 @@ describe("People on an account whose channel id is opaque", () => {
       expect(retried.status).toBe(202);
       expect((await retried.json()) as OutboxMessage).toMatchObject({
         state: "failed",
-        from: "tg-second",
+        from: SECOND,
       });
       expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
     });

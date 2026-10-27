@@ -144,9 +144,8 @@ describe("SetupManager", () => {
       },
     ]);
     expect(linkStated).toHaveBeenCalledWith(
-      { channel: "discord", channelUserId: "guardian-1" },
+      { platform: "discord", id: "guardian-1" },
       "guardian",
-      undefined,
       FAKE_TX,
     );
   });

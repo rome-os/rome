@@ -188,7 +188,7 @@ describe("a dot on the People page", () => {
     const personId = await deps.peopleRepo.create({
       displayName: "Atlas",
       bondLevel: "inner-circle",
-      links: [{ channel: "agents", channelUserId: ATLAS }],
+      links: [{ platform: "agents", id: ATLAS }],
     });
     expect(await find()).toMatchObject({ personId, state: "linked" });
   });

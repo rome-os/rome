@@ -111,7 +111,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
 
   const channelRecords = new ChannelRecordsRepository(db, noAccountLinks);
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
-  const peopleRepo = new PeopleRepository(db, connectionKindOfChannel);
+  const peopleRepo = new PeopleRepository(db);
   const sentinelLogRepo = new SentinelLogRepository(db);
   const approvalsRepo = new ApprovalsRepository(db);
   const webchatRepo = new WebChatRepository(db);
@@ -161,7 +161,9 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       // Apps built before the chat rename read `conversationSettings`.
       conversationSettings: appChatSettings,
       capabilityDiscovery,
-      personMappingRepo: appPersonMapping(peopleRepo),
+      personMappingRepo: appPersonMapping(peopleRepo, (name) =>
+        channelRecords.platformOfChannel(name),
+      ),
       sentinelLogRepo,
       approvalsRepo,
       policyEngine,

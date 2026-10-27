@@ -226,8 +226,8 @@ describe("discord descriptor shape", () => {
       guardian,
     );
     expect(findByChannelUser).toHaveBeenCalledWith({
-      channel: "discord",
-      channelUserId: "guardian-777",
+      platform: "discord",
+      id: "guardian-777",
     });
   });
 

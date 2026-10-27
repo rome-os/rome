@@ -34,8 +34,8 @@ describe("readSendStates", () => {
     ];
 
     const states = await readSendStates({ channels }, [
-      { channel: "unknown", channelUserId: "u" },
-      ...channels.map((c) => ({ channel: c.name, channelUserId: "u" })),
+      { platform: "unknown", id: "u" },
+      ...channels.map((c) => ({ platform: c.name, id: "u" })),
     ]);
 
     expect(states).toEqual([
@@ -50,22 +50,24 @@ describe("readSendStates", () => {
   });
 });
 
-describe("a link keyed by a connection kind", () => {
+describe("a link on a platform Rome holds accounts on", () => {
   const open = (name: string) => channel(name, sending({ chatFor: async (id) => id as ChatId }));
   const unbacked = (name: string) =>
     channel(name, sending({ chatFor: () => Promise.reject(new ChannelNotConnected(name)) }));
-  const link = { channel: "telegram", channelUserId: "u" };
+  const link = { platform: "telegram", id: "u" };
+  const platformOfChannel = (name: string) => (name.startsWith("tg-") ? "telegram" : name);
 
-  it("sends on the kind's own channel exactly as on any other", async () => {
+  it("sends on a platform's own channel exactly as on any other", async () => {
     const resolution = await resolveSendTarget({ channels: [open("telegram")] }, link);
     expect(resolution.ok && resolution.target.channel).toBe("telegram");
   });
 
-  it("sends on the kind's only account when its id is opaque", async () => {
+  it("sends from Rome's only account on the platform, whatever its channel is called", async () => {
     // The connection kind's own channel is always listed, backed or not.
     const deps = {
       channels: [unbacked("telegram"), open("tg-opaque")],
-      channelOfLink: (linked: string) => (linked === "telegram" ? "tg-opaque" : linked),
+      platformOfChannel,
+      sendersOn: (platform: string) => (platform === "telegram" ? ["tg-opaque"] : null),
     };
 
     expect(await readSendStates(deps, [link])).toEqual(["yes"]);
@@ -73,7 +75,7 @@ describe("a link keyed by a connection kind", () => {
     expect(resolution.ok && resolution.target.channel).toBe("tg-opaque");
   });
 
-  it("sends on none of several accounts, and asks none of them", async () => {
+  it("sends from none of several accounts unless the send names one", async () => {
     let asked = 0;
     const counted = (name: string) =>
       channel(
@@ -87,13 +89,25 @@ describe("a link keyed by a connection kind", () => {
       );
     const deps = {
       channels: [counted("tg-opaque"), counted("tg-second")],
-      channelOfLink: (linked: string) => (linked === "telegram" ? null : linked),
+      platformOfChannel,
+      sendersOn: (platform: string) =>
+        platform === "telegram" ? ["tg-opaque", "tg-second"] : null,
+    };
+
+    expect(await resolveSendTarget(deps, link)).toEqual({ ok: false, send: "not-connected" });
+    expect(asked).toBe(0);
+    const named = await resolveSendTarget(deps, link, "tg-second");
+    expect(named.ok && named.target.channel).toBe("tg-second");
+    // Either account can reach the person, so the person reads as sendable.
+    expect(await readSendStates(deps, [link])).toEqual(["yes"]);
+  });
+
+  it("reads as not connected while Rome holds no account on the platform", async () => {
+    const deps = {
+      channels: [open("telegram")],
+      sendersOn: (platform: string) => (platform === "telegram" ? [] : null),
     };
 
     expect(await readSendStates(deps, [link])).toEqual(["not-connected"]);
-    expect(asked).toBe(0);
-    // A link naming one account's own id still reaches it.
-    const exact = await resolveSendTarget(deps, { channel: "tg-second", channelUserId: "u" });
-    expect(exact.ok && exact.target.channel).toBe("tg-second");
   });
 });

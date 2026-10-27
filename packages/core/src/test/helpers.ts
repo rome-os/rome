@@ -557,7 +557,7 @@ export async function buildTestDeps(
 
   const sessionsRepo = new SessionsRepository(db);
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
-  const peopleRepo = new PeopleRepository(db, recordedConnectionKindOf(db));
+  const peopleRepo = new PeopleRepository(db);
   const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
@@ -567,7 +567,11 @@ export async function buildTestDeps(
   const sentinelLogRepo = new SentinelLogRepository(db);
   const connections = createTestConnections(transports);
   const channels = testChannels({ db, whatsAppAccounts, linkedInAccounts }, connections);
-  const accountNames = createAccountNames({ channels, sentinelLogRepo });
+  const accountNames = createAccountNames({
+    channels,
+    sentinelLogRepo,
+    platformOfChannel: (name) => channelRecords.platformOfChannel(name),
+  });
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
   // A private env object per deps bag: route tests exercise apply/remove
@@ -749,8 +753,9 @@ export async function buildTestDeps(
     linkedInStoreRepo,
     linkedInAccounts,
     channels,
-    channelOfLink: (link: string) => channelRecords.channelOfLink(link),
-    sendersOfLink: (link: string) => channelRecords.sendersOfLink(link),
+    platformOfChannel: (name: string) => channelRecords.platformOfChannel(name),
+    sendersOn: (platform: string) => channelRecords.sendersOn(platform),
+    accountOf: (channel: string) => channelRecords.accountOf(channel),
     accountNames,
     assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,

@@ -30,13 +30,11 @@ describe("addPersonMapping", () => {
 
   it("creates person record (approved=false)", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: appPersonMapping(
-        new PeopleRepository(testDb.db, identityConnectionKindOf),
-      ),
+      personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
-    const personRepo = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    const personRepo = new PeopleRepository(testDb.db);
     const person = await personRepo.byId(result.personId);
     expect(person).not.toBeNull();
     expect(person!.displayName).toBe("Alice");
@@ -46,27 +44,23 @@ describe("addPersonMapping", () => {
 
   it("creates channel mapping", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: appPersonMapping(
-        new PeopleRepository(testDb.db, identityConnectionKindOf),
-      ),
+      personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
-    const personRepo = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    const personRepo = new PeopleRepository(testDb.db);
     const person = await personRepo.byId(result.personId);
     expect(person).not.toBeNull();
     expect(person!.links).toHaveLength(1);
     expect(person!.links[0]).toEqual({
-      channel: "telegram",
-      channelUserId: "alice-123",
+      platform: "telegram",
+      id: "alice-123",
     });
   });
 
   it("creates approval request", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: appPersonMapping(
-        new PeopleRepository(testDb.db, identityConnectionKindOf),
-      ),
+      personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
@@ -81,9 +75,7 @@ describe("addPersonMapping", () => {
   it("handles existing person with same display name", async () => {
     // Create a person first
     await addPersonMapping(baseInput, {
-      personMappingRepo: appPersonMapping(
-        new PeopleRepository(testDb.db, identityConnectionKindOf),
-      ),
+      personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
@@ -92,9 +84,7 @@ describe("addPersonMapping", () => {
       addPersonMapping(
         { ...baseInput, channelUserId: "alice-456" },
         {
-          personMappingRepo: appPersonMapping(
-            new PeopleRepository(testDb.db, identityConnectionKindOf),
-          ),
+          personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
           approvalsRepo: new ApprovalsRepository(testDb.db),
         },
       ),
@@ -104,35 +94,28 @@ describe("addPersonMapping", () => {
   it("handles merging channel mappings for same person", async () => {
     // Create person first
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: appPersonMapping(
-        new PeopleRepository(testDb.db, identityConnectionKindOf),
-      ),
+      personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
     // Add another channel mapping to the same person directly via repo
-    const personRepo = new PeopleRepository(testDb.db, identityConnectionKindOf);
-    await personRepo.linkStated(
-      { channel: "whatsapp", channelUserId: "alice-whatsapp" },
-      result.personId,
-    );
+    const personRepo = new PeopleRepository(testDb.db);
+    await personRepo.linkStated({ platform: "whatsapp", id: "alice-whatsapp" }, result.personId);
 
     // Verify person now has two mappings
     const person = await personRepo.byId(result.personId);
     expect(person!.links).toHaveLength(2);
     expect(person!.links).toEqual(
       expect.arrayContaining([
-        { channel: "telegram", channelUserId: "alice-123" },
-        { channel: "whatsapp", channelUserId: "alice-whatsapp" },
+        { platform: "telegram", id: "alice-123" },
+        { platform: "whatsapp", id: "alice-whatsapp" },
       ]),
     );
   });
 
   it("returns personId and approvalId", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: appPersonMapping(
-        new PeopleRepository(testDb.db, identityConnectionKindOf),
-      ),
+      personMappingRepo: appPersonMapping(new PeopleRepository(testDb.db)),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 

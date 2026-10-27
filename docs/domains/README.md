@@ -56,6 +56,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - Feishu and Lark are two platforms.
 - The dashboard and docs say account, agent, connect, disconnect, link, switch and unlink.
 - An account has at most one link to a person, and Rome never makes one from what a sender says about itself.
+- Links, dismissals and who is this are keyed by platform, not by kind of connection.
 - Rome never asks a sender to pair. A sender with no link is admitted and is a stranger.
 - An assistant's chat is on one Assistants page that switches between assistants, each marked with its kind, from the moment Rome knows the assistant, and the guardian can add the page to the sidebar. Other Romes are left out.
 - What the guardian writes in an assistant's chat goes to the assistant and wakes no agent.
@@ -96,7 +97,6 @@ Diffs still owed to the model, each a change of its own:
 - A woken agent gets the recent messages of its place as its default view, and a tool to read more of the chat.
 - A message to a chat other than the one the agent was woken in waits on an approval card.
 - Code, docs and the dashboard say platform for where an account lives and kind of connection for how Rome got in. Neither says service.
-- Links, dismissals and who is this are keyed by platform, not by kind of connection.
 - People's labels and docs say platform where they say channel.
 - The channel record goes.
 - Email and WhatsApp accounts end at disconnect like every other, and connecting again starts a fresh connected account.

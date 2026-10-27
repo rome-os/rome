@@ -93,7 +93,7 @@ describe("readAccountStream", () => {
       displayName: "Transcribed Tam",
       bondLevel: "acquaintance",
       approved: true,
-      links: [{ channel: "telegram", channelUserId: TRANSCRIBED }],
+      links: [{ platform: "telegram", id: TRANSCRIBED }],
     });
     await testDb.db.insert(romeSessions).values({
       id: "s-transcribed",

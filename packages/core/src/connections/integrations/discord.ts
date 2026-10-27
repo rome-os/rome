@@ -259,7 +259,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,
             resolveDiscordPerson: (channelUserId) =>
-              deps.peopleRepo.byAccount({ channel: "discord", channelUserId }),
+              deps.peopleRepo.byAccount({ platform: "discord", id: channelUserId }),
             // Live gateway faults (post-login) route through here; the descriptor
             // maps the adapter's kind onto grant state vs. transport.
             onGatewayFault: ({ kind, cause }) => {

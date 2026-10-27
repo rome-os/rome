@@ -57,8 +57,8 @@ describe("People timeline API", () => {
       bondLevel: "acquaintance",
       approved: true,
       links: [
-        { channel: "whatsapp", channelUserId: WA_JID },
-        { channel: "telegram", channelUserId: TG_THREAD },
+        { platform: "whatsapp", id: WA_JID },
+        { platform: "telegram", id: TG_THREAD },
       ],
     });
 
@@ -253,7 +253,7 @@ describe("People timeline API", () => {
       displayName: "Sentinel Only",
       bondLevel: "other",
       approved: true,
-      links: [{ channel: "telegram", channelUserId: "tg-triaged" }],
+      links: [{ platform: "telegram", id: "tg-triaged" }],
     });
     await deps.sentinelLogRepo.create({
       messageId: "tg-900",
@@ -316,7 +316,7 @@ describe("People timeline API", () => {
       displayName: "Triaged Talker",
       bondLevel: "other",
       approved: true,
-      links: [{ channel: "telegram", channelUserId: "tg-both" }],
+      links: [{ platform: "telegram", id: "tg-both" }],
     });
     const conversation = await deps.webchatRepo.ensureChannelChat({
       channel: "telegram",
@@ -351,7 +351,7 @@ describe("People timeline API", () => {
       displayName: "Group Talker",
       bondLevel: "other",
       approved: true,
-      links: [{ channel: "telegram", channelUserId: "tg-in-group" }],
+      links: [{ platform: "telegram", id: "tg-in-group" }],
     });
     await deps.webchatRepo.ensureChannelChat({
       channel: "telegram",
@@ -390,7 +390,7 @@ describe("People timeline API", () => {
       displayName: "Nadia By LID",
       bondLevel: "other",
       approved: true,
-      links: [{ channel: "whatsapp", channelUserId: WA_LID }],
+      links: [{ platform: "whatsapp", id: WA_LID }],
     });
 
     const page = await fetchTimeline(byLid);
@@ -458,7 +458,7 @@ describe("People timeline API", () => {
       displayName: "Priya Nair",
       bondLevel: "acquaintance",
       approved: true,
-      links: [{ channel: "linkedin", channelUserId: member }],
+      links: [{ platform: "linkedin", id: member }],
     });
 
     const page = await fetchTimeline(priya);
@@ -565,8 +565,8 @@ describe("People API", () => {
       bondLevel: "acquaintance",
       approved: true,
       links: [
-        { channel: "whatsapp", channelUserId: NADIA_JID },
-        { channel: "whatsapp", channelUserId: NADIA_LID },
+        { platform: "whatsapp", id: NADIA_JID },
+        { platform: "whatsapp", id: NADIA_LID },
       ],
     });
   });
@@ -825,7 +825,7 @@ describe("People create API", () => {
       displayName: "Alice Marsh",
       bondLevel: "inner-circle",
       approved: true,
-      links: [{ channel: "whatsapp", channelUserId: ALICE_JID }],
+      links: [{ platform: "whatsapp", id: ALICE_JID }],
     });
 
     const res = await create({
@@ -849,15 +849,15 @@ describe("People create API", () => {
     // was free before the call is still free.
     expect((await fetchPeopleRes("bob-reyes")).status).toBe(404);
     expect(
-      await deps.peopleRepo.byAccount({ channel: "telegram", channelUserId: "tg-bob-reyes" }),
+      await deps.peopleRepo.byAccount({ platform: "telegram", id: "tg-bob-reyes" }),
     ).toBeNull();
-    expect(
-      (await deps.peopleRepo.byAccount({ channel: "whatsapp", channelUserId: ALICE_JID }))?.id,
-    ).toBe(alice);
+    expect((await deps.peopleRepo.byAccount({ platform: "whatsapp", id: ALICE_JID }))?.id).toBe(
+      alice,
+    );
   });
 
   it("links an account that only a dismissal held", async () => {
-    await deps.peopleRepo.dismiss({ channel: "whatsapp", channelUserId: BOB_JID });
+    await deps.peopleRepo.dismiss({ platform: "whatsapp", id: BOB_JID });
 
     const res = await create({
       displayName: "Bob Reyes",
@@ -865,12 +865,10 @@ describe("People create API", () => {
     });
 
     expect(res.status).toBe(201);
-    expect(
-      (await deps.peopleRepo.byAccount({ channel: "whatsapp", channelUserId: BOB_JID }))?.id,
-    ).toBe("bob-reyes");
-    expect(await deps.peopleRepo.isDismissed({ channel: "whatsapp", channelUserId: BOB_JID })).toBe(
-      false,
+    expect((await deps.peopleRepo.byAccount({ platform: "whatsapp", id: BOB_JID }))?.id).toBe(
+      "bob-reyes",
     );
+    expect(await deps.peopleRepo.isDismissed({ platform: "whatsapp", id: BOB_JID })).toBe(false);
   });
 
   it("numbers people who share a name, counting the first as one", async () => {
@@ -977,10 +975,7 @@ describe("People account links", () => {
 
     // An account the guardian set aside: a dismissal, with no person holding
     // it.
-    await deps.peopleRepo.dismiss({
-      channel: DISMISSED.channel,
-      channelUserId: DISMISSED.channelUserId,
-    });
+    await deps.peopleRepo.dismiss({ platform: DISMISSED.channel, id: DISMISSED.channelUserId });
   });
 
   afterEach(() => testDb.close());
@@ -1009,8 +1004,8 @@ describe("People account links", () => {
   /** Who the stored link says holds an account, or null when nothing does. */
   async function holderOf(account: { channel: string; channelUserId: string }) {
     const person = await deps.peopleRepo.byAccount({
-      channel: account.channel,
-      channelUserId: account.channelUserId,
+      platform: account.channel,
+      id: account.channelUserId,
     });
     return person?.id ?? null;
   }
@@ -1081,7 +1076,12 @@ describe("People account links", () => {
     const body = await res.json();
     expect(body).toMatchObject({ linkedPersonId: null, linkedPersonName: null });
     expect(await holderOf(DISMISSED)).toBeNull();
-    expect(await deps.peopleRepo.isDismissed(DISMISSED)).toBe(true);
+    expect(
+      await deps.peopleRepo.isDismissed({
+        platform: DISMISSED.channel,
+        id: DISMISSED.channelUserId,
+      }),
+    ).toBe(true);
   });
 
   it("answers a re-link to the same person without disturbing their accounts", async () => {
@@ -1283,11 +1283,7 @@ describe("People delegate links", () => {
 
   it("marks the agent's account and leaves the person's own unmarked", async () => {
     const guardian = baseline.persons.guardianId;
-    deps.peopleRepo.linkDelegate(
-      { channel: "agents", channelUserId: "agt-atlas" },
-      guardian,
-      "atlas",
-    );
+    deps.peopleRepo.linkDelegate({ platform: "agents", id: "agt-atlas" }, guardian);
 
     const person = (await (await app.request(`/people/${guardian}`)).json()) as PersonResource;
 
@@ -1326,8 +1322,8 @@ describe("People delete", () => {
 
   it("deletes the person and returns their accounts to strangers", async () => {
     const bob = baseline.persons.acquaintanceId;
-    const wa = { channel: "whatsapp", channelUserId: "wa-bob" };
-    await deps.peopleRepo.linkStated(wa, bob, "Bob");
+    const wa = { platform: "whatsapp", id: "wa-bob" };
+    await deps.peopleRepo.linkStated(wa, bob);
 
     const res = await remove(bob);
 
@@ -1335,7 +1331,7 @@ describe("People delete", () => {
     expect((await app.request(`/people/${bob}`)).status).toBe(404);
     const list = (await (await app.request("/people")).json()) as PeopleList;
     expect(list.people.map((person) => person.id)).not.toContain(bob);
-    for (const account of [{ channel: "telegram", channelUserId: "tg-bob" }, wa]) {
+    for (const account of [{ platform: "telegram", id: "tg-bob" }, wa]) {
       expect(await deps.peopleRepo.byAccount(account)).toBeNull();
       expect(await deps.peopleRepo.isDismissed(account)).toBe(false);
     }
@@ -1348,9 +1344,9 @@ describe("People delete", () => {
     expect((await res.json()) as { error: string }).toEqual({
       error: "the guardian cannot be deleted",
     });
-    expect(
-      (await deps.peopleRepo.byAccount({ channel: "telegram", channelUserId: "tg-guardian" }))?.id,
-    ).toBe(baseline.persons.guardianId);
+    expect((await deps.peopleRepo.byAccount({ platform: "telegram", id: "tg-guardian" }))?.id).toBe(
+      baseline.persons.guardianId,
+    );
   });
 
   it("answers 404 for an id that names nobody, including one already deleted", async () => {
@@ -1397,15 +1393,15 @@ describe("People merge", () => {
 
   async function holderOf(account: { channel: string; channelUserId: string }) {
     const person = await deps.peopleRepo.byAccount({
-      channel: account.channel,
-      channelUserId: account.channelUserId,
+      platform: account.channel,
+      id: account.channelUserId,
     });
     return person?.id ?? null;
   }
 
   it("moves every account onto the survivor and deletes the duplicate", async () => {
     // Bob holds a second account, so the merge has more than one link to move.
-    await deps.peopleRepo.linkStated({ channel: "whatsapp", channelUserId: "wa-bob" }, bob, "Bob");
+    await deps.peopleRepo.linkStated({ platform: "whatsapp", id: "wa-bob" }, bob);
 
     const res = await merge(alice, { from: bob });
 
@@ -1477,7 +1473,7 @@ describe("People merge", () => {
       displayName: "Me",
       bondLevel: "other",
       approved: true,
-      links: [{ channel: "whatsapp", channelUserId: "wa-me" }],
+      links: [{ platform: "whatsapp", id: "wa-me" }],
     });
 
     const res = await merge(baseline.persons.guardianId, { from: duplicate });

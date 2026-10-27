@@ -6,17 +6,18 @@
 // so a serializer living in one handler is a serializer the next five copy.
 
 import { readdir } from "node:fs/promises";
+import type { Account } from "@rome-os/app-runtime";
 import type { AccountSendState, PersonResource } from "@rome/api-types/people";
 import type { Message } from "@rome/api-types/message";
 import { getRelationshipDir, personProfileFileName, RELATIONSHIP_DIR } from "../profile-memory.js";
 import type { AccountNames } from "../channels/account-names.js";
-import type { Channels } from "../channels/channel.js";
+import type { Channels, PlatformOfChannel } from "../channels/channel.js";
 import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { SendersOfLink } from "../db/repositories/channel-records.js";
+import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import { readActivity } from "./activity.js";
-import { readSendStates, type SendDeps } from "./send.js";
+import { readSendStates, sendersOf, type SendDeps } from "./send.js";
 import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
 export interface PeopleReadDeps extends SendDeps {
@@ -24,9 +25,10 @@ export interface PeopleReadDeps extends SendDeps {
   peopleRepo: Pick<PeopleRepository, "all" | "byId">;
   channels: Channels;
   accountNames: Pick<AccountNames, "displayNames">;
-  /** Rome's accounts a send to each link may go out from. Absent, a link's
-   *  own channel. */
-  sendersOfLink?: SendersOfLink;
+  platformOfChannel: PlatformOfChannel;
+  /** Rome's own account on a channel, to name a sender by. Absent, no sender
+   *  is named. */
+  accountOf?: ChannelRecordsRepository["accountOf"];
 }
 
 /** A person as the repository reads them: the row and the accounts linked to
@@ -63,9 +65,9 @@ async function serialize(
   deps: PeopleReadDeps,
   persons: readonly PersonRow[],
 ): Promise<PersonResource[]> {
-  // One mapping is one account on the wire, so a client can address the link
-  // it sees. The activity fold is the one place two mappings of a single
-  // account collapse — reporting one person's history twice would be a wrong
+  // One link is one account on the wire, so a client can address the link it
+  // sees. The activity fold is the one place two links of a single account
+  // collapse — reporting one person's history twice would be a wrong
   // number, whereas showing both addresses is only what the guardian stored.
   const refs = persons.flatMap((person) => person.links);
 
@@ -78,7 +80,7 @@ async function serialize(
       persons.map((person) => person.links),
     ),
     deps.accountNames.displayNames(refs),
-    // Whether each mapping can be written to, asked of the live connections
+    // Whether each link can be written to, asked of the live connections
     // rather than stored: a channel that went down between two reads has to
     // change this answer, and nothing writes a row when it does.
     readSendStates(deps, refs),
@@ -86,21 +88,32 @@ async function serialize(
   ]);
   const activity = await readActivity(personMessageStores(deps), accountsByPerson);
 
+  // Asked once per platform, since each answer reads the channel records.
+  const senders = new Map<string, Account[]>();
+  const sendersOn = (platform: string) => {
+    let found = senders.get(platform);
+    if (!found) {
+      found = sendersOf(deps, platform).flatMap((channel) => deps.accountOf?.(channel) ?? []);
+      senders.set(platform, found);
+    }
+    return found;
+  };
+
   let next = 0;
   return persons.map((person, i) => ({
     id: person.id,
     displayName: person.displayName,
     bondLevel: person.bondLevel,
-    accounts: person.links.map((mapping) => {
+    accounts: person.links.map((link) => {
       const index = next++;
       return {
-        channel: mapping.channel,
-        channelUserId: mapping.channelUserId,
+        channel: link.platform,
+        channelUserId: link.id,
         displayName: names[index],
         send: sendStates[index] ?? ("not-connected" as AccountSendState),
-        latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], mapping),
-        from: deps.sendersOfLink?.(mapping.channel) ?? [mapping.channel],
-        ...(mapping.delegate ? { delegate: true as const } : {}),
+        latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], link),
+        from: sendersOn(link.platform),
+        ...(link.delegate ? { delegate: true as const } : {}),
       };
     }),
     memoryPath: memoryPaths[i],
@@ -140,22 +153,21 @@ async function memoryProfilePaths(persons: readonly PersonRow[]): Promise<(strin
 }
 
 /**
- * When the account behind one mapping was last active.
+ * When the account behind one link was last active.
  *
- * The activity read is keyed by folded account and this is asked per mapping,
- * and the two are not the same count: a channel that folds a phone JID and its
- * `@lid` form onto one account answers one head for the two links naming it.
- * So the mapping is matched by the address the fold put on its account, which
+ * The activity read is keyed by folded account and this is asked per link,
+ * and the two are not the same count: a platform that folds a phone JID and
+ * its `@lid` form onto one account answers one head for the two links naming
+ * it. So the link is matched by the address the fold put on its account, which
  * is the same rule `timelineAccounts` grouped by.
  */
 function latestAtOf(
   heads: Map<MessageAccount, Message>,
   accounts: readonly MessageAccount[] | undefined,
-  mapping: { channel: string; channelUserId: string },
+  link: Account,
 ): number | null {
   const account = accounts?.find(
-    (candidate) =>
-      candidate.channel === mapping.channel && candidate.addresses.includes(mapping.channelUserId),
+    (candidate) => candidate.channel === link.platform && candidate.addresses.includes(link.id),
   );
   return (account && heads.get(account)?.timestamp) ?? null;
 }

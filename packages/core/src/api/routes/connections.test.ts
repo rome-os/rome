@@ -708,11 +708,11 @@ describe("guardian links across a disconnect", () => {
     registry.register(fixture.descriptor);
     const conn = await registry.connect("discord");
     await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.botCredential());
-    const peopleRepo = new PeopleRepository(db, identityConnectionKindOf);
+    const peopleRepo = new PeopleRepository(db);
     await peopleRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",
-      links: [{ channel: "discord", channelUserId: "linked" }],
+      links: [{ platform: "discord", id: "linked" }],
     });
     const suffix = teardown === "connection" ? "" : "/grants/bot";
 
@@ -722,8 +722,6 @@ describe("guardian links across a disconnect", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(
-      await peopleRepo.byAccount({ channel: "discord", channelUserId: "linked" }),
-    ).not.toBeNull();
+    expect(await peopleRepo.byAccount({ platform: "discord", id: "linked" })).not.toBeNull();
   });
 });

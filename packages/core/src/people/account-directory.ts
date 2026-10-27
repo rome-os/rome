@@ -3,10 +3,12 @@
 // links and dismissals the guardian has made, the sentinel log's senders, and
 // the address books Rome mirrors.
 //
-// An account is one person on one channel, whatever addresses that channel
-// reaches them at. Which of them fold together is the channel's own answer,
-// read once through `AccountFold` (../channels/account-fold.ts), so nothing
-// here is channel-specific and adding a mirror changes nothing in this file.
+// An account is one person on one platform, whatever addresses that platform
+// reaches them at. Which of them fold together is the address book's own
+// answer, read once through `AccountFold` (../channels/account-fold.ts), so
+// nothing here is platform-specific and adding a mirror changes nothing in this
+// file. The sentinel log still names the channel a sender wrote on, so its
+// rows are read as accounts on that channel's platform where they are folded.
 //
 // Two reads, because the two surfaces ask two questions — "who does Rome know"
 // and "who has something new". They fold the same address books to decide which
@@ -20,10 +22,17 @@ import {
   type DirectoryAccount,
   type StreamAccount,
 } from "@rome/api-types/people";
+import type { Account } from "@rome-os/app-runtime";
 import type { Message } from "@rome/api-types/message";
 import type { AccountNames } from "../channels/account-names.js";
 import { foldAccounts } from "../channels/account-fold.js";
-import { addressBooks, type Channels } from "../channels/channel.js";
+import {
+  addressBooks,
+  channelsOn,
+  type Channels,
+  type PlatformOfChannel,
+} from "../channels/channel.js";
+import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
@@ -37,6 +46,7 @@ export interface AccountDirectoryDeps {
   peopleRepo: Pick<PeopleRepository, "all" | "dismissals">;
   sentinelLogRepo: Pick<SentinelLogRepository, "listSenders">;
   accountNames: Pick<AccountNames, "displayNames">;
+  platformOfChannel: PlatformOfChannel;
   /** Where the message stores live. Read by the stream alone — the contacts
    *  list never reaches a history. */
   db: DrizzleDb;
@@ -111,7 +121,7 @@ export function accountStreamReader(deps: AccountDirectoryDeps): () => Promise<S
   };
 }
 
-/** What a head read depends on: the channel and every address of the account. */
+/** What a head read depends on: the platform and every address of the account. */
 function headKey(account: DirectoryAccount): string {
   return JSON.stringify([account.channel, [...account.addresses].sort(compareCodePoints)]);
 }
@@ -128,9 +138,23 @@ async function readHeads(
 ): Promise<Map<string, Message>> {
   const stores = personMessageStores(deps);
   const heads = new Map<string, Message>();
+  // An account is read under every channel on its platform, as a person's
+  // timeline is (`timelineAccounts`).
+  const storedUnder = (platform: string) =>
+    channelsOn(deps.channels, deps.platformOfChannel, platform);
   for (const round of rounds(accounts)) {
-    for (const [account, owned] of await assignAccountHeads(stores, round)) {
-      heads.set(headKey(account), owned.head);
+    const asked = new Map<MessageAccount, DirectoryAccount>(
+      round.map((account) => [
+        {
+          channel: account.channel,
+          addresses: account.addresses,
+          storedUnder: storedUnder(account.channel),
+        },
+        account,
+      ]),
+    );
+    for (const [account, owned] of await assignAccountHeads(stores, [...asked.keys()])) {
+      heads.set(headKey(asked.get(account)!), owned.head);
     }
   }
   return heads;
@@ -225,29 +249,27 @@ export async function readAccountDirectory(
     deps.peopleRepo.dismissals(),
   ]);
 
-  const mappings = persons.flatMap((person) =>
-    person.links.map((mapping) => ({ ...mapping, person })),
-  );
-  const fold = await foldAccounts(addressBooks(deps.channels), {
-    stored: [...senders, ...mappings, ...dismissals],
+  const heard = senders.map((sender) => ({
+    platform: deps.platformOfChannel(sender.channel),
+    id: sender.channelUserId,
+  }));
+  const links = persons.flatMap((person) => person.links.map((link) => ({ ...link, person })));
+  const fold = await foldAccounts(addressBooks(deps.channels, deps.platformOfChannel), {
+    stored: [...heard, ...links, ...dismissals],
   });
 
   /** Who holds each account, decided once before any row is built. */
   const linkOf = new Map<string, AccountLink>();
   // The account behind every address the three sources name, each one under the
-  // address the channel folds it onto.
-  const observed = new Map<
-    string,
-    { channel: string; channelUserId: string; addresses: string[] }
-  >();
-  const observe = (channel: string, channelUserId: string, addresses?: string[]) => {
-    const key = fold.key(channel, channelUserId);
+  // address the platform's address book folds it onto.
+  const observed = new Map<string, { account: Account; addresses: string[] }>();
+  const observe = (platform: string, address: string, addresses?: string[]) => {
+    const key = fold.key(platform, address);
     if (!observed.has(key)) {
-      const own = fold.canonical(channel, channelUserId);
+      const own = fold.canonical(platform, address);
       observed.set(key, {
-        channel,
-        channelUserId: own,
-        // A channel with no address book can say nothing about which
+        account: { platform, id: own },
+        // A platform with no address book can say nothing about which
         // addresses are the same account, so an address it named is an
         // account of its own.
         addresses: [...(addresses ?? [own])].sort(compareCodePoints),
@@ -256,20 +278,18 @@ export async function readAccountDirectory(
     return key;
   };
 
-  for (const account of fold.accounts) {
-    observe(account.channel, account.channelUserId, account.aliases);
-  }
-  for (const sender of senders) observe(sender.channel, sender.channelUserId);
-  for (const mapping of mappings) {
-    const key = observe(mapping.channel, mapping.channelUserId);
+  for (const account of fold.accounts) observe(account.platform, account.id, account.aliases);
+  for (const sender of heard) observe(sender.platform, sender.id);
+  for (const link of links) {
+    const key = observe(link.platform, link.id);
     const held = linkOf.get(key);
-    if (held && !outranks(mapping.person.id, held)) continue;
-    linkOf.set(key, { personId: mapping.person.id, displayName: mapping.person.displayName });
+    if (held && !outranks(link.person.id, held)) continue;
+    linkOf.set(key, { personId: link.person.id, displayName: link.person.displayName });
   }
   // A dismissal of one address never hides a link on another address of the
   // same account: a placement the guardian made is what the row should say.
   for (const dismissal of dismissals) {
-    const key = observe(dismissal.channel, dismissal.channelUserId);
+    const key = observe(dismissal.platform, dismissal.id);
     if (!linkOf.has(key)) linkOf.set(key, { dismissed: true });
   }
 
@@ -277,10 +297,14 @@ export async function readAccountDirectory(
   // One naming read for the whole directory: every mirror answers from a single
   // fold of its address book, and the sentinel log's push names are read once,
   // and only where a mirror left a name unanswered.
-  const names = await deps.accountNames.displayNames(rows.map(([, account]) => account));
+  const names = await deps.accountNames.displayNames(rows.map(([, row]) => row.account));
 
-  return rows.map(([key, account], i) => ({
-    ...account,
+  // On the wire an account is still a channel and an address, and the channel
+  // a link names is its platform.
+  return rows.map(([key, row], i) => ({
+    channel: row.account.platform,
+    channelUserId: row.account.id,
+    addresses: row.addresses,
     displayName: names[i],
     ...accountPresentation(linkOf.get(key)),
   }));

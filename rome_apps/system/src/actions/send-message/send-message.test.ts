@@ -442,20 +442,20 @@ describe("send_message to an account with an opaque id", () => {
     );
   });
 
-  // People files a signed-in Telegram's links under its own key, not under
-  // the platform, until links are keyed by platform.
-  it("resolves to: guardian under the key People files the account's links by", async () => {
+  // A host that fills `accounts` names the guardian's link by its platform,
+  // whatever `channelMappings` still says.
+  it("resolves to: guardian through the account on the sending account's platform", async () => {
     const adapter = accounts(FIRST);
     const personMappingRepo = {
       findByBondLevel: rs.fn(async () => [
         {
-          channelMappings: [
-            { channel: "telegram", channelUserId: "1001" },
-            { channel: "telegram_user", channelUserId: "2002" },
+          channelMappings: [{ channel: "whatsapp", channelUserId: "wa-1" }],
+          accounts: [
+            { platform: "whatsapp", id: "wa-1" },
+            { platform: "telegram", id: "2002" },
           ],
         },
       ]),
-      linkKeyOf: rs.fn(async () => "telegram_user"),
     };
 
     await executeSendMessage(
@@ -464,7 +464,6 @@ describe("send_message to an account with an opaque id", () => {
       { personMappingRepo },
     );
 
-    expect(personMappingRepo.linkKeyOf).toHaveBeenCalledWith(FIRST);
     expect(adapter.send).toHaveBeenCalledWith(
       FIRST,
       "2002",

@@ -70,7 +70,7 @@ describe("LinkedIn replies through People", () => {
       displayName: "LinkedIn Recipient",
       bondLevel: "acquaintance",
       approved: true,
-      links: [{ channel: "linkedin", channelUserId: MEMBER }],
+      links: [{ platform: "linkedin", id: MEMBER }],
     });
     app = new Hono().route("/", peopleRoutes(deps));
   });
