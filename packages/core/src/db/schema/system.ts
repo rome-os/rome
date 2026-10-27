@@ -183,6 +183,10 @@ export const outboundMessages = sqliteTable(
      *  carries, which is how the read knows the row has landed. */
     providerMessageId: text("provider_message_id"),
     error: text("error"),
+    /** The channel id of Rome's account the message goes out from. A retry
+     *  sends from it again, and the row lands only on a message stored under
+     *  it. Null on a row written before it was recorded. */
+    from: text("from_channel"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
@@ -427,6 +431,17 @@ export const guardianAuth = sqliteTable("guardian_auth", {
   avatarUrl: text("avatar_url"),
   onboardingComplete: integer("onboarding_complete", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+// The last Rome Cloud profile each visitor signed in with, kept so other
+// dashboard people see who sent a chat message. A visitor's own session holds
+// the same fields, but only in their cookie. Display only, never used for
+// authentication; a sign-in overwrites the row.
+export const visitorProfiles = sqliteTable("visitor_profiles", {
+  accountId: text("account_id").primaryKey(),
+  email: text("email").notNull(),
+  avatarUrl: text("avatar_url"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
 export const oauthPendingAttempts = sqliteTable(
@@ -729,6 +744,21 @@ export const romeAgentMessages = sqliteTable(
   ],
 );
 
+// The platform messages a message row stands for besides its own
+// platform_message_id. A reply the platform shows as several messages is one
+// row, and a quote of any of them reaches it. Not a FK, as with the trace
+// blocks below: session-scoped deletes remove these rows explicitly.
+export const romeAgentMessagePlatformIds = sqliteTable(
+  "rome_agent_message_platform_ids",
+  {
+    sessionId: text("session_id").notNull(),
+    platformMessageId: text("platform_message_id").notNull(),
+    // The rome_agent_messages row the platform message belongs to.
+    messageId: text("message_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.platformMessageId] })],
+);
+
 // Append-only storage for trace content, avoiding the O(N²) cost of storing
 // the whole trace as one JSON array on the role='trace' rome_agent_messages
 // row and re-serializing it after every agent event — that multi-megabyte
@@ -869,9 +899,90 @@ export const executionJournal = sqliteTable(
   ],
 );
 
-// One row per minted Connection. A connection kind may hold several. The many-to-many
-// grant ledger lives in `connection_grants` below, keyed by custody (the
-// connectionId).
+export const appConnectionAccess = sqliteTable(
+  "app_connection_access",
+  {
+    appId: text("app_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    identity: text("identity").notNull(),
+    operation: text("operation").notNull(),
+    sideEffects: text("side_effects", { enum: ["read-only", "write"] }).notNull(),
+    approval: text("approval", { enum: ["required", "not_required"] }).notNull(),
+    constraints: text("constraints", { mode: "json" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }),
+    grantEpoch: text("grant_epoch").notNull(),
+    revision: integer("revision").notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.appId, table.connectionId, table.identity, table.operation],
+    }),
+    index("idx_app_connection_access_app").on(table.appId, table.connectionId),
+  ],
+);
+
+export const appConnectionInvocations = sqliteTable(
+  "app_connection_invocations",
+  {
+    id: text("id").primaryKey(),
+    appId: text("app_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    identity: text("identity").notNull(),
+    operation: text("operation").notNull(),
+    requestIdHash: text("request_id_hash"),
+    inputHash: text("input_hash").notNull(),
+    input: text("input", { mode: "json" }),
+    sideEffects: text("side_effects", { enum: ["read-only", "write"] }).notNull(),
+    accessRevision: integer("access_revision").notNull(),
+    status: text("status", {
+      enum: [
+        "ready",
+        "pending_approval",
+        "running",
+        "succeeded",
+        "failed",
+        "rejected",
+        "outcome_unknown",
+      ],
+    }).notNull(),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_app_connection_invocation_request")
+      .on(table.appId, table.requestIdHash)
+      .where(sql`${table.requestIdHash} IS NOT NULL`),
+    index("idx_app_connection_invocation_retention").on(table.updatedAt),
+  ],
+);
+
+export const appConnectionAudit = sqliteTable(
+  "app_connection_audit",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    appId: text("app_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    identity: text("identity").notNull(),
+    operation: text("operation").notNull(),
+    accessRevision: integer("access_revision"),
+    approval: text("approval", {
+      enum: ["not_required", "pending", "approved", "rejected"],
+    }).notNull(),
+    executionId: text("execution_id").notNull(),
+    requestIdHash: text("request_id_hash"),
+    status: text("status").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [index("idx_app_connection_audit_app").on(table.appId, table.seq)],
+);
+
+// One row per minted Connection. A connection kind may hold several. Its one
+// grant lives in `connection_grants` below, keyed by custody (the connectionId).
+
 export const connections = sqliteTable("connections", {
   id: text("id").primaryKey(),
   connectionKind: text("connection_kind").notNull(),
@@ -881,13 +992,14 @@ export const connections = sqliteTable("connections", {
 
 // One row per channel a Connection backs: Rome's presence on a platform, with
 // an id minted once and never changed. The first channel of a connection kind takes
-// the connection kind's name as its id, and later ones get an opaque id. A row
+// the connection kind's name as its id, and later ones get an opaque id. A linkable
+// connection kind's account connected through setup always gets an opaque id, and only
+// its account from before channels were recorded keeps the name. A row
 // outlives its Connection, unbacked and unlinked, so its id is never minted
 // again: a linkable connection kind's next Connection gets a channel of its own, and
-// another connection kind's takes the row back. `agent` is the canonical id of the
-// account's agent, and one agent may be the agent of any number of channels,
-// several on one platform included. `platform` is the platform the row was
-// minted on, and the row keeps it.
+// another connection kind's takes the row back. `agent` is no longer written
+// or read: an account's agent lives on `connected_accounts`. `platform` is
+// the platform the row was minted on, and the row keeps it.
 export const channels = sqliteTable(
   "channels",
   {
@@ -895,29 +1007,63 @@ export const channels = sqliteTable(
     connectionKind: text("connection_kind").notNull(),
     platform: text("platform").notNull(),
     connectionId: text("connection_id"),
+    // The platform's own id for the account. With `platform` it is the
+    // account's identity, so at most one record holds a pair. Vocabulary:
+    // docs/domains/chats.md#account.
+    platformAccountId: text("platform_account_id"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     agent: text("agent"),
   },
-  (table) => [uniqueIndex("channels_connection_unique").on(table.connectionId)],
+  (table) => [
+    uniqueIndex("channels_connection_unique").on(table.connectionId),
+    uniqueIndex("uq_channels_platform_account")
+      .on(table.platform, table.platformAccountId)
+      .where(sql`${table.platformAccountId} IS NOT NULL`),
+  ],
 );
+
+// Chats' record of a connected account: one row per connection that lets
+// Rome chat, keyed by that connection and holding the agent that speaks
+// through the account, null for none. It lives exactly as long as its
+// connection. Vocabulary: docs/domains/chats.md#connected-account.
+export const connectedAccounts = sqliteTable("connected_accounts", {
+  connectionId: text("connection_id")
+    .primaryKey()
+    .references(() => connections.id, { onDelete: "cascade" }),
+  agent: text("agent"),
+});
 
 // The grant ledger. Rows record outcomes only — never step/flow state
 // or scheme-specific columns. `credential` is a PersistedCredential envelope
 // stored as plain JSON (encryption was deliberately dropped); the envelope
 // shape is kept so encryption can return later. A grant row is present in "unauthorized" from
-// connection creation; conferral fills it. One grant = one credential row.
+// connection creation; giving a grant fills it. One grant = one credential row.
 export const connectionGrants = sqliteTable(
   "connection_grants",
   {
-    custody: text("custody").notNull(), // connectionId
-    name: text("name").notNull(),
+    // The connection that holds the grant. A connection holds exactly one.
+    // Vocabulary: docs/domains/connections.md#grant.
+    custody: text("custody").primaryKey(),
     state: text("state").notNull(), // unauthorized | authorized | degraded
     credential: text("credential", { mode: "json" }), // PersistedCredential | null
-    profile: text("profile", { mode: "json" }), // ProfileRecord | null — non-secret conferral outcome
-    conferredAt: integer("conferred_at", { mode: "timestamp" }),
+    profile: text("profile", { mode: "json" }), // ProfileRecord | null — non-secret grant outcome
+    grantedAt: integer("granted_at", { mode: "timestamp" }),
+    grantEpoch: text("grant_epoch"),
     lastRenewedAt: integer("last_renewed_at", { mode: "timestamp" }),
     degradedAt: integer("degraded_at", { mode: "timestamp" }),
     degradedReason: text("degraded_reason"),
+    // The account the grant reaches, read from its profile: the platform and
+    // the platform's own id for the account. Null when the profile names none.
+    platform: text("platform"),
+    accountId: text("account_id"),
   },
-  (table) => [primaryKey({ columns: [table.custody, table.name] })],
+  (table) => [
+    // At most one connection reaches an account at a time, across every kind of
+    // connection on its platform. A broken (degraded) grant still counts, so a
+    // broken connection keeps its account. Vocabulary:
+    // docs/domains/connections.md#connection.
+    uniqueIndex("uq_connection_grants_account")
+      .on(table.platform, table.accountId)
+      .where(sql`${table.accountId} IS NOT NULL AND ${table.state} != 'unauthorized'`),
+  ],
 );

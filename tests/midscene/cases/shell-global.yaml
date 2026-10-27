@@ -23,7 +23,8 @@ cases:
           path: /chat
           viewport: mobile
       - aiAct: >-
-          Click the visible "Open sidebar" hamburger button once, then stop.
+          Click the "Open sidebar" hamburger button (three horizontal lines) in the top-left
+          header once, not the back arrow beside it, then stop.
       - aiAssert: >-
-          A mobile navigation drawer is open over the page with Chat, Apps, and Activity entries, a
-          "Close sidebar" control, and a dimmed backdrop.
+          A mobile navigation drawer has slid in from the left over a dimmed page, and lists named
+          Chat, Apps, and Activity entries.

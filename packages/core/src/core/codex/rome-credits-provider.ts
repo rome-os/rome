@@ -28,12 +28,21 @@ function tomlString(value: string): string {
  * instance credential is excluded from the shell env explicitly. This is not
  * a security boundary: a full-access agent command runs as the same user and
  * can still read the app-server's environ, as it can read Rome's settings DB.
+ *
+ * Codex's bundled skills (skill-creator, openai-docs, ...) are off so agents
+ * see only Rome's skill catalog; agents with the image tool get `imagegen`
+ * back per thread (codex-app-server-provider.ts).
  */
 export function codexAppServerConfigArgs(
   romeCloudOrigin: string | null,
   defaultProvider: string | null = null,
 ): string[] {
-  const args = ["-c", `shell_environment_policy.exclude=[${tomlString(ROME_CREDITS_TOKEN_ENV)}]`];
+  const args = [
+    "-c",
+    `shell_environment_policy.exclude=[${tomlString(ROME_CREDITS_TOKEN_ENV)}]`,
+    "-c",
+    "skills.bundled.enabled=false",
+  ];
   if (!romeCloudOrigin) {
     if (defaultProvider) throw new Error("Rome credits cannot be the default without Rome Cloud");
     return args;

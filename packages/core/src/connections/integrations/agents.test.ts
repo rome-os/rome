@@ -7,7 +7,7 @@ import {
 } from "../../lib/rome-cloud-agents.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { StreamFault } from "../types.js";
 import {
@@ -228,13 +228,19 @@ describe("agents channel", () => {
       throw rejected;
     };
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(createTestDb().db),
+      repository: new DrizzleConnectionsRepository(createTestDb().db),
     });
     registry.register(makeAgentsDescriptor(client));
     const conn = await registry.connect("agents");
-    await registry.importCredential(conn.id, "cloud", { material: HOME, expiresAt: "never" }, HOME);
+    await registry.giveGrant(
+      conn.connectionKind,
+      conn.id,
+      "cloud",
+      { material: HOME, expiresAt: "never" },
+      HOME,
+    );
     await until(() => conn.auth.grants().cloud === "degraded");
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.isUnlocked("chat")).toBe(false);
   });
 
   it("refuses attachments rather than sending only the text", async () => {
@@ -289,16 +295,16 @@ describe("agents channel", () => {
 
   it("records the agent Cloud assigned when the guardian connects", async () => {
     const setup = makeAgentsSetup(fakeClient([]));
-    const conferral = await setup(
+    const grant = await setup(
       { show: () => {} } as never,
       {
         step: (_label: string, fn: (signal: AbortSignal) => Promise<unknown>) =>
           fn(new AbortController().signal),
       } as never,
     );
-    expect(conferral.profile).toEqual(HOME);
+    expect(grant.profile).toEqual(HOME);
     // The instance token is the credential, so the grant records the agent only in its profile.
-    expect(conferral.credential.material).toEqual({});
+    expect(grant.credential.material).toEqual({});
     expect(reviveAgentsProfile(HOME).handle).toBe("home-rome");
   });
 

@@ -1,10 +1,10 @@
 // Built-in connection integrations. `registerBuiltinConnections` is the boot-time entry point.
 
+import { feishuStreamingStyle } from "../../channels/delivery/streaming-switch.js";
 import type { EmailAdapter } from "../../channels/email.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
 import type { WechatUserRuntime } from "../../channels/wechat-user.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
@@ -30,7 +30,6 @@ import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { makeSlackBotDescriptor } from "./slack-bot.js";
 import { createWechatDescriptor } from "./wechat.js";
 import { createWechatUserDescriptor } from "./wechat-user.js";
-import { makeWebchatDescriptor } from "./webchat.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
 
 export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
@@ -41,7 +40,6 @@ export { createWechatUserDescriptor, WECHAT_USER_KIND } from "./wechat-user.js";
 export { createFeishuDescriptor } from "./feishu.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeAgentsDescriptor } from "./agents.js";
-export { makeWebchatDescriptor } from "./webchat.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
 export { createLinkedInDescriptor } from "./linkedin.js";
 export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-providers.js";
@@ -57,7 +55,6 @@ export interface BuiltinConnectionDeps {
   chatSettings: ChatSettingsService;
   chatStop: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
-  webchatRepo: WebChatRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
   /** The LinkedIn inbox mirror (linkedin_threads/linkedin_messages). */
   linkedInSyncSink: LinkedInSyncSink;
@@ -78,7 +75,7 @@ export interface BuiltinConnectionDeps {
   /** Keeps index.ts's prompt-builder "our own inbox address" ref pointed at the
    *  CURRENT email epoch (birth/relock/backoff rebuild). */
   onEmailAdapterBuilt?: (adapter: EmailAdapter) => void;
-  /** DB handle for the Rome Cloud-OAuth conferral setups (github/slack/google):
+  /** DB handle for the Rome Cloud-OAuth grant setups (github/slack/google):
    *  the begin-redirect (mints the PKCE attempt) and the return-leg redeem both
    *  read/write the `oauth_pending_attempts` table. */
   db: DrizzleDb;
@@ -127,6 +124,7 @@ export function registerBuiltinConnections(
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
       hasAgent: deps.hasAgent,
+      replyStreamingStyle: feishuStreamingStyle(deps.settingsRepo),
     }),
   );
   registry.register(
@@ -138,7 +136,6 @@ export function registerBuiltinConnections(
       onAdapterBuilt: deps.onEmailAdapterBuilt,
     }),
   );
-  registry.register(makeWebchatDescriptor({ webchatRepo: deps.webchatRepo }));
   // Messages with other agents in the Rome Cloud account (dots). Offered on
   // every instance; it does nothing until the guardian connects it.
   registry.register(makeAgentsDescriptor());
@@ -157,9 +154,9 @@ export function registerBuiltinConnections(
   );
   // Rome Cloud-OAuth provider connection state (github/slack/
   // google/shopify; grant ledger only, no capabilities yet — Actors land in follow-ups).
-  // The conferral setup drives connect through the generic setup
+  // The setup drives connect through the generic setup
   // surface: begin-redirect → guardian consents on the broker → the return leg
-  // resumes the coroutine → redeem → terminal confer (which re-materializes the
+  // resumes the coroutine → redeem → terminal grant (which re-materializes the
   // tmpfs token file + gh/git shell auth via custody). Registration is NOT gated
   // on the connect-UI provider list (google is env-gated there), so an existing
   // grant still loads. A `reconnect` hint is

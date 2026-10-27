@@ -592,11 +592,12 @@ describe("PeoplePage directory", () => {
     await screen.findByText("Wei Chen");
     await showDirectory(user);
 
-    // All is the placed roster, the quiet person included — a contacts list
-    // answers "who does Rome know", not "who said something". The guardian and
-    // the accounts nobody has placed answer other questions, so neither pads it.
+    // All is the guardian's own row, then the placed roster, the quiet person
+    // included — a contacts list answers "who does Rome know", not "who said
+    // something". The accounts nobody has placed answer another question, so
+    // they do not pad it.
     expect(await screen.findByText("Nadia Petrova")).toBeTruthy();
-    expect(screen.queryByText("Zhangfan Dong")).toBeNull();
+    expect(screen.getByText("Zhangfan Dong")).toBeTruthy();
     expect(screen.queryByText("Jonas Tan")).toBeNull();
 
     await user.click(chip(/^Unknown/));
@@ -683,10 +684,9 @@ describe("PeoplePage directory", () => {
 
   it("says the roster is empty rather than blaming a search nobody ran", async () => {
     const user = userEvent.setup();
-    // A fresh instance: the guardian exists, and nobody has been placed. All
-    // holds the guardian back, so the directory is legitimately empty with an
-    // empty search box.
-    mockApi({ people: [GUARDIAN], accounts: [] });
+    // Nobody placed and nothing to show: the directory is legitimately empty
+    // with an empty search box.
+    mockApi({ people: [], accounts: [] });
     renderPage();
 
     await showDirectory(user);

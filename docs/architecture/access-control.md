@@ -49,5 +49,6 @@ A visitor gets their credential by signing in to their [Rome Cloud](../concepts/
 - Sign-in starts only for an access-gated target: a link-public or email-restricted app, or the dashboard when its allow-list is non-empty.
 - The PKCE verifier and the pending sign-in record stay server-side, single-use, and short-lived. The browser carries only the state echo and the returned code.
 - The callback re-checks the allow-list after a successful Rome Cloud sign-in. Sign-in success alone never grants reach.
+- The callback keeps the visitor's profile only after a sign-in succeeds. A refused sign-in leaves no record.
 - The instance normalizes the post-sign-in redirect: an app-scoped sign-in returns only into that app, and a dashboard sign-in never lands on an API path.
 - An account that does not own the instance can never leave the flow holding a guardian credential. The refusal downgrades to a visitor credential or an error, never upgrades.

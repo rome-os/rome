@@ -11,13 +11,13 @@ import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from
 import { SetupManager, NoSetupError, type SetupRegistry } from "./manager.js";
 import type { SetupFn } from "./types.js";
 
-/** A stand-in transaction handle for the fake registry's `confer` participant. */
+/** A stand-in transaction handle for the fake registry's `giveGrant` participant. */
 const FAKE_TX = {} as unknown as DrizzleTx;
 
 const CRED: Credential = { material: { token: "t" }, expiresAt: "never" };
 
 /** The Discord-shaped setup used across these tests: prompt a token, then
- *  confer credential + profile + guardian mapping. */
+ *  grant credential + profile + guardian mapping. */
 const discordSetup: SetupFn = async (interact) => {
   const { token } = await interact.prompt({
     fields: [{ name: "token", label: "Token", secret: true }],
@@ -32,7 +32,7 @@ const discordSetup: SetupFn = async (interact) => {
 const mkConn = (id: string, service = "discord"): Connection =>
   ({ id, service }) as unknown as Connection;
 
-/** A registry double whose `confer` records the terminal write and runs sections
+/** A registry double whose `grant` records the terminal write and runs sections
  *  inline. `seed` pre-populates existing connections (for addressed-connection
  *  tests). `mint` stands in for the placeholder mint so the tests can assert
  *  whether a connection was created. */
@@ -51,28 +51,27 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
   });
   const descriptor = {
     service: "discord",
+    grant: "bot",
     auth: {
-      bot: {
-        confer: async () => CRED,
-        renew: async () => "re-confer" as const,
-        ...(setup ? { setup } : {}),
-      },
+      obtain: async () => CRED,
+      renew: async () => "needs-fix" as const,
+      ...(setup ? { setup } : {}),
     },
     capabilities: {},
   } as unknown as ConnectionDescriptor;
   const registry: SetupRegistry = {
     getDescriptor: () => descriptor,
     withGrantSection: (_s, _g, fn) => fn(),
-    confer: async (service, connectionId, grant, credential, profile, opts) => {
+    giveGrant: async (service, connectionId, grant, credential, profile, opts) => {
       let conn = connectionId
         ? connected.find((c) => c.id === connectionId)
         : connected.find((c) => c.connectionKind === service);
       if (connectionId && !conn) {
-        throw new Error(`Connection "${connectionId}" no longer exists; setup cannot confer.`);
+        throw new Error(`Connection "${connectionId}" no longer exists; setup cannot grant.`);
       }
       if (!conn) conn = mint(service);
       // The atomic write: record the credential, then run the guardian-mapping
-      // participant exactly as the real `confer` does inside its transaction.
+      // participant exactly as the real `grant` does inside its transaction.
       imports.push({ id: conn.id, grant, credential, profile });
       opts?.inTx?.(FAKE_TX);
       return conn;
@@ -82,7 +81,7 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
 }
 
 /** A person-mapping repo double; `writeChannelMapping` is the guardian-map sink
- *  (the participant the conferral transaction runs). */
+ *  (the participant the grant transaction runs). */
 function fakePersonRepo(writeChannelMapping = rs.fn(() => "id")): PersonMappingRepository {
   return {
     findByChannelUser: async () => null,

@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { connections as mockConnections } from "../../mock/handlers/connections-store";
+import type { GrantState } from "@/lib/connections-api";
+import { stateOfGrants } from "@/test/connection-state";
 import InboxPage from "./InboxPage";
 
 beforeAll(async () => {
@@ -28,13 +30,14 @@ function mockBackend(connections: unknown[] = []) {
   }) as typeof fetch);
 }
 
-// A lean /api/connections row for the source overview: grant states + whether
+// A lean /api/connections row for the source overview: its state + whether
 // the Talk capability is unlocked.
-function connectionRow(kind: string, grants: Record<string, string>, talkUnlocked: boolean) {
+function connectionRow(kind: string, grants: Record<string, GrantState>, talkUnlocked: boolean) {
   return {
     connectionKind: kind,
+    state: stateOfGrants(grants),
     grants,
-    capabilities: { talk: { state: talkUnlocked ? "unlocked" : "needs-auth" } },
+    capabilities: { chat: { state: talkUnlocked ? "unlocked" : "needs-auth" } },
   };
 }
 
@@ -59,13 +62,13 @@ describe("InboxPage message sources", () => {
 
   it("classifies each channel with the shared registry-native rule", async () => {
     mockBackend([
-      // Talk unlocked → Connected.
+      // Chat unlocked → Connected.
       connectionRow("telegram", { bot: "authorized" }, true),
-      // Conferred (even degraded) but transport not up → Configured.
+      // Granted (even degraded) but transport not up → Configured.
       connectionRow("whatsapp", { session: "degraded" }, false),
       connectionRow("wechat", { account: "authorized" }, true),
       connectionRow("discord", { bot: "authorized" }, true),
-      // Nothing conferred → Disconnected.
+      // Nothing granted → Disconnected.
       connectionRow("telegram_user", { session: "unauthorized" }, false),
     ]);
     renderPage();

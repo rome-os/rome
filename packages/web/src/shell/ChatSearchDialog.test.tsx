@@ -414,6 +414,8 @@ describe("ChatSearchDialog", () => {
         }),
         // A carrier opens fine but is plumbing, not a destination.
         installedApp("user-skills", "Notes Skills"),
+        // So does an app whose app.yaml opts out of the launcher.
+        installedApp("notes-hidden", "Notes Hidden", { hideInLauncher: true }),
       ],
     );
     const user = userEvent.setup();
@@ -519,18 +521,6 @@ describe("ChatSearchDialog", () => {
     await waitFor(() =>
       expect(screen.getByTestId("location").textContent).toBe("/apps/settings-sync"),
     );
-  });
-
-  it("leaves the App Store, which has no dashboard page, out of page results", async () => {
-    mockSessionSearch([], [], []);
-    const user = userEvent.setup();
-    renderSearch("/chat", true);
-
-    await user.type(
-      await screen.findByRole("combobox", { name: "Search pages, apps, and chats" }),
-      "store",
-    );
-    expect(await screen.findByText("No pages, apps, or chats found")).toBeTruthy();
   });
 
   it("matches translated page labels and keeps the English alias", async () => {

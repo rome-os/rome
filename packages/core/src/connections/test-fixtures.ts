@@ -1,12 +1,11 @@
 // Shared test fixtures. No Rstest imports here so all three
 // test agents (registry, ledger, rehydration) can import from this one file.
 //
-// Six fake descriptors mirror the six canonical connection kinds:
-//   zeroGrantTalk   — webchat-like: Talker with no grants, unlocked from birth
+// Fake descriptors mirror the canonical connection kinds. Each holds one grant:
 //   pasteTalk       — telegram-like: one tokenPaste grant → Talker
-//   twoGrant        — discord-like: bot(paste)+user(renewable) → talker+watcher+actor
-//   renewableAct    — github-like: one renewable grant → Actor (N renewals, then re-confer)
-//   gatedWatch      — github-like: zero-grant Watcher with subscriptionGated:true
+//   botAll          — discord-like: one tokenPaste grant → talker+watcher+actor
+//   renewableAct    — github-like: one renewable grant → Actor (N renewals, then fix)
+//   gatedWatch      — github-like: one grant → Watcher with subscriptionGated:true
 //   externalCustody — Composio-like: scheme with resolveExternal; no secrets in ledger
 //
 // All factories produce plain objects — no singletons, safe to call per test.
@@ -30,6 +29,8 @@ import type {
   WatchEvent,
 } from "./types.js";
 import { tokenPaste } from "./schemes.js";
+import type { GrantValue } from "./grant.js";
+import type { ConnectionsRepository } from "./repository.js";
 
 // recordingSleep — replaces the registry's sleep(ms) in backoff tests.
 
@@ -58,8 +59,8 @@ export interface FakeTalkerState {
   deliver: ((msg: ChannelMessage) => void) | null;
   /** The `fault` callback passed to start(). Null until start() is called. */
   fault: ((err: CredentialRejected | Disconnected) => void) | null;
-  /** Every start() call is recorded here as the creds snapshot at the time. */
-  starts: Array<{ creds: Record<string, Credential> }>;
+  /** Every start() call is recorded here with the credential at the time. */
+  starts: Array<{ cred: Credential }>;
   stopCount: number;
   sends: Array<{ address: ChatId; msg: OutgoingMessage }>;
   /** If set, the next send() call will throw this error (then clear). */
@@ -87,10 +88,7 @@ export interface FakeTalkerOptions {
   asyncStop?: boolean;
 }
 
-export function makeFakeTalker(
-  creds: Record<string, Credential>,
-  opts?: FakeTalkerOptions,
-): FakeTalker {
+export function makeFakeTalker(cred: Credential, opts?: FakeTalkerOptions): FakeTalker {
   const state: FakeTalkerState = {
     deliver: null,
     fault: null,
@@ -107,7 +105,7 @@ export function makeFakeTalker(
     start(deliver, fault) {
       state.deliver = deliver;
       state.fault = fault;
-      state.starts.push({ creds });
+      state.starts.push({ cred });
       // Synchronously flush any buffered inbound (models a Talker that delivers
       // from start()). This runs AFTER onUnlocked fired, so a handler registered
       // synchronously in the callback is already wired.
@@ -142,7 +140,7 @@ export function makeFakeTalker(
 // Fake Actor
 
 export interface FakeActorState {
-  invocations: Array<{ call: OperationCall; creds: Record<string, Credential> }>;
+  invocations: Array<{ call: OperationCall; cred: Credential }>;
   /** If set, the next invoke() call will throw this error (then clear). */
   nextInvokeError: Error | null;
   stopCount: number;
@@ -152,7 +150,7 @@ export interface FakeActor extends Actor {
   readonly state: FakeActorState;
 }
 
-export function makeFakeActor(creds: Record<string, Credential>): FakeActor {
+export function makeFakeActor(cred: Credential): FakeActor {
   const state: FakeActorState = {
     invocations: [],
     nextInvokeError: null,
@@ -168,7 +166,7 @@ export function makeFakeActor(creds: Record<string, Credential>): FakeActor {
         state.nextInvokeError = null;
         throw err;
       }
-      state.invocations.push({ call, creds });
+      state.invocations.push({ call, cred });
       return { ok: true };
     },
     stop() {
@@ -186,8 +184,8 @@ export interface FakeWatcherState {
   emit: ((event: WatchEvent) => void) | null;
   /** The `fault` callback passed to start(). Null until start() is called. */
   fault: ((err: CredentialRejected | Disconnected) => void) | null;
-  /** Every start() call recorded with the creds snapshot. */
-  starts: Array<{ creds: Record<string, Credential> }>;
+  /** Every start() call recorded with the credential. */
+  starts: Array<{ cred: Credential }>;
   stopCount: number;
 }
 
@@ -195,7 +193,7 @@ export interface FakeWatcher extends Watcher {
   readonly state: FakeWatcherState;
 }
 
-export function makeFakeWatcher(creds: Record<string, Credential>): FakeWatcher {
+export function makeFakeWatcher(cred: Credential): FakeWatcher {
   const state: FakeWatcherState = {
     emit: null,
     fault: null,
@@ -208,7 +206,7 @@ export function makeFakeWatcher(creds: Record<string, Credential>): FakeWatcher 
     start(emit, fault) {
       state.emit = emit;
       state.fault = fault;
-      state.starts.push({ creds });
+      state.starts.push({ cred });
     },
     stop() {
       state.stopCount++;
@@ -225,15 +223,15 @@ export function makeFakeWatcher(creds: Record<string, Credential>): FakeWatcher 
 
 export interface FakeTalkerFactory {
   readonly instances: FakeTalker[];
-  build(creds: Record<string, Credential>): FakeTalker;
+  build(cred: Credential): FakeTalker;
 }
 
 export function makeFakeTalkerFactory(opts?: FakeTalkerOptions): FakeTalkerFactory {
   const instances: FakeTalker[] = [];
   return {
     instances,
-    build(creds) {
-      const t = makeFakeTalker(creds, opts);
+    build(cred) {
+      const t = makeFakeTalker(cred, opts);
       instances.push(t);
       return t;
     },
@@ -242,15 +240,15 @@ export function makeFakeTalkerFactory(opts?: FakeTalkerOptions): FakeTalkerFacto
 
 export interface FakeActorFactory {
   readonly instances: FakeActor[];
-  build(creds: Record<string, Credential>): FakeActor;
+  build(cred: Credential): FakeActor;
 }
 
 export function makeFakeActorFactory(): FakeActorFactory {
   const instances: FakeActor[] = [];
   return {
     instances,
-    build(creds) {
-      const a = makeFakeActor(creds);
+    build(cred) {
+      const a = makeFakeActor(cred);
       instances.push(a);
       return a;
     },
@@ -259,15 +257,15 @@ export function makeFakeActorFactory(): FakeActorFactory {
 
 export interface FakeWatcherFactory {
   readonly instances: FakeWatcher[];
-  build(creds: Record<string, Credential>): FakeWatcher;
+  build(cred: Credential): FakeWatcher;
 }
 
 export function makeFakeWatcherFactory(): FakeWatcherFactory {
   const instances: FakeWatcher[] = [];
   return {
     instances,
-    build(creds) {
-      const w = makeFakeWatcher(creds);
+    build(cred) {
+      const w = makeFakeWatcher(cred);
       instances.push(w);
       return w;
     },
@@ -278,15 +276,15 @@ export function makeFakeWatcherFactory(): FakeWatcherFactory {
 
 /**
  * A headless AuthScheme that:
- * - confer(): immediately returns a credential without interaction.
+ * - `obtain()`: immediately returns a credential without interaction.
  * - renew(): returns fresh credentials `successCount` times (decrements each
- *   call), then returns "re-confer" forever. Pass Infinity to always renew.
+ *   call), then returns "needs-fix" forever. Pass Infinity to always renew.
  * - resolveExternal: optional, enables external-custody tests.
  */
 export interface FakeRenewableScheme extends AuthScheme {
   /** Number of remaining successful renewals (starts at the configured value). */
   renewsRemaining: number;
-  /** Materials handed out by confer() and each successful renew(). */
+  /** Materials handed out by `obtain()` and each successful renew(). */
   readonly materialHistory: SecretRecord[];
 }
 
@@ -308,10 +306,10 @@ export function makeFakeRenewableScheme(opts?: {
       successCount = n;
     },
 
-    async confer(_interact): Promise<Credential> {
-      const material: SecretRecord = { token: `conferred-${materialHistory.length}` };
+    async obtain(_interact): Promise<Credential> {
+      const material: SecretRecord = { token: `granted-${materialHistory.length}` };
       if (materialHistory.length === 0) {
-        // First confer returns the configured initial material.
+        // The first `obtain()` returns the configured initial material.
         Object.assign(material, initialMaterial);
         materialHistory.push(material);
       } else {
@@ -320,8 +318,8 @@ export function makeFakeRenewableScheme(opts?: {
       return { material, expiresAt: "never" };
     },
 
-    async renew(_cred): Promise<Credential | "re-confer"> {
-      if (successCount <= 0) return "re-confer";
+    async renew(_cred): Promise<Credential | "needs-fix"> {
+      if (successCount <= 0) return "needs-fix";
       successCount--;
       const material: SecretRecord = { token: `renewed-${materialHistory.length}` };
       materialHistory.push(material);
@@ -362,33 +360,6 @@ export function makeWatchEvent(overrides?: Partial<WatchEvent>): WatchEvent {
   };
 }
 
-// Descriptor: zeroGrantTalk (webchat-like)
-//
-// No auth grants; Talker unlocked from birth. Models webchat where access is
-// bounded out-of-band by the guardian-gated web app.
-
-export interface ZeroGrantTalkFixture {
-  descriptor: ConnectionDescriptor;
-  talkerFactory: FakeTalkerFactory;
-}
-
-export function makeZeroGrantTalk(): ZeroGrantTalkFixture {
-  const talkerFactory = makeFakeTalkerFactory();
-  const descriptor: ConnectionDescriptor = {
-    connectionKind: "fake-webchat",
-    auth: {},
-    capabilities: {
-      talker: {
-        needs: [] as const,
-        build(creds) {
-          return talkerFactory.build(creds);
-        },
-      },
-    },
-  };
-  return { descriptor, talkerFactory };
-}
-
 // Descriptor: pasteTalk (telegram-like)
 //
 // One tokenPaste grant "bot" → Talker. validate is a no-op (always valid).
@@ -396,7 +367,7 @@ export function makeZeroGrantTalk(): ZeroGrantTalkFixture {
 export interface PasteTalkFixture {
   descriptor: ConnectionDescriptor;
   talkerFactory: FakeTalkerFactory;
-  /** Call this inside an importCredential call to supply a valid token. */
+  /** Call this inside an `obtain()` call to supply a valid token. */
   validCredential: () => Credential;
 }
 
@@ -406,20 +377,19 @@ export function makePasteTalk(opts?: FakeTalkerOptions): PasteTalkFixture {
   const descriptor: ConnectionDescriptor = {
     connectionKind: "fake-telegram",
     // Names its account by the profile's `botId`, as Telegram does.
-    accountIdOf: (_grant, profile) => (typeof profile.botId === "string" ? profile.botId : null),
-    auth: {
-      bot: tokenPaste({
-        label: "Fake bot token",
-        validate: async (_token: string) => {
-          // Always valid in tests.
-        },
-      }),
-    },
+    accountIdOf: (profile) => (typeof profile.botId === "string" ? profile.botId : null),
+    link: "own_account",
+    grant: "bot",
+    auth: tokenPaste({
+      label: "Fake bot token",
+      validate: async (_token: string) => {
+        // Always valid in tests.
+      },
+    }),
     capabilities: {
       talker: {
-        needs: ["bot"] as const,
-        build(creds) {
-          return talkerFactory.build(creds);
+        build(cred) {
+          return talkerFactory.build(cred);
         },
       },
     },
@@ -433,32 +403,24 @@ export function makePasteTalk(opts?: FakeTalkerOptions): PasteTalkFixture {
   return { descriptor, talkerFactory, validCredential };
 }
 
-// Descriptor: twoGrant (discord-like)
+// Descriptor: botAll (discord-like)
 //
-// Two grants:
-//   bot  (tokenPaste) → talker + watcher
-//   user (renewable)  → actor
-//
-// A degraded user grant relocks Act while Talk+Watch stay live.
+// One tokenPaste grant "bot" → talker + watcher + actor.
 
-export interface TwoGrantFixture {
+export interface BotAllFixture {
   descriptor: ConnectionDescriptor;
   talkerFactory: FakeTalkerFactory;
   watcherFactory: FakeWatcherFactory;
   actorFactory: FakeActorFactory;
-  botScheme: AuthScheme; // tokenPaste — renew is always "re-confer"
-  userScheme: FakeRenewableScheme;
+  botScheme: AuthScheme; // tokenPaste — renew is always "needs-fix"
   /** Valid credential for the "bot" grant. */
   botCredential: () => Credential;
-  /** Valid credential for the "user" grant. */
-  userCredential: () => Credential;
 }
 
-export function makeTwoGrant(): TwoGrantFixture {
+export function makeBotAll(): BotAllFixture {
   const talkerFactory = makeFakeTalkerFactory();
   const watcherFactory = makeFakeWatcherFactory();
   const actorFactory = makeFakeActorFactory();
-  const userScheme = makeFakeRenewableScheme({ successCount: 3 });
 
   const botScheme = tokenPaste({
     label: "Fake Discord bot token",
@@ -469,27 +431,22 @@ export function makeTwoGrant(): TwoGrantFixture {
 
   const descriptor: ConnectionDescriptor = {
     connectionKind: "fake-discord",
-    auth: {
-      bot: botScheme,
-      user: userScheme,
-    },
+    grant: "bot",
+    auth: botScheme,
     capabilities: {
       talker: {
-        needs: ["bot"] as const,
-        build(creds) {
-          return talkerFactory.build(creds);
+        build(cred) {
+          return talkerFactory.build(cred);
         },
       },
       watcher: {
-        needs: ["bot"] as const,
-        build(creds) {
-          return watcherFactory.build(creds);
+        build(cred) {
+          return watcherFactory.build(cred);
         },
       },
       actor: {
-        needs: ["user"] as const,
-        build(creds) {
-          return actorFactory.build(creds);
+        build(cred) {
+          return actorFactory.build(cred);
         },
       },
     },
@@ -500,26 +457,12 @@ export function makeTwoGrant(): TwoGrantFixture {
     expiresAt: "never",
   });
 
-  const userCredential = (): Credential => ({
-    material: { token: "fake-discord-user-token" },
-    expiresAt: "never",
-  });
-
-  return {
-    descriptor,
-    talkerFactory,
-    watcherFactory,
-    actorFactory,
-    botScheme,
-    userScheme,
-    botCredential,
-    userCredential,
-  };
+  return { descriptor, talkerFactory, watcherFactory, actorFactory, botScheme, botCredential };
 }
 
 // Descriptor: renewableAct (github-like)
 //
-// One grant "user" whose scheme renews N times then "re-confer".
+// One grant "user" whose scheme renews N times then "needs-fix".
 // Used to test: renew-once-then-degrade, and re-authorize after degrade.
 
 export interface RenewableActFixture {
@@ -539,14 +482,12 @@ export function makeRenewableAct(opts?: { successCount?: number }): RenewableAct
 
   const descriptor: ConnectionDescriptor = {
     connectionKind: "fake-github",
-    auth: {
-      user: userScheme,
-    },
+    grant: "user",
+    auth: userScheme,
     capabilities: {
       actor: {
-        needs: ["user"] as const,
-        build(creds) {
-          return actorFactory.build(creds);
+        build(cred) {
+          return actorFactory.build(cred);
         },
       },
     },
@@ -562,12 +503,15 @@ export function makeRenewableAct(opts?: { successCount?: number }): RenewableAct
 
 // Descriptor: gatedWatch (github-like)
 //
-// Zero-grant Watcher with subscriptionGated:true. Needs no credential but
-// stays "needs-subscription" until registry.setWatchSubscribed(id, true).
+// One tokenPaste grant "user" → a Watcher with subscriptionGated:true. Once the
+// grant is held it stays "needs-subscription" until
+// registry.setWatchSubscribed(id, true).
 
 export interface GatedWatchFixture {
   descriptor: ConnectionDescriptor;
   watcherFactory: FakeWatcherFactory;
+  /** Valid credential for the "user" grant. */
+  userCredential: () => Credential;
 }
 
 export function makeGatedWatch(): GatedWatchFixture {
@@ -575,26 +519,31 @@ export function makeGatedWatch(): GatedWatchFixture {
 
   const descriptor: ConnectionDescriptor = {
     connectionKind: "fake-github-watch",
-    auth: {},
+    grant: "user",
+    auth: tokenPaste({ label: "Fake GitHub token", validate: async () => {} }),
     capabilities: {
       watcher: {
-        needs: [] as const,
         subscriptionGated: true,
-        build(creds) {
-          return watcherFactory.build(creds);
+        build(cred) {
+          return watcherFactory.build(cred);
         },
       },
     },
   };
 
-  return { descriptor, watcherFactory };
+  const userCredential = (): Credential => ({
+    material: { token: "fake-github-token" },
+    expiresAt: "never",
+  });
+
+  return { descriptor, watcherFactory, userCredential };
 }
 
 // Descriptor: externalCustody (Composio-like)
 //
 // A scheme with resolveExternal: the ledger must persist { kind: "external" }
 // (no secret material) and the registry re-wraps the material at rehydration
-// by calling resolveExternal instead of conferring again.
+// by calling resolveExternal instead of granting again.
 //
 // The fixture exposes the resolver spy so tests can verify it was called and
 // what material it produced.
@@ -621,18 +570,18 @@ export function makeExternalCustody(): ExternalCustodyFixture {
     return { ...externalMaterial };
   };
 
-  // confer() returns a credential whose material is a function (external resolver).
+  // `obtain()` returns a credential whose material is a function (external resolver).
   // The ledger must persist this as { kind: "external" }.
   const scheme = makeFakeRenewableScheme({
-    successCount: 0, // cannot renew — always "re-confer"
+    successCount: 0, // cannot renew — always "needs-fix"
     resolveExternal,
   });
 
-  // Override confer so it returns a function-valued material.
-  const originalConfer = scheme.confer.bind(scheme);
-  scheme.confer = async (_interact) => {
+  // Override `obtain()` so it returns a function-valued material.
+  const originalObtain = scheme.obtain.bind(scheme);
+  scheme.obtain = async (_interact) => {
     // Ignore the base implementation; return a resolver-backed credential.
-    void originalConfer; // silence unused-var lint
+    void originalObtain; // silence unused-var lint
     return {
       material: resolveExternal,
       expiresAt: "never",
@@ -641,14 +590,12 @@ export function makeExternalCustody(): ExternalCustodyFixture {
 
   const descriptor: ConnectionDescriptor = {
     connectionKind: "fake-composio",
-    auth: {
-      account: scheme,
-    },
+    grant: "account",
+    auth: scheme,
     capabilities: {
       actor: {
-        needs: ["account"] as const,
-        build(creds) {
-          return actorFactory.build(creds);
+        build(cred) {
+          return actorFactory.build(cred);
         },
       },
     },
@@ -678,29 +625,29 @@ export function makeExternalCustody(): ExternalCustodyFixture {
 // grant transitions independently of any capability build.
 
 export interface CustodyRecorder extends GrantCustody {
-  readonly syncs: Array<{ grant: GrantName; material: SecretRecord; profile: ProfileRecord }>;
-  readonly clears: Array<{ grant: GrantName }>;
+  readonly syncs: Array<{ material: SecretRecord; profile: ProfileRecord }>;
+  /** How many times clear() ran. */
+  clears: number;
   /** If set, the NEXT sync() throws this (then clears) — models a disk error. */
   nextSyncError: Error | null;
 }
 
 export function makeCustodyRecorder(): CustodyRecorder {
   const syncs: CustodyRecorder["syncs"] = [];
-  const clears: CustodyRecorder["clears"] = [];
   return {
     syncs,
-    clears,
+    clears: 0,
     nextSyncError: null,
-    async sync(grant, material, profile) {
+    async sync(material, profile) {
       if (this.nextSyncError !== null) {
         const err = this.nextSyncError;
         this.nextSyncError = null;
         throw err;
       }
-      syncs.push({ grant, material, profile });
+      syncs.push({ material, profile });
     },
-    async clear(grant) {
-      clears.push({ grant });
+    async clear() {
+      this.clears++;
     },
   };
 }
@@ -722,7 +669,8 @@ export function makeCustodyGrant(opts?: { successCount?: number }): CustodyGrant
 
   const descriptor: ConnectionDescriptor = {
     connectionKind: "fake-oauth-provider",
-    auth: { user: userScheme },
+    grant: "user",
+    auth: userScheme,
     custody,
     capabilities: {},
   };
@@ -738,3 +686,13 @@ export function makeCustodyGrant(opts?: { successCount?: number }): CustodyGrant
 // Re-exports used by test files
 
 export { CredentialRejected, Disconnected };
+
+/** Replace connection `id`'s kept grant with `next` of it, as a test sets up
+ *  a state no command reaches, such as a degraded grant. */
+export function updateGrant(
+  repository: Pick<ConnectionsRepository, "update">,
+  id: string,
+  next: (current: GrantValue) => GrantValue,
+): Promise<void> {
+  return repository.update(id, (current) => ({ ...current, grant: next(current.grant) }));
+}

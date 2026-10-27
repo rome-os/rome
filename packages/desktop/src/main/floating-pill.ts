@@ -17,6 +17,7 @@ import {
 } from "./floating-pill-state";
 import { isQuitting, requestStopAndQuit } from "./lifecycle";
 import { createLogger } from "./logger";
+import { preventActivation } from "./prevent-activation";
 import type { Runtime } from "./runtime/runtime";
 
 const log = createLogger("pill");
@@ -142,6 +143,17 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
       },
     });
     win = created;
+
+    // Without this, pressing the icon activates Rome, and becoming active hides
+    // the icon before the press reaches the page: every click and drag opens
+    // Rome instead.
+    try {
+      if (!preventActivation(created)) {
+        log.warn("AppKit has no _setPreventsActivation:, so pressing the icon activates Rome");
+      }
+    } catch (err) {
+      log.warn(`Failed to keep the icon from activating Rome (${String(err)})`);
+    }
 
     created.on("closed", () => {
       if (win === created) win = null;

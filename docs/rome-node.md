@@ -38,7 +38,11 @@ See the [library examples](../packages/rome-node-core/README.md) for both APIs.
 ## Device status in Settings
 
 Settings → Devices shows the caller connection, connected device count, and each
-device's name, platform, and status. The dashboard refreshes every 15 seconds
+device's name, platform, and status. Each card's menu renames the device or removes
+it, which revokes it and deletes it from the account in one step. A removed device
+returns only as a new device, after `rome-node connect` and a new approval. A
+device whose revocation the Gateway has not confirmed stays listed as revoked, and
+removing it again deletes it. The dashboard refreshes every 15 seconds
 while open. `client.getDevicesStatus()` returns the same daemon-owned checks.
 
 It only connects to an existing daemon and returns `null` if none is running.
@@ -80,9 +84,14 @@ Gateway presence protocol is involved.
 A new chat can work in a folder on a connected device instead of in a Rome
 project. With at least one authorized device, the composer's project selector
 opens on two levels: first Rome Cloud and each device, then Rome Cloud's
-projects or that device's folders. The device list comes from
-`GET /api/devices/list`, which reads Cloud's list and sends nothing to any
-device, so it shows no online status. Opening a device lists its folders with
+projects or that device's folders. The selector reads its projects and devices
+in one request, `GET /api/chat/locations`, so the menu draws once. Its device
+list is Cloud's list, which sends nothing to any device, so it shows no online
+status. When Cloud's list fails or takes longer than 3 seconds, the answer has
+no devices and the menu keeps one level. In the Mac app, the computer the app
+runs on lists first, marked "This device", and opening it shows the system
+folder dialog instead of the drawn folder list while the app connects it.
+Opening a device lists its folders with
 `fs.list`, through `GET /api/devices/:deviceId/files?path=`. That request is the
 only probe: an offline device, or one that needs an update, is marked then.
 A chat holds a project or a device folder, never both, and
@@ -124,6 +133,8 @@ The connection uses JSON-RPC 2.0 and starts with `daemon.hello`, passing
 | `daemon.status` | Read caller status without opening a Gateway connection |
 | `daemon.stop` | Explicitly stop the shared daemon |
 | `devices.list` | List authorized devices from Cloud |
+| `devices.rename` | Rename `{ deviceId, name }` in the account through Cloud |
+| `devices.remove` | Revoke `{ deviceId }` and delete it from the account through Cloud |
 | `devices.status` | Check device reachability with read-only `system.info` requests |
 | `devices.run` | Forward `{ deviceId, action, args }` to a device |
 | `devices.runBinary` | Forward `{ deviceId, action, args }` and input bytes to a device as a binary frame |
@@ -402,9 +413,18 @@ gets only the system directories.
 The user can turn the computer off as a device and on again. The choice persists
 across restarts: while it is off, the app stays signed in and opens the Rome, but
 does not connect the computer. Settings → Devices in the Rome the app opened shows
-a "This device" card with that switch, only inside the app. The app answers the
+a "This device" card whose menu has Connect or Disconnect, only inside the app.
+The menu cannot remove this computer. It links to Rome Cloud, which can. The app answers the
 card's requests only from the top frame of that Rome's origin. Other pages in its
 window, and the Rome in a browser, cannot read or change the device.
+
+While the computer is on as a device, the app keeps its display from sleeping,
+and macOS does not idle-sleep while the display stays on. A lost connection keeps
+the hold for 30 minutes, because a computer that sleeps during an outage does not
+reconnect on its own. After that the app releases the hold and takes it again
+once the device reconnects. Turning the device off, signing out, Rome Cloud
+revoking the device, or quitting the app releases it at once. Closing the lid or
+choosing Sleep still sleeps the computer.
 
 The app keeps its credential in its own encrypted store and never reads the CLI's
 configuration directory. `rome-node connect` on the same computer is a separate
@@ -468,6 +488,18 @@ for action arguments, examples, and result handling. Each command also accepts
 `rome-node device` reads the authorized device list from Cloud. It does not claim
 that listed devices are online. `device describe <id>` invokes `system.info`,
 which returns the computer name, platform, and supported actions.
+
+`device rename <id> <name>` and `device remove <id>` change the account's device
+list in Cloud. They do not contact the device, so it can be offline. Cloud trims
+names to 1–80 characters without control characters. Names need not be unique.
+`remove` revokes the device, which disconnects it, then deletes the record. A
+removed computer must run `connect` and be approved again. Cloud keeps the record
+until the Gateway confirms the revocation, and until then `remove` fails with
+`revocation_pending`. The device is already revoked. Run `remove` again later.
+Rome Core exposes the same operations as `PATCH /api/devices/:deviceId` with
+`{ name }` and `DELETE /api/devices/:deviceId`. Both answer 204, or 404
+`device_not_found`, 400 `invalid_device_name`, 409 `revocation_pending`, or 503
+`unavailable`.
 
 `device run <id> exec --args <json>` starts a program with an argument vector.
 The arguments are `command`, optional `args: string[]`, and optional `cwd`.
@@ -617,6 +649,36 @@ aborts every transfer on that side. A host accepts at most four concurrent
 transfers and replies `busy` to more. Each transfer accepts frames only from the
 peer that opened it. Host frames from an earlier connection never go out on a
 replacement connection.
+
+## Screen control on macOS
+
+The host offers no screen action. On a macOS device, a caller controls the
+screen by running the system tools through `exec` and copying the screenshot
+back with `rome-node cp`.
+
+```json
+{"command":"screencapture","args":["-x","/tmp/rome-screen.png"]}
+{"command":"cliclick","args":["c:640,400"]}
+{"command":"cliclick","args":["t:hello"]}
+{"command":"osascript","args":["-e","tell application \"System Events\" to keystroke \"hello\""]}
+```
+
+`screencapture -x` saves the screen without the shutter sound. Copy the file
+with `rome-node cp <device-id>:/tmp/rome-screen.png ./screen.png` to read it.
+`cliclick` clicks and types at screen coordinates, and Homebrew installs it.
+`osascript` with System Events types into the frontmost app without extra installs.
+
+A screenshot of a Retina display has twice as many pixels as the screen has
+points. `cliclick` and System Events take points, so divide the image
+coordinates by the display's scale factor before clicking.
+
+macOS grants Screen Recording and Accessibility to the app that started the
+host, either the terminal running `rome-node connect` or the Rome desktop app.
+Grant both in System Settings → Privacy & Security on the Mac itself. Without
+Screen Recording, the screenshot leaves out other apps' windows. Without
+Accessibility, clicks and keystrokes fail. The first `osascript` call to System
+Events also asks for Automation permission. The Mac must stay awake and unlocked,
+because a locked screen shows only the lock screen.
 
 ## Failure and shutdown
 

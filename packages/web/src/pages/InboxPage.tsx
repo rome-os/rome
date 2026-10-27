@@ -33,12 +33,12 @@ interface SentinelEntry {
 }
 
 // Lean subset of /api/connections — only what the read-only source overview
-// needs: per-kind grant states (conferred or not) and whether the Talk
+// needs: per-kind connection state (connected or not) and whether the Talk
 // capability is actually unlocked (the live transport).
 interface ConnectionLite {
   connectionKind: string;
-  grants: Record<string, "unauthorized" | "authorized" | "degraded">;
-  capabilities: { talk: { state: string } };
+  state: "working" | "broken" | null;
+  capabilities: { chat: { state: string } };
 }
 
 // "configured" = set up but the live connection is not currently open (pending
@@ -375,15 +375,14 @@ function BondLevelToggle({
 // ── Section: Message sources (read-only overview + deep link) ───────────
 
 // One shared rule over the registry-native projection: a service whose Talk is
-// unlocked is connected; a conferred credential (authorized or degraded) whose
-// transport is not up reads "configured"; nothing conferred is disconnected.
+// unlocked is connected; a working or broken connection whose transport is
+// not up reads "configured"; a connection with no state is disconnected.
 // The old per-channel nuances (guardian-awaiting, live-socket "open") are
 // ceremony detail that lives in Settings → Connections, not this overview.
 function sourceStatus(conn: ConnectionLite | undefined): SourceStatus {
   if (!conn) return "disconnected";
-  if (conn.capabilities.talk.state === "unlocked") return "connected";
-  const conferred = Object.values(conn.grants).some((state) => state !== "unauthorized");
-  return conferred ? "configured" : "disconnected";
+  if (conn.capabilities.chat.state === "unlocked") return "connected";
+  return conn.state !== null ? "configured" : "disconnected";
 }
 
 function MessageSourcesSection({ connections }: { connections: ConnectionLite[] | null }) {

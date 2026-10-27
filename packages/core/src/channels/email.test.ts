@@ -520,7 +520,7 @@ describe("EmailAdapter.start guardian resolution", () => {
 
     await adapter.start();
 
-    // start() never provisions (route-driven conferral).
+    // start() never provisions (route-driven grant).
     expect(provider.provision).not.toHaveBeenCalled();
     // Normalized (lowercased) and persisted back into the email setting.
     expect(settingsRepo.set).toHaveBeenCalledWith(

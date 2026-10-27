@@ -1,4 +1,5 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
+import type { TranscriptPart } from "@rome/api-types/chat";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -21,6 +22,7 @@ import {
   sharedChats,
   webchatProjects,
   romeSessions,
+  romeAgentMessagePlatformIds,
   romeAgentMessages,
   romeAgentTraceBlocks,
   webchatTurnFeedback,
@@ -35,6 +37,11 @@ import {
   withSessionKind,
 } from "../session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
+import {
+  isSessionTraceArchived,
+  sessionTraceCutoff,
+  TRACE_ACTIVITY_ROLES,
+} from "../../webchat/trace-retention.js";
 import type {
   TraceSubagentResultEvent,
   TraceSubagentStartEvent,
@@ -286,6 +293,32 @@ export type WebchatSessionNameChangedListener = (event: {
   name: string;
 }) => void;
 
+interface TraceReadOptions {
+  /** Dashboard reads hide all traces in sessions whose last message is at or before this cutoff. */
+  sessionActivityCutoff?: Date;
+}
+
+function traceReadFields(archivedSessionIds: string[]) {
+  const archived = archivedSessionIds.length
+    ? sql<boolean>`${romeAgentMessages.role} = 'trace' AND ${inArray(romeAgentMessages.sessionId, archivedSessionIds)}`.mapWith(
+        Boolean,
+      )
+    : sql<boolean>`0`.mapWith(Boolean);
+  return {
+    id: romeAgentMessages.id,
+    traceArchived: archived,
+    content: sql<string>`CASE WHEN ${archived} THEN '[]' ELSE ${romeAgentMessages.content} END`,
+  };
+}
+
+function traceContentResult(row: { id: string; content: string; traceArchived: boolean }) {
+  return {
+    id: row.id,
+    content: row.content,
+    ...(row.traceArchived ? { traceArchived: true } : {}),
+  };
+}
+
 const webchatMessageSelectFields = {
   id: romeAgentMessages.id,
   sessionId: romeAgentMessages.sessionId,
@@ -305,6 +338,7 @@ const sessionSelectFields = {
   // The sidebar groups a device-folder chat under its folder, not its project.
   deviceFolder: romeSessions.deviceFolder,
   agentName: romeSessions.agentName,
+  triggerKind: romeSessions.triggerKind,
   archivedAt: romeSessions.archivedAt,
   pinnedAt: romeSessions.pinnedAt,
   createdAt: romeSessions.createdAt,
@@ -859,6 +893,9 @@ export class WebChatRepository {
       for (const chunk of chunkArray(sessionIds, SESSION_DELETE_CHUNK_SIZE)) {
         tx.delete(romeAgentTraceBlocks).where(inArray(romeAgentTraceBlocks.sessionId, chunk)).run();
         tx.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, chunk)).run();
+        tx.delete(romeAgentMessagePlatformIds)
+          .where(inArray(romeAgentMessagePlatformIds.sessionId, chunk))
+          .run();
         tx.delete(webchatTurnFeedback).where(inArray(webchatTurnFeedback.sessionId, chunk)).run();
         tx.delete(webchatWorkspaceLayouts)
           .where(inArray(webchatWorkspaceLayouts.sessionId, chunk))
@@ -1125,6 +1162,9 @@ export class WebChatRepository {
     sessionId: string;
     content: string;
     platformMessageId?: string;
+    /** The platform's other messages the row stands for, when it showed the
+     *  content as several. A quote of any of them reaches the row. */
+    otherPlatformMessageIds?: string[];
     senderId?: string;
     senderName?: string;
     replyToPlatformMessageId?: string;
@@ -1156,6 +1196,7 @@ export class WebChatRepository {
             replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
           })
           .where(eq(romeAgentMessages.id, delivered[0].id));
+        await this.keepPlatformMessageIds(input, delivered[0].id);
         return;
       }
     }
@@ -1183,17 +1224,19 @@ export class WebChatRepository {
             replyToPlatformMessageId: input.replyToPlatformMessageId ?? null,
           })
           .where(eq(romeAgentMessages.id, existing[0].id));
+        await this.keepPlatformMessageIds(input, existing[0].id);
         return;
       }
     }
 
     const createdAt = new Date();
+    const id = input.platformMessageId
+      ? conversationPlatformMessageId(input.sessionId, input.platformMessageId)
+      : randomUUID();
     await this.db.transaction((tx) => {
       tx.insert(romeAgentMessages)
         .values({
-          id: input.platformMessageId
-            ? conversationPlatformMessageId(input.sessionId, input.platformMessageId)
-            : randomUUID(),
+          id,
           sessionId: input.sessionId,
           turnId: input.turnId ?? null,
           role: input.knownToProvider ? "assistant" : "notification",
@@ -1207,11 +1250,36 @@ export class WebChatRepository {
         })
         .onConflictDoNothing()
         .run();
+      const others = this.otherPlatformMessageIdRows(input, id);
+      if (others.length > 0)
+        tx.insert(romeAgentMessagePlatformIds).values(others).onConflictDoNothing().run();
       tx.update(romeSessions)
         .set(advanceSessionActivitySet(createdAt))
         .where(eq(romeSessions.id, input.sessionId))
         .run();
     });
+  }
+
+  private otherPlatformMessageIdRows(
+    input: { sessionId: string; platformMessageId?: string; otherPlatformMessageIds?: string[] },
+    messageId: string,
+  ) {
+    const ids = new Set(input.otherPlatformMessageIds);
+    if (input.platformMessageId) ids.delete(input.platformMessageId);
+    return [...ids].map((platformMessageId) => ({
+      sessionId: input.sessionId,
+      platformMessageId,
+      messageId,
+    }));
+  }
+
+  private async keepPlatformMessageIds(
+    input: { sessionId: string; platformMessageId?: string; otherPlatformMessageIds?: string[] },
+    messageId: string,
+  ): Promise<void> {
+    const others = this.otherPlatformMessageIdRows(input, messageId);
+    if (others.length === 0) return;
+    await this.db.insert(romeAgentMessagePlatformIds).values(others).onConflictDoNothing();
   }
 
   async loadConversationContext(
@@ -1255,14 +1323,15 @@ export class WebChatRepository {
             .from(romeAgentMessages)
             .where(inArray(romeAgentMessages.id, projectedNotificationIds))
             .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
-    const findMessageInSession = async (targetSessionId: string, platformMessageId: string) =>
-      await this.db
-        .select({
-          id: romeAgentMessages.id,
-          content: romeAgentMessages.content,
-          senderName: romeAgentMessages.senderName,
-          createdAt: romeAgentMessages.createdAt,
-        })
+    const contextColumns = {
+      id: romeAgentMessages.id,
+      content: romeAgentMessages.content,
+      senderName: romeAgentMessages.senderName,
+      createdAt: romeAgentMessages.createdAt,
+    };
+    const findMessageInSession = async (targetSessionId: string, platformMessageId: string) => {
+      const own = await this.db
+        .select(contextColumns)
         .from(romeAgentMessages)
         .where(
           and(
@@ -1271,6 +1340,23 @@ export class WebChatRepository {
           ),
         )
         .limit(1);
+      if (own[0]) return own;
+      // A reply shown as several messages keeps the others' ids beside its row.
+      return await this.db
+        .select(contextColumns)
+        .from(romeAgentMessagePlatformIds)
+        .innerJoin(
+          romeAgentMessages,
+          eq(romeAgentMessages.id, romeAgentMessagePlatformIds.messageId),
+        )
+        .where(
+          and(
+            eq(romeAgentMessagePlatformIds.sessionId, targetSessionId),
+            eq(romeAgentMessagePlatformIds.platformMessageId, platformMessageId),
+          ),
+        )
+        .limit(1);
+    };
     let parentSessionId: string | null | undefined;
     const loadParentSessionId = async (): Promise<string | null> => {
       if (parentSessionId !== undefined) return parentSessionId;
@@ -1435,6 +1521,9 @@ export class WebChatRepository {
     await this.db.transaction((tx) => {
       tx.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.sessionId, id)).run();
       tx.delete(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).run();
+      tx.delete(romeAgentMessagePlatformIds)
+        .where(eq(romeAgentMessagePlatformIds.sessionId, id))
+        .run();
       tx.delete(webchatTurnFeedback).where(eq(webchatTurnFeedback.sessionId, id)).run();
       tx.delete(webchatWorkspaceLayouts).where(eq(webchatWorkspaceLayouts.sessionId, id)).run();
       // Kill the chat's public shares too. They're keyed by sessionId and only
@@ -1737,6 +1826,17 @@ export class WebChatRepository {
       .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "fork")));
   }
 
+  /** Marks why a chat exists. Read by the sessions explorer and the chat list. */
+  async setSessionTrigger(
+    id: string,
+    trigger: { triggerKind: string; triggerName: string | null },
+  ): Promise<void> {
+    await this.db
+      .update(romeSessions)
+      .set({ triggerKind: trigger.triggerKind, triggerName: trigger.triggerName })
+      .where(eq(romeSessions.id, id));
+  }
+
   async updateSessionName(id: string, name: string) {
     const rows = await this.db
       .update(romeSessions)
@@ -1772,7 +1872,7 @@ export class WebChatRepository {
       .where(eq(romeSessions.id, id));
   }
 
-  async updateSessionLargeModelSelection(id: string, largeModelSelection: string) {
+  async updateSessionLargeModelSelection(id: string, largeModelSelection: string | null) {
     await this.db.update(romeSessions).set({ largeModelSelection }).where(eq(romeSessions.id, id));
   }
 
@@ -2020,7 +2120,7 @@ export class WebChatRepository {
     sessionId: string,
     turnId: string | null,
     role: string,
-    parts: MessagePart[],
+    parts: TranscriptPart[],
     id: string = randomUUID(),
   ): Promise<StoredWebchatMessage> {
     const message = await this.db.transaction((tx) => {
@@ -2130,7 +2230,7 @@ export class WebChatRepository {
   async addBackendMessage(
     sessionId: string,
     turnId: string,
-    parts: MessagePart[],
+    parts: TranscriptPart[],
   ): Promise<StoredWebchatMessage> {
     return this.insertBackendMessage(sessionId, turnId, "assistant", parts);
   }
@@ -2322,6 +2422,22 @@ export class WebChatRepository {
       );
   }
 
+  /** The person who sent each user message in a session, for messages that
+   * recorded one. */
+  async getUserMessageActors(sessionId: string): Promise<Map<string, SessionActor>> {
+    const rows = await this.db
+      .select({ id: romeAgentMessages.id, actor: romeAgentMessages.actor })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "user"),
+          isNotNull(romeAgentMessages.actor),
+        ),
+      );
+    return new Map(rows.flatMap((row) => (row.actor ? [[row.id, row.actor] as const] : [])));
+  }
+
   async getHistoryMessages(
     threadId: string | null,
     since: Date,
@@ -2378,19 +2494,51 @@ export class WebChatRepository {
       );
   }
 
-  async getTraceContents(sessionId: string) {
+  /** A session stays visible while it or any ancestor has recent conversation activity. */
+  async getTraceArchivedSessionIds(
+    sessionIds: readonly string[],
+    cutoff = sessionTraceCutoff(),
+  ): Promise<string[]> {
+    if (sessionIds.length === 0) return [];
+    const rows = await this.db.all<{ sessionId: string; lastMessageAt: number }>(sql`
+      WITH RECURSIVE ancestors(session_id, ancestor_id, parent_id) AS (
+        SELECT id, id, parent_session_id FROM ${romeSessions}
+        WHERE ${inArray(romeSessions.id, [...new Set(sessionIds)])}
+        UNION
+        SELECT ancestors.session_id, parent.id, parent.parent_session_id
+        FROM ancestors JOIN ${romeSessions} AS parent ON parent.id = ancestors.parent_id
+      ),
+      activity AS MATERIALIZED (
+        SELECT session_id, max(created_at) AS last_message_at FROM ${romeAgentMessages}
+        WHERE session_id IN (SELECT ancestor_id FROM ancestors)
+          AND ${inArray(romeAgentMessages.role, TRACE_ACTIVITY_ROLES)}
+        GROUP BY session_id
+      )
+      SELECT ancestors.session_id AS sessionId, max(activity.last_message_at) AS lastMessageAt
+      FROM ancestors JOIN activity ON activity.session_id = ancestors.ancestor_id
+      GROUP BY ancestors.session_id
+    `);
+    return rows
+      .filter((row) => isSessionTraceArchived(new Date(row.lastMessageAt * 1000), cutoff))
+      .map((row) => row.sessionId);
+  }
+
+  async getTraceContents(sessionId: string, options: TraceReadOptions = {}) {
+    const archivedSessionIds = options.sessionActivityCutoff
+      ? await this.getTraceArchivedSessionIds([sessionId], options.sessionActivityCutoff)
+      : [];
     const stubs = await this.db
-      .select({ id: romeAgentMessages.id, content: romeAgentMessages.content })
+      .select(traceReadFields(archivedSessionIds))
       .from(romeAgentMessages)
       .where(and(eq(romeAgentMessages.sessionId, sessionId), eq(romeAgentMessages.role, "trace")));
-    if (stubs.length === 0) return stubs;
+    if (stubs.length === 0 || archivedSessionIds.length > 0) return stubs.map(traceContentResult);
 
     const blockRows = await this.db
       .select({ messageId: romeAgentTraceBlocks.messageId, content: romeAgentTraceBlocks.content })
       .from(romeAgentTraceBlocks)
       .where(eq(romeAgentTraceBlocks.sessionId, sessionId))
       .orderBy(asc(romeAgentTraceBlocks.messageId), asc(romeAgentTraceBlocks.seq));
-    if (blockRows.length === 0) return stubs;
+    if (blockRows.length === 0) return stubs.map(traceContentResult);
 
     const blocksByMessage = new Map<string, string[]>();
     for (const row of blockRows) {
@@ -2402,12 +2550,15 @@ export class WebChatRepository {
       }
     }
     return stubs.map((stub) => ({
-      id: stub.id,
+      ...traceContentResult(stub),
       content: mergeTraceContent(stub.content, blocksByMessage.get(stub.id) ?? []),
     }));
   }
 
-  async getTraceContentsByTurns(refs: readonly { sessionId: string; turnId: string }[]) {
+  async getTraceContentsByTurns(
+    refs: readonly { sessionId: string; turnId: string }[],
+    options: TraceReadOptions = {},
+  ) {
     const traceTurnKey = (sessionId: string, turnId: string): string =>
       JSON.stringify([sessionId, turnId]);
     const refsByKey = new Map(
@@ -2415,7 +2566,14 @@ export class WebChatRepository {
     );
     const uniqueRefs = [...refsByKey.values()];
     if (uniqueRefs.length === 0) return [];
-    const sessionIds = [...new Set(uniqueRefs.map((ref) => ref.sessionId))];
+    const requestedSessionIds = [...new Set(uniqueRefs.map((ref) => ref.sessionId))];
+    const archivedSessionIds = new Set(
+      options.sessionActivityCutoff
+        ? await this.getTraceArchivedSessionIds(requestedSessionIds, options.sessionActivityCutoff)
+        : [],
+    );
+    const sessionIds = requestedSessionIds.filter((id) => !archivedSessionIds.has(id));
+    if (sessionIds.length === 0) return [];
     const turnIds = [...new Set(uniqueRefs.map((ref) => ref.turnId))];
 
     const candidateStubs = await this.db
@@ -2700,6 +2858,7 @@ export class WebChatRepository {
   async getTurnChatMessages(sessionId: string, turnId: string) {
     return this.db
       .select({
+        id: romeAgentMessages.id,
         role: romeAgentMessages.role,
         content: romeAgentMessages.content,
       })
@@ -2714,9 +2873,12 @@ export class WebChatRepository {
       .orderBy(asc(romeAgentMessages.createdAt), asc(romeAgentMessages.id));
   }
 
-  async getTraceContentByTurn(sessionId: string, turnId: string) {
+  async getTraceContentByTurn(sessionId: string, turnId: string, options: TraceReadOptions = {}) {
+    const archivedSessionIds = options.sessionActivityCutoff
+      ? await this.getTraceArchivedSessionIds([sessionId], options.sessionActivityCutoff)
+      : [];
     const rows = await this.db
-      .select({ id: romeAgentMessages.id, content: romeAgentMessages.content })
+      .select(traceReadFields(archivedSessionIds))
       .from(romeAgentMessages)
       .where(
         and(
@@ -2728,22 +2890,42 @@ export class WebChatRepository {
       .limit(1);
     const stub = rows[0];
     if (!stub) return null;
+    if (stub.traceArchived) return traceContentResult(stub);
     return {
-      id: stub.id,
+      ...traceContentResult(stub),
       content: mergeTraceContent(stub.content, await this.getTraceBlockContents(stub.id)),
     };
   }
 
   async getMessageContent(id: string) {
+    return (await this.getMessageContentForDisplay(id))?.content ?? null;
+  }
+
+  async getMessageContentForDisplay(id: string, options: TraceReadOptions = {}) {
+    if (options.sessionActivityCutoff) {
+      const [message] = await this.db
+        .select({ sessionId: romeAgentMessages.sessionId, role: romeAgentMessages.role })
+        .from(romeAgentMessages)
+        .where(eq(romeAgentMessages.id, id));
+      if (!message) return null;
+      if (message.role === "trace") {
+        const archivedSessionIds = await this.getTraceArchivedSessionIds(
+          [message.sessionId],
+          options.sessionActivityCutoff,
+        );
+        if (archivedSessionIds.length) return { id, content: "[]", traceArchived: true };
+      }
+    }
     const rows = await this.db
-      .select({ content: romeAgentMessages.content })
+      .select(traceReadFields([]))
       .from(romeAgentMessages)
       .where(eq(romeAgentMessages.id, id));
-    const content = rows[0]?.content;
-    if (content === undefined) return null;
-    // Non-trace messages never have block rows, so the lookup is a no-op
-    // for them and the stored content is returned as-is.
-    return mergeTraceContent(content, await this.getTraceBlockContents(id));
+    const stub = rows[0];
+    if (!stub) return null;
+    return {
+      ...traceContentResult(stub),
+      content: mergeTraceContent(stub.content, await this.getTraceBlockContents(id)),
+    };
   }
 
   async getLayout(sessionId: string): Promise<unknown[] | null> {
@@ -2848,6 +3030,9 @@ export class WebChatRepository {
     await this.db.transaction((tx) => {
       tx.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.sessionId, sessionId)).run();
       tx.delete(romeAgentMessages).where(eq(romeAgentMessages.sessionId, sessionId)).run();
+      tx.delete(romeAgentMessagePlatformIds)
+        .where(eq(romeAgentMessagePlatformIds.sessionId, sessionId))
+        .run();
     });
   }
 

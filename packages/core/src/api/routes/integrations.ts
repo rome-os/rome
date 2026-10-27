@@ -169,7 +169,7 @@ export function integrationsRoutes(deps: ApiDeps): Hono {
     return c.json({ error: "Provider tokens are only available to server-side code." }, 403);
   });
 
-  // OAuth reconnect on a degraded grant is just re-running the conferral
+  // OAuth reconnect on a degraded grant is just re-running the grant
   // setup (its begin-redirect always forces fresh consent) — the dashboard
   // drives it through the generic setup surface, not a route here.
 

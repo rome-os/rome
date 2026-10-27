@@ -8,6 +8,9 @@ const device = {
   get: (): Promise<DeviceStatus> => ipcRenderer.invoke("device:get"),
   setEnabled: (enabled: boolean): Promise<DeviceStatus> =>
     ipcRenderer.invoke("device:setEnabled", enabled),
+  /** A folder on this computer from the system dialog, or null when the user cancels. */
+  pickFolder: (defaultPath?: string): Promise<{ path: string; home: string } | null> =>
+    ipcRenderer.invoke("device:pickFolder", defaultPath),
   onStatus: (callback: (status: DeviceStatus) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: DeviceStatus) => callback(status);
     ipcRenderer.on("device:status", listener);

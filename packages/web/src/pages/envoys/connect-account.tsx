@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/list-row";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { serviceLabel, type ConnectionSlot } from "@/lib/connection-cards";
-import { type ApiConnection, fetchConnections, linkAccountAgent } from "@/lib/connections-api";
+import { type ApiConnection, linkAccountAgent } from "@/lib/connections-api";
 import { Avatar } from "../people/avatar";
 import { AgentText } from "./agent-text";
 import { BackLink } from "./back-link";
@@ -109,7 +109,7 @@ function PickPlatform({ connections }: { connections: readonly ApiConnection[] }
   const name = agentLabel(agent);
   useDocumentTitle([t("connect.title"), t("index.title")]);
   const choices = connectChoices(connections);
-  const own = choices.filter((choice) => choice.kind === "own");
+  const own = choices.filter((choice) => choice.kind === "own_account");
   const delegate = choices.filter((choice) => choice.kind === "delegate");
   return (
     <Page>
@@ -226,10 +226,11 @@ function ConnectOn({
     key: delegate ? "session" : "bot",
     connectionId: null,
     grant: config.defaultGrant,
-    state: "unauthorized",
+    state: null,
     display: null,
     identity: null,
     activeSetupCid: choice.activeSetupCid,
+    link: choice.kind,
   };
 
   const refetch = () =>
@@ -246,34 +247,15 @@ function ConnectOn({
     navigate("/envoys");
   };
 
-  // Core links a service's first account to main and leaves a later one with
-  // no agent, so the picked agent is linked once the account exists.
+  // A new account starts with no agent, so the picked agent is linked once
+  // the setup connects it.
   const connected = async (connectionId: string | null) => {
-    let account: ApiConnection | undefined;
+    if (!connectionId) return leave(t("connect.notFound", { agent: name }));
     try {
-      // Fetched apart from the polled query, whose request in flight may have
-      // started before the account existed.
-      if (connectionId) account = (await fetchConnections()).find((c) => c.id === connectionId);
+      await linkAccountAgent(connectionId, agent, t("change.failed"));
     } catch {
-      account = undefined;
-    }
-    if (!account?.channel) return leave(t("connect.notFound", { agent: name }));
-    const linked = account.agent ? canonicalAgent(account.agent) : null;
-    if (linked !== agent) {
-      try {
-        await linkAccountAgent(account.channel, agent, t("change.failed"));
-      } catch {
-        // Unlink the agent core gave the account, so the account waits under
-        // Connected, no agent rather than answering as an agent nobody picked.
-        if (linked !== null) {
-          try {
-            await linkAccountAgent(account.channel, null, t("change.failed"));
-          } catch {
-            return leave(t("connect.linkFailedKept", { agent: name, kept: agentLabel(linked) }));
-          }
-        }
-        return leave(t("connect.linkFailed", { agent: name }));
-      }
+      // The account waits under Connected, no agent.
+      return leave(t("connect.linkFailed", { agent: name }));
     }
     await refetch();
     navigate(`/envoys/${encodeURIComponent(agent)}`);

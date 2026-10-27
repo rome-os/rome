@@ -67,6 +67,7 @@ description: Short description
 # tagline: One sentence for the share card   # Optional — uncomment and fill in: ≤ 80 chars (40 CJK), benefit-first, no jargon, like an App Store subtitle. It is the card's only description (no fallback). Existing apps without one are backfilled by `app_tagline_backfill`.
 appRoot: dist                    # Optional; defaults to source root if omitted
 includeSource: true              # Optional; publish src/ with the Store bundle
+hideInLauncher: true             # Optional; keep the app off the Apps page, sidebar, search, and app picker. It still opens by URL
 remix:                            # Rome-managed lineage for a derived app
   listing: "@alice/calendar"
   version: 1.2.3

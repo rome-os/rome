@@ -94,9 +94,13 @@ interface DiscordRestGuild {
 
 const HISTORY_CHANNEL_TYPES = new Set([0, 5, 11, 12]);
 
-function timestampToSnowflake(timestampMs: number): string {
-  const discordEpoch = 1420070400000n;
-  return ((BigInt(Math.floor(timestampMs)) - discordEpoch) << 22n).toString();
+const DISCORD_EPOCH_MS = 1420070400000n;
+
+/** The snowflake of an instant, or null before Discord's epoch (2015-01-01),
+ *  where none exists: a read from then has no lower bound. */
+function timestampToSnowflake(timestampMs: number): string | null {
+  const sinceEpoch = BigInt(Math.floor(timestampMs)) - DISCORD_EPOCH_MS;
+  return sinceEpoch > 0n ? (sinceEpoch << 22n).toString() : null;
 }
 
 function restMessageToChannelMessage(
@@ -1608,11 +1612,16 @@ Use \`/channel agent clear\` to undo.`,
   private async fetchChannelMessages(
     rest: REST,
     channelId: string,
-    afterSnowflake: string,
+    afterSnowflake: string | null,
     limit: number,
   ): Promise<DiscordRestMessage[]> {
+    // `after` answers the oldest messages past it, so with no bound it is left
+    // out, and the read answers the newest.
     return (await rest.get(Routes.channelMessages(channelId), {
-      query: new URLSearchParams({ after: afterSnowflake, limit: String(limit) }),
+      query: new URLSearchParams({
+        ...(afterSnowflake ? { after: afterSnowflake } : {}),
+        limit: String(limit),
+      }),
     })) as DiscordRestMessage[];
   }
 

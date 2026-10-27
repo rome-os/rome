@@ -78,6 +78,16 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
       return Response.json({ guardianName: "Ada", ...settings });
     }
     if (url === "/api/people") return Response.json(peopleList(options.people ?? []));
+    if (url === "/api/chat/locations") {
+      return Response.json({
+        projects: {
+          rootPath: "/projects",
+          defaultPath: "/projects/default",
+          projects: [{ name: "alpha", path: "alpha" }],
+        },
+        devices: [{ id: "mac", name: "macbook", platform: "macos" }],
+      });
+    }
     if (url === "/api/skills") {
       return Response.json({
         skills: [
@@ -113,6 +123,51 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
 // The people the composer offers to speak as. The listing is the curated
 // people read (`GET /api/people`); the guardian is dropped because speaking as
 // the guardian is what the composer already does by default.
+describe("text-only composer", () => {
+  afterEach(() => {
+    cleanup();
+    rs.restoreAllMocks();
+  });
+
+  it("offers text and Send only, under the placeholder it is given", async () => {
+    const onSend = rs.fn();
+    renderComposer({ textOnly: true, placeholder: "Message Muse", onSend });
+
+    const box = await screen.findByPlaceholderText("Message Muse");
+    expect(screen.queryByRole("button", { name: "Upload files" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reasoning effort" })).toBeNull();
+
+    // A leading slash is text here, not a skill.
+    await userEvent.type(box, "/status please{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(onSend.mock.calls[0]![0].text).toBe("/status please");
+  });
+});
+
+describe("placeholder hints", () => {
+  it("shows a different hint after each send", async () => {
+    stubCoarsePointer(false);
+    rs.spyOn(Math, "random").mockReturnValue(0);
+    const onSend = rs.fn();
+    renderComposer({ showProjectSelector: true, onSend });
+
+    const box = await screen.findByPlaceholderText("How can I help you today?");
+    await userEvent.type(box, "hi{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    expect(await screen.findByPlaceholderText("Type / to use a skill")).toBe(box);
+  });
+
+  it("offers neither @ nor keyboard hints in an open chat on a phone", async () => {
+    stubCoarsePointer(true);
+    rs.spyOn(Math, "random").mockReturnValue(0.99);
+    renderComposer({ lockAgentMention: true });
+
+    expect(
+      await screen.findByPlaceholderText("Send anytime, even while the agent is working"),
+    ).toBeTruthy();
+  });
+});
+
 describe("composer mention list", () => {
   const GUARDIAN = person("mock-guardian", "Mock Guardian", "guardian");
   const RAY = person("ray-oster", "Ray Oster", "inner-circle");
@@ -284,6 +339,27 @@ describe("composer lock", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend.mock.calls[0][0].text).toBe("build me X");
+  });
+
+  it("sends once the lock lifts even when the draft changed while locked", () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    const ref = createRef<ChatComposerHandle>();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const withLock = (lockedReason: string | null) => (
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ChatComposer ref={ref} onSend={onSend} lockedReason={lockedReason} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    const { rerender } = render(withLock(reason));
+
+    act(() => ref.current?.insertText("build me Y"));
+    rerender(withLock(null));
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][0].text).toBe("build me Y");
   });
 });
 
@@ -876,6 +952,22 @@ describe("New chat draft", () => {
     expect(onSend.mock.calls[0][0]).toMatchObject({ projectPath: "default", deviceFolder });
   });
 
+  it("reads the menu's projects and devices in one request before the menu opens", async () => {
+    const { fetchSpy } = renderComposer({ showProjectSelector: true });
+    const reads = () =>
+      fetchSpy.mock.calls
+        .map(([input]) => String(input))
+        .filter((url) => /\/api\/(chat\/locations|chat\/projects|devices)/.test(url));
+    await waitFor(() => expect(reads()).toEqual(["/api/chat/locations"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Project" }));
+    // The cached answer draws the first level at once; opening only refreshes it.
+    expect(screen.getByRole("option", { name: /Rome Cloud/ })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /macbook/ })).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    await waitFor(() => expect(reads()).toEqual(["/api/chat/locations", "/api/chat/locations"]));
+  });
+
   it("drops a saved device folder when the composer opens with a project", async () => {
     const deviceFolder = { deviceId: "mac", deviceName: "macbook", path: "/w", home: null };
     saveNewChatDraft({ ...empty, text: "run tests", deviceFolder });
@@ -1142,5 +1234,55 @@ describe("New chat draft", () => {
     expect(input().value).toBe(draft.text);
     expect(loadNewChatDraft()).toEqual(draft);
     expect(screen.getByRole("button", { name: "Remove skill" })).toBeTruthy();
+  });
+});
+
+describe("composer model picker in an open chat", () => {
+  it("shows and changes the chat's own pick, and sends without one", async () => {
+    stubCoarsePointer(false);
+    const user = userEvent.setup();
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    const onChange = rs.fn();
+    const { fetchSpy } = renderComposer(
+      {
+        onSend,
+        showModelSelector: true,
+        chatModelSelection: { value: "gpt-6-luna", onChange },
+      },
+      { settings: { enableModelSelector: true, webchatLargeModel: "claude-opus-5-5" } },
+    );
+
+    const trigger = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => expect(trigger.textContent).toContain("GPT-6 Luna"));
+    await user.click(trigger);
+    await user.click(await screen.findByRole("option", { name: /Opus 5\.5/ }));
+
+    expect(onChange).toHaveBeenCalledWith("claude-opus-5-5");
+    // The chat stores its pick; the default for new chats is left alone.
+    expect(fetchSpy.mock.calls.some(([, init]) => init?.method && init.method !== "GET")).toBe(
+      false,
+    );
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][0].largeModelSelection).toBeUndefined();
+  });
+
+  it("sends a draft's pick with its first message", async () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer(
+      { onSend, showModelSelector: true },
+      { settings: { enableModelSelector: true, webchatLargeModel: "claude-opus-5-5" } },
+    );
+    const trigger = await screen.findByRole("button", { name: "Model" });
+    await waitFor(() => expect(trigger.textContent).toContain("Opus 5.5"));
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend.mock.calls[0][0].largeModelSelection).toBe("claude-opus-5-5");
   });
 });

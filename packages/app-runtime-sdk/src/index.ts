@@ -1698,6 +1698,18 @@ export interface ChatRef {
   chatId: ChatId;
 }
 
+/**
+ * An account: the platform it is on and the platform's own id for it, such as
+ * `{ platform: "telegram", id: "8123456789" }`. Two accounts are the same
+ * account when both are the same. An app names one of Rome's accounts this way
+ * to send as it or read what was said on it; {@link ChannelsService.list}
+ * answers each of Rome's accounts.
+ */
+export interface Account {
+  platform: string;
+  id: string;
+}
+
 export interface ChatDescriptor {
   ref: ChatRef;
   /** The kind of connection the chat is reached through, such as `telegram_user`. */
@@ -1724,6 +1736,10 @@ export interface ChatDescriptor {
 export interface ChannelMessage {
   /** The channel's name, as every stored row and link spells it. */
   channel: string;
+  /** Rome's account that carried the message: the one it arrived on or was
+   *  sent as. Absent where Rome does not know the account, such as on a
+   *  channel Rome serves itself, or from a host that predates accounts. */
+  account?: Account;
   direction: "inbound" | "outbound";
   messageId: string;
   chatId: ChatId;
@@ -1741,6 +1757,10 @@ export interface ChannelMessage {
   thread?: { kind: "dm" | "group" | "topic"; name?: string };
   addressing?: MessageAddressing;
   raw?: unknown;
+  /** Where this message sits in a channel read, as an opaque token. Set on
+   *  what {@link ChannelsService.query} answers: pass it as
+   *  {@link ChannelMessageQuery.after} to read the messages older than it. */
+  cursor?: string;
 }
 
 /** What {@link ChannelsService.query} asks for. Every field narrows it, and
@@ -1753,6 +1773,10 @@ export interface ChannelMessageQuery {
   chatId?: ChatId;
   /** Only messages said at or after this instant. */
   since?: Date;
+  /** Only messages older than the one whose {@link ChannelMessage.cursor}
+   *  this is: the next page back. Paging this way neither repeats nor skips a
+   *  message, also among several said in one second. Needs `chatId`. */
+  after?: string;
   /** At most this many, newest first. Defaults to 100, capped at 1,000. */
   limit?: number;
 }
@@ -1761,6 +1785,11 @@ export interface ChannelMessageQuery {
 export interface ChannelSummary {
   /** The channel's name, as every stored row and link spells it. */
   name: string;
+  /** Rome's account this channel is, to pass to `send` and `query`. Absent
+   *  until the account's connection reports which account it reaches, for a
+   *  channel Rome serves itself such as `webchat`, and from a host that
+   *  predates accounts. Such a channel is addressed by its `name`. */
+  account?: Account;
   /** The platform the channel is an account on, such as `telegram`. Rome can
    *  hold several accounts on one platform, each its own channel: a Telegram
    *  bot and a signed-in Telegram are both on `telegram`. A channel named after
@@ -1783,19 +1812,28 @@ export interface ChannelSummary {
  * it subscribes through.
  */
 export interface ChannelsService {
-  /** Every channel this Rome has, and whether a Connection backs each. */
+  /** Every channel this Rome has, the account each is, and whether a
+   *  Connection backs each. Rome's accounts on a platform are the channels
+   *  whose `platform` it is. */
   list(): Promise<ChannelSummary[]>;
-  /** Send on a channel, through the Connection backing it. Rejects when no
-   *  Connection backs the channel. */
-  send(channel: string, chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
+  /** Send as one of Rome's accounts, through the Connection that reaches it.
+   *  Rejects when no Connection reaches the account. A channel's name in
+   *  place of the account sends on that channel, as a host that predates
+   *  accounts takes it; such a host rejects an account. */
+  send(
+    account: Account | string,
+    chatId: ChatId,
+    message: OutgoingMessage,
+  ): Promise<MessageReceipt>;
   /**
-   * The channel's `messages.query`: its newest messages, newest first.
+   * What was said on one of Rome's accounts: its newest messages, newest
+   * first. A channel's name in place of the account reads that channel.
    *
-   * A channel read live through its Connection shares one read for 30 seconds
-   * among the queries over the same window, so a message just sent through
-   * `send` may not appear until that read expires.
+   * An account read live through its Connection shares one read for 30
+   * seconds among the queries over the same window, so a message just sent
+   * through `send` may not appear until that read expires.
    */
-  query(channel: string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
+  query(account: Account | string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
 }
 
 /** Exact provider-neutral chat command recognized before an agent turn. */
@@ -1975,20 +2013,21 @@ export interface ChannelMessageHookDeps {
    *  bot, in place. Read it at each `register()` rather than keep a copy. */
   channels: readonly Channel[];
   /**
-   * The agent of the account carried by the channel named `channelName`, read
-   * when each message arrives, since switching the agent changes it on the
+   * The agent of one of Rome's accounts, read when each message arrives, since switching the agent changes it on the
    * same channel:
    * - a canonical agent id (`<app-id>:<local-name>`, `core:main` for main):
    *   that agent answers, except in a group or channel that chose its own agent;
    * - null: the account takes an agent but has none, or that agent is not
    *   loaded, so nothing answers;
-   * - undefined: the channel takes no agent, such as webchat or email, and its
+   * - undefined: the account takes no agent, such as webchat or email, and its
    *   conversations choose their agent, main by default.
-   * A host that predates account agents passes neither `accountAgentOf` nor
-   * `linkedAgentOf`, which reads as undefined for every channel. A host that
-   * passes only `linkedAgentOf` answers the same through it.
+   * Pass the message's {@link ChannelMessage.account}, or the channel's name
+   * where it has none. A host that predates accounts answers only a channel's
+   * name. A host that predates account agents passes neither `accountAgentOf`
+   * nor `linkedAgentOf`, which reads as undefined for every channel. A host
+   * that passes only `linkedAgentOf` answers the same through it.
    */
-  accountAgentOf?: (channelName: string) => string | null | undefined;
+  accountAgentOf?: (account: Account | string) => string | null | undefined;
   /** @deprecated Use `accountAgentOf`, which answers the same. */
   linkedAgentOf?: (channelName: string) => string | null | undefined;
 }
@@ -2049,7 +2088,8 @@ export interface CurrentActionContext {
 const CURRENT_ACTION_CONTEXT_RESOLVER = Symbol.for("rome.appRuntime.currentActionContextResolver");
 const CURRENT_ACTION_CONTEXT_RUNNER = Symbol.for("rome.appRuntime.currentActionContextRunner");
 
-export type CurrentActionContextPatch = Partial<CurrentActionContext>;
+/** Context an App may add around a nested call. Execution identity stays host-owned. */
+export type CurrentActionContextPatch = Pick<CurrentActionContext, "sharedContext">;
 
 type CurrentActionContextRunner = <T>(
   patch: CurrentActionContextPatch,
@@ -2303,6 +2343,130 @@ export interface WebChatRecapRepository {
   addTurnRecapMessage(input: AddTurnRecapMessageInput): Promise<WebChatRecapMessage>;
 }
 
+export type AppConnectionHealth = "working" | "broken" | "not_connected";
+export type AppConnectionCapabilityState =
+  | "available"
+  | "needs_authorization"
+  | "unhealthy"
+  | "unsupported";
+
+export interface AppConnectionSummary {
+  connectionId: string;
+  connectionKind: string;
+  label: string;
+  /** Provider identity to pass to describe, operations, and invoke. */
+  identity: string;
+  health: AppConnectionHealth;
+}
+
+export interface AppConnectionPage {
+  connections: AppConnectionSummary[];
+  nextCursor?: string;
+}
+
+export interface AppConnectionIdentity {
+  name: string;
+  state: "authorized" | "needs_authorization" | "unhealthy";
+  profile?: {
+    displayName?: string;
+    handle?: string;
+    email?: string;
+    avatarUrl?: string;
+  };
+}
+
+export interface AppConnectionDescription {
+  connection: AppConnectionSummary;
+  identity: AppConnectionIdentity;
+  act: {
+    state: AppConnectionCapabilityState;
+    reason?: string;
+  };
+}
+
+export interface AppConnectionResourceConstraint {
+  /** RFC 6901 JSON Pointer into the operation input. */
+  inputPointer: string;
+  allowedValues: Array<string | number | boolean>;
+}
+
+export interface AppConnectionOperation {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  sideEffects: "read-only" | "write";
+  access: "granted" | "not_granted";
+  approval: "required" | "not_required";
+  constraints: AppConnectionResourceConstraint[];
+}
+
+export interface AppConnectionOperationsPage {
+  operations: AppConnectionOperation[];
+  nextCursor?: string;
+}
+
+export interface AppConnectionErrorBody {
+  code:
+    | "access_denied"
+    | "connection_not_found"
+    | "identity_not_found"
+    | "operation_not_found"
+    | "capability_unavailable"
+    | "authorization_required"
+    | "connection_unhealthy"
+    | "invalid_input"
+    | "resource_denied"
+    | "resource_unresolved"
+    | "request_id_required"
+    | "request_id_conflict"
+    | "request_in_progress"
+    | "rate_limited"
+    | "approval_rejected"
+    | "outcome_unknown"
+    | "provider_error";
+  message: string;
+  retryable: boolean;
+}
+
+export class AppConnectionError extends Error {
+  constructor(readonly detail: AppConnectionErrorBody) {
+    super(detail.message);
+    this.name = "AppConnectionError";
+  }
+}
+
+export type AppConnectionInvokeResult<T = unknown> =
+  | { status: "ok"; executionId: string; data?: T }
+  | { status: "pending_approval"; executionId: string; approval: PendingApproval }
+  | {
+      status: "duplicate";
+      executionId: string;
+      outcome: "succeeded" | "failed";
+      /** Present for a failed original request so callers retain its structured cause. */
+      errorCode?: AppConnectionErrorBody["code"];
+    }
+  | { status: "outcome_unknown"; executionId: string };
+
+export interface AppConnectionsCapability {
+  list(input?: { cursor?: string; limit?: number }): Promise<AppConnectionPage>;
+  describe(input: { connectionId: string; identity: string }): Promise<AppConnectionDescription>;
+  operations(input: {
+    connectionId: string;
+    identity: string;
+    cursor?: string;
+    limit?: number;
+  }): Promise<AppConnectionOperationsPage>;
+  invoke<T = unknown>(input: {
+    connectionId: string;
+    identity: string;
+    operation: string;
+    input?: unknown;
+    /** Required for writes; must contain 8–200 characters. Reusing it never repeats the effect. */
+    requestId?: string;
+  }): Promise<AppConnectionInvokeResult<T>>;
+}
+
 export interface RomeAppContext {
   app: RomeAppDefinition;
   controller: unknown;
@@ -2310,6 +2474,7 @@ export interface RomeAppContext {
   log: Logger;
   repositories: AppRuntimeRepositories;
   favors: AppFavorCapability;
+  connections: AppConnectionsCapability;
   runAction(
     name: string,
     args: Record<string, unknown>,
@@ -2689,6 +2854,8 @@ export interface EventBusTrigger {
   /** Payload conditions, AND-ed together. Absent or empty means fire on every
    * event of this name. */
   filter?: EventFilterCondition[];
+  /** Fire on the first matching event only, then disable the routine. */
+  once?: boolean;
 }
 
 /** A producer app's declaration that it can currently emit `eventType`.
@@ -2712,6 +2879,37 @@ export interface EventCatalogEntry {
    * (pre-registration); a declared schema is authoritative and is never
    * overwritten by an observed one. */
   schemaOrigin?: "observed" | "declared";
+  /** True when an installed app declares this type under `eventSources` in
+   * its app.yaml, so waiting on it can subscribe at the provider (`defer`
+   * does that). Absent for types that only show up by being emitted. */
+  subscribable?: boolean;
+  /** For a subscribable type: the equality-filter fields that pick where to
+   * subscribe. A wait must filter on every field of at least one inner list
+   * (e.g. `[["repository.full_name"], ["organization.login"]]`). Empty when
+   * the subscription follows the connected account. */
+  keys?: string[][];
+  /** Only present when the search was given `match`: whether the producer
+   * already delivers this type for that target. */
+  active?: boolean;
+}
+
+/** Result of {@link EventCatalogReader.search}. */
+export interface EventCatalogSearchResult {
+  entries: EventCatalogEntry[];
+  /** Full match count before `limit`. */
+  total: number;
+  /** Why `active` is missing on a subscribable entry when `match` was given,
+   * e.g. the provider is not connected or `match` names no target field. */
+  matchError?: string;
+}
+
+/** Options for {@link EventCatalogReader.search}. */
+export interface EventCatalogSearchOptions {
+  /** Payload field values that name a subscription target, e.g.
+   * `{ "repository.full_name": "acme/widgets" }`. When given, each
+   * subscribable match reports `active`; this asks the producer, so it costs
+   * one provider API call per returned type. */
+  match?: Record<string, string>;
 }
 
 export interface PollTrigger {
@@ -2807,7 +3005,11 @@ export interface EventPublisher {
 }
 
 export interface EventCatalogReader {
-  search(query: string, limit: number): Promise<{ entries: EventCatalogEntry[]; total: number }>;
+  search(
+    query: string,
+    limit: number,
+    options?: EventCatalogSearchOptions,
+  ): Promise<EventCatalogSearchResult>;
 }
 
 /** A system-initiated turn re-enters an established session rather than

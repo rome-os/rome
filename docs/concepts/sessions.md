@@ -26,6 +26,9 @@ A session remembers the concrete model that produced its history — the **sessi
 
 - A successful turn establishes or updates the pin. A pinned session never drifts to another model on its own. A session with no pin resolves from the agent's exact `modelId`, when configured, or its tier until its next successful turn records a pin.
 - Resolution precedence for a turn is **explicit guardian selection → session pin → agent modelId → agent tier**. An explicit model selection (the webchat model selector) wins over both pins, and the successful turn then re-pins the session to the model that actually ran. Choosing a model is therefore the rescue path for a session stranded by a pin whose model cannot run.
+- The webchat model selector stays available after a chat's first message. A pick is stored on the chat, and the next turn runs on it, also when the chat's session is already open. Auto clears the pick, so the session pin decides again. A side chat promoted to a chat, and a chat with a handoff open, show no selector.
+- A pick on the same provider continues the provider thread on the new model. A pick on another provider starts a new thread, which has seen none of the chat, so its first turn carries a [continuation](#continuation) notice.
+- The chat shows a short centered note before the first turn that ran on another model than the session's previous turn. It names the model that ran, as the turn's accounting records it, so two picks that a custom provider maps to one model show no note.
 - A pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection, or a new session whose configured model is available.
 - A new session — including a summoned or subagent session on a shared thread — resolves from its own agent's exact model or tier, because session lookup is agent-scoped. A fork inherits the live session's model unless its caller supplies a tier override, and never updates its source session's pin.
 - Changing an agent's configured `modelId` does not rewrite a saved session pin. The changed default applies to new or unpinned sessions.
@@ -36,6 +39,17 @@ A session remembers the concrete model that produced its history — the **sessi
 - **Provider pin** — an [agent](agents.md) may pin a *provider* while still letting a tier select the concrete model.
 - **Agent model pin** — `provider` with `modelId` supplies an exact default for a new or unpinned session. The session model pin records the model that produced existing history and takes precedence over that default.
 - **Model tier** — the portable agent-level default the session pin overrides once a turn has run.
+
+## Continuation
+
+Rome's transcript is the conversation, and a provider thread is a cache of it. When a chat moves to another provider, the new provider starts a thread that has seen none of the chat. Its first turn carries a `<continuation>` notice: the earlier messages are not in its context, and the model the chat ran on before. When the agent may call `system:fetch_channel_history`, the notice says to read them with it. The agent reads them when the conversation needs them, so nothing grows the prompt unless it asks.
+
+**Contracts:**
+
+- The notice goes on the first turn of a thread that replaced one holding the chat: a pick on another provider in an open chat, or a session reopened on another provider than its recorded thread. It rides on that thread's turns until one returns a result, since a turn that fails may never have reached the thread.
+- A thread that starts in a session also gets the `<thread_context>` block on its first turn.
+- The notice names no channel. The thread's channel and thread id are in its thread context.
+- A new chat, a new generation (the chat-settings reset policy), and a thread that resumes add no notice. Subagent sessions carry none.
 
 ## Turn
 
@@ -58,6 +72,32 @@ A turn is one request to an agent plus the agent work that follows until the age
 - **[Session](#sessions)** — a session accumulates many turns. A turn is one unit of work inside it.
 - **Step** — a single model call inside a turn. A turn that uses tools takes several steps, because each tool result feeds the next model call.
 - **Run** — an action run is one execution of an [action](actions.md), and a routine run is one fire of a [routine](data.md#routines). Neither is a turn.
+
+## Chat trace window
+
+A session's effective activity is the latest conversation message across itself and every ancestor reached through `parentSessionId`.
+The dashboard loads all of its traces while that time is less than seven days old.
+At exactly seven idle days, the session shows chat history only, with an archived-steps note on each turn.
+User messages, assistant replies, cards, and interaction results stay in the transcript.
+History, lazy trace reads, and raw downloads follow the same session-wide decision.
+
+Activity includes user, assistant, trace, and notification rows. Notifications record real out-of-band conversation messages.
+Reading, renaming, pinning, and unknown metadata roles do not count. A lineage with no conversation messages is not an archive candidate.
+Each read batches session and ancestor message times in one recursive query, without reading trace payloads.
+There are no session-type exceptions: an old subagent remains visible under an active ancestor, and a fork, promoted side chat, or channel thread can stay active on its own messages under an idle source.
+A new message reactivates the session and its descendants, not its ancestors or siblings.
+If every session in a tree is idle, all of its traces are archived.
+
+Handoffs have no `parentSessionId`. Their link lives in a transcript card. They use their own session activity.
+The chat view loads a handoff child's history separately and splices it into the visible transcript.
+The calling session's trace summaries and descendant cost rollups do not read handoff traces.
+A merged transcript can therefore contain archived child steps beside active parent steps, while keeping both sessions' replies and cards.
+
+This window changes dashboard reads, not storage. It deletes nothing and does not change sharing, usage accounting, or agent resume context.
+Reactivation reveals retained traces while their blocks remain in the database.
+The window and idle predicate live in `packages/core/src/webchat/trace-retention.ts`.
+The repository's `getTraceArchivedSessionIds` applies that predicate to explicitly requested sessions.
+Step 2 will add its own archival selection query and must account for handoff links before removing traces.
 
 ## Event
 
@@ -126,6 +166,7 @@ A conversational input is one independently submitted user message. Its identity
 **Contracts:**
 
 - WebChat persists an input before dispatch. Sending during a turn attempts non-interrupting provider steering. It does not start a concurrent turn or replace the active output stream.
+- An input may set `priority: "now"` instead of the default `next`. It then ends the running turn with the reason `superseded` and starts the next turn, which takes the inputs the ended turn never consumed, in order, and every other queued `now` input. See [opt-in interrupting input](../adrs/opt-in-interrupting-input.md).
 - Provider acceptance and consumption are distinct. An accepted input is not shown as consumed until the provider includes it in context.
 - A definitely unconsumed input can start the next turn. If the provider already holds it, the next turn adopts it without sending another copy.
 - An uncertain delivery is not automatically retried. After a backend restart, unfinished inputs remain visible with unconfirmed delivery. They are not silently replayed.

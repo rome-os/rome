@@ -46,7 +46,7 @@ import { Switch } from "@/components/ui/switch";
 import { artifactLocalName, artifactOwnerId } from "@/lib/artifact-name";
 import { connectionRoute, serviceLabel } from "@/lib/connection-cards";
 import { fetchConnections, type ApiConnection } from "@/lib/connections-api";
-import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 
 interface PageResponse {
   items: ChatSettingsListItem[];
@@ -129,7 +129,7 @@ export function ChannelsSettingsPage() {
   const talkConnections = useMemo(
     () =>
       connections.flatMap((connection) =>
-        connection.id !== null && connection.capabilities.talk?.state !== "unsupported"
+        connection.id !== null && connection.capabilities.chat?.state !== "unsupported"
           ? [{ id: connection.id, label: connection.label }]
           : [],
       ),
@@ -143,9 +143,7 @@ export function ChannelsSettingsPage() {
     () =>
       new Map(
         connections.flatMap((connection) =>
-          connection.id !== null &&
-          LINKABLE_KINDS.has(connection.connectionKind) &&
-          connection.agent === null
+          connection.id !== null && Boolean(connection.link) && connection.agent === null
             ? [
                 [
                   connection.id,
@@ -164,9 +162,7 @@ export function ChannelsSettingsPage() {
     () =>
       new Map(
         connections.flatMap((connection) =>
-          connection.id !== null &&
-          LINKABLE_KINDS.has(connection.connectionKind) &&
-          typeof connection.agent === "string"
+          connection.id !== null && Boolean(connection.link) && typeof connection.agent === "string"
             ? [[connection.id, connection.agent]]
             : [],
         ),

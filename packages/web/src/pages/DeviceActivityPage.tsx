@@ -1,9 +1,12 @@
 import { NodeDeviceActivity } from "@rome-os/node-ui";
 import { Page } from "@rome-os/ui/page";
 import { ArrowLeft } from "lucide-react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { deviceHref, nodeConsoleUrl, useDevicesQuery } from "@/components/devices-section";
+import { useDeviceManage } from "@/hooks/use-device-manage";
+import { useThisDevice } from "@/hooks/use-this-device";
 
 /**
  * One device's commands (`/settings/devices/:deviceId`). `?command=<id>` selects a command, so a
@@ -13,7 +16,14 @@ export default function DeviceActivityPage() {
   const { t, i18n } = useTranslation("settings");
   const { deviceId = "" } = useParams();
   const [params, setParams] = useSearchParams();
-  const devices = useDevicesQuery().data?.devices ?? [];
+  const navigate = useNavigate();
+  const query = useDevicesQuery();
+  const thisDevice = useThisDevice(() => void query.refetch());
+  // Removing the page's device leaves for the devices list.
+  const manage = useDeviceManage(
+    useCallback(() => navigate(deviceHref(null), { replace: true }), [navigate]),
+  );
+  const devices = query.data?.devices ?? [];
   const device = devices.find((item) => item.id.toLowerCase() === deviceId.toLowerCase()) ?? {
     id: deviceId,
     name: deviceId,
@@ -25,6 +35,12 @@ export default function DeviceActivityPage() {
         url={nodeConsoleUrl()}
         device={device}
         locale={i18n.language}
+        manage={manage}
+        thisDevice={
+          thisDevice && thisDevice.id.toLowerCase() === deviceId.toLowerCase()
+            ? thisDevice
+            : undefined
+        }
         selected={Number.isSafeInteger(command) && command > 0 ? command : null}
         onSelect={(id) =>
           setParams(id === null ? {} : { command: String(id) }, { replace: params.has("command") })

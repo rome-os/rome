@@ -3,7 +3,7 @@
 // Unlike the bot channel (integrations/telegram.ts), this is a *user* session:
 // a single `session` grant holding a GramJS StringSession plus the account
 // identity fields (apiId/apiHash/phoneNumber/userId/…). There is no interactive
-// confer() — conferral runs the setup coroutine (`makeTelegramUserSetup`
+// `obtain()`. The grant comes from the setup coroutine (`makeTelegramUserSetup`
 // below): API credentials + phone number → phone code → optional 2FA password,
 // whose terminal return is the single ledger write of credential material +
 // identity profile. The transport core — connect, NewMessage streaming, the
@@ -17,7 +17,7 @@
 // reach `fault`:
 //   - a 401 / AUTH_KEY_UNREGISTERED / SESSION_REVOKED (at start, or observed by
 //     the in-epoch session probe) → CredentialRejected{ grant: "session" } →
-//     runtime renews once ("re-confer"), then degrades.
+//     runtime renews once ("needs-fix"), then degrades.
 //   - any other terminal transport failure → Disconnected → runtime backs off
 //     and rebuilds.
 //
@@ -134,19 +134,19 @@ export function telegramUserProfileFromSettings(
 }
 
 /**
- * A setup-driven session scheme: there is no headless `confer()` — conferral runs
+ * A setup-driven session scheme: there is no headless `obtain()` — grant runs
  * the interactive phone-code + optional 2FA login coroutine attached in
  * `makeTelegramUserDescriptor`, whose terminal return is the single
  * ledger write. `renew()` cannot refresh a user session without the guardian, so
- * it answers "re-confer", driving the runtime's renew-once → degrade path.
+ * it answers "needs-fix", driving the runtime's renew-once → degrade path.
  */
 function telegramUserSession(): AuthScheme {
   return {
-    async confer(): Promise<Credential> {
-      throw new Error("conferral driven by the connection setup");
+    async obtain(): Promise<Credential> {
+      throw new Error("grant driven by the connection setup");
     },
-    async renew(): Promise<Credential | "re-confer"> {
-      return "re-confer";
+    async renew(): Promise<Credential | "needs-fix"> {
+      return "needs-fix";
     },
   };
 }
@@ -185,7 +185,7 @@ export function telegramUserSettingsFromMaterial(material: SecretRecord): Telegr
   };
 }
 
-// ── conferral setup ───────────────────────────────────────────────
+// ── setup ───────────────────────────────────────────────
 
 /** Validate + normalize the API credentials and phone number the guardian
  *  enters. Returns the parsed values, or a re-prompt error message. */
@@ -209,15 +209,15 @@ function parseTelegramUserCredentials(
 }
 
 /**
- * Build the Telegram user-account conferral setup. A linear coroutine:
+ * Build the Telegram user-account setup. A linear coroutine:
  *   1. prompt the API ID / API hash / phone number (re-prompt on invalid input),
  *   2. `ctx.step("send-code")` — connect a throwaway client and request the code,
  *   3. prompt the phone code and sign in (re-prompt on an invalid/expired code),
  *   4. when Telegram asks for 2FA, prompt the cloud password with the wrong-
  *      password re-prompt loop (`prompt(form, { error })`),
- *   5. stop the login client, then return the terminal conferral: the serialized
+ *   5. stop the login client, then return the terminal grant: the serialized
  *      session material + identity profile.
- * The runtime performs the single durable write from the returned conferral;
+ * The runtime performs the single durable write from the returned grant;
  * cancel/abandon stops the login client and writes nothing. Unlike the bot
  * channels there is no guardian-link step — a user session IS the guardian's own
  * account, so no `guardianChannelUserId` is mapped.
@@ -249,7 +249,7 @@ export function makeTelegramUserSetup(deps: {
     }
 
     const login = deps.openLogin(creds.apiId, creds.apiHash);
-    let conferred = false;
+    let granted = false;
     try {
       // 2. Send the phone code (external event → ctx.step).
       const { isCodeViaApp } = await ctx.step("send-code", () => login.sendCode(creds.phoneNumber));
@@ -312,7 +312,7 @@ export function makeTelegramUserSetup(deps: {
       //    the real Talk from the ledger the moment the credential lands, and a
       //    second live GramJS client on the same session risks AUTH_KEY_DUPLICATED.
       await login.stop();
-      conferred = true;
+      granted = true;
 
       const material = telegramUserMaterialFromSettings(account);
       const profile = telegramUserProfileFromSettings(account) ?? undefined;
@@ -329,7 +329,7 @@ export function makeTelegramUserSetup(deps: {
     } finally {
       // Cancel, fault, or any throw above: disconnect the pending client. Nothing
       // durable exists — the session lived in the login client's memory only.
-      if (!conferred) await login.stop().catch(() => {});
+      if (!granted) await login.stop().catch(() => {});
     }
   };
 }
@@ -363,17 +363,16 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
   session.setup = makeTelegramUserSetup({ openLogin: deps.openLogin ?? openTelegramUserLogin });
   return {
     connectionKind: "telegram_user",
-    reviveProfile: (_grant, record) => reviveTelegramUserProfile(record),
-    accountIdOf: (_grant, record) => (typeof record.userId === "string" && record.userId) || null,
-    auth: {
-      session,
-    },
+    reviveProfile: (record) => reviveTelegramUserProfile(record),
+    accountIdOf: (record) => (typeof record.userId === "string" && record.userId) || null,
+    link: "delegate",
+    grant: "session",
+    auth: session,
     capabilities: {
       talker: {
-        needs: ["session"] as const,
         history: true,
-        build(creds, kit): Talker {
-          const settings = telegramUserSettingsFromMaterial(creds.session.material as SecretRecord);
+        build(cred, kit): Talker {
+          const settings = telegramUserSettingsFromMaterial(cred.material as SecretRecord);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           let probeTimer: ReturnType<typeof setInterval> | null = null;
           let probeInFlight = false;

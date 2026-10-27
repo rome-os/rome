@@ -141,6 +141,21 @@ describe("sentinelLogMessages", () => {
     });
     expect(elsewhere).toEqual([]);
   });
+
+  // A link keyed by a service names the service, and the log names the
+  // account's own channel id, which may be opaque.
+  it("reads an account under the channel it is stored under", async () => {
+    await row(db, "opaque", { at: 1400, text: "on the other account", channel: "tg-opaque" });
+
+    expect(await refs()).not.toContain("sentinel:opaque");
+    const entries = await sentinelLogMessages(db).read({
+      accounts: [{ ...account, storedUnder: "tg-opaque" }],
+      limit: WHOLE_HISTORY,
+    });
+    expect(entries.map((entry) => [entry.ref, entry.source])).toEqual([
+      ["sentinel:opaque", CHANNEL],
+    ]);
+  });
 });
 
 // One seeded database for the whole suite: every assertion in it reads, so a

@@ -13,11 +13,8 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { afterAll, afterEach, describe, expect, it } from "@rstest/core";
-import {
-  OAUTH_PROVIDER_GRANTS,
-  type GithubGrantProfile,
-} from "../connections/integrations/oauth-providers.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import type { GithubGrantProfile } from "../connections/integrations/oauth-providers.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import type { DrizzleDb } from "../db/index.js";
 import { createTestDb } from "../test/helpers.js";
 import {
@@ -54,23 +51,19 @@ function useTokenFile(): string {
   return path;
 }
 
-/** Seed a connected GitHub grant carrying `profile` in the ledger. */
+/** Seed a connected GitHub grant carrying `profile` in the store. */
 async function seedGithubGrant(
   db: ReturnType<typeof createTestDb>["db"],
   profile: GithubGrantProfile | undefined,
   id = "conn-github",
 ): Promise<void> {
-  const ledger = new DrizzleGrantLedger(db);
-  await ledger.createConnection({
+  const ledger = new DrizzleConnectionsRepository(db);
+  ledger.save(db, {
     id,
     connectionKind: "github",
     label: "github",
     createdAt: new Date(),
-  });
-  await ledger.ensureGrant(id, OAUTH_PROVIDER_GRANTS.github);
-  await ledger.updateGrant(id, OAUTH_PROVIDER_GRANTS.github, {
-    state: "authorized",
-    ...(profile ? { profile } : {}),
+    grant: { state: "authorized", ...(profile ? { profile } : {}) },
   });
 }
 
@@ -370,7 +363,7 @@ describe("GitSyncSource.availability", () => {
 });
 
 describe("githubCommitterIdentity", () => {
-  it("attributes commits to the conferred grant identity", async () => {
+  it("attributes commits to the granted grant identity", async () => {
     const { db, close } = createTestDb();
     try {
       await seedGithubGrant(db, {
@@ -455,16 +448,17 @@ describe("githubCommitterIdentity", () => {
         created_at integer NOT NULL
       );
       CREATE TABLE connection_grants (
-        custody text NOT NULL,
-        name text NOT NULL,
+        custody text PRIMARY KEY NOT NULL,
         state text NOT NULL,
         credential text,
         profile text,
-        conferred_at integer,
+        granted_at integer,
+        grant_epoch text,
         last_renewed_at integer,
         degraded_at integer,
         degraded_reason text,
-        PRIMARY KEY (custody, name)
+        platform text,
+        account_id text
       );
     `);
     const db = drizzle(sqlite) as unknown as DrizzleDb;

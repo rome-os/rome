@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
+import { forwardRef, useImperativeHandle, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
@@ -14,6 +14,7 @@ import {
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
 import { applyAgentPlacement } from "@/pages/free/use-free-cells";
+import { ToolTraceContext, type ToolTraceHost } from "@/pages/free/tool-trace";
 import {
   createSession,
   deleteSession,
@@ -29,6 +30,7 @@ const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 const mockFindActiveSubmission = rs.hoisted(() => rs.fn(() => null));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
+const conciergeInsertText = rs.hoisted(() => rs.fn());
 
 rs.mock("@/hooks/use-tab-status", () => ({
   useChatTabStatus: mockUseChatTabStatus,
@@ -36,6 +38,17 @@ rs.mock("@/hooks/use-tab-status", () => ({
 
 rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t }),
+}));
+
+rs.mock("@/hooks/use-dashboard-identity", () => ({
+  useDashboardIdentity: () => ({
+    data: {
+      kind: "visitor",
+      accountId: "acct-ana",
+      email: "ana@example.com",
+      avatarUrl: "https://example.com/ana.png",
+    },
+  }),
 }));
 
 rs.mock("@/components/chat/use-session-identity", () => ({
@@ -82,8 +95,25 @@ rs.mock("@/hooks/use-smooth-text", () => ({
 }));
 
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
-  TraceDrawer: () => null,
-  traceDrawerContentInsetClass: () => "",
+  TraceDrawer: ({
+    target,
+    outlet,
+    onClose,
+  }: {
+    target: { kind: string } | null;
+    outlet: HTMLElement | null;
+    onClose: () => void;
+  }) =>
+    target ? (
+      <button
+        type="button"
+        data-testid="trace-drawer"
+        data-outlet={outlet ? "tab" : "pending"}
+        onClick={onClose}
+      >
+        {target.kind}
+      </button>
+    ) : null,
 }));
 
 rs.mock("@/components/chat/AgentAvatar", () => ({
@@ -102,23 +132,58 @@ rs.mock("@/components/chat/MessageList", () => ({
   MessageList: ({
     live,
     rows,
+    onOpenStoredTrace,
   }: {
+    onOpenStoredTrace: (target: unknown) => void;
     live: { identity: { name: string } };
-    rows: { kind: string; key: string; message?: { content: string } }[];
+    rows: {
+      kind: string;
+      key: string;
+      message?: {
+        content: string;
+        traceArchived?: boolean;
+        sender?: { name: string | null; avatarUrl: string | null };
+      };
+    }[];
   }) => (
     <>
       <div data-testid="message-list">{live.identity.name}</div>
+      <button
+        type="button"
+        onClick={() =>
+          onOpenStoredTrace({
+            kind: "stored",
+            messageId: "trace-1",
+            sessionId: "session-1",
+            turnId: "turn-1",
+            summary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+          })
+        }
+      >
+        open stored trace
+      </button>
       {rows
         .filter((row) => row.kind === "user")
         .map((row) => (
-          <div key={row.key} data-testid="user-row" data-row-key={row.key}>
+          <div
+            key={row.key}
+            data-testid="user-row"
+            data-row-key={row.key}
+            data-sender={row.message?.sender?.name}
+            data-sender-avatar={row.message?.sender?.avatarUrl}
+          >
             {row.message?.content}
           </div>
         ))}
       {rows
         .filter((row) => row.kind === "trace")
         .map((row) => (
-          <div key={row.key} data-testid="trace-row" data-row-key={row.key} />
+          <div
+            key={row.key}
+            data-testid="trace-row"
+            data-row-key={row.key}
+            data-archived={row.message?.traceArchived}
+          />
         ))}
     </>
   ),
@@ -183,6 +248,36 @@ rs.mock("@/components/chat/ChatComposer", () => ({
   ),
 }));
 
+// Concierge's composer: records programmatic fills and sends a fixed message.
+rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
+  ConciergeComposer: forwardRef(function ConciergeComposer(
+    props: { onSend?: (snapshot: unknown, controls: unknown) => Promise<void> },
+    ref,
+  ) {
+    useImperativeHandle(ref, () => ({ insertText: conciergeInsertText }));
+    return (
+      <button
+        type="button"
+        data-testid="concierge-send-button"
+        onClick={() =>
+          void props
+            .onSend?.(
+              {
+                text: "sent at once",
+                uploads: [],
+                reasoningEffort: "medium",
+                projectPath: "",
+                inputId: "11111111-1111-4111-8111-111111111111",
+              },
+              { onUploadProgress: () => {}, signal: new AbortController().signal },
+            )
+            .catch(() => {})
+        }
+      />
+    );
+  }),
+}));
+
 rs.mock("@/components/chat/entries", () => ({
   renderFlatEntries: () => null,
   renderSingleEntry: () => null,
@@ -218,8 +313,21 @@ rs.mock("@/lib/chat-api", () => {
   };
 });
 
+// A stand-in tool pane that follows the mocked saved pane state. A test that
+// supplies its own provider inside `children` overrides it.
+function pane(children: ReactNode) {
+  const host: ToolTraceHost = {
+    outlet: null,
+    paneOpen: !appsPanel.collapsed,
+    setPaneCollapsed: appsPanel.setCollapsed,
+    reveal: rs.fn(),
+    set: rs.fn(),
+  };
+  return <ToolTraceContext.Provider value={host}>{children}</ToolTraceContext.Provider>;
+}
+
 function renderChat(children: ReactNode, live?: LiveEventsClient) {
-  const routed = <MemoryRouter>{children}</MemoryRouter>;
+  const routed = <MemoryRouter>{pane(children)}</MemoryRouter>;
   return render(
     live ? (
       <LiveEventsClientContext.Provider value={live}>{routed}</LiveEventsClientContext.Provider>
@@ -325,6 +433,82 @@ describe("Chat missing-session detection", () => {
   });
 });
 
+describe("Chat trace in the tool pane", () => {
+  function host(outlet: HTMLElement | null = null) {
+    return {
+      outlet,
+      paneOpen: true,
+      setPaneCollapsed: rs.fn(),
+      reveal: rs.fn(),
+      set: rs.fn(),
+    } satisfies ToolTraceHost;
+  }
+  const withHost = (toolTrace: ToolTraceHost, element: ReactNode) => (
+    <ToolTraceContext.Provider value={toolTrace}>{element}</ToolTraceContext.Provider>
+  );
+
+  it("reveals the Trace tab and registers the open trace with the pane", async () => {
+    const user = userEvent.setup();
+    const toolTrace = host();
+    renderChat(withHost(toolTrace, <Chat sessionId="session-1" />));
+    expect(toolTrace.set).toHaveBeenLastCalledWith(expect.any(String), null);
+    expect(toolTrace.reveal).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "open stored trace" }));
+    expect(toolTrace.reveal).toHaveBeenCalledTimes(1);
+    expect(toolTrace.set).toHaveBeenLastCalledWith(expect.any(String), {
+      streaming: false,
+      onClose: expect.any(Function),
+    });
+    // The pane draws the trace, so the chat no longer reserves room for a drawer.
+    expect(screen.getByTestId("trace-drawer").getAttribute("data-outlet")).toBe("pending");
+  });
+
+  it("shows the expand control from the pane's open state, which counts a trace-held pane", async () => {
+    const user = userEvent.setup();
+    const toolTrace = { ...host(), paneOpen: false };
+    const { rerender } = renderChat(withHost(toolTrace, <Chat sessionId="session-1" />));
+    await user.click(screen.getByRole("button", { name: "chat.expandTools" }));
+    expect(toolTrace.setPaneCollapsed).toHaveBeenCalledWith(false);
+
+    rerender(
+      <MemoryRouter>
+        {withHost({ ...toolTrace, paneOpen: true }, <Chat sessionId="session-1" />)}
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("button", { name: "chat.expandTools" })).toBeNull();
+  });
+
+  it("hands the pane's outlet to the drawer", async () => {
+    const user = userEvent.setup();
+    const outlet = document.createElement("div");
+    renderChat(withHost(host(outlet), <Chat sessionId="session-1" />));
+    await user.click(screen.getByRole("button", { name: "open stored trace" }));
+    expect(screen.getByTestId("trace-drawer").getAttribute("data-outlet")).toBe("tab");
+  });
+
+  it("closes the trace when the pane's tab asks to close", async () => {
+    const user = userEvent.setup();
+    const toolTrace = host();
+    renderChat(withHost(toolTrace, <Chat sessionId="session-1" />));
+    await user.click(screen.getByRole("button", { name: "open stored trace" }));
+    const tab = toolTrace.set.mock.calls.at(-1)?.[1] as { onClose: () => void };
+    act(() => tab.onClose());
+
+    expect(screen.queryByTestId("trace-drawer")).toBeNull();
+    expect(toolTrace.set).toHaveBeenLastCalledWith(expect.any(String), null);
+  });
+
+  it("removes the tab when the chat goes away", async () => {
+    const user = userEvent.setup();
+    const toolTrace = host();
+    const { unmount } = renderChat(withHost(toolTrace, <Chat sessionId="session-1" />));
+    await user.click(screen.getByRole("button", { name: "open stored trace" }));
+    unmount();
+    expect(toolTrace.set).toHaveBeenLastCalledWith(expect.any(String), null);
+  });
+});
+
 describe("Chat read marking", () => {
   it("leaves a chat unread while its tab is hidden, then marks it on return", async () => {
     const { markSessionRead } = await import("@/lib/chat-api");
@@ -361,22 +545,14 @@ describe("Chat agent identity", () => {
     await user.click(screen.getByRole("button", { name: "chat.expandTools" }));
     expect(appsPanel.setCollapsed).toHaveBeenCalledWith(false);
     appsPanel.collapsed = false;
-    rerender(
-      <MemoryRouter>
-        <Chat sessionId="session-1" />
-      </MemoryRouter>,
-    );
+    rerender(<MemoryRouter>{pane(<Chat sessionId="session-1" />)}</MemoryRouter>);
     expect(screen.queryByRole("button", { name: "chat.expandTools" })).toBeNull();
     appsPanel.collapsed = true;
-    rerender(
-      <MemoryRouter>
-        <Chat sessionId="session-1" />
-      </MemoryRouter>,
-    );
+    rerender(<MemoryRouter>{pane(<Chat sessionId="session-1" />)}</MemoryRouter>);
     expect(screen.getByRole("button", { name: "chat.expandTools" })).toBeTruthy();
   });
 
-  it("shows the session model in the chat header", () => {
+  it("marks the header avatar with the session model's vendor", () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "A conversation",
       model: "gpt-5.5",
@@ -384,10 +560,11 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    expect(screen.getByLabelText("navbar.sessionModel").textContent).toBe("gpt-5.5");
+    const avatar = screen.getByRole("button", { name: "navbar.sessionModel" });
+    expect(avatar.querySelector('svg[aria-label="ChatGPT"]')).toBeTruthy();
   });
 
-  it("shows the effort the session's last turn ran with beside the model", () => {
+  it("names the effort the session's last turn ran with", () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "A conversation",
       model: "gpt-5.5",
@@ -396,10 +573,7 @@ describe("Chat agent identity", () => {
       archivedAt: null,
     });
     renderChat(<Chat sessionId="session-1" />);
-    // The provider's own effort term, with no mapping to composer labels.
-    expect(screen.getByLabelText("navbar.sessionModelWithEffort").textContent).toBe(
-      "gpt-5.5 · max",
-    );
+    expect(screen.getByRole("button", { name: "navbar.sessionModelWithEffort" })).toBeTruthy();
   });
 
   it("does not invent a model for a session without a pin", () => {
@@ -432,6 +606,68 @@ describe("Chat agent identity", () => {
 });
 
 describe("Chat session events", () => {
+  const archivedTrace = {
+    id: "old-trace",
+    sessionId: "session-1",
+    turnId: "old-turn",
+    role: "trace" as const,
+    content: "[]",
+    createdAt: "2026-09-24T12:00:00Z",
+    traceArchived: true,
+  };
+  const restoredTrace = {
+    ...archivedTrace,
+    traceArchived: undefined,
+    traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+  };
+
+  it.each([
+    "user",
+    "assistant",
+    "trace",
+    "notification",
+  ])("reloads archived turns immediately when a %s message arrives", async (role) => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    rs.mocked(listSessionMessages)
+      .mockResolvedValueOnce([archivedTrace])
+      .mockResolvedValueOnce([restoredTrace]);
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("trace-row").getAttribute("data-archived")).toBe("true"),
+    );
+    act(() =>
+      MockEventSource.instances[0]?.emit("message_insert", {
+        id: "new-message",
+        sessionId: "session-1",
+        turnId: "new-turn",
+        role,
+        content: "[]",
+        createdAt: "2026-10-24T12:00:00Z",
+      }),
+    );
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getAllByTestId("trace-row")[0]?.getAttribute("data-archived")).toBeNull(),
+    );
+  });
+
+  it("reloads archived turns on send acceptance without waiting for a message event or completed turn", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    rs.mocked(listSessionMessages)
+      .mockResolvedValueOnce([archivedTrace])
+      .mockResolvedValueOnce([restoredTrace]);
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId: "turn-1" } });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("trace-row").getAttribute("data-archived")).toBe("true"),
+    );
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByTestId("trace-row").getAttribute("data-archived")).toBeNull(),
+    );
+  });
+
   it("delivers a validated inserted message to the active session", async () => {
     rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
     const onSessionMessage = rs.fn();
@@ -762,6 +998,31 @@ describe("Chat turn stream lifecycle", () => {
 
     expect(screen.getAllByTestId("user-row")).toHaveLength(1);
     expect(screen.getByTestId("user-row")).toBe(bubble);
+  });
+
+  it("shows the signed-in person as the sender of a message they send", async () => {
+    let resolvePost!: (result: Awaited<ReturnType<typeof postSessionTurn>>) => void;
+    rs.mocked(postSessionTurn).mockImplementationOnce(
+      () => new Promise((resolve) => (resolvePost = resolve)),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+
+    fireEvent.click(screen.getByTestId("send-text-button"));
+    const early = await screen.findByTestId("user-row");
+    expect(early.dataset.sender).toBe("ana@example.com");
+    expect(early.dataset.senderAvatar).toBe("https://example.com/ana.png");
+
+    await act(async () => {
+      resolvePost({
+        ok: true,
+        data: {
+          turnId: "turn-1",
+          inputId: "11111111-1111-4111-8111-111111111111",
+          inputState: "submitted",
+        },
+      });
+    });
+    expect(screen.getByTestId("user-row").dataset.sender).toBe("ana@example.com");
   });
 
   it("takes the early bubble back down when the send is refused", async () => {
@@ -1375,5 +1636,68 @@ describe("Chat draft", () => {
     // The send registered its local follow before the render that adopted the
     // session, so the reattach poll never looks the turn up.
     expect(listSessionTurns).not.toHaveBeenCalled();
+  });
+});
+
+describe("Chat Concierge empty state", () => {
+  const guidance = () => screen.queryByRole("region", { name: "concierge.empty.title" });
+  // The file's default listing reports a running turn, which would reattach
+  // and stream; these chats start idle.
+  beforeEach(() => {
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+  });
+  afterEach(() => {
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+  });
+
+  it("guides a chat with no messages, and an example fills the composer", async () => {
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+
+    expect(await screen.findByRole("region", { name: "concierge.empty.title" })).toBeTruthy();
+    expect(screen.queryByTestId("message-list")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "concierge.empty.prompts.email" }));
+    expect(conciergeInsertText).toHaveBeenCalledWith("concierge.empty.prompts.email");
+  });
+
+  it("waits for the history, so a chat with messages never shows it", async () => {
+    let resolveMessages!: (messages: Awaited<ReturnType<typeof listSessionMessages>>) => void;
+    rs.mocked(listSessionMessages).mockImplementationOnce(
+      () => new Promise((resolve) => (resolveMessages = resolve)),
+    );
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    expect(guidance()).toBeNull();
+
+    await act(async () => {
+      resolveMessages([
+        {
+          id: "m-1",
+          sessionId: "concierge",
+          role: "user" as const,
+          content: "hello",
+          createdAt: "2026-10-26T00:00:00.000Z",
+        },
+      ]);
+    });
+    expect(await screen.findByTestId("user-row")).toBeTruthy();
+    expect(guidance()).toBeNull();
+  });
+
+  it("goes away as soon as the first message is sent", async () => {
+    rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await screen.findByRole("region", { name: "concierge.empty.title" });
+
+    fireEvent.click(screen.getByTestId("concierge-send-button"));
+
+    expect(await screen.findByTestId("user-row")).toBeTruthy();
+    expect(guidance()).toBeNull();
+  });
+
+  it("is only for Concierge: an empty normal chat keeps its message list", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
+    expect(screen.getByTestId("message-list")).toBeTruthy();
+    expect(guidance()).toBeNull();
   });
 });

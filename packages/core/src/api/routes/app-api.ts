@@ -32,6 +32,7 @@ function buildDispatcher(deps: ApiDeps): AppApiDispatcher {
     routinesRepo: deps.routinesRepo,
     repositories: deps.appRuntimeRepositories,
     favorService: deps.favorService,
+    appConnections: deps.appConnections,
   });
 }
 

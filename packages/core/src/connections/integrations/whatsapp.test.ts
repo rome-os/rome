@@ -14,7 +14,7 @@ import {
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { Credential, RuntimeKit, SecretRecord, StreamFault } from "../types.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
@@ -29,10 +29,10 @@ const openDbs: Array<() => void> = [];
 afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 /**
@@ -115,26 +115,25 @@ describe("whatsapp descriptor shape", () => {
     const { deps } = makeDeps(new FakeWhatsAppAdapter());
     const desc = createWhatsAppDescriptor(deps);
     expect(desc.connectionKind).toBe("whatsapp");
-    expect(Object.keys(desc.auth)).toEqual(["session"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["session"]);
+    expect(desc.grant).toBe("session");
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
-  it("setup-driven scheme: confer throws, renew is re-confer", async () => {
+  it("setup-driven scheme: grant throws, renew is fix", async () => {
     const { deps } = makeDeps(new FakeWhatsAppAdapter());
-    const scheme = createWhatsAppDescriptor(deps).auth.session;
-    await expect(scheme.confer({ prompt: async () => ({}) })).rejects.toThrow(
-      "conferral driven by the connection setup",
+    const scheme = createWhatsAppDescriptor(deps).auth;
+    await expect(scheme.obtain({ prompt: async () => ({}) })).rejects.toThrow(
+      "grant driven by the connection setup",
     );
-    await expect(scheme.renew(sessionCred())).resolves.toBe("re-confer");
+    await expect(scheme.renew(sessionCred())).resolves.toBe("needs-fix");
   });
 
   it("threads the store sink + guardian-map callback into the adapter", () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps, mapped, sync } = makeDeps(fake);
     const desc = createWhatsAppDescriptor(deps);
-    desc.capabilities.talker!.build({ session: sessionCred() }, runtimeKit());
+    desc.capabilities.talker!.build(sessionCred(), runtimeKit());
 
     expect(fake.sync).toBe(sync);
     fake.connectedCb?.("15550100@s.whatsapp.net");
@@ -145,7 +144,7 @@ describe("whatsapp descriptor shape", () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps } = makeDeps(fake);
     const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
-      { session: sessionCred() },
+      sessionCred(),
       runtimeKit(),
     );
     talker.start(
@@ -173,7 +172,7 @@ describe("whatsapp descriptor shape", () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps } = makeDeps(fake);
     const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
-      { session: sessionCred() },
+      sessionCred(),
       runtimeKit(),
     );
     expect(talker.history).toBeUndefined();
@@ -185,12 +184,9 @@ describe("whatsapp descriptor — kit.persist write-through", () => {
   it("persists the session material when the adapter's auth state mutates", async () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps } = makeDeps(fake);
-    const persist = rs.fn(async (_grant: string, _material: SecretRecord) => {});
+    const persist = rs.fn(async (_material: SecretRecord) => {});
     const kit = runtimeKit(persist);
-    const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
-      { session: sessionCred() },
-      kit,
-    );
+    const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(sessionCred(), kit);
     talker.start(
       () => {},
       () => {},
@@ -203,8 +199,7 @@ describe("whatsapp descriptor — kit.persist write-through", () => {
     await flush();
 
     expect(persist).toHaveBeenCalled();
-    const [grant, material] = persist.mock.calls[0];
-    expect(grant).toBe("session");
+    const [material] = persist.mock.calls[0];
     expect(
       JSON.parse((material as { keys: string }).keys).session["u@s.whatsapp.net"],
     ).toBeTruthy();
@@ -213,9 +208,9 @@ describe("whatsapp descriptor — kit.persist write-through", () => {
   it("flush()es the final rotation on stop (no loss)", async () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps } = makeDeps(fake);
-    const persist = rs.fn(async (_grant: string, _material: SecretRecord) => {});
+    const persist = rs.fn(async (_material: SecretRecord) => {});
     const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
-      { session: sessionCred() },
+      sessionCred(),
       runtimeKit(persist),
     );
     talker.start(
@@ -227,7 +222,7 @@ describe("whatsapp descriptor — kit.persist write-through", () => {
     void state.keys.set({ session: { last: new Uint8Array([9]) } });
     await talker.stop();
     expect(persist).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(persist.mock.calls[0][1].keys).session.last).toBeTruthy();
+    expect(JSON.parse(persist.mock.calls[0]![0].keys).session.last).toBeTruthy();
   });
 });
 
@@ -235,7 +230,7 @@ describe("whatsapp Talker fault mapping", () => {
   function buildTalker(fake: FakeWhatsAppAdapter): { faults: StreamFault[] } {
     const { deps } = makeDeps(fake);
     const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
-      { session: sessionCred() },
+      sessionCred(),
       runtimeKit(),
     );
     const faults: StreamFault[] = [];
@@ -277,25 +272,25 @@ describe("whatsapp Talker fault mapping", () => {
 describe("whatsapp descriptor over a real registry", () => {
   function setup(fake: FakeWhatsAppAdapter): ConnectionRegistry {
     const { deps } = makeDeps(fake);
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(createWhatsAppDescriptor(deps));
     return registry;
   }
 
-  it("reports needs-auth before the session grant is conferred", async () => {
+  it("reports needs-auth before the session grant is granted", async () => {
     const registry = setup(new FakeWhatsAppAdapter());
     const conn = await registry.connect("whatsapp");
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["session"] });
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["session"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
   });
 
   it("unlocks talk once the session is imported and round-trips send()", async () => {
     const fake = new FakeWhatsAppAdapter();
     const registry = setup(fake);
     const conn = await registry.connect("whatsapp");
-    await registry.importCredential(conn.id, "session", sessionCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "session", sessionCred());
 
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     // WhatsAppAdapter.send addresses by the conversation (the chat JID), and
     // its receipt is the Talk's as it is.
     const receipt = await sendThrough(conn, "120@g.us" as ChatId, { text: "hi" });
@@ -327,7 +322,7 @@ describe("whatsapp inbound delivery", () => {
       },
       onGuardianConnected: () => {},
       createAdapter: (authProvider) => new WhatsAppAdapter({ authProvider }, socketFactory),
-    }).capabilities.talker!.build({ session: sessionCred() }, runtimeKit());
+    }).capabilities.talker!.build(sessionCred(), runtimeKit());
     return { talker, handlers };
   }
 

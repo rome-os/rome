@@ -29,6 +29,7 @@ const PeopleIndexRedirect = lazy(() =>
   import("./pages/PeoplePage").then((m) => ({ default: m.PeopleIndexRedirect })),
 );
 const PersonDetailPage = lazy(() => import("./pages/PersonDetailPage"));
+const AssistantsPage = lazy(() => import("./pages/AssistantsPage"));
 const MemoryPage = lazy(() => import("./pages/MemoryPage"));
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
 const RoutinesPage = lazy(() => import("./pages/RoutinesPage"));
@@ -153,6 +154,7 @@ export default function App() {
             <Route path="/" element={<Navigate to="/chat" replace />} />
             <Route path="/chat/*" element={<FreePage />} />
             <Route path="/activity" element={<ActivityPage />} />
+            <Route path="/assistants" element={<AssistantsPage />} />
             {/* The two People views are routes, so each is linkable and back
                 steps between them. The dossier takes its own segment rather
                 than sharing theirs: a person id is a slug of the display name

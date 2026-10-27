@@ -20,4 +20,16 @@ describe("public surface", () => {
     expect(err.code).toBe("not_found");
     expect(err.message).toBe("no such action");
   });
+
+  it("exports the structured App connection error", () => {
+    const detail = {
+      code: "access_denied" as const,
+      message: "not granted",
+      retryable: false,
+    };
+    const err = new sdk.AppConnectionError(detail);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe("AppConnectionError");
+    expect(err.detail).toEqual(detail);
+  });
 });

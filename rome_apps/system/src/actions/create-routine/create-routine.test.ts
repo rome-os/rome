@@ -1434,6 +1434,27 @@ describe("create_routine — validation and fail-closed", () => {
     expect(await repo.findAll()).toHaveLength(0);
   });
 
+  it("persists a once event-bus trigger", async () => {
+    const result = await createRoutine(
+      {
+        name: "once-event",
+        trigger: { type: "event-bus", eventName: "ci.done", once: true },
+        actionName: "summon",
+        args: {},
+      },
+      {
+        routinesRepo: repo,
+        actionRegistry: allActions,
+        routineEngine: makeFakeEngine(),
+        resolveOneOffDate,
+      },
+    );
+
+    expect(result.status).toBe("ok");
+    const [stored] = await repo.findAll();
+    expect(stored.trigger).toEqual({ type: "event-bus", eventName: "ci.done", once: true });
+  });
+
   it("rejects an event-bus filter with an empty field", async () => {
     const result = await createRoutine(
       {

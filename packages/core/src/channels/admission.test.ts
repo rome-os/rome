@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
@@ -23,12 +23,10 @@ describe("a channel's Connection across epochs", () => {
     }> = [];
     const descriptor: ConnectionDescriptor = {
       connectionKind: "discord",
-      auth: {
-        bot: tokenPaste({ label: "token", validate: async () => {} }),
-      },
+      grant: "bot",
+      auth: tokenPaste({ label: "token", validate: async () => {} }),
       capabilities: {
         talker: {
-          needs: ["bot"],
           build(): Talker {
             const state: (typeof instances)[number] = {
               sends: [],
@@ -63,7 +61,9 @@ describe("a channel's Connection across epochs", () => {
         },
       },
     };
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(descriptor);
     const connection = await registry.connect("discord");
     const admit = rs.fn(
@@ -83,7 +83,7 @@ describe("a channel's Connection across epochs", () => {
       received.push(event.message.messageId);
     });
 
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "first" },
       expiresAt: "never",
     });
@@ -111,8 +111,8 @@ describe("a channel's Connection across epochs", () => {
     // Past its epoch nothing reaches the stopped talker.
     await connection.auth.revoke("bot");
     expect(connection.withTalker(() => "reached")).toBeUndefined();
-    expect(connection.isUnlocked("talk")).toBe(false);
-    await registry.importCredential(connection.id, "bot", {
+    expect(connection.isUnlocked("chat")).toBe(false);
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "second" },
       expiresAt: "never",
     });
@@ -154,13 +154,15 @@ describe("a channel's Connection across epochs", () => {
   it("admits a message even before anyone subscribes", async () => {
     testDb = createTestDb();
     let deliver: ((message: ChannelMessage) => void) | undefined;
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register({
       connectionKind: "telegram",
-      auth: { bot: tokenPaste({ label: "token", validate: async () => {} }) },
+      grant: "bot",
+      auth: tokenPaste({ label: "token", validate: async () => {} }),
       capabilities: {
         talker: {
-          needs: ["bot"],
           build: (): Talker => ({
             start(next) {
               deliver = next;
@@ -174,7 +176,7 @@ describe("a channel's Connection across epochs", () => {
     const admit = rs.fn(async () => false);
     connectionPorts({ registry, admit, channelOf: kindChannelOf }, "telegram");
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });

@@ -15,12 +15,13 @@ import {
 import { testMessagesQueryContract } from "./messages-contract.js";
 import { ChannelNotConnected } from "./channel.js";
 import { ConnectionRegistry } from "../connections/registry.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { makePasteTalk } from "../connections/test-fixtures.js";
 import { createTestDb, kindChannelOf } from "../test/helpers.js";
 import { systemClock } from "../lib/clock.js";
 import { ConnectionPacing } from "./delivery/connection-pacing.js";
-import { plainText } from "./delivery/types.js";
+import { ReplyDelivery } from "./delivery/reply.js";
+import { type PartReceipt, plainText } from "./delivery/types.js";
 
 // A channel with no store answers `query` through its Connection's history.
 // That history reads a window rounded out to whole hours, as the adapters do,
@@ -310,7 +311,7 @@ describe("connection-backed messages, shared reads", () => {
 describe("connection-backed send, across epochs", () => {
   it("keeps a held direct port on whichever talker is live", async () => {
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(createTestDb().db),
+      repository: new DrizzleConnectionsRepository(createTestDb().db),
     });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
@@ -320,7 +321,7 @@ describe("connection-backed send, across epochs", () => {
       if (!talker) throw new Error("talker not built");
       talker.directMessaging = { chatFor: async () => answer as ChatId };
     };
-    await registry.importCredential(connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
     offerDirect("first");
     const direct = connectionPorts({ registry, channelOf: kindChannelOf }, "fake-telegram")?.send
       ?.direct;
@@ -331,7 +332,7 @@ describe("connection-backed send, across epochs", () => {
     await connection.auth.revoke("bot");
     await expect(direct.chatFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
 
-    await registry.importCredential(connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
     offerDirect("second");
     await expect(direct.chatFor("7")).resolves.toBe("second");
   });
@@ -340,7 +341,7 @@ describe("connection-backed send, across epochs", () => {
 describe("connection ports for a service's later channels", () => {
   it("hears and sends on each channel through its own Connection", async () => {
     const { db } = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
     const first = await registry.connect("fake-telegram");
@@ -349,28 +350,40 @@ describe("connection ports for a service's later channels", () => {
       [first.id, "fake-telegram"],
       [second.id, "fake-telegram-2"],
     ]);
+    // Only the second has reported the account it reaches.
+    const account = { platform: "telegram", id: "8123" };
     const deps: ConnectionPortsDeps = {
       registry,
       channelOf: (connection) => names.get(connection.id) ?? connection.connectionKind,
+      accountOf: (connectionId) => (connectionId === second.id ? account : null),
     };
     const ports = {
       first: connectionPorts(deps, "fake-telegram"),
       second: connectionPorts(deps, "fake-telegram", "fake-telegram-2"),
     };
-    const heard: Array<{ channel: string; connectionId: string }> = [];
+    const heard: Array<{ channel: string; account?: unknown; connectionId: string }> = [];
     for (const port of Object.values(ports)) {
       port?.inbound?.subscribe(async (event) => {
-        heard.push({ channel: event.message.channel, connectionId: event.ref.connectionId });
+        const { channel, account } = event.message;
+        heard.push({
+          channel,
+          ...(account ? { account } : {}),
+          connectionId: event.ref.connectionId,
+        });
       });
     }
-    await registry.importCredential(first.id, "bot", fx.validCredential());
+    await registry.giveGrant(first.connectionKind, first.id, "bot", fx.validCredential());
     const firstTalker = fx.talkerFactory.instances.at(-1)!;
-    await registry.importCredential(second.id, "bot", fx.validCredential());
+    await registry.giveGrant(second.connectionKind, second.id, "bot", fx.validCredential());
     const secondTalker = fx.talkerFactory.instances.at(-1)!;
 
     secondTalker.state.deliver?.({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
+    firstTalker.state.deliver?.({ ...said("m2", "dm-1", 0), channel: "fake-telegram" });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(heard).toEqual([{ channel: "fake-telegram-2", connectionId: second.id }]);
+    expect(heard).toEqual([
+      { channel: "fake-telegram-2", account, connectionId: second.id },
+      { channel: "fake-telegram", connectionId: first.id },
+    ]);
 
     await ports.second?.send?.send("dm-1" as ChatId, { text: "hi" });
     expect(secondTalker.state.sends).toHaveLength(1);
@@ -378,14 +391,16 @@ describe("connection ports for a service's later channels", () => {
   });
 });
 
-describe("a channel Rome does not listen to", () => {
+describe("a Connection Rome does not listen to", () => {
   function setup(listenedAtFirst: boolean) {
     const { db } = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
     let listened = listenedAtFirst;
-    const listeners: Array<(channel: string) => void> = [];
+    const listeners: Array<(connectionId: string) => void> = [];
+    // The service's one Connection, once connected.
+    const held = () => registry.find("fake-telegram")[0]?.id;
     const admitted: string[] = [];
     const deps: ConnectionPortsDeps = {
       registry,
@@ -395,7 +410,7 @@ describe("a channel Rome does not listen to", () => {
         return true;
       },
       listening: {
-        listens: (channel) => channel === "fake-telegram" && listened,
+        listens: (connectionId) => connectionId === held() && listened,
         onChange: (listener) => listeners.push(listener),
       },
     };
@@ -404,9 +419,9 @@ describe("a channel Rome does not listen to", () => {
     ports.inbound!.subscribe(async (event) => {
       heard.push(event.message.messageId);
     });
-    const listen = (to: boolean, channel = "fake-telegram") => {
+    const listen = (to: boolean, connectionId = held() ?? "") => {
       listened = to;
-      for (const listener of listeners) listener(channel);
+      for (const listener of listeners) listener(connectionId);
     };
     const deliver = async (id: string) => {
       fx.talkerFactory.instances.at(-1)!.state.deliver!({
@@ -421,7 +436,7 @@ describe("a channel Rome does not listen to", () => {
   it("hears nothing, not even admission, until it is listened to", async () => {
     const { registry, fx, heard, admitted, listen, deliver } = setup(false);
     const connection = await registry.connect("fake-telegram");
-    await registry.importCredential(connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
 
     await deliver("before");
     expect(heard).toEqual([]);
@@ -436,7 +451,7 @@ describe("a channel Rome does not listen to", () => {
   it("stops hearing when it stops being listened to, and starts again", async () => {
     const { registry, fx, heard, listen, deliver } = setup(true);
     const connection = await registry.connect("fake-telegram");
-    await registry.importCredential(connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
 
     await deliver("m1");
     listen(false);
@@ -449,12 +464,12 @@ describe("a channel Rome does not listen to", () => {
     expect(heard).toEqual(["m1", "m3"]);
   });
 
-  it("ignores a change to another channel", async () => {
+  it("ignores a change to another Connection", async () => {
     const { registry, fx, heard, listen, deliver } = setup(false);
     const connection = await registry.connect("fake-telegram");
-    await registry.importCredential(connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
 
-    listen(true, "fake-telegram-2");
+    listen(true, "another-connection");
     await deliver("m1");
 
     expect(heard).toEqual([]);
@@ -463,7 +478,7 @@ describe("a channel Rome does not listen to", () => {
   it("sends whether or not it is listened to", async () => {
     const { registry, fx, ports } = setup(false);
     const connection = await registry.connect("fake-telegram");
-    await registry.importCredential(connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
 
     await ports.send!.send("dm-1" as ChatId, { text: "hi" });
 
@@ -474,7 +489,7 @@ describe("a channel Rome does not listen to", () => {
     const { registry, fx, heard, listen, deliver } = setup(false);
     const connection = await registry.connect("fake-telegram");
     listen(true);
-    await registry.importCredential(connection.id, "bot", fx.validCredential());
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
 
     await deliver("m1");
 
@@ -485,7 +500,7 @@ describe("a channel Rome does not listen to", () => {
 describe("a Connection with no channel record", () => {
   it("backs no channel, not even its service's first", async () => {
     const { db } = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
     // The service's only Connection, so nothing else could back the channel.
@@ -499,7 +514,7 @@ describe("a Connection with no channel record", () => {
     ports.inbound!.subscribe(async (event) => {
       heard.push(event.ref.connectionId);
     });
-    await registry.importCredential(unrecorded.id, "bot", fx.validCredential());
+    await registry.giveGrant(unrecorded.connectionKind, unrecorded.id, "bot", fx.validCredential());
     const talker = fx.talkerFactory.instances.at(-1)!;
 
     talker.state.deliver!({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
@@ -525,6 +540,8 @@ describe("reply streaming ports", () => {
    */
   function portsFor({ pacing, streams = true }: { pacing?: ConnectionPacing; streams?: boolean }) {
     const sent: string[] = [];
+    /** The messages the talker was asked to settle, with their text. */
+    const settled: string[] = [];
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     const live = { talker: true };
@@ -540,7 +557,10 @@ describe("reply streaming ports", () => {
             replyDelivery: {
               capabilities: { maxPartLength: 10, edit: false, budget },
               codec: plainText,
-              create: async () => ({ messageId: "m1", chatId: "chat-1" }),
+              create: async () => ({ messageId: "m1", chatId: "chat-1", streaming: true as const }),
+              settle: async (receipt: PartReceipt, text: string) => {
+                settled.push(`${receipt.messageId} ${text}`);
+              },
             },
           }
         : {}),
@@ -561,7 +581,7 @@ describe("reply streaming ports", () => {
       channelOf: (each: { service: string }) => each.service,
       ...(pacing ? { pacing } : {}),
     } as unknown as ConnectionPortsDeps;
-    return { send: connectionPorts(deps, "telegram")!.send!, sent, release, live };
+    return { send: connectionPorts(deps, "telegram")!.send!, sent, settled, release, live };
   }
 
   const pacingWith = (on: boolean) => new ConnectionPacing(systemClock, async () => on);
@@ -604,10 +624,27 @@ describe("reply streaming ports", () => {
     await expect(replies.transport.create("chat-1", "hi")).resolves.toEqual({
       messageId: "m1",
       chatId: "chat-1",
+      streaming: true,
     });
     live.talker = false;
     await expect(replies.transport.create("chat-1", "hi")).rejects.toMatchObject({
       kind: "unauthorized",
     });
+  });
+
+  it("settles a streamed reply's message through the live talker", async () => {
+    const { send, settled } = portsFor({ pacing: pacingWith(true) });
+    const replies = send.replies!;
+    const delivery = new ReplyDelivery({
+      transport: replies.transport,
+      pacer: replies.pacer,
+      policy: { mode: "blocks", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 100 },
+      conversation: "chat-1",
+      clock: systemClock,
+    });
+    delivery.accept({ type: "text", content: "hi there" });
+
+    expect((await delivery.finish()).status).toBe("delivered");
+    expect(settled).toEqual(["m1 hi there"]);
   });
 });

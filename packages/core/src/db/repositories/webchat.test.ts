@@ -4,7 +4,13 @@ import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { ApprovalsRepository } from "./approvals.js";
 import { ChatSettingsRepository } from "../../chat-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
-import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema.js";
+import { sessionTraceCutoff } from "../../webchat/trace-retention.js";
+import {
+  romeAgentMessagePlatformIds,
+  romeAgentMessages,
+  romeSessions,
+  romeAgentTraceBlocks,
+} from "../schema.js";
 import {
   INTERRUPTED_TURN_ERROR,
   WebChatRepository,
@@ -51,6 +57,299 @@ describe("WebChatRepository", () => {
   afterEach(() => {
     rs.useRealTimers();
     testDb.close();
+  });
+
+  it("never selects block content when all requested traces are archived", async () => {
+    await repo.createSession("old-only", "Old only");
+    await repo.appendTraceBlocks({
+      messageId: "old-only-trace",
+      sessionId: "old-only",
+      turnId: "turn",
+      startSeq: 0,
+      blocks: [{ type: "thinking", content: "Heavy payload" }],
+    });
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-10-16T12:00:00Z") });
+    const select = testDb.db.select.bind(testDb.db);
+    const spy = rs.spyOn(testDb.db, "select").mockImplementation(((
+      fields?: Record<string, unknown>,
+    ) => {
+      expect(fields?.content).not.toBe(romeAgentTraceBlocks.content);
+      return fields ? select(fields as never) : select();
+    }) as typeof testDb.db.select);
+    const options = { sessionActivityCutoff: sessionTraceCutoff(new Date("2026-10-24T12:00:00Z")) };
+    try {
+      expect((await repo.getTraceContents("old-only", options))[0]?.traceArchived).toBe(true);
+      expect(
+        (await repo.getMessageContentForDisplay("old-only-trace", options))?.traceArchived,
+      ).toBe(true);
+      expect((await repo.getTraceContentByTurn("old-only", "turn", options))?.traceArchived).toBe(
+        true,
+      );
+      expect(
+        await repo.getTraceContentsByTurns([{ sessionId: "old-only", turnId: "turn" }], options),
+      ).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it.each([
+    ["2026-10-18T12:00:00Z", false],
+    ["2026-10-16T12:00:00Z", true],
+    ["2026-10-17T12:00:00Z", true],
+    ["2026-10-17T12:00:01Z", false],
+  ] as const)("uses the session's last message at %s (archived: %s) for every trace", async (lastMessageAt, archived) => {
+    await repo.createSession("retention", "Retention");
+    const sessionActivityCutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
+    const options = { sessionActivityCutoff };
+    const blocks = [
+      { type: "thinking", content: "private steps" },
+      { type: "result", content: "Reply" },
+    ];
+    await repo.appendTraceBlocks({
+      messageId: "old",
+      sessionId: "retention",
+      turnId: "old",
+      startSeq: 0,
+      blocks,
+    });
+    await repo.addMessage("legacy", "retention", "trace", JSON.stringify(blocks), "legacy");
+    await repo.addMessage("prompt", "retention", "user", "Keep my question", "old");
+    await repo.addMessage(
+      "reply",
+      "retention",
+      "assistant",
+      JSON.stringify([{ type: "text", content: "Reply" }]),
+      "old",
+    );
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await repo.addMessage("latest", "retention", "user", "More please", "latest");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date(lastMessageAt) })
+      .where(eq(romeAgentMessages.id, "latest"));
+
+    const activityQuery = rs.spyOn(repo, "getTraceArchivedSessionIds");
+    const traces = await repo.getTraceContents("retention", options);
+    expect(activityQuery).toHaveBeenCalledTimes(1);
+    expect(activityQuery).toHaveBeenCalledWith(["retention"], sessionActivityCutoff);
+    activityQuery.mockRestore();
+    for (const id of ["old", "legacy"]) {
+      const expected = archived
+        ? { id, content: "[]", traceArchived: true }
+        : { id, content: JSON.stringify(blocks) };
+      expect(traces.find((row) => row.id === id)).toEqual(expected);
+      expect(await repo.getMessageContentForDisplay(id, options)).toEqual(expected);
+      expect(await repo.getTraceContentByTurn("retention", id, options)).toEqual(expected);
+      expect(await repo.getMessageContent(id)).toBe(JSON.stringify(blocks));
+    }
+    const children = await repo.getTraceContentsByTurns(
+      ["old", "legacy"].map((turnId) => ({ sessionId: "retention", turnId })),
+      options,
+    );
+    expect(children.map((row) => row.id).sort()).toEqual(archived ? [] : ["legacy", "old"]);
+    expect((await repo.getMessageContentForDisplay("prompt", options))?.content).toBe(
+      "Keep my question",
+    );
+    expect((await repo.getMessageContentForDisplay("reply", options))?.content).toContain("Reply");
+    if (archived) {
+      await testDb.db.delete(romeAgentTraceBlocks).where(eq(romeAgentTraceBlocks.messageId, "old"));
+      expect(await repo.getTraceContents("retention", options)).toEqual(traces);
+    }
+  });
+
+  it.each([
+    "user",
+    "assistant",
+    "trace",
+    "notification",
+  ])("counts a recent %s message as activity and restores all old steps", async (role) => {
+    await repo.createSession("idle", "Idle");
+    await repo.appendTraceBlocks({
+      messageId: "idle-trace",
+      sessionId: "idle",
+      turnId: "old-turn",
+      startSeq: 0,
+      blocks: [{ type: "thinking", content: "old steps" }],
+    });
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    const options = { sessionActivityCutoff: sessionTraceCutoff(new Date("2026-10-24T12:00:00Z")) };
+    expect((await repo.getTraceContents("idle", options))[0]?.traceArchived).toBe(true);
+    await repo.addMessage("new-message", "idle", role, "[]", "new-turn");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-18T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "new-message"));
+    expect(await repo.getTraceArchivedSessionIds(["idle"], options.sessionActivityCutoff)).toEqual(
+      [],
+    );
+    expect((await repo.getTraceContentByTurn("idle", "old-turn", options))?.content).toContain(
+      "old steps",
+    );
+  });
+
+  it("ignores session metadata and unknown message roles, and batches idle-session selection", async () => {
+    await repo.createSession("idle", "Idle");
+    await repo.createSession("active", "Active");
+    await repo.createSession("empty", "Empty");
+    for (const id of ["idle", "active"]) {
+      await repo.addMessage(
+        `${id}-trace`,
+        id,
+        "trace",
+        JSON.stringify([{ type: "thinking", content: id }]),
+        "old-turn",
+      );
+    }
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await repo.addMessage("active-reply", "active", "assistant", "Reply");
+    await repo.addMessage("metadata", "idle", "system", "Metadata");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-18T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "active-reply"));
+    await repo.updateSessionName("idle", "Renamed");
+    await repo.markSessionRead("idle");
+    await testDb.db.update(romeSessions).set({
+      activityAt: new Date("2026-10-24T12:00:00Z"),
+      pinnedAt: new Date("2026-10-24T12:00:00Z"),
+    });
+    const cutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
+    expect(await repo.getTraceArchivedSessionIds(["idle", "active", "empty"], cutoff)).toEqual([
+      "idle",
+    ]);
+    expect(await repo.getTraceArchivedSessionIds([], cutoff)).toEqual([]);
+    const activityQuery = rs.spyOn(repo, "getTraceArchivedSessionIds");
+    const children = await repo.getTraceContentsByTurns(
+      ["idle", "active", "active"].map((sessionId) => ({ sessionId, turnId: "old-turn" })),
+      { sessionActivityCutoff: cutoff },
+    );
+    expect(activityQuery).toHaveBeenCalledTimes(1);
+    expect(children.map((row) => row.sessionId)).toEqual(["active"]);
+    activityQuery.mockRestore();
+  });
+
+  it.each([
+    ["2026-10-23T12:00:00Z", false],
+    ["2026-10-16T12:00:00Z", true],
+    ["2026-10-17T12:00:00Z", true],
+    ["2026-10-17T12:00:01Z", false],
+  ] as const)("inherits ancestor activity at %s in a nested idle tree (archived: %s)", async (lastMessageAt, archived) => {
+    await repo.createSession("root", "Root");
+    await repo.createSession("unrelated", "Unrelated");
+    for (const [id, parentSessionId] of [
+      ["child", "root"],
+      ["grandchild", "child"],
+      ["sibling", "root"],
+    ]) {
+      await repo.ensureRomeSession({
+        id,
+        parentSessionId,
+        type: "subagent",
+        name: id,
+        agentName: "main",
+      });
+    }
+    for (const id of ["root", "child", "grandchild", "sibling", "unrelated"]) {
+      await repo.appendTraceBlocks({
+        messageId: `${id}-trace`,
+        sessionId: id,
+        turnId: "old-turn",
+        startSeq: 0,
+        blocks: [{ type: "thinking", content: `${id} steps` }],
+      });
+    }
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await repo.addMessage("root-latest", "root", "user", "Continue");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date(lastMessageAt) })
+      .where(eq(romeAgentMessages.id, "root-latest"));
+    await repo.addMessage("unrelated-latest", "unrelated", "user", "Continue");
+    const cutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
+    const options = { sessionActivityCutoff: cutoff };
+    const query = rs.spyOn(testDb.db, "all");
+    expect(
+      (
+        await repo.getTraceArchivedSessionIds(
+          ["root", "child", "grandchild", "sibling", "unrelated"],
+          cutoff,
+        )
+      ).sort(),
+    ).toEqual(archived ? ["child", "grandchild", "root", "sibling"] : []);
+    expect(query).toHaveBeenCalledTimes(1);
+    query.mockRestore();
+    expect(await repo.getTraceArchivedSessionIds(["grandchild"], cutoff)).toEqual(
+      archived ? ["grandchild"] : [],
+    );
+    for (const id of ["root", "child", "grandchild", "sibling"]) {
+      expect((await repo.getTraceContents(id, options))[0]?.traceArchived).toBe(
+        archived ? true : undefined,
+      );
+      expect((await repo.getTraceContentByTurn(id, "old-turn", options))?.traceArchived).toBe(
+        archived ? true : undefined,
+      );
+      expect((await repo.getMessageContentForDisplay(`${id}-trace`, options))?.traceArchived).toBe(
+        archived ? true : undefined,
+      );
+    }
+    const children = await repo.getTraceContentsByTurns(
+      ["child", "grandchild"].map((sessionId) => ({ sessionId, turnId: "old-turn" })),
+      options,
+    );
+    expect(children.map((row) => row.sessionId).sort()).toEqual(
+      archived ? [] : ["child", "grandchild"],
+    );
+  });
+
+  it("reactivates an idle branch and its descendants without reactivating ancestors or siblings", async () => {
+    await repo.createSession("root", "Idle source");
+    for (const [id, parentSessionId] of [
+      ["branch", "root"],
+      ["grandchild", "branch"],
+      ["sibling", "root"],
+    ]) {
+      await repo.ensureRomeSession({
+        id,
+        name: id,
+        parentSessionId,
+        type: "fork",
+        agentName: "main",
+      });
+    }
+    const ids = ["root", "branch", "grandchild", "sibling"];
+    for (const id of ids) {
+      await repo.appendTraceBlocks({
+        messageId: `${id}-trace`,
+        sessionId: id,
+        turnId: "old-turn",
+        startSeq: 0,
+        blocks: [{ type: "thinking", content: `${id} steps` }],
+      });
+    }
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-10-10T12:00:00Z") });
+    const cutoff = sessionTraceCutoff(new Date("2026-10-24T12:00:00Z"));
+    expect((await repo.getTraceArchivedSessionIds(ids, cutoff)).sort()).toEqual([...ids].sort());
+    await repo.addMessage("branch-latest", "branch", "user", "Continue here");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "branch-latest"));
+    expect((await repo.getTraceArchivedSessionIds(ids, cutoff)).sort()).toEqual([
+      "root",
+      "sibling",
+    ]);
+    expect(await repo.getTraceArchivedSessionIds(["grandchild"], cutoff)).toEqual([]);
+    const options = { sessionActivityCutoff: cutoff };
+    for (const id of ["branch", "grandchild"]) {
+      expect((await repo.getTraceContents(id, options))[0]?.content).toContain(`${id} steps`);
+      expect((await repo.getTraceContentByTurn(id, "old-turn", options))?.content).toContain(
+        `${id} steps`,
+      );
+      expect(
+        (await repo.getMessageContentForDisplay(`${id}-trace`, options))?.traceArchived,
+      ).toBeUndefined();
+    }
   });
 
   it("filters owners before returning chats and preserves the all-owner default", async () => {
@@ -1049,6 +1348,77 @@ describe("WebChatRepository", () => {
         role: "notification",
         contextInjectedTurnId: null,
       });
+    });
+  });
+
+  describe("a reply written as several messages", () => {
+    const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
+
+    it("is found from a quote of any of its messages, in its conversation and in a child's", async () => {
+      const conversation = await repo.ensureChannelChat({
+        channel: "telegram",
+        threadId: "split-reply",
+        agentName: "main",
+      });
+      const content = textContent("first paragraph\n\nsecond paragraph");
+      await repo.recordOutboundConversationMessage({
+        sessionId: conversation.id,
+        content,
+        platformMessageId: "part-2",
+        otherPlatformMessageIds: ["part-1", "part-2", "part-3"],
+        senderName: "Rome",
+        turnId: "turn-split",
+        knownToProvider: true,
+      });
+
+      for (const quoted of ["part-1", "part-2", "part-3"]) {
+        const { repliedTo } = await repo.loadConversationContext(conversation.id, quoted);
+        expect(repliedTo?.content).toBe(content);
+      }
+      await expect(
+        repo.loadConversationContext(conversation.id, "elsewhere"),
+      ).resolves.toMatchObject({ repliedTo: null });
+      const child = await repo.ensureChannelChat({
+        channel: "telegram",
+        threadId: "split-reply-thread",
+        parentThreadId: "split-reply",
+        agentName: "main",
+      });
+      const { repliedTo } = await repo.loadConversationContext(child.id, "part-1");
+      expect(repliedTo?.content).toBe(content);
+    });
+
+    it("keeps the ids of a row recorded again, and drops them with its conversation", async () => {
+      const conversation = await repo.ensureChannelChat({
+        channel: "telegram",
+        threadId: "split-reply-again",
+        agentName: "main",
+      });
+      const content = textContent("answer");
+      const record = () =>
+        repo.recordOutboundConversationMessage({
+          sessionId: conversation.id,
+          content,
+          platformMessageId: "again-2",
+          otherPlatformMessageIds: ["again-1"],
+          senderName: "Rome",
+          turnId: "turn-again",
+          knownToProvider: true,
+        });
+      await record();
+      await record();
+      const ids = () =>
+        testDb.db
+          .select()
+          .from(romeAgentMessagePlatformIds)
+          .where(eq(romeAgentMessagePlatformIds.sessionId, conversation.id));
+      await expect(ids()).resolves.toHaveLength(1);
+
+      await repo.deleteMessagesBySession(conversation.id);
+      await expect(ids()).resolves.toEqual([]);
+      await record();
+      await repo.deleteSession(conversation.id);
+      await expect(ids()).resolves.toEqual([]);
     });
   });
 

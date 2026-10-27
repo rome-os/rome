@@ -209,13 +209,9 @@ describe("project selector devices", () => {
     { id: "pc", name: "Windows PC", platform: "windows" },
   ];
 
-  function stubDevices(
-    files: (deviceId: string, path: string | null) => Response,
-    devices: unknown[] = defaultDevices,
-  ) {
+  function stubDevices(files: (deviceId: string, path: string | null) => Response) {
     return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://rome.test");
-      if (url.pathname === "/api/devices/list") return Response.json({ devices });
       const match = url.pathname.match(/^\/api\/devices\/([^/]+)\/files$/);
       if (match) return files(match[1], url.searchParams.get("path"));
       return Response.json({ error: "unexpected" }, { status: 500 });
@@ -233,6 +229,7 @@ describe("project selector devices", () => {
     props: Partial<ReturnType<typeof baseProps>> & {
       onPickDeviceFolder: (folder: unknown) => void;
       deviceFolder?: Parameters<typeof ProjectSelector>[0]["deviceFolder"];
+      devices?: Parameters<typeof ProjectSelector>[0]["devices"];
     },
   ) {
     const [searchQuery, setSearchQuery] = useState("");
@@ -240,6 +237,7 @@ describe("project selector devices", () => {
       <ProjectSelector
         {...baseProps()}
         {...props}
+        devices={props.devices === undefined ? defaultDevices : props.devices}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
       />
@@ -249,14 +247,37 @@ describe("project selector devices", () => {
   afterEach(() => rs.restoreAllMocks());
 
   it("keeps the single project list when only Rome Cloud is available", async () => {
-    const fetchSpy = stubDevices(macFiles, []);
-    render(<Harness onPickDeviceFolder={rs.fn()} />);
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    expect(await screen.findByRole("option", { name: /alpha/ })).toBeTruthy();
-    expect(screen.queryByRole("option", { name: /Rome Cloud/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
-    // Only the probe-free list is read; no device is asked anything.
-    expect(fetchSpy.mock.calls.map(([input]) => String(input))).toEqual(["/api/devices/list"]);
+    const fetchSpy = stubDevices(macFiles);
+    for (const devices of [[], null]) {
+      const { unmount } = render(<Harness onPickDeviceFolder={rs.fn()} devices={devices} />);
+      expect(await screen.findByRole("option", { name: /alpha/ })).toBeTruthy();
+      expect(screen.queryByRole("option", { name: /Rome Cloud/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+      unmount();
+    }
+    // No device is asked anything.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("holds the first level with placeholder devices until the locations arrive", async () => {
+    stubDevices(macFiles);
+    const { rerender } = render(
+      <Harness
+        onPickDeviceFolder={rs.fn()}
+        projectCatalog={null}
+        projectsLoading={true}
+        devices={null}
+      />,
+    );
+    // The final shape from the first frame: Rome Cloud, then the devices to come.
+    expect(screen.getByRole("option", { name: /Rome Cloud/ })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Loading devices…");
+    expect(screen.queryByText("Loading projects...")).toBeNull();
+    expect(screen.queryByText("Create project")).toBeNull();
+
+    rerender(<Harness onPickDeviceFolder={rs.fn()} />);
+    expect(screen.getByRole("option", { name: /macbook/ })).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("opens on Rome Cloud and the devices, then Rome Cloud lists the projects", async () => {
@@ -374,5 +395,138 @@ describe("project selector devices", () => {
     expect(screen.getByRole("button", { name: "Project" }).textContent).toContain("macbook:~/code");
     const mac = await screen.findByRole("option", { name: /macbook/ });
     expect(mac.textContent).toContain("~/code");
+  });
+
+  describe("in the Mac app", () => {
+    type Status = { state: string; deviceId: string; name: string };
+    function stubApp(status: Status, pickFolder?: (path?: string) => Promise<unknown>) {
+      window.rome = {
+        device: {
+          get: async () => status,
+          setEnabled: async () => status,
+          onStatus: () => () => undefined,
+          ...(pickFolder ? { pickFolder: rs.fn(pickFolder) } : {}),
+        },
+      };
+      return (window.rome as { device: { pickFolder?: ReturnType<typeof rs.fn> } }).device;
+    }
+    const connectedMac = { state: "connected", deviceId: "mac", name: "macbook" };
+    const filesCalls = (fetchSpy: ReturnType<typeof stubDevices>) =>
+      fetchSpy.mock.calls.map(([input]) => String(input)).filter((url) => url.includes("/files"));
+
+    afterEach(() => {
+      delete window.rome;
+    });
+
+    it("marks this computer and lists it first", async () => {
+      stubDevices(macFiles);
+      stubApp({ state: "connected", deviceId: "pc", name: "Windows PC" }, async () => null);
+      render(<Harness onPickDeviceFolder={rs.fn()} />);
+
+      const pc = await screen.findByRole("option", { name: /Windows PC/ });
+      await waitFor(() => expect(pc.textContent).toContain("This device"));
+      expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+        expect.stringContaining("Rome Cloud"),
+        expect.stringContaining("Windows PC"),
+        "macbook",
+        "old-linux",
+      ]);
+    });
+
+    it("picks a folder on this computer with the system dialog", async () => {
+      const fetchSpy = stubDevices(macFiles);
+      const device = stubApp(connectedMac, async () => ({
+        path: "/Users/ray/code/rome",
+        home: "/Users/ray",
+      }));
+      const onPickDeviceFolder = rs.fn();
+      const user = userEvent.setup();
+      render(<Harness onPickDeviceFolder={onPickDeviceFolder} />);
+
+      const mac = await screen.findByRole("option", { name: /macbook/ });
+      await waitFor(() => expect(mac.textContent).toContain("This device"));
+      await user.click(mac);
+      await waitFor(() =>
+        expect(onPickDeviceFolder).toHaveBeenCalledWith({
+          deviceId: "mac",
+          deviceName: "macbook",
+          path: "/Users/ray/code/rome",
+          home: "/Users/ray",
+        }),
+      );
+      expect(device.pickFolder).toHaveBeenCalledWith(undefined);
+      expect(filesCalls(fetchSpy)).toEqual([]);
+    });
+
+    it("stays on the first level when the dialog is cancelled", async () => {
+      stubDevices(macFiles);
+      stubApp(connectedMac, async () => null);
+      const onPickDeviceFolder = rs.fn();
+      const user = userEvent.setup();
+      render(<Harness onPickDeviceFolder={onPickDeviceFolder} />);
+
+      const mac = await screen.findByRole("option", { name: /macbook/ });
+      await waitFor(() => expect(mac.textContent).toContain("This device"));
+      await user.click(mac);
+      expect(await screen.findByRole("option", { name: /Rome Cloud/ })).toBeTruthy();
+      expect(onPickDeviceFolder).not.toHaveBeenCalled();
+    });
+
+    it("opens the dialog at the folder already picked on this computer", async () => {
+      stubDevices(macFiles);
+      const device = stubApp(connectedMac, async () => null);
+      const user = userEvent.setup();
+      render(
+        <Harness
+          onPickDeviceFolder={rs.fn()}
+          deviceFolder={{
+            deviceId: "mac",
+            deviceName: "macbook",
+            path: "/Users/ray/code",
+            home: "/Users/ray",
+          }}
+        />,
+      );
+
+      const mac = await screen.findByRole("option", { name: /macbook/ });
+      await waitFor(() => expect(mac.textContent).toContain("This device"));
+      await user.click(mac);
+      await waitFor(() => expect(device.pickFolder).toHaveBeenCalledWith("/Users/ray/code"));
+    });
+
+    it("browses this computer in the menu while Rome cannot reach it", async () => {
+      const fetchSpy = stubDevices(macFiles);
+      const device = stubApp({ ...connectedMac, state: "disabled" }, async () => null);
+      const user = userEvent.setup();
+      render(<Harness onPickDeviceFolder={rs.fn()} />);
+
+      const mac = await screen.findByRole("option", { name: /macbook/ });
+      await waitFor(() => expect(mac.textContent).toContain("This device"));
+      await user.click(mac);
+      expect(await screen.findByRole("option", { name: "code" })).toBeTruthy();
+      expect(device.pickFolder).not.toHaveBeenCalled();
+      expect(filesCalls(fetchSpy)).toEqual(["/api/devices/mac/files"]);
+    });
+
+    it("browses in the menu when the app has no dialog or the dialog fails", async () => {
+      stubDevices(macFiles);
+      stubApp(connectedMac);
+      const user = userEvent.setup();
+      const { unmount } = render(<Harness onPickDeviceFolder={rs.fn()} />);
+      const mac = await screen.findByRole("option", { name: /macbook/ });
+      await waitFor(() => expect(mac.textContent).toContain("This device"));
+      await user.click(mac);
+      expect(await screen.findByRole("option", { name: "code" })).toBeTruthy();
+      unmount();
+
+      stubApp(connectedMac, async () => {
+        throw new Error("device:pickFolder is not available to this page");
+      });
+      render(<Harness onPickDeviceFolder={rs.fn()} />);
+      const again = await screen.findByRole("option", { name: /macbook/ });
+      await waitFor(() => expect(again.textContent).toContain("This device"));
+      await user.click(again);
+      expect(await screen.findByRole("option", { name: "code" })).toBeTruthy();
+    });
   });
 });

@@ -9,6 +9,7 @@
  */
 
 import type {
+  Account,
   ChannelActivity,
   ChannelInbound,
   ChannelInboundMedia,
@@ -34,7 +35,7 @@ import {
 import { ChatBuffers } from "./conversation-buffer.js";
 import type { ConnectionPacing } from "./delivery/connection-pacing.js";
 import { DeliveryFailure, type DeliveryTransport } from "./delivery/types.js";
-import { MAX_QUERY_LIMIT, queryLimit, type Messages } from "./messages.js";
+import { MAX_QUERY_LIMIT, queryPage, type Messages } from "./messages.js";
 
 const log = createLogger("channel-ports");
 
@@ -54,19 +55,23 @@ export interface ConnectionPortsDeps {
   channelOf: ChannelOf;
   /** Paces a send while reply streaming is on, and backs the `replies` port. */
   pacing?: ConnectionPacing;
-  /** Which channels the inbound port hears. Absent, every channel is heard. */
+  /** Which Connections the inbound port hears. Absent, every one is heard. */
   listening?: InboundListening;
+  /** The account each Connection reaches, which an inbound message names as
+   *  the one it arrived on. Absent, or null for a Connection, a message names
+   *  none. */
+  accountOf?: (connectionId: string) => Account | null;
 }
 
 /**
- * Whether a channel's inbound port hears its Connections now. `onChange` tells
- * each port the name of a channel whose answer may have changed, and the port
+ * Whether an inbound port hears a Connection now, by its id. `onChange` tells
+ * each port the id of a Connection whose answer may have changed, and the port
  * reads `listens` again. A port reads `listens` when a Connection unlocks and
  * on each change, never per message.
  */
 export interface InboundListening {
-  listens(channel: string): boolean;
-  onChange(listener: (channel: string) => void): void;
+  listens(connectionId: string): boolean;
+  onChange(listener: (connectionId: string) => void): void;
 }
 
 /** The name of the channel a Connection backs, or null when it backs none.
@@ -103,7 +108,7 @@ export interface ConnectionPorts {
  * its first channel.
  *
  * Building the ports subscribes the inbound port to the channel's talkers for
- * the registry's lifetime, while `deps.listening` listens to the channel, and
+ * the registry's lifetime, while `deps.listening` hears each Connection, and
  * admission runs once per message for each subscription. So build one set per
  * registry and channel, as `channelList` does: a second set would run
  * admission twice.
@@ -241,7 +246,7 @@ function connectionMessages(backing: Backing): Messages {
   }
 
   return {
-    async query({ chatId, since, limit }) {
+    async query({ chatId, since, after, limit }) {
       const connection = connectionFor(backing);
       if (!connection) throw new ChannelNotConnected(channel);
       const connectionId = connection.id;
@@ -265,14 +270,16 @@ function connectionMessages(backing: Backing): Messages {
             }),
           ) ?? Promise.reject(new ChannelNotConnected(channel)),
       );
+      // Paged after the read, so a cursor pages back only within the window
+      // the platform answers.
       // Reversed before the sort, so lines sharing a timestamp come newest
       // first too.
-      return lines
+      const newestFirst = lines
         .filter((message) => message.timestamp.getTime() >= from.getTime())
         .reverse()
         .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-        .slice(0, queryLimit(limit))
         .map((message) => copyOf(message, channel));
+      return queryPage(newestFirst, { after, limit });
     },
     byAccount: null,
   };
@@ -323,7 +330,7 @@ export async function sendThrough(
 /**
  * The reply port of `connection`, or null when its talker cannot stream. Each
  * write looks the talker up when it runs, so a reply survives a new credential
- * epoch and fails `unauthorized` while talk is locked, rather than writing as a
+ * epoch and fails `unauthorized` while chat is locked, rather than writing as a
  * stale epoch.
  */
 function connectionReplies(
@@ -350,6 +357,9 @@ function connectionReplies(
         live((transport) => transport.create(conversation, text, replyTo)),
       ...(declared.edit
         ? { edit: (receipt, text) => live((transport) => transport.edit?.(receipt, text)) }
+        : {}),
+      ...(declared.settle
+        ? { settle: (receipt, text) => live((transport) => transport.settle?.(receipt, text)) }
         : {}),
     },
   };
@@ -437,10 +447,16 @@ function connectionInbound(backing: Backing): ChannelInbound {
     async (message: ChannelMessage): Promise<void> => {
       if (!isAnswerable(message)) return;
       // A talker delivers the channel's own record, inbound, named after its
-      // connection kind. The event names the channel it arrived on.
+      // connection kind. The event names the channel and the account it
+      // arrived on.
+      const account = deps.accountOf?.(connectionId) ?? null;
       const event: InboundEvent = {
         kind: "message",
-        message: message.channel === channel ? message : { ...message, channel },
+        message: {
+          ...message,
+          channel,
+          ...(account ? { account } : {}),
+        },
         ref: { connectionId, chatId: message.chatId },
       };
       // A Connection id is a UUID, so the first colon ends it.
@@ -448,7 +464,8 @@ function connectionInbound(backing: Backing): ChannelInbound {
       for (const buffers of subscriptions) buffers.push(conversation, event);
     };
 
-  const listens = (): boolean => deps.listening?.listens(channel) ?? true;
+  const listens = (connection: Connection): boolean =>
+    deps.listening?.listens(connection.id) ?? true;
 
   // Admission runs whether or not anyone subscribes yet: the Agents channel
   // links an agent to the guardian even before the inbox hears it. A channel that is
@@ -464,7 +481,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
       detach();
       attached.delete(id);
     }
-    if (!listens()) return;
+    if (!listens(connection)) return;
     const dispatch = dispatchFrom(connection.id);
     const detach = connection.hearTalker((message) =>
       admission.deliver(connection, message, dispatch),
@@ -473,7 +490,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
   };
 
   // Fires now for each Connection already unlocked, then at every unlock.
-  deps.registry.onUnlocked("talk", (connection) => {
+  deps.registry.onUnlocked("chat", (connection) => {
     if (connection.connectionKind !== backing.connectionKind) return;
     const named = deps.channelOf(connection);
     if (named === channel) attach(connection);
@@ -488,19 +505,18 @@ function connectionInbound(backing: Backing): ChannelInbound {
     }
   });
 
-  // A channel starts listening on the Connections unlocked now, and stops by
-  // dropping every talker subscription. The subscribers stay, so a channel
-  // listened to again reaches the same handlers.
+  // A Connection starts being heard once unlocked, and stops by dropping its
+  // talker subscription. The subscribers stay, so a Connection heard again
+  // reaches the same handlers.
   deps.listening?.onChange((changed) => {
-    if (changed !== channel) return;
-    if (!listens()) {
-      for (const detach of attached.values()) detach();
-      attached.clear();
+    const connection = connectionsOf(backing).find((each) => each.id === changed);
+    if (!connection) return;
+    if (!listens(connection)) {
+      attached.get(connection.id)?.();
+      attached.delete(connection.id);
       return;
     }
-    for (const connection of connectionsOf(backing)) {
-      if (!attached.has(connection.id)) attach(connection);
-    }
+    if (!attached.has(connection.id)) attach(connection);
   });
 
   return {

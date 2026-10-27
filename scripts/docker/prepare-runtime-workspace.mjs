@@ -82,6 +82,26 @@ async function generateWorkspaceYaml() {
   return rootYaml.replace(packagesBlock, runtimeWorkspacePackagesYaml);
 }
 
+// Contributor-only docs stay out of the image. northstars/ and adrs/ describe
+// goals and past options rather than what Rome does, so an agent answering the
+// guardian from them would claim features that do not exist.
+const excludedDocsPaths = [
+  "docs/adrs",
+  "docs/assets",
+  "docs/authoring",
+  "docs/northstars",
+  "docs/screenshots",
+  "docs/ui",
+  "docs/AGENTS.md",
+  "docs/CLAUDE.md",
+  "docs/dashboard-mock-mode.md",
+  "docs/design-system.md",
+  "docs/midscene-e2e-cases.md",
+  "docs/midscene-e2e-plan.md",
+  "docs/storybook.md",
+  "docs/ui-kit.md",
+].map((docsPath) => docsPath.split("/").join(path.sep));
+
 const ignoredNames = new Set([".git", ".next", ".turbo", "coverage", "dist", "node_modules"]);
 
 const ignoredFileSuffixes = [
@@ -179,6 +199,11 @@ async function main() {
   await copyPath("infra/chrome");
   copiedTopLevelPaths.add("infra");
 
+  // The main agent's prompt points at docs/ so it can answer the guardian's
+  // questions about what Rome supports from the docs for the version it runs.
+  await copyPath("docs");
+  copiedTopLevelPaths.add("docs");
+
   assertForbiddenPackagesAbsent();
 
   const workspacePackages = await listWorkspacePackages(runtimeWorkspace);
@@ -260,6 +285,14 @@ function shouldCopy(sourcePath) {
 
   const parts = relativePath.split(path.sep);
   if (parts.some((part) => ignoredNames.has(part))) {
+    return false;
+  }
+
+  if (
+    excludedDocsPaths.some(
+      (excluded) => relativePath === excluded || relativePath.startsWith(excluded + path.sep),
+    )
+  ) {
     return false;
   }
 

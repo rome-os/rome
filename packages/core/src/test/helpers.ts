@@ -1,3 +1,4 @@
+import type { ExternalAgents } from "../channels/agents-accounts.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -50,6 +51,7 @@ import type {
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
+import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
@@ -68,6 +70,8 @@ import { createChannelsService } from "../channels/channels-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
+import type { AccountLink } from "@rome/api-types/account-agents";
+import type { AccountLinkOf } from "../channels/account-links.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
@@ -136,12 +140,26 @@ function migratedSystemImage(): Buffer {
   return migratedImage;
 }
 
+/** The kinds of link the built-in descriptors declare, for tests that build a
+ *  channel record without a registry. `connections/integrations/index.test.ts`
+ *  keeps it in step with the descriptors. */
+export const BUILTIN_ACCOUNT_LINKS: Readonly<Record<string, AccountLink>> = {
+  feishu: "own_account",
+  telegram: "own_account",
+  discord: "own_account",
+  slack_bot: "own_account",
+  telegram_user: "delegate",
+};
+
+/** {@link BUILTIN_ACCOUNT_LINKS} as a lookup. */
+export const testAccountLinkOf: AccountLinkOf = (kind) => BUILTIN_ACCOUNT_LINKS[kind] ?? null;
+
 /** Maps every channel to itself. Valid only where no connection kind has a later channel. */
 export const identityConnectionKindOf: ConnectionKindOfChannel = (channel) => channel;
 
 /** Maps a channel to its connection kind through `db`'s channel records, as Rome does. */
 export function recordedConnectionKindOf(db: DrizzleDb): ConnectionKindOfChannel {
-  const records = new ChannelRecordsRepository(db);
+  const records = new ChannelRecordsRepository(db, testAccountLinkOf);
   return (channel) => records.connectionKindOf(channel);
 }
 
@@ -313,8 +331,8 @@ export function createTestConnections(
       withTalker: (call: (talker: TestTalker) => unknown) => call(live),
       hearTalker: (handler: (message: ChannelMessage) => Promise<void>) =>
         transport.listen(handler),
-      isUnlocked: (capability: string) => capability === "talk",
-      status: () => ({ talk: { state: "unlocked" } }),
+      isUnlocked: (capability: string) => capability === "chat",
+      status: () => ({ chat: { state: "unlocked" } }),
     } as unknown as Connection);
   }
   const find = (connectionKind: string) => connections.get(`test:${connectionKind}`);
@@ -478,6 +496,8 @@ export interface TestDeps extends ApiDeps {
 
 export interface BuildTestDepsOptions {
   channels?: string[];
+  /** The agents Rome Cloud lists. Agents is not connected by default. */
+  assistants?: ExternalAgents;
 }
 
 const unavailableFavorService: FavorService = {
@@ -536,7 +556,9 @@ export async function buildTestDeps(
   }
 
   const sessionsRepo = new SessionsRepository(db);
+  const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const personMappingRepo = new PersonMappingRepository(db, recordedConnectionKindOf(db));
+  const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -689,7 +711,10 @@ export async function buildTestDeps(
   // Same provider set the daemon registers before the API comes up, so
   // routine trigger validation behaves identically here.
   routineEngine.registerProvider("schedule", new ScheduleTriggerProvider(routinesRepo));
-  routineEngine.registerProvider("event-bus", new EventBusTriggerProvider(new EventBus()));
+  routineEngine.registerProvider(
+    "event-bus",
+    new EventBusTriggerProvider(new EventBus(), routinesRepo),
+  );
 
   // Mirror daemon boot: the auth-edge snapshot is loaded from the persisted
   // `publicAccess` setting before serving (src/index.ts). Tests that change
@@ -714,6 +739,7 @@ export async function buildTestDeps(
     actionEngine,
     actionLoader,
     db,
+    appConnectionAccessRepo,
     sessionsRepo,
     personMappingRepo,
     guardianLinkCodes: new GuardianLinkCodes(),
@@ -723,7 +749,10 @@ export async function buildTestDeps(
     linkedInStoreRepo,
     linkedInAccounts,
     channels,
+    channelOfLink: (link: string) => channelRecords.channelOfLink(link),
+    sendersOfLink: (link: string) => channelRecords.sendersOfLink(link),
     accountNames,
+    assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,
     approvalsRepo,
     approvalHandler,
@@ -773,6 +802,8 @@ export async function buildTestDeps(
       start: async () => {},
       listFiles: async () => ({ ok: false, code: "offline" }),
       listDevices: async () => ({ devices: [] }),
+      renameDevice: async () => ({ ok: true }),
+      removeDevice: async () => ({ ok: true }),
       getStatus: async () => ({
         connection: "not_configured",
         checkedAt: new Date().toISOString(),

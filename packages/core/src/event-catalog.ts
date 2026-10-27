@@ -25,6 +25,9 @@ export const catalogEntrySchema = z.object({
     )
     .optional(),
   schemaOrigin: z.enum(["observed", "declared"]).optional(),
+  subscribable: z.boolean().optional(),
+  keys: z.array(z.array(z.string())).optional(),
+  active: z.boolean().optional(),
 }) satisfies z.ZodType<EventCatalogEntry>;
 
 export type CatalogEntry = EventCatalogEntry;
@@ -149,19 +152,7 @@ export class EventCatalog {
    * browses — it returns the first `limit` entries. `total` is the full match
    * count before truncation, so the caller can tell when to narrow the query. */
   search(query: string, limit: number): { entries: CatalogEntry[]; total: number } {
-    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const scored = [...this.entries.values()]
-      .map((entry) => {
-        const haystack = `${entry.eventType} ${entry.appId}`.toLowerCase();
-        const score = tokens.filter((token) => haystack.includes(token)).length;
-        return { entry, score };
-      })
-      .filter(({ score }) => tokens.length === 0 || score > 0);
-    scored.sort((a, b) => b.score - a.score || a.entry.eventType.length - b.entry.eventType.length);
-    return {
-      entries: scored.slice(0, Math.max(0, limit)).map(({ entry }) => ({ ...entry })),
-      total: scored.length,
-    };
+    return searchCatalogEntries([...this.entries.values()], query, limit);
   }
 
   /** Look up a single entry; undefined when no producer can currently emit it.
@@ -171,4 +162,26 @@ export class EventCatalog {
   get(eventType: string): Readonly<CatalogEntry> | undefined {
     return this.entries.get(eventType);
   }
+}
+
+/** The ranking behind {@link EventCatalog.search}, over any entry list, so
+ * declared types merged in at read time rank the same way. */
+export function searchCatalogEntries(
+  entries: readonly CatalogEntry[],
+  query: string,
+  limit: number,
+): { entries: CatalogEntry[]; total: number } {
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const scored = entries
+    .map((entry) => {
+      const haystack = `${entry.eventType} ${entry.appId}`.toLowerCase();
+      const score = tokens.filter((token) => haystack.includes(token)).length;
+      return { entry, score };
+    })
+    .filter(({ score }) => tokens.length === 0 || score > 0);
+  scored.sort((a, b) => b.score - a.score || a.entry.eventType.length - b.entry.eventType.length);
+  return {
+    entries: scored.slice(0, Math.max(0, limit)).map(({ entry }) => ({ ...entry })),
+    total: scored.length,
+  };
 }

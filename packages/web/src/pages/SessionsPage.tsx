@@ -58,6 +58,7 @@ import {
 } from "@/lib/chat-api";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
+import { modelDisplayName } from "@/lib/model-display";
 import type {
   ChatMessage,
   RomeSessionExplorerRecord,
@@ -587,7 +588,7 @@ function SessionsIndexPage({
     model
       ? {
           key: "model",
-          label: `Model: ${model.kind === "unknown" ? "Unknown" : model.name}`,
+          label: `Model: ${model.kind === "unknown" ? "Unknown" : modelDisplayName(model.name)}`,
           clear: () => setModel(undefined),
         }
       : null,
@@ -1100,7 +1101,10 @@ function ReadOnlySessionChat({
     [view.interactionResults],
   );
   const loadStoredTrace = useCallback(
-    async (messageId: string, includeSubagentUsage: boolean): Promise<TraceSnapshot | null> => {
+    async (
+      messageId: string,
+      includeSubagentUsage: boolean,
+    ): Promise<TraceSnapshot | "archived" | null> => {
       const params = new URLSearchParams({
         includeSubagentUsage: String(includeSubagentUsage),
       });
@@ -1109,8 +1113,8 @@ function ReadOnlySessionChat({
         { credentials: "include" },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { trace: TraceSnapshot | null };
-      return data.trace;
+      const data = (await res.json()) as { trace: TraceSnapshot | null; traceArchived?: boolean };
+      return data.traceArchived ? "archived" : data.trace;
     },
     [],
   );

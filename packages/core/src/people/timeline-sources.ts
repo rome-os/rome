@@ -23,6 +23,7 @@ import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 import { agentMessages } from "../channels/messages-agent.js";
 import { sentinelLogMessages } from "../channels/messages-sentinel.js";
 import type { DrizzleDb } from "../db/index.js";
+import type { ChannelOfLink } from "../db/repositories/channel-records.js";
 
 /**
  * The stores a person's history is read from, in the order they claim an
@@ -54,6 +55,11 @@ export function personMessageStores(deps: {
  * Every account each group of linked addresses is reachable at, with every
  * address the channel folds onto it — one result per group, in the order given.
  *
+ * Each account keeps the `channel` its link names, and is read on the one
+ * channel that link reaches (`channelOfLink`), or on none when the link names
+ * a connection kind Rome holds several accounts of. Rome never merges or picks among
+ * them. Absent `channelOfLink`, a link reaches the channel it names.
+ *
  * Two links that name two addresses of one account collapse to one account, so
  * a person linked under both a WhatsApp phone JID and its `@lid` form reads one
  * timeline rather than two halves of one.
@@ -66,12 +72,13 @@ export function personMessageStores(deps: {
  * asking about a directory of people must not pay for one read per row.
  */
 export async function timelineAccounts(
-  deps: { channels: Channels },
+  deps: { channels: Channels; channelOfLink?: ChannelOfLink },
   groups: readonly (readonly StoredAddress[])[],
 ): Promise<MessageAccount[][]> {
   const links = groups.flat();
   const fold = await foldAccounts(booksNamed(deps.channels, links), { stored: links });
-  return groups.map((group) => accountsOf(fold, group));
+  const channelOfLink = deps.channelOfLink ?? ((link: string) => link);
+  return groups.map((group) => accountsOf(fold, channelOfLink, group));
 }
 
 /** The address books of the channels the links name, and nothing else. An
@@ -87,13 +94,19 @@ function booksNamed(channels: Channels, links: readonly StoredAddress[]): Addres
 /** One group's links as the accounts they reach, keyed by the account rather
  *  than by the address a link happened to name, so two links onto one account
  *  are one entry. */
-function accountsOf(fold: AccountFold, links: readonly StoredAddress[]): MessageAccount[] {
+function accountsOf(
+  fold: AccountFold,
+  channelOfLink: ChannelOfLink,
+  links: readonly StoredAddress[],
+): MessageAccount[] {
   const byAccount = new Map<string, MessageAccount>();
   for (const link of links) {
     const key = fold.key(link.channel, link.channelUserId);
     if (byAccount.has(key)) continue;
+    const storedUnder = channelOfLink(link.channel);
     byAccount.set(key, {
       channel: link.channel,
+      ...(storedUnder === link.channel ? {} : { storedUnder }),
       // The link's own address among them, whatever the book says: a channel
       // that folds nothing onto it is still read at the address the guardian
       // stored.

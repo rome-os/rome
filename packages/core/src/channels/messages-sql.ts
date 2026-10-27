@@ -12,7 +12,13 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { Message } from "@rome/api-types/message";
 import type { DrizzleDb } from "../db/index.js";
-import type { AccountMessages, MessageAccount, MessageDetail, MessageRead } from "./messages.js";
+import {
+  heldOn,
+  type AccountMessages,
+  type MessageAccount,
+  type MessageDetail,
+  type MessageRead,
+} from "./messages.js";
 
 /**
  * A store's rows as timeline entries: a SELECT producing exactly the columns
@@ -140,18 +146,30 @@ export function sqlMessages(options: SqlMessagesOptions): AccountMessages {
  * one channel drops the accounts on every other here; a store that serves them
  * all keeps the channel beside each address and matches on both.
  */
-function accountKeys(
-  accounts: readonly MessageAccount[],
-  channel: string | undefined,
-): MessageScopeKey[] {
-  const scope = new Map<string, MessageScopeKey>();
+function accountKeys(accounts: readonly MessageAccount[], channel: string | undefined): JobKey[] {
+  const scope = new Map<string, JobKey>();
   for (const account of accounts) {
-    if (channel !== undefined && account.channel !== channel) continue;
+    const held = heldOn(account);
+    if (held === null || (channel !== undefined && held !== channel)) continue;
     for (const address of account.addresses) {
-      scope.set(`${account.channel}\n${address}`, { channel: account.channel, key: address });
+      const pair = `${held}\n${address}`;
+      if (!scope.has(pair)) {
+        scope.set(pair, { channel: held, key: address, shown: account.channel });
+      }
     }
   }
   return [...scope.values()];
+}
+
+/**
+ * A scope key as a job asks it, with the `source` its entries carry: the
+ * account's `channel`, which is its link's key. A row is stored under the
+ * channel it arrived on, which for an account read under `storedUnder` is
+ * another name, and an entry has to name the account a reader asked about.
+ * Ranking and the cursor read the same name, so a page and its cursor agree.
+ */
+interface JobKey extends MessageScopeKey {
+  shown: string;
 }
 
 /** Every key in a scope, each once — what a view on a single channel needs, the
@@ -163,7 +181,7 @@ export function keysIn(scope: readonly MessageScopeKey[]): string[] {
 /** One call, as the batch sees it. `limit` of {@link COUNT_ONLY} is a job that
  *  wants the length of a history and none of it. */
 interface Job {
-  keys: readonly MessageScopeKey[];
+  keys: readonly JobKey[];
   after: Message | null;
   limit: number;
 }
@@ -200,7 +218,7 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
   if (rows === null) return jobs.map(nothing);
 
   const scope = sql.join(
-    asked.map((entry) => sql`(${entry.index}, ${entry.channel}, ${entry.key})`),
+    asked.map((entry) => sql`(${entry.index}, ${entry.channel}, ${entry.key}, ${entry.shown})`),
     sql`, `,
   );
   const ask = sql.join(
@@ -209,7 +227,7 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
   );
 
   const answered = (await options.db.all(sql`
-    WITH scope(rq, source, held_key) AS (VALUES ${scope}),
+    WITH scope(rq, source, held_key, shown) AS (VALUES ${scope}),
     ask(rq, cap, has_cursor, c_at, c_outbound, c_source, c_ref) AS (VALUES ${ask}),
     -- One row per (job, message). DISTINCT because a view may attribute one
     -- message to several of a job's keys — a LinkedIn thread carrying two
@@ -218,7 +236,7 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
     scoped AS (
       SELECT DISTINCT
         scope.rq AS rq,
-        held.source AS source,
+        scope.shown AS source,
         held.at AS at,
         held.outbound AS outbound,
         held.ref AS ref,

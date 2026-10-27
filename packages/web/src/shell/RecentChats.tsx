@@ -1,4 +1,9 @@
-import { ChevronDownIcon, ChevronRightIcon, Pencil2Icon } from "@radix-ui/react-icons";
+import {
+  ChatBubbleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  Pencil2Icon,
+} from "@radix-ui/react-icons";
 import {
   Archive,
   ArchiveRestore,
@@ -29,20 +34,22 @@ import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { deleteSession, listSessions, renameSession, type SessionScope } from "@/lib/chat-api";
+import { deleteSession, renameSession, type SessionScope } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import type { ChatSession } from "@/lib/chat-types";
 import { deviceFolderName, pathSegments } from "@/lib/device-folder";
 import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
+import { useChatSessions } from "@/hooks/use-chat-sessions";
+import {
+  CONCIERGE_AGENT_ID,
+  TASK_CHAT_TRIGGER_KIND,
+  useConciergeChatId,
+} from "@/hooks/use-concierge";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
+import { RomeLogo } from "@/components/logo";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
-import {
-  emitSessionsChanged,
-  useArchiveSession,
-  usePinSession,
-  useSessionsChanged,
-} from "@/lib/session-events";
+import { emitSessionsChanged, useArchiveSession, usePinSession } from "@/lib/session-events";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
  *  so they show even while it is open; done means unseen replies, so the open
@@ -254,7 +261,18 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
+function ChatRowLink({
+  id,
+  name,
+  nested,
+  marker,
+}: {
+  id: string;
+  name: string;
+  nested: boolean;
+  /** Names who started the chat, shown as a small mark after the name. */
+  marker?: string;
+}) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -287,6 +305,13 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
           <span ref={nameRef} className="truncate">
             {name}
           </span>
+          {marker ? (
+            <ChatBubbleIcon
+              role="img"
+              aria-label={marker}
+              className="ml-2 h-3 w-3 shrink-0 text-subtle-foreground"
+            />
+          ) : null}
         </Link>
       </TooltipTrigger>
       {/* Right of the row, so the bubble reaches into the page rather than
@@ -299,17 +324,21 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
 export interface RecentChatsProps {
   /** Extra buttons after the list's own, such as the shell's collapse control. */
   headerControls?: ReactNode;
+  /** A control before the title, such as the phone drawer's way back to the rail. */
+  headerLeading?: ReactNode;
   /** Sit closer to the top, where a title bar above already holds the window's edge. */
   belowTitlebar?: boolean;
 }
 
 // The sidebar's second column: the header stays put while the list scrolls.
-export function RecentChats({ headerControls, belowTitlebar = false }: RecentChatsProps) {
+export function RecentChats({
+  headerControls,
+  headerLeading,
+  belowTitlebar = false,
+}: RecentChatsProps) {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [phase, setPhase] = useState<LoadPhase>("loading");
   const [groupMode, setGroupMode] = useState<GroupMode>(() => readGroupMode());
   const [scope, setScope] = useState<SessionScope>(() => readScope());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => readStatusFilter());
@@ -326,35 +355,31 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
   const renamingRef = useRef(false);
   const activeSessionId = activeSessionFromPath(location.pathname);
 
-  // The newest running state the status stream has reported per chat. A list
-  // response can be older than an event that arrived while it was in flight,
-  // so the stream's word wins over the row's.
+  const {
+    sessions: cachedSessions,
+    isError,
+    refetch,
+    invalidate,
+    update: updateSessions,
+  } = useChatSessions(statusFilter, scope);
+  // Cached rows show at once and a failed refetch keeps them, so the skeleton
+  // is only for a list that has never loaded.
+  const phase: LoadPhase = isError ? "error" : cachedSessions ? "ready" : "loading";
+
+  // The newest running state the status stream has reported per chat, applied
+  // over every list response: one can be older than an event that arrived
+  // while it was in flight. Per mount, since events stop while unmounted; the
+  // remount's refetch reconciles whatever was missed.
   const liveRunning = useRef(new Map<string, boolean>());
-  // Only the latest request may update the list or phase, including event-driven refetches.
-  const listRequest = useRef(0);
-  const loadSessions = useCallback(async () => {
-    const request = ++listRequest.current;
-    try {
-      const data = await listSessions(statusFilter, scope);
-      if (request !== listRequest.current) return;
-      setSessions(data.map((s) => withLiveRunning(s, liveRunning.current)));
-      setPhase("ready");
-    } catch {
-      if (request !== listRequest.current) return;
-      setPhase("error");
-    }
-  }, [statusFilter, scope]);
-
-  useEffect(() => {
-    void loadSessions();
-    return () => {
-      listRequest.current += 1;
-    };
-  }, [loadSessions]);
-
-  useSessionsChanged(() => {
-    void loadSessions();
-  });
+  // The Concierge chat has its own entry above the list.
+  const sessions = useMemo(
+    () =>
+      (cachedSessions ?? [])
+        .filter((s) => s.agentName !== CONCIERGE_AGENT_ID)
+        .map((s) => withLiveRunning(s, liveRunning.current)),
+    [cachedSessions],
+  );
+  const conciergeChatId = useConciergeChatId();
 
   // Live running state. A stop refetches the list for unread and
   // lastTurnFailed, and a reconnect refetches whatever changed meanwhile.
@@ -365,10 +390,10 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
         schema: sessionRunningSchema,
         fn: ({ sessionId, running }) => {
           liveRunning.current.set(sessionId, running);
-          setSessions((prev) =>
+          updateSessions((prev) =>
             prev.map((s) => (s.id === sessionId ? withLiveRunning(s, liveRunning.current) : s)),
           );
-          if (!running) void loadSessions();
+          if (!running) void invalidate();
         },
       },
     },
@@ -377,7 +402,7 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
       // and the snapshot the new connection sends.
       onReconnect: () => {
         liveRunning.current.clear();
-        void loadSessions();
+        void invalidate();
       },
     },
   );
@@ -566,7 +591,7 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
         // Server unchanged — leave the list as-is and skip the optimistic flip.
         return;
       }
-      setSessions((prev) => {
+      updateSessions((prev) => {
         // Drop the row when it no longer matches the active filter (archiving
         // under "active", unarchiving under "archived"); otherwise reflect the
         // new flag in place (the "all" view). Archiving never forces navigation.
@@ -578,7 +603,7 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
         );
       });
     },
-    [archiveMutation, statusFilter],
+    [archiveMutation, statusFilter, updateSessions],
   );
 
   const handleUnarchive = useCallback(
@@ -595,7 +620,7 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
       } catch {
         return;
       }
-      setSessions((prev) =>
+      updateSessions((prev) =>
         prev.map((session) =>
           session.id === id
             ? { ...session, pinnedAt: pinned ? new Date().toISOString() : null }
@@ -603,7 +628,7 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
         ),
       );
     },
-    [pinMutation],
+    [pinMutation, updateSessions],
   );
 
   const handleDelete = useCallback(
@@ -613,13 +638,13 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
       } catch {
         // ignore — refetch anyway
       }
-      setSessions((prev) => prev.filter((s) => s.id !== id));
+      updateSessions((prev) => prev.filter((s) => s.id !== id));
       emitSessionsChanged();
       if (activeSessionId === id) {
         navigate("/chat");
       }
     },
-    [activeSessionId, navigate],
+    [activeSessionId, navigate, updateSessions],
   );
 
   const startRename = useCallback((session: ChatSession) => {
@@ -649,7 +674,7 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
       }
       setEditingId(null);
       setEditingValue("");
-      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
+      updateSessions((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
       try {
         await renameSession(id, name);
       } catch {
@@ -657,7 +682,7 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
       }
       emitSessionsChanged();
     },
-    [editingValue, sessions, cancelRename],
+    [editingValue, sessions, cancelRename, updateSessions],
   );
 
   // Focus and select the rename field as soon as it mounts.
@@ -718,7 +743,16 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
             }`}
           />
         ) : (
-          <ChatRowLink id={session.id} name={session.name} nested={nested} />
+          <ChatRowLink
+            id={session.id}
+            name={session.name}
+            nested={nested}
+            marker={
+              session.triggerKind === TASK_CHAT_TRIGGER_KIND
+                ? t("recentChats.startedByConcierge")
+                : undefined
+            }
+          />
         )}
         <span
           className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
@@ -999,9 +1033,12 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div
-          className={`flex shrink-0 items-center justify-between pb-2 pl-5 pr-3 ${belowTitlebar ? "pt-2" : "pt-5"}`}
+          className={`flex shrink-0 items-center justify-between pb-2 pr-3 ${headerLeading ? "pl-2" : "pl-5"} ${belowTitlebar ? "pt-2" : "pt-5"}`}
         >
-          <span className="text-section text-foreground">{t("recentChats.title")}</span>
+          <div className="flex min-w-0 items-center gap-1">
+            {headerLeading}
+            <span className="text-section text-foreground">{t("recentChats.title")}</span>
+          </div>
           <div className="flex items-center gap-1">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -1098,6 +1135,22 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
             </span>
             <span className="flex-1 truncate">{t("recentChats.newChat")}</span>
           </Link>
+          {conciergeChatId ? (
+            <Link
+              to={`/chat/${conciergeChatId}`}
+              className={`${LINK_CLASS} ${
+                activeSessionId === conciergeChatId ? ACTIVE_CLASS : IDLE_CLASS
+              }`}
+            >
+              <span
+                className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+                aria-hidden
+              >
+                <RomeLogo className="size-4 shrink-0" aria-hidden />
+              </span>
+              <span className="flex-1 truncate">{t("recentChats.concierge")}</span>
+            </Link>
+          ) : null}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2 scrollbar-idle-hidden">
           {hasPinned ? (
@@ -1156,7 +1209,7 @@ export function RecentChats({ headerControls, belowTitlebar = false }: RecentCha
                   variant="outline"
                   size="sm"
                   className="mt-3"
-                  onClick={() => void loadSessions()}
+                  onClick={() => void refetch()}
                 >
                   {t("recentChats.searchRetry")}
                 </Button>

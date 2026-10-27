@@ -29,7 +29,7 @@ for (const width of [390, 1440]) {
       if (tab === "advanced") {
         await page.getByText("Developer Settings", { exact: true }).click();
         await expect(
-          page.getByRole("switch", { name: "Route large models to Fable" }),
+          page.getByRole("switch", { name: "Enable model selector in chat" }),
         ).toBeVisible();
       }
       await page.evaluate(() => document.fonts.ready);

@@ -173,15 +173,6 @@ export const BASELINE = {
     "text-sm": 7,
     "text-xs": 3,
   },
-  "rome_apps/recap/src/web/App.tsx": {
-    "gap-2.5": 1,
-    "gap-3.5": 1,
-    "mt-[18px]": 2,
-    "px-2.5": 1,
-    "px-3.5": 1,
-    "text-3xl": 1,
-    "text-xs": 2,
-  },
   "rome_apps/showcases/src/web/components/PresetCard.tsx": {
     "gap-1.5": 1,
     "text-sm": 3,

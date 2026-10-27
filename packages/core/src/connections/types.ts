@@ -13,6 +13,7 @@ import type {
   ChannelDirectMessaging,
   ChannelInboundMedia,
 } from "@rome-os/app-runtime";
+import type { AccountLink } from "@rome/api-types/account-agents";
 import type { DeliveryTransport } from "../channels/delivery/types.js";
 import type { CredentialRejected, Disconnected } from "./errors.js";
 
@@ -69,10 +70,10 @@ export type TalkFeatures = { [K in TalkFeatureName]?: TalkFeatureMap[K] };
 
 export type ConnectionId = string; // opaque; minted with crypto.randomUUID()
 export type GrantName = string;
-export type Capability = "talk" | "act" | "watch";
+export type Capability = "chat" | "act" | "watch";
 export type SecretRecord = Record<string, string>;
 /**
- * The non-secret half of a grant's conferral outcome. Like SecretRecord, this
+ * The non-secret half of a grant's grant outcome. Like SecretRecord, this
  * is deliberately opaque to the connection framework: each integration owns
  * the keys and value shapes it stores here.
  */
@@ -85,6 +86,8 @@ export type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runti
 export interface OperationCall {
   operation: string;
   input?: unknown;
+  /** Stable caller request id for an app-exposed write operation. */
+  requestId?: string;
 }
 export type OperationResult = unknown;
 
@@ -93,6 +96,23 @@ export interface OperationDescriptor {
   description: string;
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
+  /**
+   * Opts this operation into the restricted App SDK broker. An absent value
+   * keeps the operation Core-only.
+   */
+  appAccess?: {
+    sideEffects: "read-only" | "write";
+    /** Safe fields Core may show when a guardian approves this operation. A
+     * write operation must declare this contract before an App can use it. */
+    approvalPreview?: {
+      summary: string;
+      fields?: readonly {
+        label: string;
+        /** RFC 6901 JSON Pointer into the operation input. */
+        inputPointer: string;
+      }[];
+    };
+  };
 }
 
 /** Caller-facing Act handle. Outbound-only and synchronous. */
@@ -121,8 +141,8 @@ export interface AuthState {
 }
 
 /**
- * Conferral ceremonies are not implemented for `confer`; this is the minimal
- * placeholder so `AuthScheme` compiles. Headless conferrals (tests, settings
+ * Grant ceremonies are not implemented for `grant`; this is the minimal
+ * placeholder so `AuthScheme` compiles. Headless grants (tests, settings
  * import) never call it.
  */
 export interface GuardianInteraction {
@@ -166,25 +186,25 @@ export interface ProfileDisplay {
 
 /** What a builder supplies per grant. */
 export interface AuthScheme {
-  confer(interact: GuardianInteraction): Promise<Credential>;
+  obtain(interact: GuardianInteraction): Promise<Credential>;
   /**
-   * the guardian-facing conferral setup for this grant. When present,
+   * the guardian-facing setup for this grant. When present,
    * the generic setup surface (`POST
    * /api/connections/:id/grants/:name/setup`) drives it: a server-owned
-   * coroutine that prompts/shows/redirects and returns a terminal conferral
+   * coroutine that prompts/shows/redirects and returns a terminal grant
    * (credential + profile + optional guardian mapping). Absent for grants with
    * no dashboard setup (headless imports, OAuth redirect routes). Kept
    * `unknown`-free by importing the setup type lazily to avoid a cycle: see
    * `./setup/types.ts`.
    */
   setup?: import("./setup/types.js").SetupFn;
-  /** Renew WITHOUT the guardian, if the scheme can; "re-confer" is the honest
+  /** Renew WITHOUT the guardian, if the scheme can; "needs-fix" is the honest
    *  answer for pasted tokens and pairing sessions. Required, not optional. */
-  renew(cred: Credential): Promise<Credential | "re-confer">;
+  renew(cred: Credential): Promise<Credential | "needs-fix">;
   /**
    * External-custody resolver. When a rehydrated credential persisted
    * as `{ kind: "external" }`, the registry re-wraps its live `material` with
-   * this resolver — rehydration must never confer.
+   * this resolver — rehydration must never grant.
    */
   resolveExternal?: () => Promise<SecretRecord>;
 }
@@ -205,12 +225,25 @@ export type CapabilityStatus =
   | { state: "needs-subscription" }
   | { state: "unsupported" };
 
-/** One connection kind, named grants, up to three capabilities. */
+/**
+ * Whether the platform accepts the connection's grant. A broken connection
+ * keeps its account and that account's agent until the guardian gives access
+ * again (docs/domains/connections.md).
+ */
+export type ConnectionState = "working" | "broken";
+
+/** One connection kind, one grant, up to three capabilities. */
 export interface Connection {
   readonly id: ConnectionId;
   readonly connectionKind: string;
   readonly label: string;
   readonly auth: AuthState;
+  /**
+   * Broken when the grant is degraded, working when it is authorized. Null
+   * while it is unauthorized: a disconnect ends the connection, so only one
+   * whose removal failed, or one not yet granted, is neither.
+   */
+  state(): ConnectionState | null;
   /** Discovery with reasons — drives the dashboard and connect hints. */
   status(): Record<Capability, CapabilityStatus>;
   /** Whether `cap` is built and live now. `status()` reads the grants; this
@@ -218,15 +251,15 @@ export interface Connection {
   isUnlocked(cap: Capability): boolean;
   /**
    * Calls `call` with the talker of the live epoch and answers what it
-   * returns, or undefined while talk is locked. Starting and stopping the
+   * returns, or undefined while chat is locked. Starting and stopping the
    * talker are the registry's. A `CredentialRejected` that
    * `call` throws, or that the promise it returns rejects with, runs the
    * grant's fault flow before it reaches the caller. Read the talker inside
    * `call` only: a talker held past it outlives a relock unguarded.
    */
   withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined;
-  /** Hears each message the live talker delivers until talk relocks, or null
-   *  while talk is locked. */
+  /** Hears each message the live talker delivers until chat relocks, or null
+   *  while chat is locked. */
   hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null;
   /** A typed handle iff unlocked, else null — presence IS the runtime check. */
   get act(): Act | null;
@@ -242,7 +275,7 @@ export interface RuntimeKit {
   readonly connectionId: ConnectionId;
   /** Write-through custody (Baileys). Updates the grant's stored credential
    *  material IN PLACE: no epoch rebuild, no state change, no onUnlocked. */
-  persist(grant: GrantName, material: SecretRecord): Promise<void>;
+  persist(material: SecretRecord): Promise<void>;
   registerIngress(handler: (input: unknown) => Promise<unknown>): () => void;
   // kit.webhook() lands in phase 6 — do not add it now.
 }
@@ -283,7 +316,7 @@ export type StreamFault = CredentialRejected | Disconnected;
  * (the `gh`/git shell wrappers) or a sandboxed app (the `connector` reading a
  * tmpfs token file). The registry drives those artifacts off grant transitions,
  * NOT off any capability build: `sync` runs whenever a grant reaches
- * `authorized` (fresh conferral, renew, or boot rehydration) with that grant's
+ * `authorized` (fresh grant, renew, or boot rehydration) with that grant's
  * live secret `material` plus its integration-owned non-secret `profile`;
  * `clear` runs on revoke AND on
  * degrade. Both are fire-and-forget: a failure is logged and swallowed so it can
@@ -291,20 +324,25 @@ export type StreamFault = CredentialRejected | Disconnected;
  * transition or boot re-syncs.
  */
 export interface GrantCustody {
-  sync(grant: GrantName, material: SecretRecord, profile: ProfileRecord): Promise<void>;
-  clear(grant: GrantName): Promise<void>;
+  sync(material: SecretRecord, profile: ProfileRecord): Promise<void>;
+  clear(): Promise<void>;
 }
 
 /** A connection kind declaration. */
 export interface ConnectionDescriptor {
   connectionKind: string;
-  auth: Record<GrantName, AuthScheme>;
+  /** The name of the connection's one grant: the key the dashboard, the setup
+   *  routes and the ledger know it by. */
+  grant: GrantName;
+  /** How the guardian gives access. A connection holds one grant
+   *  (docs/domains/connections.md#grant). */
+  auth: AuthScheme;
   /** Revive a grant's stored opaque profile record: re-parse it with this
    *  connection kind's own schema, then map it through the connection kind's pure display
    *  function. Fail-closed — a record that no longer matches the schema throws
    *  rather than displaying sparsely. Generic readers consume only the returned
    *  display object; raw records never cross to generic surfaces. */
-  reviveProfile?(grant: GrantName, record: ProfileRecord): ProfileDisplay;
+  reviveProfile?(record: ProfileRecord): ProfileDisplay;
   /** Grant-state-driven custody of out-of-process artifacts (token files, shell
    *  auth). Omitted by connection kinds with no such artifact — most descriptors. */
   custody?: GrantCustody;
@@ -314,22 +352,25 @@ export interface ConnectionDescriptor {
    *  (webchat, email), leaves it unset. Vocabulary:
    *  docs/domains/chats.md#account. */
   severalAccounts?: boolean;
-  /** The platform account a grant's profile names (a bot id, an app id), or
-   *  null when the profile names none. It reads the one field rather than
-   *  parsing the strict profile schema, so a stored profile with an extra key
-   *  still names its account.
-   *  `ConnectionRegistry.confer` refuses a conferral whose account another
-   *  Connection of the connection kind already holds in the same grant. A connection kind that
-   *  leaves it unset is never refused.
-   *  A connection kind with a Talk that declares it holds accounts that exist only while
-   *  connected: the last grant's disconnect removes the Connection
-   *  (`isUnconnectedAccount`). Declare it only for a connection kind in
-   *  `LINKABLE_KINDS`, whose channels start fresh. */
-  accountIdOf?(grant: GrantName, profile: ProfileRecord): string | null;
+  /** The platform's own id for the account a grant's profile names (a bot id,
+   *  an app id, an inbox address), or null when the profile names none. It reads
+   *  the one field rather than parsing the strict profile schema, so a stored
+   *  profile with an extra key still names its account.
+   *  The ledger stores it on the grant with the account's platform. Grant
+   *  refuses an account another live grant reaches on that platform, whatever
+   *  its connection kind, and a fix that reaches another account
+   *  (docs/domains/connections.md#connection). A connection kind that leaves it
+   *  unset, or a profile it answers null for, is never refused. */
+  accountIdOf?(profile: ProfileRecord): string | null;
+  /** The kind of link an agent has to this kind's accounts: `own_account` for
+   *  an account made for the agent, `delegate` for the guardian's own signed-in
+   *  account. A kind that leaves it unset takes no agent. It is the one place
+   *  that says which kinds take an agent. Vocabulary:
+   *  docs/domains/chats.md#connected-account. */
+  link?: AccountLink;
   capabilities: Partial<{
     talker: {
-      needs: readonly GrantName[];
-      build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Talker;
+      build(cred: Credential, kit: RuntimeKit): Talker;
       degradation?(instance: Talker): CapabilityDegradation | null;
       /** False when the talker can never send, so the channel it backs has no
        *  `send` port. Absent means it can. */
@@ -354,13 +395,14 @@ export interface ConnectionDescriptor {
       promptContext?: boolean;
     };
     actor: {
-      needs: readonly GrantName[];
-      build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Actor;
+      /** Static discovery contract for App SDK operations. Required when any
+       * operation opts into `appAccess`. */
+      operations?: readonly OperationDescriptor[];
+      build(cred: Credential, kit: RuntimeKit): Actor;
     };
     watcher: {
-      needs: readonly GrantName[];
       subscriptionGated?: boolean;
-      build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Watcher;
+      build(cred: Credential, kit: RuntimeKit): Watcher;
     };
   }>;
 }

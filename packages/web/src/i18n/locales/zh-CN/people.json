@@ -51,7 +51,8 @@
     "noActivity": "暂无动态"
   },
   "guardian": {
-    "meta": "这是你本人，拥有所有界面的完整权限。"
+    "you": "你本人",
+    "noAccounts": "这是你本人。还没有关联任何账号，可用“关联我的账号”添加。"
   },
   "actions": {
     "select": "选择 {{name}}",

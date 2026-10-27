@@ -23,6 +23,9 @@ export function createAppDbSchema(tablePrefix: string = "welcome_to_rome") {
     // Whether the connect-AI step ended with a provider logged in. Decides
     // whether the later steps summon agents or show static content.
     aiConnected: integer("ai_connected", { mode: "boolean" }),
+    // The chat the current welcome run lives in, so the landing screen can send
+    // the guardian back to it instead of opening a new one.
+    sessionId: text("session_id"),
     completedAt: text("completed_at"),
     updatedAt: text("updated_at").notNull(),
   });

@@ -1,4 +1,11 @@
 // @rstest-environment jsdom
+import type { ComponentProps } from "react";
+import type { ChatRow } from "@/components/chat/chat-view";
+import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
+import * as traceDrawerModule from "@/components/agent-trace/TraceDrawer" with {
+  rstest: "importActual",
+};
+import i18n from "@/i18n";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   MemoryRouter,
@@ -23,8 +30,10 @@ import {
 } from "@/lib/chat-api";
 import SessionsPage from "./SessionsPage";
 
+const realTraceDrawer = rs.hoisted(() => ({ enabled: false }));
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
-  TraceDrawer: () => null,
+  TraceDrawer: (props: ComponentProps<typeof traceDrawerModule.TraceDrawer>) =>
+    realTraceDrawer.enabled ? <traceDrawerModule.TraceDrawer {...props} /> : null,
   traceDrawerContentInsetClass: () => "",
 }));
 
@@ -57,9 +66,11 @@ rs.mock("@/components/chat/MessageList", () => ({
   MessageList: ({
     live,
     rows,
+    onOpenStoredTrace,
   }: {
     live: { isStreaming: boolean; text: string };
-    rows: { kind: string; key: string }[];
+    rows: ChatRow[];
+    onOpenStoredTrace: (target: TraceDrawerTarget) => void;
   }) => (
     <div
       data-testid="session-messages"
@@ -70,6 +81,27 @@ rs.mock("@/components/chat/MessageList", () => ({
         .join(",")}
     >
       {live.text}
+      {realTraceDrawer.enabled
+        ? rows.map((row) =>
+            row.kind === "trace" && row.message.traceSummary ? (
+              <button
+                key={row.key}
+                type="button"
+                onClick={() =>
+                  onOpenStoredTrace({
+                    kind: "stored",
+                    messageId: row.message.id,
+                    sessionId: row.message.sessionId,
+                    turnId: row.message.turnId ?? null,
+                    summary: row.message.traceSummary!,
+                  })
+                }
+              >
+                Open stored steps
+              </button>
+            ) : null,
+          )
+        : null}
     </div>
   ),
 }));
@@ -234,8 +266,39 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  realTraceDrawer.enabled = false;
   rs.restoreAllMocks();
   rs.clearAllMocks();
+});
+
+describe("Sessions viewer archived traces", () => {
+  it("shows the archived note instead of an error and Retry for a stale trace button", async () => {
+    await i18n.changeLanguage("en");
+    realTraceDrawer.enabled = true;
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listRomeSessionMessages).mockResolvedValue([
+      {
+        id: "old-trace",
+        sessionId: FORK_SESSION.id,
+        turnId: "old-turn",
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-09-24T12:00:00Z",
+        traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+      },
+    ]);
+    const fetchTrace = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ trace: null, traceArchived: true })));
+    renderDetail();
+    fireEvent.click(await screen.findByRole("button", { name: "Open stored steps" }));
+    expect(await screen.findByText("Steps from this turn are archived.")).toBeTruthy();
+    expect(fetchTrace).toHaveBeenCalledWith(
+      "/api/sessions/messages/old-trace/content?includeSubagentUsage=true",
+      { credentials: "include" },
+    );
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
 });
 
 describe("SessionsPage missing sessions", () => {

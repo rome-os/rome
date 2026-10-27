@@ -46,3 +46,21 @@ describe("defer facade tool", () => {
     expect(result.content[0].text).toContain("defer fires in the past");
   });
 });
+
+describe("session tools", () => {
+  it("register beside defer on every surface, and none by default", async () => {
+    const handler = rs.fn().mockResolvedValue({ content: [{ type: "text", text: "sent" }] });
+    const say = { name: "say", description: "Speak", inputSchema: { type: "object" }, handler };
+    const names = (params: FacadeParams) =>
+      buildFacadeBundle(params).interactiveTools.map((tool) => tool.name);
+    expect(names(baseParams())).not.toContain("say");
+    expect(names(baseParams({ sessionTools: [say], supportsInteractiveSurface: false }))).toContain(
+      "say",
+    );
+    const tool = buildFacadeBundle(baseParams({ sessionTools: [say] })).interactiveTools.find(
+      (candidate) => candidate.name === "say",
+    );
+    await tool?.handler({ text: "hi" });
+    expect(handler).toHaveBeenCalledWith({ text: "hi" });
+  });
+});

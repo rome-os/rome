@@ -235,7 +235,7 @@ export class EmailAdapter {
 
   async start(): Promise<void> {
     // Provisioning is route-driven: the connect ceremony calls
-    // MailProvider.provision() and confers the `inbox` grant directly, so the
+    // MailProvider.provision() and grants the `inbox` grant directly, so the
     // registry only ever builds this adapter from complete grant material —
     // there is no secretless start here to self-provision.
 

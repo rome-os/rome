@@ -11,6 +11,7 @@ import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps, GREETING_ONLY_HOME_KEY } from "./ChatComponent";
 import * as chatModule from "./Chat" with { rstest: "importActual" };
 import type { ChatProps } from "./Chat";
+import { ToolTraceContext, type ToolTraceHost } from "@/pages/free/tool-trace";
 
 rs.mock("@/components/logo", () => ({
   RomeLogo: (props: Record<string, unknown>) => <div data-testid="rome-logo" {...props} />,
@@ -55,7 +56,6 @@ rs.mock("@/hooks/use-tab-status", () => ({
 
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
   TraceDrawer: () => null,
-  traceDrawerContentInsetClass: () => "",
 }));
 
 rs.mock("@/components/chat/entries", () => ({
@@ -152,6 +152,15 @@ function ChatHost({
   );
 }
 
+// The chat always sits in a tool workspace; this one has a collapsed pane.
+const toolPane: ToolTraceHost = {
+  outlet: null,
+  paneOpen: false,
+  setPaneCollapsed: () => {},
+  reveal: () => {},
+  set: () => {},
+};
+
 function renderChatComponent(
   props: Partial<ChatComponentProps> = {},
   homeData?: {
@@ -199,11 +208,14 @@ function renderChatComponent(
         ? (homeData?.postTurn?.() ?? Response.json({ turnId: "turn-1" }))
         : Response.json([]);
     }
-    if (url === "/api/chat/projects") {
+    if (url === "/api/chat/locations") {
       return Response.json({
-        rootPath: "/projects",
-        defaultPath: "/projects/default",
-        projects: homeData?.projects ?? [],
+        projects: {
+          rootPath: "/projects",
+          defaultPath: "/projects/default",
+          projects: homeData?.projects ?? [],
+        },
+        devices: null,
       });
     }
     if (url.endsWith("/api/rome-news")) {
@@ -224,7 +236,9 @@ function renderChatComponent(
   const result = render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>
-        <ChatHost {...props} />
+        <ToolTraceContext.Provider value={toolPane}>
+          <ChatHost {...props} />
+        </ToolTraceContext.Provider>
         <LocationProbe />
       </QueryClientProvider>
     </MemoryRouter>,

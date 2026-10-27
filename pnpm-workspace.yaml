@@ -33,6 +33,9 @@ allowBuilds:
   # better-sqlite3 13 ships Node-API prebuilds that load without a build.
   # Approved, pnpm would run node-gyp over its binding.gyp, which needs make.
   better-sqlite3: false
+  # koffi ships prebuilt binaries in its package; its install script only
+  # checks for them.
+  koffi: false
   # Scripts below were already skipped under pnpm 10 (absent from
   # onlyBuiltDependencies); `false` preserves that, now explicitly.
   "@whiskeysockets/baileys": false

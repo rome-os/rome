@@ -28,6 +28,7 @@ const capture = loadCapture(postCapture);
 const created = exemplar<{ data: Record<string, unknown> }>(capture, "create").data;
 const MISSING_ID = "om_00000000000000000000000000000000";
 const MESSAGES = "/open-apis/im/v1/messages";
+const CARDS = "/open-apis/cardkit/v1/cards";
 /** Feishu refuses a post or card whose content is larger than this. */
 const CONTENT_LIMIT = 30 * 1024;
 const MAX_EDITS = 20;
@@ -36,6 +37,20 @@ interface PostElement {
   tag: string;
   text?: string;
   href?: string;
+}
+
+/** A CardKit card entity, holding one Markdown element. */
+export interface PeerCard {
+  element: string;
+  text: string;
+  /** The card shows its text as it is typed, and takes streamed text. */
+  streaming: boolean;
+  /** What the chat list shows for the card's message. */
+  summary?: string;
+  /** The last sequence number a write to the card carried. */
+  sequence: number;
+  /** The message that shows the card, once one was sent. */
+  messageId?: string;
 }
 
 /**
@@ -47,10 +62,18 @@ interface PostElement {
  * A post's text is what its elements say, one line per paragraph. A Markdown
  * element shows its source: the peer does not parse it into styled runs as
  * Feishu does, so the `content` of its answer holds the source as one run.
+ *
+ * CardKit's cards are modelled as the API reference describes them, and answer
+ * with `source: "synthetic"`: a card in streaming mode takes its element's
+ * text and its settings, each write with a sequence number above the last.
+ * A message that shows a card shows its element's text, and a write to the
+ * text counts as an edit of the message.
  */
 export class FeishuPeer implements Peer {
   readonly server = new PeerServer((request) => this.route(request));
   private readonly store = new MessageStore();
+  private readonly cards = new Map<string, PeerCard>();
+  private nextCardId = 1;
   private readonly chats = new Set([FEISHU_CHAT]);
   /** Each message's answer content, as Feishu echoes what it holds. */
   private readonly contents = new Map<string, string>();
@@ -85,6 +108,23 @@ export class FeishuPeer implements Peer {
   /** The thread a message is in, if a reply opened one on it or it joined one. */
   threadOf(messageId: string): string | undefined {
     return this.threads.get(messageId);
+  }
+
+  /** The card a message shows, if it shows one. */
+  cardOf(messageId: string): PeerCard | undefined {
+    for (const card of this.cards.values()) if (card.messageId === messageId) return { ...card };
+    return undefined;
+  }
+
+  /** Every card created, sent or not. */
+  allCards(): PeerCard[] {
+    return [...this.cards.values()].map((card) => ({ ...card }));
+  }
+
+  /** Feishu ends a card's streaming mode, as it does ten minutes after it began. */
+  endStreaming(messageId: string): void {
+    for (const card of this.cards.values())
+      if (card.messageId === messageId) card.streaming = false;
   }
 
   /** A client for the app, with a token cache of its own so tests do not share one. */
@@ -141,12 +181,13 @@ export class FeishuPeer implements Peer {
   private route({ method, path, query, headers, body }: PeerRequest): Reply | undefined {
     if (method === "POST" && path === "/open-apis/auth/v3/tenant_access_token/internal")
       return this.token(body);
-    if (!path.startsWith(MESSAGES)) return undefined;
+    if (!path.startsWith(MESSAGES) && !path.startsWith(CARDS)) return undefined;
     if (headers.get("authorization") !== `Bearer ${TOKEN}`)
       return refusal(
         99991663,
         "Invalid access token for authorization. Please make a request with token attached.",
       );
+    if (path.startsWith(CARDS)) return this.card(method, path.slice(CARDS.length), body);
     const rest = path.slice(MESSAGES.length);
     if (method === "POST" && rest === "") return this.create(query, body);
     const reply = /^\/(om_\w+)\/reply$/.exec(rest);
@@ -217,6 +258,7 @@ export class FeishuPeer implements Peer {
     apply: (text: string) => VisibleMessage,
     edit = false,
   ): Reply | undefined {
+    if (body.msg_type === "interactive" && !edit) return this.cardMessage(body, apply);
     if (body.msg_type !== "post" || typeof body.content !== "string") return undefined;
     if (Buffer.byteLength(body.content) > CONTENT_LIMIT)
       return refusal(230025, "The message content is too long.");
@@ -232,6 +274,127 @@ export class FeishuPeer implements Peer {
       source: "capture",
       accepted: true,
     };
+  }
+
+  /** Sends a message that shows a card the app created, which shows its text. */
+  private cardMessage(
+    body: Record<string, unknown>,
+    apply: (text: string) => VisibleMessage,
+  ): Reply | undefined {
+    if (typeof body.content !== "string") return undefined;
+    const content = JSON.parse(body.content) as { type?: string; data?: { card_id?: string } };
+    const card = this.cards.get(content.data?.card_id ?? "");
+    if (content.type !== "card" || !card || card.messageId) return undefined;
+    const message = apply(card.text.trim());
+    card.messageId = message.id;
+    const now = String(Date.now());
+    this.times.set(message.id, { create_time: now, update_time: now });
+    this.contents.set(message.id, body.content);
+    return {
+      body: { code: 0, data: this.wire(message, false), msg: "success" },
+      source: "synthetic",
+      accepted: true,
+    };
+  }
+
+  private card(method: string, rest: string, body: Record<string, unknown>): Reply | undefined {
+    if (method === "POST" && rest === "") return this.createCard(body);
+    const content = /^\/(\w+)\/elements\/(\w+)\/content$/.exec(rest);
+    if (method === "PUT" && content) return this.streamText(content[1]!, content[2]!, body);
+    const settings = /^\/(\w+)\/settings$/.exec(rest);
+    if (method === "PATCH" && settings) return this.cardSettings(settings[1]!, body);
+    const whole = /^\/(\w+)$/.exec(rest);
+    if (method === "PUT" && whole) return this.replaceCard(whole[1]!, body);
+    return undefined;
+  }
+
+  private createCard(body: Record<string, unknown>): Reply | undefined {
+    const json = this.cardJson(body);
+    if (!json || "body" in json) return json;
+    const id = `7${String(this.nextCardId++).padStart(18, "0")}`;
+    this.cards.set(id, { ...json, sequence: 0 });
+    return { body: { code: 0, msg: "success", data: { card_id: id } }, source: "synthetic" };
+  }
+
+  /** What a card JSON body this peer models makes of a card, or Feishu's
+   *  refusal of it. */
+  private cardJson(
+    body: Record<string, unknown>,
+  ): Pick<PeerCard, "element" | "text" | "streaming" | "summary"> | Reply | undefined {
+    if (body.type !== "card_json" || typeof body.data !== "string") return undefined;
+    if (Buffer.byteLength(body.data) > CONTENT_LIMIT)
+      return refusal(200860, "Card content exceeds limit.");
+    const json = JSON.parse(body.data) as {
+      schema?: string;
+      config?: { streaming_mode?: boolean; summary?: { content?: string } };
+      body?: { elements?: Array<{ tag?: string; element_id?: string; content?: string }> };
+    };
+    const elements = json.body?.elements ?? [];
+    const [element] = elements;
+    if (
+      json.schema !== "2.0" ||
+      elements.length !== 1 ||
+      element?.tag !== "markdown" ||
+      !element.element_id ||
+      typeof element.content !== "string"
+    )
+      return undefined;
+    const summary = json.config?.summary?.content;
+    return {
+      element: element.element_id,
+      text: element.content,
+      streaming: json.config?.streaming_mode === true,
+      ...(summary !== undefined ? { summary } : {}),
+    };
+  }
+
+  /** The card's write with `sequence`, or Feishu's refusal of it. */
+  private cardWrite(id: string, sequence: unknown): PeerCard | Reply {
+    const card = this.cards.get(id);
+    if (!card) return refusal(200740, "The card entity does not exist.");
+    if (typeof sequence !== "number" || sequence <= card.sequence)
+      return refusal(300317, "The sequence number for operating on the card did not increment.");
+    card.sequence = sequence;
+    return card;
+  }
+
+  private streamText(
+    id: string,
+    element: string,
+    body: Record<string, unknown>,
+  ): Reply | undefined {
+    if (typeof body.content !== "string") return undefined;
+    const card = this.cardWrite(id, body.sequence);
+    if ("body" in card) return card;
+    if (element !== card.element) return undefined;
+    if (!card.streaming) return refusal(300309, "Card streaming closed.");
+    card.text = body.content;
+    if (card.messageId) this.store.edit(card.messageId, body.content.trim());
+    return { body: { code: 0, msg: "success", data: {} }, source: "synthetic", accepted: true };
+  }
+
+  /** Replaces the whole card, which Feishu allows in or out of streaming mode. */
+  private replaceCard(id: string, body: Record<string, unknown>): Reply | undefined {
+    const json = this.cardJson((body.card ?? {}) as Record<string, unknown>);
+    if (!json || "body" in json) return json;
+    const card = this.cardWrite(id, body.sequence);
+    if ("body" in card) return card;
+    delete card.summary;
+    Object.assign(card, json);
+    if (card.messageId) this.store.edit(card.messageId, card.text.trim());
+    return { body: { code: 0, msg: "success", data: {} }, source: "synthetic", accepted: true };
+  }
+
+  private cardSettings(id: string, body: Record<string, unknown>): Reply | undefined {
+    if (typeof body.settings !== "string") return undefined;
+    const card = this.cardWrite(id, body.sequence);
+    if ("body" in card) return card;
+    const { config } = JSON.parse(body.settings) as {
+      config?: { streaming_mode?: boolean; summary?: { content?: string } };
+    };
+    if (config?.streaming_mode !== undefined) card.streaming = config.streaming_mode;
+    if (config?.summary?.content !== undefined) card.summary = config.summary.content;
+    return { body: { code: 0, msg: "success", data: {} }, source: "synthetic" };
   }
 
   /** A stored message as the API spells it, from the recorded one. */

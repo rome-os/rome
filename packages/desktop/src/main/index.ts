@@ -1,6 +1,6 @@
 import { release } from "os";
 import { existsSync } from "fs";
-import { app, BrowserWindow, net, shell } from "electron";
+import { app, BrowserWindow, net, powerSaveBlocker, shell } from "electron";
 import { initDatabase } from "./db/database";
 import { createLogger } from "./logger";
 import {
@@ -36,6 +36,7 @@ import type { CloudAccount } from "./cloud/account";
 import { createCloudAccount, deviceName } from "./cloud/electron";
 import { DeviceHost, type DeviceStatus } from "./cloud/device-host";
 import { adoptLoginShellPath } from "./cloud/login-path";
+import { KeepAwake } from "./keep-awake";
 import { consumeProtocolFromArgv, registerProtocolClient, setupProtocolHandler } from "./protocol";
 
 const log = createLogger("main");
@@ -115,6 +116,7 @@ async function bootstrap() {
         : null,
     });
     runtimeManager = controller.runtime;
+    const keepAwake = new KeepAwake(powerSaveBlocker);
     // The credential file is shared by every build on this computer, so a dev
     // window would connect as the same device and take over its connection.
     const deviceHost =
@@ -129,6 +131,7 @@ async function bootstrap() {
             },
             prepare: process.platform === "darwin" ? adoptLoginShellPath : undefined,
             onStatus: (status) => {
+              keepAwake.sync(status);
               // Only the app's own pages and the open Rome hear it, as with device:get.
               const target = controller.activeTarget();
               const origin = target.kind === "remote" ? target.instance?.origin : null;
@@ -151,6 +154,7 @@ async function bootstrap() {
       },
       stop: async () => {
         await deviceHost?.stop();
+        keepAwake.release();
       },
       setEnabled: async (enabled: boolean) => {
         writeDeviceEnabled(enabled);

@@ -13,13 +13,31 @@ function requestLocale(request: RomeAppApiRequest): WelcomeLocale | undefined {
   }
 }
 
+function requestSessionId(request: RomeAppApiRequest): string | null {
+  if (!request.body || request.body.byteLength === 0) return null;
+  try {
+    const body = JSON.parse(new TextDecoder().decode(request.body)) as { sessionId?: unknown };
+    const id = body?.sessionId;
+    return typeof id === "string" && id.trim() ? id.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * welcome-to-rome app API. The only real route is `POST /reset`, which the
- * landing screen (src/web/App.tsx) calls before starting a chat so every entry
- * from the welcome screen replays the flow from a clean slate. When supplied,
- * the locale is persisted as the guardian's language before the chat starts.
- * Reset scope otherwise stays intentionally narrow: no memory or transcript is
- * touched.
+ * welcome-to-rome app API, called by the landing screen (src/web/App.tsx).
+ *
+ * - `GET /state` returns the agent name and where the welcome run stands, so
+ *   the landing screen can offer to continue a run instead of starting a new
+ *   one. The bare app path (`fetchAppApi("")`) is the host's app-management
+ *   route, which never reaches this handler, so the landing screen uses this
+ *   named route. `GET /` (with a trailing slash) returns the same.
+ * - `POST /session` records the chat the landing screen found for a run that
+ *   started before the chat was recorded, so later visits skip that search.
+ *   It never replaces a recorded chat.
+ * - `POST /reset` clears the run before the landing screen opens a new chat.
+ *   When supplied, the locale is persisted as the guardian's language before
+ *   the chat starts. No memory or transcript is touched.
  */
 class WelcomeApiHandler implements RomeAppApiHandler {
   constructor(private readonly ctx: RomeAppContext) {}
@@ -27,20 +45,35 @@ class WelcomeApiHandler implements RomeAppApiHandler {
   async handle(request: RomeAppApiRequest): Promise<Response> {
     const route = request.path.join("/");
 
-    if (request.method === "GET" && request.path.length === 0) {
+    if (request.method === "GET" && (request.path.length === 0 || route === "state")) {
+      const { node, aiConnected, completedAt, sessionId } = createProgressRepository(
+        this.ctx.db,
+      ).get();
       return Response.json({
         appId: this.ctx.app.id,
         version: this.ctx.app.version,
         agentName: await this.getAgentName(),
+        progress: { node, aiConnected, completedAt, sessionId },
         status: "ok",
       });
+    }
+
+    if (request.method === "POST" && route === "session") {
+      const sessionId = requestSessionId(request);
+      if (!sessionId) {
+        return Response.json({ error: "invalid_session_id" }, { status: 400 });
+      }
+      const progress = createProgressRepository(this.ctx.db);
+      const current = progress.get();
+      const saved = current.sessionId === null && current.node !== "greet";
+      if (saved) progress.patch({ sessionId });
+      return Response.json({ ok: true, saved });
     }
 
     if (request.method === "POST" && route === "reset") {
       const locale = requestLocale(request);
       if (locale) await this.ctx.repositories.settings.set("guardianLanguage", locale);
-      const progress = createProgressRepository(this.ctx.db);
-      progress.reset();
+      createProgressRepository(this.ctx.db).reset();
       return Response.json({ ok: true });
     }
 

@@ -78,13 +78,14 @@ describe("Settings connections request states", () => {
       return ok({
         connections: [
           {
-            id: "conn-webchat",
-            connectionKind: "webchat",
-            label: "Webchat",
-            grants: {},
+            id: "conn-email",
+            connectionKind: "email",
+            label: "Email",
+            grants: { inbox: "unauthorized" },
             display: {},
+            setups: {},
             capabilities: {
-              talk: { state: "unsupported" },
+              chat: { state: "unsupported" },
               act: { state: "unsupported" },
               watch: { state: "unsupported" },
             },
@@ -101,7 +102,7 @@ describe("Settings connections request states", () => {
 
     await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
 
-    expect(await screen.findByRole("button", { name: "Open Webchat" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Open Email" })).toBeTruthy();
     expect(connectionLoads).toBe(2);
   });
 

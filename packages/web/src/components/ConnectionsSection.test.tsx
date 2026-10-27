@@ -7,6 +7,7 @@ import i18n from "@/i18n";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
 import type { ApiConnection, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+import { stateOfGrants } from "@/test/connection-state";
 
 /** A later account's channel id, opaque as core mints it. */
 const SECOND_FEISHU = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
@@ -40,10 +41,11 @@ function connection(
   return {
     id: `conn-${overrides.connectionKind}`,
     label: overrides.connectionKind,
+    state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? {}),
     grants: {},
     display: {},
     capabilities: {
-      talk: { state: "unsupported" },
+      chat: { state: "unsupported" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
@@ -87,12 +89,11 @@ function oauth(
 }
 
 /** Mirrors the old minimal channel-status fold: telegram + whatsapp offered but
- *  unconnected, webchat always on (zero grants). */
+ *  unconnected. */
 function minimalConnections(): ApiConnection[] {
   return [
     telegramBot("unauthorized"),
     connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" }, display: {} }),
-    connection({ connectionKind: "webchat" }),
   ];
 }
 
@@ -155,28 +156,27 @@ function sectionWith(
 }
 
 describe("ConnectionsSection — list of rows", () => {
-  it("renders a row for every connection the registry reports including webchat", () => {
+  it("renders a row for every connection the registry reports", () => {
     renderSection([...minimalConnections(), oauth("github"), oauth("google")]);
 
-    // telegram and whatsapp from minimalConnections, webchat always-on
-    for (const label of ["Telegram", "WhatsApp", "Webchat", "GitHub", "Google"]) {
+    for (const label of ["Telegram", "WhatsApp", "GitHub", "Google"]) {
       expect(screen.getByRole("button", { name: `Open ${label}` })).toBeTruthy();
     }
   });
 
-  it("shows the Rome mark for webchat and a mail glyph for email", () => {
+  it("shows a brand mark for GitHub and a mail glyph for email", () => {
     renderSection([
       ...minimalConnections(),
+      oauth("github"),
       connection({ connectionKind: "email", grants: { inbox: "unauthorized" } }),
     ]);
 
-    const webchatRow = screen.getByRole("button", { name: "Open Webchat" });
+    const githubRow = screen.getByRole("button", { name: "Open GitHub" });
     const emailRow = screen.getByRole("button", { name: "Open Email" });
 
-    // The Rome mark is the only non-Lucide glyph a row can carry.
-    const webchatLogo = webchatRow.querySelector("svg");
-    expect(webchatLogo).toBeTruthy();
-    expect(webchatLogo?.classList.contains("lucide")).toBe(false);
+    const githubLogo = githubRow.querySelector("svg");
+    expect(githubLogo).toBeTruthy();
+    expect(githubLogo?.classList.contains("lucide")).toBe(false);
     expect(emailRow.querySelector("svg.lucide-mail")).toBeTruthy();
   });
 
@@ -202,28 +202,30 @@ describe("ConnectionsSection — list of rows", () => {
     expect(screen.getByText("Connect")).toBeTruthy();
   });
 
-  it("a degraded OAuth grant reads Not connected with an attention-toned dot on the row (#1472)", () => {
+  it("a broken OAuth connection reads Broken with an attention-toned dot on the row (#1472)", () => {
     // The old expired-token case (client-side tokenExpiresAt clock) is now the
-    // registry's own health signal: a `degraded` grant state on the connection.
+    // registry's own health signal: the connection reads broken.
     renderSection([...minimalConnections(), oauth("github", "degraded")]);
 
     const row = screen.getByRole("button", { name: "Open GitHub" });
-    expect(within(row).getByText("Not connected")).toBeTruthy();
+    expect(within(row).getByText("Broken")).toBeTruthy();
     const dot = row.querySelector("span[aria-hidden]");
     expect(dot).toBeTruthy();
     expect(dot?.className).toContain("bg-warning");
-    expect(dot?.parentElement?.getAttribute("title")).toBe("Access expired — reconnect");
+    expect(dot?.parentElement?.getAttribute("title")).toBe(
+      "The platform stopped accepting Rome's access. Give access again.",
+    );
     expect(row.querySelector("svg.lucide-triangle-alert")).toBeTruthy();
   });
 
-  it("a stale WeChat runtime reads Degraded while its grant remains authorized", () => {
+  it("a stale WeChat runtime reads Working with an attention dot while its grant remains authorized", () => {
     renderSection([
       ...minimalConnections(),
       connection({
         connectionKind: "wechat",
         grants: { account: "authorized" },
         capabilities: {
-          talk: {
+          chat: {
             state: "unlocked",
             degradation: {
               reason: "WeChat reported a stale session.",
@@ -237,8 +239,7 @@ describe("ConnectionsSection — list of rows", () => {
     ]);
 
     const row = screen.getByRole("button", { name: "Open WeChat" });
-    expect(within(row).getByText("Degraded")).toBeTruthy();
-    expect(within(row).queryByText("Connected")).toBeNull();
+    expect(within(row).getByText("Working")).toBeTruthy();
     expect(row.querySelector("span[aria-hidden]")?.className).toContain("bg-warning");
   });
 });
@@ -256,11 +257,11 @@ describe("ConnectionsSection — Telegram fold row status", () => {
     expect(screen.queryByRole("button", { name: /personal account/i })).toBeNull();
   });
 
-  it("bot authorized + degraded personal-account session ⇒ attention override (Not connected, attention dot)", () => {
-    // The old failed sessionHealth signal is now the registry's `degraded`
-    // grant state on the telegram_user connection.
+  it("bot working + broken personal account ⇒ attention override (Broken, attention dot)", () => {
+    // The old failed sessionHealth signal is now the registry's broken state
+    // on the telegram_user connection.
     const row = telegramRow([telegramBot("authorized", "mybot"), telegramUser("degraded")]);
-    expect(within(row).getByText("Not connected")).toBeTruthy();
+    expect(within(row).getByText("Broken")).toBeTruthy();
     const dot = row.querySelector("span[aria-hidden]");
     expect(dot?.className).toContain("bg-warning");
   });
@@ -312,7 +313,7 @@ describe("ConnectionsSection — several accounts", () => {
   function connectedSetup(connectionId: string | null) {
     return {
       cid: "cid-new",
-      state: { status: "done", conferral: connectionId ? { connectionId } : {} },
+      state: { status: "done", grant: connectionId ? { connectionId } : {} },
       reattached: false,
     };
   }

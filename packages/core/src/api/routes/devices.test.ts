@@ -1,13 +1,19 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { devicesRoutes } from "./devices.js";
 import { createNodeDevicesService } from "../../lib/node-devices.js";
-import { CallerConfigurationError, DaemonVersionError } from "@rome-os/node-core/client";
+import {
+  CallerConfigurationError,
+  DaemonVersionError,
+  DeviceActionError,
+} from "@rome-os/node-core/client";
 
 it("returns device checks without credentials or caching at the HTTP edge", async () => {
   const nodeDevices = createNodeDevicesService(() => ({
     disconnect() {},
     run: rs.fn(),
     listDevices: rs.fn(),
+    renameDevice: rs.fn(),
+    removeDevice: rs.fn(),
     getDevicesStatus: async () => ({
       connection: "online",
       checkedAt: new Date().toISOString(),
@@ -32,6 +38,8 @@ describe("device status failures", () => {
       disconnect() {},
       run: rs.fn(),
       listDevices: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
       getDevicesStatus: async () => null,
     }));
     const response = await devicesRoutes({ nodeDevices: service }).request("/devices");
@@ -49,6 +57,8 @@ describe("device status failures", () => {
       disconnect() {},
       run: rs.fn(),
       listDevices: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
       getDevicesStatus: async () => {
         throw error;
       },
@@ -72,6 +82,8 @@ describe("device status failures", () => {
       getDevicesStatus,
       run: rs.fn(),
       listDevices: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
     }));
     const service = createNodeDevicesService(createClient);
     expect((await service.getStatus()).connection).toBe("incompatible");
@@ -87,7 +99,14 @@ describe("explicit device service startup", () => {
     const start = rs.fn(async () => {});
     const getDevicesStatus = rs.fn(async () => null);
     const service = createNodeDevicesService(
-      () => ({ disconnect() {}, run: rs.fn(), listDevices: rs.fn(), getDevicesStatus }),
+      () => ({
+        disconnect() {},
+        run: rs.fn(),
+        listDevices: rs.fn(),
+        renameDevice: rs.fn(),
+        removeDevice: rs.fn(),
+        getDevicesStatus,
+      }),
       start,
     );
     const app = devicesRoutes({ nodeDevices: service });
@@ -117,6 +136,8 @@ describe("explicit device service startup", () => {
         disconnect() {},
         run: rs.fn(),
         listDevices: rs.fn(),
+        renameDevice: rs.fn(),
+        removeDevice: rs.fn(),
         getDevicesStatus: async () => null,
       }),
       start,
@@ -149,6 +170,8 @@ describe("device folder listing", () => {
       disconnect() {},
       getDevicesStatus: async () => null,
       listDevices: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
       run,
     }));
     const app = devicesRoutes({ nodeDevices: service });
@@ -174,6 +197,8 @@ describe("device folder listing", () => {
       disconnect() {},
       getDevicesStatus: async () => null,
       listDevices: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
       run: async () => ({
         type: "response" as const,
         ok: false as const,
@@ -191,6 +216,8 @@ describe("device folder listing", () => {
       disconnect() {},
       getDevicesStatus: async () => null,
       listDevices: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
       run: async () => ({ type: "response" as const, ok: true as const, result: { path: 1 } }),
     }));
     expect(await malformed.listFiles("mac")).toEqual({ ok: false, code: "unavailable" });
@@ -199,6 +226,8 @@ describe("device folder listing", () => {
       disconnect() {},
       getDevicesStatus: async () => null,
       listDevices: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
       run: async () => {
         throw new CallerConfigurationError("not_configured", "secret");
       },
@@ -215,6 +244,8 @@ describe("device list for the folder picker", () => {
       disconnect() {},
       getDevicesStatus,
       run: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
       listDevices: async () => ({
         items: [
           { id: "mac", device_name: "macbook", platform: "macos", token: "secret" },
@@ -241,6 +272,8 @@ describe("device list for the folder picker", () => {
       disconnect() {},
       getDevicesStatus: rs.fn(),
       run: rs.fn(),
+      renameDevice: rs.fn(),
+      removeDevice: rs.fn(),
       listDevices: async () => {
         throw new CallerConfigurationError("not_configured", "secret");
       },
@@ -249,5 +282,96 @@ describe("device list for the folder picker", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "unavailable" });
     service.close();
+  });
+});
+
+describe("device rename and remove", () => {
+  const id = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+  const failure = (code: string) =>
+    new DeviceActionError({
+      type: "response",
+      ok: false,
+      error: { code, message: "private detail" },
+    });
+  function service(
+    overrides: Partial<Record<"renameDevice" | "removeDevice", () => Promise<void>>> = {},
+  ) {
+    const client = {
+      disconnect: rs.fn(),
+      getDevicesStatus: rs.fn(),
+      run: rs.fn(),
+      listDevices: rs.fn(),
+      renameDevice: rs.fn(async (_deviceId: string, _name: string) => {}),
+      removeDevice: rs.fn(async (_deviceId: string) => {}),
+      ...overrides,
+    };
+    const nodeDevices = createNodeDevicesService(() => client);
+    return { client, nodeDevices, app: devicesRoutes({ nodeDevices }) };
+  }
+
+  it("renames through the caller and answers 204", async () => {
+    const f = service();
+    const response = await f.app.request(`/devices/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Build server" }),
+    });
+    expect(response.status).toBe(204);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(f.client.renameDevice).toHaveBeenCalledWith(id, "Build server");
+    f.nodeDevices.close();
+  });
+
+  it("refuses a rename without a string name before calling Cloud", async () => {
+    const f = service();
+    const response = await f.app.request(`/devices/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: 3 }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_device_name" });
+    expect(f.client.renameDevice).not.toHaveBeenCalled();
+    f.nodeDevices.close();
+  });
+
+  it("removes through the caller and answers 204", async () => {
+    const f = service();
+    const response = await f.app.request(`/devices/${id}`, { method: "DELETE" });
+    expect(response.status).toBe(204);
+    expect(f.client.removeDevice).toHaveBeenCalledWith(id);
+    f.nodeDevices.close();
+  });
+
+  it.each([
+    ["device_not_found", 404, "device_not_found"],
+    ["invalid_device_name", 400, "invalid_device_name"],
+    ["revocation_pending", 409, "revocation_pending"],
+    ["cloud_unavailable", 503, "unavailable"],
+    ["invalid_device_session", 503, "unavailable"],
+  ] as const)("maps the Cloud error %s", async (code, status, error) => {
+    const f = service({
+      removeDevice: async () => {
+        throw failure(code);
+      },
+    });
+    const response = await f.app.request(`/devices/${id}`, { method: "DELETE" });
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ error });
+    f.nodeDevices.close();
+  });
+
+  it("recreates the client after an old daemon refuses the method", async () => {
+    const f = service({
+      renameDevice: async () => {
+        throw new DaemonVersionError();
+      },
+    });
+    expect(await f.nodeDevices.renameDevice(id, "Mac")).toEqual({
+      ok: false,
+      code: "unavailable",
+    });
+    expect(f.client.disconnect).toHaveBeenCalled();
+    f.nodeDevices.close();
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import {
   EventBusTriggerProvider,
   matchesSource,
@@ -28,13 +28,32 @@ function publish(bus: EventBus, overrides: Partial<BusEvent> = {}): void {
   });
 }
 
+/** Records the `update` calls the provider makes (a `once` routine disables
+ * itself through it). */
+function fakeRepo() {
+  const updates: Array<{ id: string; data: { enabled?: boolean } }> = [];
+  return {
+    updates,
+    async update(id: string, data: { enabled?: boolean }) {
+      updates.push({ id, data });
+    },
+  };
+}
+
+/** Let the provider's fire-and-forget chain (disable, then fire) settle. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+}
+
 describe("EventBusTriggerProvider", () => {
   let bus: EventBus;
+  let repo: ReturnType<typeof fakeRepo>;
   let provider: EventBusTriggerProvider;
 
   beforeEach(() => {
     bus = new EventBus();
-    provider = new EventBusTriggerProvider(bus);
+    repo = fakeRepo();
+    provider = new EventBusTriggerProvider(bus, repo);
   });
 
   it("fires a routine when a matching event is published, with the payload", async () => {
@@ -165,6 +184,81 @@ describe("EventBusTriggerProvider", () => {
     publish(bus, { name: "evt" });
 
     expect(fired).toHaveLength(0);
+  });
+});
+
+describe("EventBusTriggerProvider once routines", () => {
+  let bus: EventBus;
+  let repo: ReturnType<typeof fakeRepo>;
+  let provider: EventBusTriggerProvider;
+
+  beforeEach(() => {
+    bus = new EventBus();
+    repo = fakeRepo();
+    provider = new EventBusTriggerProvider(bus, repo);
+  });
+
+  afterEach(() => {
+    provider.stop();
+  });
+
+  it("fires on the first matching event only and disables the routine", async () => {
+    const fired: Record<string, unknown>[] = [];
+    await provider.activate(
+      buildRoutine({
+        id: "once-1",
+        trigger: { type: "event-bus", eventName: "ci.done", once: true },
+      }),
+      async (p) => {
+        fired.push(p);
+      },
+    );
+
+    publish(bus, { name: "ci.done", payload: { run: 1 } });
+    publish(bus, { name: "ci.done", payload: { run: 2 } });
+    await flush();
+
+    expect(fired).toEqual([{ run: 1 }]);
+    expect(repo.updates).toEqual([{ id: "once-1", data: { enabled: false } }]);
+    expect(provider.isActive("once-1")).toBe(false);
+  });
+
+  it("skips non-matching events and still waits for a match", async () => {
+    const fired: Record<string, unknown>[] = [];
+    await provider.activate(
+      buildRoutine({
+        id: "once-2",
+        trigger: {
+          type: "event-bus",
+          eventName: "ci.done",
+          once: true,
+          filter: [{ field: "branch", equals: "feat" }],
+        },
+      }),
+      async (p) => {
+        fired.push(p);
+      },
+    );
+
+    publish(bus, { name: "ci.done", payload: { branch: "main" } });
+    await flush();
+    expect(fired).toEqual([]);
+    expect(provider.isActive("once-2")).toBe(true);
+
+    publish(bus, { name: "ci.done", payload: { branch: "feat" } });
+    await flush();
+    expect(fired).toEqual([{ branch: "feat" }]);
+  });
+
+  it("does not disable a routine that is not once", async () => {
+    await provider.activate(
+      buildRoutine({ id: "many", trigger: { type: "event-bus", eventName: "ci.done" } }),
+      async () => {},
+    );
+    publish(bus, { name: "ci.done" });
+    await flush();
+    expect(repo.updates).toEqual([]);
+    expect(provider.isActive("many")).toBe(true);
   });
 });
 

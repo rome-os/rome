@@ -25,7 +25,7 @@ export type DrizzleTx = Parameters<Parameters<DrizzleDb["transaction"]>[0]>[0];
 
 // A synchronous write target: the db itself (autocommit) or a transaction on it.
 // A write helper that takes one of these runs standalone OR enlisted in a
-// caller's transaction with no change to its body — the terminal conferral uses
+// caller's transaction with no change to its body — the terminal grant uses
 // this to write the credential, the placeholder connection, and the guardian
 // mapping through one `tx`, while the same helpers back the plain async methods
 // via `this.db`. `.run()` is the synchronous terminal, so this is better-sqlite3

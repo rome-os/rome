@@ -7,10 +7,10 @@
 // is what a cold re-attach renders while the coroutine is blocked inside a
 // `ctx.step` external-event wait.
 //
-// Terminal conferral: the coroutine's `return` is the ONE durable write. The
-// pump calls `commit` with the returned conferral and only then reports `done` —
+// Terminal grant: the coroutine's `return` is the ONE durable write. The
+// pump calls `commit` with the returned grant and only then reports `done` —
 // so `done` is never observable before the ledger write lands. Abandoning or
-// cancelling runs no commit at all: nothing half-conferred is ever observable.
+// cancelling runs no commit at all: nothing half-granted is ever observable.
 //
 // Cancellation genuinely interrupts: `cancel()` aborts the setup signal
 // (rejecting an in-flight `ctx.step` wait via a race even if its `fn` ignores
@@ -18,7 +18,7 @@
 // coroutine unwinds to `cancelled`.
 
 import type {
-  SetupConferral,
+  SetupGrant,
   SetupContext,
   SetupFn,
   SetupForm,
@@ -53,7 +53,7 @@ export interface SetupSessionDeps {
   /** The single durable write, run exactly once when the coroutine returns. A
    *  throw here fails the setup (nothing partial is left observable). It
    *  answers the id of the connection it wrote, which `done` reports. */
-  commit: (conferral: SetupConferral, signal: AbortSignal) => Promise<string | void>;
+  commit: (grant: SetupGrant, signal: AbortSignal) => Promise<string | void>;
   /** Optional override of the default working view (progress snapshot). */
   workingView?: SetupView;
   /** The setup renews a connection that already names its account. */
@@ -161,12 +161,12 @@ export class SetupSession {
       renewing: this.#deps.renewing === true,
     };
     try {
-      const conferral = await this.#deps.fn(interact, ctx);
+      const grant = await this.#deps.fn(interact, ctx);
       // The one durable write; `done` is set only after it resolves.
-      const connectionId = await this.#deps.commit(conferral, this.#abort.signal);
+      const connectionId = await this.#deps.commit(grant, this.#abort.signal);
       this.#terminate({
         status: "done",
-        conferral: { summary: conferral.summary, ...(connectionId ? { connectionId } : {}) },
+        grant: { summary: grant.summary, ...(connectionId ? { connectionId } : {}) },
       });
     } catch (err) {
       if (this.#abort.signal.aborted) {

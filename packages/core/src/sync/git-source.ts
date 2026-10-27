@@ -3,11 +3,10 @@ import { existsSync, mkdirSync, readdirSync, rmSync, rmdirSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import {
-  OAUTH_PROVIDER_GRANTS,
   githubGrantProfileSchema,
   type GithubGrantProfile,
 } from "../connections/integrations/oauth-providers.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { readGithubAccessTokenFile } from "../lib/provider-token-files.js";
 import { createLogger } from "../logger.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -425,26 +424,27 @@ async function fetchCheckout(dir: string, url: string, branch: string): Promise<
   await tryGit(dir, ["branch", `--set-upstream-to=origin/${branch}`, branch]);
 }
 
-/** Read the GitHub grant's non-secret profile from the connection ledger — the
- * conferral outcome (login/display name/email) recorded alongside the credential.
+/** Read the GitHub grant's non-secret profile from the connections store — the
+ * grant outcome (login/display name/email) recorded alongside the credential.
  * Null when no GitHub connection exists or the grant carries no profile. A
- * degraded grant keeps the profile of the conferral that degraded, so the last
+ * degraded grant keeps the profile of the grant that degraded, so the last
  * known identity survives. */
 async function readGithubGrantProfile(db: DrizzleDb): Promise<GithubGrantProfile | null> {
-  const ledger = new DrizzleGrantLedger(db);
-  const github = (await ledger.listConnections()).filter((c) => c.connectionKind === "github");
+  const github = (await new DrizzleConnectionsRepository(db).all()).filter(
+    (c) => c.connectionKind === "github",
+  );
   // GitHub is a single-slot provider connection; more than one is a corrupt
-  // ledger state that would make "the connected identity" ambiguous. Fail loud
+  // store state that would make "the connected identity" ambiguous. Fail loud
   // rather than silently attributing commits to whichever row sorts first.
   if (github.length > 1) {
     throw new Error(`expected at most one GitHub connection, found ${github.length}`);
   }
   const connection = github[0];
   if (!connection) return null;
-  const grant = await ledger.getGrant(connection.id, OAUTH_PROVIDER_GRANTS.github);
+  const grant = connection.grant;
   // Re-run GitHub's own parse on the stored record — a record that no longer
   // matches the schema fails loudly here, never a silently wrong committer.
-  return grant?.profile ? githubGrantProfileSchema.parse(grant.profile) : null;
+  return grant.profile ? githubGrantProfileSchema.parse(grant.profile) : null;
 }
 
 /** The git committer identity for GitHub commits, derived from the connected

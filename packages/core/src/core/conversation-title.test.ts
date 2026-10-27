@@ -1,19 +1,25 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { validatePortableOutputSchema } from "../apps/packaging/output-schema-validator.js";
 import type { ModelProvider, ModelSession, ModelSessionParams } from "./agent-runner.js";
 import {
   CONVERSATION_TITLE_INPUT_MAX_LENGTH,
+  CONVERSATION_TITLE_OUTPUT_SCHEMA,
   conversationTitleLength,
   createConversationTitleGenerator,
   normalizeConversationTitle,
 } from "./conversation-title.js";
 import type { ModelResolver } from "./model-resolver.js";
 
-function resultSession(content: string): ModelSession {
+function resultSession(title: string): ModelSession {
+  return rawResultSession(JSON.stringify({ title }), { title });
+}
+
+function rawResultSession(content: string, structuredOutput?: unknown): ModelSession {
   return {
     providerId: "mock",
     model: "small-model",
     events: (async function* () {
-      yield { type: "result" as const, content };
+      yield { type: "result" as const, content, structuredOutput };
     })(),
     sendUserInput: rs.fn(async () => undefined),
     fork: rs.fn(async () => {
@@ -22,6 +28,19 @@ function resultSession(content: string): ModelSession {
     interrupt: rs.fn(async () => undefined),
     close: rs.fn(async () => undefined),
   };
+}
+
+function generatorFor(session: ModelSession) {
+  const provider: ModelProvider = {
+    id: "mock",
+    displayName: "Mock",
+    builtinTools: new Set(),
+    openSession: rs.fn(async () => session),
+  };
+  const modelResolver: ModelResolver = {
+    getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+  };
+  return createConversationTitleGenerator(modelResolver);
 }
 
 describe("conversation title generation", () => {
@@ -53,6 +72,7 @@ describe("conversation title generation", () => {
       builtinTools: [],
       maxTurns: 1,
       reasoningEffort: "low",
+      outputSchema: CONVERSATION_TITLE_OUTPUT_SCHEMA,
       sessionId: expect.stringMatching(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
       ),
@@ -68,6 +88,31 @@ describe("conversation title generation", () => {
       }),
     );
     expect(session.close).toHaveBeenCalledOnce();
+  });
+
+  it("sends a portable output schema", () => {
+    expect(validatePortableOutputSchema(CONVERSATION_TITLE_OUTPUT_SCHEMA)).toEqual([]);
+  });
+
+  it("uses the structured title, not reasoning in the text reply", async () => {
+    // A real claude-haiku-5-5 reply: reasoning first, the name after a blank line.
+    const session = rawResultSession(
+      "Chinese message about Rome Cloud. Name in Chinese, 2-6 words-ish.\n\nRome Cloud 节点 API 设计",
+      { title: "Rome Cloud 节点 API 设计" },
+    );
+
+    await expect(generatorFor(session).generate("rome cloud 开放一些 API")).resolves.toBe(
+      "Rome Cloud 节点 API 设计",
+    );
+  });
+
+  it("fails instead of using a text reply without a structured title", async () => {
+    // A real claude-haiku-5-5 reply that labels the name with its language.
+    const session = rawResultSession("Chinese: 轮换 input 占位提示文案");
+
+    await expect(generatorFor(session).generate("input 的 placeholder")).rejects.toThrow(
+      "no structured title",
+    );
   });
 
   it("normalizes model formatting and keeps Unicode titles within 50 characters", () => {

@@ -61,6 +61,16 @@ export type DeviceFilesErrorCode =
   | "unavailable";
 
 /**
+ * Why renaming or removing a device failed. `revocation_pending` means the
+ * device is revoked but Cloud still lists it until the Gateway confirms.
+ */
+export type DeviceManageErrorCode =
+  | "device_not_found"
+  | "invalid_device_name"
+  | "revocation_pending"
+  | "unavailable";
+
+/**
  * The folder a chat works in on a rome-node device. The name and platform are
  * a snapshot taken when the chat was created.
  */

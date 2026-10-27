@@ -333,13 +333,92 @@ describe("send_message to an account with an opaque id", () => {
     );
   });
 
-  it("refuses a platform name that is not an account's id", async () => {
+  it("sends as Rome's one account on a platform it names", async () => {
+    const adapter = accounts(FIRST);
+
+    await executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" });
+
+    expect(adapter.send).toHaveBeenCalledWith(FIRST, "42", expect.objectContaining({ text: "hi" }));
+  });
+
+  it("refuses a platform where Rome has several accounts, naming them", async () => {
+    const adapter = accounts(FIRST, SECOND);
+
+    await expect(
+      executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" }),
+    ).rejects.toThrow(`Rome has several accounts on "telegram": "${FIRST}", "${SECOND}"`);
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  // A bot connected before opaque ids has a channel named after its platform.
+  // Its name addresses that bot, and the platform still counts both accounts.
+  it("keeps a channel named after its platform apart from the platform", async () => {
+    const adapter: ChannelsService = {
+      list: rs.fn(async () => [
+        { name: "telegram", platform: "telegram", sendable: true },
+        { name: FIRST, platform: "telegram", sendable: true },
+      ]),
+      send: rs.fn(async (_account, chatId) => ({ chatId })),
+      query: async () => [],
+    };
+
+    await executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" });
+    expect(adapter.send).toHaveBeenCalledWith(
+      "telegram",
+      "42",
+      expect.objectContaining({ text: "hi" }),
+    );
+    await expect(
+      executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" }),
+    ).rejects.toThrow(`Rome has several accounts on "telegram": "telegram", "${FIRST}"`);
+    expect(adapter.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a channel named after a platform once its account is gone", async () => {
     const adapter = accounts(FIRST);
 
     await expect(
       executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" }),
     ).rejects.toThrow('No Talk connection registered for "telegram"');
     expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a platform where Rome has no account it can send as", async () => {
+    const adapter = accounts(FIRST);
+
+    await expect(
+      executeSendMessage(adapter, { platform: "discord", threadId: "42", text: "hi" }),
+    ).rejects.toThrow('No Talk connection registered for "discord"');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a message naming both a channel and a platform, or neither", async () => {
+    const adapter = accounts(FIRST);
+
+    await expect(
+      executeSendMessage(adapter, { channel: FIRST, platform: "telegram", text: "hi" }),
+    ).rejects.toThrow("Name either `channel` or `platform`");
+    await expect(executeSendMessage(adapter, { threadId: "42", text: "hi" })).rejects.toThrow(
+      "Name either `channel` or `platform`",
+    );
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("sends as the account by its platform and id where the host names it", async () => {
+    const account = { platform: "telegram", id: "8123456789" };
+    const adapter: ChannelsService = {
+      list: rs.fn(async () => [{ name: FIRST, account, platform: "telegram", sendable: true }]),
+      send: rs.fn(async (_account, chatId) => ({ chatId })),
+      query: async () => [],
+    };
+
+    await executeSendMessage(adapter, { platform: "telegram", threadId: "42", text: "hi" });
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      account,
+      "42",
+      expect.objectContaining({ text: "hi" }),
+    );
   });
 
   it("resolves to: guardian through the link People keys by platform", async () => {
@@ -552,6 +631,23 @@ describe("send_message preview", () => {
     });
     // The raw thread/user id must never reach the card.
     expect(JSON.stringify(payload)).not.toContain("918273645");
+  });
+
+  it("names the platform a message goes to when it names no channel", () => {
+    const action = createSendMessageAction(config, makeAdapter());
+
+    expect(action.preview!({ platform: "whatsapp", to: "guardian", text: "hi" })).toMatchObject({
+      fields: [{ label: "Channel", value: "WhatsApp" }],
+    });
+    expect(action.preview!({ platform: "email", to: "a@b.com", text: "hi" })).toMatchObject({
+      fields: [{ label: "Channel", value: "Email" }],
+    });
+    expect(action.preview!({ platform: "agents", to: "Atlas", text: "hi" })).toMatchObject({
+      fields: [
+        { label: "Channel", value: "Agents" },
+        { label: "To", value: "Atlas" },
+      ],
+    });
   });
 
   it("falls back to the raw channel name for an unmapped adapter", () => {

@@ -25,5 +25,33 @@ export type StoredErrorPart = Pick<
   "type" | "error" | "code" | "provider" | "reason"
 >;
 
+/** A text part as WebChat stores it. `format` is a display hint only the
+ * `say` tool sets: `long` shows the text as one long message, `bubble` or
+ * absent as a chat bubble where the chat shows bubbles. */
+export type WebchatTextPart = Extract<MessagePart, { type: "text" }> & {
+  format?: "bubble" | "long";
+};
+
+/** A card for a chat that another agent's tool started on the guardian's
+ * behalf. The chat's live status is read from the chat itself. */
+export interface TaskChatPart {
+  type: "task_chat";
+  chatId: string;
+  title: string;
+}
+
 /** One part of a stored WebChat message's content. */
-export type TranscriptPart = MessagePart | HandbackApprovedPart | StoredErrorPart;
+export type TranscriptPart =
+  | Exclude<MessagePart, { type: "text" }>
+  | WebchatTextPart
+  | HandbackApprovedPart
+  | StoredErrorPart
+  | TaskChatPart;
+
+/** The person who sent a WebChat user message, as the dashboard shows them.
+ * Absent when the message recorded no sender: one sent before senders were
+ * recorded, or one an agent or a channel wrote. `name` is the guardian's name
+ * or the visitor's email, null when neither is known. */
+export type ChatMessageSender =
+  | { kind: "guardian"; name: string | null; avatarUrl: string | null }
+  | { kind: "visitor"; accountId: string; name: string | null; avatarUrl: string | null };

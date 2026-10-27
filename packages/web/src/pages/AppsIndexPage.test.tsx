@@ -480,6 +480,31 @@ describe("AppsIndexPage reactivity", () => {
     expect(screen.queryByText("User Skills")).toBeNull();
   });
 
+  it("hides an app that sets hideInLauncher: no tile, not counted, not searchable", async () => {
+    const user = userEvent.setup();
+    mockBackend({
+      installed: [
+        installedCard({ id: "weather", displayName: "Weather", origin: "local" }),
+        installedCard({
+          id: "quiet",
+          displayName: "Quiet App",
+          origin: "local",
+          hideInLauncher: true,
+        }),
+      ],
+    });
+
+    renderPage();
+
+    await screen.findByText("Weather");
+    const mySection = screen.getByRole("region", { name: "My apps" });
+    expect(within(mySection).getByText("1")).toBeTruthy();
+    expect(screen.queryByText("Quiet App")).toBeNull();
+
+    await user.type(screen.getByLabelText("Search apps"), "quiet");
+    expect(screen.queryByText("Quiet App")).toBeNull();
+  });
+
   it("hides a section that has no matches while searching", async () => {
     const user = userEvent.setup();
     mockBackend({

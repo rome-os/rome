@@ -25,6 +25,9 @@ export interface OutboxRow {
   state: "sending" | "unconfirmed" | "failed";
   providerMessageId: string | null;
   error: string | null;
+  /** The channel id of Rome's account the message goes out from, or null on a
+   *  row written before it was recorded. */
+  from: string | null;
   createdAt: Date;
   /** When the row last changed state. A retry moves this and not `createdAt`,
    *  so "how long has this been in flight" is asked of the attempt rather than
@@ -78,6 +81,7 @@ export class OutboxRepository {
     channelUserId: string;
     chatId: string;
     text: string;
+    from?: string | null;
   }): Promise<OutboxRow> {
     const claimed = await this.openOnce({ ...input, id: uuid() });
     if (!claimed.created) throw new Error("Generated send id already exists");
@@ -92,10 +96,12 @@ export class OutboxRepository {
     channelUserId: string;
     chatId: string;
     text: string;
+    from?: string | null;
   }): Promise<{ row: OutboxRow; created: true } | { message: OutboxMessage; created: false }> {
     const now = new Date();
     const row = {
       ...input,
+      from: input.from ?? null,
       state: "sending" as const,
       providerMessageId: null,
       error: null,
@@ -289,6 +295,7 @@ export function outboxMessage(row: OutboxRow, now = new Date()): OutboxMessage {
     state: row.state,
     ref: row.providerMessageId ? `${row.chatId}:${row.providerMessageId}` : null,
     error: row.error,
+    from: row.from,
     dismissable: isDismissable(row, now),
   };
 }

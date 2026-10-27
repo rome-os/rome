@@ -39,6 +39,16 @@ systemPromptPrefix: Complete the requested coding task.
 
 An agent model pin supplies the default for a new session, not an instruction to migrate existing history. Changing the YAML affects new sessions. Existing sessions retain their [session model pin](sessions.md#model-pin) unless the guardian explicitly selects another model.
 
+## Session policy
+
+A core or app agent may declare how a chat treats its turns in an optional `policy:` block. Each omitted field keeps the default, which is the behavior every chat had before the block existed.
+
+| Field | Values | Default |
+|---|---|---|
+| `finalText` | `deliver` sends the model's text to the chat. `private` keeps it, narration and final reply alike, in the trace, so the agent reaches the guardian only through its tools. | `deliver` |
+| `autoTitle` | Whether the chat's first message names the chat. | `true` |
+| `loadMemory` | Whether a core agent's system prompt carries the memory index, project summaries, and runtime paths. | `true` for `main` only |
+
 ## Builtin tools
 
 A builtin tool is a tool the model provider runs itself, such as a file read or a shell command. An agent's `tools` list names the builtin tools it gets. Its actions, skills, and subagents are Rome tools, which `tools` does not control.
@@ -54,6 +64,7 @@ Both providers use one set of names: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `G
 - Codex offers its patch tool on every thread. An agent with no `Write`, `Edit`, or shell name runs in Codex's read-only sandbox, which rejects every patch.
 - Some Codex models carry collaboration tools that spawn Codex agents, and no setting removes them. A spawned Codex agent gets the same builtin tools as the agent that spawned it.
 - Codex's plan tool stays on for every agent, because Rome renders plan updates from it. `WebFetch` and `TodoWrite` grant nothing on Codex.
+- Codex's bundled skills are off, so an agent sees only Rome's [skills](skills.md). The exception is `imagegen`, Codex's guide to its image tool, which an agent that declares `ImageGeneration` gets too.
 
 | Declared on Codex | Codex capability |
 |---|---|
@@ -62,7 +73,7 @@ Both providers use one set of names: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `G
 | `Write`, `Edit`, `Read`, `Glob`, `Grep`, or `Bash` | Patches that write files |
 | `WebSearch` | Web search |
 | `Task` | Codex's multi-agent tools, on models without collaboration tools |
-| `ImageGeneration` | Image generation |
+| `ImageGeneration` | Image generation, and Codex's `imagegen` skill |
 
 ## Structured output
 
@@ -92,4 +103,4 @@ provider's native structured-output API.
 
 ## Agent hierarchy
 
-Agents form a hierarchy with one orchestrator: the **main agent** handles trusted messages directly or delegates to role-restricted subagents (quick tasks, read-only exploration). Coding work is not a subagent delegation — the main agent starts it through a coding [action](actions.md), so the work crosses the coding app's boundary. The coding agent plans its own work before it edits code. Two agents sit outside the delegation tree as gates: the [sentinel](messaging.md#sentinel) triages untrusted inbound messages, and the **envoy** validates outgoing messages before they are sent.
+Agents form a hierarchy with one orchestrator: the **main agent** handles trusted messages directly or delegates to role-restricted subagents (quick tasks, read-only exploration, coding). The coding agent is a subagent, so the chat shows its progress while it runs, and a follow-up in the same chat continues its session. Routines, workflows, and agents that do not list the coding subagent start the same agent through the `coding:coding_task` [action](actions.md). The coding agent plans its own work before it edits code. Two agents sit outside the delegation tree as gates: the [sentinel](messaging.md#sentinel) triages untrusted inbound messages, and the **envoy** validates outgoing messages before they are sent.

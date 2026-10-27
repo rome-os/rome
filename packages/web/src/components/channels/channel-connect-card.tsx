@@ -2,7 +2,6 @@ import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { User } from "lucide-react";
-import { LINKABLE_KINDS } from "@rome/api-types/account-agents";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
@@ -16,7 +15,7 @@ import { useSetup } from "@/components/setup/use-setup";
 import type { ConnectionSlot } from "@/lib/connection-cards";
 import { revokeConnectionGrant } from "@/lib/connections-api";
 
-// Every Talk channel connects through the conferral setup: the card
+// Every Talk channel connects through the setup: the card
 // is a thin frame around `useSetup` (drives `/api/connections/:id/grants/:name/
 // setup` + `/api/setups/:cid/input`) and the standard `SetupRenderer`. What used
 // to be seven near-identical per-service cards (telegram bot / telegram user /
@@ -58,7 +57,7 @@ export interface ChannelConnectConfig {
   /** Setup service id — addresses the setup (`useSetup`/`SetupRenderer`) and,
    *  by default, the brand badge and copy namespace. */
   service: string;
-  /** Grant to address before a connection row exists; the terminal conferral
+  /** Grant to address before a connection row exists; the terminal grant
    *  mints the row, so this is the fallback when `slot.grant` is null. */
   defaultGrant: string;
   /** ConnectionSlotCard copy namespace (`connections.cards.<copyService>`) when
@@ -175,7 +174,7 @@ export interface ChannelConnectCardProps {
  * Disconnect (and, per config, a "linked as guardian" note); when not, it runs
  * the setup through the standard renderers (plus any per-service custom
  * renderer). A channel that reads connected was guardian-linked during the
- * terminal conferral, so there is no separate verify-status polling.
+ * terminal grant, so there is no separate verify-status polling.
  */
 export function ChannelConnectCard({
   config,
@@ -187,20 +186,20 @@ export function ChannelConnectCard({
   onConnected,
 }: ChannelConnectCardProps) {
   const { t } = useTranslation("settings");
-  const connected = slot.state !== "unauthorized";
-  // A degraded credential is renewed in place: disconnecting would remove the
+  const connected = slot.state !== null;
+  // A broken connection is fixed in place: disconnecting would remove the
   // account, and an account that connects again starts with no history.
-  const degraded = slot.state === "degraded";
+  const broken = slot.state === "broken";
 
   const [disconnecting, setDisconnecting] = useState(false);
   // Disconnecting an account removes it, so the guardian confirms the cost first.
   const [confirming, setConfirming] = useState(false);
-  const confirmsDisconnect = LINKABLE_KINDS.has(config.service);
+  const confirmsDisconnect = Boolean(slot.link);
   const [error, setError] = useState<string | null>(null);
 
   // The setup addresses the connection by id, or by the bare service name when
   // the guardian has never connected or is adding another account (the
-  // terminal conferral mints the row).
+  // terminal grant mints the row).
   const setup = useSetup({
     idOrKind: (another ? null : slot.connectionId) ?? config.service,
     grant: slot.grant ?? config.defaultGrant,
@@ -220,7 +219,7 @@ export function ChannelConnectCard({
   const setupStatus = setup.state?.status;
   const { reset } = setup;
   useEffect(() => {
-    if (slot.state === "authorized" && setupStatus === "done") reset();
+    if (slot.state === "working" && setupStatus === "done") reset();
   }, [slot.state, setupStatus, reset]);
 
   async function handleDisconnect() {
@@ -252,7 +251,7 @@ export function ChannelConnectCard({
     </Button>
   ) : undefined;
   const disconnectAction =
-    degraded && !setup.state ? (
+    broken && !setup.state ? (
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={() => setup.start(true)} disabled={setup.busy}>
           {setup.busy ? t("common.connecting") : t("channels.reconnect")}
@@ -314,10 +313,10 @@ export function ChannelConnectCard({
         }}
       />
 
-      {degraded && setup.error && !setup.state ? (
+      {broken && setup.error && !setup.state ? (
         <p className="text-aux text-destructive-fg">{setup.error}</p>
       ) : null}
-      {connected && !(degraded && setup.state) ? (
+      {connected && !(broken && setup.state) ? (
         config.guardianLinkedKey ? (
           <div>
             <p className="text-aux text-success-fg">{t(config.guardianLinkedKey)}</p>

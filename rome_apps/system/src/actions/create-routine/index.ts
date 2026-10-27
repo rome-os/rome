@@ -47,6 +47,10 @@ const eventBusTriggerSchema = z.object({
     .array(z.object({ field: z.string().min(1), equals: z.string() }))
     .optional()
     .describe("Payload conditions, AND-ed together; omit to fire on every matching event"),
+  once: z
+    .boolean()
+    .optional()
+    .describe("Fire on the first matching event only, then disable the routine"),
 });
 
 const manualTriggerSchema = z.object({

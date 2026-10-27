@@ -74,7 +74,7 @@ describe("guardian channel mapping", () => {
     expect(plan).toEqual({ op: "update", guardianId: "guardian", from: "tg-work" });
 
     // A second account lands between the plan and its application: the grant
-    // section the conferral holds keeps competing conferrals out, not
+    // section the grant holds keeps competing grants out, not
     // a link write.
     await repo.addChannelMapping("guardian", "telegram", "tg-personal");
 
@@ -113,11 +113,11 @@ describe("guardian channel mapping", () => {
     const plan = await planGuardianMapping(repo, "telegram", "tg-guardian");
     expect(plan).toEqual({ op: "add", guardianId: "guardian" });
 
-    // The grant section keeps competing conferrals out of this window, not
+    // The grant section keeps competing grants out of this window, not
     // every writer.
     await repo.addChannelMapping(alice, "telegram", "tg-guardian");
 
-    // The conferral commits rather than aborting on the claim it raced.
+    // The grant commits rather than aborting on the claim it raced.
     testDb.db.transaction((tx) => {
       applyGuardianMappingWithinTx(tx, repo, "telegram", "tg-guardian", plan);
     });
@@ -138,7 +138,7 @@ describe("guardian channel mapping", () => {
     });
 
     // The canonical account is claimed in the window the plan cannot hold. The
-    // conferral must not abort over it — the credential rides the same
+    // grant must not abort over it — the credential rides the same
     // transaction.
     await repo.addChannelMapping(alice, "whatsapp", "15551234567@s.whatsapp.net");
 

@@ -32,6 +32,26 @@ const en = {
       start: "Start chat",
       opening: "Opening…",
       openError: "Couldn't open the chat just yet — give it another tap.",
+      resumeGreeting:
+        "Welcome back! We're partway through setup. Last time we stopped at “{{step}}”.",
+      resumeGreetingNoChat:
+        "Welcome back! We're partway through setup, but I can't find the chat we were in, so let's start it again.",
+      doneGreeting: "You're all set up. What would you like to do next?",
+      steps: {
+        names: "Confirm names",
+        ai: "Connect an AI",
+        question: "Tell me about you",
+        ideas: "Pick a first app",
+      },
+      stepSkipped: "Skipped",
+      stepDone: "Done",
+      stepCurrent: "Current step",
+      resume: "Continue setup",
+      restart: "Start over",
+      newChat: "New chat",
+      openWelcomeChat: "Open the welcome chat",
+      loadError: "I couldn't check where setup stands just now. Give it another try.",
+      retry: "Try again",
     },
     names: {
       guardianLabel: "What I call you",

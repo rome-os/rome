@@ -24,10 +24,13 @@ class FakeClock {
   }
 }
 
+const RESTART_WINDOW_MS = 3_600_000;
+
 function makeHub(onDeadline = rs.fn()) {
   const clock = new FakeClock();
   const hub = new UpgradeStatusHub({
     onDeadline,
+    restartWindowMs: RESTART_WINDOW_MS,
     now: clock.now,
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
@@ -73,7 +76,7 @@ describe("UpgradeStatusHub", () => {
     expect(hub.getSnapshot().phase).toBe("countdown");
   });
 
-  it("markRestarting moves countdown to updating and is terminal", () => {
+  it("markRestarting moves countdown to updating, and no verb un-sets it", () => {
     const { hub, clock, onDeadline } = makeHub();
     hub.beginCountdown("1.2.3", 600_000);
     hub.markRestarting();
@@ -83,12 +86,36 @@ describe("UpgradeStatusHub", () => {
     expect(snap.targetVersion).toBe("1.2.3");
     expect(snap.deadline).toBeNull();
 
-    // Nothing un-sets updating: verbs no-op and the old timer is dead.
+    // Verbs no-op, a re-offer no-ops, and the old countdown timer is dead.
     hub.defer();
     hub.standDown();
+    expect(hub.beginCountdown("1.2.4", 1_000)).toBe(false);
     clock.advance(600_000);
     expect(onDeadline).not.toHaveBeenCalled();
     expect(hub.getSnapshot().phase).toBe("updating");
+    expect(hub.getSnapshot().targetVersion).toBe("1.2.3");
+  });
+
+  it("stays updating for the whole restart window", () => {
+    const { hub, clock } = makeHub();
+    hub.beginCountdown("1.2.3", 600_000);
+    hub.markRestarting();
+    clock.advance(RESTART_WINDOW_MS - 1);
+    expect(hub.getSnapshot().phase).toBe("updating");
+  });
+
+  it("returns to idle when the accepting process outlives the restart window", () => {
+    const { hub, clock } = makeHub();
+    hub.beginCountdown("1.2.3", 600_000);
+    hub.markRestarting();
+    clock.advance(RESTART_WINDOW_MS);
+
+    const snap = hub.getSnapshot();
+    expect(snap.phase).toBe("idle");
+    expect(snap.targetVersion).toBeNull();
+    expect(snap.deadline).toBeNull();
+    // The next nightly probe can offer the release again.
+    expect(hub.beginCountdown("1.2.3", 600_000)).toBe(true);
   });
 
   it("standDown returns a countdown to idle so the next probe can re-offer", () => {

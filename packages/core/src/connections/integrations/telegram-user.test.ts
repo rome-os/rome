@@ -1,7 +1,7 @@
 // The Telegram-user descriptor. Layers under test:
 //   1. material round-trip (settings ⇄ SecretRecord, incl. apiId stringify +
 //      nullable username), descriptor shape, the route-driven session scheme
-//      (confer throws, renew "re-confer") — pure.
+//      (grant throws, renew "needs-fix") — pure.
 //   2. fault mapping — a fake TelegramUserAdapter (rs.mock) lets us drive a
 //      start rejection and a send failure; the real
 //      isTelegramUserSessionRejected classifier (imported unmocked) decides
@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId, OutgoingMessage, ChannelMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
 import { installTestClock } from "../../test/kit/index.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { Credential, ProfileRecord, SecretRecord, StreamFault, Talker } from "../types.js";
@@ -138,14 +138,11 @@ function buildTalker(deps: Parameters<typeof makeTelegramUserDescriptor>[0] = {}
   start: () => void;
 } {
   const desc = makeTelegramUserDescriptor(deps);
-  const talker = desc.capabilities.talker!.build(
-    { session: validCred() },
-    {
-      connectionId: "telegram-user-test",
-      persist: async () => {},
-      registerIngress: () => () => {},
-    },
-  );
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "telegram-user-test",
+    persist: async () => {},
+    registerIngress: () => () => {},
+  });
   const faults: StreamFault[] = [];
   return {
     talker,
@@ -191,20 +188,19 @@ describe("telegram_user descriptor shape", () => {
   it("declares one setup-driven `session` grant and a talker needing it", () => {
     const desc = makeTelegramUserDescriptor();
     expect(desc.connectionKind).toBe("telegram_user");
-    expect(Object.keys(desc.auth)).toEqual(["session"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["session"]);
+    expect(desc.grant).toBe("session");
     expect(desc.capabilities.actor).toBeUndefined();
-    // The `session` grant carries a conferral setup coroutine.
-    expect(typeof desc.auth.session.setup).toBe("function");
+    // The `session` grant carries a setup coroutine.
+    expect(typeof desc.auth.setup).toBe("function");
   });
 
-  it("session scheme: confer is setup-driven (throws), renew answers re-confer", async () => {
-    const scheme = makeTelegramUserDescriptor().auth.session;
-    await expect(scheme.confer({ prompt: async () => ({}) })).rejects.toThrow(
-      "conferral driven by the connection setup",
+  it("session scheme: grant is setup-driven (throws), renew answers fix", async () => {
+    const scheme = makeTelegramUserDescriptor().auth;
+    await expect(scheme.obtain({ prompt: async () => ({}) })).rejects.toThrow(
+      "grant driven by the connection setup",
     );
     expect(await scheme.renew({ material: {} as SecretRecord, expiresAt: "never" })).toBe(
-      "re-confer",
+      "needs-fix",
     );
   });
 
@@ -274,14 +270,11 @@ describe("telegram_user descriptor shape", () => {
 describe("telegram_user inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const desc = makeTelegramUserDescriptor();
-    const talker = desc.capabilities.talker!.build(
-      { session: validCred() },
-      {
-        connectionId: "telegram-user-test",
-        persist: async () => {},
-        registerIngress: () => () => {},
-      },
-    );
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "telegram-user-test",
+      persist: async () => {},
+      registerIngress: () => () => {},
+    });
     const delivered: unknown[] = [];
     talker.start(
       (msg) => delivered.push(msg),
@@ -468,7 +461,7 @@ const PROFILE = telegramUserProfileFromSettings(SETTINGS) as ProfileRecord;
 
 function makeRegistry(): ConnectionRegistry {
   const { db } = createTestDb();
-  const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
   registry.register(makeTelegramUserDescriptor({ probeIntervalMs: 1000 }));
   return registry;
 }
@@ -479,23 +472,29 @@ describe("telegram_user probe → grant degradation (registry)", () => {
     try {
       const registry = makeRegistry();
       const conn = await registry.connect("telegram_user");
-      await registry.importCredential(conn.id, "session", validCred() as Credential, PROFILE);
+      await registry.giveGrant(
+        conn.connectionKind,
+        conn.id,
+        "session",
+        validCred() as Credential,
+        PROFILE,
+      );
       expect(conn.auth.grants().session).toBe("authorized");
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
 
       // The account revokes the session server-side: the next probe sees it.
       fakeState.probeError = rpcError(undefined, "SESSION_REVOKED");
       await clock.advance(1000);
 
-      // renew answers "re-confer", so one probe fault degrades. The status
+      // renew answers "needs-fix", so one probe fault degrades. The status
       // surface then reads needs-reconnect + reason off the ledger.
       expect(conn.auth.grants().session).toBe("degraded");
-      expect(conn.isUnlocked("talk")).toBe(false);
-      const grant = await registry.getLedger().getGrant(conn.id, "session");
+      expect(conn.isUnlocked("chat")).toBe(false);
+      const grant = await registry.grantOf(conn.id);
       expect(grant?.state).toBe("degraded");
       // The status surface reads `degradedReason` off this — a non-empty reason
       // naming the credential rejection (the registry's renew-once-then-degrade
-      // wording; a user session's renew can only answer "re-confer").
+      // wording; a user session's renew can only answer "needs-fix").
       expect(grant?.degraded?.reason).toContain("credential rejected");
       expect(grant?.degraded?.at).toBeInstanceOf(Date);
     } finally {
@@ -508,7 +507,13 @@ describe("telegram_user probe → grant degradation (registry)", () => {
     try {
       const registry = makeRegistry();
       const conn = await registry.connect("telegram_user");
-      await registry.importCredential(conn.id, "session", validCred() as Credential, PROFILE);
+      await registry.giveGrant(
+        conn.connectionKind,
+        conn.id,
+        "session",
+        validCred() as Credential,
+        PROFILE,
+      );
 
       // Park epoch A's probe in flight (it has read the live client but not yet
       // returned) so a re-login can land underneath it.
@@ -529,7 +534,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
         }),
         expiresAt: "never",
       };
-      await registry.importCredential(conn.id, "session", cred2, PROFILE);
+      await registry.giveGrant(conn.connectionKind, conn.id, "session", cred2, PROFILE);
       expect(conn.auth.grants().session).toBe("authorized");
 
       // Epoch A's parked probe now fails auth — but it reports through the dead
@@ -541,7 +546,7 @@ describe("telegram_user probe → grant degradation (registry)", () => {
       await clock.advance(0);
 
       expect(conn.auth.grants().session).toBe("authorized");
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
     } finally {
       clock.uninstall();
     }

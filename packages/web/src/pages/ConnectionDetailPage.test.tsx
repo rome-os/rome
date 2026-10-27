@@ -7,6 +7,7 @@ import i18n from "@/i18n";
 import ConnectionDetailPage from "@/pages/ConnectionDetailPage";
 import type { ApiConnection, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+import { stateOfGrants } from "@/test/connection-state";
 
 /** A later account's channel id, opaque as core mints it. */
 const SECOND_FEISHU = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
@@ -26,10 +27,11 @@ function connection(
   return {
     id: `conn-${overrides.connectionKind}`,
     label: overrides.connectionKind,
+    state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? {}),
     grants: {},
     display: {},
     capabilities: {
-      talk: { state: "unsupported" },
+      chat: { state: "unsupported" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
@@ -56,12 +58,11 @@ function oauth(
 }
 
 /** Mirrors the old minimal channel-status fold: telegram + whatsapp offered but
- *  unconnected, webchat always on. */
+ *  unconnected. */
 function minimalConnections(): ApiConnection[] {
   return [
     connection({ connectionKind: "telegram", grants: { bot: "unauthorized" } }),
     connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" } }),
-    connection({ connectionKind: "webchat" }),
   ];
 }
 
@@ -212,36 +213,6 @@ describe("ConnectionDetailPage — load failure", () => {
   });
 });
 
-describe("ConnectionDetailPage — webchat (alwaysOn)", () => {
-  it("shows the Always on note in the Connection section", async () => {
-    mockApi();
-    renderDetail("webchat");
-
-    expect(await screen.findByText("Always on — nothing to configure.")).toBeTruthy();
-  });
-
-  it("renders the plain enablement bullet for webchat", async () => {
-    mockApi();
-    renderDetail("webchat");
-
-    expect(
-      await screen.findByText("Chat with your agent right here in the dashboard"),
-    ).toBeTruthy();
-  });
-
-  it("shows plain enablement copy without the Talk/Act/Watch taxonomy", async () => {
-    mockApi();
-    renderDetail("webchat");
-
-    await screen.findByText("Always on — nothing to configure.");
-    // The plain outcome bullet renders...
-    expect(screen.getByText("Chat with your agent right here in the dashboard")).toBeTruthy();
-    // ...but the internal taxonomy is never surfaced to the guardian.
-    expect(screen.queryByText("Capabilities")).toBeNull();
-    expect(screen.queryByText("Talk")).toBeNull();
-  });
-});
-
 describe("ConnectionDetailPage — OAuth service (github)", () => {
   it("renders the Connect button when github is not connected", async () => {
     mockApi([...minimalConnections(), oauth("github", "unauthorized")]);
@@ -263,7 +234,7 @@ describe("ConnectionDetailPage — OAuth service (github)", () => {
     expect(screen.getByText("React when something happens in your repositories")).toBeTruthy();
   });
 
-  it("renders Reconnect + Disconnect when the grant is conferred", async () => {
+  it("renders Reconnect + Disconnect when the grant is granted", async () => {
     mockApi([...minimalConnections(), oauth("github", "authorized")]);
     renderDetail("github");
 
@@ -273,14 +244,6 @@ describe("ConnectionDetailPage — OAuth service (github)", () => {
 });
 
 describe("ConnectionDetailPage — enablement bullets", () => {
-  it("webchat: the dashboard-chat bullet", async () => {
-    mockApi();
-    renderDetail("webchat");
-
-    const text = await screen.findByText("Chat with your agent right here in the dashboard");
-    expect(text).toBeTruthy();
-  });
-
   it("google: the outcome bullet phrased for the service", async () => {
     mockApi([...minimalConnections(), oauth("google", "authorized")]);
     renderDetail("google");
@@ -296,7 +259,7 @@ describe("ConnectionDetailPage — several accounts", () => {
       channel: "feishu",
       grants: { app: "authorized" },
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },
@@ -361,7 +324,7 @@ describe("ConnectionDetailPage — several accounts", () => {
   /** The setup start for a new account, answered as connected at once. */
   const connectedSetup = (connectionId: string) => ({
     cid: "cid-new",
-    state: { status: "done", conferral: { connectionId } },
+    state: { status: "done", grant: { connectionId } },
     reattached: false,
   });
 
