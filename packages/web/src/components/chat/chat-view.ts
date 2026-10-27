@@ -291,17 +291,17 @@ export function isAwaitingGuardian(
   return openFloorCards(view, runningTurnId).length > 0;
 }
 
-// Whether the floor session waits on a card that is the only way to answer
+// The card the floor session waits on that is the only way to answer
 // (`render.requiresCard`), in the same window as isAwaitingGuardian. The
-// composer locks while this holds.
-export function isLockedByCard(
+// composer locks while there is one, and its Skip dismisses this card.
+export function lockingCard(
   view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
   runningTurnId: string | null = null,
-): boolean {
-  return openFloorCards(view, runningTurnId).some((card) => card.render.requiresCard === true);
+): PendingCard | undefined {
+  return openFloorCards(view, runningTurnId).find((card) => card.render.requiresCard === true);
 }
 
-type PendingCard = Extract<TranscriptPart, { type: "pending_interaction" }>;
+export type PendingCard = Extract<TranscriptPart, { type: "pending_interaction" }>;
 
 // The unanswered cards of the floor session's latest turn, in the window
 // isAwaitingGuardian describes.

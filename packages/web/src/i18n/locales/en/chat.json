@@ -247,6 +247,7 @@
   "composer": {
     "placeholderDefault": "How can I help you today?",
     "lockedByCard": "Answer the card above to continue.",
+    "skipCard": "Skip",
     "placeholderWithUploads": "Add a message or send the uploaded files...",
     "hints": {
       "skill": "Type / to use a skill",
@@ -285,9 +286,6 @@
     "askedByRome": "Asked by Rome",
     "dismiss": "Dismiss",
     "send": "Send"
-  },
-  "appComponent": {
-    "dismiss": "Dismiss"
   },
   "aiToolsCard": {
     "title": "Connect Claude or ChatGPT",

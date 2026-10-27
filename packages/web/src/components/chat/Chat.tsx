@@ -50,7 +50,7 @@ import {
   buildRows,
   canPickChatModel,
   isAwaitingGuardian,
-  isLockedByCard,
+  lockingCard,
   isLastTurnFailed,
   type AgentIdentity,
   type HandoffNode,
@@ -654,7 +654,7 @@ export function Chat({
     () => isAwaitingGuardian(view, runningTurnId),
     [view, runningTurnId],
   );
-  const lockedByCard = useMemo(() => isLockedByCard(view, runningTurnId), [view, runningTurnId]);
+  const cardLock = useMemo(() => lockingCard(view, runningTurnId), [view, runningTurnId]);
   const lastTurnFailed = useMemo(() => isLastTurnFailed(view), [view]);
   // Typewriter-paced reveal of the latest assistant text block — the SSE
   // stream updates in provider-sized deltas; this smooths them into typing.
@@ -2279,7 +2279,12 @@ export function Chat({
                       // Locks once the turn that saved the card has ended, so
                       // Stop stays in reach while it still streams.
                       lockedReason={
-                        lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
+                        cardLock && !displayedStreaming ? t("composer.lockedByCard") : null
+                      }
+                      onSkipLock={
+                        cardLock
+                          ? () => void handleDismissAppComponent(floorSessionId, cardLock.toolUseId)
+                          : undefined
                       }
                       designingInteraction={
                         floorHandoff

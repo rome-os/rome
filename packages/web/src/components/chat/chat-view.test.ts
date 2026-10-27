@@ -6,7 +6,7 @@ import {
   canPickChatModel,
   interactionResultKey,
   isAwaitingGuardian,
-  isLockedByCard,
+  lockingCard,
   isLastTurnFailed,
   type AgentIdentity,
 } from "./chat-view";
@@ -477,7 +477,7 @@ describe("isAwaitingGuardian", () => {
   });
 });
 
-describe("isLockedByCard", () => {
+describe("lockingCard", () => {
   const card = (toolUseId: string, requiresCard?: boolean) => ({
     type: "pending_interaction",
     toolUseId,
@@ -490,42 +490,43 @@ describe("isLockedByCard", () => {
     },
   });
   const locked = (main: ChatMessage[], runningTurnId?: string) =>
-    isLockedByCard(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY), runningTurnId);
+    lockingCard(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY), runningTurnId)
+      ?.toolUseId ?? null;
 
-  it("is true while a card that is the only way to answer waits", () => {
+  it("names the waiting card that is the only way to answer", () => {
     expect(
       locked([
         mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
         mk(MAIN, "assistant", "t1", [card("c_0", true)]),
       ]),
-    ).toBe(true);
+    ).toBe("c_0");
   });
 
-  it("is false for a card typed text may replace", () => {
+  it("is none for a card typed text may replace", () => {
     expect(
       locked([
         mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
         mk(MAIN, "assistant", "t1", [card("c_0")]),
       ]),
-    ).toBe(false);
+    ).toBeNull();
     expect(
       locked([
         mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
         mk(MAIN, "assistant", "t1", [card("c_0", false)]),
       ]),
-    ).toBe(false);
+    ).toBeNull();
   });
 
-  it("is false once the card is answered", () => {
+  it("is none once the card is answered", () => {
     expect(
       locked([
         mk(MAIN, "assistant", "t1", [card("c_0", true)]),
         mk(MAIN, "user", "t2", [{ type: "interaction_result", toolUseId: "c_0", output: {} }]),
       ]),
-    ).toBe(false);
+    ).toBeNull();
   });
 
-  it("is false while a newer turn runs that has saved nothing yet", () => {
+  it("is none while a newer turn runs that has saved nothing yet", () => {
     expect(
       locked(
         [
@@ -534,6 +535,6 @@ describe("isLockedByCard", () => {
         ],
         "backend:b1",
       ),
-    ).toBe(false);
+    ).toBeNull();
   });
 });

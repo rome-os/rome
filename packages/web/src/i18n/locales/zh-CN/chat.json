@@ -247,6 +247,7 @@
   "composer": {
     "placeholderDefault": "今天我能帮你做点什么?",
     "lockedByCard": "请先回答上方的卡片，再继续。",
+    "skipCard": "跳过",
     "placeholderWithUploads": "添加消息或直接发送已上传的文件...",
     "hints": {
       "skill": "输入 / 使用技能",
@@ -285,9 +286,6 @@
     "askedByRome": "Rome 正在提问",
     "dismiss": "跳过",
     "send": "发送"
-  },
-  "appComponent": {
-    "dismiss": "跳过"
   },
   "aiToolsCard": {
     "title": "连接 Claude 或 ChatGPT",
