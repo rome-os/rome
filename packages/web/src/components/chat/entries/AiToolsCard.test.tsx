@@ -265,4 +265,33 @@ describe("AiToolsCard", () => {
     expect(screen.getByText("Connected")).toBeTruthy();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it("brings back a way to send a skip that did not go through", async () => {
+    mockStatus({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+    const onSubmit = rs
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(<AiToolsCard toolUseId="t-1" onSubmit={onSubmit} />);
+    await user.click(await screen.findByRole("button", { name: "Skip for now" }));
+
+    expect(await screen.findByText("That didn't go through.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onSubmit).toHaveBeenLastCalledWith("t-1", { skip: true }, "Skipped connecting an AI");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Try again" })).toBeNull());
+  });
+
+  it("stops sending a connected answer on its own once it fails", async () => {
+    mockStatus({ claude: { loggedIn: true }, codex: { loggedIn: false } });
+    const onSubmit = rs.fn().mockRejectedValue(new Error("offline"));
+
+    render(<AiToolsCard toolUseId="t-1" onSubmit={onSubmit} />);
+
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(onSubmit).toHaveBeenCalledOnce();
+  });
 });

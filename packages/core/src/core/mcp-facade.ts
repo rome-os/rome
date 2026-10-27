@@ -18,6 +18,7 @@
 // The Anthropic MCP-server test (`anthropic-mcp-servers.test.ts`) is the
 // regression gate for this module.
 
+import { isValidTimeZone } from "../lib/timezone.js";
 import { createLogger } from "../logger.js";
 import type { DeferInput } from "./defer.js";
 import type {
@@ -1009,12 +1010,8 @@ function buildScheduleTriggerFromInput(
       error: `propose_routine.localTime "${localTime}" is invalid — expected HH:mm (24-hour), e.g. 09:30`,
     };
   }
-  if (tzid !== "UTC") {
-    const supported =
-      typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
-    if (supported.length > 0 && !supported.includes(tzid)) {
-      return { ok: false, error: `propose_routine.tzid "${tzid}" is not a valid IANA timezone` };
-    }
+  if (!isValidTimeZone(tzid)) {
+    return { ok: false, error: `propose_routine.tzid "${tzid}" is not a valid IANA timezone` };
   }
 
   const rrule = typeof o.rrule === "string" && o.rrule.trim() ? o.rrule.trim() : undefined;

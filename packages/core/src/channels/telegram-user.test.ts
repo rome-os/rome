@@ -129,7 +129,6 @@ describe("TelegramUserAdapter", () => {
         messageId: "7",
         chatId: "-100555",
         senderId: "111",
-        senderDisplayName: "111",
         text: "see this",
         attachments: [{ type: "document" }],
         timestamp: new Date(1_700_000_000_000),

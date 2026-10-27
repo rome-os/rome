@@ -59,6 +59,8 @@ describe("runTurn — greeting and the name card", () => {
       componentId: "name-card",
       lead: expect.stringContaining("Hi Alex — I'm Nova."),
       props: { guardianName: "Alex", agentName: "Nova" },
+      // Only the card can answer this step, so the host closes the composer.
+      requiresCard: true,
     });
     expect(getNode()).toBe("await_names");
   });

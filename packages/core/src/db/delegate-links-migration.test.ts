@@ -6,7 +6,7 @@ import { describe, expect, it } from "@rstest/core";
 
 const migrationPath = (name: string) =>
   resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system", name);
-const DELEGATE_LINKS = readFileSync(migrationPath("0098_delegate_links.sql"), "utf8");
+const DELEGATE_LINKS = readFileSync(migrationPath("0099_delegate_links.sql"), "utf8");
 
 function run(sqlite: Database.Database, migration: string): void {
   for (const statement of migration.split("--> statement-breakpoint")) sqlite.exec(statement);

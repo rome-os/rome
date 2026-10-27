@@ -21,6 +21,7 @@ import { prettyAgentName } from "@/lib/agent-name";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { deleteSession } from "@/lib/chat-api";
 import { useApps } from "@/hooks/use-apps";
+import { appDisplayName } from "@/lib/app-display-name";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -183,12 +184,7 @@ export function FreeGrid() {
     if (widget.type === "chat" && widget.targetId) {
       return sessionNames.get(widget.targetId) ?? t("nav.chat");
     }
-    if (widget.type === "app")
-      return (
-        apps?.find((app) => app.id === widget.targetId)?.displayName ??
-        widget.targetId ??
-        t("nav.apps")
-      );
+    if (widget.type === "app") return appDisplayName(widget.targetId, apps, t("nav.apps"));
     return t(
       widget.type === "chat"
         ? "nav.chat"

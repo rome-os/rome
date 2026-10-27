@@ -3887,7 +3887,12 @@ describe("Webchat API", () => {
     // An inline component goes through the same suspension lifecycle as a
     // handoff — toolUseId-keyed card and resolution — but keeps its own
     // `pending_interaction` part type and spawns no child session.
-    const inlineRenderEvents = (toolUseId: string, appId: string, componentId: string) =>
+    const inlineRenderEvents = (
+      toolUseId: string,
+      appId: string,
+      componentId: string,
+      render: Record<string, unknown> = {},
+    ) =>
       async function* () {
         yield {
           type: "tool_result",
@@ -3899,13 +3904,44 @@ describe("Webchat API", () => {
               text: JSON.stringify({
                 pendingInteraction: true,
                 appId,
-                render: { kind: "inline", componentId, props: { q: "ok?" } },
+                render: { kind: "inline", componentId, props: { q: "ok?" }, ...render },
               }),
             },
           ],
         };
         yield { type: "result", content: "" };
       };
+
+    it("keeps requiresCard on the stored card, and only when the payload set it", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(
+        inlineRenderEvents("tu-required-1", "ask-user", "question-card", { requiresCard: true }),
+      );
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "ask me something" }),
+      });
+      expect((await findCard(sessionId, "tu-required-1"))?.render).toMatchObject({
+        componentId: "question-card",
+        requiresCard: true,
+      });
+
+      // A payload that says "yes" in any other shape, or says nothing, stores no flag.
+      ctl.setEvents(
+        inlineRenderEvents("tu-required-2", "ask-user", "question-card", { requiresCard: "yes" }),
+      );
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "again" }),
+      });
+      expect((await findCard(sessionId, "tu-required-2"))?.render).not.toHaveProperty(
+        "requiresCard",
+      );
+    });
 
     it("snapshots an inline pending_interaction card with no child session", async () => {
       const ctl = mockScriptedManager();

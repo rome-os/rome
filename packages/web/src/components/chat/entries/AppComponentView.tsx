@@ -1,11 +1,13 @@
 import { useUiScale } from "@rome-os/ui/ui-scale";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   appendScopedStyles,
   prepareShadowMount,
   type RomeAppBootstrap,
 } from "@/components/rome-app-host";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { trackAppOpen } from "@/lib/analytics";
 import { useTheme } from "@/hooks/use-theme";
 import { getActiveLocale } from "@/i18n";
@@ -70,6 +72,7 @@ export function AppComponentView({
   onSubmit,
   onDismiss,
 }: AppComponentViewProps) {
+  const { t } = useTranslation("chat");
   const { resolved: theme, theme: themeName } = useTheme();
   const scale = useUiScale();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -170,6 +173,20 @@ export function AppComponentView({
           Couldn’t load <span className="font-mono">{componentId}</span> from{" "}
           <span className="font-mono">{appId}</span>: {error}
         </AlertDescription>
+        {/* A card that cannot load can still be dismissed, so a step that only
+            the card can answer, which also closes the composer, is never a
+            dead end. */}
+        {resolved ? null : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="col-start-2 mt-1 justify-self-start"
+            onClick={() => onDismiss(toolUseId)}
+          >
+            {t("appComponent.dismiss")}
+          </Button>
+        )}
       </Alert>
     );
   }

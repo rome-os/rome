@@ -246,6 +246,7 @@
   },
   "composer": {
     "placeholderDefault": "今天我能帮你做点什么?",
+    "lockedByCard": "请先回答上方的卡片，再继续。",
     "placeholderWithUploads": "添加消息或直接发送已上传的文件...",
     "hints": {
       "skill": "输入 / 使用技能",
@@ -285,6 +286,9 @@
     "dismiss": "跳过",
     "send": "发送"
   },
+  "appComponent": {
+    "dismiss": "跳过"
+  },
   "aiToolsCard": {
     "title": "连接 Claude 或 ChatGPT",
     "hint": "我会使用你已有的订阅来思考。登录其中一个，我就可以开始工作了。",
@@ -292,6 +296,8 @@
     "connected": "已连接",
     "skipped": "暂时跳过",
     "skip": "暂时跳过",
+    "sendFailed": "没能发送出去。",
+    "retry": "重试",
     "connectedSummary": "已连接 AI",
     "skippedSummary": "暂时跳过连接 AI",
     "connectedTitle": "AI 已连接",

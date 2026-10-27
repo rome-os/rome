@@ -113,6 +113,15 @@ One of Rome's accounts as Chats sees it: a [connection](connections.md#connectio
 - A message or a participant names an account by platform and the platform's own id, never by a connection. A message remembers who said it, not the connection that carried it. Rome finds the connection when it sends, as the one whose grant reaches the account.
 - Its kind of link, [own account](#own-account) or [delegate](#delegate), follows from its kind of connection: a bot is always the agent's own account, and the guardian's signed-in account always takes a delegate.
 
+## Account profile
+
+What a platform says about an [account](#account): its display name, handle and avatar. Chats keeps it as a cache, not a record of its own.
+
+- It is keyed by the account, the platform and the platform's own id, and has no identity of its own. Nothing points at it: a reader that holds an account looks its profile up by the same value.
+- The channels fill it as they learn: from an address book's sync, and from what a sender put on a message. On a platform Rome mirrors an address book for, only the address book fills it, keyed by the book's own id for the account, since a message may name the sender by another of the account's addresses. Elsewhere, what a platform's address book holds would outrank what a sender called themselves, so a message never overwrites a profile an address book wrote.
+- It can be dropped and rebuilt from the platforms at any time, and nothing else is lost when it is. An account no profile has been learned for yet is still an account.
+- A channel's own mirror of an address book stays the source for what it mirrors. A name is read from the mirror first, then from the profile.
+
 ## Envoy
 
 The feature's name: linking agents to accounts so they can take part in chats on platforms. Not a thing in the model. The things are the two kinds of link below. The dashboard's use of the name as a page title is branding.
@@ -148,3 +157,4 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **An assistant's chat starting at its first message.** The guardian could not find an assistant to write to before it had written, so they could never start the chat.
 - **Listing other Romes among the assistants, for now.** Talking to another Rome has no product of its own yet: no way in, and no rule for two Romes answering each other's replies. Every Rome in the account, stopped test stacks included, would also fill the list. Other Romes return to the list when that product is designed.
 - **Assistants' chats as a group in the dashboard's chat list.** Main answers assistants, so the guardian reads their chats now and then rather than watching them. A group beside the guardian's own chats kept them in view all the time.
+- **An account record with an id of its own that links and profiles point at.** It would make the account an entity with an identity Rome minted, which no platform has, and Rome never makes an account, so a link to one Rome has not heard from yet would have nothing to point at. The [account profile](#account-profile) keyed by the account gives what the platform says a home without giving the account a lifetime.

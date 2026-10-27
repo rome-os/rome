@@ -128,9 +128,9 @@ class WelcomeTurnMiddleware implements TurnMiddlewareHook {
     if (reply.kind === "ask") {
       emitAskQuestion(emit, reply.questions);
     } else if (reply.kind === "connect_ai") {
-      emitConnectAi(emit);
+      emitConnectAi(emit, { requiresCard: true });
     } else {
-      emitComponent(emit, reply.componentId, reply.props);
+      emitComponent(emit, reply.componentId, reply.props, { requiresCard: reply.requiresCard });
     }
   }
 

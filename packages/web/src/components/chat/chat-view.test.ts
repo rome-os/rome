@@ -6,6 +6,7 @@ import {
   canPickChatModel,
   interactionResultKey,
   isAwaitingGuardian,
+  isLockedByCard,
   isLastTurnFailed,
   type AgentIdentity,
 } from "./chat-view";
@@ -473,5 +474,66 @@ describe("isAwaitingGuardian", () => {
         [mk(CHILD, "assistant", "c1", [questionCard("q_0")])],
       ),
     ).toBe(true);
+  });
+});
+
+describe("isLockedByCard", () => {
+  const card = (toolUseId: string, requiresCard?: boolean) => ({
+    type: "pending_interaction",
+    toolUseId,
+    appId: "welcome-to-rome",
+    render: {
+      kind: "inline",
+      componentId: "name-card",
+      props: {},
+      ...(requiresCard === undefined ? {} : { requiresCard }),
+    },
+  });
+  const locked = (main: ChatMessage[], runningTurnId?: string) =>
+    isLockedByCard(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY), runningTurnId);
+
+  it("is true while a card that is the only way to answer waits", () => {
+    expect(
+      locked([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+        mk(MAIN, "assistant", "t1", [card("c_0", true)]),
+      ]),
+    ).toBe(true);
+  });
+
+  it("is false for a card typed text may replace", () => {
+    expect(
+      locked([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+        mk(MAIN, "assistant", "t1", [card("c_0")]),
+      ]),
+    ).toBe(false);
+    expect(
+      locked([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+        mk(MAIN, "assistant", "t1", [card("c_0", false)]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is false once the card is answered", () => {
+    expect(
+      locked([
+        mk(MAIN, "assistant", "t1", [card("c_0", true)]),
+        mk(MAIN, "user", "t2", [{ type: "interaction_result", toolUseId: "c_0", output: {} }]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is false while a newer turn runs that has saved nothing yet", () => {
+    expect(
+      locked(
+        [
+          mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+          mk(MAIN, "assistant", "t1", [card("c_0", true)]),
+        ],
+        "backend:b1",
+      ),
+    ).toBe(false);
   });
 });

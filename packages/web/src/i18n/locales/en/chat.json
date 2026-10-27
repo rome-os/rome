@@ -246,6 +246,7 @@
   },
   "composer": {
     "placeholderDefault": "How can I help you today?",
+    "lockedByCard": "Answer the card above to continue.",
     "placeholderWithUploads": "Add a message or send the uploaded files...",
     "hints": {
       "skill": "Type / to use a skill",
@@ -285,6 +286,9 @@
     "dismiss": "Dismiss",
     "send": "Send"
   },
+  "appComponent": {
+    "dismiss": "Dismiss"
+  },
   "aiToolsCard": {
     "title": "Connect Claude or ChatGPT",
     "hint": "I think with your existing subscription. Sign in to one so I can start working.",
@@ -292,6 +296,8 @@
     "connected": "Connected",
     "skipped": "Skipped for now",
     "skip": "Skip for now",
+    "sendFailed": "That didn't go through.",
+    "retry": "Try again",
     "connectedSummary": "Connected an AI",
     "skippedSummary": "Skipped connecting an AI",
     "connectedTitle": "AI connected",

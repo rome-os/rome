@@ -87,6 +87,9 @@ import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
+import { AccountProfiles, channelPlatforms, refreshingAfter } from "./channels/account-profiles.js";
+import { AccountProfilesRepository } from "./db/repositories/account-profiles.js";
+import { platformOf } from "@rome/api-types/platform";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./channels/webchat-channel.js";
@@ -340,6 +343,18 @@ async function main() {
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
   const sentinelLogRepo = new SentinelLogRepository(db);
+  // What each platform says about the accounts Rome meets. The two address
+  // books fill it after each sync and once now, so a dropped cache is rebuilt.
+  const accountProfiles = new AccountProfiles(
+    new AccountProfilesRepository(db),
+    channelPlatforms(channelRecords),
+  );
+  const refreshWhatsAppProfiles = () =>
+    accountProfiles.refresh(platformOf("whatsapp"), whatsAppAccounts);
+  const refreshLinkedInProfiles = () =>
+    accountProfiles.refresh(platformOf("linkedin"), linkedInAccounts);
+  refreshWhatsAppProfiles();
+  refreshLinkedInProfiles();
   // The personal WeChat account contributes a people-timeline source only when
   // the connection is enabled; its store is the client's own database, read live.
   // The channel list and the Connection's Talk share this one client runtime.
@@ -1379,8 +1394,20 @@ async function main() {
     chatSettings,
     chatStop,
     peopleRepo,
-    whatsAppSyncSink: whatsAppStoreRepo,
-    linkedInSyncSink: linkedInStoreRepo,
+    whatsAppSyncSink: refreshingAfter(
+      whatsAppStoreRepo,
+      ["upsertContacts", "upsertChats"],
+      refreshWhatsAppProfiles,
+    ),
+    linkedInSyncSink: refreshingAfter(
+      linkedInStoreRepo,
+      [
+        "replaceThreadParticipantMembership",
+        "upsertParticipantProfile",
+        "backfillParticipantsFromMessages",
+      ],
+      refreshLinkedInProfiles,
+    ),
     linkedinPoll: {
       minIntervalMs: config.linkedinPollMinMinutes * 60_000,
       maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
@@ -1424,6 +1451,7 @@ async function main() {
       pacing: replyPacing,
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
+      heard: (message) => accountProfiles.heard(message),
     },
     connectionAccounts: {
       [AGENTS_KIND]: agentsAccounts(listedAgents),
@@ -1443,7 +1471,11 @@ async function main() {
     own: [webchat],
   });
   builtChannels = channels;
-  const accountNames = createAccountNames({ channels, sentinelLogRepo });
+  const accountNames = createAccountNames({
+    channels,
+    sentinelLogRepo,
+    profiles: accountProfiles,
+  });
 
   // The channel-message hook hears every channel through these, so each
   // inbound message it handles is traced and logged once.
@@ -1526,6 +1558,7 @@ async function main() {
         pacing: replyPacing,
         listening: accountListening,
         accountOf: (connectionId) => accounts.accountOf(connectionId),
+        heard: (message) => accountProfiles.heard(message),
         channels,
       },
       connection,

@@ -288,22 +288,46 @@ export function isAwaitingGuardian(
   view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
   runningTurnId: string | null = null,
 ): boolean {
+  return openFloorCards(view, runningTurnId).length > 0;
+}
+
+// Whether the floor session waits on a card that is the only way to answer
+// (`render.requiresCard`), in the same window as isAwaitingGuardian. The
+// composer locks while this holds.
+export function isLockedByCard(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  runningTurnId: string | null = null,
+): boolean {
+  return openFloorCards(view, runningTurnId).some((card) => card.render.requiresCard === true);
+}
+
+type PendingCard = Extract<TranscriptPart, { type: "pending_interaction" }>;
+
+// The unanswered cards of the floor session's latest turn, in the window
+// isAwaitingGuardian describes.
+function openFloorCards(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  runningTurnId: string | null,
+): PendingCard[] {
   const { displayMessages, floorSessionId, interactionResults } = view;
   const floor = displayMessages.filter((m) => m.sessionId === floorSessionId);
   const latestTurnId = floor.at(-1)?.turnId;
-  if (runningTurnId !== null && latestTurnId !== runningTurnId) return false;
+  if (runningTurnId !== null && latestTurnId !== runningTurnId) return [];
+  const cards: PendingCard[] = [];
   for (let i = floor.length - 1; i >= 0; i--) {
     const msg = floor[i];
-    if (msg.turnId !== latestTurnId || msg.role === "user") return false;
+    if (msg.turnId !== latestTurnId || msg.role === "user") break;
     if (msg.role !== "assistant") continue;
-    const waiting = parseMessageEntries(msg).some(
-      (b) =>
+    for (const b of parseMessageEntries(msg)) {
+      if (
         b.type === "pending_interaction" &&
-        !interactionResults.has(interactionResultKey(floorSessionId, b.toolUseId)),
-    );
-    if (waiting) return true;
+        !interactionResults.has(interactionResultKey(floorSessionId, b.toolUseId))
+      ) {
+        cards.push(b);
+      }
+    }
   }
-  return false;
+  return cards;
 }
 
 // Whether the floor session's latest finished turn ended with an error: the

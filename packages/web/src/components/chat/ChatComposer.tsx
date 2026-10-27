@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowUp, Paperclip, Sparkles, X } from "lucide-react";
+import { ArrowUp, Lock, Paperclip, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -171,6 +171,12 @@ export interface ChatComposerProps {
     onApprove?: () => void;
     onCancel?: () => void;
   } | null;
+  // Why typing is off right now: a card in the transcript is the only way to
+  // answer. While set, a locked strip with this text stands where the box
+  // was, so the state reads at a glance. Null or undefined keeps the composer
+  // open. The box stays mounted but hidden, so its draft and measurements
+  // survive the lock.
+  lockedReason?: string | null;
   // Styling for the input box itself (border, surface, padding, blur). The
   // composer owns the box so the pre-send chip row can sit *outside* it; each
   // mount passes its own box look (the floating composer adds backdrop-blur).
@@ -225,6 +231,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     onStop,
     streamError,
     designingInteraction = null,
+    lockedReason = null,
     boxClassName,
     textOnly = false,
     placeholder,
@@ -413,11 +420,26 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // box would otherwise stay at its previous (potentially maxed-out) height
   // and not shrink back to a single line. We mirror the onInput math here
   // and let React re-apply it after every value change.
+  // A hidden box measures zero, so a locked composer waits and resizes again
+  // once the lock lifts.
+  const locked = lockedReason !== null && lockedReason !== undefined;
   useLayoutEffect(() => {
     const el = textareaRef.current;
-    if (!el) return;
+    if (!el || locked) return;
     clampTextareaHeight(el, textareaMaxHeight);
-  }, [inputText, textareaMaxHeight]);
+  }, [inputText, textareaMaxHeight, locked]);
+
+  // The composer's menus render outside the box, so hiding it leaves an open
+  // one on screen. Close them as the lock engages.
+  useEffect(() => {
+    if (!locked) return;
+    setMentionMenuOpen(false);
+    setSlashMenuOpen(false);
+    setImpersonationMenuOpen(false);
+    setModelMenuOpen(false);
+    setReasoningMenuOpen(false);
+    setDraftProjectMenuOpen(false);
+  }, [locked]);
 
   // Whether the textarea held focus when the current Send press began.
   const textareaFocusedAtPressRef = useRef(false);
@@ -680,7 +702,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   );
 
   const runSend = useCallback(async () => {
-    if (uploadInFlight || uploadInFlightRef.current) return;
+    if (locked || uploadInFlight || uploadInFlightRef.current) return;
     // A skill chip alone is a sendable turn — the server-expanded prompt asks
     // the agent to read the skill and ask what to do with it.
     if (!inputText.trim() && pendingUploads.length === 0 && !draftSkill) return;
@@ -784,6 +806,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     uploadInFlight,
     invokeOnSend,
     hints,
+    locked,
   ]);
 
   // Re-evaluates whether the cursor sits inside an active mention token
@@ -1129,7 +1152,21 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         )}
         {textOnly ? null : <WorkspaceContextChips />}
       </div>
-      <div data-chat-composer-box className={cn("@container/composer relative z-10", boxClassName)}>
+      {locked ? (
+        <div
+          role="status"
+          data-chat-composer-locked
+          className="relative z-10 flex items-center gap-3 rounded-16 border border-border bg-muted px-4 py-3 text-ui text-foreground"
+        >
+          <Lock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1">{lockedReason}</span>
+        </div>
+      ) : null}
+      <div
+        data-chat-composer-box
+        hidden={locked}
+        className={cn("@container/composer relative z-10", boxClassName)}
+      >
         {composerError && (
           <Alert variant="destructive" className="mb-3 px-3 py-2">
             <AlertDescription>{composerError}</AlertDescription>
