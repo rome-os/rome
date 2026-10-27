@@ -120,6 +120,7 @@ What a platform says about an [account](#account): its display name, handle and 
 - It is keyed by the account, the platform and the platform's own id, and has no identity of its own. Nothing points at it: a reader that holds an account looks its profile up by the same value.
 - The channels fill it as they learn: from an address book's sync, and from what a sender put on a message. On a platform Rome mirrors an address book for, only the address book fills it, keyed by the book's own id for the account, since a message may name the sender by another of the account's addresses. Elsewhere, what a platform's address book holds would outrank what a sender called themselves, so a message never overwrites a profile an address book wrote.
 - It can be dropped and rebuilt from the platforms at any time, and nothing else is lost when it is. An account no profile has been learned for yet is still an account.
+- A profile may be missing for an account a link, a dismissal or a message names. A reader then shows the account by its id.
 - A channel's own mirror of an address book stays the source for what it mirrors. A name is read from the mirror first, then from the profile.
 
 ## Envoy
