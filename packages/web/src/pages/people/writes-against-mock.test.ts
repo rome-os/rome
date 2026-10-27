@@ -9,6 +9,7 @@ import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
 import { fetchJson } from "@/lib/fetch-json";
 import {
   createPerson,
+  deletePerson,
   discardSend,
   dismissAccount,
   linkAccount,
@@ -94,6 +95,26 @@ describe("People writes, against the contract's own handlers", () => {
 
     const merged = await mergePeople(survivor.value.id, duplicate.value.id, t);
     expect(merged).toMatchObject({ ok: true, value: { id: survivor.value.id } });
+  });
+
+  it("deletes a person, leaving their account free to link again, and keeps the guardian", async () => {
+    const account = { channel: "telegram", channelUserId: "990001" };
+    const doomed = await createPerson({ displayName: "Nell Deleted", accounts: [account] }, t);
+    const other = await createPerson({ displayName: "Nell Other" }, t);
+    expect(doomed.ok && other.ok).toBe(true);
+    if (!doomed.ok || !other.ok) return;
+
+    expect(await deletePerson(doomed.value.id, t)).toMatchObject({ ok: true });
+    expect(await deletePerson(doomed.value.id, t)).toMatchObject({ ok: false, status: 404 });
+    // A stranger again: linking it needs no transfer from anybody.
+    const relinked = await linkAccount(other.value.id, account, t);
+    expect(relinked.ok).toBe(true);
+
+    expect(await deletePerson("mock-guardian", t)).toMatchObject({
+      ok: false,
+      message: "the guardian cannot be deleted",
+      status: 400,
+    });
   });
 });
 

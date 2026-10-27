@@ -754,4 +754,16 @@ export const peopleHandlers = [
     persons.splice(persons.indexOf(source), 1);
     return HttpResponse.json(personResource(target));
   }),
+
+  // Delete: the person and their links go, so their accounts are strangers
+  // again. The guardian stays.
+  http.delete("/api/people/:id", ({ params }) => {
+    const person = findVisiblePerson(String(params.id));
+    if (!person) return notFound("person");
+    if (protectedPersonReason(person) === "guardian") {
+      return HttpResponse.json({ error: "the guardian cannot be deleted" }, { status: 400 });
+    }
+    persons.splice(persons.indexOf(person), 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
 ];

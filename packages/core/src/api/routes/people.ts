@@ -22,6 +22,7 @@ import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
 import { parseMessageCursor } from "@rome/api-types/message";
 import { createPerson } from "../../people/create.js";
+import { deletePerson } from "../../people/delete.js";
 import { mergePeople } from "../../people/merge.js";
 import { discardSend, readOutbox, retrySend, sendToAccount } from "../../people/outbox.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
@@ -35,7 +36,7 @@ import type { ApiDeps } from "../deps.js";
 // a refused one answers are the contract's (@rome/api-types/people);
 // serializing a person is `src/people/resource.ts`, creating one is
 // `src/people/create.ts`, editing one `src/people/update.ts`, absorbing one
-// `src/people/merge.ts`, and which stores a history is merged from is the rest
+// `src/people/merge.ts`, deleting one `src/people/delete.ts`, and which stores a history is merged from is the rest
 // of `src/people/`. The compare-and-swap a link rides on is the person
 // repository's, because only a transaction there can decide it. These handlers
 // read the request and pick a status code, and hold no rule of their own.
@@ -103,6 +104,17 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // a change the person does not have.
     if ("refused" in result) return c.json({ error: result.refused }, 400);
     return c.json(result.person);
+  });
+
+  // 204: the person is gone, so there is no resource to answer with. Their
+  // accounts are strangers again, which the directory read shows.
+  app.delete("/people/:id", async (c) => {
+    const result = await deletePerson(deps, c.req.param("id"));
+    if ("unknown" in result) return c.json({ error: "Unknown person" }, 404);
+    // 400 for the same reason as a refused edit: the request names a change the
+    // guardian cannot have.
+    if ("refused" in result) return c.json({ error: result.refused }, 400);
+    return c.body(null, 204);
   });
 
   // The duplicate names itself in the body and the survivor in the path, so a

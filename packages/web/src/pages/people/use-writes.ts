@@ -11,6 +11,7 @@ import type {
 import { ACCOUNTS_KEY, OUTBOX_KEY, PEOPLE_KEY, TIMELINE_KEY } from "./use-roster";
 import {
   createPerson,
+  deletePerson,
   discardSend,
   dismissAccount,
   linkAccount,
@@ -59,6 +60,8 @@ export interface PeopleWrites {
   restore(account: AccountRef): Promise<WriteOutcome<DirectoryAccount>>;
   /** `into` absorbs `from`, and `from` is gone. */
   merge(into: string, from: string): Promise<WriteOutcome<PersonResource>>;
+  /** The person is gone and their accounts are strangers again. */
+  remove(personId: string): Promise<WriteOutcome<void>>;
   setBond(personId: string, bondLevel: AssignableBondLevel): Promise<WriteOutcome<PersonResource>>;
   /**
    * Say something to one of a person's accounts. The account is named, always —
@@ -154,6 +157,7 @@ export function usePeopleWrites(): PeopleWrites {
       dismiss: (account) => settling(() => dismissAccount(ref(account), t)),
       restore: (account) => settling(() => restoreAccount(ref(account), t)),
       merge: (into, from) => settling(() => mergePeople(into, from, t)),
+      remove: (personId) => settling(() => deletePerson(personId, t)),
       setBond: (personId, bondLevel) => settling(() => updatePerson(personId, { bondLevel }, t)),
       say: (personId, account, text, options) =>
         settling(async () => {

@@ -19,6 +19,7 @@
 //
 //   PATCH  /api/people/:id           -> PersonResource
 //   POST   /api/people/:id/merge     -> PersonResource
+//   DELETE /api/people/:id           -> 204
 //   POST   /api/accounts/:channel/:channelUserId/dismiss  -> DirectoryAccount
 //   POST   /api/accounts/:channel/:channelUserId/restore  -> DirectoryAccount
 //

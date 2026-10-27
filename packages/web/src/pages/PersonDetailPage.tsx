@@ -165,6 +165,9 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
             onMerged={(survivorId) =>
               navigate(personPath(survivorId), { replace: true, state: { from: origin } })
             }
+            // A delete leaves nobody to follow, so the page goes where its back
+            // arrow would.
+            onDeleted={back}
           />
         </div>
 
