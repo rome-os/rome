@@ -61,6 +61,7 @@ export function createRomeMcpServerForSession(params: ModelSessionForkOpenParams
     executeDefer: params.executeDefer,
     sessionTools: params.sessionTools,
     routineActivation: params.routineActivation,
+    textPrivate: params.textPrivate,
   });
 }
 

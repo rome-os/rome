@@ -567,6 +567,7 @@ export class AnthropicProvider implements ModelProvider {
       executeDefer,
       sessionTools: params.sessionTools,
       routineActivation,
+      textPrivate: params.textPrivate,
     });
 
     const queryContext = await this.buildQueryContext();
@@ -580,6 +581,10 @@ export class AnthropicProvider implements ModelProvider {
         queryContext.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS,
         askQuestionParksOnCard(params),
       ),
+      // Claude Code nudges a turn that has gone a few rounds without visible
+      // text. A private-text agent's text is never visible, so the nudge would
+      // fire even right after it messaged the guardian.
+      ...(params.textPrivate ? { CLAUDE_CODE_SILENT_TURN_REMINDER: "0" } : {}),
     };
     const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
     const authRevokedSource = queryContext.authRevokedSource;

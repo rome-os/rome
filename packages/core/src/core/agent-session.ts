@@ -119,6 +119,7 @@ import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
+import { resolveSessionPolicy } from "./session-policy.js";
 import { detachSessionTools, type SessionToolsProvider } from "./session-tools.js";
 import type {
   StoredConversationContextMessage,
@@ -1542,6 +1543,7 @@ async function openSession(
     reasoningEffort,
     workingDir,
     channel: sessionKeyChannel(key.channelThreadKey),
+    textPrivate: resolveSessionPolicy(config).finalText === "private",
     externalMcpServers,
     sessionId,
     isNewSession: sessionIdUnused,

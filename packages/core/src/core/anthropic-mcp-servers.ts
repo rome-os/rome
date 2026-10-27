@@ -57,6 +57,8 @@ interface BuildAnthropicMcpServersParams {
   sessionTools?: FacadeToolDef[];
   /** See FacadeParams.routineActivation. */
   routineActivation?: RoutineActivationGate;
+  /** See FacadeParams.textPrivate. */
+  textPrivate?: boolean;
 }
 
 export type AnthropicMcpServers = Record<
@@ -116,6 +118,7 @@ export function buildAnthropicMcpServers({
   executeDefer,
   sessionTools,
   routineActivation,
+  textPrivate,
 }: BuildAnthropicMcpServersParams): AnthropicMcpServers {
   const server = createRomeMcpServer({
     getActionCatalog,
@@ -130,6 +133,7 @@ export function buildAnthropicMcpServers({
     executeDefer,
     sessionTools,
     routineActivation,
+    textPrivate,
   });
 
   // The actions + skills MCP servers always register so the agent can list

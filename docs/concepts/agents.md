@@ -45,7 +45,7 @@ A core or app agent may declare how a chat treats its turns in an optional `poli
 
 | Field | Values | Default |
 |---|---|---|
-| `finalText` | `deliver` sends the model's text to the chat. `private` keeps it, narration and final reply alike, in the trace, so the agent reaches the guardian only through its tools. | `deliver` |
+| `finalText` | `deliver` sends the model's text to the chat. `private` keeps it, narration and final reply alike, in the trace, so the agent reaches the guardian only through its tools. A `private` agent gets no Claude Code reminder to update the guardian, and `defer` does not ask it for a confirmation line. | `deliver` |
 | `autoTitle` | Whether the chat's first message names the chat. | `true` |
 | `loadMemory` | Whether a core agent's system prompt carries the memory index, project summaries, and runtime paths. | `true` for `main` only |
 

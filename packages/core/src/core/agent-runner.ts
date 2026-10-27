@@ -149,6 +149,11 @@ export interface ModelSessionParams {
   /** The channel the session's turns are delivered on, from its key. Shell
    *  tools such as the Discord CLI read it to act as that channel's account. */
   channel?: string;
+  /**
+   * The agent's text stays in its trace (`policy.finalText: private`), so it
+   * reaches the guardian only through its tools.
+   */
+  textPrivate?: boolean;
   externalMcpServers?: Record<string, McpServerConfig>;
   /**
    * The session identifier, a bare UUID. The Anthropic provider passes a new

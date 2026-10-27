@@ -1,5 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { buildFacadeBundle, type FacadeParams } from "./mcp-facade.js";
+import { createRomeMcpServerForSession } from "./mcp/server.js";
 
 function baseParams(overrides: Partial<FacadeParams> = {}): FacadeParams {
   return {
@@ -36,6 +37,30 @@ describe("defer facade tool", () => {
     expect(executeDefer).toHaveBeenCalledWith({ name: "check CI", afterMinutes: 5 });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("2026-06-25T12:05:00.000Z");
+  });
+
+  // A private-text agent can confirm only with another message, which repeats
+  // what it already told the guardian.
+  it.each([
+    [false, true],
+    [true, false],
+  ])("with textPrivate %s, asks for a confirmation line: %s", (textPrivate, confirms) => {
+    const executeDefer = rs.fn().mockResolvedValue({ ok: true });
+    const description = deferTool(baseParams({ executeDefer, textPrivate }))!.description;
+    expect(description.includes("write one short line confirming")).toBe(confirms);
+    expect(description).toContain("end your turn");
+  });
+
+  it("carries textPrivate from the session params into the Codex tool server", () => {
+    const server = createRomeMcpServerForSession({
+      ...baseParams(),
+      model: "gpt-test",
+      systemPrompt: "system",
+      executeDefer: rs.fn().mockResolvedValue({ ok: true }),
+      textPrivate: true,
+    });
+    const defer = server.listTools("ask_user").find((tool) => tool.name === "defer");
+    expect(defer?.description).not.toContain("write one short line confirming");
   });
 
   it("surfaces a thrown error as a tool error", async () => {

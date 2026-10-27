@@ -140,6 +140,11 @@ export interface FacadeParams {
    * Absent → auto-enable is unavailable and the draft card is shown instead.
    */
   routineActivation?: RoutineActivationGate;
+  /**
+   * The agent's text never reaches the guardian, so `defer` does not ask it
+   * to confirm in text: it could only confirm with another message.
+   */
+  textPrivate?: boolean;
 }
 
 /** What `propose_routine` checks before it creates a routine without the
@@ -731,6 +736,7 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
         ? { ...params.routineActivation, executeAction: params.executeAction }
         : undefined,
       params.sessionTools,
+      params.textPrivate ?? false,
     ),
   };
 }
@@ -1164,15 +1170,21 @@ const DEFER_DESCRIPTION =
   "at the provider and fails with the reason if it can't. Events are not replayed and a new subscription " +
   "only sees future events: after an event defer, check the current state once more, and if what you're " +
   "waiting for already happened, handle it now. When you wake you're pinged back in this thread with the whole conversation still in context, so " +
-  "just re-evaluate and either finish or `defer` again (minimum one minute, no limit on re-defers). " +
+  "just re-evaluate and either finish or `defer` again (minimum one minute, no limit on re-defers). ";
+
+const DEFER_END_OF_TURN =
   "After calling defer, write one short line confirming you'll keep watch, then end your turn.";
+const DEFER_END_OF_TURN_TEXT_PRIVATE =
+  "After calling defer, end your turn. It needs no confirmation.";
 
 function buildDeferFacadeTool(
   executeDefer: (input: DeferInput) => Promise<unknown>,
+  textPrivate: boolean,
 ): FacadeToolDef {
   return {
     name: "defer",
-    description: DEFER_DESCRIPTION,
+    description:
+      DEFER_DESCRIPTION + (textPrivate ? DEFER_END_OF_TURN_TEXT_PRIVATE : DEFER_END_OF_TURN),
     inputSchema: {
       type: "object",
       required: ["name"],
@@ -1244,6 +1256,7 @@ function buildInteractiveTools(
   executeDefer?: (input: DeferInput) => Promise<unknown>,
   activation?: ActivationDeps,
   sessionTools: FacadeToolDef[] = [],
+  textPrivate = false,
 ): FacadeToolDef[] {
   // `ask_question` is registered on every surface: webchat mounts the card; other
   // surfaces (messaging channels, subagents, CLI) get the questions relayed as
@@ -1346,7 +1359,7 @@ function buildInteractiveTools(
   // — it injects an inbound message rather than rendering UI, so it needs no
   // interactive surface. Only absent when the session has no defer impl wired.
   if (executeDefer) {
-    tools.push(buildDeferFacadeTool(executeDefer));
+    tools.push(buildDeferFacadeTool(executeDefer, textPrivate));
   }
   tools.push(...sessionTools);
   // propose_routine and confirm_output render/resolve UI and have no prose
