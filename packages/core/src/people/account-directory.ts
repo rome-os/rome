@@ -153,7 +153,9 @@ async function readHeads(
     }
     return names;
   };
-  for (const round of rounds(accounts)) {
+  const cost = (account: DirectoryAccount) =>
+    account.addresses.length * Math.max(storedUnder(account.channel).length, 1);
+  for (const round of rounds(accounts, cost)) {
     const asked = new Map<MessageAccount, DirectoryAccount>(
       round.map((account) => [
         {
@@ -185,10 +187,11 @@ function streamRows(
 }
 
 /**
- * How many addresses one round of ownership reads covers.
+ * How many stored addresses one round of ownership reads covers: each address
+ * once per channel it may be stored under.
  *
  * A SQL store answers a whole round in one statement, binding a bounded handful
- * of variables per address in it, and SQLite refuses any statement carrying
+ * of variables per stored address in it, and SQLite refuses any statement carrying
  * more than 32,766 of them. This is the one read that asks about a whole
  * address book at once, and an address book is thousands of contacts — so
  * asking about all of them in a single round is a stream that fails outright on
@@ -209,22 +212,27 @@ const ADDRESSES_PER_ROUND = 1000;
 /**
  * The accounts split into rounds no wider than {@link ADDRESSES_PER_ROUND}.
  *
- * By addresses rather than by accounts because that is what the stores are
- * scoped by: an account reachable three ways costs three times what one
- * reachable a single way does. An account wider than a whole round still gets
- * one of its own rather than being dropped.
+ * By stored addresses rather than by accounts because that is what the stores
+ * are scoped by: an account reachable three ways costs three times what one
+ * reachable a single way does, and an account on a platform where Rome has
+ * held several channels costs that again per channel. An account wider than a
+ * whole round still gets one of its own rather than being dropped.
  */
-function* rounds(accounts: readonly DirectoryAccount[]): Generator<DirectoryAccount[]> {
+function* rounds(
+  accounts: readonly DirectoryAccount[],
+  cost: (account: DirectoryAccount) => number,
+): Generator<DirectoryAccount[]> {
   let round: DirectoryAccount[] = [];
-  let addresses = 0;
+  let width = 0;
   for (const account of accounts) {
-    if (round.length > 0 && addresses + account.addresses.length > ADDRESSES_PER_ROUND) {
+    const wide = cost(account);
+    if (round.length > 0 && width + wide > ADDRESSES_PER_ROUND) {
       yield round;
       round = [];
-      addresses = 0;
+      width = 0;
     }
     round.push(account);
-    addresses += account.addresses.length;
+    width += wide;
   }
   if (round.length > 0) yield round;
 }
