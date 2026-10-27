@@ -770,3 +770,13 @@ html.is-electron [data-app-titlebar] {
 [data-timeline-landed] {
   background: color-mix(in srgb, var(--primary) 6%, transparent);
 }
+/* A Concierge bubble is as wide as its anchor, so the tint alone hides behind
+   it. The ring shows around the bubble. */
+[data-concierge-transcript] [data-timeline-anchor] {
+  transition:
+    background 300ms ease-out,
+    box-shadow 300ms ease-out;
+}
+[data-concierge-transcript] [data-timeline-landed] {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
+}

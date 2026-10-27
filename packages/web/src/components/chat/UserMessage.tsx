@@ -7,6 +7,8 @@ import { userMessageText } from "@/components/chat/chat-view";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
 import { MessageRow } from "@/components/chat/MessageRow";
+import { ReplyButton } from "@/components/chat/reply/ReplyButton";
+import { isSettledUserMessage } from "@/components/chat/reply/reply-source";
 import { SenderAvatar, sentByViewer } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 
@@ -47,6 +49,17 @@ export const UserMessage = memo(
       >
         {timestamp ? <span className="text-aux text-muted-foreground">{timestamp}</span> : null}
         <CopyMessageButton text={text} />
+        {isSettledUserMessage(msg) ? (
+          <ReplyButton
+            source={{
+              messageId: msg.id,
+              sessionId: msg.sessionId,
+              author: "guardian",
+              name: msg.sender?.name ?? undefined,
+              text,
+            }}
+          />
+        ) : null}
       </div>
     );
     // Someone else's message reads like the agent's: on the left, under their

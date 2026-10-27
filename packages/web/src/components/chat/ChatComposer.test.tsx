@@ -18,6 +18,8 @@ import {
   type ChatComposerProps,
   type ChatComposerSendControls,
 } from "./ChatComposer";
+import { ReplyDraftHarness } from "./reply/reply-draft-harness";
+import type { ReplyTarget } from "./reply/reply-draft";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -1302,5 +1304,64 @@ describe("composer model picker in an open chat", () => {
     fireEvent.input(textarea, { target: { value: "hello" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(onSend.mock.calls[0][0].largeModelSelection).toBe("claude-opus-5-5");
+  });
+});
+
+describe("composer reply", () => {
+  const reply: ReplyTarget = { messageId: "a1", author: "agent", preview: "Fly to Lisbon." };
+
+  function renderWithReply(onSend: ChatComposerProps["onSend"]) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) =>
+      String(input) === "/api/settings"
+        ? Response.json({})
+        : Response.json({}, { status: 404 })) as typeof fetch);
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ReplyDraftHarness initial={reply}>
+            <ChatComposer onSend={onSend} />
+          </ReplyDraftHarness>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows the chip, sends the reply with the message, then clears it", async () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderWithReply(onSend);
+    expect(await screen.findByText("Fly to Lisbon.")).toBeTruthy();
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "and then?" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSend.mock.calls[0][0]).toMatchObject({ text: "and then?", replyTo: reply });
+    await waitFor(() => expect(screen.queryByText("Fly to Lisbon.")).toBeNull());
+  });
+
+  it("puts the reply back when the send fails", async () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockRejectedValue(new Error("offline"));
+    renderWithReply(onSend);
+    await screen.findByText("Fly to Lisbon.");
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "and then?" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Fly to Lisbon.")).toBeTruthy();
+  });
+
+  it("drops the reply on Escape from the textarea", async () => {
+    stubCoarsePointer(false);
+    renderWithReply(rs.fn());
+    await screen.findByText("Fly to Lisbon.");
+
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+
+    expect(screen.queryByText("Fly to Lisbon.")).toBeNull();
   });
 });

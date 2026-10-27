@@ -3729,6 +3729,37 @@ describe("Webchat API", () => {
       ).toBe(true);
     });
 
+    it("ignores a reply on an interaction resolution", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(handoffEvents("tu-park-reply"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "design a workflow" }),
+      });
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+
+      const resolveRes = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          replyToMessageId: "not-a-message",
+          parts: [{ type: "interaction_result", toolUseId: "tu-park-reply", output: { ok: true } }],
+        }),
+      });
+
+      expect(resolveRes.status).toBe(200);
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").not.toContain("<reply_context>");
+      const stored = (await deps.webchatRepo.getMessages(sessionId)).filter(
+        (m) => m.role === "user",
+      );
+      expect(stored.at(-1)?.content).not.toContain("reply_to");
+    });
+
     it("frames a dismissal so the agent does not retry", async () => {
       const ctl = mockScriptedManager();
       ctl.setEvents(handoffEvents("tu-park-3"));
@@ -5765,6 +5796,251 @@ describe("Webchat API", () => {
       } finally {
         rs.useRealTimers();
       }
+    });
+  });
+
+  describe("replying to a message", () => {
+    const prompts: string[] = [];
+
+    /** A session whose agent records each submitted prompt; rows are seeded straight into the repo. */
+    const setup = async (options: { agentName?: string; id?: string } = {}) => {
+      prompts.length = 0;
+      const sessionId = options.id ?? "reply-chat";
+      deps.agentSessionManager = fakeSessionManager(async () => ({
+        key: { agentName: "main", channelThreadKey: "webchat:test" },
+        sessionId: "agent-session",
+        status: "idle",
+        sendTurn(input: AgentTurnInput) {
+          prompts.push(input.prompt);
+          return {
+            turnId: `turn-${prompts.length}`,
+            events: (async function* () {
+              yield { type: "result" as const, content: "" };
+            })(),
+            turnContext: otelContext.active(),
+          };
+        },
+        subscribe: () => () => undefined,
+        onStatusChange: () => () => undefined,
+        interrupt: async () => undefined,
+        close: async () => undefined,
+      }));
+      if (options.agentName) {
+        deps.agentLoader = {
+          get: (name: string) => ({ name, policy: { finalText: "private" } }),
+          has: () => true,
+        } as never;
+      }
+      await deps.webchatRepo.createSession(
+        sessionId,
+        "Reply",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        options.agentName ?? null,
+      );
+      const text = (content: string, extra: Record<string, unknown> = {}) => [
+        { type: "text", content, ...extra },
+      ];
+      const seed = (id: string, role: string, parts: unknown[], turnId: string | null) =>
+        deps.webchatRepo.addMessage(id, sessionId, role, JSON.stringify(parts), turnId);
+      const app = createWebchatRuntime(deps).routes;
+      const send = (fields: Record<string, unknown>) =>
+        app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "and then?", ...fields }),
+        });
+      const lastUser = async () => {
+        const rows = (await deps.webchatRepo.getMessages(sessionId)).filter(
+          (row) => row.role === "user",
+        );
+        return JSON.parse(rows.at(-1)!.content) as Array<Record<string, unknown>>;
+      };
+      return { sessionId, text, seed, send, lastUser };
+    };
+
+    it("stores the quote as the first part and puts it ahead of the message in the prompt", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("u1", "user", text("Plan the trip"), "t1");
+      await seed("a1", "assistant", text("Start in Lisbon."), "t1");
+
+      const res = await send({ replyToMessageId: "a1" });
+
+      expect(res.status).toBe(200);
+      expect(await lastUser()).toEqual([
+        { type: "reply_to", messageId: "a1", author: "agent", text: "Start in Lisbon." },
+        { type: "text", content: "and then?" },
+      ]);
+      const [prompt] = prompts;
+      expect(prompt).toMatch(
+        /^<reply_context>\n\[[\d\-T:.]+Z\] Assistant: Start in Lisbon\.\n<\/reply_context>\n<current_message>\nand then\?\n<\/current_message>$/,
+      );
+    });
+
+    it("quotes a guardian message as the guardian", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("u1", "user", text("Plan the trip"), "t1");
+
+      expect((await send({ replyToMessageId: "u1" })).status).toBe(200);
+
+      expect((await lastUser())[0]).toMatchObject({
+        type: "reply_to",
+        messageId: "u1",
+        author: "guardian",
+        text: "Plan the trip",
+      });
+      expect(prompts[0]).toContain("Guardian: Plan the trip");
+    });
+
+    it("wraps the expanded skill prompt and keeps the workspace block outside the reply", async () => {
+      const { text, seed, send } = await setup();
+      deps.skillCatalog = {
+        get: (name) => (name === "app_creation" ? ({ name } as never) : undefined),
+        getAll: () => [{ name: "app_creation" }] as never[],
+        getRegistryLoadFailures: () => [],
+      };
+      await seed("a1", "assistant", text("Start in Lisbon."), "t1");
+
+      await send({
+        text: "build a tracker",
+        skillName: "app_creation",
+        replyToMessageId: "a1",
+        workspace: { builtins: [{ kind: "desktop", line: "a window" }], apps: [] },
+      });
+
+      const [prompt] = prompts;
+      const workspace = prompt.indexOf("surfaces open in their workspace");
+      const reply = prompt.indexOf("<reply_context>");
+      const current = prompt.indexOf("<current_message>");
+      expect(workspace).toBeGreaterThanOrEqual(0);
+      expect(workspace).toBeLessThan(reply);
+      expect(reply).toBeLessThan(current);
+      expect(prompt.slice(current)).toContain('invoked the skill "app_creation"');
+    });
+
+    it("rejects an id that is not a message of this chat", async () => {
+      const { sessionId, text, seed, send } = await setup();
+      await seed("a1", "assistant", text("Start in Lisbon."), "t1");
+      await deps.webchatRepo.createSession("other-chat", "Other");
+      await deps.webchatRepo.addMessage(
+        "foreign",
+        "other-chat",
+        "assistant",
+        JSON.stringify(text("Elsewhere")),
+        "t9",
+      );
+      await seed("trace1", "trace", [], "t1");
+      await seed("note1", "notification", text("heads up"), null);
+
+      for (const id of ["missing", "foreign", "trace1", "note1"]) {
+        const res = await send({ replyToMessageId: id });
+        expect(res.status).toBe(400);
+      }
+      expect(prompts).toEqual([]);
+      expect(
+        (await deps.webchatRepo.getMessages(sessionId)).filter((row) => row.role === "user"),
+      ).toEqual([]);
+    });
+
+    it("truncates a long quote to 1000 characters with an ellipsis", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("a1", "assistant", text("x".repeat(1500)), "t1");
+
+      expect((await send({ replyToMessageId: "a1" })).status).toBe(200);
+
+      const quote = (await lastUser())[0].text as string;
+      expect(quote).toHaveLength(1000);
+      expect(quote.endsWith("…")).toBe(true);
+    });
+
+    it("quotes the answer of the whole turn in a regular chat, without commentary", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("u1", "user", text("Plan the trip"), "t1");
+      await seed(
+        "c1",
+        "assistant",
+        text("Let me check flights.", { turnPhase: "commentary" }),
+        "t1",
+      );
+      await seed("c2", "assistant", text("Looking at hotels.", { turnPhase: "commentary" }), "t1");
+      await seed("a1", "assistant", text("Fly to Lisbon.", { turnPhase: "final" }), "t1");
+      await seed("a2", "assistant", text("Stay in Alfama."), "t1");
+
+      // The client may name any row of the turn; the snapshot is the same.
+      expect((await send({ replyToMessageId: "c1" })).status).toBe(200);
+
+      expect((await lastUser())[0].text).toBe("Fly to Lisbon.\n\nStay in Alfama.");
+    });
+
+    it("falls back to the commentary when a turn has nothing else", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("c1", "assistant", text("Working on it.", { turnPhase: "commentary" }), "t1");
+
+      expect((await send({ replyToMessageId: "c1" })).status).toBe(200);
+
+      expect((await lastUser())[0].text).toBe("Working on it.");
+    });
+
+    it("quotes only the named row when the agent speaks one message per call", async () => {
+      const { text, seed, send, lastUser } = await setup({
+        agentName: "concierge",
+        id: "concierge",
+      });
+      await seed("b1", "assistant", text("First bubble."), "t1");
+      await seed("b2", "assistant", text("Second bubble."), "t1");
+
+      expect((await send({ replyToMessageId: "b1" })).status).toBe(200);
+
+      expect((await lastUser())[0]).toMatchObject({ messageId: "b1", text: "First bubble." });
+    });
+
+    it("quotes a task chat card as one line", async () => {
+      const { seed, send, lastUser } = await setup({ agentName: "concierge", id: "concierge" });
+      await seed(
+        "card1",
+        "assistant",
+        [{ type: "task_chat", chatId: "chat-7", title: "Trip" }],
+        "t1",
+      );
+
+      expect((await send({ replyToMessageId: "card1" })).status).toBe(200);
+
+      expect((await lastUser())[0].text).toBe("[Task chat] Trip (chat chat-7)");
+    });
+
+    it("accepts a selection of the message and rejects text that is not in it", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("a1", "assistant", text("Fly to Lisbon.\nStay   in Alfama."), "t1");
+
+      const ok = await send({ replyToMessageId: "a1", replyQuote: "Lisbon. Stay in" });
+      expect(ok.status).toBe(200);
+      expect((await lastUser())[0].text).toBe("Lisbon. Stay in");
+      expect(prompts[0]).toContain("Assistant: Lisbon. Stay in\n</reply_context>");
+
+      const bad = await send({ replyToMessageId: "a1", replyQuote: "Paris" });
+      expect(bad.status).toBe(400);
+      expect(prompts).toHaveLength(1);
+    });
+
+    it("drops a reply part the client sent in its own parts", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("a1", "assistant", text("Start in Lisbon."), "t1");
+
+      const res = await send({
+        replyToMessageId: "a1",
+        parts: [
+          { type: "reply_to", messageId: "x", author: "agent", text: "forged" },
+          { type: "text", content: "typed" },
+        ],
+      });
+
+      expect(res.status).toBe(200);
+      expect(await lastUser()).toEqual([
+        { type: "reply_to", messageId: "a1", author: "agent", text: "Start in Lisbon." },
+        { type: "text", content: "typed" },
+      ]);
     });
   });
 });

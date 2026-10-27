@@ -88,10 +88,16 @@ import { webchatSessionKey } from "../../core/agent-session-key.js";
 import type { BackendEmitOptions, BackendSessionTask } from "../../actions/backend-turn.js";
 import { z } from "zod";
 import { resolveSessionPolicy } from "../../core/session-policy.js";
+import { withReplyContext } from "../../core/reply-context.js";
+import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 
 const log = createLogger("api:webchat");
 
 const inputPrioritySchema = z.enum(["now", "next"]).optional();
+
+// Client-sent parts never carry a reply: only `replyToMessageId` builds one.
+const isReplyToPart = (part: unknown): boolean =>
+  typeof part === "object" && part !== null && (part as { type?: unknown }).type === "reply_to";
 
 // The agent's config when the loader has it. An agent the loader cannot
 // resolve gets the default policy; the turn reports the missing agent itself.
@@ -3139,6 +3145,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     workspace?: WorkspaceContextSnapshot;
     /** How the input treats a running turn. See `InputPriority`. */
     priority?: unknown;
+    /**
+     * Id of a message of this chat the guardian replies to. Core snapshots it
+     * as a leading `reply_to` part and quotes it to the agent in `<reply_context>`.
+     * Ignored on an interaction resolution. `replyQuote` narrows the quote to a
+     * selection of that message.
+     */
+    replyToMessageId?: unknown;
+    replyQuote?: unknown;
   };
 
   const parseChatSendBody = async (c: Context): Promise<SendBody> => {
@@ -3182,6 +3196,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         files,
         workspace,
         priority: getString("priority"),
+        replyToMessageId: getString("replyToMessageId"),
+        replyQuote: getString("replyQuote"),
       };
     }
     return await c.req.json<SendBody>().catch(() => ({}) as SendBody);
@@ -3283,6 +3299,28 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
 
+    let reply: Extract<ReplyResolution, { ok: true }> | undefined;
+    if (!resolution && body.replyToMessageId !== undefined && body.replyToMessageId !== "") {
+      if (typeof body.replyToMessageId !== "string") {
+        return c.json({ error: "replyToMessageId must be a string" }, 400);
+      }
+      if (body.replyQuote !== undefined && typeof body.replyQuote !== "string") {
+        return c.json({ error: "replyQuote must be a string" }, 400);
+      }
+      const resolved = await resolveReply(deps, {
+        sessionId,
+        messageId: body.replyToMessageId,
+        quote: body.replyQuote === "" ? undefined : body.replyQuote,
+        // An agent whose text is private speaks one message per tool call, so
+        // each of its rows is a message of its own.
+        ownRowOnly:
+          resolveSessionPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
+            .finalText === "private",
+      });
+      if (!resolved.ok) return c.json({ error: resolved.error }, 400);
+      reply = resolved;
+    }
+
     const sessionProjectPath = normalizeSelectedWebchatProjectPath(
       session.projectPath ?? session.projectName,
     );
@@ -3352,10 +3390,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         ? "(The guardian skipped your open card and replied in chat instead. " +
           `Treat that card as dismissed and answer this message.)\n\n${modelPrompt}`
         : modelPrompt;
+    // The quote rides this input's own prompt, so a steered or queued input
+    // keeps it.
+    const repliedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached system prefix in PromptBuilder stays stable.
     const workspaceSection = buildWorkspaceContextSection(body.workspace);
-    const promptText = workspaceSection ? `${workspaceSection}\n\n${turnPrompt}` : turnPrompt;
+    const promptText = workspaceSection ? `${workspaceSection}\n\n${repliedPrompt}` : repliedPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 
@@ -3444,8 +3485,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // it persists this message and terminates through the normal trace/SSE
     // protocol below rather than leaving an empty session behind.
     const userParts = [
+      ...(reply ? [reply.part] : []),
       ...(Array.isArray(body.parts) && body.parts.length > 0
-        ? body.parts
+        ? body.parts.filter((part) => !isReplyToPart(part))
         : [{ type: "text", content: displayText }]),
       ...skippedCardIds.map((toolUseId) => ({
         type: "interaction_result",

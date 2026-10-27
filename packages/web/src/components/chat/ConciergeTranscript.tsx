@@ -61,6 +61,7 @@ export function ConciergeTranscript({
       <div
         ref={contentRef}
         data-chat-transcript
+        data-concierge-transcript
         className="@container mx-auto flex max-w-5xl flex-col gap-4 pb-4"
         role="log"
         aria-relevant="additions"

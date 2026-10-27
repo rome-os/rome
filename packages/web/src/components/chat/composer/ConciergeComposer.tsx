@@ -41,7 +41,10 @@ import { randomUUID } from "@/lib/random-uuid";
 import type { ChatErrorNotice, PendingUpload } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 import { ErrorEventView } from "../entries/ErrorEventView";
+import { ReplyBar } from "../reply/ReplyBar";
+import { useReplyDraft } from "../reply/reply-draft";
 import { PendingUploadsList } from "./PendingUploadsList";
+import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
 
@@ -77,6 +80,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     ref,
   ) {
     const { t } = useTranslation("chat");
+    const replyDraft = useReplyDraft();
     const { data: settings } = useSettings();
     const coarsePointer = useCoarsePointer();
     const modelSelectorEnabled = settings?.enableModelSelector === true;
@@ -143,13 +147,19 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     );
 
     const snapshotOf = useCallback(
-      (text: string, uploads: PendingUpload[], inputId?: string): ChatComposerSnapshot => ({
+      (
+        text: string,
+        uploads: PendingUpload[],
+        inputId?: string,
+        replyTo?: ReplyTarget,
+      ): ChatComposerSnapshot => ({
         text,
         uploads,
         reasoningEffort,
         // A session keeps its project; the field is only read for a draft.
         projectPath: DEFAULT_PROJECT_NAME,
         inputId,
+        replyTo,
       }),
       [reasoningEffort],
     );
@@ -168,14 +178,17 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       // Text alone clears at once and comes back on failure. Attachments keep
       // the text on screen until the server accepts the upload.
       const clearsOptimistically = uploads.length === 0;
+      const replyTo = replyDraft?.target ?? undefined;
       if (clearsOptimistically) {
         setInputText("");
         setPendingUploads([]);
+        replyDraft?.clear();
       }
       try {
-        await invokeOnSend(snapshotOf(text, uploads, inputId));
+        await invokeOnSend(snapshotOf(text, uploads, inputId, replyTo));
         failedSendRef.current = null;
         if (!clearsOptimistically) {
+          replyDraft?.clear();
           const sentIds = new Set(uploads.map((upload) => upload.id));
           setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
           setInputText((current) => (current === rawText ? "" : current));
@@ -185,9 +198,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         if (clearsOptimistically) {
           setInputText(text);
           setPendingUploads(uploads);
+          if (replyTo) replyDraft?.restore(replyTo);
         }
       }
-    }, [inputText, pendingUploads, invokeOnSend, snapshotOf]);
+    }, [inputText, pendingUploads, invokeOnSend, snapshotOf, replyDraft]);
 
     useImperativeHandle(
       ref,
@@ -267,6 +281,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               event.target.value = "";
             }}
           />
+          <ReplyBar />
           <div className="flow-root empty:hidden">
             <PendingUploadsList
               uploads={pendingUploads}
@@ -357,6 +372,11 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 onChange={(event) => setInputText(event.target.value)}
                 onInput={(event) => clampTextareaHeight(event.currentTarget)}
                 onKeyDown={(event) => {
+                  if (event.key === "Escape" && replyDraft?.target) {
+                    event.preventDefault();
+                    replyDraft.clear();
+                    return;
+                  }
                   if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
                     event.preventDefault();
                     void runSend();

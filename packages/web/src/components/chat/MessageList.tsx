@@ -17,6 +17,7 @@ import { LiveTurnActivity } from "@/components/chat/LiveTurnActivity";
 import { TurnSummaryGroup } from "@/components/chat/TurnSummaryGroup";
 import { TraceTrigger } from "@/components/chat/TraceTrigger";
 import { UserMessage } from "@/components/chat/UserMessage";
+import { lastTextMessage, turnAnswerText } from "@/components/chat/reply/reply-source";
 import type { AgentIdentity, ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
 
@@ -251,6 +252,8 @@ const RowView = memo(function RowView({
   const copyText = live ? "" : turnCopyText(row.messages);
   // A row can group commentary and a final answer, so use its last saved message.
   const createdAt = live ? undefined : row.messages.at(-1)?.createdAt;
+  // Replying to a settled turn quotes its answer, named by the turn's last row with text.
+  const replyRow = live ? undefined : lastTextMessage(row.messages);
   // Feedback rides the same settled action row; it needs the turn identity.
   const feedbackTurn = feedback && !live ? rowTurnRef(row) : null;
   const showFeedback = !!feedbackTurn?.turnId && !!feedbackTurn.sessionId;
@@ -282,6 +285,16 @@ const RowView = memo(function RowView({
           }
           showBranch={showBranch}
           createdAt={createdAt}
+          reply={
+            replyRow
+              ? {
+                  messageId: replyRow.id,
+                  sessionId: replyRow.sessionId,
+                  author: "agent",
+                  text: turnAnswerText(row.messages),
+                }
+              : null
+          }
         />
       }
     >
@@ -588,9 +601,17 @@ function TranscriptMessageList({
           // around the view inside every branch, so share mode cannot strip it.
           // A plain div with no classes adds no box: UserMessage's own `mb-4`
           // still collapses through it, so row rhythm is unchanged.
+          // An agent row is addressable by every message id it holds: a reply
+          // names the turn by its last message, and a jump finds it by that id.
+          const anchorIds =
+            row.kind === "user"
+              ? row.message.id
+              : row.kind === "agent"
+                ? row.messages.map((message) => message.id).join(" ")
+                : null;
           const anchored = (node: ReactNode, key?: string) =>
-            row.kind === "user" ? (
-              <div key={key} data-timeline-anchor={row.message.id}>
+            anchorIds ? (
+              <div key={key} data-timeline-anchor={anchorIds}>
                 {node}
               </div>
             ) : (

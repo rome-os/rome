@@ -6,6 +6,8 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import type { ChatComposerSnapshot } from "../ChatComposer";
 import { ConciergeComposer, type ConciergeComposerProps } from "./ConciergeComposer";
+import { ReplyDraftHarness } from "../reply/reply-draft-harness";
+import type { ReplyTarget } from "../reply/reply-draft";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -16,7 +18,7 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function renderComposer(props: Partial<ConciergeComposerProps> = {}) {
+function renderComposer(props: Partial<ConciergeComposerProps> = {}, reply?: ReplyTarget) {
   rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) =>
     String(input) === "/api/settings"
       ? Response.json({ enableModelSelector: true, webchatReasoningEffort: "low" })
@@ -25,7 +27,9 @@ function renderComposer(props: Partial<ConciergeComposerProps> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <ConciergeComposer onSend={onSend} {...props} />
+      <ReplyDraftHarness initial={reply}>
+        <ConciergeComposer onSend={onSend} {...props} />
+      </ReplyDraftHarness>
     </QueryClientProvider>,
   );
   return { onSend };
@@ -79,5 +83,54 @@ describe("ConciergeComposer", () => {
     await userEvent.keyboard("{Enter}");
     expect(await screen.findByRole("menuitem", { name: /Upload files/ })).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: /Model/ })).toBeNull();
+  });
+});
+
+describe("ConciergeComposer reply", () => {
+  const reply: ReplyTarget = {
+    messageId: "a1",
+    author: "agent",
+    quote: "Lisbon",
+    preview: "Lisbon",
+  };
+
+  it("holds the reply as a chip, sends it with the message, and clears it", async () => {
+    const { onSend } = renderComposer({}, reply);
+    expect(await screen.findByRole("button", { name: "Cancel reply" })).toBeTruthy();
+
+    await userEvent.type(screen.getByPlaceholderText("Message"), "why there?{Enter}");
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0]).toMatchObject({ text: "why there?", replyTo: reply });
+    expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+  });
+
+  it("puts the reply back when the send fails", async () => {
+    const { onSend } = renderComposer({}, reply);
+    onSend.mockRejectedValueOnce(new Error("offline"));
+
+    await userEvent.type(await screen.findByPlaceholderText("Message"), "why there?{Enter}");
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("button", { name: "Cancel reply" })).toBeTruthy();
+    expect((screen.getByPlaceholderText("Message") as HTMLTextAreaElement).value).toBe(
+      "why there?",
+    );
+  });
+
+  it("drops the reply on Escape, and from the chip's ×", async () => {
+    renderComposer({}, reply);
+    await screen.findByRole("button", { name: "Cancel reply" });
+
+    await userEvent.type(screen.getByPlaceholderText("Message"), "{Escape}");
+    expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+  });
+
+  it("drops the reply from the chip's ×", async () => {
+    renderComposer({}, reply);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Cancel reply" }));
+
+    expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
   });
 });

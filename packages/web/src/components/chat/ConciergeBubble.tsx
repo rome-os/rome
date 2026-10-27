@@ -5,6 +5,8 @@ import { CHAT_POPOVER_FIT } from "@/components/chat/chat-overlay";
 import { ConciergeMessageMeta } from "@/components/chat/ConciergeMessageMeta";
 import { IconButton } from "@/components/ui/icon-button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ReplyButton } from "@/components/chat/reply/ReplyButton";
+import type { ReplySource } from "@/components/chat/reply/reply-source";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +22,10 @@ const POPOVER_COLLISION_PADDING = { top: 12, right: 0, left: 0, bottom: 96 };
 // feedback) plus its offset. Without it the popover opens below the button.
 const POPOVER_ROOM_BESIDE = 246;
 
+// The look of the controls floating beside a bubble.
+const HOVER_CHIP =
+  "rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 hover:text-foreground";
+
 // A tap on any of these belongs to the thing tapped, not to the bubble.
 const INTERACTIVE = "a,button,input,textarea,select,summary,label,[role=button],[role=link]";
 
@@ -27,14 +33,15 @@ const INTERACTIVE = "a,button,input,textarea,select,summary,label,[role=button],
  * One Concierge bubble and the details behind it (time, copy, and for the last
  * bubble of an agent turn, feedback). The bubble takes no room for them:
  *
- * - With a pointer that can hover, a "more" button floats beside the bubble on
- *   hover or keyboard focus and opens the details in a popover. It stays visible
- *   while the popover, or the feedback popover inside it, is open. When the
- *   bubble fills the transcript's width, the button sits over the bubble's
- *   inner edge instead of past the transcript. The nearest `@container` is the
+ * - With a pointer that can hover, a Reply button and a "more" button float
+ *   beside the bubble on hover or keyboard focus, Reply next to the bubble. The
+ *   "more" button opens the details in a popover. Both stay visible while the
+ *   popover, or the feedback popover inside it, is open. When the bubble fills
+ *   the transcript's width, the buttons sit over the bubble's inner edge
+ *   instead of past the transcript. The nearest `@container` is the
  *   transcript, which is what `cqw` measures.
- * - Without hover, tapping the bubble toggles a row of the same details under
- *   it. A tap on a link or control inside the bubble, or one that ends a text
+ * - Without hover, tapping the bubble toggles a row of the same details, and
+ *   Reply, under it. A tap on a link or control inside the bubble, or one that ends a text
  *   selection, does not toggle. The "more" button stays in the tab order for
  *   keyboards and screen readers but is not drawn.
  *
@@ -42,19 +49,24 @@ const INTERACTIVE = "a,button,input,textarea,select,summary,label,[role=button],
  * to a tall bubble it would open at the bubble's far end.
  *
  * `side` is the edge the bubble aligns to: `start` for the agent, `end` for the
- * guardian.
+ * guardian. `reply` is what the Reply button quotes. `anchorId` makes
+ * the bubble the target of a jump from a quote of it.
  */
 export function ConciergeBubble({
   side,
   copyText,
   createdAt,
   feedbackTurn,
+  reply = null,
+  anchorId,
   children,
 }: {
   side: "start" | "end";
   copyText: string;
   createdAt: string;
   feedbackTurn: { sessionId: string; turnId: string } | null;
+  reply?: ReplySource | null;
+  anchorId?: string;
   children: ReactNode;
 }) {
   const { t } = useTranslation("chat");
@@ -75,7 +87,13 @@ export function ConciergeBubble({
   };
 
   const meta = (
-    <ConciergeMessageMeta copyText={copyText} createdAt={createdAt} feedbackTurn={feedbackTurn} />
+    <ConciergeMessageMeta
+      copyText={copyText}
+      createdAt={createdAt}
+      feedbackTurn={feedbackTurn}
+      reply={touch ? reply : null}
+      onReply={() => setOpen(false)}
+    />
   );
   return (
     <Popover
@@ -96,6 +114,7 @@ export function ConciergeBubble({
       }}
     >
       <div
+        data-timeline-anchor={anchorId}
         className={cn(
           "flex min-w-0 max-w-full flex-col",
           side === "end" ? "items-end" : "items-start",
@@ -121,10 +140,20 @@ export function ConciergeBubble({
                   ? "left-0"
                   : "right-0"
                 : side === "start"
-                  ? "left-[min(100%,calc(100cqw-2rem))] pl-1"
-                  : "right-[min(100%,calc(100cqw-2rem))] pr-1",
+                  ? "left-[min(100%,calc(100cqw-4rem))] flex gap-1 pl-1"
+                  : "right-[min(100%,calc(100cqw-4rem))] flex flex-row-reverse gap-1 pr-1",
             )}
           >
+            {touch || !reply ? null : (
+              <ReplyButton
+                source={reply}
+                className={cn(
+                  HOVER_CHIP,
+                  "opacity-0 transition-opacity group-focus-within/bubble:opacity-100 group-hover/bubble:opacity-100 motion-reduce:transition-none",
+                  open && "opacity-100",
+                )}
+              />
+            )}
             <PopoverTrigger asChild>
               <IconButton
                 ref={triggerRef}
@@ -132,7 +161,7 @@ export function ConciergeBubble({
                 label={t("concierge.messageDetails")}
                 icon={<Ellipsis />}
                 className={cn(
-                  "rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 hover:text-foreground",
+                  HOVER_CHIP,
                   touch
                     ? "pointer-events-none opacity-0 focus-visible:opacity-100"
                     : "opacity-0 transition-opacity group-focus-within/bubble:opacity-100 group-hover/bubble:opacity-100 aria-expanded:opacity-100 motion-reduce:transition-none",

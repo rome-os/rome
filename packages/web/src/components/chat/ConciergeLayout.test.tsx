@@ -7,11 +7,16 @@ import { ThemeProvider } from "@/hooks/use-theme";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import type { ChatRow } from "./chat-view";
 import type { BlockActions, LivePreview } from "./MessageList";
+import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
   useDashboardIdentity: () => ({
     data: { kind: "guardian", userId: "seat", displayName: "Ray", avatarUrl: null },
   }),
+}));
+// The card reads the chat list; the transcript only decides what surrounds it.
+rs.mock("@/components/chat/entries/TaskChatCard", () => ({
+  TaskChatCard: ({ title }: { title: string }) => <div data-testid="task-card">{title}</div>,
 }));
 // The real buttons fetch and observe the viewport; the transcript only decides
 // where they appear and for which turn.
@@ -404,5 +409,142 @@ describe("Concierge layout", () => {
       expect(groups).toHaveLength(1);
       expect(within(groups[0] as HTMLElement).getByRole("status", { name: "Typing" })).toBeTruthy();
     });
+  });
+});
+
+describe("Concierge reply", () => {
+  beforeEach(() => stubHover(true));
+
+  const draftOf = (overrides: Partial<ReplyDraft> = {}): ReplyDraft => ({
+    sessionId: "concierge",
+    target: null,
+    set: rs.fn(),
+    clear: rs.fn(),
+    restore: rs.fn(),
+    has: () => true,
+    jump: rs.fn(),
+    ...overrides,
+  });
+  const inChat = (draft: ReplyDraft, rows: ChatRow[]) =>
+    render(
+      <ReplyDraftProvider value={draft}>
+        <ThemeProvider>
+          <ConciergeTranscript
+            rows={rows}
+            live={idle}
+            actions={actions}
+            contentRef={() => {}}
+            feedback
+          />
+        </ThemeProvider>
+      </ReplyDraftProvider>,
+    );
+  const replyButtons = () => screen.getAllByRole("button", { name: "Reply" });
+
+  it("puts Reply beside the more button, next to the bubble, and not in the menu", () => {
+    const draft = draftOf();
+    inChat(draft, [
+      agentRow(
+        agent("a1", 0, [text("First bubble.")]),
+        agent("a2", 2_000, [text("Second bubble.")]),
+      ),
+    ]);
+
+    const more = screen.getAllByRole("button", { name: "Message details" })[1];
+    expect(more.parentElement?.firstElementChild).toBe(replyButtons()[1]);
+    fireEvent.click(replyButtons()[1]);
+    expect(draft.set).toHaveBeenCalledWith({
+      messageId: "a2",
+      author: "agent",
+      preview: "Second bubble.",
+    });
+
+    fireEvent.click(more);
+    const menu = document.querySelector("[data-slot=popover-content]") as HTMLElement;
+    expect(within(menu).getByRole("button", { name: "Copy message" })).toBeTruthy();
+    expect(within(menu).queryByRole("button", { name: "Reply" })).toBeNull();
+  });
+
+  it("puts Reply in the row a tap opens on touch", () => {
+    stubHover(false);
+    const draft = draftOf();
+    inChat(draft, [agentRow(agent("a1", 0, [text("Found three.")]))]);
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+
+    fireEvent.click(bubbleOf("Found three."));
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+
+    expect(draft.set).toHaveBeenCalledWith(expect.objectContaining({ messageId: "a1" }));
+    // The row closes once the reply is picked.
+    expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
+  });
+
+  it("replies to a guardian bubble", () => {
+    const draft = draftOf();
+    inChat(draft, [userRow(guardian("u1", 0, "Find me a cafe", { inputState: "consumed" }))]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+
+    expect(draft.set).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "u1", author: "guardian", preview: "Find me a cafe" }),
+    );
+  });
+
+  it("offers no Reply on a guardian bubble the agent has not taken in", () => {
+    inChat(draftOf(), [userRow(guardian("u1", 0, "Find me a cafe", { inputState: "queued" }))]);
+
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+  });
+
+  it("gives a task chat card the same Reply, quoting it as one line", () => {
+    const draft = draftOf();
+    inChat(draft, [
+      agentRow(agent("c1", 0, [{ type: "task_chat", chatId: "chat-7", title: "Trip" }])),
+    ]);
+
+    expect(screen.getByTestId("task-card")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Message details" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
+
+    expect(draft.set).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "c1", preview: "[Task chat] Trip (chat chat-7)" }),
+    );
+  });
+
+  it("makes each message the target of a jump from a quote of it", () => {
+    const { container } = inChat(draftOf(), [
+      userRow(guardian("u1", 0, "Hi")),
+      agentRow(agent("a1", 2_000, [text("Hello.")])),
+    ]);
+
+    const anchors = [...container.querySelectorAll("[data-timeline-anchor]")].map((el) =>
+      el.getAttribute("data-timeline-anchor"),
+    );
+    expect(anchors).toEqual(["u1", "a1"]);
+  });
+
+  it("offers no Reply where the chat has no reply state", () => {
+    renderTranscript([agentRow(agent("a1", 0, [text("Found three.")]))]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Message details" }));
+
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+  });
+
+  it("shows a reply's quote above its text in the guardian's bubble", () => {
+    inChat(draftOf(), [
+      userRow(
+        guardian("u2", 0, "ok", {
+          content: JSON.stringify([
+            { type: "reply_to", messageId: "a1", author: "agent", text: "Found three." },
+            { type: "text", content: "ok" },
+          ]),
+        }),
+      ),
+    ]);
+
+    expect(
+      screen.getByRole("button", { name: "Go to the original message" }).textContent,
+    ).toContain("Found three.");
   });
 });

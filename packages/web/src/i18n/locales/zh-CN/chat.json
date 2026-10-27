@@ -27,6 +27,11 @@
       }
     }
   },
+  "reply": {
+    "action": "回复",
+    "dismiss": "取消回复",
+    "jump": "跳到原消息"
+  },
   "senderGuardian": "守护者",
   "inputState": {
     "queued": "等待加入对话",

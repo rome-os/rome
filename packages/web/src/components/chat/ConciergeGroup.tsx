@@ -7,7 +7,9 @@ import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { BlockActions } from "@/components/chat/MessageList";
 import { userMessageText } from "@/components/chat/chat-view";
+import type { ReplySource } from "@/components/chat/reply/reply-source";
 import type { ConciergeEntry, ConciergeItem } from "@/components/chat/concierge-groups";
+import { isSettledUserMessage } from "@/components/chat/reply/reply-source";
 import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
@@ -23,7 +25,23 @@ const GuardianBubble = memo(
         className="flex min-w-0 max-w-full flex-col items-end"
         data-arrival={arrival}
       >
-        <ConciergeBubble side="end" copyText={text} createdAt={msg.createdAt} feedbackTurn={null}>
+        <ConciergeBubble
+          side="end"
+          copyText={text}
+          createdAt={msg.createdAt}
+          feedbackTurn={null}
+          reply={
+            isSettledUserMessage(msg)
+              ? {
+                  messageId: msg.id,
+                  sessionId: msg.sessionId,
+                  author: "guardian",
+                  name: msg.sender?.name ?? undefined,
+                  text,
+                }
+              : null
+          }
+        >
           <UserMessageBubble msg={msg} text={text} own />
         </ConciergeBubble>
       </div>
@@ -54,8 +72,38 @@ function AgentEntry({
   const { message } = entry;
   const parts = parseMessageEntries(message);
   const lastText = parts.findLastIndex((part) => part.type === "text" && part.content.trim());
+  // A quote of this message jumps to its first bubble.
+  const firstBubble = parts.findIndex(
+    (part) => part.type === "task_chat" || (part.type === "text" && part.content.trim()),
+  );
+  const replyTo = (text: string): ReplySource => ({
+    messageId: message.id,
+    sessionId: message.sessionId,
+    author: "agent",
+    text,
+  });
   return parts.map((part, index) => {
     const key = `${message.id}:${index}`;
+    if (part.type === "task_chat") {
+      // The card is a message of its own, so it takes the same details as a bubble.
+      return (
+        <ConciergeBubble
+          key={key}
+          side="start"
+          copyText=""
+          createdAt={message.createdAt}
+          feedbackTurn={null}
+          reply={replyTo(`[Task chat] ${part.title} (chat ${part.chatId})`)}
+          anchorId={index === firstBubble ? message.id : undefined}
+        >
+          {renderFlatEntries([part], {
+            ...actions,
+            sessionId: message.sessionId,
+            turnId: message.turnId ?? undefined,
+          })}
+        </ConciergeBubble>
+      );
+    }
     if (part.type !== "text") {
       return (
         <Fragment key={key}>
@@ -80,6 +128,8 @@ function AgentEntry({
             ? { sessionId: message.sessionId, turnId: message.turnId }
             : null
         }
+        reply={replyTo(part.content)}
+        anchorId={index === firstBubble ? message.id : undefined}
       >
         <ChatBubble tone="received" {...arrival(message.id)}>
           <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks={!long}>

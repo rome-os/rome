@@ -126,6 +126,7 @@ import type {
   WebChatRepository,
 } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
+import { currentMessageSection, replyContextLine, replyContextSection } from "./reply-context.js";
 import { evaluateProviderSessionReset } from "../chat-settings/reset-policy.js";
 import {
   forkSessionKey,
@@ -161,9 +162,11 @@ type ConversationContextMessage = Omit<StoredConversationContextMessage, "create
 };
 
 function conversationContextLine(message: ConversationContextMessage): string {
-  const sender = message.senderName?.trim() || "Unknown sender";
-  const timestamp = message.createdAt ? `[${message.createdAt.toISOString()}] ` : "";
-  return `${timestamp}${sender}: ${conversationMessageText(message.content)}`;
+  return replyContextLine({
+    createdAt: message.createdAt,
+    sender: message.senderName?.trim() || "Unknown sender",
+    text: conversationMessageText(message.content),
+  });
 }
 
 function prependConversationContext(
@@ -189,14 +192,10 @@ function prependConversationContext(
     );
   }
   if (context.repliedTo) {
-    sections.push(
-      "<reply_context>",
-      conversationContextLine(context.repliedTo),
-      "</reply_context>",
-    );
+    sections.push(...replyContextSection(conversationContextLine(context.repliedTo)));
   }
   if (sections.length === 0) return prompt;
-  sections.push("<current_message>", prompt, "</current_message>");
+  sections.push(...currentMessageSection(prompt));
   return sections.join("\n");
 }
 

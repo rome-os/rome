@@ -5,6 +5,7 @@ import { forwardRef, useImperativeHandle, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
+import { useReplyDraft } from "@/components/chat/reply/reply-draft";
 import { Chat } from "./Chat";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import type { LiveEventsClient } from "@/lib/live-events";
@@ -128,6 +129,15 @@ rs.mock("@/pages/free/WidgetPicker", () => ({
   WidgetPicker: () => null,
 }));
 
+function ReplyJump() {
+  const reply = useReplyDraft();
+  return (
+    <button type="button" data-testid="reply-jump" onClick={() => reply?.jump("a2")}>
+      jump
+    </button>
+  );
+}
+
 rs.mock("@/components/chat/MessageList", () => ({
   MessageList: ({
     live,
@@ -148,6 +158,8 @@ rs.mock("@/components/chat/MessageList", () => ({
   }) => (
     <>
       <div data-testid="message-list">{live.identity.name}</div>
+      <div data-testid="agent-anchor" data-timeline-anchor="a1 a2" />
+      <ReplyJump />
       <button
         type="button"
         onClick={() =>
@@ -218,6 +230,32 @@ rs.mock("@/components/chat/ChatComposer", () => ({
             void props
               .onSend?.(
                 { text: "hi", uploads: [], reasoningEffort: "medium", projectPath: "" },
+                { onUploadProgress: () => {}, signal: new AbortController().signal },
+              )
+              .catch(() => {})
+          }
+        />
+      ) : null}
+      {props.onSend ? (
+        <button
+          type="button"
+          data-testid="send-reply-button"
+          onClick={() =>
+            void props
+              .onSend?.(
+                {
+                  text: "and then?",
+                  uploads: [],
+                  reasoningEffort: "medium",
+                  projectPath: "",
+                  inputId: "11111111-1111-4111-8111-111111111111",
+                  replyTo: {
+                    messageId: "a2",
+                    author: "agent",
+                    quote: "Lisbon",
+                    preview: "Lisbon",
+                  },
+                },
                 { onUploadProgress: () => {}, signal: new AbortController().signal },
               )
               .catch(() => {})
@@ -998,6 +1036,39 @@ describe("Chat turn stream lifecycle", () => {
 
     expect(screen.getAllByTestId("user-row")).toHaveLength(1);
     expect(screen.getByTestId("user-row")).toBe(bubble);
+  });
+
+  it("posts the reply and its quote, and shows the quote in the early bubble", async () => {
+    rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
+    renderChat(<Chat sessionId="session-1" />);
+
+    fireEvent.click(screen.getByTestId("send-reply-button"));
+
+    const early = await screen.findByTestId("user-row");
+    expect(JSON.parse(early.textContent ?? "[]")).toEqual([
+      { type: "reply_to", messageId: "a2", author: "agent", text: "Lisbon" },
+      { type: "text", content: "and then?" },
+    ]);
+    const form = rs.mocked(postSessionTurn).mock.calls[0][1] as FormData;
+    expect(form.get("replyToMessageId")).toBe("a2");
+    expect(form.get("replyQuote")).toBe("Lisbon");
+  });
+
+  it("jumps to an agent turn by any of its message ids and tints it", async () => {
+    // jsdom has no layout, so Element has no scrollTo to call.
+    const scrollTo = rs.fn();
+    const original = Element.prototype.scrollTo;
+    Element.prototype.scrollTo = scrollTo as typeof Element.prototype.scrollTo;
+    try {
+      renderChat(<Chat sessionId="session-1" />);
+
+      fireEvent.click(screen.getByTestId("reply-jump"));
+
+      expect(scrollTo).toHaveBeenCalledOnce();
+      expect(screen.getByTestId("agent-anchor").hasAttribute("data-timeline-landed")).toBe(true);
+    } finally {
+      Element.prototype.scrollTo = original;
+    }
   });
 
   it("shows the signed-in person as the sender of a message they send", async () => {

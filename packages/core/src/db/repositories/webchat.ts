@@ -2457,6 +2457,28 @@ export class WebChatRepository {
     return new Map(rows.flatMap((row) => (row.actor ? [[row.id, row.actor] as const] : [])));
   }
 
+  /** One user or assistant row of the session, with the actor that sent it, or null when the
+   * id is not a chat message of this session. */
+  async getReplyTarget(
+    sessionId: string,
+    messageId: string,
+  ): Promise<
+    (StoredWebchatMessage & { role: "user" | "assistant"; actor: SessionActor | null }) | null
+  > {
+    const [row] = await this.db
+      .select({ ...webchatMessageSelectFields, actor: romeAgentMessages.actor })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.id, messageId),
+          eq(romeAgentMessages.sessionId, sessionId),
+          inArray(romeAgentMessages.role, ["user", "assistant"]),
+        ),
+      )
+      .limit(1);
+    return row ? { ...row, role: row.role as "user" | "assistant" } : null;
+  }
+
   async getHistoryMessages(
     threadId: string | null,
     since: Date,

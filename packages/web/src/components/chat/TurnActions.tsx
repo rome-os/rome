@@ -2,6 +2,8 @@ import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
 import { TurnBranchButton } from "@/components/chat/TurnBranchButton";
 import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
+import { ReplyButton } from "@/components/chat/reply/ReplyButton";
+import type { ReplySource } from "@/components/chat/reply/reply-source";
 import type { ChatMessage } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 
@@ -30,15 +32,18 @@ export function TurnActions({
   feedbackTurn,
   showBranch,
   createdAt,
+  reply,
 }: {
   copyText: string;
   /** The turn to rate; null hides feedback and branch. */
   feedbackTurn: { sessionId: string; turnId: string } | null;
   showBranch: boolean;
   createdAt?: string;
+  /** What Reply quotes; null hides it. */
+  reply?: ReplySource | null;
 }) {
   const timestamp = createdAt ? formatMessageTimestamp(createdAt) : "";
-  if (!copyText && !feedbackTurn && !timestamp) return null;
+  if (!copyText && !feedbackTurn && !timestamp && !reply) return null;
   return (
     // Hover-revealed on pointer devices, always visible on touch — mirrors the affordance
     // under the guardian's own bubbles. `has-[[aria-pressed=true]]` keeps
@@ -47,6 +52,7 @@ export function TurnActions({
     // recorded.
     <div className="-ml-[var(--control-action-offset)] mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
       {copyText ? <CopyMessageButton text={copyText} /> : null}
+      {reply ? <ReplyButton source={reply} /> : null}
       {feedbackTurn ? (
         <TurnFeedbackButtons
           key={`${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}

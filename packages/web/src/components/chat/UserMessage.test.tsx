@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { ThemeProvider } from "@/hooks/use-theme";
 import type { ChatMessage } from "@/lib/chat-types";
 import { UserMessage } from "./UserMessage";
+import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
 
 const viewer = rs.hoisted(() => ({
   current: { kind: "guardian", userId: "seat", displayName: "Ray", avatarUrl: null } as
@@ -187,5 +188,67 @@ describe("UserMessage sender", () => {
     rerender(withSender({ kind: "guardian", name: "Ray", avatarUrl: null }));
 
     expect(screen.getByTitle("Ray").textContent).toBe("R");
+  });
+});
+
+describe("UserMessage reply", () => {
+  const draft = (overrides: Partial<ReplyDraft> = {}): ReplyDraft => ({
+    sessionId: "session-1",
+    target: null,
+    set: rs.fn(),
+    clear: rs.fn(),
+    restore: rs.fn(),
+    has: () => true,
+    jump: rs.fn(),
+    ...overrides,
+  });
+  const inChat = (
+    reply: ReplyDraft,
+    inputState?: ChatMessage["inputState"],
+    content = message.content,
+  ) => (
+    <ReplyDraftProvider value={reply}>
+      <ThemeProvider>
+        <UserMessage msg={{ ...message, content, inputState }} />
+      </ThemeProvider>
+    </ReplyDraftProvider>
+  );
+
+  it("replies to a message the agent has taken in", () => {
+    const reply = draft();
+    render(inChat(reply, "consumed"));
+
+    fireEvent.click(screen.getByRole("button", { name: "reply.action" }));
+
+    expect(reply.set).toHaveBeenCalledWith({
+      messageId: "input-1",
+      author: "guardian",
+      preview: "Also include pseudocode.",
+    });
+  });
+
+  it.each([
+    "queued",
+    "submitted",
+    "failed",
+  ] as const)("offers no Reply on a message that is %s", (state) => {
+    render(inChat(draft(), state));
+
+    expect(screen.queryByRole("button", { name: "reply.action" })).toBeNull();
+  });
+
+  it("shows the quote a reply carries, linked to the original", () => {
+    const reply = draft();
+    const content = JSON.stringify([
+      { type: "reply_to", messageId: "a-9", author: "agent", text: "Use a heap." },
+      { type: "text", content: "Also include pseudocode." },
+    ]);
+    render(inChat(reply, "consumed", content));
+
+    fireEvent.click(screen.getByRole("button", { name: "reply.jump" }));
+
+    expect(reply.jump).toHaveBeenCalledWith("a-9");
+    expect(screen.getByText("Use a heap.")).toBeTruthy();
+    expect(screen.getByText("Also include pseudocode.")).toBeTruthy();
   });
 });

@@ -47,6 +47,8 @@ import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
+import { ReplyBar } from "./reply/ReplyBar";
+import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
 import {
   COMPOSER_HINT_KEYS,
   composerHints,
@@ -84,6 +86,9 @@ export interface ChatComposerSnapshot {
   // Resending an unchanged draft after a failure reuses it, so a turn the server
   // accepted before the failure is returned rather than recorded twice.
   inputId?: string;
+  // The message this turn replies to, sent as `replyToMessageId` (and
+  // `replyQuote` for a selection).
+  replyTo?: ReplyTarget;
 }
 
 export interface ChatComposerSendControls {
@@ -240,6 +245,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   ref,
 ) {
   const { t } = useTranslation("chat");
+  const replyDraft = useReplyDraft();
 
   const [{ storedDraft, authEpoch }] = useState(() => {
     const authEpoch = persistNewChatDraft ? currentAuthEpoch() : null;
@@ -731,6 +737,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       agentMention: draftAgentMention ?? undefined,
       skillName: skill?.name,
       inputId,
+      replyTo: replyDraft?.target ?? undefined,
     };
 
     // A text-only turn clears optimistically — it is accepted or rejected in
@@ -748,12 +755,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       setInputText("");
       setPendingUploads([]);
       setDraftSkill(null);
+      replyDraft?.clear();
     }
     setHint((current) => pickComposerHint(hints, current));
     try {
       await invokeOnSend(snapshot, persistNewChatDraft);
       failedSendRef.current = null;
       if (!clearsOptimistically) {
+        replyDraft?.clear();
         const sentIds = new Set(uploads.map((upload) => upload.id));
         setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
         setDraftSkill((current) => (current === skill ? null : current));
@@ -787,6 +796,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setInputText(persistNewChatDraft ? rawText : text);
         setPendingUploads(uploads);
         setDraftSkill(skill);
+        if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
       }
       // Nothing to restore otherwise — a cancelled or failed upload never
       // cleared the text or the attachment tray in the first place.
@@ -807,6 +817,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     invokeOnSend,
     hints,
     locked,
+    replyDraft,
   ]);
 
   // Re-evaluates whether the cursor sits inside an active mention token
@@ -1044,6 +1055,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         return;
       }
     }
+    if (e.key === "Escape" && replyDraft?.target) {
+      e.preventDefault();
+      replyDraft.clear();
+      return;
+    }
     if (shouldSubmitOnEnter(e, { enterSends: !coarsePointer })) {
       e.preventDefault();
       void runSend();
@@ -1179,6 +1195,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           className="hidden"
           onChange={handleFileSelection}
         />
+        <ReplyBar />
         {/* flow-root keeps the tray's bottom margin inside this box, so the
             measured height is the full space the tray takes from the input. */}
         <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">

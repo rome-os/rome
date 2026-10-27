@@ -34,6 +34,7 @@ const REQUIRED_FIELDS = {
   handback_approved: {},
   error: { error: "string" },
   task_chat: { chatId: "string", title: "string" },
+  reply_to: { messageId: "string", author: "string", text: "string" },
 } satisfies {
   [K in TranscriptPart["type"]]: Partial<
     Record<Exclude<keyof Extract<TranscriptPart, { type: K }>, "type">, "string" | "object">

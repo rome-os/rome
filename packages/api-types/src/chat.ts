@@ -40,13 +40,28 @@ export interface TaskChatPart {
   title: string;
 }
 
+/** Longest `text` a {@link ReplyToPart} keeps; core truncates longer snapshots with an ellipsis. */
+export const REPLY_TO_TEXT_MAX_LENGTH = 1000;
+
+/** The message a user message replies to, snapshotted when it was sent. It is
+ * the first part of the reply, so the quote stays whole after the original
+ * leaves the transcript. `text` is the quoted selection or the whole message. */
+export interface ReplyToPart {
+  type: "reply_to";
+  messageId: string;
+  author: "guardian" | "agent";
+  name?: string;
+  text: string;
+}
+
 /** One part of a stored WebChat message's content. */
 export type TranscriptPart =
   | Exclude<MessagePart, { type: "text" }>
   | WebchatTextPart
   | HandbackApprovedPart
   | StoredErrorPart
-  | TaskChatPart;
+  | TaskChatPart
+  | ReplyToPart;
 
 /** The person who sent a WebChat user message, as the dashboard shows them.
  * Absent when the message recorded no sender: one sent before senders were

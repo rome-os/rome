@@ -68,6 +68,8 @@ import type {
 import { useSmoothText } from "@/hooks/use-smooth-text";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
+import { ReplyDraftProvider, useReplyDraftState } from "@/components/chat/reply/reply-draft";
+import { findMessageAnchor } from "@/components/chat/reply/reply-source";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
@@ -547,13 +549,13 @@ export function Chat({
   const landingTimerRef = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(landingTimerRef.current), []);
 
-  const jumpToQuestion = useCallback(
+  // Scrolls to a message and tints it. An anchor names one message id, or
+  // every id of an agent turn separated by spaces.
+  const jumpToMessage = useCallback(
     (messageId: string) => {
       const scroller = scrollerEl;
       if (!scroller) return;
-      const anchor = [...scroller.querySelectorAll<HTMLElement>("[data-timeline-anchor]")].find(
-        (el) => el.getAttribute("data-timeline-anchor") === messageId,
-      );
+      const anchor = findMessageAnchor(scroller, messageId);
       if (!anchor) return;
       const top =
         anchor.getBoundingClientRect().top -
@@ -581,6 +583,18 @@ export function Chat({
     },
     [scrollerEl],
   );
+
+  const displayedMessageIds = useMemo(
+    () => new Set(displayMessages.map((message) => message.id)),
+    [displayMessages],
+  );
+  const replyDraft = useReplyDraftState({
+    chatId: mainSessionId ?? undefined,
+    sessionId: floorSessionId || null,
+    messageIds: displayedMessageIds,
+    jump: jumpToMessage,
+    focusComposer: () => composerRef.current?.focus(),
+  });
 
   const enterShareMode = useCallback(() => {
     setSelectedShareTurns(new Set(mainTurnIds));
@@ -1542,7 +1556,22 @@ export function Chat({
             baseOptimisticText.trim() ? ` ${baseOptimisticText}` : ""
           }`
         : baseOptimisticText;
-      const optimisticContent = JSON.stringify([{ type: "text", content: optimisticText }]);
+      const replyTo = snapshot.replyTo;
+      // The quote shows at once; the accepted row carries the server's snapshot of it.
+      const optimisticContent = JSON.stringify([
+        ...(replyTo
+          ? [
+              {
+                type: "reply_to",
+                messageId: replyTo.messageId,
+                author: replyTo.author,
+                ...(replyTo.name ? { name: replyTo.name } : {}),
+                text: replyTo.preview,
+              },
+            ]
+          : []),
+        { type: "text", content: optimisticText },
+      ]);
       await runTurnLifecycle(
         sendingSessionId,
         async () => {
@@ -1555,6 +1584,10 @@ export function Chat({
             formData.set("largeModelSelection", snapshot.largeModelSelection);
           formData.set("reasoningEffort", snapshot.reasoningEffort);
           if (concierge) formData.set("priority", "now");
+          if (replyTo) {
+            formData.set("replyToMessageId", replyTo.messageId);
+            if (replyTo.quote) formData.set("replyQuote", replyTo.quote);
+          }
           for (const upload of snapshot.uploads) {
             formData.append("files", upload.file);
           }
@@ -2052,7 +2085,7 @@ export function Chat({
     </>
   );
 
-  return (
+  const page = (
     <TooltipProvider delayDuration={150}>
       {sessionEventIds.map((sid) => (
         <ChatSessionEvents
@@ -2319,7 +2352,7 @@ export function Chat({
                 scroller={scrollerEl}
                 content={contentEl}
                 questions={timelineQuestions}
-                onJump={jumpToQuestion}
+                onJump={jumpToMessage}
               />
             )}
           </div>
@@ -2354,4 +2387,6 @@ export function Chat({
       </div>
     </TooltipProvider>
   );
+
+  return <ReplyDraftProvider value={replyDraft}>{page}</ReplyDraftProvider>;
 }

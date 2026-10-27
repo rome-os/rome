@@ -2,6 +2,8 @@ import { CircleAlert, CircleHelp, CircleSlash } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
+import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
+import { QuotedReply } from "@/components/chat/reply/QuotedReply";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +29,7 @@ export function UserMessageBubble({
     msg.inputState === "failed" || msg.inputState === "unknown" || msg.inputState === "cancelled";
   const pending =
     msg.inputState === "queued" || msg.inputState === "submitted" || msg.inputState === "accepted";
+  const quote = parseMessageEntries(msg).find((part) => part.type === "reply_to");
   const statusLabel =
     msg.inputState && msg.inputState !== "consumed" ? t(`inputState.${msg.inputState}`) : undefined;
   return (
@@ -57,9 +60,12 @@ export function UserMessageBubble({
         ) : msg.inputState === "cancelled" ? (
           <CircleSlash className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         ) : null}
-        <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
-          {text}
-        </Markdown>
+        <div className="min-w-0">
+          {quote ? <QuotedReply part={quote} /> : null}
+          <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
+            {text}
+          </Markdown>
+        </div>
       </ChatBubble>
       <span className="sr-only" role="status">
         {statusLabel}

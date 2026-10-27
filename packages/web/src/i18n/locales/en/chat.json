@@ -27,6 +27,11 @@
       }
     }
   },
+  "reply": {
+    "action": "Reply",
+    "dismiss": "Cancel reply",
+    "jump": "Go to the original message"
+  },
   "senderGuardian": "Guardian",
   "inputState": {
     "queued": "Waiting to be included",
