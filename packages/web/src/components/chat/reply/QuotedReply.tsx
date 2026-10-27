@@ -23,13 +23,13 @@ export function QuotedReply({ part }: { part: ReplyToPart }) {
     </>
   );
   const frame =
-    "mb-2 flex w-full gap-2 rounded-8 border-l-3 border-muted-foreground bg-current/10 px-2 py-1 text-left text-muted-foreground";
+    "mb-2 flex w-full gap-2 rounded-8 border-l-3 border-muted-foreground bg-muted px-2 py-1 text-left text-muted-foreground";
   if (!draft || !jumpable) return <div className={frame}>{body}</div>;
   return (
     <button
       type="button"
       aria-label={t("reply.jump")}
-      className={cn(frame, "cursor-pointer transition-colors hover:bg-current/15")}
+      className={cn(frame, "cursor-pointer transition-colors hover:bg-border")}
       onClick={() => draft.jump(part.messageId)}
     >
       {body}
