@@ -129,6 +129,12 @@ export class OutboxRepository {
       .where(eq(outboundMessages.id, id));
   }
 
+  /** A retry going out on another channel than the last attempt did, which
+   *  its transcript will be stored under. */
+  async movedTo(id: string, channel: string): Promise<void> {
+    await this.db.update(outboundMessages).set({ channel }).where(eq(outboundMessages.id, id));
+  }
+
   async refused(id: string, error: string): Promise<void> {
     await this.db
       .update(outboundMessages)

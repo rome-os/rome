@@ -251,7 +251,11 @@ export async function retrySend(
     await deps.outboxRepo.refused(row.id, error);
     return outboxMessage({ ...row, state: "failed", error });
   }
-  return attempt(deps, row, resolution.target);
+  // The account may be back on a channel of its own since, and this attempt's
+  // transcript is stored under the channel it goes out on now.
+  const channel = resolution.target.channel;
+  if (channel !== row.channel) await deps.outboxRepo.movedTo(row.id, channel);
+  return attempt(deps, { ...row, channel }, resolution.target);
 }
 
 /** Give up on a failed send of this person's. Answers whether there was one to

@@ -1059,6 +1059,27 @@ describe("People on an account whose channel id is opaque", () => {
       expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
     });
 
+    // Reconnecting an account gives it a fresh channel. A retry goes out from
+    // the same account on that channel, and lands under it.
+    it("confirms a retry that goes out on the account's new channel", async () => {
+      const row = await deps.outboxRepo.open({
+        to: { platform: "telegram", id: ADA },
+        channel: "tg-before-reconnect",
+        chatId: ADA,
+        text: "sent before the reconnect",
+        from: ME,
+      });
+      await deps.outboxRepo.refused(row.id, "provider down");
+
+      const retried = await app.request(`/people/${personId}/outbox/${row.id}/retry`, {
+        method: "POST",
+      });
+      expect(((await retried.json()) as OutboxMessage).state).toBe("unconfirmed");
+      expect((await deps.outboxRepo.find(row.id))?.channel).toBe(OPAQUE);
+      const outboxRes = await app.request(`/people/${personId}/outbox`);
+      expect(((await outboxRes.json()) as OutboxPage).messages).toEqual([]);
+    });
+
     // A row whose channel knew no account went out from a channel that still
     // knew none. The platform's one channel now knows its account, which may
     // not be the one the row went out from, so a retry is refused rather than
