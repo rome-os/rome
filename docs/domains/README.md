@@ -98,7 +98,6 @@ Diffs still owed to the model, each a change of its own:
 - Code, docs and the dashboard say platform for where an account lives and kind of connection for how Rome got in. Neither says service.
 - Links, dismissals and who is this are keyed by platform, not by kind of connection.
 - The People page and docs say dismiss, dismissed and stranger.
-- The guardian can delete a person.
 - A delegate link is stored and shown as the agent of its person.
 - People's labels and docs say platform where they say channel.
 - The channel record goes.
