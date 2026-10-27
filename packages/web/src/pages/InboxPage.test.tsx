@@ -64,10 +64,11 @@ describe("InboxPage message sources", () => {
     mockBackend([
       // Chat unlocked → Connected.
       connectionRow("telegram", { bot: "authorized" }, true),
-      // Granted (even degraded) but transport not up → Configured.
+      // The platform stopped accepting the grant → Broken.
       connectionRow("whatsapp", { session: "degraded" }, false),
       connectionRow("wechat", { account: "authorized" }, true),
-      connectionRow("discord", { bot: "authorized" }, true),
+      // Working, but Talk is not unlocked → Configured.
+      connectionRow("discord", { bot: "authorized" }, false),
       // Nothing granted → Disconnected.
       connectionRow("telegram_user", { session: "unauthorized" }, false),
     ]);
@@ -79,9 +80,9 @@ describe("InboxPage message sources", () => {
     };
 
     expect((await badgeOf("Telegram")).getByText("Connected")).toBeTruthy();
-    expect((await badgeOf("WhatsApp")).getByText("Configured")).toBeTruthy();
+    expect((await badgeOf("WhatsApp")).getByText("Broken")).toBeTruthy();
     expect((await badgeOf("WeChat")).getByText("Connected")).toBeTruthy();
-    expect((await badgeOf("Discord")).getByText("Connected")).toBeTruthy();
+    expect((await badgeOf("Discord")).getByText("Configured")).toBeTruthy();
     expect((await badgeOf("Telegram User")).getByText("Not connected")).toBeTruthy();
     expect((await badgeOf("Webchat")).getByText("Always on")).toBeTruthy();
   });
