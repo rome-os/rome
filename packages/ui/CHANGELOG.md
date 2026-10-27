@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7](https://github.com/rome-os/rome/compare/ui-v0.3.6...ui-v0.3.7) (2026-10-27)
+
+
+### Performance Improvements
+
+* page chat history by turn and trim chat-open requests ([#1468](https://github.com/rome-os/rome/issues/1468)) ([3f3ae7a](https://github.com/rome-os/rome/commit/3f3ae7a8d45e7006510ab2e508d9e8ee81a08455))
+
 ## [0.3.6](https://github.com/rome-os/rome/compare/ui-v0.3.5...ui-v0.3.6) (2026-10-21)
 
 

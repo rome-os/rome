@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.9.3](https://github.com/rome-os/rome/compare/app-runtime-v0.9.2...app-runtime-v0.9.3) (2026-10-27)
+
+
+### Features
+
+* **core:** key People links by platform ([#1459](https://github.com/rome-os/rome/issues/1459)) ([93401a8](https://github.com/rome-os/rome/commit/93401a8cb659d4d75d8889b1929d3abb7090298a))
+
 ## [0.9.2](https://github.com/rome-os/rome/compare/app-runtime-v0.9.1...app-runtime-v0.9.2) (2026-10-27)
 
 
