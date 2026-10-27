@@ -42,11 +42,13 @@ export function useSubagentProgress({
   if (running) wasRunning.current = true;
   const retained = !running && retain && wasRunning.current;
   const stream = useTurnStream(turnId, { enabled: running || retained });
-  // The clock stops where the run ended: at the stream's `done`, or when the
-  // caller reports it no longer running, whichever comes first.
-  const endedAt = useRef<number | null>(null);
+  // The clock stops where the run ended: at the stream's `done` (one timestamp
+  // shared by every reader), or when the caller reports it no longer running,
+  // whichever comes first.
+  const reportedEndAt = useRef<number | null>(null);
   const ended = stream.done || !running;
-  if (ended && endedAt.current === null) endedAt.current = Date.now();
+  if (ended && reportedEndAt.current === null) reportedEndAt.current = Date.now();
+  const endedAt = stream.endedAt ?? reportedEndAt.current;
   const now = useNow(!ended);
   if (!running && !retained) {
     return { label: null, currentStep: null, segments: stream.segments };
@@ -54,8 +56,7 @@ export function useSubagentProgress({
 
   const steps = stream.summary?.totalSteps ?? 0;
   const startMs = startedAtMs ?? firstStepStartMs(stream.segments);
-  const elapsed =
-    startMs === null ? null : formatDuration(Math.max(0, (endedAt.current ?? now) - startMs));
+  const elapsed = startMs === null ? null : formatDuration(Math.max(0, (endedAt ?? now) - startMs));
   const stepsLabel =
     steps > 0
       ? t(steps === 1 ? "trace.summary.stepsSingle" : "trace.summary.stepsMultiple", {

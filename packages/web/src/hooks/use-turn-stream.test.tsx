@@ -83,19 +83,94 @@ describe("useTurnStream", () => {
     expect(result.current.segments).toEqual([]);
   });
 
-  it("is done with an error when the request fails", async () => {
-    respond = () => Promise.reject(new Error("offline"));
-    const { result } = renderHook(() => useTurnStream("child-turn-2"));
-    await waitFor(() => expect(result.current.done).toBe(true));
-    expect(result.current.error).toBe("offline");
+  describe("a transport failure is not the end of the turn", () => {
+    // Real timers: the first retry waits one second.
+    const RETRY_WAIT = { timeout: 3_000 };
+
+    it("keeps the snapshot and reopens the stream when the connection closes without done", async () => {
+      const first = new FakeTurnStream();
+      const second = new FakeTurnStream();
+      const streams = [first, second];
+      respond = async () => streams.shift()?.response ?? new Response(null, { status: 404 });
+      const { result } = renderHook(() => useTurnStream("child-turn-3"));
+      await act(async () => {
+        first.send("segment_upsert", runSegment("run-1", [{ tool: "Bash", input: {} }]));
+        first.send("summary_update", stepsSummary(1));
+        first.close();
+      });
+
+      await waitFor(() => expect(result.current.error).toBe("Stream closed"));
+      expect(result.current.done).toBe(false);
+      expect(result.current.endedAt).toBeNull();
+      expect(result.current.segments).toHaveLength(1);
+
+      // The server replays the turn from its start on the new connection.
+      await waitFor(() => expect(calls).toHaveLength(2), RETRY_WAIT);
+      await act(async () => {
+        second.send("segment_upsert", runSegment("run-1", [{ tool: "Bash", input: {} }]));
+        second.send("segment_upsert", runSegment("run-2", [{ tool: "Read", input: {} }]));
+        second.send("summary_update", stepsSummary(2));
+        second.send("done", { success: true });
+      });
+      await waitFor(() => expect(result.current.done).toBe(true));
+      expect(result.current.error).toBeNull();
+      expect(result.current.segments.map((s) => s.id)).toEqual(["run-1", "run-2"]);
+      expect(result.current.summary?.totalSteps).toBe(2);
+    });
+
+    it("retries a failed request and a non-404 HTTP error without ending", async () => {
+      const stream = new FakeTurnStream();
+      const outcomes: (() => Promise<Response>)[] = [
+        () => Promise.reject(new Error("offline")),
+        async () => new Response("{}", { status: 503 }),
+        async () => stream.response,
+      ];
+      respond = () => (outcomes.shift() ?? (async () => stream.response))();
+      const { result } = renderHook(() => useTurnStream("child-turn-2"));
+
+      await waitFor(() => expect(result.current.error).toBe("offline"));
+      expect(result.current.done).toBe(false);
+      await waitFor(() => expect(result.current.error).toBe("HTTP 503"), RETRY_WAIT);
+      expect(result.current.done).toBe(false);
+      await waitFor(() => expect(calls).toHaveLength(3), RETRY_WAIT);
+      await waitFor(() => expect(result.current.error).toBeNull());
+      expect(result.current.done).toBe(false);
+    });
+
+    it("ends on a 404 after a failed attempt", async () => {
+      const outcomes: (() => Promise<Response>)[] = [
+        () => Promise.reject(new Error("offline")),
+        async () => new Response("{}", { status: 404 }),
+      ];
+      respond = () => (outcomes.shift() ?? (async () => new Response("{}", { status: 404 })))();
+      const { result } = renderHook(() => useTurnStream("child-turn-4"));
+      await waitFor(() => expect(result.current.done).toBe(true), RETRY_WAIT);
+      expect(result.current.error).toBeNull();
+    });
+
+    it("stops retrying once the last reader leaves", async () => {
+      respond = () => Promise.reject(new Error("offline"));
+      const { result, unmount } = renderHook(() => useTurnStream("child-turn-5"));
+      await waitFor(() => expect(result.current.error).toBe("offline"));
+      unmount();
+      await act(async () => new Promise((r) => setTimeout(r, 1_300)));
+      expect(calls).toHaveLength(1);
+    });
   });
 
-  it("is done when the connection closes without a done event", async () => {
+  it("stamps the end once, so every reader shares it", async () => {
     const stream = new FakeTurnStream();
     respond = async () => stream.response;
-    const { result } = renderHook(() => useTurnStream("child-turn-3"));
-    await act(async () => stream.close());
-    await waitFor(() => expect(result.current.done).toBe(true));
+    const a = renderHook(() => useTurnStream("ended-turn"));
+    expect(a.result.current.endedAt).toBeNull();
+    await act(async () => stream.send("done", { success: true }));
+    await waitFor(() => expect(a.result.current.done).toBe(true));
+    const endedAt = a.result.current.endedAt;
+    expect(endedAt).not.toBeNull();
+
+    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    const b = renderHook(() => useTurnStream("ended-turn"));
+    expect(b.result.current.endedAt).toBe(endedAt);
   });
 
   it("opens no stream while disabled", () => {

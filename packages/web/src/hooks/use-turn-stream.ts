@@ -8,16 +8,29 @@ export interface TurnStreamState {
   segments: TraceSegment[];
   summary: TraceSummary | null;
   /**
-   * The stream has ended: the server sent `done`, the turn's stream was gone
-   * (404 after its retention window), or the connection failed or closed.
-   * After this the stored trace is the record, so a reader should fetch it.
+   * The turn has ended: the server sent `done`, or the turn's stream was gone
+   * (404 after its retention window). Only then is the stored trace the record,
+   * so a reader should fetch it. A dropped connection is not an end: the last
+   * snapshot stays and the stream is reopened.
    */
   done: boolean;
-  /** Set when the stream could not be read. A gone stream (404) is not an error. */
+  /** When `done` was applied (ms since epoch), so every reader shows the same end. */
+  endedAt: number | null;
+  /** The last transport failure, while the stream is being reopened. Never ends the turn. */
   error: string | null;
 }
 
-const IDLE: TurnStreamState = { segments: [], summary: null, done: false, error: null };
+const IDLE: TurnStreamState = {
+  segments: [],
+  summary: null,
+  done: false,
+  endedAt: null,
+  error: null,
+};
+
+// The same backoff as Chat's followTurn.
+const RETRY_BASE_DELAY_MS = 1_000;
+const RETRY_MAX_DELAY_MS = 5_000;
 
 interface Entry {
   state: TurnStreamState;
@@ -57,21 +70,33 @@ function applyEvents(state: TurnStreamState, events: { event: string; data: stri
       done = true;
     }
   }
-  return { ...state, segments, summary, done };
+  const endedAt = done && !state.done ? Date.now() : state.endedAt;
+  return { ...state, segments, summary, done, endedAt };
 }
 
-async function run(turnId: string, entry: Entry) {
+function end(entry: Entry) {
+  setState(entry, {
+    ...entry.state,
+    done: true,
+    endedAt: entry.state.endedAt ?? Date.now(),
+    error: null,
+  });
+}
+
+/** Reads one connection. Resolves true when the turn ended, false on a transport failure. */
+async function readOnce(turnId: string, entry: Entry): Promise<boolean> {
   const { signal } = entry.controller;
   try {
     const response = await openTurnStream(turnId, signal);
-    if (!response.ok || !response.body) {
-      setState(entry, {
-        ...entry.state,
-        done: true,
-        error: response.status === 404 ? null : `HTTP ${response.status}`,
-      });
-      return;
+    if (response.status === 404) {
+      end(entry);
+      return true;
     }
+    if (!response.ok || !response.body) {
+      setState(entry, { ...entry.state, error: `HTTP ${response.status}` });
+      return false;
+    }
+    if (entry.state.error) setState(entry, { ...entry.state, error: null });
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -85,15 +110,47 @@ async function run(turnId: string, entry: Entry) {
       buffer = buffer.slice(boundary + 2);
       setState(entry, applyEvents(entry.state, parseSSEEvents(complete)));
     }
-    if (!entry.state.done) setState(entry, { ...entry.state, done: true });
     await reader.cancel().catch(() => {});
+    if (entry.state.done) return true;
+    // EOF without `done`: the connection dropped, the turn did not end.
+    setState(entry, { ...entry.state, error: "Stream closed" });
+    return false;
   } catch (err) {
+    if (!signal.aborted) {
+      setState(entry, {
+        ...entry.state,
+        error: err instanceof Error ? err.message : "Stream failed",
+      });
+    }
+    return false;
+  }
+}
+
+// Follows the turn until it ends or the last reader leaves. The server replays a
+// turn from its start (and 404s once it is gone), so each reconnect gets a
+// complete, definitive answer; the snapshot is kept meanwhile.
+async function run(turnId: string, entry: Entry) {
+  const { signal } = entry.controller;
+  let delayMs = RETRY_BASE_DELAY_MS;
+  while (!signal.aborted) {
+    const openedAt = Date.now();
+    if (await readOnce(turnId, entry)) return;
     if (signal.aborted) return;
-    setState(entry, {
-      ...entry.state,
-      done: true,
-      error: err instanceof Error ? err.message : "Stream failed",
+    // Retry fast after a connection that held; keep backing off when streams
+    // keep closing right away.
+    if (Date.now() - openedAt >= RETRY_MAX_DELAY_MS) delayMs = RETRY_BASE_DELAY_MS;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, delayMs);
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        { once: true },
+      );
     });
+    delayMs = Math.min(delayMs * 2, RETRY_MAX_DELAY_MS);
   }
 }
 
