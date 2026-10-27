@@ -84,7 +84,7 @@ export class AccountProfiles {
     >,
   ): void {
     if (message.direction !== "inbound" || !message.senderId) return;
-    const displayName = named(message.senderDisplayName);
+    const displayName = notAnId(named(message.senderDisplayName), message.senderId);
     const handle = named(message.senderUsername);
     if (!displayName && !handle) return;
     const platform = message.account?.platform ?? this.platformOfChannel(message.channel);
@@ -150,6 +150,18 @@ export function refreshingAfter<S extends object>(
       };
     },
   });
+}
+
+/**
+ * A name, or null where it only echoes the sender's id. Some channels label a
+ * nameless sender with its id, or the part of it a person would read: an email
+ * address for an `unauthenticated:` sender, a WeChat id before its `@`.
+ */
+function notAnId(name: string | null, senderId: string): string | null {
+  if (!name) return null;
+  const echoes =
+    name === senderId || senderId.startsWith(`${name}@`) || senderId.endsWith(`:${name}`);
+  return echoes ? null : name;
 }
 
 /** A value, or null where there is only blank space. */

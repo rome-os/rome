@@ -340,7 +340,7 @@ export class FeishuAdapter {
       messageId: m.messageId,
       chatId: m.chatId as ChatId,
       senderId: m.senderId,
-      senderDisplayName: m.senderName ?? "Feishu User",
+      ...(m.senderName ? { senderDisplayName: m.senderName } : {}),
       text,
       attachments: [],
       timestamp: new Date(m.createTime),

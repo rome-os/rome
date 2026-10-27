@@ -129,6 +129,14 @@ export class TelegramAdapter {
       // A channel post, or a message sent on behalf of a chat, speaks as the
       // chat rather than as a person.
       const fromPerson = ctx.from && !ctx.channelPost && !rawMsg.sender_chat ? ctx.from : undefined;
+      // The name of whoever the sender id names: the person, the chat the
+      // message speaks for, or the channel posting. Absent where Telegram gives
+      // none, rather than a placeholder that would read as a name.
+      const senderName = fromPerson
+        ? [fromPerson.first_name, fromPerson.last_name].filter(Boolean).join(" ")
+        : rawMsg.sender_chat
+          ? (rawMsg.sender_chat as { title?: string }).title
+          : chatTitle;
 
       const msg: ChannelMessage = {
         channel: "telegram",
@@ -142,9 +150,7 @@ export class TelegramAdapter {
             : ctx.from
               ? String(ctx.from.id)
               : String(chat.id),
-        senderDisplayName: fromPerson
-          ? [fromPerson.first_name, fromPerson.last_name].filter(Boolean).join(" ") || "Unknown"
-          : (chatTitle ?? "Channel"),
+        ...(senderName ? { senderDisplayName: senderName } : {}),
         ...(fromPerson?.username ? { senderUsername: fromPerson.username } : {}),
         text: rawMsg.text ?? rawMsg.caption ?? "",
         attachments: this.extractAttachments(ctx),

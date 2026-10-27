@@ -69,6 +69,52 @@ describe("AccountProfiles", () => {
     ).toEqual([null, null]);
   });
 
+  it("takes no name that only echoes the sender's id", async () => {
+    profiles.heard(
+      inbound({
+        channel: "telegram_user",
+        senderId: "1001",
+        senderDisplayName: "1001",
+        senderUsername: undefined,
+      }),
+    );
+    profiles.heard(
+      inbound({
+        channel: "email",
+        senderId: "unauthenticated:ada@example.com",
+        senderDisplayName: "ada@example.com",
+        senderUsername: undefined,
+      }),
+    );
+    profiles.heard(
+      inbound({
+        channel: "wechat",
+        senderId: "wxid_ada@im.wechat",
+        senderDisplayName: "wxid_ada",
+        senderUsername: undefined,
+      }),
+    );
+    await settle();
+
+    expect(
+      await repo.profilesOf([
+        { platform: "telegram", id: "1001" },
+        { platform: "email", id: "unauthenticated:ada@example.com" },
+        { platform: "wechat", id: "wxid_ada@im.wechat" },
+      ]),
+    ).toEqual([null, null, null]);
+  });
+
+  it("keeps a learned name when a later message carries none", async () => {
+    profiles.heard(inbound());
+    profiles.heard(inbound({ senderDisplayName: undefined, senderUsername: "ada_new" }));
+    await settle();
+
+    expect(await repo.profilesOf([{ platform: "telegram", id: "1001" }])).toEqual([
+      { displayName: "Ada", handle: "ada_new", avatarUrl: null },
+    ]);
+  });
+
   it("copies an address book in, under its platform and the book's own ids", async () => {
     const store = new WhatsAppStoreRepository(testDb.db);
     await store.upsertContacts([
