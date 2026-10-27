@@ -72,7 +72,10 @@
     "markingStranger": "标记中…",
     "restore": "恢复",
     "restoring": "恢复中…",
-    "transfer": "移到这里"
+    "transfer": "移到这里",
+    "deletePerson": "删除人物…",
+    "delete": "删除",
+    "deleting": "删除中…"
   },
   "bulk": {
     "selected": "已选择",
@@ -89,6 +92,10 @@
     "confirm": "合并",
     "searchPlaceholder": "按姓名、电话或账号搜索",
     "noCandidates": "没有符合该搜索的人。"
+  },
+  "delete": {
+    "title": "删除 {{name}}？",
+    "description": "{{name}} 将从人物中移除。其账号会重新成为陌生人，每个聊天都保留其历史记录。"
   },
   "errors": {
     "requestFailed": "出了点问题，更改未保存。",

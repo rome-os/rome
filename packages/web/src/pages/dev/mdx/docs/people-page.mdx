@@ -133,7 +133,7 @@ contact would out-shout the roster the view exists to read.
 ## The person page
 
 `/people/person/:personId` is the dossier: the person card with bond select, linked accounts
-as neutral glyph + id pills, `Link account…` and `Merge into…`. The merged timeline
+as neutral glyph + id pills, `Link account…`, `Merge into…` and `Delete person…`. The merged timeline
 grouped by day sits below it, and a sticky composer sits at the bottom.
 
 Both pickers offer more than what would succeed. `Link account…` lists the accounts
@@ -141,6 +141,10 @@ another person already holds, because taking one back is a gesture the guardian 
 and the refusal is what makes it explicit. `Merge into…` names the survivor, so the
 person whose page is open is the one absorbed — which is why it ends on the survivor's
 page rather than on a route that now answers 404.
+
+`Delete person…` asks first, because every account the person holds goes back to the
+strangers and taking them back is one link each. Each chat keeps its history. The page
+then leaves the way its back arrow would, since nobody is left to follow.
 
 <Specimen title="Dossier">
   <PersonPageDemo />
@@ -180,7 +184,8 @@ Every gesture is a verb of the contract, and the union's single "move" decompose
 them: `POST /api/people` places a sender and links the account it came from in one
 request, `POST /api/people/:id/accounts` links onto somebody who already exists,
 `dismiss` and `restore` decide about an account, `POST /api/people/:id/merge` absorbs a
-duplicate, and `PATCH /api/people/:id` changes a bond.
+duplicate, `DELETE /api/people/:id` deletes a person, and `PATCH /api/people/:id` changes
+a bond.
 
 | Rule | Why |
 | --- | --- |

@@ -72,7 +72,10 @@
     "markingStranger": "Marking…",
     "restore": "Restore",
     "restoring": "Restoring…",
-    "transfer": "Move it here"
+    "transfer": "Move it here",
+    "deletePerson": "Delete person…",
+    "delete": "Delete",
+    "deleting": "Deleting…"
   },
   "bulk": {
     "selected": "selected",
@@ -89,6 +92,10 @@
     "confirm": "Merge",
     "searchPlaceholder": "Search by name, phone, or handle",
     "noCandidates": "Nobody matches that search."
+  },
+  "delete": {
+    "title": "Delete {{name}}?",
+    "description": "{{name}} is removed from People. Their accounts become strangers again, and every chat keeps its history."
   },
   "errors": {
     "requestFailed": "Something went wrong. The change wasn't saved.",

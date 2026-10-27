@@ -669,6 +669,46 @@ describe("PeopleRepository", () => {
     });
   });
 
+  describe("delete()", () => {
+    it("deletes a person and returns their accounts to strangers", async () => {
+      const tg = { channel: "telegram", channelUserId: "tg-alice" };
+      const wa = { channel: "whatsapp", channelUserId: "wa-alice" };
+      const alice = await repo.create({
+        displayName: "Alice",
+        bondLevel: "other",
+        links: [tg, wa],
+      });
+      const bob = await repo.create({
+        displayName: "Bob",
+        bondLevel: "other",
+        links: [{ channel: "telegram", channelUserId: "tg-bob" }],
+      });
+
+      expect(await repo.delete(alice)).toEqual({ deleted: true, links: 2 });
+
+      expect(await repo.byId(alice)).toBeNull();
+      expect(await repo.byAccount(tg)).toBeNull();
+      // A stranger, not a dismissal: the guardian deleted a person, not a
+      // decision about each of their accounts.
+      expect(await repo.isDismissed(tg)).toBe(false);
+      // An account a stranger again can be linked again.
+      expect(await repo.link(wa, bob)).toEqual({ linked: true });
+      expect((await repo.byId(bob))!.links).toHaveLength(2);
+    });
+
+    it("refuses the guardian and an id that names nobody", async () => {
+      const guardian = await repo.create({
+        displayName: "Ouou",
+        bondLevel: "guardian",
+        links: [{ channel: "telegram", channelUserId: "tg-ouou" }],
+      });
+
+      expect(await repo.delete(guardian)).toEqual({ deleted: false, reason: "guardian" });
+      expect((await repo.byId(guardian))!.links).toHaveLength(1);
+      expect(await repo.delete("nobody")).toEqual({ deleted: false, reason: "unknown" });
+    });
+  });
+
   describe("create() claiming accounts", () => {
     it("takes an account that was only dismissed", async () => {
       await dismiss("whatsapp", "+15551234", "Bob");

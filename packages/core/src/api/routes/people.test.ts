@@ -1265,10 +1265,66 @@ describe("People updates", () => {
   });
 });
 
+// DELETE /people/:id — the guardian deletes a person. What these pin is that
+// the person and every link go together, that the accounts become strangers
+// rather than dismissals, and that the guardian cannot be deleted.
+describe("People delete", () => {
+  let testDb: TestDb;
+  let deps: TestDeps;
+  let app: Hono;
+  let baseline: BaselineIds;
+
+  beforeEach(async () => {
+    testDb = createTestDb();
+    baseline = await seedBaseline(testDb.db);
+    deps = await buildTestDeps(testDb.db);
+    app = new Hono().route("/", peopleRoutes(deps));
+  });
+
+  afterEach(() => testDb.close());
+
+  const remove = (id: string) => app.request(`/people/${id}`, { method: "DELETE" });
+
+  it("deletes the person and returns their accounts to strangers", async () => {
+    const bob = baseline.persons.acquaintanceId;
+    const wa = { channel: "whatsapp", channelUserId: "wa-bob" };
+    await deps.peopleRepo.linkStated(wa, bob, "Bob");
+
+    const res = await remove(bob);
+
+    expect(res.status).toBe(204);
+    expect((await app.request(`/people/${bob}`)).status).toBe(404);
+    const list = (await (await app.request("/people")).json()) as PeopleList;
+    expect(list.people.map((person) => person.id)).not.toContain(bob);
+    for (const account of [{ channel: "telegram", channelUserId: "tg-bob" }, wa]) {
+      expect(await deps.peopleRepo.byAccount(account)).toBeNull();
+      expect(await deps.peopleRepo.isDismissed(account)).toBe(false);
+    }
+  });
+
+  it("refuses to delete the guardian, and unlinks nothing", async () => {
+    const res = await remove(baseline.persons.guardianId);
+
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "the guardian cannot be deleted",
+    });
+    expect(
+      (await deps.peopleRepo.byAccount({ channel: "telegram", channelUserId: "tg-guardian" }))?.id,
+    ).toBe(baseline.persons.guardianId);
+  });
+
+  it("answers 404 for an id that names nobody, including one already deleted", async () => {
+    const bob = baseline.persons.acquaintanceId;
+    expect((await remove(bob)).status).toBe(204);
+    expect((await remove(bob)).status).toBe(404);
+    expect((await remove("nobody")).status).toBe(404);
+  });
+});
+
 // POST /people/:id/merge — one person absorbs another. What these pin is that
 // the links all move together, that the duplicate is gone rather than emptied,
-// and that the two rows which are structure rather than people are not
-// addressable on either side of it.
+// and that the guardian is never the one merged away.
 describe("People merge", () => {
   let testDb: TestDb;
   let deps: TestDeps;

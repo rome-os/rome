@@ -190,6 +190,15 @@ export function mergePeople(
   );
 }
 
+/** `DELETE /api/people/:id`. The person and every link they hold go
+ *  together, so their accounts are strangers again. */
+export function deletePerson(
+  personId: string,
+  t: TFunction<"people">,
+): Promise<WriteOutcome<void>> {
+  return send(`/api/people/${encodeURIComponent(personId)}`, { method: "DELETE" }, t);
+}
+
 /** `PATCH /api/people/:id`. An omitted field is one the update leaves alone, so
  *  a bond change carries the bond and nothing else. */
 export function updatePerson(

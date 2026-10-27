@@ -108,6 +108,13 @@ export type MergeResult = { merged: true; links: number } | { merged: false; rea
  *  and "guardian-source" a person who exists and stays. */
 export type MergeRefusal = "same-person" | "unknown-target" | "unknown-source" | "guardian-source";
 
+/** What a {@link PeopleRepository.delete} attempt did: removed the person and
+ *  returned this many accounts to strangers, or refused because the id names
+ *  nobody or names the guardian. */
+export type DeleteResult =
+  | { deleted: true; links: number }
+  | { deleted: false; reason: "unknown" | "guardian" };
+
 type PersonRow = typeof persons.$inferSelect;
 
 function toPerson(row: PersonRow, links: Link[]): Person {
@@ -354,11 +361,39 @@ export class PeopleRepository {
   }
 
   /**
+   * Delete a person and every link they hold, so their accounts are strangers
+   * again (docs/domains/people.md#person). Nothing is dismissed on the way: the
+   * guardian deleted a person, not a decision about each account.
+   *
+   * The links and the person go in one transaction, so no reader sees links
+   * onto a person who is gone. The guardian anchors the ladder and is refused.
+   */
+  async delete(personId: string): Promise<DeleteResult> {
+    return this.db.transaction((tx): DeleteResult => {
+      const row = tx
+        .select({ bondLevel: persons.bondLevel })
+        .from(persons)
+        .where(eq(persons.id, personId))
+        .get();
+      if (!row) return { deleted: false, reason: "unknown" };
+      if (protectedPersonReason(row) === "guardian") return { deleted: false, reason: "guardian" };
+
+      const released = tx
+        .delete(channelMappings)
+        .where(eq(channelMappings.personId, personId))
+        .run();
+      tx.delete(persons).where(eq(persons.id, personId)).run();
+      return { deleted: true, links: released.changes };
+    });
+  }
+
+  /**
    * Link an account nobody holds to `personId`.
    *
-   * Claims a stranger, a dismissed account, or one this person already holds, which is the same request arriving twice. An
-   * account another person holds is refused and its holder named: taking it is
-   * {@link move}, the guardian's explicit act.
+   * Claims a stranger, a dismissed account, or one this person already holds,
+   * which is the same request arriving twice. An account another person holds
+   * is refused and its holder named: taking it is {@link move}, the guardian's
+   * explicit act.
    */
   async link(account: Link, personId: string): Promise<LinkResult> {
     return this.swap(account, null, personId);
