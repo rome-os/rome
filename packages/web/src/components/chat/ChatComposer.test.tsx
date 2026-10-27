@@ -341,15 +341,6 @@ describe("composer lock", () => {
     expect(onSend.mock.calls[0][0].text).toBe("build me X");
   });
 
-  it("offers Skip on the strip, which dismisses the card behind the lock", () => {
-    stubCoarsePointer(false);
-    const onSkipLock = rs.fn();
-    renderComposer({ onSend: rs.fn(), lockedReason: reason, onSkipLock });
-
-    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
-    expect(onSkipLock).toHaveBeenCalledTimes(1);
-  });
-
   it("closes an open menu as the lock engages", async () => {
     stubCoarsePointer(false);
     const onSend = rs.fn().mockResolvedValue(undefined);

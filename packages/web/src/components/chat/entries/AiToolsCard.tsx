@@ -40,13 +40,26 @@ export interface AiToolsCardProps {
   toolUseId: string;
   /** Prior submitted output when this instance already resolved. */
   result?: Record<string, unknown>;
-  onSubmit: (toolUseId: string, output: Record<string, unknown>, summary?: string) => void;
+  onSubmit: (
+    toolUseId: string,
+    output: Record<string, unknown>,
+    summary?: string,
+  ) => void | Promise<void>;
+}
+
+interface Submission {
+  output: Record<string, unknown>;
+  summary: string;
 }
 
 export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
   const { t, i18n } = useTranslation("chat");
   const [sent, setSent] = useState(false);
   const [sentWithCredits, setSentWithCredits] = useState(false);
+  // An answer that did not go through. The card hides its controls once it
+  // sends, so a failed send brings back one way to send the same answer again,
+  // and the connected probe stops sending it on its own.
+  const [failed, setFailed] = useState<Submission | null>(null);
   const [probe, setProbe] = useState<Probe>("checking");
   const [credits, setCredits] = useState<RomeCreditsView | null>(null);
   const resolved = result !== undefined || sent;
@@ -55,7 +68,12 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
     (output: Record<string, unknown>, summary: string) => {
       setSent(true);
       setSentWithCredits(output.credits === true);
-      onSubmit(toolUseId, output, summary);
+      setFailed(null);
+      Promise.resolve(onSubmit(toolUseId, output, summary)).catch(() => {
+        setSent(false);
+        setSentWithCredits(false);
+        setFailed({ output, summary });
+      });
     },
     [onSubmit, toolUseId],
   );
@@ -112,10 +130,10 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
   }, [result]);
 
   useEffect(() => {
-    if (probe === "connected" && !resolved) {
+    if (probe === "connected" && !resolved && !failed) {
       submit({ connected: true }, t("aiToolsCard.connectedSummary"));
     }
-  }, [probe, resolved, submit, t]);
+  }, [probe, resolved, failed, submit, t]);
 
   const usingCredits = result ? result.credits === true : sentWithCredits;
   const connected =
@@ -161,19 +179,25 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
         <span className="text-aux text-muted-foreground">
-          {connected
-            ? t("aiToolsCard.connected")
-            : usingCredits
-              ? t("aiToolsCard.credits.using")
-              : skipped
-                ? t("aiToolsCard.skipped")
-                : probe === "checking"
-                  ? t("aiToolsCard.checking")
-                  : offerCredits
-                    ? t("aiToolsCard.credits.ready")
-                    : t("aiToolsCard.waiting")}
+          {failed && !resolved
+            ? t("aiToolsCard.sendFailed")
+            : connected
+              ? t("aiToolsCard.connected")
+              : usingCredits
+                ? t("aiToolsCard.credits.using")
+                : skipped
+                  ? t("aiToolsCard.skipped")
+                  : probe === "checking"
+                    ? t("aiToolsCard.checking")
+                    : offerCredits
+                      ? t("aiToolsCard.credits.ready")
+                      : t("aiToolsCard.waiting")}
         </span>
-        {offerCredits ? (
+        {failed && !resolved ? (
+          <Button type="button" size="sm" onClick={() => submit(failed.output, failed.summary)}>
+            {t("aiToolsCard.retry")}
+          </Button>
+        ) : offerCredits ? (
           <Button
             type="button"
             size="sm"

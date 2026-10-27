@@ -177,10 +177,6 @@ export interface ChatComposerProps {
   // open. The box stays mounted but hidden, so its draft and measurements
   // survive the lock.
   lockedReason?: string | null;
-  // Dismisses the card behind the lock. The strip offers it so a card that
-  // cannot be answered, whether it failed to load or its answer did not go
-  // through, never leaves the chat with no way forward.
-  onSkipLock?: () => void;
   // Styling for the input box itself (border, surface, padding, blur). The
   // composer owns the box so the pre-send chip row can sit *outside* it; each
   // mount passes its own box look (the floating composer adds backdrop-blur).
@@ -236,7 +232,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     streamError,
     designingInteraction = null,
     lockedReason = null,
-    onSkipLock,
     boxClassName,
     textOnly = false,
     placeholder,
@@ -1165,11 +1160,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         >
           <Lock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 flex-1">{lockedReason}</span>
-          {onSkipLock ? (
-            <Button type="button" variant="outline" size="sm" onClick={onSkipLock}>
-              {t("composer.skipCard")}
-            </Button>
-          ) : null}
         </div>
       ) : null}
       <div
