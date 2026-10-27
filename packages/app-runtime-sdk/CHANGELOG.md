@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.9.1](https://github.com/rome-os/rome/compare/app-runtime-v0.9.0...app-runtime-v0.9.1) (2026-10-27)
+
+
+### Features
+
+* **app-runtime:** name Rome's accounts by platform and id ([#1415](https://github.com/rome-os/rome/issues/1415)) ([65c7e1a](https://github.com/rome-os/rome/commit/65c7e1a2d8ef998bdd99ba7fe05a73ca9dde81d9))
+
 ## [0.9.0](https://github.com/rome-os/rome/compare/app-runtime-v0.8.2...app-runtime-v0.9.0) (2026-10-26)
 
 
