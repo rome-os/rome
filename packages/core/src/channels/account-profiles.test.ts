@@ -84,6 +84,29 @@ describe("AccountProfiles", () => {
     ).toEqual([{ displayName: "Ada Lovelace", handle: null, avatarUrl: null }]);
   });
 
+  it("learns nothing from a message on a platform an address book fills", async () => {
+    const store = new WhatsAppStoreRepository(testDb.db);
+    await store.upsertContacts([
+      { jid: "15550007777@s.whatsapp.net", phoneNumber: "15550007777", name: "Ada Lovelace" },
+      { jid: "88817260077@lid", phoneNumber: "15550007777" },
+    ]);
+    profiles.refresh("whatsapp", new WhatsAppAccounts(store));
+    await settle();
+
+    // The same account, named by its LID alias rather than the book's id.
+    profiles.heard(
+      inbound({ channel: "whatsapp", senderId: "88817260077@lid", senderDisplayName: "ada" }),
+    );
+    await settle();
+
+    expect(
+      await repo.profilesOf([
+        { platform: "whatsapp", id: "15550007777@s.whatsapp.net" },
+        { platform: "whatsapp", id: "88817260077@lid" },
+      ]),
+    ).toEqual([{ displayName: "Ada Lovelace", handle: null, avatarUrl: null }, null]);
+  });
+
   it("copies once more when a sync lands during a copy, not once per sync", async () => {
     let reads = 0;
     let release!: () => void;

@@ -21,6 +21,10 @@ export class AccountProfiles {
   /** The platforms whose address book is being copied now, and whether a sync
    *  landed during the copy, so one more copy follows it. */
   private readonly copying = new Map<string, { again: boolean }>();
+  /** The platforms an address book fills. Their ids are the book's own, so a
+   *  message's sender address, which may be another of the account's aliases,
+   *  never keys a row there. */
+  private readonly booked = new Set<string>();
 
   constructor(
     private readonly repo: Pick<
@@ -39,6 +43,7 @@ export class AccountProfiles {
    * copy asks for one more copy after it rather than a copy of its own.
    */
   refresh(platform: string, book: Pick<Accounts, "listAccounts">): void {
+    this.booked.add(platform);
     const running = this.copying.get(platform);
     if (running) {
       running.again = true;
@@ -66,8 +71,11 @@ export class AccountProfiles {
   /**
    * Learn what an inbound message's sender called themselves. The sender is on
    * the platform of the account the message arrived on, or of its channel
-   * where Rome does not know that account. Never throws: a profile is a cache,
-   * and failing to fill it must not hold up the message.
+   * where Rome does not know that account. A platform an address book fills
+   * learns nothing from messages: a sender's address there may be an alias of
+   * an account the book keys by another, and the book already holds the name.
+   * Never throws: a profile is a cache, and failing to fill it must not hold
+   * up the message.
    */
   heard(
     message: Pick<
@@ -80,6 +88,7 @@ export class AccountProfiles {
     const handle = named(message.senderUsername);
     if (!displayName && !handle) return;
     const platform = message.account?.platform ?? this.platformOfChannel(message.channel);
+    if (this.booked.has(platform)) return;
     this.repo
       .fromMessage({ platform, id: message.senderId }, { displayName, handle, avatarUrl: null })
       .catch((err) => {
