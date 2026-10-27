@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { AccountProfilesRepository } from "../db/repositories/account-profiles.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
-import { AccountProfiles, refreshingAfter } from "./account-profiles.js";
+import { AccountProfiles, channelPlatforms, refreshingAfter } from "./account-profiles.js";
 import { WhatsAppAccounts } from "./whatsapp-accounts.js";
 
 const PLATFORMS: Record<string, string> = { telegram_user: "telegram", telegram: "telegram" };
@@ -174,6 +174,62 @@ describe("AccountProfiles", () => {
     await settle();
 
     expect(reads).toBe(2);
+  });
+});
+
+describe("channelPlatforms", () => {
+  const LARK_CHANNEL = "6f1c2a9e-0000-4000-8000-000000000001";
+  const records = {
+    platformOf: (id: string) =>
+      id === LARK_CHANNEL ? "lark" : id === "telegram" ? "telegram" : null,
+    channelOfLink: (link: string) => (link === "feishu" ? LARK_CHANNEL : null),
+  };
+  const platformOfChannel = channelPlatforms(records);
+
+  it("reads a channel's own record, then the channel a link key reaches, then the kind", () => {
+    expect(platformOfChannel(LARK_CHANNEL)).toBe("lark");
+    expect(platformOfChannel("feishu")).toBe("lark");
+    expect(platformOfChannel("telegram")).toBe("telegram");
+    expect(platformOfChannel("telegram_user")).toBe("telegram");
+  });
+
+  it("names a sender learned on a Lark app's channel through the link stored under feishu", async () => {
+    const testDb = createTestDb();
+    try {
+      const profiles = new AccountProfiles(
+        new AccountProfilesRepository(testDb.db),
+        platformOfChannel,
+      );
+      profiles.heard(inbound({ channel: LARK_CHANNEL, senderId: "ou_ada" }));
+      await settle();
+
+      expect(await profiles.displayNames([{ channel: "feishu", channelUserId: "ou_ada" }])).toEqual(
+        ["Ada"],
+      );
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("is asked once per channel in a listing, not once per row", async () => {
+    const testDb = createTestDb();
+    try {
+      const asked: string[] = [];
+      const profiles = new AccountProfiles(new AccountProfilesRepository(testDb.db), (channel) => {
+        asked.push(channel);
+        return "telegram";
+      });
+      await profiles.displayNames(
+        Array.from({ length: 50 }, (_, i) => ({
+          channel: i % 2 ? "telegram" : "telegram_user",
+          channelUserId: `${i}`,
+        })),
+      );
+
+      expect(asked.sort()).toEqual(["telegram", "telegram_user"]);
+    } finally {
+      testDb.close();
+    }
   });
 });
 

@@ -87,7 +87,7 @@ import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
-import { AccountProfiles, refreshingAfter } from "./channels/account-profiles.js";
+import { AccountProfiles, channelPlatforms, refreshingAfter } from "./channels/account-profiles.js";
 import { AccountProfilesRepository } from "./db/repositories/account-profiles.js";
 import { platformOf } from "@rome/api-types/platform";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
@@ -347,7 +347,7 @@ async function main() {
   // books fill it after each sync and once now, so a dropped cache is rebuilt.
   const accountProfiles = new AccountProfiles(
     new AccountProfilesRepository(db),
-    (name) => channelRecords.platformOf(name) ?? platformOf(name),
+    channelPlatforms(channelRecords),
   );
   const refreshWhatsAppProfiles = () =>
     accountProfiles.refresh(platformOf("whatsapp"), whatsAppAccounts);
