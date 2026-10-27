@@ -95,6 +95,14 @@ describe("Markdown", () => {
     );
   });
 
+  it("loads images lazily and decodes them off the main thread", () => {
+    render(<Markdown>{"![Preview](/preview.png)"}</Markdown>);
+
+    const image = screen.getByRole("img", { name: "Preview" });
+    expect(image.getAttribute("loading")).toBe("lazy");
+    expect(image.getAttribute("decoding")).toBe("async");
+  });
+
   it("tags the root with rome-markdown, the hook hosts style prose through", () => {
     const { container } = renderMd("hello");
     const root = container.querySelector(".rome-markdown");
