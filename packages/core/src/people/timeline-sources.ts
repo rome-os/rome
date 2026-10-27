@@ -115,26 +115,44 @@ function booksNamed(
 
 /** One group's links as the accounts they reach, keyed by the account rather
  *  than by the address a link happened to name, so two links onto one account
- *  are one entry. */
+ *  are one entry per channel it is stored under (see {@link perChannel}). */
 function accountsOf(
   fold: AccountFold,
   storedUnder: (platform: string) => string[],
   links: readonly Account[],
 ): MessageAccount[] {
-  const byAccount = new Map<string, MessageAccount>();
+  const byAccount = new Map<string, MessageAccount[]>();
   for (const link of links) {
     const key = fold.key(link.platform, link.id);
     if (byAccount.has(key)) continue;
-    byAccount.set(key, {
-      channel: link.platform,
-      storedUnder: storedUnder(link.platform),
-      // The link's own address among them, whatever the book says: a platform
-      // that folds nothing onto it is still read at the address the guardian
-      // stored.
-      addresses: [
-        ...new Set([link.id, ...(fold.accountFor(link.platform, link.id)?.aliases ?? [])]),
-      ],
-    });
+    byAccount.set(
+      key,
+      perChannel({
+        channel: link.platform,
+        storedUnder: storedUnder(link.platform),
+        // The link's own address among them, whatever the book says: a
+        // platform that folds nothing onto it is still read at the address the
+        // guardian stored.
+        addresses: [
+          ...new Set([link.id, ...(fold.accountFor(link.platform, link.id)?.aliases ?? [])]),
+        ],
+      }),
+    );
   }
-  return [...byAccount.values()];
+  return [...byAccount.values()].flat();
+}
+
+/**
+ * An account read under several channels as one read per channel.
+ *
+ * A store owns an account's history only as a whole (`assignAccounts`), and
+ * what was said on two of Rome's accounts is stored apart: an old transcript
+ * under a released channel and a recent triage under a live one. Asked as one,
+ * the first store holding either would claim both and drop the other's. Asked
+ * per channel, each channel's history is claimed by its own store and the
+ * timeline merges them, as it merges a person's accounts.
+ */
+export function perChannel(account: MessageAccount): MessageAccount[] {
+  const names = account.storedUnder ?? [account.channel];
+  return names.length <= 1 ? [account] : names.map((name) => ({ ...account, storedUnder: [name] }));
 }

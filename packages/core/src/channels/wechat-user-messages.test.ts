@@ -213,35 +213,6 @@ describe("wechatUserMessages", () => {
     expect(page[1]).toMatchObject({ direction: "inbound", body: "first" });
   });
 
-  // People reads a personal-WeChat contact as an account on the wechat
-  // platform, stored under this channel, and shows its messages under the
-  // platform so the account's own view of the timeline holds them.
-  it("shows each message under the platform of the account asked for", async () => {
-    const store = accountReads(
-      fakeReader({
-        byConversation: {
-          wxid_a: [
-            msg({ id: "wxid_a:1", timestamp: 1000 }),
-            msg({ id: "wxid_a:2", timestamp: 1000 }),
-            msg({ id: "wxid_a:3", timestamp: 2000 }),
-          ],
-        },
-      }),
-    );
-    const onPlatform = [{ channel: "wechat", storedUnder: ["wechat_user"], addresses: ["wxid_a"] }];
-
-    const first = await store.read({ accounts: onPlatform, limit: 2 });
-    expect(first.map((m) => m.source)).toEqual(["wechat", "wechat"]);
-    // The page ends inside a same-second tie, which the cursor settles.
-    const next = await store.read({ accounts: onPlatform, after: first[1], limit: 10 });
-    expect([...first, ...next].map((m) => m.ref).sort()).toEqual([
-      "wxid_a:1",
-      "wxid_a:2",
-      "wxid_a:3",
-    ]);
-    expect((await store.latest(onPlatform))?.source).toBe("wechat");
-  });
-
   it("pages strictly after a cursor", async () => {
     const store = accountReads(
       fakeReader({

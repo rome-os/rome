@@ -23,7 +23,7 @@ import {
   type StreamAccount,
 } from "@rome/api-types/people";
 import type { Account } from "@rome-os/app-runtime";
-import type { Message } from "@rome/api-types/message";
+import { compareMessages, type Message } from "@rome/api-types/message";
 import type { AccountNames } from "../channels/account-names.js";
 import { foldAccounts } from "../channels/account-fold.js";
 import {
@@ -38,7 +38,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { assignAccountHeads } from "./timeline.js";
-import { personMessageStores } from "./timeline-sources.js";
+import { perChannel, personMessageStores } from "./timeline-sources.js";
 
 export interface AccountDirectoryDeps {
   /** Every channel Rome mirrors — the address books this folds, and the stores
@@ -156,18 +156,21 @@ async function readHeads(
   const cost = (account: DirectoryAccount) =>
     account.addresses.length * Math.max(storedUnder(account.channel).length, 1);
   for (const round of rounds(accounts, cost)) {
+    // Asked once per channel the account is stored under, as a timeline reads
+    // it (`perChannel`), and previewed by the newest of those heads.
     const asked = new Map<MessageAccount, DirectoryAccount>(
-      round.map((account) => [
-        {
+      round.flatMap((account) =>
+        perChannel({
           channel: account.channel,
           addresses: account.addresses,
           storedUnder: storedUnder(account.channel),
-        },
-        account,
-      ]),
+        }).map((read) => [read, account] as const),
+      ),
     );
-    for (const [account, owned] of await assignAccountHeads(stores, [...asked.keys()])) {
-      heads.set(headKey(asked.get(account)!), owned.head);
+    for (const [read, owned] of await assignAccountHeads(stores, [...asked.keys()])) {
+      const key = headKey(asked.get(read)!);
+      const held = heads.get(key);
+      if (!held || compareMessages(owned.head, held) < 0) heads.set(key, owned.head);
     }
   }
   return heads;

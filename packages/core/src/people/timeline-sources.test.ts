@@ -200,18 +200,20 @@ describe("timelineAccounts on a platform Rome holds several accounts on", () => 
     feishu: null,
   });
 
-  it("reads the account under every channel on its platform", async () => {
+  // Once per channel, so each channel's history is claimed by the store that
+  // holds it rather than the account's whole history by one store.
+  it("reads the account under every channel on its platform, one read per channel", async () => {
     const [accounts] = await timelineAccounts({ channels, platformOfChannel }, [
       [{ platform: "telegram", id: adaTelegram }],
     ]);
 
-    expect(accounts).toEqual([
-      {
+    expect(accounts).toEqual(
+      ["telegram", "telegram_user", "tg-second"].map((name) => ({
         channel: "telegram",
-        storedUnder: ["telegram", "telegram_user", "tg-second"],
+        storedUnder: [name],
         addresses: [adaTelegram],
-      },
-    ]);
+      })),
+    );
   });
 
   it("reads an account under the channel whose platform it is on, whatever the channel's name", async () => {

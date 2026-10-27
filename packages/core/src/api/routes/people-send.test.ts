@@ -953,6 +953,68 @@ describe("People on an account whose channel id is opaque", () => {
     );
   });
 
+  // Two of Rome's accounts hold Ada's history in two different stores: an old
+  // transcript under a released account, and a recent exchange only the
+  // sentinel triaged under the live one. Each channel's history comes from its
+  // own store, so neither hides the other.
+  it("reads each of Rome's accounts' history from the store that holds it", async () => {
+    testDb.db.delete(romeAgentMessages).run();
+    testDb.db
+      .insert(channelRows)
+      .values({
+        id: "tg-old",
+        connectionKind: "telegram",
+        platform: "telegram",
+        createdAt: new Date(0),
+      })
+      .run();
+    const oldSession = channelChatId("tg-old", ADA);
+    testDb.db
+      .insert(romeSessions)
+      .values({
+        id: oldSession,
+        name: oldSession,
+        type: "channel",
+        sourceChannel: "tg-old",
+        sourceThreadId: ADA,
+        sourceThreadType: "private",
+        createdAt: new Date(0),
+        activityAt: new Date(0),
+      })
+      .run();
+    testDb.db
+      .insert(romeAgentMessages)
+      .values({
+        id: "m-old",
+        sessionId: oldSession,
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: "said long ago" }]),
+        senderId: ADA,
+        createdAt: new Date(1_000_000),
+      })
+      .run();
+    await deps.sentinelLogRepo.create({
+      messageId: "tg-recent",
+      channel: OPAQUE,
+      channelUserId: ADA,
+      displayName: "Ada",
+      text: "said just now",
+      action: "escalated",
+    });
+
+    expect((await timeline()).entries.map((entry) => entry.body)).toEqual([
+      "said just now",
+      "said long ago",
+    ]);
+    expect((await person()).latest?.preview).toBe("said just now");
+    const stream = (await (
+      await new Hono().route("/", accountsRoutes(deps)).request("/accounts/stream")
+    ).json()) as { accounts: Array<{ channelUserId: string; latest: { preview: string } }> };
+    expect(stream.accounts.find((row) => row.channelUserId === ADA)?.latest.preview).toBe(
+      "said just now",
+    );
+  });
+
   describe("naming the account a send goes out from", () => {
     const post = (body: Record<string, unknown>) =>
       app.request(`/people/${personId}/messages`, {
