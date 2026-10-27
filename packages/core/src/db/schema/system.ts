@@ -142,6 +142,30 @@ export const dismissedAccounts = sqliteTable(
   (table) => [primaryKey({ columns: [table.channel, table.channelUserId] })],
 );
 
+/**
+ * What a platform says about an account: its display name, handle and avatar
+ * (docs/domains/chats.md#account-profile). A cache Chats keeps, keyed by the
+ * account itself, the platform and the platform's own id. It has no id of its
+ * own and nothing points at it, so a row can be dropped and learned again from
+ * the platform without losing anything else.
+ */
+export const accountProfiles = sqliteTable(
+  "account_profiles",
+  {
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+    displayName: text("display_name"),
+    handle: text("handle"),
+    avatarUrl: text("avatar_url"),
+    // Where the row was learned. A platform's address book outranks the name a
+    // sender put on a message, so a message never overwrites a row the address
+    // book wrote.
+    source: text("source", { enum: ["address_book", "message"] }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
+);
+
 // A durable mirror of the WhatsApp contact list, chats, and recent message
 // history, fed by Baileys' history sync (`messaging-history.set`) on connect
 // and kept current by the ongoing `contacts.*` / `chats.*` / `messages.upsert`

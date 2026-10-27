@@ -391,6 +391,51 @@ describe("connection ports for a service's later channels", () => {
   });
 });
 
+describe("what a sender called themselves", () => {
+  it("is heard for every inbound message, named by the channel and account it arrived on", async () => {
+    const { db } = createTestDb();
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
+    const fx = makePasteTalk();
+    registry.register(fx.descriptor);
+    const connection = await registry.connect("fake-telegram");
+    const account = { platform: "telegram", id: "8123" };
+    const heard: ChannelMessage[] = [];
+    const ports = connectionPorts(
+      {
+        registry,
+        channelOf: (each) => each.connectionKind,
+        accountOf: () => account,
+        heard: (message) => heard.push(message),
+      },
+      "fake-telegram",
+    );
+    const answered: string[] = [];
+    ports?.inbound?.subscribe(async (event) => {
+      answered.push(event.message.messageId);
+    });
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", fx.validCredential());
+    const talker = fx.talkerFactory.instances.at(-1)!;
+
+    talker.state.deliver?.(said("m1", "dm-1", 0));
+    // Nothing to answer, but it still says who sent it.
+    talker.state.deliver?.({ ...said("m2", "dm-1", 0), text: "" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(
+      heard.map(({ messageId, channel, account, senderDisplayName }) => ({
+        messageId,
+        channel,
+        account,
+        senderDisplayName,
+      })),
+    ).toEqual([
+      { messageId: "m1", channel: "fake-telegram", account, senderDisplayName: "Chat" },
+      { messageId: "m2", channel: "fake-telegram", account, senderDisplayName: "Chat" },
+    ]);
+    expect(answered).toEqual(["m1"]);
+  });
+});
+
 describe("a Connection Rome does not listen to", () => {
   function setup(listenedAtFirst: boolean) {
     const { db } = createTestDb();

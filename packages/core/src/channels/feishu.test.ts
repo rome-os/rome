@@ -396,9 +396,9 @@ describe("FeishuAdapter", () => {
     ]);
   });
 
-  it("carries the replied-to message and a fallback sender name", async () => {
+  it("carries the replied-to message, and no sender name where Feishu gave none", async () => {
     await channel.emit({ senderName: undefined, replyToMessageId: "om_parent" });
-    expect(captured[0].senderDisplayName).toBe("Feishu User");
+    expect(captured[0].senderDisplayName).toBeUndefined();
     expect(captured[0].replyTo).toStrictEqual({ messageId: "om_parent" });
   });
 

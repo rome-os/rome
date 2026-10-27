@@ -354,13 +354,22 @@ export class TelegramUserAdapter {
     const threadId = context.threadId ?? peerToThreadId(message.peerId);
     const fromId = message.fromId ? peerToThreadId(message.fromId) : threadId;
     const isOutgoing = message.out === true;
+    // A sender's name is known only for the guardian's own lines and in a
+    // private dialog, whose name is the other party's. A group's name is not
+    // its sender's, and a live message carries no name at all, so neither
+    // stands in for one: an id there would read as a name to every consumer.
+    const senderDisplayName = isOutgoing
+      ? this.settings.displayName
+      : context.threadType === "private"
+        ? context.threadName
+        : undefined;
     return {
       channel: "telegram_user",
       direction: "inbound",
       messageId: String(message.id),
       chatId: threadId as ChatId,
       senderId: isOutgoing ? this.settings.userId : fromId,
-      senderDisplayName: isOutgoing ? this.settings.displayName : (context.threadName ?? fromId),
+      ...(senderDisplayName ? { senderDisplayName } : {}),
       text: message.message ?? "",
       attachments: extractTelegramAttachments(message.media),
       timestamp: new Date((message.date ?? Math.floor(Date.now() / 1000)) * 1000),
