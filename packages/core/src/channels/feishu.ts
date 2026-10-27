@@ -16,7 +16,7 @@ import { preserveMentionOnlyText } from "./mention-only.js";
 import { isLinkCodeMessage } from "./guardian-link-code.js";
 import type { OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import type {
   ChannelMessage,
   ChatDescriptor,
@@ -46,7 +46,7 @@ export interface FeishuConfig {
   chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
-  personMappingRepo?: PersonMappingRepository;
+  peopleRepo?: PeopleRepository;
   listAgents?: () => string[];
   /** The agent linked to this adapter's channel, as `accountAgentResolver`
    *  answers it. Absent, the channel reads as one that takes no link. */
@@ -143,7 +143,7 @@ export class FeishuAdapter {
   private readonly chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
-  private readonly personMappingRepo?: PersonMappingRepository;
+  private readonly peopleRepo?: PeopleRepository;
   private readonly listAgents?: () => string[];
   private readonly accountAgent?: () => string | null | undefined;
   private readonly hasAgent?: (name: string) => boolean;
@@ -179,7 +179,7 @@ export class FeishuAdapter {
     this.channel = createChannel(config);
     this.connectionId = config.connectionId;
     this.chatSettings = config.chatSettings;
-    this.personMappingRepo = config.personMappingRepo;
+    this.peopleRepo = config.peopleRepo;
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
     this.hasAgent = config.hasAgent;
@@ -539,8 +539,8 @@ export class FeishuAdapter {
   }
 
   private async isGuardian(channelUserId: string): Promise<boolean> {
-    if (!this.personMappingRepo) return false;
-    const person = await this.personMappingRepo.findByChannelUser("feishu", channelUserId);
+    if (!this.peopleRepo) return false;
+    const person = await this.peopleRepo.byAccount({ channel: "feishu", channelUserId });
     return person?.bondLevel === "guardian";
   }
 

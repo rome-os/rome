@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DrizzleDb } from "../db/index.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../db/repositories/people.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
@@ -87,7 +87,7 @@ export async function seedBaseline(db: DrizzleDb): Promise<BaselineIds> {
 // Baseline builders (internal — tests should call seedBaseline instead)
 
 async function seedPersonsBaseline(db: DrizzleDb) {
-  const repo = new PersonMappingRepository(db, identity);
+  const repo = new PeopleRepository(db, identity);
 
   const guardianId = "guardian";
   await repo.createWithId(guardianId, {
@@ -96,28 +96,28 @@ async function seedPersonsBaseline(db: DrizzleDb) {
     profilePath: GUARDIAN_PROFILE_PATH,
     approved: true,
   });
-  await repo.addChannelMapping(guardianId, "telegram", "tg-guardian", "Guardian");
-  await repo.addChannelMapping(guardianId, "webchat", "web-guardian", "Guardian");
+  repo.linkStated({ channel: "telegram", channelUserId: "tg-guardian" }, guardianId, "Guardian");
+  repo.linkStated({ channel: "webchat", channelUserId: "web-guardian" }, guardianId, "Guardian");
 
   const innerCircleId = await repo.create({
     displayName: "Alice Inner",
     bondLevel: "inner-circle",
     approved: true,
-    channelMappings: [{ channel: "telegram", channelUserId: "tg-alice" }],
+    links: [{ channel: "telegram", channelUserId: "tg-alice" }],
   });
 
   const acquaintanceId = await repo.create({
     displayName: "Bob Acquaintance",
     bondLevel: "acquaintance",
     approved: true,
-    channelMappings: [{ channel: "telegram", channelUserId: "tg-bob" }],
+    links: [{ channel: "telegram", channelUserId: "tg-bob" }],
   });
 
   const otherId = await repo.create({
     displayName: "Carol Other",
     bondLevel: "other",
     approved: true,
-    channelMappings: [{ channel: "whatsapp", channelUserId: "wa-carol" }],
+    links: [{ channel: "whatsapp", channelUserId: "wa-carol" }],
   });
 
   const strangerId = STRANGER_PERSON_ID;

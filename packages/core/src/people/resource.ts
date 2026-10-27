@@ -19,14 +19,14 @@ import type { Channels } from "../channels/channel.js";
 import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { SendersOfLink } from "../db/repositories/channel-records.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import { readActivity } from "./activity.js";
 import { readSendStates, type SendDeps } from "./send.js";
 import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
 export interface PeopleReadDeps extends SendDeps {
   db: DrizzleDb;
-  personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings" | "findById">;
+  peopleRepo: Pick<PeopleRepository, "all" | "byId">;
   channels: Channels;
   accountNames: Pick<AccountNames, "displayNames">;
   /** Rome's accounts a send to each link may go out from. Absent, a link's
@@ -36,11 +36,11 @@ export interface PeopleReadDeps extends SendDeps {
 
 /** A person as the repository reads them: the row and the accounts linked to
  *  it. */
-export type PersonRow = Awaited<ReturnType<PersonMappingRepository["findAllWithMappings"]>>[number];
+export type PersonRow = Awaited<ReturnType<PeopleRepository["all"]>>[number];
 
 /** Every curated person. */
 export async function readPeople(deps: PeopleReadDeps): Promise<PersonResource[]> {
-  const persons = (await deps.personMappingRepo.findAllWithMappings()).filter(
+  const persons = (await deps.peopleRepo.all()).filter(
     (person) => person.id !== STRANGER_PERSON_ID,
   );
   return serialize(deps, persons);
@@ -55,10 +55,10 @@ export async function readPerson(deps: PeopleReadDeps, id: string): Promise<Pers
 /** The person an id names, as stored — for a caller that needs the mappings
  *  rather than the resource. Null for the sentinel, which is structure. */
 export async function findPerson(
-  deps: Pick<PeopleReadDeps, "personMappingRepo">,
+  deps: Pick<PeopleReadDeps, "peopleRepo">,
   id: string,
 ): Promise<PersonRow | null> {
-  return id === STRANGER_PERSON_ID ? null : await deps.personMappingRepo.findById(id);
+  return id === STRANGER_PERSON_ID ? null : await deps.peopleRepo.byId(id);
 }
 
 /**
@@ -75,7 +75,7 @@ async function serialize(
   // it sees. The activity fold is the one place two mappings of a single
   // account collapse — reporting one person's history twice would be a wrong
   // number, whereas showing both addresses is only what the guardian stored.
-  const refs = persons.flatMap((person) => person.channelMappings);
+  const refs = persons.flatMap((person) => person.links);
 
   // Independent of each other, and both reach the same channel mirrors: read
   // together, a mirror that folds its whole address book per call serves both
@@ -83,7 +83,7 @@ async function serialize(
   const [accountsByPerson, names, sendStates, memoryPaths] = await Promise.all([
     timelineAccounts(
       deps,
-      persons.map((person) => person.channelMappings),
+      persons.map((person) => person.links),
     ),
     deps.accountNames.displayNames(refs),
     // Whether each mapping can be written to, asked of the live connections
@@ -99,7 +99,7 @@ async function serialize(
     id: person.id,
     displayName: person.displayName,
     bondLevel: person.bondLevel,
-    accounts: person.channelMappings.map((mapping) => {
+    accounts: person.links.map((mapping) => {
       const index = next++;
       return {
         channel: mapping.channel,

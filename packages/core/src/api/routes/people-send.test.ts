@@ -56,11 +56,11 @@ describe("People send API", () => {
     deps = await buildTestDeps(testDb.db);
     app = new Hono().route("/", peopleRoutes(deps));
 
-    personId = await deps.personMappingRepo.create({
+    personId = await deps.peopleRepo.create({
       displayName: "Send Target",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "telegram", channelUserId: TG }],
+      links: [{ channel: "telegram", channelUserId: TG }],
     });
   });
 
@@ -143,11 +143,11 @@ describe("People send API", () => {
     const body = { id: crypto.randomUUID(), channel: "telegram", channelUserId: TG, text: "hello" };
     expect((await send(body)).status).toBe(202);
     expect((await send({ ...body, text: "different" })).status).toBe(409);
-    const anotherPerson = await deps.personMappingRepo.create({
+    const anotherPerson = await deps.peopleRepo.create({
       displayName: "Another target",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "telegram", channelUserId: OTHER_TG }],
+      links: [{ channel: "telegram", channelUserId: OTHER_TG }],
     });
     expect((await send({ ...body, channelUserId: OTHER_TG }, anotherPerson)).status).toBe(409);
     expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
@@ -389,11 +389,11 @@ describe("People send API — delivery bookkeeping", () => {
     ]);
 
     // Linked by the LID, which is the half of the fold a send would address.
-    personId = await deps.personMappingRepo.create({
+    personId = await deps.peopleRepo.create({
       displayName: "Folded Contact",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "whatsapp", channelUserId: LID }],
+      links: [{ channel: "whatsapp", channelUserId: LID }],
     });
   });
 
@@ -475,11 +475,11 @@ describe("People send API — delivery bookkeeping", () => {
   });
 
   it("will not retry or discard a row belonging to somebody else", async () => {
-    const otherId = await deps.personMappingRepo.create({
+    const otherId = await deps.peopleRepo.create({
       displayName: "Somebody Else",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "telegram", channelUserId: "tg-elsewhere" }],
+      links: [{ channel: "telegram", channelUserId: "tg-elsewhere" }],
     });
     rs.spyOn(deps.transports.get("telegram")!, "send").mockRejectedValue(new Error("nope"));
     await app.request(`/people/${otherId}/messages`, {
@@ -530,11 +530,11 @@ describe("People send API — delivery bookkeeping", () => {
     deps.webchatRepo.recordOutboundConversationMessage = async () => {
       throw new Error("disk is full");
     };
-    const tgPersonId = await deps.personMappingRepo.create({
+    const tgPersonId = await deps.peopleRepo.create({
       displayName: "Unmirrored",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "telegram", channelUserId: "tg-unmirrored" }],
+      links: [{ channel: "telegram", channelUserId: "tg-unmirrored" }],
     });
     await app.request(`/people/${tgPersonId}/messages`, {
       method: "POST",
@@ -587,11 +587,11 @@ describe("People send API — delivery bookkeeping", () => {
       deps.webchatRepo.recordOutboundConversationMessage = async () => {
         throw new Error("disk is full");
       };
-      tgPersonId = await deps.personMappingRepo.create({
+      tgPersonId = await deps.peopleRepo.create({
         displayName: "Unmirrored",
         bondLevel: "other",
         approved: true,
-        channelMappings: [{ channel: "telegram", channelUserId: "tg-unmirrored" }],
+        links: [{ channel: "telegram", channelUserId: "tg-unmirrored" }],
       });
     });
 
@@ -793,11 +793,11 @@ describe("People on an account whose channel id is opaque", () => {
     };
     app = new Hono().route("/", peopleRoutes(deps));
 
-    personId = await deps.personMappingRepo.create({
+    personId = await deps.peopleRepo.create({
       displayName: "Ada",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: OPAQUE, channelUserId: ADA }],
+      links: [{ channel: OPAQUE, channelUserId: ADA }],
     });
 
     // What Ada said to that account, as Rome's transcript holds it.

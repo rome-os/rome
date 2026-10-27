@@ -1,5 +1,5 @@
 import type { DrizzleTx } from "../db/index.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("guardian-mapping");
@@ -13,17 +13,17 @@ const log = createLogger("guardian-mapping");
  * channel user was already mapped or no guardian person exists.
  */
 export async function mapGuardianToChannel(
-  repo: PersonMappingRepository,
+  repo: PeopleRepository,
   channel: string,
   channelUserId: string,
 ): Promise<boolean> {
-  const existing = await repo.findByChannelUser(channel, channelUserId);
+  const existing = await repo.byAccount({ channel, channelUserId });
   if (existing) {
     log.info("channel user already mapped", { channel, channelUserId, personId: existing.id });
     return false;
   }
 
-  const guardians = await repo.findByBondLevel("guardian");
+  const guardians = await repo.byBondLevel("guardian");
   if (guardians.length === 0) {
     log.warn("no guardian person found, skipping auto-map", { channel });
     return false;
@@ -31,9 +31,9 @@ export async function mapGuardianToChannel(
 
   const guardian = guardians[0];
 
-  const stale = staleAddress(guardian.channelMappings, channel);
+  const stale = staleAddress(guardian.links, channel);
   if (stale) {
-    if (await repo.updateChannelUserId(guardian.id, channel, stale, channelUserId)) {
+    if (repo.readdress(guardian.id, { channel, channelUserId: stale }, channelUserId)) {
       log.info("re-canonicalized guardian channel mapping", {
         channel,
         from: stale,
@@ -53,7 +53,7 @@ export async function mapGuardianToChannel(
     });
   }
 
-  await repo.addChannelMapping(guardian.id, channel, channelUserId);
+  await repo.linkStated({ channel, channelUserId }, guardian.id);
   log.info("auto-mapped guardian to channel", { channel, channelUserId, personId: guardian.id });
   return true;
 }
@@ -112,18 +112,18 @@ export type GuardianMappingPlan =
  * credential in the same transaction, to preserve a claim that is wrong.
  */
 export async function planGuardianMapping(
-  repo: PersonMappingRepository,
+  repo: PeopleRepository,
   channel: string,
   channelUserId: string,
 ): Promise<GuardianMappingPlan> {
-  const existing = await repo.findByChannelUser(channel, channelUserId);
+  const existing = await repo.byAccount({ channel, channelUserId });
   if (existing) return { op: "noop" };
 
-  const guardians = await repo.findByBondLevel("guardian");
+  const guardians = await repo.byBondLevel("guardian");
   if (guardians.length === 0) return { op: "noop" };
 
   const guardian = guardians[0];
-  const stale = staleAddress(guardian.channelMappings, channel);
+  const stale = staleAddress(guardian.links, channel);
   // The plan names the row it re-points, so an account placed between this read
   // and the apply — a link write runs outside the grant section that holds
   // competing grants off — is left where it is rather than swept onto
@@ -148,14 +148,19 @@ export async function planGuardianMapping(
  */
 export function applyGuardianMappingWithinTx(
   tx: DrizzleTx,
-  repo: PersonMappingRepository,
+  repo: PeopleRepository,
   channel: string,
   channelUserId: string,
   plan: GuardianMappingPlan,
 ): void {
   if (plan.op === "noop") return;
   if (plan.op === "update") {
-    const moved = repo.writeChannelUserId(tx, plan.guardianId, channel, plan.from, channelUserId);
+    const moved = repo.readdress(
+      plan.guardianId,
+      { channel, channelUserId: plan.from },
+      channelUserId,
+      tx,
+    );
     if (!moved) {
       log.info("planned guardian re-point found no account to move", {
         channel,
@@ -165,6 +170,6 @@ export function applyGuardianMappingWithinTx(
       });
     }
   } else {
-    repo.writeChannelMapping(tx, plan.guardianId, channel, channelUserId);
+    repo.linkStated({ channel, channelUserId }, plan.guardianId, undefined, tx);
   }
 }

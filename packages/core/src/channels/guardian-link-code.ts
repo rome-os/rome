@@ -12,7 +12,7 @@
 
 import { randomInt, timingSafeEqual } from "node:crypto";
 import type { ConnectionRegistry } from "../connections/registry.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import { createLogger } from "../logger.js";
 import type { Admission } from "./admission.js";
 import { sendThrough } from "./connection-ports.js";
@@ -89,7 +89,7 @@ export function isLinkCodeMessage(text: string | undefined): boolean {
  */
 export function createGuardianLinkAdmission(deps: {
   codes: GuardianLinkCodes;
-  personMappingRepo: Pick<PersonMappingRepository, "findByBondLevel" | "linkAccount">;
+  peopleRepo: Pick<PeopleRepository, "byBondLevel" | "link">;
   registry: Pick<ConnectionRegistry, "get">;
 }): Admission {
   return async (connectionId, connectionKind, message) => {
@@ -117,13 +117,12 @@ export function createGuardianLinkAdmission(deps: {
       reply("That code was not accepted. Open People in Rome to get a new one.");
       return false;
     }
-    const [guardian] = await deps.personMappingRepo.findByBondLevel("guardian");
+    const [guardian] = await deps.peopleRepo.byBondLevel("guardian");
     if (!guardian) return false;
-    const result = await deps.personMappingRepo.linkAccount({
-      personId: guardian.id,
-      channel: connectionKind,
-      channelUserId: message.senderId,
-    });
+    const result = await deps.peopleRepo.link(
+      { channel: connectionKind, channelUserId: message.senderId },
+      guardian.id,
+    );
     log.info("link code redeemed", { connectionId, linked: result.linked });
     reply(
       result.linked

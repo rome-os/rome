@@ -22,7 +22,7 @@
 import { randomUUID } from "node:crypto";
 import type { DrizzleTx } from "../../db/index.js";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import {
   applyGuardianMappingWithinTx,
   planGuardianMapping,
@@ -52,7 +52,7 @@ export interface SetupRegistry {
 
 export interface SetupManagerDeps {
   registry: SetupRegistry;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
 }
 
 /** What a setup addresses: the connection kind, plus the connection id when the route
@@ -324,11 +324,7 @@ export class SetupManager {
       if (signal.aborted) throw new SetupAbortError();
       const channelUserId = given.guardianChannelUserId;
       const plan = channelUserId
-        ? await planGuardianMapping(
-            this.#deps.personMappingRepo,
-            target.connectionKind,
-            channelUserId,
-          )
+        ? await planGuardianMapping(this.#deps.peopleRepo, target.connectionKind, channelUserId)
         : null;
       const opts = {
         ...(plan && channelUserId
@@ -336,7 +332,7 @@ export class SetupManager {
               inTx: (tx: DrizzleTx) =>
                 applyGuardianMappingWithinTx(
                   tx,
-                  this.#deps.personMappingRepo,
+                  this.#deps.peopleRepo,
                   target.connectionKind,
                   channelUserId,
                   plan,

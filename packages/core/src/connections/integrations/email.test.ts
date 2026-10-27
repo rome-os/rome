@@ -23,7 +23,7 @@ import type {
   SendMailInput,
   SendMailResult,
 } from "../../lib/rome-cloud-mail.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { EmailInboundResult } from "../../channels/email-control.js";
 import { createTestDb } from "../../test/helpers.js";
@@ -130,11 +130,11 @@ function makeSettingsRepo(
 
 /** A person-mapping fake: no guardian person exists, so mapGuardianToChannel is a
  *  no-op — keeps start() off any write path in the descriptor tests. */
-function makePersonMappingRepo(): PersonMappingRepository {
+function makePersonMappingRepo(): PeopleRepository {
   return {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [],
-  } as unknown as PersonMappingRepository;
+    byAccount: async () => null,
+    byBondLevel: async () => [],
+  } as unknown as PeopleRepository;
 }
 
 function makeDeps(
@@ -144,7 +144,7 @@ function makeDeps(
   return {
     provider,
     settingsRepo: makeSettingsRepo(),
-    personMappingRepo: makePersonMappingRepo(),
+    peopleRepo: makePersonMappingRepo(),
     // Never hit the real whoami during tests; guardian stays unresolved
     // unless a test's settings row carries it.
     ownerEmailResolver: async () => undefined,

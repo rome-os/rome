@@ -11,7 +11,7 @@ type ApprovalStatus = "pending" | "approved" | "rejected" | "auto_approved";
 const VALID_STATUSES: ApprovalStatus[] = ["pending", "approved", "rejected", "auto_approved"];
 
 async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "reject") {
-  const { approvalHandler, approvalsRepo, personMappingRepo } = deps;
+  const { approvalHandler, approvalsRepo, peopleRepo } = deps;
   const approvalId = c.req.param("id") as string;
   const actor = await currentSessionActor();
   if (actor?.kind !== "guardian") return c.json({ error: "Guardian authentication required" }, 403);
@@ -49,7 +49,7 @@ async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "r
       const channelUserId = payload.channelUserId;
       if (typeof channel === "string" && typeof channelUserId === "string") {
         try {
-          await personMappingRepo.deleteChannelMapping(channel, channelUserId);
+          await peopleRepo.unlink({ channel, channelUserId });
         } catch (err) {
           log.error("failed to cleanup auto-mapped channel mapping on rejection", {
             approvalId,

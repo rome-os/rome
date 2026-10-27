@@ -83,11 +83,11 @@ describe("Account dismiss and restore", () => {
       },
     ]);
 
-    waPersonId = await deps.personMappingRepo.create({
+    waPersonId = await deps.peopleRepo.create({
       displayName: "Wanda Placed",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "whatsapp", channelUserId: LINKED_JID }],
+      links: [{ channel: "whatsapp", channelUserId: LINKED_JID }],
     });
 
     // An account already dismissed: a sender in the log, filed under the
@@ -100,10 +100,9 @@ describe("Account dismiss and restore", () => {
       text: "buy my coin",
       action: "ignored",
     });
-    await deps.personMappingRepo.addChannelMapping(
+    await deps.peopleRepo.linkStated(
+      { channel: "telegram", channelUserId: DISMISSED_SENDER },
       STRANGER_PERSON_ID,
-      "telegram",
-      DISMISSED_SENDER,
       "Spammer",
     );
   });
@@ -260,22 +259,22 @@ describe("Account dismiss and restore", () => {
     // somebody just has. Checking before writing cannot see this; only the
     // write itself can refuse it.
     let rivalId: string | null = null;
-    const repo = deps.personMappingRepo;
+    const repo = deps.peopleRepo;
     const racing: AccountDecisionDeps = {
       ...deps,
-      personMappingRepo: {
-        findAllWithMappings: async () => {
-          const stale = await repo.findAllWithMappings();
+      peopleRepo: {
+        all: async () => {
+          const stale = await repo.all();
           rivalId ??= await repo.create({
             displayName: "Rival Claimant",
             bondLevel: "other",
             approved: true,
-            channelMappings: [{ channel: "whatsapp", channelUserId: TALKING_JID }],
+            links: [{ channel: "whatsapp", channelUserId: TALKING_JID }],
           });
           return stale;
         },
-        linkAccount: repo.linkAccount.bind(repo),
-        releaseStrangerClaims: repo.releaseStrangerClaims.bind(repo),
+        dismiss: repo.dismiss.bind(repo),
+        restore: repo.restore.bind(repo),
       },
     };
 

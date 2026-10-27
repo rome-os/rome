@@ -35,7 +35,7 @@ import {
 } from "../../connections/integrations/feishu.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
-import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../../db/repositories/people.js";
 import { createTestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { setupsRoutes } from "./setups.js";
@@ -72,15 +72,15 @@ const setupFn: SetupFn = async (interact) => {
   };
 };
 
-function fakePersonRepo(): PersonMappingRepository {
+function fakePersonRepo(): PeopleRepository {
   return {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [{ id: "guardian", channelMappings: [] }],
+    byAccount: async () => null,
+    byBondLevel: async () => [{ id: "guardian", links: [] }],
     // The terminal grant applies the guardian mapping through the synchronous
     // write helpers enlisted in its transaction — not the async setters.
-    writeChannelUserId: rs.fn(),
-    writeChannelMapping: rs.fn(() => "id"),
-  } as unknown as PersonMappingRepository;
+    readdress: rs.fn(),
+    linkStated: rs.fn(() => "id"),
+  } as unknown as PeopleRepository;
 }
 
 function harness() {
@@ -91,14 +91,14 @@ function harness() {
   fixture.descriptor.connectionKind = "fake-telegram";
   fixture.descriptor.auth.setup = setupFn;
   registry.register(fixture.descriptor);
-  const personMappingRepo = fakePersonRepo();
-  const manager = new SetupManager({ registry, personMappingRepo });
+  const peopleRepo = fakePersonRepo();
+  const manager = new SetupManager({ registry, peopleRepo });
   const deps = {
     db,
     approvalsRepo: new ApprovalsRepository(db),
     connectionRegistry: registry,
     setupManager: manager,
-    personMappingRepo,
+    peopleRepo,
   } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
   return { app, registry };
@@ -262,17 +262,17 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     openDbs.push(close);
     const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const personRepo = {
-      findByChannelUser: async () => null,
-      findByBondLevel: async () => [{ id: "guardian", channelMappings: [] }],
+      byAccount: async () => null,
+      byBondLevel: async () => [{ id: "guardian", links: [] }],
       // The terminal grant applies the guardian mapping through the synchronous
       // write helpers enlisted in its transaction — not the async setters.
-      writeChannelUserId: rs.fn(),
-      writeChannelMapping: rs.fn(() => "id"),
+      readdress: rs.fn(),
+      linkStated: rs.fn(() => "id"),
     };
     registry.register(feishuDeps(overrides, personRepo));
     const manager = new SetupManager({
       registry,
-      personMappingRepo: personRepo as unknown as PersonMappingRepository,
+      peopleRepo: personRepo as unknown as PeopleRepository,
     });
     const deps = { connectionRegistry: registry, setupManager: manager } as unknown as ApiDeps;
     const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
@@ -299,7 +299,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     };
     return createFeishuDescriptor({
       chatSettings: {} as never,
-      personMappingRepo: personRepo as PersonMappingRepository,
+      peopleRepo: personRepo as PeopleRepository,
       listAgents: () => [],
       createChannel: () => fakeLarkChannel as never,
       probeCredentials: fakes.probeCredentials ?? (async () => {}),
@@ -347,7 +347,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.profile).toEqual({ appId: "cli_abc", domain: "lark", appType: "manual" });
-    expect(personRepo.writeChannelMapping).not.toHaveBeenCalled();
+    expect(personRepo.linkStated).not.toHaveBeenCalled();
   });
 
   it("agent-ready mode: presents the QR mid-step and grants the minted credential", async () => {
@@ -425,7 +425,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     expect(stepSignal?.aborted).toBe(true);
     // Zero durable state: no connection minted, no guardian mapping.
     expect(registry.find("feishu")).toHaveLength(0);
-    expect(personRepo.writeChannelMapping).not.toHaveBeenCalled();
+    expect(personRepo.linkStated).not.toHaveBeenCalled();
   });
 });
 
@@ -624,7 +624,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
           })),
       }),
     );
-    const manager = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const manager = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     const deps = { connectionRegistry: registry, setupManager: manager } as unknown as ApiDeps;
     const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
     return { app, registry };

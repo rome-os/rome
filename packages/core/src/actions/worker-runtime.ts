@@ -11,7 +11,8 @@ import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { noAccountLinks } from "../channels/account-links.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../db/repositories/people.js";
+import { appPersonMapping } from "../people/app-person-mapping.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -110,7 +111,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
 
   const channelRecords = new ChannelRecordsRepository(db, noAccountLinks);
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
-  const personMappingRepo = new PersonMappingRepository(db, connectionKindOfChannel);
+  const peopleRepo = new PeopleRepository(db, connectionKindOfChannel);
   const sentinelLogRepo = new SentinelLogRepository(db);
   const approvalsRepo = new ApprovalsRepository(db);
   const webchatRepo = new WebChatRepository(db);
@@ -160,7 +161,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       // Apps built before the chat rename read `conversationSettings`.
       conversationSettings: appChatSettings,
       capabilityDiscovery,
-      personMappingRepo,
+      personMappingRepo: appPersonMapping(peopleRepo),
       sentinelLogRepo,
       approvalsRepo,
       policyEngine,

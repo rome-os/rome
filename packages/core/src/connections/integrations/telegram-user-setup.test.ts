@@ -16,7 +16,7 @@
 //      setup through the generic SetupManager surface.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import {
   TelegramUserAuthError,
   type TelegramUserLoginHandle,
@@ -263,7 +263,7 @@ describe("Telegram-user setup discovery", () => {
   it("reports an in-flight login as the session grant's active setup", async () => {
     const manager = new SetupManager({
       registry: makeRegistry(),
-      personMappingRepo: {} as PersonMappingRepository,
+      peopleRepo: {} as PeopleRepository,
     });
 
     const started = await manager.start({ connectionKind: "telegram_user" }, "session");

@@ -17,7 +17,7 @@ import {
   type SendInput,
   type SendOptions,
 } from "@larksuiteoapi/node-sdk";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import { isFeishuAuthError } from "../../channels/feishu.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -122,12 +122,12 @@ class FakeLarkChannel {
   }
 }
 
-function fakePersonRepo(): PersonMappingRepository {
+function fakePersonRepo(): PeopleRepository {
   return {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [],
-    addChannelMapping: async () => "id",
-  } as unknown as PersonMappingRepository;
+    byAccount: async () => null,
+    byBondLevel: async () => [],
+    linkStated: async () => "id",
+  } as unknown as PeopleRepository;
 }
 
 function makeDescriptor(channel: FakeLarkChannel) {
@@ -150,7 +150,7 @@ function makeDescriptor(channel: FakeLarkChannel) {
         supportedFields: ["enabled", "activation.mode", "replies.placement", "routing.agentName"],
       }),
     } as never,
-    personMappingRepo: fakePersonRepo(),
+    peopleRepo: fakePersonRepo(),
     listAgents: () => ["main"],
     createChannel: () => channel as never,
   });

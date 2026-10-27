@@ -3,7 +3,7 @@
 // setup. Observed through the ledger and the setup state.
 
 import { describe, expect, it } from "@rstest/core";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb, testAccountLinkOf } from "../test/helpers.js";
 import { AccountAlreadyConnectedError, DifferentAccountError } from "./errors.js";
@@ -174,7 +174,7 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     try {
       const manager = new SetupManager({
         registry,
-        personMappingRepo: {} as PersonMappingRepository,
+        peopleRepo: {} as PeopleRepository,
       });
       const first = await registry.connect(SERVICE);
       const firstSetup = await manager.start(

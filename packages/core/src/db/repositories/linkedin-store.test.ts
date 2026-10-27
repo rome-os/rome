@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { sql } from "drizzle-orm";
 import { createTestDb, type TestDb, identityConnectionKindOf } from "../../test/helpers.js";
 import { LinkedInStoreRepository, linkedInMemberIdFromProfileUrl } from "./linkedin-store.js";
-import { PersonMappingRepository } from "./person-mapping.js";
+import { PeopleRepository } from "./people.js";
 
 describe("LinkedInStoreRepository", () => {
   let testDb: TestDb;
@@ -608,7 +608,7 @@ describe("LinkedInStoreRepository", () => {
     // is the account's address on both sides, so promotion needs no translation
     // step and nothing in this repository ever writes `persons`.
     describe("promotion to a person", () => {
-      let people: PersonMappingRepository;
+      let people: PeopleRepository;
 
       const personCount = () =>
         Number(
@@ -616,7 +616,7 @@ describe("LinkedInStoreRepository", () => {
         );
 
       beforeEach(async () => {
-        people = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
+        people = new PeopleRepository(testDb.db, identityConnectionKindOf);
         await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
         await repo.upsertThreadParticipants("t1", [ada, self]);
       });
@@ -641,7 +641,7 @@ describe("LinkedInStoreRepository", () => {
           displayName: "Ada Lovelace",
           bondLevel: "acquaintance",
           approved: true,
-          channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+          links: [{ channel: "linkedin", channelUserId: ada.participantId }],
         });
 
         const mapping = (
@@ -672,7 +672,7 @@ describe("LinkedInStoreRepository", () => {
           displayName: "Ada Lovelace",
           bondLevel: "acquaintance",
           approved: true,
-          channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+          links: [{ channel: "linkedin", channelUserId: ada.participantId }],
         });
 
         // The second promotion slugs to a free id (`ada-lovelace-2`), so the
@@ -682,7 +682,7 @@ describe("LinkedInStoreRepository", () => {
             displayName: "Ada Lovelace",
             bondLevel: "acquaintance",
             approved: true,
-            channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+            links: [{ channel: "linkedin", channelUserId: ada.participantId }],
           }),
         ).rejects.toThrow(/already belongs to person/);
 
@@ -695,14 +695,17 @@ describe("LinkedInStoreRepository", () => {
           displayName: "Ada Lovelace",
           bondLevel: "acquaintance",
           approved: true,
-          channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+          links: [{ channel: "linkedin", channelUserId: ada.participantId }],
         });
         await people.createWithId("ada-byron", {
           displayName: "Ada Byron",
           bondLevel: "inner-circle",
         });
 
-        await people.addChannelMapping("ada-byron", "linkedin", ada.participantId);
+        await people.linkStated(
+          { channel: "linkedin", channelUserId: ada.participantId },
+          "ada-byron",
+        );
 
         expect(personCount()).toBe(2);
         const rows = await repo.listParticipants();

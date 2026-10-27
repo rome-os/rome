@@ -11,14 +11,11 @@ import {
   type NewPerson,
   type PersonResource,
 } from "@rome/api-types/people";
-import {
-  AccountHeldError,
-  type PersonMappingRepository,
-} from "../db/repositories/person-mapping.js";
+import { AccountHeldError, type PeopleRepository } from "../db/repositories/people.js";
 import { readPerson, type PeopleReadDeps } from "./resource.js";
 
 export interface PeopleWriteDeps extends PeopleReadDeps {
-  personMappingRepo: PeopleReadDeps["personMappingRepo"] & Pick<PersonMappingRepository, "create">;
+  peopleRepo: PeopleReadDeps["peopleRepo"] & Pick<PeopleRepository, "create">;
 }
 
 /** The person that now exists, or the account that stopped them existing. */
@@ -44,13 +41,13 @@ export async function createPerson(
 ): Promise<CreatePersonResult> {
   let id: string;
   try {
-    id = await deps.personMappingRepo.create({
+    id = await deps.peopleRepo.create({
       displayName: request.displayName,
       bondLevel: request.bondLevel,
       // The guardian typed this person in, so there is nobody left to approve
       // them — the same standing every person the dashboard creates has.
       approved: true,
-      channelMappings: request.accounts,
+      links: request.accounts,
     });
   } catch (err) {
     if (err instanceof AccountHeldError) {

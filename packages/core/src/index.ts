@@ -79,7 +79,8 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { SessionsRepository } from "./db/repositories/sessions.js";
-import { PersonMappingRepository } from "./db/repositories/person-mapping.js";
+import { PeopleRepository } from "./db/repositories/people.js";
+import { appPersonMapping } from "./people/app-person-mapping.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
 import { OutboxRepository } from "./db/repositories/outbox.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
@@ -331,7 +332,7 @@ async function main() {
   // The connection kind a channel name belongs to. Whatever is keyed by connection kind, such
   // as a descriptor, a channel policy, or a person's link, reads it.
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
-  const personMappingRepo = new PersonMappingRepository(db, connectionKindOfChannel);
+  const peopleRepo = new PeopleRepository(db, connectionKindOfChannel);
   const channelOfLink = (link: string) => channelRecords.channelOfLink(link);
   const sendersOfLink = (link: string) => channelRecords.sendersOfLink(link);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
@@ -406,7 +407,7 @@ async function main() {
     log.warn("Ended runs a stopped Rome process left running", interrupted);
   }
 
-  await ensureSentinelPersons(personMappingRepo);
+  await ensureSentinelPersons(peopleRepo);
 
   // Connection registry (use side). Descriptors are registered here at boot, but
   // the load()/import that hydrate + rebuild live connections run LATER — after
@@ -451,14 +452,14 @@ async function main() {
   });
   const channelOf = recordedChannelOf(channelRecords, talks);
   const linkAgentToGuardian = createAgentsGuardianLink({
-    personMappingRepo,
+    peopleRepo,
     settingsRepo,
     channel: AGENTS_KIND,
   });
   const guardianLinkCodes = new GuardianLinkCodes();
   const linkCodeAdmission = createGuardianLinkAdmission({
     codes: guardianLinkCodes,
-    personMappingRepo,
+    peopleRepo,
     registry: connectionRegistry,
   });
   // Every sender is admitted: Rome never asks a sender to pair
@@ -511,7 +512,7 @@ async function main() {
   // routes; created here so descriptors registered later expose their setup.
   const setupManager = new SetupManager({
     registry: connectionRegistry,
-    personMappingRepo,
+    peopleRepo,
   });
   // Descriptors are registered LATER (before registry.load(), just above the
   // Talk runtime) so their factories can be threaded the runtime
@@ -934,7 +935,8 @@ async function main() {
     stopActiveConversationTurn(input, {
       turns: agentTurnStreamRegistry,
       isGuardian: async (channel, senderId) =>
-        (await personMappingRepo.findByChannelUser(channel, senderId))?.bondLevel === "guardian",
+        (await peopleRepo.byAccount({ channel, channelUserId: senderId }))?.bondLevel ===
+        "guardian",
     });
   const subagentExecutionService = createSubagentExecutionService({
     webchatRepo,
@@ -1128,7 +1130,7 @@ async function main() {
     // Apps built before the chat rename read `conversationSettings`.
     conversationSettings: appChatSettings,
     capabilityDiscovery,
-    personMappingRepo,
+    personMappingRepo: appPersonMapping(peopleRepo),
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
@@ -1379,7 +1381,7 @@ async function main() {
     settingsRepo,
     chatSettings,
     chatStop,
-    personMappingRepo,
+    peopleRepo,
     whatsAppSyncSink: whatsAppStoreRepo,
     linkedInSyncSink: linkedInStoreRepo,
     linkedinPoll: {
@@ -1391,7 +1393,7 @@ async function main() {
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
-      mapGuardianToChannel(personMappingRepo, "whatsapp", selfJid).catch((err) => {
+      mapGuardianToChannel(peopleRepo, "whatsapp", selfJid).catch((err) => {
         log.error("failed to auto-map guardian on WhatsApp connect", {
           error: err instanceof Error ? err.message : String(err),
         });
@@ -1780,7 +1782,7 @@ async function main() {
       chatSettings,
       actionEngine,
       actionLoader,
-      personMappingRepo,
+      peopleRepo,
       guardianLinkCodes,
       outboxRepo,
       channels,

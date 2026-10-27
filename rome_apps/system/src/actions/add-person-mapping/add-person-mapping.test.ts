@@ -4,7 +4,8 @@ import {
   type TestDb,
   identityConnectionKindOf,
 } from "../../../../../packages/core/src/test/helpers.js";
-import { PersonMappingRepository } from "../../../../../packages/core/src/db/repositories/person-mapping.js";
+import { PeopleRepository } from "../../../../../packages/core/src/db/repositories/people.js";
+import { appPersonMapping } from "../../../../../packages/core/src/people/app-person-mapping.js";
 import { ApprovalsRepository } from "../../../../../packages/core/src/db/repositories/approvals.js";
 import { addPersonMapping, type AddPersonMappingInput } from "./index.js";
 
@@ -29,12 +30,14 @@ describe("addPersonMapping", () => {
 
   it("creates person record (approved=false)", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
+      personMappingRepo: appPersonMapping(
+        new PeopleRepository(testDb.db, identityConnectionKindOf),
+      ),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
-    const personRepo = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
-    const person = await personRepo.findById(result.personId);
+    const personRepo = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    const person = await personRepo.byId(result.personId);
     expect(person).not.toBeNull();
     expect(person!.displayName).toBe("Alice");
     expect(person!.bondLevel).toBe("inner-circle");
@@ -43,15 +46,17 @@ describe("addPersonMapping", () => {
 
   it("creates channel mapping", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
+      personMappingRepo: appPersonMapping(
+        new PeopleRepository(testDb.db, identityConnectionKindOf),
+      ),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
-    const personRepo = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
-    const person = await personRepo.findById(result.personId);
+    const personRepo = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    const person = await personRepo.byId(result.personId);
     expect(person).not.toBeNull();
-    expect(person!.channelMappings).toHaveLength(1);
-    expect(person!.channelMappings[0]).toEqual({
+    expect(person!.links).toHaveLength(1);
+    expect(person!.links[0]).toEqual({
       channel: "telegram",
       channelUserId: "alice-123",
     });
@@ -59,7 +64,9 @@ describe("addPersonMapping", () => {
 
   it("creates approval request", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
+      personMappingRepo: appPersonMapping(
+        new PeopleRepository(testDb.db, identityConnectionKindOf),
+      ),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
@@ -74,7 +81,9 @@ describe("addPersonMapping", () => {
   it("handles existing person with same display name", async () => {
     // Create a person first
     await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
+      personMappingRepo: appPersonMapping(
+        new PeopleRepository(testDb.db, identityConnectionKindOf),
+      ),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
@@ -83,7 +92,9 @@ describe("addPersonMapping", () => {
       addPersonMapping(
         { ...baseInput, channelUserId: "alice-456" },
         {
-          personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
+          personMappingRepo: appPersonMapping(
+            new PeopleRepository(testDb.db, identityConnectionKindOf),
+          ),
           approvalsRepo: new ApprovalsRepository(testDb.db),
         },
       ),
@@ -93,18 +104,23 @@ describe("addPersonMapping", () => {
   it("handles merging channel mappings for same person", async () => {
     // Create person first
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
+      personMappingRepo: appPersonMapping(
+        new PeopleRepository(testDb.db, identityConnectionKindOf),
+      ),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 
     // Add another channel mapping to the same person directly via repo
-    const personRepo = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
-    await personRepo.addChannelMapping(result.personId, "whatsapp", "alice-whatsapp");
+    const personRepo = new PeopleRepository(testDb.db, identityConnectionKindOf);
+    await personRepo.linkStated(
+      { channel: "whatsapp", channelUserId: "alice-whatsapp" },
+      result.personId,
+    );
 
     // Verify person now has two mappings
-    const person = await personRepo.findById(result.personId);
-    expect(person!.channelMappings).toHaveLength(2);
-    expect(person!.channelMappings).toEqual(
+    const person = await personRepo.byId(result.personId);
+    expect(person!.links).toHaveLength(2);
+    expect(person!.links).toEqual(
       expect.arrayContaining([
         { channel: "telegram", channelUserId: "alice-123" },
         { channel: "whatsapp", channelUserId: "alice-whatsapp" },
@@ -114,7 +130,9 @@ describe("addPersonMapping", () => {
 
   it("returns personId and approvalId", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
+      personMappingRepo: appPersonMapping(
+        new PeopleRepository(testDb.db, identityConnectionKindOf),
+      ),
       approvalsRepo: new ApprovalsRepository(testDb.db),
     });
 

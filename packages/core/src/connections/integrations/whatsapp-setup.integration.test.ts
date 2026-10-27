@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
 import { WhatsAppAdapter, type WhatsAppSocketFactory } from "../../channels/whatsapp.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import { createTestDb } from "../../test/helpers.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
@@ -71,11 +71,11 @@ function harness() {
       createAdapter: (authProvider) => new WhatsAppAdapter({ authProvider }, socketFactory),
     }),
   );
-  const personMappingRepo = {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [],
-  } as unknown as PersonMappingRepository;
-  const setupManager = new SetupManager({ registry, personMappingRepo });
+  const peopleRepo = {
+    byAccount: async () => null,
+    byBondLevel: async () => [],
+  } as unknown as PeopleRepository;
+  const setupManager = new SetupManager({ registry, peopleRepo });
   const deps = { connectionRegistry: registry, setupManager } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps));
   return { app, sockets };

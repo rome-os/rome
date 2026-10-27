@@ -52,7 +52,7 @@ import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../db/repositories/people.js";
 import { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
@@ -557,7 +557,7 @@ export async function buildTestDeps(
 
   const sessionsRepo = new SessionsRepository(db);
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db, recordedConnectionKindOf(db));
+  const peopleRepo = new PeopleRepository(db, recordedConnectionKindOf(db));
   const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
@@ -741,7 +741,7 @@ export async function buildTestDeps(
     db,
     appConnectionAccessRepo,
     sessionsRepo,
-    personMappingRepo,
+    peopleRepo,
     guardianLinkCodes: new GuardianLinkCodes(),
     outboxRepo,
     whatsAppStoreRepo,

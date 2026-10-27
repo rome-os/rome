@@ -16,12 +16,11 @@
 // for the guardian or the agent to fold in as prose.
 
 import { type PersonResource } from "@rome/api-types/people";
-import type { MergeRefusal, PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { MergeRefusal, PeopleRepository } from "../db/repositories/people.js";
 import { readPerson, type PeopleReadDeps } from "./resource.js";
 
 export interface PeopleMergeDeps extends PeopleReadDeps {
-  personMappingRepo: PeopleReadDeps["personMappingRepo"] &
-    Pick<PersonMappingRepository, "mergePersons">;
+  peopleRepo: PeopleReadDeps["peopleRepo"] & Pick<PeopleRepository, "merge">;
 }
 
 /**
@@ -50,7 +49,7 @@ export async function mergePeople(
   into: string,
   from: string,
 ): Promise<MergePeopleResult> {
-  const result = await deps.personMappingRepo.mergePersons(into, from);
+  const result = await deps.peopleRepo.merge(into, from);
   if (!result.merged) return refusal(result.reason);
 
   const person = await readPerson(deps, into);

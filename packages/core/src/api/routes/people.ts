@@ -126,12 +126,10 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const request = parseLinkAccountRequest(await c.req.json().catch(() => null));
     if (!request) return c.json({ error: "channel and channelUserId are required" }, 400);
 
-    const result = await deps.personMappingRepo.linkAccount({
-      personId: person.id,
-      channel: request.channel,
-      channelUserId: request.channelUserId,
-      transferFrom: request.transferFrom,
-    });
+    const account = { channel: request.channel, channelUserId: request.channelUserId };
+    const result = request.transferFrom
+      ? await deps.peopleRepo.move(account, request.transferFrom, person.id)
+      : await deps.peopleRepo.link(account, person.id);
     if (!result.linked) {
       const { holder } = result;
       return c.json(
@@ -156,10 +154,9 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // else holds it: unlinking is not a way to reach into another person's
     // accounts, and reporting success would tell the caller their view was
     // right when it was stale.
-    const unlinked = await deps.personMappingRepo.unlinkAccount(
+    const unlinked = await deps.peopleRepo.unlink(
+      { channel: c.req.param("channel"), channelUserId: c.req.param("channelUserId") },
       person.id,
-      c.req.param("channel"),
-      c.req.param("channelUserId"),
     );
     if (!unlinked) return c.json({ error: "Unknown account" }, 404);
 
@@ -185,7 +182,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // person's address is not making a request this person's page can answer,
     // and sending anyway would deliver a message the guardian addressed to
     // someone else.
-    const held = person.channelMappings.some(
+    const held = person.links.some(
       (mapping) =>
         mapping.channel === parsed.request.channel &&
         mapping.channelUserId === parsed.request.channelUserId,
@@ -224,7 +221,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
 
-    const [accounts] = await timelineAccounts(deps, [person.channelMappings]);
+    const [accounts] = await timelineAccounts(deps, [person.links]);
     return c.json({
       messages: await readOutbox(deps, personMessageStores(deps), accounts),
     } satisfies OutboxPage);
@@ -243,7 +240,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
 
-    const message = await retrySend(deps, person.channelMappings, c.req.param("messageId"));
+    const message = await retrySend(deps, person.links, c.req.param("messageId"));
     return message
       ? c.json(message, 202)
       : c.json({ error: "No failed message of theirs with that id" }, 404);
@@ -256,7 +253,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
 
-    const discarded = await discardSend(deps, person.channelMappings, c.req.param("messageId"));
+    const discarded = await discardSend(deps, person.links, c.req.param("messageId"));
     return discarded
       ? c.body(null, 204)
       : c.json({ error: "No dismissable message of theirs with that id" }, 404);
@@ -277,7 +274,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // no set of names to check one against, and "no history there" is the true
     // answer for every name that is not a typo.
     const channel = c.req.query("channel");
-    const [accounts] = await timelineAccounts(deps, [person.channelMappings]);
+    const [accounts] = await timelineAccounts(deps, [person.links]);
 
     return c.json(
       await readPersonTimeline(

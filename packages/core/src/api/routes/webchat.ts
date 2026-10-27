@@ -3364,13 +3364,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let channelUserId = "guardian";
     const personaId = await resolveRequestedPersonaId(body.personaId);
     if (personaId) {
-      const person = await deps.personMappingRepo.findById(personaId);
+      const person = await deps.peopleRepo.byId(personaId);
       if (person) {
         displayName = person.displayName;
         channelUserId = person.id;
       }
     } else {
-      const guardians = await deps.personMappingRepo.findByBondLevel("guardian");
+      const guardians = await deps.peopleRepo.byBondLevel("guardian");
       if (guardians.length > 0) {
         displayName = guardians[0].displayName;
         channelUserId = guardians[0].id;

@@ -9,7 +9,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import { mapGuardianToChannel } from "./guardian-mapping.js";
 import { InboundDedup } from "./inbound-dedup.js";
 import {
@@ -70,7 +70,7 @@ export interface EmailInboxCoordinates {
 export interface EmailAdapterDeps {
   provider: MailProvider;
   settingsRepo: SettingsRepository;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
   config: EmailInboxCoordinates;
   /**
    * Resolve the account owner's (guardian's) email from Rome Cloud when none is
@@ -194,7 +194,7 @@ function textFromParts(parts: OutgoingMessage["parts"]): string {
 export class EmailAdapter {
   private readonly provider: MailProvider;
   private readonly settingsRepo: SettingsRepository;
-  private readonly personMappingRepo: PersonMappingRepository;
+  private readonly peopleRepo: PeopleRepository;
   private readonly ownerEmailResolver: () => Promise<string | undefined>;
   private readonly inboundDedup = new InboundDedup();
 
@@ -219,7 +219,7 @@ export class EmailAdapter {
   constructor(deps: EmailAdapterDeps) {
     this.provider = deps.provider;
     this.settingsRepo = deps.settingsRepo;
-    this.personMappingRepo = deps.personMappingRepo;
+    this.peopleRepo = deps.peopleRepo;
     this.address = deps.config.address;
     this.inboundSecret = deps.config.inboundSecret;
     // guardianEmail is durable settings config, resolved from the settings row
@@ -280,13 +280,11 @@ export class EmailAdapter {
     // known address lands on the trusted path. The inbound gate still enforces
     // authentication before honoring this mapping (see ingestInbound).
     if (this.guardianEmail) {
-      await mapGuardianToChannel(this.personMappingRepo, "email", this.guardianEmail).catch(
-        (err) => {
-          log.warn("failed to preset guardian email mapping", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        },
-      );
+      await mapGuardianToChannel(this.peopleRepo, "email", this.guardianEmail).catch((err) => {
+        log.warn("failed to preset guardian email mapping", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
 
     log.info("email channel started", { address: this.address });

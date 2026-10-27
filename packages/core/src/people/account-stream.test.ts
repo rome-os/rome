@@ -89,11 +89,11 @@ describe("readAccountStream", () => {
 
     // A mapped Telegram account whose conversation lives only in Rome's own
     // transcript.
-    await deps.personMappingRepo.create({
+    await deps.peopleRepo.create({
       displayName: "Transcribed Tam",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "telegram", channelUserId: TRANSCRIBED }],
+      links: [{ channel: "telegram", channelUserId: TRANSCRIBED }],
     });
     await testDb.db.insert(romeSessions).values({
       id: "s-transcribed",

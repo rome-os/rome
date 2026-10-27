@@ -25,7 +25,7 @@ import type { AccountNames } from "../channels/account-names.js";
 import { foldAccounts } from "../channels/account-fold.js";
 import { addressBooks, type Channels } from "../channels/channel.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { assignAccountHeads } from "./timeline.js";
 import { personMessageStores } from "./timeline-sources.js";
@@ -34,7 +34,7 @@ export interface AccountDirectoryDeps {
   /** Every channel Rome mirrors — the address books this folds, and the stores
    *  the stream reads a history from. */
   channels: Channels;
-  personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings">;
+  peopleRepo: Pick<PeopleRepository, "all">;
   sentinelLogRepo: Pick<SentinelLogRepository, "listSenders">;
   accountNames: Pick<AccountNames, "displayNames">;
   /** Where the message stores live. Read by the stream alone — the contacts
@@ -228,11 +228,11 @@ export async function readAccountDirectory(
     deps.sentinelLogRepo.listSenders(),
     // One statement, so an account moving between two people mid-read cannot
     // land under both of them.
-    deps.personMappingRepo.findAllWithMappings(),
+    deps.peopleRepo.all(),
   ]);
 
   const mappings = persons.flatMap((person) =>
-    person.channelMappings.map((mapping) => ({ ...mapping, person })),
+    person.links.map((mapping) => ({ ...mapping, person })),
   );
   const fold = await foldAccounts(addressBooks(deps.channels), {
     stored: [...senders, ...mappings],

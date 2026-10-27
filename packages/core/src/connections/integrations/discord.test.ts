@@ -108,7 +108,7 @@ function flush(): Promise<void> {
 
 const deps = {
   chatSettings: {} as never,
-  personMappingRepo: { findByChannelUser: rs.fn(async () => null) } as never,
+  peopleRepo: { byAccount: rs.fn(async () => null) } as never,
   listAgents: () => [],
   validateToken: async () => {},
 };
@@ -214,7 +214,7 @@ describe("discord descriptor shape", () => {
     const findByChannelUser = rs.fn(async () => guardian);
     const desc = makeDiscordDescriptor({
       ...deps,
-      personMappingRepo: { findByChannelUser } as never,
+      peopleRepo: { byAccount: findByChannelUser } as never,
     });
     desc.capabilities.talker!.build(validCred(), {
       connectionId: "discord-test",
@@ -225,7 +225,10 @@ describe("discord descriptor shape", () => {
     await expect(fakeState.lastConfig?.resolveDiscordPerson?.("guardian-777")).resolves.toEqual(
       guardian,
     );
-    expect(findByChannelUser).toHaveBeenCalledWith("discord", "guardian-777");
+    expect(findByChannelUser).toHaveBeenCalledWith({
+      channel: "discord",
+      channelUserId: "guardian-777",
+    });
   });
 
   it("passes the opaque conversation id to the adapter and returns its receipt", async () => {

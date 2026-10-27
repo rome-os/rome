@@ -23,7 +23,7 @@ import type { Credential, ProfileRecord } from "../../connections/types.js";
 import { domainOf } from "../../channels/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
-import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../../db/repositories/people.js";
 import { createTestDb, identityConnectionKindOf, testAccountLinkOf } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { connectionsRoutes } from "./connections.js";
@@ -708,11 +708,11 @@ describe("guardian links across a disconnect", () => {
     registry.register(fixture.descriptor);
     const conn = await registry.connect("discord");
     await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.botCredential());
-    const personMappingRepo = new PersonMappingRepository(db, identityConnectionKindOf);
-    await personMappingRepo.create({
+    const peopleRepo = new PeopleRepository(db, identityConnectionKindOf);
+    await peopleRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",
-      channelMappings: [{ channel: "discord", channelUserId: "linked" }],
+      links: [{ channel: "discord", channelUserId: "linked" }],
     });
     const suffix = teardown === "connection" ? "" : "/grants/bot";
 
@@ -722,6 +722,8 @@ describe("guardian links across a disconnect", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await personMappingRepo.findByChannelUser("discord", "linked")).not.toBeNull();
+    expect(
+      await peopleRepo.byAccount({ channel: "discord", channelUserId: "linked" }),
+    ).not.toBeNull();
   });
 });

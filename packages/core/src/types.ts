@@ -90,27 +90,6 @@ export interface AgentSession {
   status: "active" | "completed" | "error";
 }
 
-/**
- * A person and the accounts linked to them.
- *
- * `channelMappings` keeps the table's and the wire's name — a channel mapping is
- * a [link](docs/concepts/people.md#link), and `channelUserId` is the account's
- * own [address](docs/concepts/people.md#address) — because
- * `@rome-os/app-runtime` publishes the field to apps.
- */
-export interface PersonMapping {
-  id: string;
-  displayName: string;
-  channelMappings: {
-    channel: string;
-    channelUserId: string;
-  }[];
-  bondLevel: "guardian" | "inner-circle" | "acquaintance" | "other";
-  profilePath?: string;
-  approved: boolean;
-  createdAt: Date;
-}
-
 export interface Policy {
   id: string;
   scope: PolicyScope;

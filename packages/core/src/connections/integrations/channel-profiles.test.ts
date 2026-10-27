@@ -56,7 +56,7 @@ const CASES: ChannelCase[] = [
     connectionKind: "discord",
     descriptor: makeDiscordDescriptor({
       chatSettings: stub,
-      personMappingRepo: stub,
+      peopleRepo: stub,
       listAgents: () => [],
     }),
     grant: "bot",
@@ -73,7 +73,7 @@ const CASES: ChannelCase[] = [
     connectionKind: "feishu",
     descriptor: createFeishuDescriptor({
       chatSettings: stub,
-      personMappingRepo: stub,
+      peopleRepo: stub,
       listAgents: () => [],
     }),
     grant: "app",
@@ -104,7 +104,7 @@ const CASES: ChannelCase[] = [
     descriptor: makeEmailDescriptor({
       provider: stub,
       settingsRepo: stub,
-      personMappingRepo: stub,
+      peopleRepo: stub,
     }),
     grant: "inbox",
     full: { address: "slug@romeos.cc" },

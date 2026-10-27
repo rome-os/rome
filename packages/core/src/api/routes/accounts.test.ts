@@ -71,11 +71,11 @@ describe("Accounts API", () => {
       },
     ]);
 
-    waPersonId = await deps.personMappingRepo.create({
+    waPersonId = await deps.peopleRepo.create({
       displayName: "Wanda Placed",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "whatsapp", channelUserId: LINKED_JID }],
+      links: [{ channel: "whatsapp", channelUserId: LINKED_JID }],
     });
 
     // A dismissal: the sender is filed under the stranger sentinel.
@@ -87,10 +87,9 @@ describe("Accounts API", () => {
       text: "buy my coin",
       action: "ignored",
     });
-    await deps.personMappingRepo.addChannelMapping(
+    await deps.peopleRepo.linkStated(
+      { channel: "telegram", channelUserId: DISMISSED_SENDER },
       STRANGER_PERSON_ID,
-      "telegram",
-      DISMISSED_SENDER,
       "Spammer",
     );
   });
@@ -219,11 +218,7 @@ describe("Accounts API", () => {
       await until(() => asked.includes(TALKING_JID));
 
       // A write lands while the first read is waiting on its heads.
-      await deps.personMappingRepo.linkAccount({
-        personId: STRANGER_PERSON_ID,
-        channel: "whatsapp",
-        channelUserId: TALKING_JID,
-      });
+      await deps.peopleRepo.dismiss({ channel: "whatsapp", channelUserId: TALKING_JID });
       const directory = countDirectoryReads();
       const second = fetchStream();
       await until(() => directory.done === 1);
@@ -378,11 +373,11 @@ describe("Accounts API", () => {
   });
 
   it("lists an account on a channel with no history at all", async () => {
-    const linkedSilent = await deps.personMappingRepo.create({
+    const linkedSilent = await deps.peopleRepo.create({
       displayName: "Quiet Link",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "signal", channelUserId: "sig-quiet" }],
+      links: [{ channel: "signal", channelUserId: "sig-quiet" }],
     });
     const account = find(await fetchPage(), "signal:sig-quiet")!;
     expect(account.personId).toBe(linkedSilent);

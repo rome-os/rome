@@ -53,11 +53,11 @@ describe("People timeline API", () => {
     deps = await buildTestDeps(testDb.db);
     app = new Hono().route("/", peopleRoutes(deps));
 
-    personId = await deps.personMappingRepo.create({
+    personId = await deps.peopleRepo.create({
       displayName: "Nadia Cross",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [
+      links: [
         { channel: "whatsapp", channelUserId: WA_JID },
         { channel: "telegram", channelUserId: TG_THREAD },
       ],
@@ -250,11 +250,11 @@ describe("People timeline API", () => {
   });
 
   it("gives a sender with only sentinel history both halves of the exchange", async () => {
-    const sentinelOnly = await deps.personMappingRepo.create({
+    const sentinelOnly = await deps.peopleRepo.create({
       displayName: "Sentinel Only",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "telegram", channelUserId: "tg-triaged" }],
+      links: [{ channel: "telegram", channelUserId: "tg-triaged" }],
     });
     await deps.sentinelLogRepo.create({
       messageId: "tg-900",
@@ -313,11 +313,11 @@ describe("People timeline API", () => {
   it("falls back to the channel transcript for an account no mirror holds", async () => {
     // The same overlap without a mirror: the transcript outranks the sentinel,
     // so the exchange reads as Rome's own record of it.
-    const triaged = await deps.personMappingRepo.create({
+    const triaged = await deps.peopleRepo.create({
       displayName: "Triaged Talker",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "telegram", channelUserId: "tg-both" }],
+      links: [{ channel: "telegram", channelUserId: "tg-both" }],
     });
     const conversation = await deps.webchatRepo.ensureChannelChat({
       channel: "telegram",
@@ -348,11 +348,11 @@ describe("People timeline API", () => {
   });
 
   it("holds a sentinel row back when the thread it names is a group", async () => {
-    const inGroup = await deps.personMappingRepo.create({
+    const inGroup = await deps.peopleRepo.create({
       displayName: "Group Talker",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "telegram", channelUserId: "tg-in-group" }],
+      links: [{ channel: "telegram", channelUserId: "tg-in-group" }],
     });
     await deps.webchatRepo.ensureChannelChat({
       channel: "telegram",
@@ -387,11 +387,11 @@ describe("People timeline API", () => {
     await deps.whatsAppStoreRepo.upsertContacts([
       { jid: WA_LID, phoneNumber: "15550009999", notify: "Nadia" },
     ]);
-    const byLid = await deps.personMappingRepo.create({
+    const byLid = await deps.peopleRepo.create({
       displayName: "Nadia By LID",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "whatsapp", channelUserId: WA_LID }],
+      links: [{ channel: "whatsapp", channelUserId: WA_LID }],
     });
 
     const page = await fetchTimeline(byLid);
@@ -455,11 +455,11 @@ describe("People timeline API", () => {
         text: "posted in the unread group",
       },
     ]);
-    const priya = await deps.personMappingRepo.create({
+    const priya = await deps.peopleRepo.create({
       displayName: "Priya Nair",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "linkedin", channelUserId: member }],
+      links: [{ channel: "linkedin", channelUserId: member }],
     });
 
     const page = await fetchTimeline(priya);
@@ -481,11 +481,11 @@ describe("People timeline API", () => {
   });
 
   it("answers an empty page for a person with no accounts", async () => {
-    const unreachable = await deps.personMappingRepo.create({
+    const unreachable = await deps.peopleRepo.create({
       displayName: "No Channels",
       bondLevel: "other",
       approved: true,
-      channelMappings: [],
+      links: [],
     });
     expect(await fetchTimeline(unreachable)).toEqual({ entries: [], nextCursor: null });
   });
@@ -563,11 +563,11 @@ describe("People API", () => {
       },
     ]);
 
-    nadiaId = await deps.personMappingRepo.create({
+    nadiaId = await deps.peopleRepo.create({
       displayName: "Nadia Cross",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [
+      links: [
         { channel: "whatsapp", channelUserId: NADIA_JID },
         { channel: "whatsapp", channelUserId: NADIA_LID },
       ],
@@ -750,11 +750,11 @@ describe("People API", () => {
   });
 
   it("answers a person with no accounts as one with no history", async () => {
-    const unreachable = await deps.personMappingRepo.create({
+    const unreachable = await deps.peopleRepo.create({
       displayName: "No Channels",
       bondLevel: "other",
       approved: true,
-      channelMappings: [],
+      links: [],
     });
     const person = await fetchPerson(unreachable);
     expect(person.accounts).toEqual([]);
@@ -829,11 +829,11 @@ describe("People create API", () => {
   });
 
   it("refuses the whole request over one held account, and writes nothing", async () => {
-    const alice = await deps.personMappingRepo.create({
+    const alice = await deps.peopleRepo.create({
       displayName: "Alice Marsh",
       bondLevel: "inner-circle",
       approved: true,
-      channelMappings: [{ channel: "whatsapp", channelUserId: ALICE_JID }],
+      links: [{ channel: "whatsapp", channelUserId: ALICE_JID }],
     });
 
     const res = await create({
@@ -856,15 +856,18 @@ describe("People create API", () => {
     // Neither half of the request survived: no person, and the account that
     // was free before the call is still free.
     expect((await fetchPeopleRes("bob-reyes")).status).toBe(404);
-    expect(await deps.personMappingRepo.findByChannelUser("telegram", "tg-bob-reyes")).toBeNull();
-    expect((await deps.personMappingRepo.findByChannelUser("whatsapp", ALICE_JID))?.id).toBe(alice);
+    expect(
+      await deps.peopleRepo.byAccount({ channel: "telegram", channelUserId: "tg-bob-reyes" }),
+    ).toBeNull();
+    expect(
+      (await deps.peopleRepo.byAccount({ channel: "whatsapp", channelUserId: ALICE_JID }))?.id,
+    ).toBe(alice);
   });
 
   it("links an account that only a dismissal held", async () => {
-    await deps.personMappingRepo.addChannelMapping(
+    await deps.peopleRepo.linkStated(
+      { channel: "whatsapp", channelUserId: BOB_JID },
       STRANGER_PERSON_ID,
-      "whatsapp",
-      BOB_JID,
       "Bob Reyes",
     );
 
@@ -874,11 +877,11 @@ describe("People create API", () => {
     });
 
     expect(res.status).toBe(201);
-    expect((await deps.personMappingRepo.findByChannelUser("whatsapp", BOB_JID))?.id).toBe(
-      "bob-reyes",
-    );
-    const sentinel = await deps.personMappingRepo.findById(STRANGER_PERSON_ID);
-    expect(sentinel!.channelMappings).toHaveLength(0);
+    expect(
+      (await deps.peopleRepo.byAccount({ channel: "whatsapp", channelUserId: BOB_JID }))?.id,
+    ).toBe("bob-reyes");
+    const sentinel = await deps.peopleRepo.byId(STRANGER_PERSON_ID);
+    expect(sentinel!.links).toHaveLength(0);
   });
 
   it("numbers people who share a name, counting the first as one", async () => {
@@ -985,10 +988,9 @@ describe("People account links", () => {
 
     // An account the guardian set aside: stored as a link onto the sentinel,
     // which is a dismissal rather than a person holding it.
-    await deps.personMappingRepo.addChannelMapping(
+    await deps.peopleRepo.linkStated(
+      { channel: DISMISSED.channel, channelUserId: DISMISSED.channelUserId },
       STRANGER_PERSON_ID,
-      DISMISSED.channel,
-      DISMISSED.channelUserId,
       "Dismissed Sender",
     );
   });
@@ -1018,10 +1020,10 @@ describe("People account links", () => {
 
   /** Who the stored link says holds an account, or null when nothing does. */
   async function holderOf(account: { channel: string; channelUserId: string }) {
-    const person = await deps.personMappingRepo.findByChannelUser(
-      account.channel,
-      account.channelUserId,
-    );
+    const person = await deps.peopleRepo.byAccount({
+      channel: account.channel,
+      channelUserId: account.channelUserId,
+    });
     return person?.id ?? null;
   }
 
@@ -1195,7 +1197,7 @@ describe("People updates", () => {
       body: JSON.stringify(body),
     });
 
-  const stored = async (id: string) => await deps.personMappingRepo.findById(id);
+  const stored = async (id: string) => await deps.peopleRepo.byId(id);
 
   it("moves a person along the ladder and answers with them", async () => {
     const res = await patch(baseline.persons.otherId, { bondLevel: "inner-circle" });
@@ -1316,16 +1318,16 @@ describe("People merge", () => {
     person.accounts.map((account) => `${account.channel}:${account.channelUserId}`);
 
   async function holderOf(account: { channel: string; channelUserId: string }) {
-    const person = await deps.personMappingRepo.findByChannelUser(
-      account.channel,
-      account.channelUserId,
-    );
+    const person = await deps.peopleRepo.byAccount({
+      channel: account.channel,
+      channelUserId: account.channelUserId,
+    });
     return person?.id ?? null;
   }
 
   it("moves every account onto the survivor and deletes the duplicate", async () => {
     // Bob holds a second account, so the merge has more than one link to move.
-    await deps.personMappingRepo.addChannelMapping(bob, "whatsapp", "wa-bob", "Bob");
+    await deps.peopleRepo.linkStated({ channel: "whatsapp", channelUserId: "wa-bob" }, bob, "Bob");
 
     const res = await merge(alice, { from: bob });
 
@@ -1338,7 +1340,7 @@ describe("People merge", () => {
 
     // Gone rather than emptied: the duplicate is not a person with no accounts.
     expect((await app.request(`/people/${bob}`)).status).toBe(404);
-    expect(await deps.personMappingRepo.findById(bob)).toBeNull();
+    expect(await deps.peopleRepo.byId(bob)).toBeNull();
     const list = (await (await app.request("/people")).json()) as PeopleList;
     expect(list.people.map((person) => person.id)).not.toContain(bob);
   });
@@ -1357,7 +1359,7 @@ describe("People merge", () => {
   });
 
   it("absorbs a duplicate holding no account at all", async () => {
-    const empty = await deps.personMappingRepo.create({
+    const empty = await deps.peopleRepo.create({
       displayName: "Alice Again",
       bondLevel: "other",
       approved: true,
@@ -1367,7 +1369,7 @@ describe("People merge", () => {
 
     expect(res.status).toBe(200);
     expect(refs((await res.json()) as PersonResource)).toEqual(["telegram:tg-alice"]);
-    expect(await deps.personMappingRepo.findById(empty)).toBeNull();
+    expect(await deps.peopleRepo.byId(empty)).toBeNull();
   });
 
   it("keeps the survivor's own name and bond level", async () => {
@@ -1386,18 +1388,18 @@ describe("People merge", () => {
     expect((await res.json()) as { error: string }).toEqual({
       error: "the guardian cannot be merged away",
     });
-    expect(await deps.personMappingRepo.findById(baseline.persons.guardianId)).not.toBeNull();
+    expect(await deps.peopleRepo.byId(baseline.persons.guardianId)).not.toBeNull();
     expect(await holderOf({ channel: "telegram", channelUserId: "tg-guardian" })).toBe(
       baseline.persons.guardianId,
     );
   });
 
   it("lets the guardian absorb a duplicate of themselves", async () => {
-    const duplicate = await deps.personMappingRepo.create({
+    const duplicate = await deps.peopleRepo.create({
       displayName: "Me",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "whatsapp", channelUserId: "wa-me" }],
+      links: [{ channel: "whatsapp", channelUserId: "wa-me" }],
     });
 
     const res = await merge(baseline.persons.guardianId, { from: duplicate });
@@ -1433,7 +1435,7 @@ describe("People merge", () => {
     expect((await res.json()) as { error: string }).toEqual({
       error: "a person cannot be merged into themselves",
     });
-    expect(await deps.personMappingRepo.findById(alice)).not.toBeNull();
+    expect(await deps.peopleRepo.byId(alice)).not.toBeNull();
   });
 
   it("refuses a body that names no duplicate", async () => {
@@ -1448,10 +1450,9 @@ describe("People merge", () => {
     // A dismissal is a link onto the sentinel, so absorbing it would read every
     // dismissed account as this person's, and merging a person into it would
     // read their accounts as dismissed.
-    await deps.personMappingRepo.addChannelMapping(
+    await deps.peopleRepo.linkStated(
+      { channel: "telegram", channelUserId: "tg-dismissed" },
       STRANGER_PERSON_ID,
-      "telegram",
-      "tg-dismissed",
       "Dismissed Sender",
     );
 
@@ -1467,6 +1468,6 @@ describe("People merge", () => {
   it("answers 404 for an unknown person on either side", async () => {
     expect((await merge(alice, { from: "nobody-here" })).status).toBe(404);
     expect((await merge("nobody-here", { from: alice })).status).toBe(404);
-    expect(await deps.personMappingRepo.findById(alice)).not.toBeNull();
+    expect(await deps.peopleRepo.byId(alice)).not.toBeNull();
   });
 });

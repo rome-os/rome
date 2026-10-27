@@ -3,7 +3,7 @@
 import { feishuStreamingStyle } from "../../channels/delivery/streaming-switch.js";
 import type { EmailAdapter } from "../../channels/email.js";
 import type { DrizzleDb } from "../../db/index.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
 import type { WechatUserRuntime } from "../../channels/wechat-user.js";
@@ -54,7 +54,7 @@ export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
   chatSettings: ChatSettingsService;
   chatStop: ChatStopHandler;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
   /** The LinkedIn inbox mirror (linkedin_threads/linkedin_messages). */
   linkedInSyncSink: LinkedInSyncSink;
@@ -100,7 +100,7 @@ export function registerBuiltinConnections(
     makeDiscordDescriptor({
       chatSettings: deps.chatSettings,
       chatStop: deps.chatStop,
-      personMappingRepo: deps.personMappingRepo,
+      peopleRepo: deps.peopleRepo,
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
       hasAgent: deps.hasAgent,
@@ -120,7 +120,7 @@ export function registerBuiltinConnections(
   registry.register(
     createFeishuDescriptor({
       chatSettings: deps.chatSettings,
-      personMappingRepo: deps.personMappingRepo,
+      peopleRepo: deps.peopleRepo,
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
       hasAgent: deps.hasAgent,
@@ -131,7 +131,7 @@ export function registerBuiltinConnections(
     makeEmailDescriptor({
       provider: deps.mailProvider,
       settingsRepo: deps.settingsRepo,
-      personMappingRepo: deps.personMappingRepo,
+      peopleRepo: deps.peopleRepo,
       ownerEmailResolver: deps.emailOwnerEmailResolver,
       onAdapterBuilt: deps.onEmailAdapterBuilt,
     }),

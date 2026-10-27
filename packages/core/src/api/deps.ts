@@ -7,7 +7,7 @@ import type { ActionLoader } from "../actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import type { OutboxRepository } from "../db/repositories/outbox.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import type { Channels } from "../channels/channel.js";
 import type { ChannelOfLink, SendersOfLink } from "../db/repositories/channel-records.js";
 import type { AccountNames } from "../channels/account-names.js";
@@ -90,7 +90,7 @@ export interface ApiDeps {
   db: DrizzleDb;
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
   /** The guardian's link code, shown in People (channels/guardian-link-code.ts). */
   guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said

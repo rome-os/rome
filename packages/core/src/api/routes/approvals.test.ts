@@ -9,7 +9,7 @@ import {
   identityConnectionKindOf,
 } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
-import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../../db/repositories/people.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import type { ApprovalHandler } from "../../actions/approval-handler.js";
 
@@ -69,10 +69,10 @@ describe("Approvals API", () => {
       status: "rejected",
       payload: { resolution: "expired" },
     });
-    const person = await new PersonMappingRepository(
-      testDb.db,
-      identityConnectionKindOf,
-    ).findByChannelUser("telegram", "123");
+    const person = await new PeopleRepository(testDb.db, identityConnectionKindOf).byAccount({
+      channel: "telegram",
+      channelUserId: "123",
+    });
     expect(person).toBeNull();
     expect(approvalHandler.onApproved).not.toHaveBeenCalled();
   });

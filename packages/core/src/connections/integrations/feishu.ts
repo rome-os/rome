@@ -27,7 +27,7 @@ import {
   LoggerLevel,
   type NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { FeishuStreamingStyle } from "../../channels/delivery/streaming-switch.js";
 import {
@@ -133,7 +133,7 @@ export function feishuProfileFromSettings(
  */
 export interface FeishuDescriptorDeps {
   chatSettings: ChatSettingsService;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
   listAgents: () => string[];
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */
@@ -558,7 +558,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             domain: app.domain,
             connectionId: kit.connectionId,
             chatSettings: deps.chatSettings,
-            personMappingRepo: deps.personMappingRepo,
+            peopleRepo: deps.peopleRepo,
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,

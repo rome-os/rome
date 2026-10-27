@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, identityConnectionKindOf } from "../../test/helpers.js";
 import type { DrizzleDb } from "../index.js";
 import { WhatsAppStoreRepository } from "./whatsapp-store.js";
-import { PersonMappingRepository } from "./person-mapping.js";
+import { PeopleRepository } from "./people.js";
 
 describe("WhatsAppStoreRepository", () => {
   let db: DrizzleDb;
@@ -77,11 +77,11 @@ describe("WhatsAppStoreRepository", () => {
   });
 
   it("carries a person link across the merged account", async () => {
-    const persons = new PersonMappingRepository(db, identityConnectionKindOf);
+    const persons = new PeopleRepository(db, identityConnectionKindOf);
     await persons.create({
       displayName: "May",
       bondLevel: "acquaintance",
-      channelMappings: [{ channel: "whatsapp", channelUserId: "15555550148@s.whatsapp.net" }],
+      links: [{ channel: "whatsapp", channelUserId: "15555550148@s.whatsapp.net" }],
     });
     await repo.upsertContacts([
       { jid: "lid-may@lid", phoneNumber: "15555550148" },
@@ -162,11 +162,11 @@ describe("WhatsAppStoreRepository", () => {
   });
 
   it("annotates contacts linked to a person", async () => {
-    const persons = new PersonMappingRepository(db, identityConnectionKindOf);
+    const persons = new PeopleRepository(db, identityConnectionKindOf);
     await persons.create({
       displayName: "Alice Smith",
       bondLevel: "inner-circle",
-      channelMappings: [{ channel: "whatsapp", channelUserId: "111@s.whatsapp.net" }],
+      links: [{ channel: "whatsapp", channelUserId: "111@s.whatsapp.net" }],
     });
     await repo.upsertContacts([{ jid: "111@s.whatsapp.net", name: "Alice" }]);
 

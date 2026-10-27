@@ -13,7 +13,7 @@
 //      through the generic SetupManager surface.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import { SetupManager, type SetupRegistry } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupGrant } from "../setup/types.js";
@@ -162,7 +162,7 @@ describe("WhatsApp setup discovery", () => {
   it("reports an in-flight pairing setup as the session grant's active setup", async () => {
     const manager = new SetupManager({
       registry: makeRegistry(),
-      personMappingRepo: {} as PersonMappingRepository,
+      peopleRepo: {} as PeopleRepository,
     });
 
     const started = await manager.start({ connectionKind: "whatsapp" }, "session");

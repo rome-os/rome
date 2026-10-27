@@ -19,7 +19,7 @@ import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures, TalkHistory } from "../types.js";
 import { DiscordAdapter } from "../../channels/discord.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -105,7 +105,7 @@ export function isDiscordAuthError(err: unknown): boolean {
 export interface DiscordDeps {
   chatSettings: ChatSettingsService;
   chatStop?: ChatStopHandler;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
   listAgents: () => string[];
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */
@@ -259,7 +259,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,
             resolveDiscordPerson: (channelUserId) =>
-              deps.personMappingRepo.findByChannelUser("discord", channelUserId),
+              deps.peopleRepo.byAccount({ channel: "discord", channelUserId }),
             // Live gateway faults (post-login) route through here; the descriptor
             // maps the adapter's kind onto grant state vs. transport.
             onGatewayFault: ({ kind, cause }) => {

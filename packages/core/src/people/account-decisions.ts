@@ -25,11 +25,10 @@ import {
 } from "@rome/api-types/people";
 import { STRANGER_PERSON_DISPLAY_NAME, STRANGER_PERSON_ID } from "../constants.js";
 import { readAccountDirectory, type AccountDirectoryDeps } from "./account-directory.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 
 export interface AccountDecisionDeps extends AccountDirectoryDeps {
-  personMappingRepo: AccountDirectoryDeps["personMappingRepo"] &
-    Pick<PersonMappingRepository, "linkAccount" | "releaseStrangerClaims">;
+  peopleRepo: AccountDirectoryDeps["peopleRepo"] & Pick<PeopleRepository, "dismiss" | "restore">;
 }
 
 /** The account a write names: any address the channel reaches it at. */
@@ -81,8 +80,7 @@ export async function dismissAccount(
     // Without that, a link arriving in the gap would be re-pointed onto the
     // sentinel and lost, which is the harm the refusal above exists to prevent
     // reached by a different route.
-    const claim = await deps.personMappingRepo.linkAccount({
-      personId: STRANGER_PERSON_ID,
+    const claim = await deps.peopleRepo.dismiss({
       channel: account.channel,
       channelUserId: account.channelUserId,
     });
@@ -132,7 +130,7 @@ export async function restoreAccount(
     // No conditional claim to lose here: the release is already scoped to the
     // sentinel's own rows, so a link landing in the same gap is not a row this
     // write can touch.
-    await deps.personMappingRepo.releaseStrangerClaims(account.channel, account.addresses);
+    await deps.peopleRepo.restore(account.channel, account.addresses);
   }
 
   return decided(account, null);

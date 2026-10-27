@@ -244,26 +244,26 @@ function makeSetupApp() {
     },
   });
   const registry = new ConnectionRegistry({ repository: ledger });
-  const personMappingRepo = {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [],
-  } as unknown as ApiDeps["personMappingRepo"];
+  const peopleRepo = {
+    byAccount: async () => null,
+    byBondLevel: async () => [],
+  } as unknown as ApiDeps["peopleRepo"];
   registry.register(
     makeEmailDescriptor({
       provider: makeMailProvider(provisionMock),
       settingsRepo,
-      personMappingRepo,
+      peopleRepo,
       ownerEmailResolver: async () => undefined,
     }),
   );
-  const setupManager = new SetupManager({ registry, personMappingRepo });
+  const setupManager = new SetupManager({ registry, peopleRepo });
   const deps = {
     settingsRepo,
     connectionRegistry: registry,
     setupManager,
     db: testDb,
     approvalsRepo: new ApprovalsRepository(testDb),
-    personMappingRepo,
+    peopleRepo,
   } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
   return {

@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../db/repositories/people.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { MailProvider } from "../lib/rome-cloud-mail.js";
 import { createTestDb, identityConnectionKindOf, type TestDb } from "../test/helpers.js";
@@ -54,14 +54,14 @@ describe("GuardianLinkCodes", () => {
 
 describe("guardian link admission", () => {
   let testDb: TestDb;
-  let repo: PersonMappingRepository;
+  let repo: PeopleRepository;
   let codes: GuardianLinkCodes;
   let send: ReturnType<typeof rs.fn>;
   let admit: ReturnType<typeof createGuardianLinkAdmission>;
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
+    repo = new PeopleRepository(testDb.db, identityConnectionKindOf);
     testDb.db
       .insert(persons)
       .values([
@@ -80,7 +80,7 @@ describe("guardian link admission", () => {
     const registry = {
       get: () => ({ withTalker: (call: (talker: object) => unknown) => call({ send }) }),
     } as unknown as Pick<ConnectionRegistry, "get">;
-    admit = createGuardianLinkAdmission({ codes, personMappingRepo: repo, registry });
+    admit = createGuardianLinkAdmission({ codes, peopleRepo: repo, registry });
   });
   afterEach(() => testDb.close());
 
@@ -92,25 +92,27 @@ describe("guardian link admission", () => {
   it("links the sender of a code in a direct message to the guardian, anywhere", async () => {
     const { code } = codes.issue();
     expect(await admit("bot", "discord", message(code, { channel: "discord" }))).toBe(false);
-    expect((await repo.findByChannelUser("discord", "123"))?.id).toBe("owner");
+    expect((await repo.byAccount({ channel: "discord", channelUserId: "123" }))?.id).toBe("owner");
     await rs.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
 
     expect(await admit("wa", "whatsapp", message(codes.issue().code, { senderId: "8613" }))).toBe(
       false,
     );
-    expect((await repo.findByChannelUser("whatsapp", "8613"))?.id).toBe("owner");
+    expect((await repo.byAccount({ channel: "whatsapp", channelUserId: "8613" }))?.id).toBe(
+      "owner",
+    );
   });
 
   it("links a dismissed account, and refuses to move one linked to someone else", async () => {
-    await repo.addChannelMapping(STRANGER_PERSON_ID, "telegram", "123");
+    await repo.linkStated({ channel: "telegram", channelUserId: "123" }, STRANGER_PERSON_ID);
     expect(await admit("bot", "telegram", message(codes.issue().code))).toBe(false);
-    expect((await repo.findByChannelUser("telegram", "123"))?.id).toBe("owner");
+    expect((await repo.byAccount({ channel: "telegram", channelUserId: "123" }))?.id).toBe("owner");
 
-    await repo.addChannelMapping("li", "telegram", "456");
+    await repo.linkStated({ channel: "telegram", channelUserId: "456" }, "li");
     expect(await admit("bot", "telegram", message(codes.issue().code, { senderId: "456" }))).toBe(
       false,
     );
-    expect((await repo.findByChannelUser("telegram", "456"))?.id).toBe("li");
+    expect((await repo.byAccount({ channel: "telegram", channelUserId: "456" }))?.id).toBe("li");
   });
 
   it("leaves the code unused when it comes in mail that failed authentication", async () => {
@@ -123,7 +125,7 @@ describe("guardian link admission", () => {
         },
       } as unknown as MailProvider,
       settingsRepo: {} as unknown as SettingsRepository,
-      personMappingRepo: repo,
+      peopleRepo: repo,
       config: { address: "slug@mail.romeos.cc", inboundSecret: "secret" },
     });
     mail.onInbound(async (m) => {
@@ -149,7 +151,9 @@ describe("guardian link admission", () => {
     await mail.ingestInbound(raw, createHmac("sha256", "secret").update(raw).digest("hex"));
 
     expect(await admit("mail", "email", inbound[0])).toBe(false);
-    expect(await repo.findByChannelUser("email", inbound[0].senderId)).toBeNull();
+    expect(
+      await repo.byAccount({ channel: "email", channelUserId: inbound[0].senderId }),
+    ).toBeNull();
     expect(send).not.toHaveBeenCalled();
     expect(codes.redeem(code)).toBe(true);
   });
@@ -157,15 +161,15 @@ describe("guardian link admission", () => {
   it("voids a code said in a group without linking anyone", async () => {
     const { code } = codes.issue();
     expect(await admit("bot", "feishu", message(code, { thread: { kind: "group" } }))).toBe(false);
-    expect(await repo.findByChannelUser("feishu", "123")).toBeNull();
+    expect(await repo.byAccount({ channel: "feishu", channelUserId: "123" })).toBeNull();
     expect(await admit("bot", "feishu", message(code))).toBe(false);
-    expect(await repo.findByChannelUser("feishu", "123")).toBeNull();
+    expect(await repo.byAccount({ channel: "feishu", channelUserId: "123" })).toBeNull();
   });
 
   it("keeps a wrong code out of the chat and links no one", async () => {
     codes.issue();
     expect(await admit("bot", "slack_bot", message("ROME-AAAAAAAA"))).toBe(false);
-    expect(await repo.findByChannelUser("slack_bot", "123")).toBeNull();
+    expect(await repo.byAccount({ channel: "slack_bot", channelUserId: "123" })).toBeNull();
     await rs.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
   });
 });

@@ -9,7 +9,7 @@ import type { SendMessageEmailInput } from "../../../../rome_apps/system/src/act
 import { DEFAULT_RPC_TIMEOUT_MS, IpcRpcTimeoutError } from "../actions/ipc.js";
 import { ChannelsServiceProxy } from "../actions/service-proxies.js";
 import { setWorkerRpcInProcessDispatcher } from "../actions/worker-rpc-client.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import {
   MAIL_REQUEST_TIMEOUT_MS,
@@ -80,10 +80,10 @@ async function harness(overrides: Partial<MailProvider> = {}) {
     settingsRepo: {
       get: async () => ({ enabled: true, guardianEmail: GUARDIAN }),
     } as unknown as SettingsRepository,
-    personMappingRepo: {
-      findByChannelUser: async () => null,
-      findByBondLevel: async () => [],
-    } as unknown as PersonMappingRepository,
+    peopleRepo: {
+      byAccount: async () => null,
+      byBondLevel: async () => [],
+    } as unknown as PeopleRepository,
     config: { address: "rome@example.com", inboundSecret: "secret" },
   });
   await adapter.start();

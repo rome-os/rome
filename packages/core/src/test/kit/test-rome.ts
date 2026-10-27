@@ -27,7 +27,7 @@ import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { ExecutionJournalRepository } from "../../db/repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../../db/repositories/action-executions.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
-import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../../db/repositories/people.js";
 import { PoliciesRepository } from "../../db/repositories/policies.js";
 import { ActionRegistryImpl } from "../../actions/registry.js";
 import { ActionEngine, type ApprovalCreatedEvent } from "../../actions/engine.js";
@@ -97,7 +97,7 @@ export interface TestRomeRepos {
   executionJournal: ExecutionJournalRepository;
   actionExecutions: ActionExecutionsRepository;
   settings: SettingsRepository;
-  personMapping: PersonMappingRepository;
+  people: PeopleRepository;
   policies: PoliciesRepository;
 }
 
@@ -208,14 +208,14 @@ async function buildHarness(
   const testDb = createTestDb();
   const db = testDb.db;
 
-  const personMapping = new PersonMappingRepository(db, recordedConnectionKindOf(db));
+  const people = new PeopleRepository(db, recordedConnectionKindOf(db));
   const repos: TestRomeRepos = {
     sessions: new SessionsRepository(db),
     approvals: new ApprovalsRepository(db),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
     settings: new SettingsRepository(db),
-    personMapping,
+    people,
     policies: new PoliciesRepository(db),
   };
 

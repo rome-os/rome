@@ -38,7 +38,7 @@ import {
   EmailAdapter,
   type EmailInboxCoordinates,
 } from "../../channels/email.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
 import { z } from "zod";
@@ -108,7 +108,7 @@ export interface EmailInboxMaterial {
 export interface EmailDescriptorDeps {
   provider: MailProvider;
   settingsRepo: SettingsRepository;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
   /** Defaults to the whoami lookup (see EmailAdapter). Injectable for
    *  tests and for the descriptor-factory call site to share one resolver. */
   ownerEmailResolver?: () => Promise<string | undefined>;
@@ -290,7 +290,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
           const adapter = new EmailAdapter({
             provider: deps.provider,
             settingsRepo: deps.settingsRepo,
-            personMappingRepo: deps.personMappingRepo,
+            peopleRepo: deps.peopleRepo,
             config,
             ownerEmailResolver: deps.ownerEmailResolver,
           });

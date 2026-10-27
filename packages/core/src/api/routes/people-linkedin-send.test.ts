@@ -66,11 +66,11 @@ describe("LinkedIn replies through People", () => {
       () => talker,
     );
     deps.channels = testChannels(deps, deps.connections);
-    person = await deps.personMappingRepo.create({
+    person = await deps.peopleRepo.create({
       displayName: "LinkedIn Recipient",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "linkedin", channelUserId: MEMBER }],
+      links: [{ channel: "linkedin", channelUserId: MEMBER }],
     });
     app = new Hono().route("/", peopleRoutes(deps));
   });
