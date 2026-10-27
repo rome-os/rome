@@ -110,6 +110,11 @@ describe("buildPrompt", () => {
     const later = buildPrompt("morning", "UTC", [], null, []);
     expect(later).toContain("chosen not to connect them");
     expect(later).not.toContain("'_Calendar not connected._'");
+
+    for (const prompt of [first, later]) {
+      expect(prompt).toContain("not signed in");
+      expect(prompt).toContain("never an Action Item");
+    }
   });
 
   it("passes personal context only with the Try with Rome rules", () => {

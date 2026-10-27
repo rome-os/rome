@@ -176,11 +176,11 @@ export function buildPrompt(
     "3. SCOUTING FINDINGS — the findings below were already gathered by scheduled scouting tasks. Integrate the key points.",
     ...suggestionsInstructions(context, previousSuggestions),
     "",
-    `ROBUSTNESS: Some sources may not be connected. ${
+    `ROBUSTNESS: Some sources may not be connected. A source is not connected when you have no tool for it or the call says it is not connected or not signed in (e.g. Composio is not signed in, or the toolkit is not connected). That is the guardian's setup, not an error, and connecting it is never an Action Item. ${
       isFirstBrief
         ? "This is the guardian's first brief, so note each source that is not connected once, in one line like '_Calendar not connected._'"
-        : "The guardian may have chosen not to connect them, so leave a source that is not connected out entirely, with no section or note."
-    } If a connected source errors or has nothing relevant, skip it gracefully with a one-line note like '_Gmail could not be reached._' NEVER fail or refuse the whole brief because one source is missing.`,
+        : "The guardian may have chosen not to connect them, so leave a source that is not connected out entirely, with no section or note, even if an earlier brief mentioned it."
+    } If a connected source fails for another reason or has nothing relevant, skip it gracefully with a one-line note like '_Gmail could not be reached._' NEVER fail or refuse the whole brief because one source is missing.`,
     "",
     windowHint,
     "",
