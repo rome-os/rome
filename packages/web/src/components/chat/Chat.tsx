@@ -67,6 +67,11 @@ import type {
 } from "@rome/api-types/trace-segments";
 import { useSmoothText } from "@/hooks/use-smooth-text";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
+import {
+  CHAT_PAGE_TURNS,
+  CONCIERGE_PAGE_TURNS,
+  useOlderMessages,
+} from "@/components/chat/use-older-messages";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
@@ -100,8 +105,9 @@ import { buildOptimisticUserText } from "@/lib/chat-helpers";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import {
   mergeChatMessage,
-  mergeFetchedChatMessages,
+  mergeLatestMessagePage,
   orderChatMessages,
+  startsNewHistory,
 } from "@/lib/chat-message-ordering";
 import {
   ChatApiError,
@@ -109,6 +115,7 @@ import {
   deleteSession,
   interruptTurn,
   listChatAgents,
+  listSessionMessagePage,
   listSessionMessages,
   listSessionTurns,
   markSessionRead as apiMarkSessionRead,
@@ -272,6 +279,12 @@ export interface ChatProps {
   mainAgentDisplayName?: string;
   onSessionsChanged?: () => void;
   onSessionNotFound?: (sessionId: string) => void;
+  /**
+   * Asked before a missing session is reported to `onSessionNotFound`: resolve
+   * true if the session exists now (it was being created), and the load tries
+   * once more.
+   */
+  recoverMissingSession?: (sessionId: string) => Promise<boolean>;
   onSessionMessage?: (message: SessionMessage) => void;
   /**
    * Called once with the id of the session a draft's first send created,
@@ -311,6 +324,7 @@ export function Chat({
   mainAgentDisplayName,
   onSessionsChanged,
   onSessionNotFound,
+  recoverMissingSession,
   onSessionMessage,
   onSessionCreated,
   emptyState,
@@ -323,6 +337,7 @@ export function Chat({
   variant = "default",
 }: ChatProps) {
   const concierge = variant === "concierge";
+  const pageTurns = concierge ? CONCIERGE_PAGE_TURNS : CHAT_PAGE_TURNS;
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
   const presentationMode = usePresentationMode();
@@ -351,6 +366,8 @@ export function Chat({
   const mainSessionId = sessionId || createdSessionId;
   const mainSessionIdRef = useRef(mainSessionId);
   const [messages, setMessages] = useState<Map<string, ChatMessage[]>>(new Map());
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   const traceArchivedSessionsRef = useRef(new Set<string>());
   const [subagentIconByName, setSubagentIconByName] = useState<ReadonlyMap<string, string | null>>(
     () => new Map(),
@@ -453,6 +470,9 @@ export function Chat({
   const creatingSessionRef = useRef(false);
   const dragDepthRef = useRef(0);
   const loadedSessionsRef = useRef<Set<string>>(new Set());
+  // Handoff children load whole: their messages are spliced into the main
+  // transcript, so a partial child would leave a hole in the middle of it.
+  const wholeSessionsRef = useRef<Set<string>>(new Set());
   const localOptimisticMessageIdsRef = useRef<Map<string, Set<string>>>(new Map());
   const locallyStreamingSessionIdsRef = useRef<Set<string>>(new Set());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
@@ -498,6 +518,19 @@ export function Chat({
     },
     [stickContentRef],
   );
+
+  // The main session loads its newest turns first and pages older ones in as
+  // the transcript scrolls toward the top.
+  const {
+    setCursor: setOlderCursor,
+    hasOlder,
+    sentinelRef: olderSentinelRef,
+  } = useOlderMessages(mainSessionId || null, {
+    pageTurns,
+    scroller: scrollerEl,
+    pinned: isAtBottom,
+    setMessages,
+  });
 
   // One <Chat> owns the main session but displays & talks to the child sessions
   // of any open handoff. The whole merge / index / floor / identity derivation
@@ -673,6 +706,8 @@ export function Chat({
   const onSessionsChangedRef = useRef(onSessionsChanged);
   const onSessionNotFoundRef = useRef(onSessionNotFound);
   const onSessionMessageRef = useRef(onSessionMessage);
+  const recoverMissingSessionRef = useRef(recoverMissingSession);
+  recoverMissingSessionRef.current = recoverMissingSession;
   useEffect(() => {
     onSessionsChangedRef.current = onSessionsChanged;
   }, [onSessionsChanged]);
@@ -805,15 +840,28 @@ export function Chat({
       // permanently suppressed retries on any failure — the user would land in
       // a silently-empty chat with no recovery short of a page refresh.
       try {
-        const data = await listSessionMessages(id);
-        if (data === null) {
+        const whole = wholeSessionsRef.current.has(id);
+        const fetchPage = () =>
+          whole
+            ? listSessionMessages(id).then((all) =>
+                all ? { messages: all, nextCursor: null } : null,
+              )
+            : listSessionMessagePage(id, { limit: pageTurns });
+        let page = await fetchPage();
+        if (page === null && (await recoverMissingSessionRef.current?.(id)))
+          page = await fetchPage();
+        if (page === null) {
           // Server says this session doesn't exist (HTTP 404). Hand it back
           // to the host so they can redirect to the draft surface instead of
           // leaving the user staring at an empty active-chat shell.
           onSessionNotFoundRef.current?.(id);
           return;
         }
-        const fetchedMessages = orderChatMessages(data);
+        const fetchedMessages = orderChatMessages(page.messages);
+        const restart = startsNewHistory(messagesRef.current.get(id) ?? [], {
+          messages: fetchedMessages,
+          hasOlder: page.nextCursor !== null,
+        });
         if (fetchedMessages.some((message) => message.traceArchived))
           traceArchivedSessionsRef.current.add(id);
         else traceArchivedSessionsRef.current.delete(id);
@@ -824,10 +872,16 @@ export function Chat({
           const next = new Map(prev);
           next.set(
             id,
-            mergeFetchedChatMessages(next.get(id) ?? [], fetchedMessages, { dropMessageIds }),
+            mergeLatestMessagePage(next.get(id) ?? [], fetchedMessages, {
+              restart,
+              dropMessageIds,
+            }),
           );
           return next;
         });
+        // A refetch of the newest page leaves older loaded pages, and the
+        // cursor that reaches past them, as they are.
+        if (!loadedSessionsRef.current.has(id) || restart) setOlderCursor(id, page.nextCursor);
         if (options.dropLocalOptimistic) {
           localOptimisticMessageIdsRef.current.delete(id);
         }
@@ -840,7 +894,7 @@ export function Chat({
         // refresh) can retry on the next trigger.
       }
     },
-    [isReadVisibleSession, markSessionRead],
+    [isReadVisibleSession, markSessionRead, pageTurns, setOlderCursor],
   );
 
   // A new message reactivates every turn's steps. Fetch server truth once,
@@ -862,7 +916,10 @@ export function Chat({
   // Load every child session referenced by a handoff so its conversation can be
   // spliced into the flat transcript (Q4 — load the whole tree).
   useEffect(() => {
-    for (const h of handoffList) loadMessages(h.childSessionId);
+    for (const h of handoffList) {
+      wholeSessionsRef.current.add(h.childSessionId);
+      loadMessages(h.childSessionId);
+    }
   }, [handoffList, loadMessages]);
 
   // Subscribe to the main session and the floor (the only one streaming): a
@@ -2118,37 +2175,42 @@ export function Chat({
               {conciergeEmpty ? (
                 <ConciergeEmptyState onPick={(prompt) => composerRef.current?.insertText(prompt)} />
               ) : mainSessionId ? (
-                <MessageList
-                  rows={rows}
-                  live={{
-                    isStreaming: displayedStreaming,
-                    runningTurnId,
-                    snapshot: currentSnapshot,
-                    text: liveAssistantText,
-                    blockIx: floorSessionStream?.assistantBlockIx,
-                    sourceText: floorSessionStream?.assistantText,
-                    textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
-                    identity: floorIdentity,
-                  }}
-                  selection={
-                    shareMode
-                      ? {
-                          selectedTurns: selectedShareTurns,
-                          selectableSessionId: mainSessionId,
-                          onToggleTurn: toggleShareTurn,
-                        }
-                      : undefined
-                  }
-                  contentRef={attachContent}
-                  onOpenLiveTrace={openLiveTraceDrawer}
-                  onOpenStoredTrace={openStoredTraceDrawer}
-                  onOpenSubagentTrace={openSubagentTraceDrawer}
-                  activeTraceTarget={traceDrawerTarget}
-                  subagentIconByName={subagentIconByName}
-                  actions={blockActions}
-                  feedback
-                  variant={variant}
-                />
+                <>
+                  {hasOlder(mainSessionId) ? (
+                    <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
+                  ) : null}
+                  <MessageList
+                    rows={rows}
+                    live={{
+                      isStreaming: displayedStreaming,
+                      runningTurnId,
+                      snapshot: currentSnapshot,
+                      text: liveAssistantText,
+                      blockIx: floorSessionStream?.assistantBlockIx,
+                      sourceText: floorSessionStream?.assistantText,
+                      textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
+                      identity: floorIdentity,
+                    }}
+                    selection={
+                      shareMode
+                        ? {
+                            selectedTurns: selectedShareTurns,
+                            selectableSessionId: mainSessionId,
+                            onToggleTurn: toggleShareTurn,
+                          }
+                        : undefined
+                    }
+                    contentRef={attachContent}
+                    onOpenLiveTrace={openLiveTraceDrawer}
+                    onOpenStoredTrace={openStoredTraceDrawer}
+                    onOpenSubagentTrace={openSubagentTraceDrawer}
+                    activeTraceTarget={traceDrawerTarget}
+                    subagentIconByName={subagentIconByName}
+                    actions={blockActions}
+                    feedback
+                    variant={variant}
+                  />
+                </>
               ) : (
                 emptyState
               )}

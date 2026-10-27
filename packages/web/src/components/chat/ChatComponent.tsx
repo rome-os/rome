@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -13,7 +14,7 @@ import type { ChatComposerHandle } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { useSettings } from "@/hooks/use-settings";
-import { CONCIERGE_CHAT_ID, useConciergeChat } from "@/hooks/use-concierge";
+import { CONCIERGE_CHAT_ID, ensureConciergeChat, useConciergeChat } from "@/hooks/use-concierge";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import type { AgentMention } from "@/lib/chat-types";
 
@@ -237,9 +238,27 @@ export function ChatComponent({
     [navigate],
   );
 
-  // `/chat/concierge` opened directly: wait until the server has created the
-  // chat, or loading it would 404 and leave for a new chat.
-  if (isConcierge && concierge.loading) return null;
+  // The Concierge chat's id is fixed, so its messages load alongside the request
+  // that creates it. The first load of a new instance can reach the server
+  // first and 404; the chat waits for the creation and asks again.
+  const queryClient = useQueryClient();
+  const conciergeEnabled = isConcierge && concierge.enabled;
+  const recoverMissingSession = useCallback(
+    async (missingSessionId: string) => {
+      if (missingSessionId !== CONCIERGE_CHAT_ID) return false;
+      try {
+        await ensureConciergeChat(queryClient);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [queryClient],
+  );
+
+  // `/chat/concierge` opened directly: the setting decides whether the chat
+  // exists for this instance, so wait for it before choosing a layout.
+  if (isConcierge && concierge.settingsLoading) return null;
 
   return (
     <>
@@ -256,7 +275,8 @@ export function ChatComponent({
         initialAgentMention={initialAgentMention}
         composerRef={composerRef}
         navbarSlot={navbarSlot}
-        variant={isConcierge && concierge.chatId ? "concierge" : "default"}
+        recoverMissingSession={conciergeEnabled ? recoverMissingSession : undefined}
+        variant={conciergeEnabled ? "concierge" : "default"}
         centerDraftComposer={greetingOnlyHome}
         emptyState={
           <ChatEmptyState

@@ -171,6 +171,9 @@ function renderChatComponent(
     postTurn?: () => Response;
     // Holds the Rome News feed back until it resolves.
     newsGate?: Promise<void>;
+    settings?: Record<string, unknown>;
+    // Answers `/api/concierge/session` once it resolves; a chat's messages 404 until then.
+    conciergeCreated?: Promise<void>;
   },
   initialEntry: string | { pathname: string; state: Record<string, unknown> } = "/chat",
 ) {
@@ -180,13 +183,19 @@ function renderChatComponent(
     },
   });
 
+  let conciergeExists = !homeData?.conciergeCreated;
   const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
     const url = String(input);
     if (url === "/api/settings") {
-      return Response.json({ guardianName: "Ada", agentName: "Atlas" });
+      return Response.json({ guardianName: "Ada", agentName: "Atlas", ...homeData?.settings });
+    }
+    if (url === "/api/concierge/session") {
+      await homeData?.conciergeCreated;
+      conciergeExists = true;
+      return Response.json({ id: "concierge", unread: 0 });
     }
     if (url === "/api/people") {
       return Response.json({
@@ -200,8 +209,13 @@ function renderChatComponent(
     if (url === "/api/chat/sessions") {
       return Response.json(homeData?.sessions ?? []);
     }
-    if (/\/api\/chat\/sessions\/[^/]+\/messages$/.test(url)) {
-      return Response.json([]);
+    if (/\/api\/chat\/sessions\/[^/]+\/messages(\?.*)?$/.test(url)) {
+      if (url.includes("/concierge/messages") && !conciergeExists) {
+        return Response.json({ error: "Session not found" }, { status: 404 });
+      }
+      return url.includes("limit=")
+        ? Response.json({ messages: [], nextCursor: null })
+        : Response.json([]);
     }
     if (/\/api\/chat\/sessions\/[^/]+\/turns$/.test(url)) {
       return init?.method === "POST"
@@ -325,6 +339,64 @@ describe("ChatComponent missing sessions", () => {
 
     expect(onSessionNotFound).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("chat-location").textContent).toBe("/chat/main POP");
+  });
+});
+
+describe("ChatComponent Concierge", () => {
+  const messageFetches = (spy: ReturnType<typeof renderChatComponent>["fetchSpy"]) =>
+    spy.mock.calls.filter(([input]) =>
+      String(input).includes("/api/chat/sessions/concierge/messages"),
+    );
+
+  it("loads the messages while the chat is still being created", async () => {
+    let created!: () => void;
+    const conciergeCreated = new Promise<void>((resolve) => {
+      created = resolve;
+    });
+    const { fetchSpy } = renderChatComponent(
+      { sessionId: "concierge" },
+      { sessions: [], projects: [], settings: { experimentalConcierge: true }, conciergeCreated },
+      "/chat/concierge",
+    );
+
+    await waitFor(() => expect(messageFetches(fetchSpy).length).toBeGreaterThan(0));
+    expect(fetchSpy.mock.calls.some(([input]) => String(input) === "/api/concierge/session")).toBe(
+      true,
+    );
+    created();
+  });
+
+  it("waits for the chat to be created and asks again when the first load finds none", async () => {
+    let created!: () => void;
+    const conciergeCreated = new Promise<void>((resolve) => {
+      created = resolve;
+    });
+    const { fetchSpy } = renderChatComponent(
+      { sessionId: "concierge" },
+      { sessions: [], projects: [], settings: { experimentalConcierge: true }, conciergeCreated },
+      "/chat/concierge",
+    );
+    await waitFor(() => expect(messageFetches(fetchSpy)).toHaveLength(1));
+
+    await act(async () => created());
+
+    await waitFor(() => expect(messageFetches(fetchSpy)).toHaveLength(2));
+    expect(screen.getByTestId("chat-location").textContent).toBe("/chat/concierge POP");
+  });
+
+  it("leaves for a new chat when the instance has Concierge off", async () => {
+    const { fetchSpy } = renderChatComponent(
+      { sessionId: "concierge" },
+      { sessions: [], projects: [], conciergeCreated: new Promise<void>(() => {}) },
+      "/chat/concierge",
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-location").textContent).toBe("/chat REPLACE"),
+    );
+    expect(fetchSpy.mock.calls.some(([input]) => String(input) === "/api/concierge/session")).toBe(
+      false,
+    );
   });
 });
 

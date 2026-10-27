@@ -48,3 +48,40 @@ export function mergeFetchedChatMessages(
   );
   return orderChatMessages([...fetchedMessages, ...preservedCurrent]);
 }
+
+/**
+ * Whether a refetched newest page starts the loaded history over. That is the
+ * case when the page reaches back to none of the loaded messages and older
+ * turns remain: the turns in between were never fetched, so keeping the loaded
+ * history would leave a hole mid-transcript.
+ */
+export function startsNewHistory(
+  currentMessages: ChatMessage[],
+  page: { messages: ChatMessage[]; hasOlder: boolean },
+): boolean {
+  if (!page.hasOlder || currentMessages.length === 0) return false;
+  const fetchedIds = new Set(page.messages.map((message) => message.id));
+  return !currentMessages.some((message) => fetchedIds.has(message.id));
+}
+
+/**
+ * Folds a refetched newest page into the loaded transcript: the page replaces
+ * the messages it carries and leaves older loaded pages alone. With `restart`
+ * (see {@link startsNewHistory}) the loaded messages older than the page go.
+ */
+export function mergeLatestMessagePage(
+  currentMessages: ChatMessage[],
+  fetchedMessages: ChatMessage[],
+  options: { restart?: boolean; dropMessageIds?: ReadonlySet<string> } = {},
+): ChatMessage[] {
+  if (!options.restart || fetchedMessages.length === 0) {
+    return mergeFetchedChatMessages(currentMessages, fetchedMessages, options);
+  }
+  const oldestFetched = Math.min(...fetchedMessages.map(messageTimestamp));
+  const history = currentMessages
+    .filter((message) => messageTimestamp(message) < oldestFetched)
+    .map((message) => message.id);
+  return mergeFetchedChatMessages(currentMessages, fetchedMessages, {
+    dropMessageIds: new Set([...history, ...(options.dropMessageIds ?? [])]),
+  });
+}

@@ -82,12 +82,13 @@ export type SessionScope = "mine" | "all";
 export async function listSessions(
   status: SessionStatusFilter = "active",
   scope?: SessionScope,
+  signal?: AbortSignal,
 ): Promise<ChatSession[]> {
   const params = new URLSearchParams();
   if (status !== "active") params.set("status", status);
   if (scope) params.set("scope", scope);
   const query = params.size ? `?${params}` : "";
-  const res = await fetch(`/api/chat/sessions${query}`, { credentials: "include" });
+  const res = await fetch(`/api/chat/sessions${query}`, { credentials: "include", signal });
   return jsonOrThrow<ChatSession[]>(res);
 }
 
@@ -149,10 +150,29 @@ export async function updateSessionModel(
   return jsonOrThrow<ChatSession>(res);
 }
 
-export async function getSession(sessionId: string): Promise<ChatSession | null> {
-  const res = await fetch(`/api/chat/sessions/${sessionId}`, { credentials: "include" });
-  if (res.status === 404) return null;
-  return jsonOrThrow<ChatSession>(res);
+const inFlightReads = new Map<string, Promise<unknown>>();
+
+/**
+ * Callers that ask for the same read while one is in flight share its result.
+ * Mounting the chat fires the same read from several components at once, and
+ * nothing is cached once it settles, so a later call fetches fresh data.
+ */
+function shareInFlight<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const pending = inFlightReads.get(key) as Promise<T> | undefined;
+  if (pending) return pending;
+  const run = load().finally(() => {
+    if (inFlightReads.get(key) === run) inFlightReads.delete(key);
+  });
+  inFlightReads.set(key, run);
+  return run;
+}
+
+export function getSession(sessionId: string): Promise<ChatSession | null> {
+  return shareInFlight(`session:${sessionId}`, async () => {
+    const res = await fetch(`/api/chat/sessions/${sessionId}`, { credentials: "include" });
+    if (res.status === 404) return null;
+    return jsonOrThrow<ChatSession>(res);
+  });
 }
 
 /**
@@ -166,6 +186,30 @@ export async function listSessionMessages(sessionId: string): Promise<ChatMessag
   });
   if (res.status === 404) return null;
   return jsonOrThrow<ChatMessage[]>(res);
+}
+
+/** One page of a session's history: whole turns, oldest first within the page. */
+export interface ChatMessagePage {
+  messages: ChatMessage[];
+  /** Pass as `before` for the page of older turns; null when this page reaches the start. */
+  nextCursor: string | null;
+}
+
+/**
+ * The newest `limit` turns of a session, or the `limit` turns before `before`.
+ * `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
+ */
+export async function listSessionMessagePage(
+  sessionId: string,
+  options: { limit: number; before?: string | null },
+): Promise<ChatMessagePage | null> {
+  const params = new URLSearchParams({ limit: String(options.limit) });
+  if (options.before) params.set("before", options.before);
+  const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
+    credentials: "include",
+  });
+  if (res.status === 404) return null;
+  return jsonOrThrow<ChatMessagePage>(res);
 }
 
 export interface ListRomeSessionsOptions {
@@ -307,9 +351,11 @@ export interface CreateSessionInput {
   deviceFolder?: { deviceId: string; path: string };
 }
 
-export async function listChatAgents(): Promise<AgentCatalogGroup[]> {
-  const res = await fetch("/api/chat/agents", { credentials: "include" });
-  return jsonOrThrow<AgentCatalogGroup[]>(res);
+export function listChatAgents(): Promise<AgentCatalogGroup[]> {
+  return shareInFlight("agents", async () => {
+    const res = await fetch("/api/chat/agents", { credentials: "include" });
+    return jsonOrThrow<AgentCatalogGroup[]>(res);
+  });
 }
 
 export async function listSkills(): Promise<SkillSummary[]> {

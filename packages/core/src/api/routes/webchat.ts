@@ -49,7 +49,7 @@ import {
   isTurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
-import type { StoredTurnFeedback } from "../../db/repositories/webchat.js";
+import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
 import type { RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
@@ -117,6 +117,9 @@ type ForkSessionPlacement = {
  * anchor the analysis — the full turn is already in the fork's inherited
  * transcript — so a long reply must not bloat the prompt. */
 const TURN_FEEDBACK_QUOTE_MAX_LENGTH = 4000;
+/** Turns per message page when a request pages without naming `limit`. */
+const MESSAGE_PAGE_DEFAULT_LIMIT = 20;
+const MESSAGE_PAGE_MAX_LIMIT = 100;
 
 /** Flatten the ambient session actor into audit-log attributes so the
  * session-lifecycle events answer "who did this" the same way
@@ -1144,8 +1147,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const hasTrace = messages.some((m) => m.role === "trace");
     if (!hasTrace) return messages;
     const sessionActivityCutoff = sessionTraceCutoff();
+    // Only the trace rows in `messages` are read, so a page of a long session
+    // never loads the blocks of the turns outside it.
     const traceContents = await deps.webchatRepo.getTraceContents(sessionId, {
       sessionActivityCutoff,
+      messageIds: messages.filter((m) => m.role === "trace").map((m) => m.id),
     });
     if (traceContents.length === 0) return messages;
     const contentById = new Map(
@@ -1190,12 +1196,52 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
     const withTraces = await attachTraceSummaries(sessionId, messages);
-    const actors = await deps.webchatRepo.getUserMessageActors(sessionId);
+    const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
+    const shownIds = new Set(messages.map((m) => m.id));
+    const actors = new Map([...allActors].filter(([id]) => shownIds.has(id)));
     const senders = await resolveChatSenders(deps, actors);
     if (senders.size === 0) return withTraces;
     return withTraces.map((message) => {
       const sender = senders.get(message.id);
       return sender ? { ...message, sender } : message;
+    });
+  };
+
+  // `limit` and `before` page the list by turn, newest first, and wrap it as
+  // `{ messages, nextCursor }`; a request with neither keeps the bare array of
+  // the whole session.
+  const encodeMessageCursor = (cursor: MessagePageCursor): string =>
+    Buffer.from(JSON.stringify([cursor.startedAt, cursor.key])).toString("base64url");
+  const decodeMessageCursor = (raw: string): MessagePageCursor | null => {
+    try {
+      const parsed: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+      if (!Array.isArray(parsed) || parsed.length !== 2) return null;
+      const [startedAt, key] = parsed;
+      if (!Number.isFinite(startedAt) || typeof key !== "string" || key === "") return null;
+      return { startedAt: Number(startedAt), key };
+    } catch {
+      return null;
+    }
+  };
+  const respondWithSessionMessages = async (c: Context, sessionId: string) => {
+    const limitParam = c.req.query("limit");
+    const beforeParam = c.req.query("before");
+    if (limitParam === undefined && beforeParam === undefined) {
+      const messages = await deps.webchatRepo.getMessages(sessionId);
+      return c.json(await enrichStoredMessages(sessionId, messages));
+    }
+    const limit =
+      limitParam === undefined ? MESSAGE_PAGE_DEFAULT_LIMIT : Number.parseInt(limitParam, 10);
+    if (!Number.isInteger(limit) || limit < 1 || limit > MESSAGE_PAGE_MAX_LIMIT) {
+      return c.json({ error: `limit must be an integer from 1 to ${MESSAGE_PAGE_MAX_LIMIT}` }, 400);
+    }
+    const before = beforeParam === undefined ? null : decodeMessageCursor(beforeParam);
+    if (beforeParam !== undefined && !before)
+      return c.json({ error: "Invalid before cursor" }, 400);
+    const page = await deps.webchatRepo.getMessagesPage(sessionId, { limit, before });
+    return c.json({
+      messages: await enrichStoredMessages(sessionId, page.rows),
+      nextCursor: page.nextCursor ? encodeMessageCursor(page.nextCursor) : null,
     });
   };
 
@@ -2014,8 +2060,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
-    const messages = await deps.webchatRepo.getMessages(sessionId);
-    return c.json(await enrichStoredMessages(sessionId, messages));
+    return respondWithSessionMessages(c, sessionId);
   });
 
   app.get("/sessions/messages/:id/content", async (c) => {
@@ -2670,8 +2715,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
-    const messages = await deps.webchatRepo.getMessages(sessionId);
-    return c.json(await enrichStoredMessages(sessionId, messages));
+    return respondWithSessionMessages(c, sessionId);
   });
 
   app.get("/chat/sessions/:id/events", async (c) => {

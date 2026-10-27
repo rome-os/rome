@@ -132,6 +132,20 @@ describe("ConciergeTranscript bubble arrival", () => {
   });
 });
 
+describe("ConciergeTranscript when the loaded history is replaced", () => {
+  it("shows the newest page that replaces the transcript in place", () => {
+    const { container, rerender } = render(transcript(history));
+    rerender(transcript([user("u8", "t8"), agent("a8", "t8"), agent("a9", "t8")]));
+    expect(entering(container)).toEqual([]);
+
+    // Later bubbles still enter.
+    rerender(
+      transcript([user("u8", "t8"), agent("a8", "t8"), agent("a9", "t8"), user("u9", "t9")]),
+    );
+    expect(entering(container)).toEqual(["u9@0"]);
+  });
+});
+
 describe("ConciergeTranscript as a live log", () => {
   it("is a log of additions, busy while a turn runs", () => {
     const { getByRole, rerender } = render(transcript(history, true));

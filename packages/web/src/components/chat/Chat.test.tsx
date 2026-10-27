@@ -19,6 +19,7 @@ import {
   createSession,
   deleteSession,
   interruptTurn,
+  listSessionMessagePage,
   listSessionMessages,
   listSessionTurns,
   openTurnStream,
@@ -284,12 +285,18 @@ rs.mock("@/components/chat/entries", () => ({
 }));
 
 rs.mock("@/lib/chat-api", () => {
+  const listSessionMessages = rs.fn().mockResolvedValue([]);
   return {
     ...chatApiModule,
     createSession: rs.fn(),
     deleteSession: rs.fn(),
     interruptTurn: rs.fn(),
-    listSessionMessages: rs.fn().mockResolvedValue([]),
+    listSessionMessages,
+    // The newest page reads like the whole list unless a test says otherwise.
+    listSessionMessagePage: rs.fn(async (id: string) => {
+      const all = await listSessionMessages(id);
+      return all === null ? null : { messages: all, nextCursor: null };
+    }),
     listSessionTurns: rs.fn().mockResolvedValue([{ turnId: "turn-1", status: "running" }]),
     markSessionRead: rs.fn().mockResolvedValue({
       sessionId: "session-1",
@@ -726,6 +733,174 @@ describe("Chat session events", () => {
     rs.mocked(listSessionMessages).mockClear();
     act(() => source.emitLifecycle("error", MockEventSource.CLOSED));
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalledOnce());
+  });
+});
+
+describe("Chat history paging", () => {
+  const userMessage = (n: number) => ({
+    id: `user-${n}`,
+    sessionId: "session-1",
+    turnId: `turn-${n}`,
+    role: "user" as const,
+    content: `question ${n}`,
+    createdAt: new Date(Date.UTC(2026, 9, 27, 12, n)).toISOString(),
+  });
+  const shownKeys = () => screen.getAllByTestId("user-row").map((row) => row.dataset.rowKey);
+  let observers: Array<{ report: () => void; disconnected: boolean }> = [];
+
+  class FakeIntersectionObserver {
+    entry = { disconnected: false, report: () => {} };
+    constructor(callback: IntersectionObserverCallback) {
+      this.entry.report = () =>
+        callback([{ isIntersecting: true } as IntersectionObserverEntry], this as never);
+      observers.push(this.entry);
+    }
+    observe() {}
+    unobserve() {}
+    takeRecords() {
+      return [];
+    }
+    disconnect() {
+      this.entry.disconnected = true;
+    }
+  }
+  const reachTop = () =>
+    act(async () =>
+      observers
+        .filter((o) => !o.disconnected)
+        .at(-1)
+        ?.report(),
+    );
+
+  beforeEach(() => {
+    observers = [];
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    rs.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+  });
+
+  it("opens on the newest page and pages older turns in above it", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [userMessage(3), userMessage(4)], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [userMessage(1), userMessage(2)], nextCursor: null });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(shownKeys()).toEqual(["user-3", "user-4"]));
+
+    await reachTop();
+
+    await waitFor(() => expect(shownKeys()).toEqual(["user-1", "user-2", "user-3", "user-4"]));
+    expect(rs.mocked(listSessionMessagePage).mock.calls[1]).toEqual([
+      "session-1",
+      { limit: expect.any(Number), before: "c1" },
+    ]);
+  });
+
+  it("keeps the older pages when a reconnect refetches the newest one", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [userMessage(3), userMessage(4)], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [userMessage(1), userMessage(2)], nextCursor: null })
+      .mockResolvedValueOnce({
+        messages: [userMessage(3), userMessage(4), userMessage(5)],
+        nextCursor: "c1",
+      });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(shownKeys()).toEqual(["user-3", "user-4"]));
+    await reachTop();
+    await waitFor(() => expect(shownKeys()).toHaveLength(4));
+    const source = MockEventSource.instances[0]!;
+
+    act(() => source.emitLifecycle("error", MockEventSource.CLOSED));
+
+    await waitFor(() =>
+      expect(shownKeys()).toEqual(["user-1", "user-2", "user-3", "user-4", "user-5"]),
+    );
+    expect(rs.mocked(listSessionMessagePage).mock.calls[2]).toEqual([
+      "session-1",
+      { limit: expect.any(Number) },
+    ]);
+  });
+
+  it("starts over from the newest page when a reconnect finds a gap behind it", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce({ messages: [userMessage(3), userMessage(4)], nextCursor: "c1" })
+      .mockResolvedValueOnce({ messages: [userMessage(8), userMessage(9)], nextCursor: "c9" })
+      .mockResolvedValueOnce({ messages: [userMessage(6), userMessage(7)], nextCursor: null });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(shownKeys()).toEqual(["user-3", "user-4"]));
+    const source = MockEventSource.instances[0]!;
+
+    act(() => source.emitLifecycle("error", MockEventSource.CLOSED));
+    await waitFor(() => expect(shownKeys()).toEqual(["user-8", "user-9"]));
+    await reachTop();
+
+    await waitFor(() => expect(shownKeys()).toEqual(["user-6", "user-7", "user-8", "user-9"]));
+    expect(rs.mocked(listSessionMessagePage).mock.calls[2]?.[1]).toMatchObject({ before: "c9" });
+  });
+
+  it("loads a handoff child whole, since its messages are spliced into the transcript", async () => {
+    const handoff = {
+      id: "handoff-msg",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      role: "assistant" as const,
+      content: JSON.stringify([
+        {
+          type: "handoff",
+          toolUseId: "tool-1",
+          appId: "app",
+          childSessionId: "child-1",
+          payload: {},
+        },
+      ]),
+      createdAt: "2026-10-27T12:00:00.000Z",
+    };
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [handoff],
+      nextCursor: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledWith("child-1"));
+    expect(rs.mocked(listSessionMessagePage).mock.calls.map((call) => call[0])).toEqual([
+      "session-1",
+    ]);
+  });
+});
+
+describe("Chat session recovery", () => {
+  it("asks the host to recover a missing session and loads it again", async () => {
+    rs.mocked(listSessionMessagePage)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ messages: [], nextCursor: null });
+    const recoverMissingSession = rs.fn().mockResolvedValue(true);
+    const onSessionNotFound = rs.fn();
+
+    renderChat(
+      <Chat
+        sessionId="concierge"
+        recoverMissingSession={recoverMissingSession}
+        onSessionNotFound={onSessionNotFound}
+      />,
+    );
+
+    await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(2));
+    expect(recoverMissingSession).toHaveBeenCalledWith("concierge");
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+  });
+
+  it("reports the session missing when it cannot be recovered", async () => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce(null);
+    const onSessionNotFound = rs.fn();
+
+    renderChat(
+      <Chat
+        sessionId="concierge"
+        recoverMissingSession={rs.fn().mockResolvedValue(false)}
+        onSessionNotFound={onSessionNotFound}
+      />,
+    );
+
+    await waitFor(() => expect(onSessionNotFound).toHaveBeenCalledWith("concierge"));
+    expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
   });
 });
 

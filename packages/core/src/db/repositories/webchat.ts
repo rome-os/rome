@@ -296,6 +296,23 @@ export type WebchatSessionNameChangedListener = (event: {
 interface TraceReadOptions {
   /** Dashboard reads hide all traces in sessions whose last message is at or before this cutoff. */
   sessionActivityCutoff?: Date;
+  /** Reads only these trace messages (stub and blocks). Other traces of the session stay unread. */
+  messageIds?: readonly string[];
+}
+
+/** Where a message page ends: the oldest turn group (or lone message) it holds. */
+export interface MessagePageCursor {
+  /** `created_at` (epoch seconds) of the group's earliest row. */
+  startedAt: number;
+  /** The group's `turn_id`, or the row id for a message without a turn. */
+  key: string;
+}
+
+export interface MessagePageOptions {
+  /** Turn groups per page. Rows without a turn each count as one group. */
+  limit: number;
+  /** Return only groups strictly older than this cursor. */
+  before?: MessagePageCursor | null;
 }
 
 function traceReadFields(archivedSessionIds: string[]) {
@@ -2415,6 +2432,51 @@ export class WebChatRepository {
   }
 
   async getMessages(sessionId: string) {
+    return this.selectMessages(eq(romeAgentMessages.sessionId, sessionId));
+  }
+
+  /**
+   * The newest `limit` turn groups of a session, in the order `getMessages`
+   * returns them, plus the cursor for the page of older groups (null when none
+   * remain). A group is every row of a turn, so a page never splits a turn's
+   * user, assistant, and trace rows. Groups order by (earliest `created_at`,
+   * key) and the cursor is a position in that order, so pages stay disjoint
+   * while rows arrive.
+   */
+  async getMessagesPage(sessionId: string, options: MessagePageOptions) {
+    const before = options.before;
+    const groups = await this.db.all<{ key: string; startedAt: number }>(sql`
+      SELECT key, startedAt FROM (
+        SELECT COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}) AS key,
+               MIN(${romeAgentMessages.createdAt}) AS startedAt
+        FROM ${romeAgentMessages}
+        WHERE ${romeAgentMessages.sessionId} = ${sessionId}
+        GROUP BY key
+      )
+      ${before ? sql`WHERE (startedAt, key) < (${before.startedAt}, ${before.key})` : sql``}
+      ORDER BY startedAt DESC, key DESC
+      LIMIT ${options.limit + 1}
+    `);
+    const pageGroups = groups.slice(0, options.limit);
+    if (pageGroups.length === 0) return { rows: [], nextCursor: null };
+    const keys = pageGroups.map((group) => group.key);
+    const rows = await this.selectMessages(
+      and(
+        eq(romeAgentMessages.sessionId, sessionId),
+        or(inArray(romeAgentMessages.turnId, keys), inArray(romeAgentMessages.id, keys)),
+      ),
+    );
+    const oldest = pageGroups[pageGroups.length - 1];
+    return {
+      rows,
+      nextCursor:
+        groups.length > options.limit && oldest
+          ? ({ startedAt: oldest.startedAt, key: oldest.key } satisfies MessagePageCursor)
+          : null,
+    };
+  }
+
+  private selectMessages(where: SQL | undefined) {
     // Partitioning by turn (not raw createdAt) keeps a turn's user/assistant/
     // trace rows contiguous even when a later turn's user row is inserted
     // before an earlier turn's reply; within a group, user sorts before
@@ -2433,7 +2495,7 @@ export class WebChatRepository {
         createdAt: romeAgentMessages.createdAt,
       })
       .from(romeAgentMessages)
-      .where(eq(romeAgentMessages.sessionId, sessionId))
+      .where(where)
       .orderBy(
         sql`MIN(${romeAgentMessages.createdAt}) OVER (PARTITION BY COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id}))`,
         asc(romeAgentMessages.turnId),
@@ -2546,16 +2608,29 @@ export class WebChatRepository {
     const archivedSessionIds = options.sessionActivityCutoff
       ? await this.getTraceArchivedSessionIds([sessionId], options.sessionActivityCutoff)
       : [];
+    const onlyIds = options.messageIds;
+    if (onlyIds && onlyIds.length === 0) return [];
     const stubs = await this.db
       .select(traceReadFields(archivedSessionIds))
       .from(romeAgentMessages)
-      .where(and(eq(romeAgentMessages.sessionId, sessionId), eq(romeAgentMessages.role, "trace")));
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "trace"),
+          onlyIds ? inArray(romeAgentMessages.id, [...onlyIds]) : undefined,
+        ),
+      );
     if (stubs.length === 0 || archivedSessionIds.length > 0) return stubs.map(traceContentResult);
 
     const blockRows = await this.db
       .select({ messageId: romeAgentTraceBlocks.messageId, content: romeAgentTraceBlocks.content })
       .from(romeAgentTraceBlocks)
-      .where(eq(romeAgentTraceBlocks.sessionId, sessionId))
+      .where(
+        and(
+          eq(romeAgentTraceBlocks.sessionId, sessionId),
+          onlyIds ? inArray(romeAgentTraceBlocks.messageId, [...onlyIds]) : undefined,
+        ),
+      )
       .orderBy(asc(romeAgentTraceBlocks.messageId), asc(romeAgentTraceBlocks.seq));
     if (blockRows.length === 0) return stubs.map(traceContentResult);
 

@@ -1156,11 +1156,25 @@ export const handlers = [
       ? HttpResponse.json(found)
       : HttpResponse.json({ error: "Unknown session" }, { status: 404 });
   }),
-  http.get("/api/chat/sessions/:sessionId/messages", ({ params }) => {
+  http.get("/api/chat/sessions/:sessionId/messages", ({ params, request }) => {
     const messages = transcripts[String(params.sessionId)];
-    return messages
-      ? HttpResponse.json(messages)
-      : HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const query = new URL(request.url).searchParams;
+    const limit = Number(query.get("limit"));
+    if (!limit) return HttpResponse.json(messages);
+    // Pages by turn like the server; the cursor is the index of the page's first turn.
+    const turns = new Map<string, typeof messages>();
+    for (const message of messages) {
+      const key = message.turnId ?? message.id;
+      turns.set(key, [...(turns.get(key) ?? []), message]);
+    }
+    const groups = [...turns.values()];
+    const end = query.has("before") ? Number(query.get("before")) : groups.length;
+    const start = Math.max(0, end - limit);
+    return HttpResponse.json({
+      messages: groups.slice(start, end).flat(),
+      nextCursor: start > 0 ? String(start) : null,
+    });
   }),
   // No turn is ever in flight: the transcripts are static and mock mode has no
   // model behind it, so a session always reads as idle.

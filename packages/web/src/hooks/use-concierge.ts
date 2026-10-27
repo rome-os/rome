@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/fetch-json";
 import { useSettings } from "@/hooks/use-settings";
 
@@ -21,19 +21,31 @@ interface ConciergeSession {
   unread: number;
 }
 
+const conciergeSessionQuery = {
+  queryKey: CONCIERGE_SESSION_QUERY_KEY,
+  queryFn: ({ signal }: { signal: AbortSignal }) =>
+    fetchJson<ConciergeSession>("/api/concierge/session", { signal, fallback: "" }),
+};
+
 function useConciergeSession(enabled: boolean) {
-  return useQuery({
-    queryKey: CONCIERGE_SESSION_QUERY_KEY,
-    enabled,
-    staleTime: 0,
-    queryFn: ({ signal }) =>
-      fetchJson<ConciergeSession>("/api/concierge/session", { signal, fallback: "" }),
-  });
+  return useQuery({ ...conciergeSessionQuery, enabled, staleTime: 0 });
+}
+
+/**
+ * Resolves once the server has created the Concierge chat, joining a request
+ * already in flight and reusing a recent one. Rejects when the server cannot.
+ */
+export async function ensureConciergeChat(queryClient: QueryClient): Promise<void> {
+  await queryClient.fetchQuery({ ...conciergeSessionQuery, staleTime: 10_000 });
 }
 
 export interface ConciergeChat {
   /** `CONCIERGE_CHAT_ID` once the chat exists, else null: Concierge is off or not loaded yet. */
   chatId: string | null;
+  /** Whether Concierge is on. The chat may not exist yet; `ensureConciergeChat` waits for it. */
+  enabled: boolean;
+  /** Whether the setting is still loading, so `enabled` is not known yet. */
+  settingsLoading: boolean;
   /** Whether the setting or the chat's creation is still in flight. */
   loading: boolean;
 }
@@ -48,6 +60,8 @@ export function useConciergeChat(): ConciergeChat {
   const { isSuccess, isPending } = useConciergeSession(enabled);
   return {
     chatId: enabled && isSuccess ? CONCIERGE_CHAT_ID : null,
+    enabled,
+    settingsLoading: settingsPending,
     loading: settingsPending || (enabled && isPending),
   };
 }

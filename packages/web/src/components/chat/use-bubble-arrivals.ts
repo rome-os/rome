@@ -13,8 +13,10 @@ export type ArrivalProps = (id: string) => { "data-arrival"?: number };
  *
  * The ids of the first non-empty list are the history and never enter. Later
  * ids enter only when they come after every id seen before, so a page of older
- * history and a refetch of the same messages appear in place. Each message
- * gets its step in the batch it came with, and keeps it.
+ * history and a refetch of the same messages appear in place. A list that
+ * shares no id with the ones before it replaces the transcript (the newest page
+ * after a gap), so it is history too. Each message gets its step in the batch
+ * it came with, and keeps it.
  */
 export function useBubbleArrivals(ids: readonly string[]): ArrivalProps {
   const seen = useRef<Set<string> | null>(null);
@@ -24,11 +26,12 @@ export function useBubbleArrivals(ids: readonly string[]): ArrivalProps {
   } else {
     const known = seen.current;
     const lastKnown = ids.findLastIndex((id) => known.has(id));
+    const replaced = lastKnown < 0 && ids.length > 0;
     let step = 0;
     ids.forEach((id, index) => {
       if (known.has(id)) return;
       known.add(id);
-      if (index > lastKnown) arrived.current.set(id, Math.min(step++, MAX_STEP));
+      if (!replaced && index > lastKnown) arrived.current.set(id, Math.min(step++, MAX_STEP));
     });
   }
   const map = arrived.current;
