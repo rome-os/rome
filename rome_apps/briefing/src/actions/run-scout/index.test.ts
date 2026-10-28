@@ -62,12 +62,20 @@ describe("briefing_run_scout", () => {
     });
 
     expect(result).toEqual({ status: "error", error: "rate limit exceeded" });
+    expect(mocks.finish).toHaveBeenCalledWith("result-1", {
+      status: "failed",
+      error: "rate limit exceeded",
+    });
   });
 
   it("reports an empty reply as an error", async () => {
     const result = await run(async () => ({ status: "ok", data: { result: "" } }));
 
     expect(result).toEqual({ status: "error", error: "The assistant returned no findings." });
+    expect(mocks.finish).toHaveBeenCalledWith("result-1", {
+      status: "failed",
+      error: "The assistant returned no findings.",
+    });
   });
 
   it("keeps a run with no findings ok", async () => {
