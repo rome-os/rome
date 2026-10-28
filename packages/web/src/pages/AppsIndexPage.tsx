@@ -45,7 +45,6 @@ import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { useSidebarPins } from "@/hooks/use-sidebar-pins";
-import { isRequiredBuiltinPin } from "@/shell/AppGrid";
 import { APP_NAV } from "@/shell/builtin-nav";
 import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 
@@ -314,7 +313,11 @@ export default function AppsIndexPage() {
   const closeRemixDialog = () => {
     setRemixTarget(null);
   };
-  const builtinPages = APP_NAV.filter((b) => b.id !== "apps" && b.id !== "chat");
+  // Apps, Chat and Projects are fixed on the sidebar and Settings is in the
+  // profile menu, so none of them needs a tile here.
+  const builtinPages = APP_NAV.filter(
+    (b) => !["apps", "chat", "projects", "settings"].includes(b.id),
+  );
 
   const normalizedQuery = query.trim().toLowerCase();
   const isSearching = normalizedQuery.length > 0;
@@ -362,15 +365,13 @@ export default function AppsIndexPage() {
         clickTarget={{ type: "link", href: entry.href }}
         menuLabel={t("installed.moreActionsAria", { name: label })}
         menu={
-          isRequiredBuiltinPin(entry.id) ? null : (
-            <DropdownMenuItem
-              onClick={() => togglePin("builtin", entry.id)}
-              className="text-foreground"
-            >
-              <Pin className="h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
-              {pinned ? t("installed.unpin") : t("installed.pin")}
-            </DropdownMenuItem>
-          )
+          <DropdownMenuItem
+            onClick={() => togglePin("builtin", entry.id)}
+            className="text-foreground"
+          >
+            <Pin className="h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
+            {pinned ? t("installed.unpin") : t("installed.pin")}
+          </DropdownMenuItem>
         }
         icon={<TileIcon size="lg" kind="builtin" displayName={label} BuiltinIcon={entry.Icon} />}
         name={label}

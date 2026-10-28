@@ -40,6 +40,7 @@ rs.mock("@/shell/builtin-nav", () => ({
     { id: "chat", href: "/chat", labelKey: "nav.chat", Icon: () => null },
     { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: () => null },
     { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: () => null },
+    { id: "settings", href: "/settings", labelKey: "nav.settings", Icon: () => null },
   ],
 }));
 rs.mock("@/shell/AppGrid", () => ({
@@ -404,7 +405,7 @@ describe("AppsIndexPage reactivity", () => {
 
     renderPage();
 
-    expect(await screen.findByText("Projects")).toBeTruthy();
+    expect(await screen.findByText("Memory")).toBeTruthy();
     expect(screen.queryByText("Chat")).toBeNull();
   });
 
@@ -446,7 +447,7 @@ describe("AppsIndexPage reactivity", () => {
     expect(within(storeSection).getByText("Store App")).toBeTruthy();
     expect(within(builtinSection).getByText("Shipped App")).toBeTruthy();
     // …and built-in surfaces share the built-in section with first-party apps.
-    expect(within(builtinSection).getByText("Projects")).toBeTruthy();
+    expect(within(builtinSection).getByText("Memory")).toBeTruthy();
 
     // Section order matches the page contract: my → store → built-in.
     const builtHere = within(mySection).getByText("Built Here");
@@ -851,13 +852,14 @@ describe("AppsIndexPage tile interactions", () => {
     expect(stored).toContainEqual({ type: "builtin", id: "projects" });
   });
 
-  it("offers no actions menu on Projects, which the sidebar always shows", async () => {
+  it("omits Projects and Settings, which the sidebar and profile menu already reach", async () => {
     mockBackend({ installed: [] });
 
     renderPage();
 
-    expect(await screen.findByLabelText("Projects")).toBeTruthy();
-    expect(screen.queryByLabelText("More actions for Projects")).toBeNull();
+    expect(await screen.findByLabelText("Memory")).toBeTruthy();
+    expect(screen.queryByLabelText("Projects")).toBeNull();
+    expect(screen.queryByLabelText("Settings")).toBeNull();
   });
 });
 
@@ -959,14 +961,14 @@ describe("AppsIndexPage search", () => {
 
     expect(await screen.findByText("Weather")).toBeTruthy();
     expect(screen.getByText("Calendar")).toBeTruthy();
-    expect(screen.getByText("Projects")).toBeTruthy();
+    expect(screen.getByText("Memory")).toBeTruthy();
 
     await user.type(screen.getByLabelText("Search apps"), "weath");
 
     expect(screen.getByText("Weather")).toBeTruthy();
     // Non-matching installed app and built-in surface both drop out.
     expect(screen.queryByText("Calendar")).toBeNull();
-    expect(screen.queryByText("Projects")).toBeNull();
+    expect(screen.queryByText("Memory")).toBeNull();
   });
 
   it("derives the displayed section count from visible search results", async () => {
@@ -1057,7 +1059,7 @@ describe("AppsIndexPage ghost tiles", () => {
     expect(within(mySection).queryByText("0")).toBeNull();
     expect(within(storeSection).queryByText("0")).toBeNull();
     const builtinSection = screen.getByRole("region", { name: "Built-in apps" });
-    expect(within(builtinSection).getByText("2")).toBeTruthy();
+    expect(within(builtinSection).getByText("1")).toBeTruthy();
   });
 
   it("seeds a chat draft from the New app ghost tile", async () => {

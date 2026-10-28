@@ -30,14 +30,12 @@
     "noResultsHint": "Try a different search, or browse the App store."
   },
   "builtinDescriptions": {
-    "projects": "Working directories the agent operates in",
     "memory": "Identity, journal, and the people Rome knows",
     "people": "Persons the guardian has introduced",
     "routines": "Scheduled and recurring agent actions",
     "activity": "What Rome has been doing, in order",
     "desktop": "Embedded browser surface",
-    "chat": "Talk to your agents",
-    "settings": "Profile, channels, and integrations"
+    "chat": "Talk to your agents"
   },
   "installedApps": "Installed Apps",
   "tabs": {
