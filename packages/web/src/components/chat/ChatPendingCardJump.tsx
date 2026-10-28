@@ -71,7 +71,7 @@ export function ChatPendingCardJump({
   return (
     <Button
       variant="outline"
-      size="md"
+      size="sm"
       aria-label={t("jumpToWaitingCard")}
       onClick={() => {
         target.focus({ preventScroll: true });
@@ -85,7 +85,8 @@ export function ChatPendingCardJump({
       }}
       className="touch-target pointer-events-auto rounded-full bg-surface/95 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
     >
-      <SquareMousePointer data-icon="inline-start" />
+      {/* Below 21rem the label alone keeps the button clear of jump to latest. */}
+      <SquareMousePointer data-icon="inline-start" className="max-[21rem]:hidden" />
       {t("waitingCard")}
     </Button>
   );

@@ -2301,43 +2301,36 @@ export function Chat({
                     the END of the transition, so the faded-out button stops taking
                     clicks and leaves the tab order instead of lurking invisibly
                     over the transcript. */}
-                <div className="pointer-events-none absolute bottom-full left-1/2 mb-3 -translate-x-1/2">
-                  <div
-                    className={cn(
-                      "absolute bottom-0",
-                      mainSessionId && !isAtBottom
-                        ? "right-full mr-2"
-                        : "left-1/2 -translate-x-1/2",
-                    )}
-                  >
-                    {mainSessionId && (
+                <IconButton
+                  size="md"
+                  label={t("jumpToLatest")}
+                  icon={<ArrowDown />}
+                  // IconButton mirrors its label into `title`, which the browser
+                  // renders as a native tooltip. The aria-label already names the
+                  // control, and a lone arrow above the composer needs no gloss.
+                  title={undefined}
+                  onClick={() => scrollToBottom("auto")}
+                  className={cn(
+                    // `touch-target` because this control, unlike the timeline
+                    // rail, has no width gate: it is reachable on a phone, where
+                    // the 36px step is under the 44px floor.
+                    "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
+                    !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
+                  )}
+                />
+                <div className="pointer-events-auto relative mx-auto max-w-5xl">
+                  {/* Sits on the composer's top-right corner, clear of the
+                      centered jump to latest. */}
+                  {mainSessionId && (
+                    <div className="pointer-events-none absolute right-0 bottom-full mb-1.5">
                       <ChatPendingCardJump
                         scroller={scrollerEl}
                         content={contentEl}
                         floor={floorEl}
                         currentReplyMessageIds={currentReplyMessageIds}
                       />
-                    )}
-                  </div>
-                  <IconButton
-                    size="md"
-                    label={t("jumpToLatest")}
-                    icon={<ArrowDown />}
-                    // IconButton mirrors its label into `title`, which the browser
-                    // renders as a native tooltip. The aria-label already names the
-                    // control, and a lone arrow above the composer needs no gloss.
-                    title={undefined}
-                    onClick={() => scrollToBottom("auto")}
-                    className={cn(
-                      // `touch-target` because this control, unlike the timeline
-                      // rail, has no width gate: it is reachable on a phone, where
-                      // the 36px step is under the 44px floor.
-                      "touch-target pointer-events-auto rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
-                      !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
-                    )}
-                  />
-                </div>
-                <div className="pointer-events-auto mx-auto max-w-5xl">
+                    </div>
+                  )}
                   {shareMode && mainSessionId ? (
                     <ShareBar
                       sessionId={mainSessionId}

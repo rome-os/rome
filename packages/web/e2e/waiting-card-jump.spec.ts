@@ -66,16 +66,21 @@ for (const viewport of [
         const scroller = page
           .locator("[data-chat-transcript]")
           .locator("xpath=ancestor::*[contains(@class, 'overflow-y-auto')][1]");
-        const center = await page.locator("[data-chat-composer-box]").evaluate((el) => {
-          const rect = el.getBoundingClientRect();
-          return rect.left + rect.width / 2;
-        });
+        const composer = await page
+          .locator("[data-chat-composer-box]")
+          .evaluate((el) => el.getBoundingClientRect().toJSON() as DOMRect);
+        const center = composer.left + composer.width / 2;
+        // The reminder sits on the composer's top-right corner.
         await expect
           .poll(async () => {
             const box = (await jump.boundingBox())!;
-            return Math.abs(box.x + box.width / 2 - center);
+            return Math.abs(box.x + box.width - composer.right);
           })
           .toBeLessThan(1);
+        const jumpBox = (await jump.boundingBox())!;
+        const gap = composer.top - (jumpBox.y + jumpBox.height);
+        expect(gap).toBeGreaterThanOrEqual(0);
+        expect(gap).toBeLessThanOrEqual(8);
         await jump.focus();
         await page.keyboard.press("Enter");
         await expect(card).toBeInViewport();
@@ -100,6 +105,8 @@ for (const viewport of [
             return Math.abs(box.x + box.width / 2 - center);
           })
           .toBeLessThan(1);
+        const latestBox = (await latest.boundingBox())!;
+        expect(latestBox.x + latestBox.width).toBeLessThanOrEqual((await jump.boundingBox())!.x);
         await latest.click();
         await expect(jump).toBeVisible();
         await expect(card).not.toBeInViewport();
