@@ -76,14 +76,14 @@ function ToolTab({ id, label, icon, active, unread = false, liveLabel, onClose }
   return (
     <div
       ref={tabRef}
-      className={`relative flex h-9 shrink-0 items-center gap-1 rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
+      className={`relative flex h-9 min-w-32 shrink items-center gap-1 rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
     >
       <TabsTrigger
         value={id}
         role="tab"
         aria-selected={active}
         title={label}
-        className="h-full max-w-48 gap-2 after:hidden"
+        className="h-full min-w-0 max-w-48 flex-1 gap-2 after:hidden"
         onKeyDown={(event) => {
           if (event.key === "Delete") {
             event.preventDefault();
@@ -273,13 +273,16 @@ export function ToolWorkspace({
   const inTitlebar = useSlotOutlet(TITLEBAR_END_SLOT);
   const toolsWidth = compact ? width : Math.max(0, width - chatWidth - SEPARATOR_WIDTH);
   // The tabs keep the `Tabs` root's context through the portal, but not its
-  // CSS group, so the list states its full height itself.
+  // CSS group, so the list states its full height itself. The kit's own list
+  // height is shorter than a tab, so inside the group the list takes the row's
+  // height too, or it would clip the tabs. The scrollbar is hidden because its
+  // track would take height from the row; the all-tools menu reaches every tab.
   const header = (
     <>
       {hasTabs ? (
         <TabsList
           aria-label={t("chat.tools")}
-          className="h-full min-w-0 flex-1 justify-start overflow-x-auto p-0"
+          className="h-full min-w-0 flex-1 justify-start overflow-x-auto overflow-y-hidden group-data-horizontal/tabs:h-full p-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {trace && (
             <ToolTab
