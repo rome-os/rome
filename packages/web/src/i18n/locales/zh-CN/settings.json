@@ -871,6 +871,37 @@
         "description": "将智能体对 Rome 平台问题的描述发送给 Rome 团队，并附带与反馈对话框相同的实例诊断信息。不影响你主动发送的反馈。",
         "toggleLabel": "允许智能体发送报告"
       }
+    },
+    "spokenRecaps": {
+      "title": "语音回顾",
+      "description": "在较长的对话回合后生成一段简短总结，可选生成音频，方便不看屏幕时收听。回顾会显示在对话中。",
+      "enabled": {
+        "title": "生成回顾",
+        "description": "每次回顾会多调用一次模型。默认关闭。关闭后不再生成新的总结和音频，已有的回顾会保留。"
+      },
+      "threshold": {
+        "title": "长度阈值",
+        "description": "按回复长度和工具调用量判断，与回顾本身的长度无关。",
+        "short": "较短的回合",
+        "medium": "较长的回合",
+        "long": "仅很长的回合"
+      },
+      "createAudio": {
+        "title": "生成音频",
+        "description": "将回顾文字发送到 Microsoft Edge 文字转语音服务，生成可播放的录音。"
+      },
+      "audioSpeed": {
+        "title": "音频语速",
+        "description": "仅对新生成的录音生效。",
+        "slower": "较慢（−15%）",
+        "normal": "正常",
+        "faster": "较快（+15%）",
+        "fastest": "最快（+30%）"
+      },
+      "loadFailed": "无法加载或保存回顾设置，请重试。",
+      "loading": "正在加载回顾设置…",
+      "saving": "正在保存…",
+      "retry": "重试"
     }
   },
   "system": {

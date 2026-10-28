@@ -110,8 +110,9 @@ const definitions = [
     version: "0.2.21",
     description:
       "Core system actions for scheduling, messaging, approvals, app store access, and subagent orchestration. In Rome context, 'store' / 'app store' usually means the Rome App Store. Reach here first for app_store_search (search/read Rome Store listings), app_management (install from the Rome Store with source.mode='appstore', install / uninstall / enable / disable a Rome app, or scaffold a new dev app — first-party apps ship with Rome, so only enable/disable applies to them), send_message (send a message through any registered channel adapter), send_user_message (start or continue a webchat conversation on the guardian's behalf), and generate_image (generate an image from a text prompt via the connected image provider).",
-    hasFrontend: true,
+    hasFrontend: false,
     iconUrl: systemIcon,
+    hideInLauncher: true,
     // Core refuses to disable the system app, unlike every other first-party app.
     canToggle: false,
   },
