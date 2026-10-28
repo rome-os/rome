@@ -1,7 +1,6 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { ChevronRightIcon } from "@radix-ui/react-icons";
 import { Link } from "react-router-dom";
-import type { TraceSegment } from "@rome/api-types/trace-segments";
 import { useSubagentProgress } from "@/hooks/use-subagent-progress";
 import { artifactLocalName } from "@/lib/artifact-name";
 import {
@@ -30,8 +29,6 @@ export function SubagentCallView({
   output,
   error,
   durationMs,
-  startedAt,
-  renderSteps,
   live = false,
 }: {
   agentName: string;
@@ -42,25 +39,11 @@ export function SubagentCallView({
   output?: unknown;
   error?: { message: string; code?: string };
   durationMs?: number;
-  /** ISO start of the call; times the elapsed clock while it runs. */
-  startedAt?: string;
-  /** Renders the subagent's own steps in the expanded view. */
-  renderSteps?: (segments: TraceSegment[], live: boolean) => React.ReactNode;
   live?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const running = status === "running";
-  const startedAtMs = startedAt ? Date.parse(startedAt) : Number.NaN;
-  const progress = useSubagentProgress({
-    turnId,
-    running,
-    startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : null,
-  });
-  // The steps stay on screen when the call finishes, so an open row does not
-  // empty the moment the stream closes.
-  const lastStepsRef = useRef<TraceSegment[]>([]);
-  if (progress.segments.length > 0) lastStepsRef.current = progress.segments;
-  const steps = lastStepsRef.current;
+  const progress = useSubagentProgress({ turnId, running });
   const displayAgentName = artifactLocalName(agentName);
   const summary = describeToolSummary(
     displayAgentName,
@@ -137,14 +120,6 @@ export function SubagentCallView({
               <span className="px-1 text-aux text-subtle-foreground">Input</span>
               <div className="rounded-8 border border-border bg-surface px-2 py-2">
                 <TraceJsonView value={input} />
-              </div>
-            </section>
-          )}
-          {renderSteps && steps.length > 0 && (
-            <section className="flex flex-col gap-2">
-              <span className="px-1 text-aux text-subtle-foreground">Steps</span>
-              <div className="rounded-8 border border-border bg-surface px-2 py-2">
-                {renderSteps(steps, running)}
               </div>
             </section>
           )}

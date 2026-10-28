@@ -1,9 +1,7 @@
-import { useRef } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { TraceSegment } from "@rome/api-types/trace-segments";
 import { formatDuration } from "@/components/agent-trace/CollapsedTraceSummary";
 import { describeLatestStep, firstStepStartMs } from "@/lib/subagent-progress";
-import { useNow } from "./use-now";
 import { useTurnStream } from "./use-turn-stream";
 
 export interface SubagentProgress {
@@ -11,52 +9,36 @@ export interface SubagentProgress {
   label: string | null;
   /** The newest call, such as `Bash pnpm test`, for a tooltip. */
   currentStep: string | null;
-  /** The subagent's own segments so far, for rendering its steps. */
-  segments: TraceSegment[];
 }
 
 /**
- * Live progress of a subagent run, read from its turn stream while it runs.
- * `startedAtMs` is the parent trace's start time for the call; without it the
- * first step's start stands in.
- *
- * With `retain`, a run that was seen running keeps its last numbers after it
- * finishes, with the elapsed time frozen where the run ended, until the caller
- * has a stored summary to show instead. A finished stream holds no connection,
- * so retaining costs only the buffered segments. A run that was never seen
- * running opens no stream.
+ * Live progress of a running subagent, read from its turn stream (none is opened
+ * once it is not running; the stored summary takes over). Elapsed time counts
+ * from its first step.
  */
 export function useSubagentProgress({
   turnId,
   running,
-  startedAtMs,
-  retain = false,
 }: {
   turnId: string;
   running: boolean;
-  startedAtMs?: number | null;
-  retain?: boolean;
 }): SubagentProgress {
   const { t } = useTranslation("activity");
-  const wasRunning = useRef(false);
-  if (running) wasRunning.current = true;
-  const retained = !running && retain && wasRunning.current;
-  const stream = useTurnStream(turnId, { enabled: running || retained });
-  // The clock stops where the run ended: at the stream's `done` (one timestamp
-  // shared by every reader), or when the caller reports it no longer running,
-  // whichever comes first.
-  const reportedEndAt = useRef<number | null>(null);
-  const ended = stream.done || !running;
-  if (ended && reportedEndAt.current === null) reportedEndAt.current = Date.now();
-  const endedAt = stream.endedAt ?? reportedEndAt.current;
-  const now = useNow(!ended);
-  if (!running && !retained) {
-    return { label: null, currentStep: null, segments: stream.segments };
-  }
+  const stream = useTurnStream(turnId, { enabled: running });
+  // The clock ticks each second until the stream ends.
+  const [now, setNow] = useState(() => Date.now());
+  const ticking = running && !stream.done;
+  useEffect(() => {
+    if (!ticking) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [ticking]);
+  if (!running) return { label: null, currentStep: null };
 
   const steps = stream.summary?.totalSteps ?? 0;
-  const startMs = startedAtMs ?? firstStepStartMs(stream.segments);
-  const elapsed = startMs === null ? null : formatDuration(Math.max(0, (endedAt ?? now) - startMs));
+  const startMs = firstStepStartMs(stream.segments);
+  const elapsed = startMs === null ? null : formatDuration(Math.max(0, now - startMs));
   const stepsLabel =
     steps > 0
       ? t(steps === 1 ? "trace.summary.stepsSingle" : "trace.summary.stepsMultiple", {
@@ -69,5 +51,5 @@ export function useSubagentProgress({
       : elapsed
         ? `${stepsLabel}${t("trace.summary.joiner")}${elapsed}`
         : stepsLabel;
-  return { label, currentStep: describeLatestStep(stream.segments), segments: stream.segments };
+  return { label, currentStep: describeLatestStep(stream.segments) };
 }

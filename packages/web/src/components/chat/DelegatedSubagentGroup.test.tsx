@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { TraceSegment, TraceSubagentSummary } from "@rome/api-types/trace-segments";
+import type { TraceSubagentSummary } from "@rome/api-types/trace-segments";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { FakeTurnStream, runSegment, stepsSummary } from "@/test/fake-turn-stream";
 import { DelegatedSubagentGroup } from "./DelegatedSubagentGroup";
@@ -192,29 +192,6 @@ describe("DelegatedSubagentGroup", () => {
       });
     }
 
-    function parentWithStart(startedAt: string): TraceSegment[] {
-      return [
-        {
-          kind: "run",
-          id: "parent-run",
-          ordinal: 0,
-          count: 1,
-          app: { id: "coding", name: "Coding", iconUrl: "/icon" },
-          blocks: [
-            {
-              type: "subagent_start",
-              toolUseId: "subagent-1",
-              agentName: "coding:planning",
-              input: {},
-              sessionId: "child-session",
-              turnId,
-              startedAt,
-            },
-          ],
-        },
-      ];
-    }
-
     it("keeps Thinking… until the first step arrives", async () => {
       render(
         <DelegatedSubagentGroup subagents={[runningChild()]} onOpenSubagentTrace={() => {}} />,
@@ -225,21 +202,17 @@ describe("DelegatedSubagentGroup", () => {
     });
 
     it("shows the live step count and elapsed time, with the current step as the tooltip", async () => {
-      const startedAt = new Date(Date.now() - 80_000).toISOString();
       render(
-        <DelegatedSubagentGroup
-          subagents={[runningChild()]}
-          parentSegments={parentWithStart(startedAt)}
-          onOpenSubagentTrace={() => {}}
-        />,
+        <DelegatedSubagentGroup subagents={[runningChild()]} onOpenSubagentTrace={() => {}} />,
       );
       await waitFor(() => expect(streams.has(turnId)).toBe(true));
       const stream = streams.get(turnId)!;
+      const startedAt = new Date(Date.now() - 80_000).toISOString();
       await act(async () => {
         stream.send(
           "segment_upsert",
           runSegment("run-1", [
-            { tool: "Read", input: { path: "a.ts" } },
+            { tool: "Read", input: { path: "a.ts" }, startedAt },
             { tool: "Edit", input: { path: "TraceDrawer.tsx" } },
           ]),
         );
@@ -264,9 +237,8 @@ describe("DelegatedSubagentGroup", () => {
       expect(await screen.findByText("1 step")).toBeTruthy();
     });
 
-    it("keeps the frozen live numbers after it finishes, until the stored summary arrives", async () => {
-      const startedAt = new Date(Date.now() - 80_000).toISOString();
-      const props = { parentSegments: parentWithStart(startedAt), onOpenSubagentTrace: () => {} };
+    it("falls back to the stored summary once the run ends", async () => {
+      const props = { onOpenSubagentTrace: () => {} };
       const { rerender } = render(
         <DelegatedSubagentGroup subagents={[runningChild()]} {...props} />,
       );
@@ -274,21 +246,7 @@ describe("DelegatedSubagentGroup", () => {
       await act(async () => {
         streams.get(turnId)!.send("summary_update", stepsSummary(7));
       });
-      await screen.findByText("7 steps · 1m 20s");
-      await act(async () => {
-        streams.get(turnId)!.send("done", { success: true });
-      });
-
-      // The parent turn is still writing its reply: the child is completed but
-      // its trace summary is not joined in yet.
-      rerender(
-        <DelegatedSubagentGroup subagents={[runningChild({ status: "completed" })]} {...props} />,
-      );
-      expect(screen.getByText("7 steps · 1m 20s")).toBeTruthy();
-      expect(screen.queryByText("completed")).toBeNull();
-      // Frozen: a ticking clock would read 1m 21s by now.
-      await act(async () => new Promise((resolve) => setTimeout(resolve, 1200)));
-      expect(screen.getByText("7 steps · 1m 20s")).toBeTruthy();
+      await screen.findByText("7 steps");
 
       rerender(
         <DelegatedSubagentGroup
@@ -307,7 +265,7 @@ describe("DelegatedSubagentGroup", () => {
         />,
       );
       expect(screen.getByText("8 steps · 3.2s")).toBeTruthy();
-      expect(screen.queryByText("7 steps · 1m 20s")).toBeNull();
+      expect(screen.queryByText("7 steps")).toBeNull();
     });
 
     it("keeps the status text for a child that failed", async () => {

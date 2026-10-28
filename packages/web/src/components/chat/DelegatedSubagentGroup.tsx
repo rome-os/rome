@@ -1,11 +1,10 @@
 import { useTranslation } from "react-i18next";
-import type { TraceSegment, TraceSubagentSummary } from "@rome/api-types/trace-segments";
+import type { TraceSubagentSummary } from "@rome/api-types/trace-segments";
 import { Button } from "@/components/ui/button";
 import { formatDuration } from "@/components/agent-trace/CollapsedTraceSummary";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { useSubagentProgress, type SubagentProgress } from "@/hooks/use-subagent-progress";
 import { artifactLocalName } from "@/lib/artifact-name";
-import { subagentStartMs } from "@/lib/subagent-progress";
 
 function SubagentTraceSummary({
   node,
@@ -24,11 +23,6 @@ function SubagentTraceSummary({
   }
 
   const duration = formatDuration(node.traceSummary?.totalDurationMs);
-  // Between the run ending and the stored summary joining in, the last live
-  // numbers stand in for it rather than dropping to a bare "completed".
-  if (node.status === "completed" && !node.traceSummary && progress.label) {
-    return <span>{progress.label}</span>;
-  }
   if (node.status !== "completed") {
     const status = t(`trace.subagents.status.${node.status}`);
     return <span>{duration ? `${status}${t("trace.summary.joiner")}${duration}` : status}</span>;
@@ -50,13 +44,11 @@ function SubagentChip({
   node,
   selected,
   iconUrl,
-  parentSegments,
   onOpenSubagentTrace,
 }: {
   node: TraceSubagentSummary;
   selected?: { sessionId: string; turnId: string | null } | null;
   iconUrl: string | null;
-  parentSegments?: readonly TraceSegment[];
   onOpenSubagentTrace: (node: TraceSubagentSummary) => void;
 }) {
   const { t } = useTranslation("activity");
@@ -65,8 +57,6 @@ function SubagentChip({
   const progress = useSubagentProgress({
     turnId: node.turnId,
     running: node.status === "running",
-    startedAtMs: subagentStartMs(parentSegments, node.toolUseId),
-    retain: !node.traceSummary,
   });
   return (
     <li className="flex min-w-0 items-center">
@@ -117,14 +107,11 @@ export function DelegatedSubagentGroup({
   subagents,
   selected,
   agentIconByName,
-  parentSegments,
   onOpenSubagentTrace,
 }: {
   subagents: TraceSubagentSummary[];
   selected?: { sessionId: string; turnId: string | null } | null;
   agentIconByName?: ReadonlyMap<string, string | null>;
-  /** The parent trace's segments, which time a running subagent's elapsed clock. */
-  parentSegments?: readonly TraceSegment[];
   onOpenSubagentTrace: (node: TraceSubagentSummary) => void;
 }) {
   const { t } = useTranslation("activity");
@@ -139,7 +126,6 @@ export function DelegatedSubagentGroup({
           node={node}
           selected={selected}
           iconUrl={agentIconByName?.get(node.agentName) ?? null}
-          parentSegments={parentSegments}
           onOpenSubagentTrace={onOpenSubagentTrace}
         />
       ))}

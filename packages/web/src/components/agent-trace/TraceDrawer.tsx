@@ -37,10 +37,7 @@ export type TraceDrawerTarget =
       turnId: string;
       summary: TraceSummary;
       dumpHref?: string;
-      /**
-       * The turn was still running when opened. The drawer follows its stream,
-       * then loads the stored trace once the stream ends.
-       */
+      /** Still running when opened: followed over its stream, then loaded from storage. */
       running?: boolean;
     };
 
@@ -110,7 +107,6 @@ export function TraceDrawer({
   readOnly = false,
   hasApps = false,
   outlet,
-  onFollowingChange,
 }: {
   target: TraceDrawerTarget | null;
   onClose: () => void;
@@ -138,11 +134,6 @@ export function TraceDrawer({
    * is that mode before the tab has mounted, and renders nothing.
    */
   outlet?: HTMLElement | null;
-  /**
-   * Called with true while a running turn target is being followed live and
-   * false otherwise, so a host that draws its own Live indicator can show it.
-   */
-  onFollowingChange?: (following: boolean) => void;
 }) {
   const { t } = useTranslation("activity");
   const [remoteTrace, setRemoteTrace] = useState<TraceSnapshot | null>(null);
@@ -169,14 +160,9 @@ export function TraceDrawer({
   const includeSubagentUsage =
     usageOption.targetKey === remoteTargetKey ? usageOption.include : true;
   const liveTargetKey = target?.kind === "live" ? `${target.sessionId}:${target.turnId}` : null;
-  // A turn opened while running is followed over its stream. Its stored trace
-  // is loaded once, when the stream ends, and is complete by then.
+  // A running turn is followed over its stream; its stored trace loads once it ends.
   const turnStream = useTurnStream(turnTarget?.turnId, { enabled: !!turnTarget?.running });
   const followingTurn = !!turnTarget?.running && !turnStream.done;
-  useEffect(() => {
-    onFollowingChange?.(followingTurn);
-    return () => onFollowingChange?.(false);
-  }, [followingTurn, onFollowingChange]);
 
   useEffect(() => {
     if (!remoteTargetKey) {
@@ -190,9 +176,7 @@ export function TraceDrawer({
       return;
     }
     if (followingTurn) {
-      // Following a running turn replaces whatever the previous target left
-      // behind (a stored trace, an archived or error state), and the stored
-      // trace loads afresh once the stream ends.
+      // Drop what the previous target left behind (stored trace, archived/error state).
       setRemoteTrace(null);
       setArchived(false);
       setError(null);
@@ -256,8 +240,7 @@ export function TraceDrawer({
   const onRetry = remoteTargetKey ? () => setRetryNonce((n) => n + 1) : undefined;
 
   const open = target !== null;
-  // Until the stored trace lands, a followed turn shows what its stream has
-  // delivered, so the panel does not blank when the stream ends.
+  // Until the stored trace lands, show what the stream delivered, so the panel never blanks.
   const streamedSegments = turnTarget?.running && turnStream.segments.length > 0;
   const segments =
     target?.kind === "live"
