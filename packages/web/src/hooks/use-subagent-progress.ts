@@ -14,14 +14,16 @@ export interface SubagentProgress {
 /**
  * Live progress of a running subagent, read from its turn stream (none is opened
  * once it is not running; the stored summary takes over). Elapsed time counts
- * from its first step.
+ * from `startedAtMs` (the call's start), or from its first step when unknown.
  */
 export function useSubagentProgress({
   turnId,
   running,
+  startedAtMs,
 }: {
   turnId: string;
   running: boolean;
+  startedAtMs?: number | null;
 }): SubagentProgress {
   const { t } = useTranslation("activity");
   const stream = useTurnStream(turnId, { enabled: running });
@@ -37,7 +39,7 @@ export function useSubagentProgress({
   if (!running) return { label: null, currentStep: null };
 
   const steps = stream.summary?.totalSteps ?? 0;
-  const startMs = firstStepStartMs(stream.segments);
+  const startMs = startedAtMs ?? firstStepStartMs(stream.segments);
   const elapsed = startMs === null ? null : formatDuration(Math.max(0, now - startMs));
   const stepsLabel =
     steps > 0

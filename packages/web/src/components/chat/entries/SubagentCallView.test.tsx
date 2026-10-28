@@ -99,6 +99,22 @@ describe("SubagentCallView", () => {
       expect(label.title).toContain("Bash");
     });
 
+    it("counts from the call's start, not from its first step", async () => {
+      const turnId = `row-turn-${(seq += 1)}`;
+      render(view(turnId, "running", { startedAt: new Date(Date.now() - 80_000).toISOString() }));
+      await waitFor(() => expect(streams.has(turnId)).toBe(true));
+      const firstStep = new Date(Date.now() - 20_000).toISOString();
+      await act(async () => {
+        const stream = streams.get(turnId)!;
+        stream.send(
+          "segment_upsert",
+          runSegment("run-1", [{ tool: "Bash", input: {}, startedAt: firstStep }]),
+        );
+        stream.send("summary_update", stepsSummary(1));
+      });
+      expect(await screen.findByText("1 step · 1m 20s")).toBeTruthy();
+    });
+
     it("opens no stream for a call that already finished", () => {
       render(view(`row-turn-${(seq += 1)}`, "completed"));
       expect(streams.size).toBe(0);

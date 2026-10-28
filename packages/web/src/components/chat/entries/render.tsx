@@ -102,6 +102,7 @@ export function renderSingleEntry(
           sessionId={block.sessionId}
           turnId={block.turnId}
           status="running"
+          startedAt={block.startedAt}
           live={options.live}
         />
       );
@@ -343,6 +344,7 @@ export function renderFlatEntries(blocks: ChatEntry[], options: RenderEntryOptio
           output={paired?.status === "completed" ? paired.output : undefined}
           error={paired && paired.status !== "completed" ? paired.error : undefined}
           durationMs={subagentCallDurationMs(block, paired)}
+          startedAt={block.startedAt}
           live={live}
         />,
       );

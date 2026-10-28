@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { TraceSegment } from "@rome/api-types/trace-segments";
 import { runSegment } from "@/test/fake-turn-stream";
-import { describeLatestStep, firstStepStartMs } from "./subagent-progress";
+import { describeLatestStep, firstStepStartMs, subagentStartMs } from "./subagent-progress";
 
 describe("describeLatestStep", () => {
   it("is null before the first call", () => {
@@ -39,5 +39,31 @@ describe("start times", () => {
     ];
     expect(firstStepStartMs(segments)).toBe(Date.parse("2026-01-01T00:00:05.000Z"));
     expect(firstStepStartMs([runSegment("a", [{ tool: "Read", input: {} }])])).toBeNull();
+  });
+
+  it("reads a subagent's start from the parent's subagent_start block", () => {
+    const parent: TraceSegment[] = [
+      {
+        kind: "run",
+        id: "p",
+        ordinal: 0,
+        count: 1,
+        app: { id: "x", name: "X", iconUrl: "/i" },
+        blocks: [
+          {
+            type: "subagent_start",
+            toolUseId: "tu-1",
+            agentName: "planning",
+            input: {},
+            sessionId: "s",
+            turnId: "t",
+            startedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      },
+    ];
+    expect(subagentStartMs(parent, "tu-1")).toBe(Date.parse("2026-01-01T00:00:00.000Z"));
+    expect(subagentStartMs(parent, "other")).toBeNull();
+    expect(subagentStartMs(undefined, "tu-1")).toBeNull();
   });
 });

@@ -29,6 +29,7 @@ export function SubagentCallView({
   output,
   error,
   durationMs,
+  startedAt,
   live = false,
 }: {
   agentName: string;
@@ -39,11 +40,18 @@ export function SubagentCallView({
   output?: unknown;
   error?: { message: string; code?: string };
   durationMs?: number;
+  /** ISO start of the call; times the elapsed clock while it runs. */
+  startedAt?: string;
   live?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const running = status === "running";
-  const progress = useSubagentProgress({ turnId, running });
+  const startedAtMs = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const progress = useSubagentProgress({
+    turnId,
+    running,
+    startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : null,
+  });
   const displayAgentName = artifactLocalName(agentName);
   const summary = describeToolSummary(
     displayAgentName,

@@ -39,3 +39,22 @@ export function firstStepStartMs(segments: readonly TraceSegment[]): number | nu
   }
   return earliest;
 }
+
+/**
+ * When the subagent with this tool-use id began, from the parent trace's
+ * `subagent_start` block. Null when the parent has no such block or timestamp.
+ */
+export function subagentStartMs(
+  parentSegments: readonly TraceSegment[] | null | undefined,
+  toolUseId: string,
+): number | null {
+  for (const segment of parentSegments ?? []) {
+    for (const block of segmentBlocks(segment)) {
+      if (block.type === "subagent_start" && block.toolUseId === toolUseId && block.startedAt) {
+        const at = Date.parse(block.startedAt);
+        if (Number.isFinite(at)) return at;
+      }
+    }
+  }
+  return null;
+}

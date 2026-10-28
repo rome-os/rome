@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { TraceSubagentSummary } from "@rome/api-types/trace-segments";
+import type { TraceSegment, TraceSubagentSummary } from "@rome/api-types/trace-segments";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { FakeTurnStream, runSegment, stepsSummary } from "@/test/fake-turn-stream";
 import { DelegatedSubagentGroup } from "./DelegatedSubagentGroup";
@@ -224,6 +224,48 @@ describe("DelegatedSubagentGroup", () => {
       expect(screen.getByRole("button", { name: "Open trace for planning" }).title).toBe(
         "Edit TraceDrawer.tsx",
       );
+    });
+
+    it("counts from the subagent_start in the parent trace, not from the first step", async () => {
+      const parent: TraceSegment[] = [
+        {
+          kind: "run",
+          id: "parent-run",
+          ordinal: 0,
+          count: 1,
+          app: { id: "coding", name: "Coding", iconUrl: "/icon" },
+          blocks: [
+            {
+              type: "subagent_start",
+              toolUseId: "subagent-1",
+              agentName: "coding:planning",
+              input: {},
+              sessionId: "child-session",
+              turnId,
+              startedAt: new Date(Date.now() - 80_000).toISOString(),
+            },
+          ],
+        },
+      ];
+      render(
+        <DelegatedSubagentGroup
+          subagents={[runningChild()]}
+          parentSegments={parent}
+          onOpenSubagentTrace={() => {}}
+        />,
+      );
+      await waitFor(() => expect(streams.has(turnId)).toBe(true));
+      const firstStep = new Date(Date.now() - 20_000).toISOString();
+      await act(async () => {
+        streams
+          .get(turnId)!
+          .send(
+            "segment_upsert",
+            runSegment("run-1", [{ tool: "Read", input: {}, startedAt: firstStep }]),
+          );
+        streams.get(turnId)!.send("summary_update", stepsSummary(1));
+      });
+      expect(await screen.findByText("1 step · 1m 20s")).toBeTruthy();
     });
 
     it("reads 1 step in the singular", async () => {
