@@ -2,6 +2,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { FakeTurnStream, runSegment, stepsSummary } from "@/test/fake-turn-stream";
+import * as chatSse from "@/lib/chat-sse" with { rstest: "importActual" };
 import { useTurnStream } from "./use-turn-stream";
 
 // A plain function rather than rs.fn: rstest reports a rejected promise that an
@@ -9,6 +10,8 @@ import { useTurnStream } from "./use-turn-stream";
 let calls: { turnId: string; signal?: AbortSignal }[] = [];
 let respond: (turnId: string, signal?: AbortSignal) => Promise<Response> = async () =>
   new Response(null, { status: 404 });
+// A short stall timeout, so a read that never resolves can be waited out.
+rs.mock("@/lib/chat-sse", () => ({ ...chatSse, STREAM_STALL_TIMEOUT_MS: 200 }));
 rs.mock("@/lib/chat-api", () => ({
   openTurnStream: (turnId: string, signal?: AbortSignal) => {
     calls.push({ turnId, signal });
@@ -72,14 +75,12 @@ describe("useTurnStream", () => {
     });
     await waitFor(() => expect(result.current.done).toBe(true));
     expect(result.current.segments).toHaveLength(1);
-    expect(result.current.error).toBeNull();
   });
 
-  it("is done without an error when the stream is gone (404)", async () => {
+  it("is done when the stream is gone (404)", async () => {
     respond = async () => new Response("{}", { status: 404 });
     const { result } = renderHook(() => useTurnStream("old-turn"));
     await waitFor(() => expect(result.current.done).toBe(true));
-    expect(result.current.error).toBeNull();
     expect(result.current.segments).toEqual([]);
   });
 
@@ -99,105 +100,112 @@ describe("useTurnStream", () => {
         first.close();
       });
 
-      await waitFor(() => expect(result.current.error).toBe("Stream closed"));
+      await waitFor(() => expect(result.current.segments).toHaveLength(1));
       expect(result.current.done).toBe(false);
-      expect(result.current.endedAt).toBeNull();
       expect(result.current.segments).toHaveLength(1);
 
       // The server replays the turn from its start on the new connection.
       await waitFor(() => expect(calls).toHaveLength(2), RETRY_WAIT);
       await act(async () => {
+        // The server replays the turn from its start, then goes on.
         second.send("segment_upsert", runSegment("run-1", [{ tool: "Bash", input: {} }]));
+        second.send("summary_update", stepsSummary(1));
         second.send("segment_upsert", runSegment("run-2", [{ tool: "Read", input: {} }]));
         second.send("summary_update", stepsSummary(2));
         second.send("done", { success: true });
       });
       await waitFor(() => expect(result.current.done).toBe(true));
-      expect(result.current.error).toBeNull();
       expect(result.current.segments.map((s) => s.id)).toEqual(["run-1", "run-2"]);
       expect(result.current.summary?.totalSteps).toBe(2);
     });
 
-    it("retries a failed request and a non-404 HTTP error without ending", async () => {
-      const stream = new FakeTurnStream();
+    it("retries a failed request and a 503, then ends on a 404", async () => {
       const outcomes: (() => Promise<Response>)[] = [
         () => Promise.reject(new Error("offline")),
         async () => new Response("{}", { status: 503 }),
-        async () => stream.response,
-      ];
-      respond = () => (outcomes.shift() ?? (async () => stream.response))();
-      const { result } = renderHook(() => useTurnStream("child-turn-2"));
-
-      await waitFor(() => expect(result.current.error).toBe("offline"));
-      expect(result.current.done).toBe(false);
-      await waitFor(() => expect(result.current.error).toBe("HTTP 503"), RETRY_WAIT);
-      expect(result.current.done).toBe(false);
-      await waitFor(() => expect(calls).toHaveLength(3), RETRY_WAIT);
-      await waitFor(() => expect(result.current.error).toBeNull());
-      expect(result.current.done).toBe(false);
-    });
-
-    it("ends on a 404 after a failed attempt", async () => {
-      const outcomes: (() => Promise<Response>)[] = [
-        () => Promise.reject(new Error("offline")),
         async () => new Response("{}", { status: 404 }),
       ];
       respond = () => (outcomes.shift() ?? (async () => new Response("{}", { status: 404 })))();
-      const { result } = renderHook(() => useTurnStream("child-turn-4"));
-      await waitFor(() => expect(result.current.done).toBe(true), RETRY_WAIT);
-      expect(result.current.error).toBeNull();
-    });
-
-    it("keeps the shown snapshot while a reconnect replays history, and swaps once caught up", async () => {
-      const first = new FakeTurnStream();
-      const second = new FakeTurnStream();
-      const streams = [first, second];
-      respond = async () => streams.shift()?.response ?? new Response(null, { status: 404 });
-      const { result } = renderHook(() => useTurnStream("replay-turn-1"));
-      await act(async () => {
-        first.send("segment_upsert", runSegment("run-1", [{ tool: "Bash", input: {} }]));
-        first.send("segment_upsert", runSegment("run-2", [{ tool: "Read", input: {} }]));
-        first.send("summary_update", stepsSummary(7));
-        first.close();
-      });
-      await waitFor(() => expect(result.current.error).toBe("Stream closed"));
-      await waitFor(() => expect(calls).toHaveLength(2), RETRY_WAIT);
-
-      // The server starts over: a zero-step summary, then older versions, in separate chunks.
-      await act(async () => second.send("summary_update", stepsSummary(0)));
-      await act(async () => second.send("segment_upsert", runSegment("run-1", [])));
-      await act(async () => second.send("summary_update", stepsSummary(3)));
-      await act(async () => new Promise((r) => setTimeout(r, 20)));
-      expect(result.current.summary?.totalSteps).toBe(7);
-      expect(result.current.segments.map((s) => s.id)).toEqual(["run-1", "run-2"]);
-      const shown = result.current.segments[0];
-      expect(shown.kind === "run" && shown.blocks).toHaveLength(1);
-
-      await act(async () => {
-        second.send("segment_upsert", runSegment("run-2", [{ tool: "Read", input: {} }]));
-        second.send("summary_update", stepsSummary(8));
-      });
-      await waitFor(() => expect(result.current.summary?.totalSteps).toBe(8));
+      const { result } = renderHook(() => useTurnStream("child-turn-2"));
+      await act(async () => new Promise((r) => setTimeout(r, 100)));
       expect(result.current.done).toBe(false);
+      await waitFor(() => expect(result.current.done).toBe(true), { timeout: 5_000 });
+      expect(calls).toHaveLength(3);
     });
 
-    it("ends without losing the shown snapshot when the replay ends before catching up", async () => {
+    it("resumes exactly after a reconnect: the replay never lowers what is shown", async () => {
       const first = new FakeTurnStream();
       const second = new FakeTurnStream();
       const streams = [first, second];
       respond = async () => streams.shift()?.response ?? new Response(null, { status: 404 });
-      const { result } = renderHook(() => useTurnStream("replay-turn-2"));
+      const seen: (number | undefined)[] = [];
+      const { result } = renderHook(() => {
+        const state = useTurnStream("replay-turn-1");
+        seen.push(state.summary?.totalSteps);
+        return state;
+      });
       await act(async () => {
-        first.send("summary_update", stepsSummary(7));
+        first.send("summary_update", stepsSummary(0));
+        first.send("segment_upsert", runSegment("run-1", [{ tool: "Bash", input: {} }]));
+        first.send("summary_update", stepsSummary(1));
+        first.send(
+          "segment_upsert",
+          runSegment("run-1", [
+            { tool: "Bash", input: {} },
+            { tool: "Read", input: {} },
+          ]),
+        );
+        first.send("summary_update", stepsSummary(2));
         first.close();
       });
       await waitFor(() => expect(calls).toHaveLength(2), RETRY_WAIT);
+      expect(result.current.summary?.totalSteps).toBe(2);
+
+      // The same events again, one chunk at a time, then new ones.
+      await act(async () => second.send("summary_update", stepsSummary(0)));
       await act(async () => {
-        second.send("summary_update", stepsSummary(0));
-        second.send("done", { success: true });
+        second.send("segment_upsert", runSegment("run-1", [{ tool: "Bash", input: {} }]));
       });
-      await waitFor(() => expect(result.current.done).toBe(true));
-      expect(result.current.summary?.totalSteps).toBe(7);
+      await act(async () => second.send("summary_update", stepsSummary(1)));
+      await act(async () => {
+        second.send(
+          "segment_upsert",
+          runSegment("run-1", [
+            { tool: "Bash", input: {} },
+            { tool: "Read", input: {} },
+          ]),
+        );
+        second.send("summary_update", stepsSummary(2));
+      });
+      expect(result.current.summary?.totalSteps).toBe(2);
+      const run = result.current.segments[0];
+      expect(run.kind === "run" && run.blocks).toHaveLength(2);
+      await act(async () => {
+        second.send("segment_upsert", runSegment("run-2", [{ tool: "Edit", input: {} }]));
+        second.send("summary_update", stepsSummary(3));
+      });
+      await waitFor(() => expect(result.current.summary?.totalSteps).toBe(3));
+      expect(result.current.segments.map((s) => s.id)).toEqual(["run-1", "run-2"]);
+      // No snapshot of any reader went backwards or blank.
+      const counts = seen.filter((n): n is number => n !== undefined);
+      expect(counts).toEqual([...counts].sort((a, b) => a - b));
+    });
+
+    it("reopens the stream when a read stays pending, keeping the snapshot", async () => {
+      const first = new FakeTurnStream();
+      const second = new FakeTurnStream();
+      const streams = [first, second];
+      respond = async () => streams.shift()?.response ?? new Response(null, { status: 404 });
+      const { result } = renderHook(() => useTurnStream("stalled-turn"));
+      await act(async () => {
+        first.send("summary_update", stepsSummary(5));
+      });
+      await waitFor(() => expect(result.current.summary?.totalSteps).toBe(5));
+
+      // Nothing more arrives and the connection is never closed.
+      await waitFor(() => expect(calls).toHaveLength(2), RETRY_WAIT);
+      expect(result.current.done).toBe(false);
+      expect(result.current.summary?.totalSteps).toBe(5);
     });
 
     it.each([401, 403])("stops retrying on HTTP %i and keeps the snapshot", async (status) => {
@@ -212,8 +220,7 @@ describe("useTurnStream", () => {
         first.send("summary_update", stepsSummary(4));
         first.close();
       });
-      await waitFor(() => expect(result.current.error).toBe(`HTTP ${status}`), RETRY_WAIT);
-      expect(result.current.done).toBe(true);
+      await waitFor(() => expect(result.current.done).toBe(true), RETRY_WAIT);
       expect(result.current.summary?.totalSteps).toBe(4);
       await act(async () => new Promise((r) => setTimeout(r, 1_300)));
       expect(calls).toHaveLength(2);
@@ -221,27 +228,12 @@ describe("useTurnStream", () => {
 
     it("stops retrying once the last reader leaves", async () => {
       respond = () => Promise.reject(new Error("offline"));
-      const { result, unmount } = renderHook(() => useTurnStream("child-turn-5"));
-      await waitFor(() => expect(result.current.error).toBe("offline"));
+      const { unmount } = renderHook(() => useTurnStream("child-turn-5"));
+      await waitFor(() => expect(calls).toHaveLength(1));
       unmount();
       await act(async () => new Promise((r) => setTimeout(r, 1_300)));
       expect(calls).toHaveLength(1);
     });
-  });
-
-  it("stamps the end once, so every reader shares it", async () => {
-    const stream = new FakeTurnStream();
-    respond = async () => stream.response;
-    const a = renderHook(() => useTurnStream("ended-turn"));
-    expect(a.result.current.endedAt).toBeNull();
-    await act(async () => stream.send("done", { success: true }));
-    await waitFor(() => expect(a.result.current.done).toBe(true));
-    const endedAt = a.result.current.endedAt;
-    expect(endedAt).not.toBeNull();
-
-    await act(async () => new Promise((r) => setTimeout(r, 20)));
-    const b = renderHook(() => useTurnStream("ended-turn"));
-    expect(b.result.current.endedAt).toBe(endedAt);
   });
 
   it("opens no stream while disabled", () => {

@@ -1,47 +1,38 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type { TraceSegment, TraceSummary } from "@rome/api-types/trace-segments";
 import { openTurnStream } from "@/lib/chat-api";
-import { parseSSEEvents } from "@/lib/chat-sse";
+import {
+  parseSSEEvents,
+  STREAM_STALL_TIMEOUT_MS,
+  TURN_RESUME_BASE_DELAY_MS,
+  TURN_RESUME_MAX_DELAY_MS,
+} from "@/lib/chat-sse";
 
 export interface TurnStreamState {
   /** Segments in arrival order; an upsert replaces the segment with the same id. */
   segments: TraceSegment[];
   summary: TraceSummary | null;
   /**
-   * The turn has ended: the server sent `done`, or the turn's stream was gone
-   * (404 after its retention window). Only then is the stored trace the record,
-   * so a reader should fetch it. A dropped connection is not an end: the last
-   * snapshot stays and the stream is reopened.
+   * The turn ended: the server sent `done`, the stream was gone (404), or the
+   * request was refused (401/403). Then the stored trace is the record. A dropped
+   * connection is not an end: the snapshot stays and the stream is reopened.
    */
   done: boolean;
-  /** When `done` was applied (ms since epoch), so every reader shows the same end. */
-  endedAt: number | null;
-  /** The last transport failure, while the stream is being reopened. Never ends the turn. */
-  error: string | null;
 }
 
-const IDLE: TurnStreamState = {
-  segments: [],
-  summary: null,
-  done: false,
-  endedAt: null,
-  error: null,
-};
-
-// The same backoff as Chat's followTurn.
-const RETRY_BASE_DELAY_MS = 1_000;
-const RETRY_MAX_DELAY_MS = 5_000;
+const IDLE: TurnStreamState = { segments: [], summary: null, done: false };
 
 interface Entry {
   state: TurnStreamState;
+  /** Segment and summary events applied so far; a reconnect skips that many. */
+  applied: number;
   listeners: Set<() => void>;
   controller: AbortController;
   releaseTimer: ReturnType<typeof setTimeout> | null;
 }
 
 // One connection per turn, shared by every mounted reader of that turn (a chip
-// and a row showing the same subagent). The entry lives while a reader is
-// mounted and closes the connection when the last one leaves.
+// and a row showing the same subagent). It closes when the last reader leaves.
 const entries = new Map<string, Entry>();
 
 function setState(entry: Entry, next: TurnStreamState) {
@@ -49,141 +40,86 @@ function setState(entry: Entry, next: TurnStreamState) {
   for (const listener of entry.listeners) listener();
 }
 
-function applyEvents(state: TurnStreamState, events: { event: string; data: string }[]) {
-  let segments = state.segments;
-  let summary = state.summary;
-  let done = state.done;
-  let copied = false;
+// A reconnect replays the turn from its start, and the server derives these
+// events from the turn's append-only message list, so the replay repeats the
+// events already applied, in order. Skipping that many resumes exactly.
+function applyEvents(entry: Entry, events: { event: string; data: string }[], seen: number) {
+  let { segments, summary, done } = entry.state;
+  segments = segments.slice();
   for (const { event, data } of events) {
-    if (event === "segment_upsert") {
-      const segment = JSON.parse(data) as TraceSegment;
-      if (!copied) {
-        segments = segments.slice();
-        copied = true;
+    if (event === "segment_upsert" || event === "summary_update") {
+      seen += 1;
+      if (seen <= entry.applied) continue;
+      entry.applied = seen;
+      const value = JSON.parse(data);
+      if (event === "summary_update") summary = value as TraceSummary;
+      else {
+        const at = segments.findIndex((segment) => segment.id === value.id);
+        if (at < 0) segments.push(value as TraceSegment);
+        else segments[at] = value as TraceSegment;
       }
-      const at = segments.findIndex((existing) => existing.id === segment.id);
-      if (at < 0) segments.push(segment);
-      else segments[at] = segment;
-    } else if (event === "summary_update") {
-      summary = JSON.parse(data) as TraceSummary;
     } else if (event === "done" || event === "stream_error") {
       done = true;
     }
   }
-  const endedAt = done && !state.done ? Date.now() : state.endedAt;
-  return { ...state, segments, summary, done, endedAt };
+  setState(entry, { segments, summary, done });
+  return seen;
 }
 
-function end(entry: Entry, error: string | null = null) {
-  setState(entry, {
-    ...entry.state,
-    done: true,
-    endedAt: entry.state.endedAt ?? Date.now(),
-    error,
-  });
-}
-
-// A reconnect replays the turn from its start, so its early events are older
-// than what the readers already show. They are applied to a copy and swapped in
-// once the copy has caught up.
-function caughtUp(replay: TurnStreamState, shown: TurnStreamState) {
-  return (
-    (replay.summary?.totalSteps ?? 0) >= (shown.summary?.totalSteps ?? 0) &&
-    replay.segments.length >= shown.segments.length
-  );
-}
-
-/** Reads one connection. Resolves true when the turn ended, false on a transport failure. */
+/** Reads one connection. True when the turn ended, false on a transport failure. */
 async function readOnce(turnId: string, entry: Entry): Promise<boolean> {
-  const { signal } = entry.controller;
   try {
-    const response = await openTurnStream(turnId, signal);
-    if (response.status === 404) {
-      end(entry);
-      return true;
-    }
-    if (response.status === 401 || response.status === 403) {
-      // Retrying cannot succeed. The last snapshot stays, the run is treated as
-      // over for this reader (the clock stops, the drawer asks for the stored
-      // trace, which surfaces the same error with its own retry).
+    const response = await openTurnStream(turnId, entry.controller.signal);
+    // Retrying cannot help after a 404 (stream gone) or a 401/403.
+    if ([401, 403, 404].includes(response.status)) {
       void response.body?.cancel().catch(() => {});
-      end(entry, `HTTP ${response.status}`);
+      setState(entry, { ...entry.state, done: true });
       return true;
     }
     if (!response.ok || !response.body) {
       void response.body?.cancel().catch(() => {});
-      setState(entry, { ...entry.state, error: `HTTP ${response.status}` });
       return false;
     }
-    if (entry.state.error) setState(entry, { ...entry.state, error: null });
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let replay: TurnStreamState | null =
-      entry.state.summary || entry.state.segments.length > 0 ? IDLE : null;
+    let seen = 0;
     while (!entry.state.done) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
+      // The same stall watchdog as Chat.consumeStream: a connection that went
+      // quiet (mobile background, network swap) never rejects the read.
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise<"stalled">((resolve) => {
+          stallTimer = setTimeout(() => resolve("stalled"), STREAM_STALL_TIMEOUT_MS);
+        }),
+      ]).finally(() => clearTimeout(stallTimer));
+      if (chunk === "stalled" || chunk.done) break;
       buffer += decoder.decode(chunk.value, { stream: true });
       const boundary = buffer.lastIndexOf("\n\n");
       if (boundary < 0) continue;
       const complete = buffer.slice(0, boundary + 2);
       buffer = buffer.slice(boundary + 2);
-      const events = parseSSEEvents(complete);
-      if (!replay) {
-        setState(entry, applyEvents(entry.state, events));
-        continue;
-      }
-      replay = applyEvents(replay, events);
-      if (caughtUp(replay, entry.state)) {
-        setState(entry, replay);
-        replay = null;
-      } else if (replay.done) {
-        // Ended before catching up: keep what is shown, the stored trace is the record.
-        end(entry);
-      }
+      seen = applyEvents(entry, parseSSEEvents(complete), seen);
     }
     await reader.cancel().catch(() => {});
-    if (entry.state.done) return true;
-    // EOF without `done`: the connection dropped, the turn did not end.
-    setState(entry, { ...entry.state, error: "Stream closed" });
-    return false;
-  } catch (err) {
-    if (!signal.aborted) {
-      setState(entry, {
-        ...entry.state,
-        error: err instanceof Error ? err.message : "Stream failed",
-      });
-    }
-    return false;
+    return entry.state.done;
+  } catch {
+    return entry.state.done;
   }
 }
 
-// Follows the turn until it ends or the last reader leaves. The server replays a
-// turn from its start (and 404s once it is gone), so each reconnect gets a
-// complete, definitive answer; the snapshot is kept meanwhile.
+// Follows the turn until it ends or the last reader leaves, reopening a dropped
+// stream with the backoff of Chat.followTurn.
 async function run(turnId: string, entry: Entry) {
   const { signal } = entry.controller;
-  let delayMs = RETRY_BASE_DELAY_MS;
-  while (!signal.aborted) {
-    const openedAt = Date.now();
-    if (await readOnce(turnId, entry)) return;
-    if (signal.aborted) return;
-    // Retry fast after a connection that held; keep backing off when streams
-    // keep closing right away.
-    if (Date.now() - openedAt >= RETRY_MAX_DELAY_MS) delayMs = RETRY_BASE_DELAY_MS;
+  let delayMs = TURN_RESUME_BASE_DELAY_MS;
+  while (!signal.aborted && !(await readOnce(turnId, entry))) {
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, delayMs);
-      signal.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        { once: true },
-      );
+      signal.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
     });
-    delayMs = Math.min(delayMs * 2, RETRY_MAX_DELAY_MS);
+    delayMs = Math.min(delayMs * 2, TURN_RESUME_MAX_DELAY_MS);
   }
 }
 
@@ -192,6 +128,7 @@ function acquire(turnId: string, listener: () => void): () => void {
   if (!entry) {
     entry = {
       state: IDLE,
+      applied: 0,
       listeners: new Set(),
       controller: new AbortController(),
       releaseTimer: null,
@@ -199,17 +136,14 @@ function acquire(turnId: string, listener: () => void): () => void {
     entries.set(turnId, entry);
     void run(turnId, entry);
   }
-  if (entry.releaseTimer) {
-    clearTimeout(entry.releaseTimer);
-    entry.releaseTimer = null;
-  }
+  if (entry.releaseTimer) clearTimeout(entry.releaseTimer);
+  entry.releaseTimer = null;
   entry.listeners.add(listener);
   const held = entry;
   return () => {
     held.listeners.delete(listener);
     if (held.listeners.size > 0) return;
-    // A zero-delay grace absorbs a reader that unmounts and remounts in the
-    // same commit (StrictMode, a keyed re-render) without reopening the stream.
+    // Zero-delay grace: a reader that remounts in the same commit keeps the stream.
     held.releaseTimer = setTimeout(() => {
       if (held.listeners.size > 0) return;
       held.controller.abort();
@@ -218,12 +152,7 @@ function acquire(turnId: string, listener: () => void): () => void {
   };
 }
 
-/**
- * Follows a running agent turn's trace over `GET /api/chat/turns/:id/stream`.
- * The server replays the turn from its start, so the state is complete from
- * the first read. Pass `enabled: false` (or a null turn) to hold no connection.
- * Readers of one turn share a single connection.
- */
+/** Follows a running turn over `GET /api/chat/turns/:id/stream`. Readers share one connection. */
 export function useTurnStream(
   turnId: string | null | undefined,
   { enabled = true }: { enabled?: boolean } = {},

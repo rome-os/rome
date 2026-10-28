@@ -96,7 +96,12 @@ import type {
   DoneEventData,
 } from "@/lib/chat-types";
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
-import { parseSSEEvents } from "@/lib/chat-sse";
+import {
+  parseSSEEvents,
+  STREAM_STALL_TIMEOUT_MS,
+  TURN_RESUME_BASE_DELAY_MS,
+  TURN_RESUME_MAX_DELAY_MS,
+} from "@/lib/chat-sse";
 import {
   mergeChatMessage,
   mergeFetchedChatMessages,
@@ -137,20 +142,6 @@ const TIMELINE_LANDING_MS = 900;
 // Stable empty list so `messages.get(sid) ?? EMPTY_MESSAGES` keeps a constant
 // reference (avoids re-running submission gates every render).
 const EMPTY_MESSAGES: ChatMessage[] = [];
-
-// The turn SSE server emits a keepalive every 15s (TURN_STREAM_KEEPALIVE_
-// INTERVAL_MS in webchat.ts). If nothing arrives for this long the connection
-// is dead — mobile background/lock, proxy idle timeout, network swap — and the
-// reader would otherwise hang forever with no error, leaving the streaming UI
-// (and the Stop button's turnId) stuck on a stale turn. Three missed
-// keepalives + margin.
-const STREAM_STALL_TIMEOUT_MS = 50_000;
-
-// A dropped turn stream is retried against the same turnId. Short and capped:
-// the server answers definitively (replayed `done`, or 404 once the turn is
-// gone), so a retry is cheap, and a resumed mobile tab catches up quickly.
-const TURN_RESUME_BASE_DELAY_MS = 1_000;
-const TURN_RESUME_MAX_DELAY_MS = 5_000;
 
 // After an interrupt is accepted, a healthy stream delivers `done` almost
 // immediately. If the local streaming entry survives this grace period the
@@ -390,9 +381,6 @@ export function Chat({
   const [streamReconnectRevision, setStreamReconnectRevision] = useState(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
-  // A subagent's trace opened mid-run is followed live by the drawer; the drawer
-  // reports it so the Trace tab can show Live for it as it does for ours.
-  const [followingSubagentTrace, setFollowingSubagentTrace] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   // Inline share flow: pick turns directly on the transcript.
   const [shareMode, setShareMode] = useState(false);
@@ -1959,9 +1947,7 @@ export function Chat({
   const traceOwner = useId();
   const setToolTrace = toolTrace.set;
   const traceOpen = traceDrawerTarget !== null;
-  const traceStreaming =
-    (traceDrawerTarget?.kind === "live" && traceDrawerTarget.streaming) ||
-    (traceDrawerTarget?.kind === "turn" && followingSubagentTrace);
+  const traceStreaming = traceDrawerTarget?.kind === "live" && traceDrawerTarget.streaming;
   const closeTraceRef = useRef(closeTraceDrawer);
   closeTraceRef.current = closeTraceDrawer;
   useEffect(() => {
@@ -2327,7 +2313,6 @@ export function Chat({
           target={traceDrawerTarget}
           onClose={closeTraceDrawer}
           outlet={toolTrace.outlet}
-          onFollowingChange={setFollowingSubagentTrace}
           renderInlineBlock={(block, key) =>
             renderSingleEntry(block, key, {
               onApprovalResolved: refreshActiveSession,
