@@ -114,7 +114,8 @@ export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBoots
     setError(null);
     try {
       const res = await fetchAppApi(`scouts/${id}/run`, { method: "POST" });
-      if (!res.ok) throw new Error(await readError(res));
+      // A failed run still adds a row to the scout's history, so reload either way.
+      if (!res.ok) setError(await readError(res));
       await loadState();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
