@@ -1,4 +1,4 @@
-import { Fragment, memo, useMemo, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { ConciergeBubble } from "@/components/chat/ConciergeBubble";
@@ -105,14 +105,15 @@ function AgentEntry({
       );
     }
     if (part.type !== "text") {
+      // The message id tells the Needs you jump which reply a card belongs to.
       return (
-        <Fragment key={key}>
+        <div key={key} data-chat-card-message={message.id} className="contents">
           {renderFlatEntries([part], {
             ...actions,
             sessionId: message.sessionId,
             turnId: message.turnId ?? undefined,
           })}
-        </Fragment>
+        </div>
       );
     }
     if (!part.content.trim()) return null;

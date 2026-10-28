@@ -37,10 +37,19 @@ describe("AppComponentView", () => {
     expect(onDismiss).toHaveBeenCalledWith("tool-1");
   });
 
+  it("keeps a card that cannot load marked as waiting until it is dismissed", async () => {
+    renderFailingCard();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.dataset.chatPendingCard).toBe("");
+    expect(alert.tabIndex).toBe(-1);
+  });
+
   it("offers no dismiss once the card has an answer", async () => {
     renderFailingCard({ dismissed: true });
 
     await screen.findByText(/App is disabled/);
     expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    expect(screen.getByRole("alert").dataset.chatPendingCard).toBeUndefined();
   });
 });

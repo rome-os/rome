@@ -177,3 +177,30 @@ describe("bubble arrival styles", () => {
     );
   });
 });
+
+describe("ConciergeTranscript waiting cards", () => {
+  it("tags a card with its message, so Needs you can tell it is in the current reply", () => {
+    const question: ChatMessage = {
+      ...agent("a1", "t1"),
+      content: JSON.stringify([
+        {
+          type: "pending_interaction",
+          toolUseId: "q1",
+          appId: "core",
+          render: {
+            kind: "inline",
+            builtin: true,
+            componentId: "question-card",
+            props: { questions: [{ id: "day", question: "Which day?", type: "text" }] },
+          },
+        },
+        { type: "text", content: "Pick a day above." },
+      ]),
+    };
+    const { container } = render(transcript([user("u1", "t1"), question]));
+    const card = container.querySelector<HTMLElement>("[data-chat-pending-card]");
+    expect(card?.closest<HTMLElement>("[data-chat-card-message]")?.dataset.chatCardMessage).toBe(
+      "a1",
+    );
+  });
+});

@@ -168,7 +168,12 @@ export function AppComponentView({
 
   if (error) {
     return (
-      <Alert variant="destructive" className="mb-4 rounded-12">
+      <Alert
+        variant="destructive"
+        tabIndex={-1}
+        data-chat-pending-card={!resolved ? "" : undefined}
+        className="mb-4 rounded-12"
+      >
         <AlertDescription>
           Couldn’t load <span className="font-mono">{componentId}</span> from{" "}
           <span className="font-mono">{appId}</span>: {error}
