@@ -27,7 +27,7 @@ function Harness({
 }: {
   questionResult?: Record<string, unknown>;
   currentReplyMessageIds?: ReadonlySet<string>;
-  kind?: "routine" | "app" | "ai" | "approval";
+  kind?: "routine" | "app" | "ai" | "approval" | "question";
   aiResult?: Record<string, unknown>;
 }) {
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
@@ -39,16 +39,16 @@ function Harness({
         <div ref={setContent}>
           <div data-chat-card-message="message">
             {kind === "approval" ? (
-              <div data-chat-pending-card="">Pending approval</div>
+              <div data-chat-pending-card="approval">Pending approval</div>
             ) : kind === "app" ? (
-              <div data-chat-pending-card="proposal">App form</div>
+              <div data-chat-pending-card="">App form</div>
             ) : kind === "ai" ? (
               <AiToolsCard toolUseId="ai" result={aiResult} onSubmit={() => {}} />
-            ) : questionResult ? (
+            ) : kind === "question" || questionResult ? (
               <QuestionCard
                 toolUseId="question"
                 props={{ questions: [{ id: "q", question: "When?", type: "text" }] }}
-                result={questionResult.resolved as Record<string, unknown> | undefined}
+                result={questionResult?.resolved as Record<string, unknown> | undefined}
                 onSubmit={() => {}}
                 onDismiss={() => {}}
               />
@@ -160,7 +160,7 @@ describe("ChatPendingCardJump", () => {
     render(<Harness kind="approval" currentReplyMessageIds={new Set(["other-message"])} />);
     await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
   });
-  for (const kind of ["routine", "app"] as const) {
+  for (const kind of ["routine", "app", "ai", "question"] as const) {
     it(`stops reminding about an ignored ${kind} when the current reply changes`, async () => {
       const view = render(<Harness kind={kind} />);
       await screen.findByRole("button", { name: "Needs you: jump to waiting card" });

@@ -141,7 +141,7 @@ for (const kind of ["routine", "app"] as const) {
       page,
     }) => {
       await openWaitingCard(page, kind, followUp);
-      const cards = page.locator("[data-chat-pending-card=proposal]");
+      const cards = page.locator("[data-chat-pending-card]");
       await expect(cards).toHaveCount(followUp === "text" ? 1 : 2);
       const jump = page.getByRole("button", { name: "Needs you: jump to waiting card" });
       if (followUp === "text") {

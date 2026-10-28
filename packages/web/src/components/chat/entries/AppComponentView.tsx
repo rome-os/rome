@@ -194,7 +194,7 @@ export function AppComponentView({
   return (
     <div
       tabIndex={-1}
-      data-chat-pending-card={!resolved ? "proposal" : undefined}
+      data-chat-pending-card={!resolved ? "" : undefined}
       data-ui-scale={scale}
       ref={rootRef}
       className="mb-4"

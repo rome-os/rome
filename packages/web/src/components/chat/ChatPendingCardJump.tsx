@@ -29,8 +29,10 @@ export function ChatPendingCardJump({
       // Cards mark their live state: transcript JSON cannot tell a draft from
       // a routine that was already turned on, or an approval resolved elsewhere.
       const cards = content.querySelectorAll<HTMLElement>("[data-chat-pending-card]");
+      // Only an approval waits across turns, since the server holds it until it
+      // is resolved. Any other card stops counting once a newer turn starts.
       const next = Array.from(cards).find((card) => {
-        if (card.dataset.chatPendingCard === "proposal") {
+        if (card.dataset.chatPendingCard !== "approval") {
           const messageId = card.closest<HTMLElement>("[data-chat-card-message]")?.dataset
             .chatCardMessage;
           if (!messageId || !currentReplyMessageIds.has(messageId)) return false;

@@ -47,7 +47,7 @@ export function ApprovalCard({
   return (
     <div
       tabIndex={-1}
-      data-chat-pending-card={record && status === "pending" ? "" : undefined}
+      data-chat-pending-card={record && status === "pending" ? "approval" : undefined}
       className="mb-3 overflow-hidden rounded-12 border border-warning-border bg-warning-bg/60"
     >
       <div className="flex items-center justify-between border-b border-warning-border bg-warning-bg px-4 py-2">
