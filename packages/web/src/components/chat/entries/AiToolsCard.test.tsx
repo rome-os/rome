@@ -292,7 +292,8 @@ describe("AiToolsCard", () => {
 
     render(<AiToolsCard toolUseId="t-1" onSubmit={onSubmit} />);
 
-    expect(await screen.findByRole("button", { name: "Try again" })).toBeTruthy();
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    expect(retry.closest("[data-chat-pending-card]")).not.toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(onSubmit).toHaveBeenCalledOnce();
   });

@@ -2322,7 +2322,7 @@ export function Chat({
                   {/* Sits on the composer's top-right corner, clear of the
                       centered jump to latest. */}
                   {mainSessionId && (
-                    <div className="pointer-events-none absolute right-0 bottom-full mb-1.5">
+                    <div className="pointer-events-none absolute right-0 bottom-full mb-2">
                       <ChatPendingCardJump
                         scroller={scrollerEl}
                         content={contentEl}

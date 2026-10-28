@@ -144,7 +144,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
   return (
     <div
       tabIndex={-1}
-      data-chat-pending-card={!resolved && probe === "absent" ? "" : undefined}
+      data-chat-pending-card={!resolved && (probe === "absent" || failed) ? "" : undefined}
       className="mb-4 rounded-12 border border-border bg-surface"
     >
       <div className="p-4">
