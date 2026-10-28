@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.9.4](https://github.com/rome-os/rome/compare/app-runtime-v0.9.3...app-runtime-v0.9.4) (2026-10-28)
+
+
+### Features
+
+* **app-runtime:** name accounts in person mapping and sentinel entries ([#1472](https://github.com/rome-os/rome/issues/1472)) ([20afa03](https://github.com/rome-os/rome/commit/20afa039f68d3ced3e4541d72fa6c8caf1d68421))
+
 ## [0.9.3](https://github.com/rome-os/rome/compare/app-runtime-v0.9.2...app-runtime-v0.9.3) (2026-10-27)
 
 
