@@ -28,7 +28,7 @@ import { AppStoreSheet } from "@/components/AppStoreSheet";
 import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TileIcon } from "@/components/app-tile-icon";
 import { getHostAppRoute } from "@/lib/auth-routing";
-import { isCarrierApp } from "@/lib/chat-helpers";
+import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import { isImeCompositionEvent } from "@/lib/keyboard-submit";
 import { cn } from "@/lib/utils";
 import { ListToolbar } from "@rome-os/ui/layout-list";
@@ -338,8 +338,8 @@ export default function AppsIndexPage() {
   // `null` while the installed list is still loading — kept distinct from the
   // empty array so the skeleton (loading) and the empty state (no matches) don't
   // collide. Filtering applies live once the list lands.
-  // Carrier apps (e.g. user-skills) are installed plumbing, not destinations.
-  const launcherApps = apps === null ? null : apps.filter((app) => !isCarrierApp(app.id));
+  // Carriers (e.g. user-skills) and apps that opt out are not destinations.
+  const launcherApps = apps === null ? null : apps.filter((app) => !isHiddenInLauncher(app));
   const visibleApps = launcherApps === null ? null : launcherApps.filter(matchesApp);
   // The grid is sectioned by the server-derived provenance (`AppOrigin`):
   // apps built on this instance, App Store installs, and the built-in group,
@@ -359,11 +359,7 @@ export default function AppsIndexPage() {
       <AppTile
         key={`builtin:${entry.id}`}
         ariaLabel={label}
-        clickTarget={
-          entry.id === "store"
-            ? { type: "action", onClick: () => setStoreOpen(true) }
-            : { type: "link", href: entry.href }
-        }
+        clickTarget={{ type: "link", href: entry.href }}
         menuLabel={t("installed.moreActionsAria", { name: label })}
         menu={
           isRequiredBuiltinPin(entry.id) ? null : (

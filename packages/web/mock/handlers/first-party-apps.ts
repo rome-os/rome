@@ -10,7 +10,6 @@ import codingIcon from "../../../../rome_apps/coding/assets/icon.svg";
 import connectorIcon from "../../../../rome_apps/connector/assets/icon.svg";
 import dreamIcon from "../../../../rome_apps/dream/assets/icon.svg";
 import inboxIcon from "../../../../rome_apps/inbox/assets/icon.svg";
-import recapIcon from "../../../../rome_apps/recap/assets/icon.svg";
 import showcasesIcon from "../../../../rome_apps/showcases/src/assets/icon.svg";
 import skillsIcon from "../../../../rome_apps/skills/assets/icon.svg";
 import systemIcon from "../../../../rome_apps/system/assets/icon.svg";
@@ -21,7 +20,7 @@ import workflowStudioIcon from "../../../../rome_apps/workflow-studio/src/assets
 // `pnpm build:apps` packs into dist/first-party-artifacts/ and boot installs.
 // Each field is copied from that app.yaml. `hasFrontend` mirrors whether the
 // manifest declares `web:`. Core still lists an app without one (assistant),
-// with no open link.
+// with no open link. `hideInLauncher` mirrors the manifest's top-level flag.
 const definitions = [
   {
     id: "assistant",
@@ -31,6 +30,7 @@ const definitions = [
       'General assistance agents and routine-management guidance. Provides the routine-from-chat skill — reach for it first whenever the guardian wants something to happen automatically: it turns a plain-language "do this automatically" request into an event-triggered ("text me when I get an email from my landlord") or scheduled ("remind me every Friday at 9am") routine instead of hand-building a trigger.',
     hasFrontend: false,
     iconUrl: assistantIcon,
+    hideInLauncher: true,
   },
   {
     id: "briefing",
@@ -49,6 +49,7 @@ const definitions = [
       "Operate the agent's browser to visit and act on websites via predefined automation actions/scripts exposed by the `opencli` tool. You can get the supported commands by running shell command `opencli <site_name> --help`, where site_name can be amazon, google, instagram, linkedin, producthunt, substack, twitter, wikipedia, xiaohongshu, youtube or more. To know all available commands, run `opencli list`. Also drives ChatGPT through the logged-in browser session — `chatgpt_chat` sends a prompt and returns the markdown response, and `chatgpt_image` generates a ChatGPT image and saves it to disk.",
     hasFrontend: true,
     iconUrl: browserAutomationIcon,
+    hideInLauncher: true,
   },
   {
     id: "coding",
@@ -58,6 +59,7 @@ const definitions = [
       "The coding agent, the app_creation skill, and a frontend gallery of live UI mocks. Use app_creation when visuals are important, such as for apps, dashboards, games, and other Rome experiences that need a polished UI.",
     hasFrontend: true,
     iconUrl: codingIcon,
+    hideInLauncher: true,
   },
   {
     id: "connector",
@@ -86,14 +88,6 @@ const definitions = [
     iconUrl: inboxIcon,
   },
   {
-    id: "recap",
-    displayName: "Recap",
-    version: "0.1.1",
-    description: "Spoken recaps for completed WebChat turns",
-    hasFrontend: true,
-    iconUrl: recapIcon,
-  },
-  {
     id: "showcases",
     displayName: "Showcases",
     version: "0.1.0",
@@ -113,7 +107,7 @@ const definitions = [
   {
     id: "system",
     displayName: "System",
-    version: "0.2.20",
+    version: "0.2.21",
     description:
       "Core system actions for scheduling, messaging, approvals, app store access, and subagent orchestration. In Rome context, 'store' / 'app store' usually means the Rome App Store. Reach here first for app_store_search (search/read Rome Store listings), app_management (install from the Rome Store with source.mode='appstore', install / uninstall / enable / disable a Rome app, or scaffold a new dev app — first-party apps ship with Rome, so only enable/disable applies to them), send_message (send a message through any registered channel adapter), send_user_message (start or continue a webchat conversation on the guardian's behalf), and generate_image (generate an image from a text prompt via the connected image provider).",
     hasFrontend: true,
@@ -170,5 +164,6 @@ export const firstPartyApps: InstalledAppCard[] = definitions.map((app) => ({
   projectPath: null,
   origin: "builtin",
   iconUrl: app.iconUrl,
+  hideInLauncher: app.hideInLauncher ?? false,
   installedAt: bootedAt,
 }));

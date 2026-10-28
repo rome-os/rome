@@ -74,4 +74,18 @@ describe("DiscordAdapter history", () => {
       ],
     });
   });
+
+  it("asks for the newest messages when the window starts before Discord's epoch", async () => {
+    const get = rs.spyOn(REST.prototype, "get").mockResolvedValue([]);
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+
+    // A read with no bound arrives as a window back to 1970.
+    await adapter.fetchHistory("chan-1", Date.now() / 3_600_000 + 1);
+    await adapter.fetchHistory("chan-1", 24);
+
+    const [unbounded, recent] = get.mock.calls.map((call) => call[1] as { query: URLSearchParams });
+    expect(unbounded?.query.has("after")).toBe(false);
+    expect(unbounded?.query.get("limit")).toBe("100");
+    expect(BigInt(recent?.query.get("after") ?? "0")).toBeGreaterThan(0n);
+  });
 });

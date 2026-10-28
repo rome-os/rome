@@ -1,4 +1,5 @@
 import { memo, type ReactNode, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
 import type { TraceSnapshot, TraceSubagentSummary } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
@@ -7,18 +8,18 @@ import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
-import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
+import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
+import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
+import { TurnActions, turnCopyText } from "@/components/chat/TurnActions";
 import { DelegatedSubagentGroup } from "@/components/chat/DelegatedSubagentGroup";
 import { MessageRow } from "@/components/chat/MessageRow";
 import { LiveTurnActivity } from "@/components/chat/LiveTurnActivity";
 import { TurnSummaryGroup } from "@/components/chat/TurnSummaryGroup";
-import { TurnBranchButton } from "@/components/chat/TurnBranchButton";
-import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
 import { TraceTrigger } from "@/components/chat/TraceTrigger";
 import { UserMessage } from "@/components/chat/UserMessage";
+import { lastTextMessage, turnAnswerText } from "@/components/chat/reply/reply-source";
 import type { AgentIdentity, ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
-import { formatMessageTimestamp } from "@/lib/message-timestamp";
 
 // The block-level callbacks + resolved-interaction map threaded into
 // renderFlatEntries — a single bag instead of six loose props.
@@ -80,7 +81,12 @@ export interface MessageListProps {
   // button under settled agent turns. Guardian-only, so the live chat opts in
   // while read-only surfaces (public share, sessions viewer) omit them.
   feedback?: boolean;
+  /** `concierge` shows a texting transcript (see ConciergeTranscript). Defaults to `default`. */
+  variant?: ChatVariant;
 }
+
+/** How a chat presents itself. `concierge` is the texting-style Concierge chat. */
+export type ChatVariant = "default" | "concierge";
 
 // Submission helpers — read a handoff child's messages to drive the composer's
 // Approve affordance. Exported for Chat; pure over a message list.
@@ -134,7 +140,13 @@ export function hasPendingApprovalConfirmation(messages: ChatMessage[]): boolean
   return false;
 }
 
+function ArchivedTraceNote() {
+  const { t } = useTranslation("activity");
+  return <p className="px-3 text-aux text-muted-foreground">{t("trace.archived")}</p>;
+}
+
 function renderTrace(trace: ChatMessage, onOpen: (target: TraceDrawerTarget) => void) {
+  if (trace.traceArchived) return null;
   return trace.traceSummary ? (
     <TraceTrigger
       messageId={trace.id}
@@ -181,21 +193,6 @@ function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
   return index;
 }
 
-// The raw text a copy button puts on the clipboard for an agent turn: every
-// text block (commentary + final answer) across the turn's messages, joined as
-// the markdown source — not the rendered HTML.
-function turnCopyText(messages: ChatMessage[]): string {
-  const parts: string[] = [];
-  for (const m of messages) {
-    for (const b of parseMessageEntries(m)) {
-      if (b.type === "text" && b.content.trim()) {
-        parts.push(b.content);
-      }
-    }
-  }
-  return parts.join("\n\n");
-}
-
 // Stable row keys preserve inline-card drafts when the live block moves on or
 // the turn ends. Memoization keeps token updates out of the historical rows.
 const RowView = memo(function RowView({
@@ -220,6 +217,7 @@ const RowView = memo(function RowView({
   feedback?: boolean;
 }) {
   if (row.kind === "user") return <UserMessage msg={row.message} />;
+  if (row.kind === "model_switch") return <ModelSwitchNotice model={row.model} />;
   const avatar = <AgentAvatar iconUrl={row.identity.iconUrl} label={row.identity.name} />;
   if (row.kind === "trace") {
     const summary = row.message.traceSummary;
@@ -237,6 +235,7 @@ const RowView = memo(function RowView({
           subagentIconByName,
         )}
       >
+        {row.message.traceArchived ? <ArchivedTraceNote /> : null}
         {plan?.steps.length ? <TurnSummaryGroup plan={plan} live={false} /> : null}
       </MessageRow>
     );
@@ -253,7 +252,8 @@ const RowView = memo(function RowView({
   const copyText = live ? "" : turnCopyText(row.messages);
   // A row can group commentary and a final answer, so use its last saved message.
   const createdAt = live ? undefined : row.messages.at(-1)?.createdAt;
-  const timestamp = createdAt ? formatMessageTimestamp(createdAt) : "";
+  // Replying to a settled turn quotes its answer, named by the turn's last row with text.
+  const replyRow = live ? undefined : lastTextMessage(row.messages);
   // Feedback rides the same settled action row; it needs the turn identity.
   const feedbackTurn = feedback && !live ? rowTurnRef(row) : null;
   const showFeedback = !!feedbackTurn?.turnId && !!feedbackTurn.sessionId;
@@ -276,37 +276,29 @@ const RowView = memo(function RowView({
       )}
       className="group"
       footer={
-        copyText || showFeedback || timestamp ? (
-          // Hover-revealed on pointer devices, always visible on touch — mirrors the affordance
-          // under the guardian's own bubbles. `has-[[aria-pressed=true]]` keeps
-          // the row visible while the feedback draft is open (its popover is
-          // portaled, so group-focus-within can't see it) and once a rating is
-          // recorded.
-          <div className="-ml-[var(--control-action-offset)] mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
-            {copyText ? <CopyMessageButton text={copyText} /> : null}
-            {showFeedback && feedbackTurn?.turnId ? (
-              <TurnFeedbackButtons
-                key={`${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
-                sessionId={feedbackTurn.sessionId}
-                turnId={feedbackTurn.turnId}
-              />
-            ) : null}
-            {showBranch && feedbackTurn?.turnId ? (
-              <TurnBranchButton
-                key={`branch:${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
-                sessionId={feedbackTurn.sessionId}
-                turnId={feedbackTurn.turnId}
-              />
-            ) : null}
-            {timestamp ? (
-              <time dateTime={createdAt} className="ml-2 text-aux text-muted-foreground">
-                {timestamp}
-              </time>
-            ) : null}
-          </div>
-        ) : null
+        <TurnActions
+          copyText={copyText}
+          feedbackTurn={
+            showFeedback && feedbackTurn?.turnId
+              ? { sessionId: feedbackTurn.sessionId, turnId: feedbackTurn.turnId }
+              : null
+          }
+          showBranch={showBranch}
+          createdAt={createdAt}
+          reply={
+            replyRow
+              ? {
+                  messageId: replyRow.id,
+                  sessionId: replyRow.sessionId,
+                  author: "agent",
+                  text: turnAnswerText(row.messages),
+                }
+              : null
+          }
+        />
       }
     >
+      {!live && row.trace?.traceArchived ? <ArchivedTraceNote /> : null}
       {row.messages.map((m) => {
         const blocks = parseMessageEntries(m);
         if (m.id !== recapMessageId) {
@@ -440,6 +432,7 @@ function StandaloneLiveTail({
 // turnId rows (transient/optimistic) and the standalone live tail aren't
 // selectable.
 function rowTurnRef(row: ChatRow): { turnId: string | null; sessionId: string } {
+  if (row.kind === "model_switch") return { turnId: null, sessionId: row.sessionId };
   if (row.kind === "user" || row.kind === "trace") {
     return { turnId: row.message.turnId ?? null, sessionId: row.message.sessionId };
   }
@@ -500,7 +493,49 @@ export function MessageList({
   subagentIconByName,
   actions,
   feedback,
+  variant = "default",
 }: MessageListProps) {
+  if (variant === "concierge") {
+    return (
+      <ConciergeTranscript
+        rows={rows}
+        live={live}
+        actions={actions}
+        contentRef={contentRef}
+        feedback={feedback}
+      />
+    );
+  }
+  return (
+    <TranscriptMessageList
+      rows={rows}
+      live={live}
+      selection={selection}
+      contentRef={contentRef}
+      onOpenLiveTrace={onOpenLiveTrace}
+      onOpenStoredTrace={onOpenStoredTrace}
+      onOpenSubagentTrace={onOpenSubagentTrace}
+      activeTraceTarget={activeTraceTarget}
+      subagentIconByName={subagentIconByName}
+      actions={actions}
+      feedback={feedback}
+    />
+  );
+}
+
+function TranscriptMessageList({
+  rows,
+  live,
+  selection,
+  contentRef,
+  onOpenLiveTrace,
+  onOpenStoredTrace,
+  onOpenSubagentTrace,
+  activeTraceTarget,
+  subagentIconByName,
+  actions,
+  feedback,
+}: Omit<MessageListProps, "variant">) {
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;
@@ -566,9 +601,17 @@ export function MessageList({
           // around the view inside every branch, so share mode cannot strip it.
           // A plain div with no classes adds no box: UserMessage's own `mb-4`
           // still collapses through it, so row rhythm is unchanged.
+          // An agent row is addressable by every message id it holds: a reply
+          // names the turn by its last message, and a jump finds it by that id.
+          const anchorIds =
+            row.kind === "user"
+              ? row.message.id
+              : row.kind === "agent"
+                ? row.messages.map((message) => message.id).join(" ")
+                : null;
           const anchored = (node: ReactNode, key?: string) =>
-            row.kind === "user" ? (
-              <div key={key} data-timeline-anchor={row.message.id}>
+            anchorIds ? (
+              <div key={key} data-timeline-anchor={anchorIds}>
                 {node}
               </div>
             ) : (

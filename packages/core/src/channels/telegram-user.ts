@@ -21,7 +21,7 @@ type SimpleEntity = string | number;
  * `displayName`/`phoneNumber`), or the connect timestamp; there is no config, so
  * this is NEVER persisted to a settings row. The login ceremony
  * returns it to the route, which splits it into the grant's credential material
- * and profile and writes both into the ledger via a single `importCredential`.
+ * and profile and writes both into the ledger via a single `grant`.
  */
 export interface TelegramUserSettings {
   apiId: number;
@@ -39,7 +39,7 @@ export interface TelegramUserSettings {
 export type TelegramUserLoginOutcome =
   | {
       status: "connected";
-      /** The full connected account — the conferral setup turns it into the
+      /** The full connected account — the setup turns it into the
        *  `session` grant's credential material + profile and writes both to the
        *  ledger in one terminal write. Carries secrets (`sessionString`/`apiHash`);
        *  only the non-secret identity ever crosses to a client. */
@@ -51,7 +51,7 @@ export type TelegramUserLoginOutcome =
     };
 
 /**
- * One in-flight interactive login, held for the lifetime of a conferral setup
+ * One in-flight interactive login, held for the lifetime of a setup
  * coroutine: a single GramJS client + StringSession. The coroutine
  * holds exactly one handle in scope, so — unlike the retired route-era
  * `TelegramUserAuthService` — there is no attempt-id map and no `hasPendingLogin`
@@ -354,13 +354,22 @@ export class TelegramUserAdapter {
     const threadId = context.threadId ?? peerToThreadId(message.peerId);
     const fromId = message.fromId ? peerToThreadId(message.fromId) : threadId;
     const isOutgoing = message.out === true;
+    // A sender's name is known only for the guardian's own lines and in a
+    // private dialog, whose name is the other party's. A group's name is not
+    // its sender's, and a live message carries no name at all, so neither
+    // stands in for one: an id there would read as a name to every consumer.
+    const senderDisplayName = isOutgoing
+      ? this.settings.displayName
+      : context.threadType === "private"
+        ? context.threadName
+        : undefined;
     return {
       channel: "telegram_user",
       direction: "inbound",
       messageId: String(message.id),
       chatId: threadId as ChatId,
       senderId: isOutgoing ? this.settings.userId : fromId,
-      senderDisplayName: isOutgoing ? this.settings.displayName : (context.threadName ?? fromId),
+      ...(senderDisplayName ? { senderDisplayName } : {}),
       text: message.message ?? "",
       attachments: extractTelegramAttachments(message.media),
       timestamp: new Date((message.date ?? Math.floor(Date.now() / 1000)) * 1000),
@@ -380,7 +389,7 @@ export class TelegramUserAdapter {
 
 /**
  * The interactive-login implementation behind {@link openTelegramUserLogin}: one
- * throwaway GramJS client + StringSession driven by the conferral setup coroutine.
+ * throwaway GramJS client + StringSession driven by the setup coroutine.
  * `sendCode` connects and requests the phone code; `submitCode` /
  * `submitPassword` complete the phone-code + optional 2FA handshake and serialize
  * the authorized session into a {@link TelegramUserSettings} account. The
@@ -476,7 +485,7 @@ class TelegramUserLogin implements TelegramUserLoginHandle {
   }
 
   /** Serialize the authorized client + session into the connected-account payload
-   *  the terminal conferral records (credential material + profile). */
+   *  the terminal grant records (credential material + profile). */
   private finalize(user: Api.TypeUser): TelegramUserSettings {
     if (!(user instanceof Api.User)) {
       throw new TelegramUserAuthError("Telegram login did not return a user account");

@@ -4,7 +4,7 @@
 // is custody-external: the signed-in session lives in Rome's server-side
 // Chrome profile (the one opencli drives over CDP), so the ledger holds only a
 // custody marker plus the account identity — there is no secret Rome could
-// hold. Conferral is therefore observational: the setup opens the LinkedIn
+// hold. Grant is therefore observational: the setup opens the LinkedIn
 // login page in the server browser, the guardian signs in through the
 // dashboard's /desktop view, and the coroutine polls `opencli linkedin whoami`
 // until the session reads authenticated.
@@ -13,10 +13,10 @@
 // valid in Chrome after a transient auth-shaped failure (LinkedIn checkpoint
 // interstitials look like auth walls), so renew re-probes whoami — a healthy
 // probe keeps the credential, and only a definite signed-out answer degrades
-// to "re-confer".
+// to "needs-fix".
 //
 // The inbox poller mirrors history without delivering inbound agent turns.
-// Replies use the same browser session and the shared People outbox.
+// Replies use the same browser session and the shared People send.
 
 import { z } from "zod";
 import type { ChatId } from "@rome-os/app-runtime";
@@ -55,7 +55,7 @@ const LOGIN_WAIT_TIMEOUT_MS = 10 * 60_000;
 const LOGIN_POLL_INTERVAL_MS = 5_000;
 
 // ── Grant profile ─────────────────────────────────────────────────────────
-// The non-secret conferral outcome recorded beside the custody marker: who the
+// The non-secret grant outcome recorded beside the custody marker: who the
 // signed-in LinkedIn account is, per `whoami`.
 
 const linkedinGrantProfileSchema = z
@@ -106,31 +106,31 @@ function browserSessionCredential(): Credential {
 }
 
 /**
- * The `session` scheme. Conferral is driven by the setup below. renew()
+ * The `session` scheme. Grant is driven by the setup below. renew()
  * re-probes the browser session: still signed in → the credential is still
- * good verbatim; definitely signed out → "re-confer". A transient probe
+ * good verbatim; definitely signed out → "needs-fix". A transient probe
  * failure (Chrome restarting, CDP briefly unreachable) also keeps the
  * credential — degrading the grant on a probe blip would demand a pointless
  * re-login, and a genuinely dead session re-faults on the next poll tick.
  */
 export function linkedinSessionScheme(run: RunOpencli): AuthScheme {
   return {
-    async confer(): Promise<Credential> {
-      throw new Error("conferral driven by the connection setup");
+    async obtain(): Promise<Credential> {
+      throw new Error("grant driven by the connection setup");
     },
-    async renew(cred: Credential): Promise<Credential | "re-confer"> {
+    async renew(cred: Credential): Promise<Credential | "needs-fix"> {
       try {
         parseWhoami(await run(["linkedin", "whoami"], { timeoutMs: WHOAMI_TIMEOUT_MS }));
         return cred;
       } catch (err) {
-        if (err instanceof OpencliAuthError) return "re-confer";
+        if (err instanceof OpencliAuthError) return "needs-fix";
         return cred;
       }
     },
   };
 }
 
-// ── conferral setup ───────────────────────────────────────────────────────
+// ── setup ───────────────────────────────────────────────────────
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -147,14 +147,14 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Build the LinkedIn conferral setup. A linear coroutine:
- *   1. `ctx.step("probe-session")` — an already-signed-in browser confers
+ * Build the LinkedIn setup. A linear coroutine:
+ *   1. `ctx.step("probe-session")` — an already-signed-in browser grants
  *      immediately with no guardian interaction,
  *   2. open the LinkedIn login page in the server browser (best-effort) and
  *      show the sign-in walkthrough,
  *   3. `ctx.step("await-login")` — poll `whoami` until the session reads
  *      authenticated (or time out after 10 minutes),
- *   4. return the terminal conferral: custody marker + whoami identity.
+ *   4. return the terminal grant: custody marker + whoami identity.
  * Nothing durable exists before the terminal return — cancelling writes
  * nothing, and the only state "accumulated" is LinkedIn's own browser cookie.
  */
@@ -267,13 +267,12 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
 
   return {
     connectionKind: "linkedin",
-    reviveProfile: (_grant, record) => reviveLinkedInProfile(record),
-    auth: {
-      session: sessionScheme,
-    },
+    reviveProfile: (record) => reviveLinkedInProfile(record),
+    accountIdOf: (record) => (typeof record.plainId === "string" && record.plainId) || null,
+    grant: "session",
+    auth: sessionScheme,
     capabilities: {
       talker: {
-        needs: ["session"] as const,
         // The inbox is mirrored into the store by the poller; nothing is
         // delivered as an inbound turn.
         receives: false,

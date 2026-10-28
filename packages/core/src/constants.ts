@@ -1,4 +1,7 @@
-// Re-exported so existing importers keep their path. The id itself lives in the
-// shared package because the dashboard filters this row out of its people lists
-// and the mock backend seeds it, so all three read one value.
-export { STRANGER_PERSON_ID, STRANGER_PERSON_DISPLAY_NAME } from "@rome/api-types/persons";
+/**
+ * The id of the stranger sentinel, the person every dismissed account used to
+ * be linked to. Dismissals are their own record now and no person carries this
+ * id. Apps still receive it as `strangerPersonId`, because an app built before
+ * then compares a sender's person against it.
+ */
+export const STRANGER_PERSON_ID = "__STRANGER__";

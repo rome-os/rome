@@ -1,5 +1,5 @@
-import type { DeviceFolder } from "@rome/api-types/devices";
-import type { TranscriptPart } from "@rome/api-types/chat";
+import type { DeviceFolder, DeviceList } from "@rome/api-types/devices";
+import type { ChatMessageSender, TranscriptPart } from "@rome/api-types/chat";
 import type { TraceErrorEvent, TraceEventDto, TraceSummary } from "@rome/api-types/trace-segments";
 import type {
   RomeSessionDetail,
@@ -32,6 +32,10 @@ export interface ChatSession {
   /** Folder on a rome-node device the chat works in, set when the chat was created. */
   deviceFolder?: DeviceFolder | null;
   agentName?: string | null;
+  /** The chat a side chat branched from, kept once it is promoted to a chat. */
+  parentSessionId?: string | null;
+  /** Why the chat exists, when something other than the guardian started it, e.g. `concierge`. */
+  triggerKind?: string | null;
   /** ISO timestamp when the chat was archived (soft-hidden), or null. */
   archivedAt?: string | null;
   /** ISO timestamp when this chat was pinned by the guardian, or null. */
@@ -159,6 +163,9 @@ export interface ChatMessage {
   content: string; // JSON array of blocks
   createdAt: string;
   traceSummary?: TraceSummary | null;
+  traceArchived?: boolean;
+  /** Who sent a user message. Absent when the message recorded no sender. */
+  sender?: ChatMessageSender;
 }
 
 export interface ProjectOption {
@@ -172,6 +179,15 @@ export interface ProjectCatalog {
   rootPath: string;
   defaultPath: string;
   projects: ProjectOption[];
+}
+
+/**
+ * What the new-chat location menu shows. `devices` is null when Rome could not
+ * read Cloud's device list in time.
+ */
+export interface ChatLocations {
+  projects: ProjectCatalog;
+  devices: DeviceList["devices"] | null;
 }
 
 export interface PendingUpload {

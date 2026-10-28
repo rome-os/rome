@@ -110,8 +110,8 @@ Keep the third element. It separates copy that informs from copy that restates i
 
 **Do not state what the reader can trivially deduce.** A description that repeats its label, or a remedy implied by the problem, is deleted rather than reworded. The words it frees are spent on the cost or the scope. `[llm]`
 
-> Prefer: "Only applies when Claude is available."
-> Over: "Routes large models to Fable. Only applies when Claude is available." (the toggle label already says where the models go)
+> Prefer: "Usage windows appear on the AI Tools tab."
+> Over: "Shows Claude and ChatGPT usage. Usage windows appear on the AI Tools tab." (the toggle label already says what is shown)
 
 ## Never
 
@@ -141,7 +141,6 @@ Each row was verified against the rendered pair.
 | Webhook relay | No relay credential is stored, so incoming webhooks are not delivered to this instance. | A state the guardian did not choose, so the cause leads. No control on this screen fixes it. |
 | Access for {{name}} | Applies to the public Rome URL. Your own dashboard access is not affected. | Scope, plus the misreading it prevents. |
 | Allowed emails | Grants the full dashboard, not just individual apps. | Cost. Apps carry their own email lists, so the wider grant is the surprise. |
-| Fable | Only applies when Claude is available. | Prerequisite. The toggle saves cleanly and does nothing without it. |
 | On a schedule | *(no description)* | "These run at a set time" restates the heading. Deleted, not reworded. |
 
 ### Economical

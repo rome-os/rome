@@ -151,7 +151,11 @@ if [ -n "$existing_project_labels" ]; then
     while IFS= read -r dir; do
       [ -n "$dir" ] && printf '  %s\n' "$dir" >&2
     done <<<"$other_roots"
-    echo "        Two worktrees share a basename. Rename one directory and retry." >&2
+    if [ -n "${ROME_DEV_SLUG:-}" ]; then
+      echo "        ROME_DEV_SLUG=${ROME_DEV_SLUG} pins this name. Unset it here, or run dev:all from that checkout." >&2
+    else
+      echo "        Two worktrees share a basename. Rename one directory and retry." >&2
+    fi
     exit 1
   fi
 fi
@@ -412,9 +416,10 @@ fi
 #     persistent volume), so host source edits flow through the mutagen sync
 #     with no reinstall — the install only has to happen once per rome-home
 #     volume. Idempotent; non-fatal because the stack is fully functional with
-#     just the built-in opencli commands.
+#     just the built-in opencli commands. Also register user-<site> plugins from
+#     every profile under the container HOME/.rome bind.
 # ---------------------------------------------------------------------------
-echo "dev-up: registering Rome opencli plugins ..."
+echo "dev-up: registering Rome and user opencli plugins ..."
 if ! docker compose -f compose.dev.yml -p "$SLUG" run --rm --no-deps -T rome sh -c '
   failed=0
   for plugin_src in /workspace/opencli-plugins/*/; do
@@ -427,6 +432,16 @@ if ! docker compose -f compose.dev.yml -p "$SLUG" run --rm --no-deps -T rome sh 
       [ -e "$plugin_src/node_modules/@jackwener/opencli/package.json" ]; then continue; fi
     rm -rf "$plugin_link"
     opencli plugin install "$plugin_src" || failed=1
+  done
+  for plugin_src in "$HOME"/.rome/*/projects/browser-automation/*/; do
+    plugin_src="${plugin_src%/}"
+    [ -f "$plugin_src/opencli-plugin.json" ] || continue
+    plugin_link="$HOME/.opencli/plugins/user-$(basename "$plugin_src")"
+    if [ "$(readlink "$plugin_link" 2>/dev/null)" = "$plugin_src" ] &&
+      [ -e "$plugin_src/node_modules/@jackwener/opencli/package.json" ]; then continue; fi
+    if ! { rm -f "$plugin_link" && opencli plugin install "$plugin_src"; }; then
+      echo "dev-up: warning — user opencli plugin install failed: $plugin_src; continuing." >&2
+    fi
   done
   exit "$failed"
 '; then

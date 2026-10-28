@@ -4,6 +4,35 @@
     "mermaid": "Mermaid diagram"
   },
   "title": "Rome",
+  "concierge": {
+    "typing": "Typing",
+    "taskChat": "Task chat",
+    "taskStatus": {
+      "running": "Working",
+      "waiting": "Needs you",
+      "failed": "Stopped with an error",
+      "idle": "Done"
+    },
+    "openTaskChat": "Open",
+    "messageDetails": "Message details",
+    "composerMenu": "Add files or change the model",
+    "placeholder": "Message",
+    "empty": {
+      "title": "Just tell me what you want to get done",
+      "prompts": {
+        "weather": "What's the weather today?",
+        "reminder": "Remind me to stretch in an hour",
+        "email": "Summarize my unread email",
+        "task": "Build me a simple habit tracker app"
+      }
+    }
+  },
+  "reply": {
+    "action": "Reply",
+    "dismiss": "Cancel reply",
+    "jump": "Go to the original message"
+  },
+  "senderGuardian": "Guardian",
   "inputState": {
     "queued": "Waiting to be included",
     "submitted": "Sending to agent",
@@ -225,7 +254,17 @@
   },
   "composer": {
     "placeholderDefault": "How can I help you today?",
+    "lockedByCard": "Answer the card above to continue.",
     "placeholderWithUploads": "Add a message or send the uploaded files...",
+    "hints": {
+      "skill": "Type / to use a skill",
+      "agent": "Type @ to pick an agent",
+      "project": "Pick a project below for the agent to work in",
+      "attach": "Paste or drop files to attach them",
+      "newline": "Shift+Enter for a new line",
+      "search": "{{shortcut}} to search your chats",
+      "sendWhileWorking": "Send anytime, even while the agent is working"
+    },
     "uploadFiles": "Upload files",
     "dropFiles": "Drop files to upload",
     "removeFile": "Remove {{name}}",
@@ -255,6 +294,9 @@
     "dismiss": "Dismiss",
     "send": "Send"
   },
+  "appComponent": {
+    "dismiss": "Dismiss"
+  },
   "aiToolsCard": {
     "title": "Connect Claude or ChatGPT",
     "hint": "I think with your existing subscription. Sign in to one so I can start working.",
@@ -262,6 +304,8 @@
     "connected": "Connected",
     "skipped": "Skipped for now",
     "skip": "Skip for now",
+    "sendFailed": "That didn't go through.",
+    "retry": "Try again",
     "connectedSummary": "Connected an AI",
     "skippedSummary": "Skipped connecting an AI",
     "connectedTitle": "AI connected",
@@ -275,6 +319,9 @@
       "using": "Rome credits in use",
       "ready": "Rome credits ready"
     }
+  },
+  "modelSwitch": {
+    "notice": "Switched to {{model}}"
   },
   "modelSelector": {
     "label": "Model",
@@ -379,6 +426,7 @@
       "truncated": "Showing the first 1,000 items.",
       "up": "Up one level",
       "useFolder": "Use this folder",
+      "thisDevice": "This device",
       "reasons": {
         "offline": "Offline",
         "upgrade_required": "Update rome-node"
@@ -397,7 +445,8 @@
       "listLabel": "Locations",
       "searchPlaceholder": "Search Rome Cloud and devices…",
       "noMatchesQuery": "Nothing matches “{{query}}”.",
-      "back": "Back"
+      "back": "Back",
+      "loading": "Loading devices…"
     }
   },
   "stream": {

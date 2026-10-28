@@ -13,7 +13,7 @@
  *   stated once there so a store and a person's timeline cut the same ranking.
  */
 
-import type { Message } from "@rome/api-types/message";
+import { compareMessages, messageCursor, type Message } from "@rome/api-types/message";
 import type { ChannelMessage, ChannelMessageQuery } from "@rome-os/app-runtime";
 
 /**
@@ -34,6 +34,21 @@ export interface MessageAccount {
   channel: string;
   /** Non-empty. Order carries no meaning. */
   addresses: readonly string[];
+  /**
+   * The channels the account's messages are stored under, when they are not
+   * `channel` alone: a link names the account's platform, and a store keys a
+   * message by the channel it arrived on, so an account on a platform Rome
+   * holds several accounts on is read under each of their channels. Empty,
+   * a store reads nothing for the account. Absent, `channel`. Either way an
+   * entry read for the account carries `channel` as its `source`, so a reader
+   * matches it against the account it asked about.
+   */
+  storedUnder?: readonly string[];
+}
+
+/** The channels a store reads `account` under. */
+export function heldOn(account: MessageAccount): readonly string[] {
+  return account.storedUnder ?? [account.channel];
 }
 
 export interface MessageRead {
@@ -45,7 +60,11 @@ export interface MessageRead {
 
 /** What `query` asks for: the SDK's {@link ChannelMessageQuery}, so the
  *  defaults and the cap are stated once. `queryLimit` applies them. */
-export type MessageQuery = ChannelMessageQuery;
+export type MessageQuery = Omit<ChannelMessageQuery, "after"> & {
+  /** The message the previous page ended on, as {@link channelMessageOrder}
+   *  names it. Only the messages after it, the older ones, answer. */
+  after?: Message;
+};
 
 const DEFAULT_QUERY_LIMIT = 100;
 export const MAX_QUERY_LIMIT = 1_000;
@@ -86,6 +105,79 @@ export function channelMessageDetail(message: ChannelMessage): MessageDetail {
 export function querySince(since: Date | undefined): Date {
   if (!since) return new Date(0);
   return new Date(Math.ceil(since.getTime() / 1000) * 1000);
+}
+
+/**
+ * A channel message as the message module names one: when it was said, which
+ * way, and a ref that names the chat as well as the message, since a
+ * platform's message ids are unique only within one chat.
+ */
+export function channelMessageOrder(message: ChannelMessage): Message {
+  return {
+    source: message.channel,
+    timestamp: Math.floor(message.timestamp.getTime() / 1000),
+    direction: message.direction,
+    ref: `${message.chatId}:${message.messageId}`,
+    body: null,
+  };
+}
+
+/** The opaque cursor a query answers on each message: resuming from it with
+ *  `after` reads the messages older than it. */
+export function channelMessageCursor(message: ChannelMessage): string {
+  return messageCursor(channelMessageOrder(message));
+}
+
+/**
+ * One page of a query from what a store read, newest first in the store's own
+ * order: the messages after `after`, at most `limit` of them. The cursor names
+ * one message, so the page resumes right behind it, also among several said
+ * in one second. Filtering comes before the limit, so the page is never spent
+ * on messages the caller has already read.
+ *
+ * A store hands over at least the cursor's whole second and what is older. A
+ * cursor whose message is gone resumes at the second before its own.
+ */
+export function queryPage(
+  messages: readonly ChannelMessage[],
+  read: Pick<MessageQuery, "after" | "limit">,
+): ChannelMessage[] {
+  const { after } = read;
+  let older: readonly ChannelMessage[] = messages;
+  if (after) {
+    const at = messages.findIndex(
+      (message) => compareMessages(channelMessageOrder(message), after) === 0,
+    );
+    older =
+      at >= 0
+        ? messages.slice(at + 1)
+        : messages.filter((message) => channelMessageOrder(message).timestamp < after.timestamp);
+  }
+  return older.slice(0, queryLimit(read.limit));
+}
+
+/**
+ * What a store keeping a copy reads for one page after a cursor, newest first:
+ * every message of the cursor's second, so the page settles the ties there,
+ * and the newest `limit` older ones. Without a cursor, the newest `limit`.
+ * `read` answers oldest first, at most `limit` messages at or after `since`
+ * and at or before `until`.
+ */
+export async function readQueryWindow<T>(
+  read: (since: Date, limit: number, until?: Date) => Promise<T[]>,
+  query: Pick<MessageQuery, "since" | "after" | "limit">,
+): Promise<T[]> {
+  const from = querySince(query.since);
+  const after = query.after;
+  if (!after) return (await read(from, queryLimit(query.limit))).reverse();
+  const second = new Date(after.timestamp * 1000);
+  const ties = await read(
+    new Date(Math.max(from.getTime(), second.getTime())),
+    MAX_QUERY_LIMIT,
+    second,
+  );
+  const older = await read(from, queryLimit(query.limit), new Date(second.getTime() - 1000));
+  return [...ties.reverse(), ...older.reverse()];
 }
 
 /** The number of messages a query asks for, defaulted and capped. */

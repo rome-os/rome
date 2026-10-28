@@ -20,6 +20,7 @@
     "@rome-os/libs": "workspace:*",
     "@rome-os/node-core": "workspace:*",
     "better-sqlite3": "^13.0.3",
+    "koffi": "^2.16.3",
     "drizzle-orm": "^0.45.1",
     "electron-updater": "^6.3.0",
     "winston": "^3.19.0",

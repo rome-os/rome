@@ -8,7 +8,7 @@
 //      { grant: "inbox" }; adapter.start() rejecting (Rome Cloud outage) →
 //      Disconnected.
 //   4. end-to-end over the real ConnectionRegistry: a bad-signature deposit
-//      degrades the inbox grant (renew-once via setup-driven "re-confer").
+//      degrades the inbox grant (renew-once via setup-driven "needs-fix").
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { createHmac } from "node:crypto";
@@ -23,12 +23,12 @@ import type {
   SendMailInput,
   SendMailResult,
 } from "../../lib/rome-cloud-mail.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { EmailInboundResult } from "../../channels/email-control.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { ChatId, StreamFault, Talker } from "../types.js";
 import { makeEmailDescriptor, type EmailDescriptorDeps, type EmailInboxMaterial } from "./email.js";
@@ -42,10 +42,10 @@ const openDbs: Array<() => void> = [];
 afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
-function makeLedger(): DrizzleGrantLedger {
+function makeLedger(): DrizzleConnectionsRepository {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  return new DrizzleGrantLedger(db);
+  return new DrizzleConnectionsRepository(db);
 }
 
 function flush(): Promise<void> {
@@ -130,11 +130,12 @@ function makeSettingsRepo(
 
 /** A person-mapping fake: no guardian person exists, so mapGuardianToChannel is a
  *  no-op — keeps start() off any write path in the descriptor tests. */
-function makePersonMappingRepo(): PersonMappingRepository {
+function makePersonMappingRepo(): PeopleRepository {
   return {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [],
-  } as unknown as PersonMappingRepository;
+    byAccount: async () => null,
+    isDismissed: async () => false,
+    byBondLevel: async () => [],
+  } as unknown as PeopleRepository;
 }
 
 function makeDeps(
@@ -144,7 +145,7 @@ function makeDeps(
   return {
     provider,
     settingsRepo: makeSettingsRepo(),
-    personMappingRepo: makePersonMappingRepo(),
+    peopleRepo: makePersonMappingRepo(),
     // Never hit the real whoami during tests; guardian stays unresolved
     // unless a test's settings row carries it.
     ownerEmailResolver: async () => undefined,
@@ -165,24 +166,23 @@ describe("email descriptor shape", () => {
   it("declares one `inbox` grant and a talker needing it", () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
     expect(desc.connectionKind).toBe("email");
-    expect(Object.keys(desc.auth)).toEqual(["inbox"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["inbox"]);
+    expect(desc.grant).toBe("inbox");
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 
-  it("confer() is setup-driven — throws, never prompts headlessly", async () => {
+  it("obtain() is setup-driven — throws, never prompts headlessly", async () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
     await expect(
-      desc.auth.inbox.confer({
+      desc.auth.obtain({
         prompt: () => Promise.reject(new Error("should not be called")),
       }),
-    ).rejects.toThrow("conferral driven by the connect setup");
+    ).rejects.toThrow("grant driven by the connect setup");
   });
 
-  it("renew() always answers re-confer", async () => {
+  it("renew() always answers fix", async () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
-    await expect(desc.auth.inbox.renew(validCred())).resolves.toBe("re-confer");
+    await expect(desc.auth.renew(validCred())).resolves.toBe("needs-fix");
   });
 });
 
@@ -200,19 +200,16 @@ function buildTalker(
 } {
   const desc = makeEmailDescriptor(makeDeps(provider, depsOverride));
   let ingress: ((input: unknown) => Promise<unknown>) | undefined;
-  const talker = desc.capabilities.talker!.build(
-    { inbox: validCred(material) },
-    {
-      connectionId: "email-test",
-      persist: async () => {},
-      registerIngress: (handler) => {
-        ingress = handler;
-        return () => {
-          ingress = undefined;
-        };
-      },
+  const talker = desc.capabilities.talker!.build(validCred(material), {
+    connectionId: "email-test",
+    persist: async () => {},
+    registerIngress: (handler) => {
+      ingress = handler;
+      return () => {
+        ingress = undefined;
+      };
     },
-  );
+  });
   const faults: StreamFault[] = [];
   return {
     talker,
@@ -262,7 +259,7 @@ describe("email Talker fault mapping", () => {
     await flush();
 
     // start() builds the transport from the grant material it was handed; it must
-    // never reach for MailProvider.provision() (conferral is
+    // never reach for MailProvider.provision() (grant is
     // setup-driven), and a valid grant produces no fault.
     expect(provider.provision).not.toHaveBeenCalled();
     expect(h.faults).toHaveLength(0);
@@ -294,17 +291,14 @@ describe("email Talker fault mapping", () => {
     const provider = makeProvider();
     const desc = makeEmailDescriptor(makeDeps(provider));
     let ingress: ((input: unknown) => Promise<unknown>) | undefined;
-    const talker = desc.capabilities.talker!.build(
-      { inbox: validCred() },
-      {
-        connectionId: "email-test",
-        persist: async () => {},
-        registerIngress: (handler) => {
-          ingress = handler;
-          return () => {};
-        },
+    const talker = desc.capabilities.talker!.build(validCred(), {
+      connectionId: "email-test",
+      persist: async () => {},
+      registerIngress: (handler) => {
+        ingress = handler;
+        return () => {};
       },
-    );
+    });
     const received: ChannelMessage[] = [];
     talker.start(
       (msg) => received.push(msg),
@@ -385,17 +379,14 @@ function buildDeliveringTalker(provider: MailProvider): {
 } {
   const desc = makeEmailDescriptor(makeDeps(provider));
   let ingress: ((input: unknown) => Promise<unknown>) | undefined;
-  const talker = desc.capabilities.talker!.build(
-    { inbox: validCred() },
-    {
-      connectionId: "email-test",
-      persist: async () => {},
-      registerIngress: (handler) => {
-        ingress = handler;
-        return () => {};
-      },
+  const talker = desc.capabilities.talker!.build(validCred(), {
+    connectionId: "email-test",
+    persist: async () => {},
+    registerIngress: (handler) => {
+      ingress = handler;
+      return () => {};
     },
-  );
+  });
   const delivered: ChannelMessage[] = [];
   talker.start(
     (msg) => delivered.push(msg),
@@ -499,21 +490,21 @@ describe("email inbound delivery", () => {
 
 describe("email descriptor over a real ConnectionRegistry", () => {
   it("reports needs-auth for talk before the inbox grant is imported", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(makeProvider())));
     const conn = await registry.connect("email");
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
   });
 
   it("unlocks talk once the inbox grant is imported and delivers inbound", async () => {
     const provider = makeProvider();
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(provider)));
     const conn = await registry.connect("email");
-    await registry.importCredential(conn.id, "inbox", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "inbox", validCred());
 
-    expect(conn.status().talk).toEqual({ state: "unlocked" });
+    expect(conn.status().chat).toEqual({ state: "unlocked" });
     const received: ChannelMessage[] = [];
     conn.hearTalker(async (msg) => {
       received.push(msg);
@@ -530,12 +521,12 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     expect(received).toHaveLength(1);
   });
 
-  it("degrades the inbox grant after a bad-signature deposit (setup-driven renew ⇒ re-confer)", async () => {
+  it("degrades the inbox grant after a bad-signature deposit (setup-driven renew ⇒ fix)", async () => {
     const provider = makeProvider();
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeEmailDescriptor(makeDeps(provider)));
     const conn = await registry.connect("email");
-    await registry.importCredential(conn.id, "inbox", validCred());
+    await registry.giveGrant(conn.connectionKind, conn.id, "inbox", validCred());
     const raw = JSON.stringify(buildEvent());
     const result = await registry.ingest(conn.id, {
       rawBody: raw,
@@ -544,8 +535,8 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     expect(result).toEqual({ status: "rejected", reason: "bad_signature" });
     await flush();
 
-    expect(conn.isUnlocked("talk")).toBe(false);
-    expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
+    expect(conn.isUnlocked("chat")).toBe(false);
+    expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
     expect(conn.auth.grants().inbox).toBe("degraded");
   });
 });

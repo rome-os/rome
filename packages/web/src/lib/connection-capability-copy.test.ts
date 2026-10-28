@@ -89,7 +89,6 @@ describe("slotCardCopy", () => {
       ["discord", slot("bot"), false],
       ["feishu", slot("bot"), false],
       ["email", slot("bot"), false],
-      ["webchat", slot("bot"), false],
       ["github", slot("user"), false],
       ["google", slot("user"), false],
       ["slack", slot("user"), false],

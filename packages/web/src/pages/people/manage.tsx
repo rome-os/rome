@@ -34,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import {
   Table,
   TableBody,
@@ -52,8 +53,9 @@ import { useAccountSearch } from "./use-roster";
 import { usePeopleWrites } from "./use-writes";
 
 // The dossier's management gestures: the bond, the accounts that resolve to
-// this person, and absorbing a duplicate. Three verbs of the /people contract
-// (`./writes.ts`), each settling the reads rather than editing them.
+// this person, absorbing a duplicate, and deleting the person. Four verbs of
+// the /people contract (`./writes.ts`), each settling the reads rather than
+// editing them.
 //
 // The pickers offer more than what would succeed. An account another person
 // holds is offerable, because taking one back is a gesture the guardian has and
@@ -80,15 +82,18 @@ function handleOf(account: { channel: string; channelUserId: string }): string {
 export function PersonManagement({
   person,
   onMerged,
+  onDeleted,
 }: {
   person: PersonResource;
   /** Where to go once this person has been absorbed: they no longer exist. */
   onMerged: (survivorId: string) => void;
+  /** Where to go once this person has been deleted: they no longer exist. */
+  onDeleted: () => void;
 }) {
   const { t } = useTranslation("people");
   const writes = usePeopleWrites();
   const level = normalizeBondLevel(person.bondLevel);
-  const [picker, setPicker] = useState<"link" | "merge" | null>(null);
+  const [picker, setPicker] = useState<"link" | "merge" | "delete" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savingBond, setSavingBond] = useState(false);
 
@@ -159,6 +164,10 @@ export function PersonManagement({
                 </DropdownMenuItem>
               </>
             )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onSelect={() => setPicker("delete")}>
+              {t("actions.deletePerson")}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -168,6 +177,14 @@ export function PersonManagement({
       {picker === "link" && <LinkAccountPicker person={person} onClose={() => setPicker(null)} />}
       {picker === "merge" && (
         <MergePicker person={person} onClose={() => setPicker(null)} onMerged={onMerged} />
+      )}
+      {picker === "delete" && (
+        <DeleteConfirm
+          person={person}
+          onClose={() => setPicker(null)}
+          onDeleted={onDeleted}
+          onRefused={setError}
+        />
       )}
     </div>
   );
@@ -409,5 +426,57 @@ function MergePicker({
         <MutationError message={error} />
       </DialogBody>
     </Dialog>
+  );
+}
+
+/**
+ * Confirm deleting this person.
+ *
+ * Asked rather than done from the menu: a delete returns every account the
+ * person holds to strangers, and taking them back is one link per account.
+ * The history stays with each chat, so nothing said is lost. A refusal closes
+ * the dialog and is said on the card, where the other gestures say theirs.
+ */
+function DeleteConfirm({
+  person,
+  onClose,
+  onDeleted,
+  onRefused,
+}: {
+  person: PersonResource;
+  onClose: () => void;
+  onDeleted: () => void;
+  onRefused: (message: string | null) => void;
+}) {
+  const { t } = useTranslation("people");
+  const writes = usePeopleWrites();
+  const [busy, setBusy] = useState(false);
+
+  async function remove() {
+    if (busy) return;
+    setBusy(true);
+    onRefused(null);
+    try {
+      const result = await writes.remove(person.id);
+      onClose();
+      if (result.ok) onDeleted();
+      else onRefused("conflict" in result ? result.conflict.error : result.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <RomeConfirmDialog
+      open
+      destructive
+      title={t("delete.title", { name: person.displayName })}
+      description={t("delete.description", { name: person.displayName })}
+      confirmLabel={busy ? t("actions.deleting") : t("actions.delete")}
+      cancelLabel={t("actions.cancel")}
+      confirmDisabled={busy}
+      onCancel={onClose}
+      onConfirm={() => void remove()}
+    />
   );
 }

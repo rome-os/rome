@@ -21,9 +21,9 @@ export interface CredentialsPasteField {
 
 /**
  * A guardian pastes one or more fields (e.g. an app id + secret). The scheme
- * cannot renew without the guardian, so `renew` always answers "re-confer".
+ * cannot renew without the guardian, so `renew` always answers "needs-fix".
  *
- * `confer` prompts every field, runs `validate` (which throws when the pasted
+ * `grant` prompts every field, runs `validate` (which throws when the pasted
  * material is not accepted), and returns a non-expiring credential whose
  * `material` is the collected `{ [field.name]: value }` record.
  */
@@ -34,7 +34,7 @@ export function credentialsPaste(opts: {
   validate: (material: SecretRecord) => Promise<void>;
 }): AuthScheme {
   return {
-    async confer(interact: GuardianInteraction): Promise<Credential> {
+    async obtain(interact: GuardianInteraction): Promise<Credential> {
       const material = await interact.prompt({
         instructions: opts.instructions,
         fields: opts.fields.map((f) => ({
@@ -48,17 +48,17 @@ export function credentialsPaste(opts: {
       await opts.validate(material);
       return { material, expiresAt: "never" };
     },
-    async renew(): Promise<Credential | "re-confer"> {
-      return "re-confer";
+    async renew(): Promise<Credential | "needs-fix"> {
+      return "needs-fix";
     },
   };
 }
 
 /**
  * A guardian pastes a long-lived secret. The scheme cannot renew without the
- * guardian, so `renew` always answers "re-confer".
+ * guardian, so `renew` always answers "needs-fix".
  *
- * `confer` prompts one secret field named "token", runs `validate` (which throws
+ * `grant` prompts one secret field named "token", runs `validate` (which throws
  * on an invalid token), and returns a non-expiring `{ token }` credential. This
  * is `credentialsPaste` specialized to the single `token` field.
  */
@@ -82,16 +82,16 @@ export function tokenPaste(opts: {
  * `accessToken` (and any `refreshToken`) lands in the grant material as a flat
  * record.
  *
- * Conferral is route-driven, exactly like WhatsApp pairing: the OAuth round-trip
+ * Grant is route-driven, exactly like WhatsApp pairing: the OAuth round-trip
  * runs in the browser + the `/oauth/{provider}/start` → `/oauth/redeem` routes,
- * which finish the flow with `importCredential`. There is no headless conferral
- * (guardian-interaction machinery is absent this phase), so `confer()`
- * throws — the route is the conferral driver.
+ * which finish the flow through the registry's `giveGrant`. There is no headless grant
+ * (guardian-interaction machinery is absent this phase), so `obtain()`
+ * throws — the route is the grant driver.
  *
  * `renew()`: when the provider is wired with `refresh` and the credential carries
  * a refresh token, Rome Cloud runs the provider's refresh (it holds the client
  * secret) and the renewed credential replaces this one. Otherwise the bundle can
- * only be re-authorized by the guardian, and `renew()` answers "re-confer".
+ * only be re-authorized by the guardian, and `renew()` answers "needs-fix".
  * GitHub and Slack tokens don't expire, so a token whose `expiresAt` is `"never"`
  * never reaches `renew()` at all.
  */
@@ -101,17 +101,17 @@ export function romeCloudOAuth(opts: {
   refresh?: (refreshToken: string) => Promise<Credential>;
 }): AuthScheme {
   return {
-    async confer(_interact: GuardianInteraction): Promise<Credential> {
+    async obtain(_interact: GuardianInteraction): Promise<Credential> {
       throw new Error(
-        `conferral for "${opts.provider}" is driven by the oauth redeem route, not a headless confer()`,
+        `the grant for "${opts.provider}" is given by the oauth redeem route, not a headless obtain()`,
       );
     },
-    async renew(cred: Credential): Promise<Credential | "re-confer"> {
+    async renew(cred: Credential): Promise<Credential | "needs-fix"> {
       const refreshToken =
         typeof cred.material === "function" ? undefined : cred.material.refreshToken;
       // Without a refresh path, a stale or refused bundle can only be replaced by
       // the guardian reconnecting.
-      if (!opts.refresh || !refreshToken) return "re-confer";
+      if (!opts.refresh || !refreshToken) return "needs-fix";
       return opts.refresh(refreshToken);
     },
   };

@@ -2,9 +2,10 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { ListRow } from "@/components/ui/list-row";
 import { Avatar, AVATAR_TONE, GUARDIAN_TONE } from "./avatar";
-import { ChannelGlyph, ChannelPill } from "./channel-meta";
+import { ChannelGlyph, ChannelPill, channelLabel } from "./channel-meta";
 import { timeAgo } from "./format";
 import { isRowFixed, rowHandle, type PeopleRow, type RowLevel } from "./people-model";
+import { accountHandle } from "./send-model";
 
 // The three rows the page renders. They differ by what the reader is doing:
 // routing to whoever has something new (stream), deciding where an unplaced
@@ -12,12 +13,12 @@ import { isRowFixed, rowHandle, type PeopleRow, type RowLevel } from "./people-m
 // neutral everywhere — a channel is a glyph on this page, never a color.
 
 const LEVEL_LABEL_KEY: Record<RowLevel, string> = {
-  unknown: "levels.unknown",
+  stranger: "levels.stranger",
   guardian: "levels.guardian",
   "inner-circle": "levels.innerCircle",
   acquaintance: "levels.acquaintance",
   other: "levels.other",
-  stranger: "levels.stranger",
+  dismissed: "levels.dismissed",
 };
 
 export function levelLabelKey(level: RowLevel): string {
@@ -37,7 +38,7 @@ const ROW_GRID = "grid grid-cols-[2rem_minmax(0,1fr)_auto]";
  *
  * Only a person's row opens a dossier: a dossier is a merged history, and a
  * history is what a person has. An account nobody has placed carries its own
- * evidence on the row instead — see {@link UnknownRow}.
+ * evidence on the row instead — see {@link StrangerRow}.
  */
 export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void }) {
   const { t } = useTranslation("people");
@@ -89,7 +90,7 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
  * rather than as a wall of buttons. Hover is not a thing on touch screens, so
  * there they stay put.
  */
-export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.ReactNode }) {
+export function StrangerRow({ row, actions }: { row: PeopleRow; actions?: React.ReactNode }) {
   const { t } = useTranslation("people");
   const handle = rowHandle(row);
   const channel = row.accounts[0]?.channel;
@@ -172,9 +173,14 @@ export function DirectoryRow({
   const who = (
     <>
       <span className="block truncate text-ui text-foreground">{row.displayName}</span>
-      <span className="block truncate text-aux text-muted-foreground">
+      {/* The guardian's line wraps rather than truncating: it carries their
+          accounts or the pointer to linking one, and either clipped on a phone
+          loses what the line is for. */}
+      <span
+        className={cn("block text-aux text-muted-foreground", fixed ? "break-words" : "truncate")}
+      >
         {fixed ? (
-          t("guardian.meta")
+          <GuardianAccounts accounts={row.accounts} />
         ) : (
           <span className="font-mono tabular-nums">{handle ?? ""}</span>
         )}
@@ -187,10 +193,7 @@ export function DirectoryRow({
     // separate targets — select, open, and the menu — so the row itself is none
     // of them. The fill marks the row the pointer is over, and predates the
     // move onto `ListRow`.
-    <ListRow
-      selected={selected}
-      className={cn(ROW_GRID, fixed ? "cursor-default" : !selected && "hover:bg-surface-hover")}
-    >
+    <ListRow selected={selected} className={cn(ROW_GRID, !selected && "hover:bg-surface-hover")}>
       {fixed || !onToggleSelect ? (
         <Avatar name={row.displayName} tone={fixed ? GUARDIAN_TONE : AVATAR_TONE} />
       ) : (
@@ -207,7 +210,7 @@ export function DirectoryRow({
           <Avatar name={row.displayName} />
         </button>
       )}
-      {onOpen && !fixed ? (
+      {onOpen ? (
         <button type="button" onClick={onOpen} className="min-w-0 text-left">
           {who}
         </button>
@@ -216,5 +219,37 @@ export function DirectoryRow({
       )}
       <span className="flex items-center justify-end gap-2">{actions}</span>
     </ListRow>
+  );
+}
+
+/**
+ * The guardian's line under their name: the accounts that are theirs, each by
+ * its channel glyph and handle, so the roster answers "which accounts are me"
+ * without opening the person page. With none linked yet it says so, since the
+ * guardian's next step is "Link my account" beside the page title.
+ */
+function GuardianAccounts({ accounts }: { accounts: PeopleRow["accounts"] }) {
+  const { t } = useTranslation("people");
+  if (accounts.length === 0) return <>{t("guardian.noAccounts")}</>;
+  return (
+    // A handle longer than the row, such as a work email on a phone, breaks
+    // rather than overflowing it.
+    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+      <span className="shrink-0">{t("guardian.you")}</span>
+      {accounts.map((account) => (
+        <span
+          key={`${account.channel}:${account.channelUserId}`}
+          className="inline-flex min-w-0 max-w-full items-center gap-1"
+        >
+          <span className="shrink-0">
+            <ChannelGlyph channel={account.channel} />
+            {/* The glyph is hidden from assistive tech, so the platform is
+                named for it here. */}
+            <span className="sr-only">{channelLabel(t, account.channel)}</span>
+          </span>
+          <span className="min-w-0 break-all font-mono tabular-nums">{accountHandle(account)}</span>
+        </span>
+      ))}
+    </span>
   );
 }

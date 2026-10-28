@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowUp, Paperclip, Sparkles, X } from "lucide-react";
+import { ArrowUp, Lock, Paperclip, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -16,16 +16,11 @@ import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
 import { ProjectSelector } from "@/components/project-selector";
 import { SourceConnect } from "@/components/sync/SourceConnect";
 import { cn } from "@/lib/utils";
-import { discardSendOrigin, recordSendOrigin } from "@/lib/send-flight";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
-import {
-  ChatApiError,
-  createProject as apiCreateProject,
-  listProjects,
-  saveSetting,
-} from "@/lib/chat-api";
+import { ChatApiError, createProject as apiCreateProject, saveSetting } from "@/lib/chat-api";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
 import { usePeople } from "@/hooks/use-people";
+import { useChatLocations } from "@/hooks/use-chat-locations";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
   DEFAULT_LARGE_MODEL_SELECTION,
@@ -38,7 +33,6 @@ import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import type {
   AgentMention,
   PendingUpload,
-  ProjectCatalog,
   ProjectOption,
   ReasoningEffort,
   ChatErrorNotice,
@@ -53,6 +47,14 @@ import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
+import { ReplyBar } from "./reply/ReplyBar";
+import { useReplyDraft, type ReplyTarget } from "./reply/reply-draft";
+import {
+  COMPOSER_HINT_KEYS,
+  composerHints,
+  pickComposerHint,
+  type ComposerHint,
+} from "./composer/composer-hints";
 import { useHorizontalScrollRail } from "./HorizontalScrollRail";
 import {
   clearNewChatDraft,
@@ -61,6 +63,7 @@ import {
   saveNewChatDraft,
 } from "@/lib/new-chat-draft-storage";
 import { randomUUID } from "@/lib/random-uuid";
+import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
 
 export interface ChatComposerSnapshot {
@@ -83,6 +86,9 @@ export interface ChatComposerSnapshot {
   // Resending an unchanged draft after a failure reuses it, so a turn the server
   // accepted before the failure is returned rather than recorded twice.
   inputId?: string;
+  // The message this turn replies to, sent as `replyToMessageId` (and
+  // `replyQuote` for a selection).
+  replyTo?: ReplyTarget;
 }
 
 export interface ChatComposerSendControls {
@@ -127,8 +133,12 @@ export interface ChatComposerProps {
   persistNewChatDraft?: boolean;
   // Whether the project picker is shown (typically only in draft mode).
   showProjectSelector?: boolean;
-  // Whether the large-model picker is shown (typically only in draft mode).
+  // Whether the large-model picker is shown.
   showModelSelector?: boolean;
+  // An open chat's own model pick. When set, the picker shows and changes it,
+  // and sends carry no selection: the chat stores it. A draft leaves it unset,
+  // so the picker edits the default for new chats.
+  chatModelSelection?: { value: string; onChange: (next: string) => void };
   // Seed for the draft project name. Honored once at mount and again when it
   // changes from undefined → defined (i.e., transitioning into a new draft).
   initialProjectName?: string;
@@ -166,10 +176,22 @@ export interface ChatComposerProps {
     onApprove?: () => void;
     onCancel?: () => void;
   } | null;
+  // Why typing is off right now: a card in the transcript is the only way to
+  // answer. While set, a locked strip with this text stands where the box
+  // was, so the state reads at a glance. Null or undefined keeps the composer
+  // open. The box stays mounted but hidden, so its draft and measurements
+  // survive the lock.
+  lockedReason?: string | null;
   // Styling for the input box itself (border, surface, padding, blur). The
   // composer owns the box so the pre-send chip row can sit *outside* it; each
   // mount passes its own box look (the floating composer adds backdrop-blur).
   boxClassName?: string;
+  // A box for plain text only, for a chat whose other end is not one of Rome's
+  // agents (an assistant's chat): no attachments, reasoning effort,
+  // impersonation, workspace chips or `/` skills, none of which reach it.
+  textOnly?: boolean;
+  // Replaces the default placeholder.
+  placeholder?: string;
   // Called when the user submits. The composer clears text immediately but
   // keeps uploading attachments visible until this promise settles. If it
   // rejects, the submitted inputs remain available for a retry.
@@ -204,6 +226,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     persistNewChatDraft = false,
     showProjectSelector = false,
     showModelSelector = false,
+    chatModelSelection,
     initialProjectName,
     initialDeviceFolder,
     pinnedAgentMention = null,
@@ -213,12 +236,16 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     onStop,
     streamError,
     designingInteraction = null,
+    lockedReason = null,
     boxClassName,
+    textOnly = false,
+    placeholder,
     onSend,
   },
   ref,
 ) {
   const { t } = useTranslation("chat");
+  const replyDraft = useReplyDraft();
 
   const [{ storedDraft, authEpoch }] = useState(() => {
     const authEpoch = persistNewChatDraft ? currentAuthEpoch() : null;
@@ -256,6 +283,25 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     }
   }, [agentMentionLocked]);
   const effectiveMention = pinnedAgentMention ?? draftAgentMention;
+  const coarsePointer = useCoarsePointer();
+
+  // The empty box shows one hint, picked again on each send rather than on a
+  // timer. The set of hints changes when a draft becomes a chat or the pointer
+  // changes; the shown one stays while it still applies.
+  const hints = useMemo(
+    () =>
+      composerHints({
+        draft: !agentMentionLocked,
+        textOnly,
+        projectSelector: showProjectSelector,
+        coarsePointer,
+      }),
+    [agentMentionLocked, textOnly, showProjectSelector, coarsePointer],
+  );
+  const [hint, setHint] = useState<ComposerHint>(() => pickComposerHint(hints, null));
+  useEffect(() => {
+    setHint((current) => (hints.includes(current) ? current : pickComposerHint(hints, current)));
+  }, [hints]);
 
   // Open while the message starts with `/` and the cursor is still inside the
   // first token. Selecting pins the skill as a structured chip (mirroring the
@@ -317,9 +363,17 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       initialDeviceFolder ??
       (initialProjectName?.trim() ? null : (storedDraft?.deviceFolder ?? null)),
   );
-  const [projectCatalog, setProjectCatalog] = useState<ProjectCatalog | null>(null);
-  const [projectsLoading, setProjectsLoading] = useState(false);
+  const locations = useChatLocations(showProjectSelector);
+  const projectCatalog = locations.query.data?.projects ?? null;
+  // Errors from creating a project; a failed load shows from the query below.
   const [projectsError, setProjectsError] = useState<string | null>(null);
+  const locationsError = locations.query.error;
+  const loadError =
+    locationsError && !locations.query.data
+      ? locationsError instanceof ChatApiError && locationsError.message
+        ? locationsError.message
+        : t("project.errors.loadFailed")
+      : null;
   // Errors that need a composer-level banner even when the project picker
   // isn't rendered (e.g. /api/settings save failures in an embed that opts
   // out of `showProjectSelector`).
@@ -372,11 +426,26 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // box would otherwise stay at its previous (potentially maxed-out) height
   // and not shrink back to a single line. We mirror the onInput math here
   // and let React re-apply it after every value change.
+  // A hidden box measures zero, so a locked composer waits and resizes again
+  // once the lock lifts.
+  const locked = lockedReason !== null && lockedReason !== undefined;
   useLayoutEffect(() => {
     const el = textareaRef.current;
-    if (!el) return;
+    if (!el || locked) return;
     clampTextareaHeight(el, textareaMaxHeight);
-  }, [inputText, textareaMaxHeight]);
+  }, [inputText, textareaMaxHeight, locked]);
+
+  // The composer's menus render outside the box, so hiding it leaves an open
+  // one on screen. Close them as the lock engages.
+  useEffect(() => {
+    if (!locked) return;
+    setMentionMenuOpen(false);
+    setSlashMenuOpen(false);
+    setImpersonationMenuOpen(false);
+    setModelMenuOpen(false);
+    setReasoningMenuOpen(false);
+    setDraftProjectMenuOpen(false);
+  }, [locked]);
 
   // Whether the textarea held focus when the current Send press began.
   const textareaFocusedAtPressRef = useRef(false);
@@ -438,6 +507,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     setImpersonationMenuOpen(false);
   }, [settings, impersonationEnabled]);
 
+  // Only a draft's first send carries the pick; an open chat has stored it.
+  const draftModelSelection =
+    showModelSelector && modelSelectorEnabled && !chatModelSelection
+      ? largeModelSelection
+      : undefined;
+
   const updateLargeModelSelection = useCallback(
     async (next: string) => {
       if (uploadInFlightRef.current) return;
@@ -466,20 +541,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     [t, invalidateSettings],
   );
 
-  const loadProjects = useCallback(async () => {
-    setProjectsLoading(true);
-    setProjectsError(null);
-    try {
-      const data = await listProjects();
-      setProjectCatalog(data);
-    } catch (error) {
-      const fallback = t("project.errors.loadFailed");
-      setProjectsError(error instanceof ChatApiError && error.message ? error.message : fallback);
-    } finally {
-      setProjectsLoading(false);
-    }
-  }, [t]);
-
   const createProjectAndSelect = useCallback(async () => {
     const name = newProjectName.trim();
     if (!name) {
@@ -490,11 +551,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     setProjectsError(null);
     try {
       const data: ProjectOption = await apiCreateProject(name);
-      setProjectCatalog((prev) => {
-        if (!prev) return prev;
-        const projects = [...prev.projects, data].sort((a, b) => a.name.localeCompare(b.name));
-        return { ...prev, projects };
-      });
+      locations.addProject(data);
       setNewProjectName("");
       setCreateProjectFormOpen(false);
       setProjectSearchQuery("");
@@ -511,7 +568,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     } finally {
       setCreatingProject(false);
     }
-  }, [newProjectName, t, connectOnCreate]);
+  }, [newProjectName, t, connectOnCreate, locations.addProject]);
 
   const addPendingFiles = useCallback((files: File[]) => {
     // The visible file picker is disabled during an upload, but paste and the
@@ -591,8 +648,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           text: trimmed,
           uploads: pendingUploads,
           personaId,
-          largeModelSelection:
-            showModelSelector && modelSelectorEnabled ? largeModelSelection : undefined,
+          largeModelSelection: draftModelSelection,
           reasoningEffort,
           projectPath: draftProjectName,
           deviceFolder: draftDeviceFolder ?? undefined,
@@ -621,9 +677,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       reasoningEffort,
       draftSkill,
       pendingUploads,
-      showModelSelector,
-      modelSelectorEnabled,
-      largeModelSelection,
+      draftModelSelection,
       draftProjectName,
       draftDeviceFolder,
       draftAgentMention,
@@ -644,17 +698,17 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      const files = extractFilesFromClipboard(event.clipboardData);
+      const files = textOnly ? [] : extractFilesFromClipboard(event.clipboardData);
       if (files.length > 0) {
         event.preventDefault();
         addPendingFiles(files);
       }
     },
-    [addPendingFiles],
+    [addPendingFiles, textOnly],
   );
 
   const runSend = useCallback(async () => {
-    if (uploadInFlight || uploadInFlightRef.current) return;
+    if (locked || uploadInFlight || uploadInFlightRef.current) return;
     // A skill chip alone is a sendable turn — the server-expanded prompt asks
     // the agent to read the skill and ask what to do with it.
     if (!inputText.trim() && pendingUploads.length === 0 && !draftSkill) return;
@@ -674,8 +728,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       text,
       uploads,
       personaId,
-      largeModelSelection:
-        showModelSelector && modelSelectorEnabled ? largeModelSelection : undefined,
+      largeModelSelection: draftModelSelection,
       reasoningEffort,
       projectPath: draftProjectName,
       deviceFolder: draftDeviceFolder ?? undefined,
@@ -684,6 +737,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       agentMention: draftAgentMention ?? undefined,
       skillName: skill?.name,
       inputId,
+      replyTo: replyDraft?.target ?? undefined,
     };
 
     // A text-only turn clears optimistically — it is accepted or rejected in
@@ -693,7 +747,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     // text the user may still be reading (or about to cancel) reads as loss.
     // It clears only once the server has accepted the turn.
     const clearsOptimistically = uploads.length === 0;
-    if (textareaRef.current && text) recordSendOrigin(inputId, textareaRef.current);
     if (persistNewChatDraft) {
       clearNewChatDraft();
       skipNextDraftSaveRef.current = clearsOptimistically && (inputText !== "" || skill !== null);
@@ -702,11 +755,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       setInputText("");
       setPendingUploads([]);
       setDraftSkill(null);
+      replyDraft?.clear();
     }
+    setHint((current) => pickComposerHint(hints, current));
     try {
       await invokeOnSend(snapshot, persistNewChatDraft);
       failedSendRef.current = null;
       if (!clearsOptimistically) {
+        replyDraft?.clear();
         const sentIds = new Set(uploads.map((upload) => upload.id));
         setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
         setDraftSkill((current) => (current === skill ? null : current));
@@ -715,7 +771,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setInputText((current) => (current === rawText ? "" : current));
       }
     } catch {
-      discardSendOrigin(inputId);
       failedSendRef.current = { inputId, text, uploads, skill };
       if (
         persistNewChatDraft &&
@@ -741,6 +796,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setInputText(persistNewChatDraft ? rawText : text);
         setPendingUploads(uploads);
         setDraftSkill(skill);
+        if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
       }
       // Nothing to restore otherwise — a cancelled or failed upload never
       // cleared the text or the attachment tray in the first place.
@@ -752,15 +808,16 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     pendingUploads,
     draftSkill,
     personaId,
-    showModelSelector,
-    modelSelectorEnabled,
-    largeModelSelection,
+    draftModelSelection,
     reasoningEffort,
     draftProjectName,
     draftDeviceFolder,
     draftAgentMention,
     uploadInFlight,
     invokeOnSend,
+    hints,
+    locked,
+    replyDraft,
   ]);
 
   // Re-evaluates whether the cursor sits inside an active mention token
@@ -808,7 +865,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       const token = value.slice(1, cursor);
       const slashCount = token.split("/").length - 1;
       const slashShapeAllowed = slashCount === 0 || (token.startsWith("@") && slashCount === 1);
-      if (value.startsWith("/") && cursor >= 1 && !/\s/.test(token) && slashShapeAllowed) {
+      if (
+        !textOnly &&
+        value.startsWith("/") &&
+        cursor >= 1 &&
+        !/\s/.test(token) &&
+        slashShapeAllowed
+      ) {
         setSlashQuery(token);
         setSlashMenuOpen(true);
         return;
@@ -818,7 +881,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setSlashQuery("");
       }
     },
-    [slashMenuOpen],
+    [slashMenuOpen, textOnly],
   );
 
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -907,7 +970,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // On touch-first devices, Enter inserts a newline instead and sending goes
   // through the send button — soft keyboards have no Shift+Enter, and an
   // accidental tap on Enter shouldn't fire a half-written message.
-  const coarsePointer = useCoarsePointer();
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // While the slash menu is open, hijack arrow/enter/escape the same way the
     // mention menu does. The two are mutually exclusive in practice: slash
@@ -992,6 +1054,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setMentionQuery("");
         return;
       }
+    }
+    if (e.key === "Escape" && replyDraft?.target) {
+      e.preventDefault();
+      replyDraft.clear();
+      return;
     }
     if (shouldSubmitOnEnter(e, { enterSends: !coarsePointer })) {
       e.preventDefault();
@@ -1099,9 +1166,23 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             onRemove={uploadInFlight ? undefined : () => setDraftSkill(null)}
           />
         )}
-        <WorkspaceContextChips />
+        {textOnly ? null : <WorkspaceContextChips />}
       </div>
-      <div data-chat-composer-box className={cn("@container/composer relative z-10", boxClassName)}>
+      {locked ? (
+        <div
+          role="status"
+          data-chat-composer-locked
+          className="relative z-10 flex items-center gap-3 rounded-16 border border-border bg-muted px-4 py-3 text-ui text-foreground"
+        >
+          <Lock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1">{lockedReason}</span>
+        </div>
+      ) : null}
+      <div
+        data-chat-composer-box
+        hidden={locked}
+        className={cn("@container/composer relative z-10", boxClassName)}
+      >
         {composerError && (
           <Alert variant="destructive" className="mb-3 px-3 py-2">
             <AlertDescription>{composerError}</AlertDescription>
@@ -1114,6 +1195,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           className="hidden"
           onChange={handleFileSelection}
         />
+        <ReplyBar />
         {/* flow-root keeps the tray's bottom margin inside this box, so the
             measured height is the full space the tray takes from the input. */}
         <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">
@@ -1164,9 +1246,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                         onKeyDown={handleKeyDown}
                         onPaste={handlePaste}
                         placeholder={
-                          pendingUploads.length > 0
+                          placeholder ??
+                          (pendingUploads.length > 0
                             ? t("composer.placeholderWithUploads")
-                            : t("composer.placeholderDefault")
+                            : t(COMPOSER_HINT_KEYS[hint], {
+                                shortcut: chatSearchShortcutForPlatform(),
+                              }))
                         }
                         rows={1}
                         className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
@@ -1196,8 +1281,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 disabled={uploadInFlight}
                 t={t}
                 projectCatalog={projectCatalog}
-                projectsLoading={projectsLoading}
-                projectsError={projectsError}
+                projectsLoading={locations.query.isPending}
+                projectsError={projectsError ?? loadError}
+                devices={locations.query.data?.devices ?? null}
                 draftProjectName={draftProjectName}
                 draftProjectLabel={draftProjectLabel}
                 defaultProjectName={DEFAULT_PROJECT_NAME}
@@ -1219,8 +1305,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                   if (!nextOpen) {
                     setProjectSearchQuery("");
                     setCreateProjectFormOpen(false);
-                  } else if (!projectCatalog) {
-                    await loadProjects();
+                  } else {
+                    // The menu shows the cached answer; this only refreshes it.
+                    void locations.query.refetch();
                   }
                 }}
                 onPickProject={(name) => {
@@ -1252,7 +1339,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 onClose={() => setPendingConnectPath(null)}
               />
             ) : null}
-            {impersonationEnabled && (
+            {impersonationEnabled && !textOnly && (
               <ImpersonationMenu
                 disabled={uploadInFlight}
                 open={impersonationMenuOpen}
@@ -1269,34 +1356,42 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 guardianLabel={guardianLabel}
               />
             )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploadInFlight}
-              aria-label={t("composer.uploadFiles")}
-              title={t("composer.uploadFiles")}
-              className="touch-target"
-            >
-              <Paperclip aria-hidden />
-            </Button>
+            {textOnly ? null : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadInFlight}
+                aria-label={t("composer.uploadFiles")}
+                title={t("composer.uploadFiles")}
+                className="touch-target"
+              >
+                <Paperclip aria-hidden />
+              </Button>
+            )}
             {showModelSelector && modelSelectorEnabled && (
               <ModelSelectorMenu
                 open={modelMenuOpen}
                 onOpenChange={setModelMenuOpen}
-                value={largeModelSelection}
-                onChange={(next) => void updateLargeModelSelection(next)}
+                value={chatModelSelection?.value ?? largeModelSelection}
+                onChange={(next) =>
+                  chatModelSelection
+                    ? chatModelSelection.onChange(next)
+                    : void updateLargeModelSelection(next)
+                }
                 disabled={uploadInFlight}
               />
             )}
-            <ReasoningEffortMenu
-              open={reasoningMenuOpen}
-              onOpenChange={setReasoningMenuOpen}
-              value={reasoningEffort}
-              onChange={(next) => void updateReasoningEffort(next)}
-              disabled={uploadInFlight}
-            />
+            {textOnly ? null : (
+              <ReasoningEffortMenu
+                open={reasoningMenuOpen}
+                onOpenChange={setReasoningMenuOpen}
+                value={reasoningEffort}
+                onChange={(next) => void updateReasoningEffort(next)}
+                disabled={uploadInFlight}
+              />
+            )}
           </div>
           {/* Stop sits just left of Send. */}
           <div className="flex items-center gap-2 self-end [grid-area:send]">

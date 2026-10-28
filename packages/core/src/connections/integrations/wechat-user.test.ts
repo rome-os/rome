@@ -1,11 +1,11 @@
-// The WeChat personal-account connection: its conferral setup driven through
+// The WeChat personal-account connection: its setup driven through
 // the real SetupSession runtime, and its read-only Talk surfaces — both against
 // a fake client runtime (no client, no python, no host script).
 //
 // Seams under test:
-//   1. The setup coroutine — an already-ready account confers with no guardian
+//   1. The setup coroutine — an already-ready account grants with no guardian
 //      interaction; a fresh one installs, captures the keys while the guardian
-//      scans, and confers once the store unlocks.
+//      scans, and grants once the store unlocks.
 //   2. Read-only by construction: `send` throws, `directMessaging` answers null,
 //      nothing is delivered into the agent pipeline.
 //   3. The read surfaces map reader rows onto Talk's provider-neutral shapes.
@@ -16,7 +16,7 @@ import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-
 import { WechatUserStorePending } from "../../channels/wechat-user.js";
 import { CredentialRejected } from "../errors.js";
 import { SetupSession } from "../setup/session.js";
-import type { SetupConferral } from "../setup/types.js";
+import type { SetupGrant } from "../setup/types.js";
 import type { Credential, RuntimeKit, StreamFault, Talker } from "../types.js";
 import { toWechatUserChannelMessage } from "../../channels/wechat-user-messages.js";
 import {
@@ -137,22 +137,22 @@ describe("makeWechatUserSetup", () => {
     expect(held.captures).toBe(0);
   });
 
-  it("confers with no guardian interaction when the account is already ready", async () => {
+  it("grants with no guardian interaction when the account is already ready", async () => {
     const { fn } = setupWith(fakeRuntime({ statuses: [READY] }));
-    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const commit = rs.fn(async (_c: SetupGrant, _s: AbortSignal) => {});
     const session = new SetupSession({ fn, commit });
 
     await session.started();
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
     expect(commit).toHaveBeenCalledTimes(1);
-    const conferral = commit.mock.calls[0][0];
-    expect(conferral.credential.material).toEqual({
+    const grant = commit.mock.calls[0][0];
+    expect(grant.credential.material).toEqual({
       custody: "rome-container",
       wxid: "wxid_guardian",
     });
-    expect(wechatUserGrantProfileSchema.parse(conferral.profile).wxid).toBe("wxid_guardian");
-    expect(conferral.summary?.body?.join(" ")).toContain("read-only");
+    expect(wechatUserGrantProfileSchema.parse(grant.profile).wxid).toBe("wxid_guardian");
+    expect(grant.summary?.body?.join(" ")).toContain("read-only");
   });
 
   it("resumes readable cached history without recapturing keys", async () => {
@@ -211,7 +211,7 @@ describe("makeWechatUserSetup", () => {
       await new Promise<void>((resolve) => (finishLogin = resolve));
     });
     const { fn } = setupWith(runtime);
-    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const commit = rs.fn(async (_c: SetupGrant, _s: AbortSignal) => {});
     const session = new SetupSession({ fn, commit });
     await session.started();
 
@@ -267,7 +267,7 @@ describe("makeWechatUserSetup", () => {
     expect(runtime.prepareSession).toHaveBeenCalledTimes(1);
   });
 
-  it("does not confer when the message shard cannot be unlocked", async () => {
+  it("does not grant when the message shard cannot be unlocked", async () => {
     const locked = { ...READY, state: "awaiting-keys" as const, keysReady: false };
     const runtime = fakeRuntime({
       statuses: [locked],
@@ -397,7 +397,7 @@ describe("the WeChat personal Talker", () => {
       material: { custody: "rome-container", wxid: "wxid_guardian" },
       expiresAt: "never",
     };
-    const talker = descriptor.capabilities.talker!.build({ session: credential }, kit);
+    const talker = descriptor.capabilities.talker!.build(credential, kit);
     const deliver = rs.fn();
     talker.start(deliver as unknown as (msg: ChannelMessage) => void, fault);
     return {

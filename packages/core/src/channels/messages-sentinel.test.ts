@@ -1,3 +1,4 @@
+import { platformOf } from "@rome/api-types/platform";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { DrizzleDb } from "../db/index.js";
 import { romeSessions, sentinelLog } from "../db/schema.js";
@@ -37,6 +38,7 @@ function row(
     id,
     messageId: `msg-${id}`,
     channel: fields.channel ?? CHANNEL,
+    platform: platformOf(fields.channel ?? CHANNEL),
     channelUserId: fields.channelUserId ?? DIRECT,
     threadId: fields.threadId ?? null,
     text: fields.text,
@@ -140,6 +142,21 @@ describe("sentinelLogMessages", () => {
       limit: WHOLE_HISTORY,
     });
     expect(elsewhere).toEqual([]);
+  });
+
+  // A link keyed by a service names the service, and the log names the
+  // account's own channel id, which may be opaque.
+  it("reads an account under the channel it is stored under", async () => {
+    await row(db, "opaque", { at: 1400, text: "on the other account", channel: "tg-opaque" });
+
+    expect(await refs()).not.toContain("sentinel:opaque");
+    const entries = await sentinelLogMessages(db).read({
+      accounts: [{ ...account, storedUnder: ["tg-opaque"] }],
+      limit: WHOLE_HISTORY,
+    });
+    expect(entries.map((entry) => [entry.ref, entry.source])).toEqual([
+      ["sentinel:opaque", CHANNEL],
+    ]);
   });
 });
 

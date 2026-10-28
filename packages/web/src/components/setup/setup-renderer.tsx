@@ -101,8 +101,8 @@ export function StandardSetupRenderer(
     case "done":
       return (
         <div className="space-y-1" data-testid="setup-done">
-          {state.conferral.summary ? (
-            <ViewBody view={state.conferral.summary} />
+          {state.grant.summary ? (
+            <ViewBody view={state.grant.summary} />
           ) : (
             <p className="text-aux text-success-fg">{labels.connected}</p>
           )}

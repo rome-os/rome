@@ -8,7 +8,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkHistory } from "../connections/types.js";
 import { ConnectionRegistry } from "../connections/registry.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { tokenPaste } from "../connections/schemes.js";
 import type { Connection, ConnectionDescriptor, Talker } from "../connections/types.js";
 import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
@@ -54,10 +54,10 @@ function talkKind(
     epochs,
     descriptor: {
       connectionKind: service,
-      auth: { bot: tokenPaste({ label: "token", validate: async () => {} }) },
+      grant: "bot",
+      auth: tokenPaste({ label: "token", validate: async () => {} }),
       capabilities: {
         talker: {
-          needs: ["bot"],
           ...ports,
           build(): Talker {
             const epoch: (typeof epochs)[number] = {};
@@ -95,7 +95,9 @@ describe("channelList", () => {
     connectionAccounts?: Record<string, Accounts>,
   ) {
     testDb = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     for (const descriptor of descriptors) registry.register(descriptor);
     // The Connection ids the channel ports hear a talker on.
     const subscribed: string[] = [];
@@ -142,9 +144,10 @@ describe("channelList", () => {
   it("gives every service with a Talk a channel, beside the read-backed ones", () => {
     const actOnly: ConnectionDescriptor = {
       connectionKind: "github",
-      auth: {},
+      grant: "user",
+      auth: tokenPaste({ label: "token", validate: async () => {} }),
       capabilities: {
-        actor: { needs: [], build: () => ({ operations: () => [], invoke: async () => null }) },
+        actor: { build: () => ({ operations: () => [], invoke: async () => null }) },
       },
     };
     const { channels } = setup([
@@ -187,7 +190,7 @@ describe("channelList", () => {
     );
 
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -221,7 +224,7 @@ describe("channelList", () => {
     const connection = await registry.connect("telegram");
     // The Connection exists but its Talk is not built until a credential backs it.
     await expect(telegram.messages!.query({})).rejects.toBeInstanceOf(ChannelNotConnected);
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -237,7 +240,7 @@ describe("channelList", () => {
     const error = rs.fn();
     const logger = { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error };
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(testDb.db),
+      repository: new DrizzleConnectionsRepository(testDb.db),
       logger: logger as never,
     });
     // Offers a history read but does not declare one, so its channel would
@@ -245,7 +248,7 @@ describe("channelList", () => {
     const history: TalkHistory = { query: async () => [] };
     registry.register(talkKind("telegram", {}, null, null, history).descriptor);
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -263,20 +266,20 @@ describe("channelList", () => {
     const warn = rs.fn();
     const logger = { debug: rs.fn(), info: rs.fn(), warn, error: rs.fn() };
     const registry = new ConnectionRegistry({
-      ledger: new DrizzleGrantLedger(testDb.db),
+      repository: new DrizzleConnectionsRepository(testDb.db),
       logger: logger as never,
     });
     const service = talkKind("telegram");
     const build = service.descriptor.capabilities.talker!.build;
-    service.descriptor.capabilities.talker!.build = (creds, kit) => ({
-      ...build(creds, kit),
+    service.descriptor.capabilities.talker!.build = (cred, kit) => ({
+      ...build(cred, kit),
       get history(): never {
         throw new Error("not started");
       },
     });
     registry.register(service.descriptor);
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -303,7 +306,7 @@ describe("channelList", () => {
 
     for (const service of ["telegram", "discord"]) {
       const connection = await registry.connect(service);
-      await registry.importCredential(connection.id, "bot", {
+      await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
         material: { token: "t" },
         expiresAt: "never",
       });
@@ -342,7 +345,7 @@ describe("channelList", () => {
     const ids: Record<string, string> = {};
     for (const service of ["discord", "feishu"]) {
       const connection = await registry.connect(service);
-      await registry.importCredential(connection.id, "bot", {
+      await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
         material: { token: "t" },
         expiresAt: "never",
       });
@@ -373,7 +376,7 @@ describe("channelList", () => {
 
     expect(send.activity).toBeNull();
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -398,7 +401,7 @@ describe("channelList", () => {
 
     const connection = await registry.connect("telegram");
     const grant = { material: { token: "first" }, expiresAt: "never" as const };
-    await registry.importCredential(connection.id, "bot", grant);
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", grant);
     service.epochs[0]!.deliver?.(message({ messageId: "stranger", senderId: "unknown" }));
     service.epochs[0]!.deliver?.(message({ messageId: "empty", text: "  " }));
     service.epochs[0]!.deliver?.(message({ messageId: "first" }));
@@ -408,7 +411,10 @@ describe("channelList", () => {
     expect(failing).toHaveBeenCalledTimes(1);
 
     await connection.auth.revoke("bot");
-    await registry.importCredential(connection.id, "bot", { ...grant, material: { token: "2" } });
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+      ...grant,
+      material: { token: "2" },
+    });
     service.epochs[1]!.deliver?.(message({ messageId: "second" }));
     await rs.waitFor(() =>
       expect(heard.map((e) => e.message.messageId)).toEqual(["first", "second"]),
@@ -427,7 +433,7 @@ describe("channelList", () => {
     inbound.subscribe(handler);
 
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -450,10 +456,10 @@ describe("channelList", () => {
     const grant = { material: { token: "t" }, expiresAt: "never" as const };
 
     const first = await registry.connect("telegram");
-    await registry.importCredential(first.id, "bot", grant);
+    await registry.giveGrant(first.connectionKind, first.id, "bot", grant);
     await registry.remove(first.id);
     const second = await registry.connect("telegram");
-    await registry.importCredential(second.id, "bot", grant);
+    await registry.giveGrant(second.connectionKind, second.id, "bot", grant);
     service.epochs[1]!.deliver?.(message({ messageId: "after reconnect" }));
 
     await rs.waitFor(() => expect(heard).toEqual(["after reconnect"]));
@@ -478,7 +484,7 @@ describe("channelList", () => {
     });
 
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -511,7 +517,7 @@ describe("channelList", () => {
       });
 
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -536,7 +542,7 @@ describe("channelList", () => {
       });
 
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -561,7 +567,7 @@ describe("channelList", () => {
     });
 
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -592,7 +598,7 @@ describe("channelList", () => {
     });
 
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });
@@ -609,7 +615,9 @@ describe("joinLaterChannel", () => {
   it("joins a second Connection's channel once, and its first message reaches a subscriber once", async () => {
     testDb = createTestDb();
     const service = talkKind("telegram");
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(service.descriptor);
     const first = await registry.connect("telegram");
     const channelOf = (connection: Pick<Connection, "id" | "connectionKind">) =>
@@ -621,10 +629,10 @@ describe("joinLaterChannel", () => {
       linkedInAccounts: noAccounts,
       connections: { registry, admit, channelOf },
     });
-    // What index.ts does: every channel a Talk unlock adds, the hook hears.
+    // What index.ts does: every channel a chat unlock adds, the hook hears.
     const joined: string[] = [];
     const heard: InboundEvent[] = [];
-    registry.onUnlocked("talk", (connection) => {
+    registry.onUnlocked("chat", (connection) => {
       const channel = joinLaterChannel({ registry, admit, channelOf, channels }, connection);
       if (!channel) return;
       joined.push(channel.name);
@@ -634,11 +642,11 @@ describe("joinLaterChannel", () => {
     });
     const grant = { material: { token: "t" }, expiresAt: "never" as const };
 
-    await registry.importCredential(first.id, "bot", grant);
+    await registry.giveGrant(first.connectionKind, first.id, "bot", grant);
     expect(joined).toEqual([]);
 
     const second = await registry.connectAnother("telegram");
-    await registry.importCredential(second.id, "bot", grant);
+    await registry.giveGrant(second.connectionKind, second.id, "bot", grant);
     expect(joined).toEqual([`later-${second.id}`]);
     service.epochs[1]!.deliver?.(message({ messageId: "to the second bot" }));
 
@@ -664,10 +672,12 @@ describe("joinLaterChannel", () => {
       codec: plainText,
       create: async () => ({ messageId: "m", chatId: "c" }),
     });
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(service.descriptor);
     const connection = await registry.connect("telegram");
-    await registry.importCredential(connection.id, "bot", {
+    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
     });

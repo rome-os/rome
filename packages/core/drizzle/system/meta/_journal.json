@@ -603,6 +603,118 @@
       "when": 1792676963578,
       "tag": "0086_chat_device_folder",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1792778740434,
+      "tag": "0087_reply_platform_message_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "6",
+      "when": 1792848576147,
+      "tag": "0088_visitor_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1792940099689,
+      "tag": "0089_grant_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "6",
+      "when": 1792940159689,
+      "tag": "0090_outbox_send_from",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "6",
+      "when": 1792940160689,
+      "tag": "0091_webchat_is_not_a_connection",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "6",
+      "when": 1792956439390,
+      "tag": "0092_channel_account_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "6",
+      "when": 1793020434502,
+      "tag": "0093_connection_holds_one_grant",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "6",
+      "when": 1793023945158,
+      "tag": "0094_connected_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "6",
+      "when": 1793038661842,
+      "tag": "0095_grant_granted_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "6",
+      "when": 1793041332638,
+      "tag": "0096_nice_iron_patriot",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "6",
+      "when": 1793064686569,
+      "tag": "0097_dismissed_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "6",
+      "when": 1793075035756,
+      "tag": "0098_account_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "6",
+      "when": 1793079915198,
+      "tag": "0099_delegate_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "6",
+      "when": 1793085255558,
+      "tag": "0100_links_by_platform",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1793100440995,
+      "tag": "0101_outbox_by_account",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "6",
+      "when": 1793121384012,
+      "tag": "0102_drop_outbox",
+      "breakpoints": true
     }
   ]
 }

@@ -32,7 +32,8 @@ import { createTestDb } from "../test/helpers.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "../lib/oauth-providers.js";
 import type { OAuthTokenBundle } from "../lib/oauth-token-bundle.js";
-import { DrizzleGrantLedger } from "./ledger-db.js";
+import { DifferentAccountError } from "./errors.js";
+import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import {
   credentialFromBundle,
@@ -44,7 +45,7 @@ import {
   makeOAuthProviderDescriptor,
 } from "./integrations/oauth-providers.js";
 
-// A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
+// A fresh drizzle-backed connections repository per test;
 // the ledger shares each test's db (distinct tables), closed after each test.
 const openDbs: Array<() => void> = [];
 afterEach(() => {
@@ -61,7 +62,7 @@ function makeRegistry(
   db: DrizzleDb,
   providers: OAuthProvider[] = ["github", "slack", "google"],
 ): ConnectionRegistry {
-  const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
   for (const provider of providers) registry.register(makeOAuthProviderDescriptor(provider));
   return registry;
 }
@@ -189,7 +190,7 @@ describe("grantProfileFromBundle", () => {
     });
   });
 
-  it("shopify: fails the conferral when Rome Cloud doesn't name the store's domain", () => {
+  it("shopify: fails the grant when Rome Cloud doesn't name the store's domain", () => {
     const bundle: OAuthTokenBundle = { accessToken: "shpat_live", raw: {} };
     expect(() => grantProfileFromBundle("shopify", bundle, { displayName: "Acme" })).toThrow(
       /myshopify\.com/,
@@ -233,25 +234,23 @@ describe("grantProfileFromBundle", () => {
   });
 });
 
-describe("a malformed conferral fails loudly and stores nothing", () => {
-  it("importProviderBundle rejects and the grant keeps no credential or profile", async () => {
+describe("a malformed grant fails loudly and stores nothing", () => {
+  it("importProviderBundle rejects and leaves no connection behind", async () => {
     const registry = makeRegistry(freshDb());
     await expect(
       importProviderBundle(registry, "github", { accessToken: "gho" }, { login: 42 }),
     ).rejects.toThrow();
-    const rec = await grantProfile(registry, "github");
-    expect(rec?.credential).toBeUndefined();
-    expect(rec?.profile).toBeUndefined();
+    expect(registry.find("github")).toEqual([]);
   });
 });
 
 async function grantProfile(registry: ConnectionRegistry, provider: OAuthProvider) {
   const conn = registry.find(provider)[0];
-  const rec = await registry.getLedger().getGrant(conn.id, OAUTH_PROVIDER_GRANTS[provider]);
+  const rec = await registry.grantOf(conn.id);
   return rec;
 }
 
-describe("importProviderBundle records the conferral profile", () => {
+describe("importProviderBundle records the grant profile", () => {
   it("writes the typed profile on the grant in the same import as the credential", async () => {
     const registry = makeRegistry(freshDb());
     await importProviderBundle(
@@ -282,7 +281,7 @@ describe("importProviderBundle records the conferral profile", () => {
     expect(rec?.profile).toBeUndefined();
   });
 
-  it("re-conferral replaces both the profile and the credential", async () => {
+  it("fix replaces both the profile and the credential", async () => {
     const registry = makeRegistry(freshDb());
     await importProviderBundle(
       registry,
@@ -305,7 +304,7 @@ describe("importProviderBundle records the conferral profile", () => {
     expect(rec?.credential?.material).toEqual({ kind: "inline", record: { accessToken: "gho_2" } });
   });
 
-  it("refreshes the profile on re-conferral even when the token is byte-identical", async () => {
+  it("refreshes the profile on fix even when the token is byte-identical", async () => {
     const registry = makeRegistry(freshDb());
     // Same access token both times, but the identity changed (renamed login,
     // broader scopes) — the profile must still land, or the grant keeps a stale one.
@@ -329,10 +328,10 @@ describe("importProviderBundle records the conferral profile", () => {
     });
   });
 
-  it("keeps the profile of the conferral that degraded — no wipe on degrade", async () => {
+  it("keeps the profile of the grant that degraded — no wipe on degrade", async () => {
     const db = freshDb();
     const registry = makeRegistry(db);
-    // A google token that has already expired, conferred with an identity.
+    // A google token that has already expired, granted with an identity.
     await importProviderBundle(
       registry,
       "google",
@@ -343,7 +342,7 @@ describe("importProviderBundle records the conferral profile", () => {
       },
       { displayName: "u", email: "u@g.com" },
     );
-    // Boot: load() renews-once (romeCloudOAuth answers "re-confer") → the grant degrades.
+    // Boot: load() renews-once (romeCloudOAuth answers "needs-fix") → the grant degrades.
     const registry2 = makeRegistry(db);
     await registry2.load();
     expect(registry2.find("google")[0].auth.grants().user).toBe("degraded");
@@ -352,7 +351,7 @@ describe("importProviderBundle records the conferral profile", () => {
     expect(rec?.profile).toEqual({ displayName: "u", email: "u@g.com", scopes: ["email"] });
   });
 
-  it("revoke clears the profile — an unauthorized grant records no conferral outcome", async () => {
+  it("revoke clears the profile — an unauthorized grant records no grant outcome", async () => {
     const registry = makeRegistry(freshDb());
     await importProviderBundle(registry, "github", { accessToken: "gho" }, { login: "octo" });
     const conn = registry.find("github")[0];
@@ -405,5 +404,45 @@ describe.each(BUNDLES)("importProviderBundle [%s]", (provider, grant, bundle) =>
     const registry = makeRegistry(freshDb(), []);
     const imported = await importProviderBundle(registry, provider, bundle);
     expect(imported).toBe(false);
+  });
+});
+
+describe("a sign-in fix reaches the same account", () => {
+  it("refuses a redeem for another account and keeps the one connected", async () => {
+    const registry = makeRegistry(freshDb());
+    await importProviderBundle(registry, "github", { accessToken: "gho-1" }, { subject: "42" });
+
+    await expect(
+      importProviderBundle(registry, "github", { accessToken: "gho-2" }, { subject: "99" }),
+    ).rejects.toBeInstanceOf(DifferentAccountError);
+
+    const rec = await grantProfile(registry, "github");
+    expect(rec?.profile).toMatchObject({ subject: "42" });
+    expect(rec?.credential?.material).toMatchObject({ kind: "inline" });
+    expect(registry.find("github")).toHaveLength(1);
+  });
+});
+
+describe("a redeem racing a disconnect", () => {
+  it("waits for the disconnect, then connects afresh", async () => {
+    const registry = makeRegistry(freshDb());
+    await importProviderBundle(registry, "github", { accessToken: "gho-1" }, { subject: "42" });
+    const [old] = registry.find("github");
+
+    const disconnect = registry.disconnect(old!.id);
+    const redeem = importProviderBundle(
+      registry,
+      "github",
+      { accessToken: "gho-2" },
+      { subject: "42" },
+    );
+    await Promise.all([disconnect, redeem]);
+
+    // The redeem never lands on the connection being removed, so its
+    // credential and custody belong to a connection that stays.
+    const connections = registry.find("github");
+    expect(connections).toHaveLength(1);
+    expect(connections[0]!.id).not.toBe(old!.id);
+    expect(connections[0]!.auth.grants().user).toBe("authorized");
   });
 });

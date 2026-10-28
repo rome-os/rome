@@ -1,3 +1,4 @@
+import { platformOf } from "./platform.js";
 import {
   createLarkChannel,
   type CardActionEvent,
@@ -9,13 +10,14 @@ import {
 } from "@larksuiteoapi/node-sdk";
 import { isStopCommand } from "@rome-os/app-runtime";
 import { answeringAgentOf, describeAnsweringAgent, storedAgentChoice } from "./account-agents.js";
+import type { FeishuStreamingStyle } from "./delivery/streaming-switch.js";
 import { feishuTransport } from "./delivery/transports/feishu.js";
 import type { DeliveryTransport } from "./delivery/types.js";
 import { preserveMentionOnlyText } from "./mention-only.js";
 import { isLinkCodeMessage } from "./guardian-link-code.js";
 import type { OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import type {
   ChannelMessage,
   ChatDescriptor,
@@ -45,7 +47,7 @@ export interface FeishuConfig {
   chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
-  personMappingRepo?: PersonMappingRepository;
+  peopleRepo?: PeopleRepository;
   listAgents?: () => string[];
   /** The agent linked to this adapter's channel, as `accountAgentResolver`
    *  answers it. Absent, the channel reads as one that takes no link. */
@@ -53,6 +55,9 @@ export interface FeishuConfig {
   /** Whether an agent is loaded, aliases included. Absent, every agent counts
    *  as loaded. */
   hasAgent?: (name: string) => boolean;
+  /** How a streamed reply shows, read for each message it creates. Absent,
+   *  it streams as messages. */
+  replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
   /**
    * Optional fault seam the Talker wires in. Fires on a terminal
    * `error` event from the long connection so the Talker maps it (auth →
@@ -139,10 +144,11 @@ export class FeishuAdapter {
   private readonly chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
-  private readonly personMappingRepo?: PersonMappingRepository;
+  private readonly peopleRepo?: PeopleRepository;
   private readonly listAgents?: () => string[];
   private readonly accountAgent?: () => string | null | undefined;
   private readonly hasAgent?: (name: string) => boolean;
+  private readonly replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
   private readonly onFault?: (err: unknown) => void;
   private readonly observedConversations = new Map<
     string,
@@ -154,6 +160,9 @@ export class FeishuAdapter {
   /** Unsubscribe callbacks from channel.on(), cleared on stop() so handlers
    *  don't accumulate if the adapter is ever started again. */
   private unsubscribes: Array<() => void> = [];
+  /** The platform this app's senders are accounts on: Lark for a Lark app,
+   *  Feishu otherwise. */
+  private readonly platform: string;
 
   constructor(
     config: FeishuConfig,
@@ -172,12 +181,14 @@ export class FeishuAdapter {
       }),
   ) {
     this.channel = createChannel(config);
+    this.platform = platformOf("feishu", config.domain);
     this.connectionId = config.connectionId;
     this.chatSettings = config.chatSettings;
-    this.personMappingRepo = config.personMappingRepo;
+    this.peopleRepo = config.peopleRepo;
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
     this.hasAgent = config.hasAgent;
+    this.replyStreamingStyle = config.replyStreamingStyle;
     this.onFault = config.onFault;
   }
 
@@ -244,11 +255,13 @@ export class FeishuAdapter {
     }
   }
 
-  /** Streams replies through this adapter's client, placed as `send` places them. */
+  /** Streams replies through this adapter's client, placed as `send` places
+   *  them, in the style the guardian chose. */
   replyDelivery(): DeliveryTransport {
     return feishuTransport({
       client: this.channel.rawClient,
       replyInThread: (chat) => this.repliesInThread(chat),
+      ...(this.replyStreamingStyle ? { style: this.replyStreamingStyle } : {}),
     });
   }
 
@@ -332,7 +345,7 @@ export class FeishuAdapter {
       messageId: m.messageId,
       chatId: m.chatId as ChatId,
       senderId: m.senderId,
-      senderDisplayName: m.senderName ?? "Feishu User",
+      ...(m.senderName ? { senderDisplayName: m.senderName } : {}),
       text,
       attachments: [],
       timestamp: new Date(m.createTime),
@@ -531,8 +544,8 @@ export class FeishuAdapter {
   }
 
   private async isGuardian(channelUserId: string): Promise<boolean> {
-    if (!this.personMappingRepo) return false;
-    const person = await this.personMappingRepo.findByChannelUser("feishu", channelUserId);
+    if (!this.peopleRepo) return false;
+    const person = await this.peopleRepo.byAccount({ platform: this.platform, id: channelUserId });
     return person?.bondLevel === "guardian";
   }
 

@@ -7,6 +7,7 @@ import { actionError, isRecord, type ActionResponse } from "./actions.js";
 import type { ConnectionStatus } from "./client.js";
 import { ObserveStore, QueryError, type ActionEnd, type ActionStart } from "./observe.js";
 import type { LogQuery, LogStatsQuery, NodeEvent, NodeStatus } from "./observe-protocol.js";
+import { CloudError } from "./cloud.js";
 import { DeviceConnector } from "./connector.js";
 import { daemonStatePath, readCallerCredential, type NodeConfig } from "./local.js";
 import { writePrivateJson } from "./storage.js";
@@ -410,6 +411,27 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
           case "devices.list":
             result = await connector.list();
             break;
+          case "devices.rename":
+          case "devices.remove": {
+            if (
+              typeof params.deviceId !== "string" ||
+              (value.method === "devices.rename" && typeof params.name !== "string")
+            )
+              throw new RpcError(-32602, "A device ID and, for rename, a name are required.");
+            try {
+              if (value.method === "devices.rename")
+                await connector.rename(params.deviceId, params.name as string);
+              else await connector.remove(params.deviceId);
+              result = { type: "response", ok: true, result: {} } satisfies ActionResponse;
+            } catch (cause) {
+              if (!(cause instanceof CloudError)) throw cause;
+              result = actionError(cause.code, cause.message);
+            } finally {
+              // A revocation can land even when the request fails.
+              deviceStatus.invalidate();
+            }
+            break;
+          }
           case "devices.run":
             if (typeof params.deviceId !== "string" || typeof params.action !== "string")
               throw new RpcError(-32602, "A device ID and action are required.");

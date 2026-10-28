@@ -7,6 +7,7 @@
 // (timeline-sources.ts), read in its own second pass. So these tests pin the
 // question the reads ask — which senders exist — and that they ask no other.
 
+import { platformOf } from "@rome/api-types/platform";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { sentinelLog } from "../db/schema.js";
@@ -74,7 +75,7 @@ describe("the account reads over the triage record", () => {
    * got its answer.
    */
   function watched(): AccountDirectoryDeps {
-    const log = new SentinelLogRepository(testDb.db);
+    const log = new SentinelLogRepository(testDb.db, platformOf);
     return {
       ...deps,
       sentinelLogRepo: {

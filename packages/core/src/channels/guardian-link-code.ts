@@ -11,11 +11,13 @@
  */
 
 import { randomInt, timingSafeEqual } from "node:crypto";
+import type { Account } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import { createLogger } from "../logger.js";
 import type { Admission } from "./admission.js";
 import { sendThrough } from "./connection-ports.js";
+import { platformOf } from "./platform.js";
 
 const log = createLogger("guardian-link-code");
 
@@ -89,8 +91,12 @@ export function isLinkCodeMessage(text: string | undefined): boolean {
  */
 export function createGuardianLinkAdmission(deps: {
   codes: GuardianLinkCodes;
-  personMappingRepo: Pick<PersonMappingRepository, "findByBondLevel" | "linkAccount">;
+  peopleRepo: Pick<PeopleRepository, "byBondLevel" | "link">;
   registry: Pick<ConnectionRegistry, "get">;
+  /** The account each Connection reaches, whose platform the sender is on.
+   *  Absent, or for a Connection that reaches none yet, the platform of its
+   *  kind. */
+  accountOf?: (connectionId: string) => Account | null;
 }): Admission {
   return async (connectionId, connectionKind, message) => {
     if (!isLinkCodeMessage(message.text)) return true;
@@ -117,13 +123,15 @@ export function createGuardianLinkAdmission(deps: {
       reply("That code was not accepted. Open People in Rome to get a new one.");
       return false;
     }
-    const [guardian] = await deps.personMappingRepo.findByBondLevel("guardian");
+    const [guardian] = await deps.peopleRepo.byBondLevel("guardian");
     if (!guardian) return false;
-    const result = await deps.personMappingRepo.linkAccount({
-      personId: guardian.id,
-      channel: connectionKind,
-      channelUserId: message.senderId,
-    });
+    const result = await deps.peopleRepo.link(
+      {
+        platform: deps.accountOf?.(connectionId)?.platform ?? platformOf(connectionKind),
+        id: message.senderId,
+      },
+      guardian.id,
+    );
     log.info("link code redeemed", { connectionId, linked: result.linked });
     reply(
       result.linked

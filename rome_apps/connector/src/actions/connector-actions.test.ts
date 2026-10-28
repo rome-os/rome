@@ -99,7 +99,11 @@ describe("connector actions when not logged in to Composio", () => {
       },
     });
     if (result.status !== "pending_interaction") throw new Error(`got ${result.status}`);
-    expect(result.interaction.promptText).not.toMatch(/connector_login/);
+    expect(result.interaction.promptText).toContain("click Connect on the card");
+    expect(result.interaction.promptText).toContain("If no card is shown");
+    expect(result.interaction.promptText).not.toMatch(
+      /connector_login|can.t be connected from here|A connect card|Ask the guardian/,
+    );
   });
 
   it("connector_connect renders the unified card for Shopify too, never a Composio connect", async () => {
@@ -113,6 +117,23 @@ describe("connector actions when not logged in to Composio", () => {
         render: { kind: "inline", componentId: "connect-card", props: { toolkit: "shopify" } },
       },
     });
+    if (result.status !== "pending_interaction") throw new Error(`got ${result.status}`);
+    expect(result.interaction.promptText).toContain("click Connect on the card");
+    expect(result.interaction.promptText).toContain("If no card is shown");
+    expect(result.interaction.promptText).not.toMatch(
+      /connector_login|can.t be connected from here|A connect card|Ask the guardian/,
+    );
+  });
+
+  it("connector_connect keeps Settings-only guidance for Rome-managed toolkits without a card", async () => {
+    const action = createConnectorConnect(config("connector_connect"), deps);
+    const result = await action.execute({ toolkit: "slack" });
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("Settings → Connections"),
+    });
+    if (result.status !== "error") throw new Error(`got ${result.status}`);
+    expect(result.error).toContain("can't be connected from here");
   });
 
   it("connector_connect refuses an unsupported toolkit and never renders a connect card", async () => {

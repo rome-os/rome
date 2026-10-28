@@ -13,7 +13,6 @@ import {
   personMatchesQuery,
   sendRefusalMessage,
   timelinePageLimit,
-  type OutboxPage,
   type PeopleList,
   type SendRefusal,
   type LinkCodeResponse,
@@ -21,13 +20,16 @@ import {
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
 import { parseMessageCursor } from "@rome/api-types/message";
+import { platformOf } from "@rome/api-types/platform";
 import { createPerson } from "../../people/create.js";
+import { deletePerson } from "../../people/delete.js";
 import { mergePeople } from "../../people/merge.js";
-import { discardSend, readOutbox, retrySend, sendToAccount } from "../../people/outbox.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
+import { sendToAccount, type SendResult } from "../../people/send.js";
 import { readPersonTimeline } from "../../people/timeline.js";
 import { personMessageStores, timelineAccounts } from "../../people/timeline-sources.js";
+import { accountOfWire, wireOf } from "../../people/wire.js";
 import type { ApiDeps } from "../deps.js";
 
 // The People surface. What a person and their accounts are, how the listing
@@ -35,7 +37,7 @@ import type { ApiDeps } from "../deps.js";
 // a refused one answers are the contract's (@rome/api-types/people);
 // serializing a person is `src/people/resource.ts`, creating one is
 // `src/people/create.ts`, editing one `src/people/update.ts`, absorbing one
-// `src/people/merge.ts`, and which stores a history is merged from is the rest
+// `src/people/merge.ts`, deleting one `src/people/delete.ts`, and which stores a history is merged from is the rest
 // of `src/people/`. The compare-and-swap a link rides on is the person
 // repository's, because only a transaction there can decide it. These handlers
 // read the request and pick a status code, and hold no rule of their own.
@@ -105,6 +107,17 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     return c.json(result.person);
   });
 
+  // 204: the person is gone, so there is no resource to answer with. Their
+  // accounts are strangers again, which the directory read shows.
+  app.delete("/people/:id", async (c) => {
+    const result = await deletePerson(deps, c.req.param("id"));
+    if ("unknown" in result) return c.json({ error: "Unknown person" }, 404);
+    // 400 for the same reason as a refused edit: the request names a change the
+    // guardian cannot have.
+    if ("refused" in result) return c.json({ error: result.refused }, 400);
+    return c.body(null, 204);
+  });
+
   // The duplicate names itself in the body and the survivor in the path, so a
   // client that renders the merge reads the survivor back from the response it
   // already has to handle.
@@ -126,16 +139,17 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const request = parseLinkAccountRequest(await c.req.json().catch(() => null));
     if (!request) return c.json({ error: "channel and channelUserId are required" }, 400);
 
-    const result = await deps.personMappingRepo.linkAccount({
-      personId: person.id,
-      channel: request.channel,
-      channelUserId: request.channelUserId,
-      transferFrom: request.transferFrom,
-    });
+    const account = accountOfWire(request);
+    const result = request.transferFrom
+      ? await deps.peopleRepo.move(account, request.transferFrom, person.id)
+      : await deps.peopleRepo.link(account, person.id);
     if (!result.linked) {
       const { holder } = result;
       return c.json(
-        linkConflict(request, holder && { id: holder.personId, displayName: holder.personName }),
+        linkConflict(
+          wireOf(account),
+          holder && { id: holder.personId, displayName: holder.personName },
+        ),
         409,
       );
     }
@@ -156,10 +170,12 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // else holds it: unlinking is not a way to reach into another person's
     // accounts, and reporting success would tell the caller their view was
     // right when it was stale.
-    const unlinked = await deps.personMappingRepo.unlinkAccount(
+    const unlinked = await deps.peopleRepo.unlink(
+      accountOfWire({
+        channel: c.req.param("channel"),
+        channelUserId: c.req.param("channelUserId"),
+      }),
       person.id,
-      c.req.param("channel"),
-      c.req.param("channelUserId"),
     );
     if (!unlinked) return c.json({ error: "Unknown account" }, 404);
 
@@ -169,10 +185,12 @@ export function peopleRoutes(deps: ApiDeps): Hono {
   /**
    * Say something to one of this person's accounts.
    *
-   * 202 rather than 200: the channel taking a message is not the message
-   * arriving, and the body says which of those has happened. A refusal answers
-   * the same `send` state the person read carries, so a client that raced a
-   * disconnect renders the reason it would already have shown.
+   * One channel call inside the request. 200 once the channel took the
+   * message, 502 with the channel's own words when it refused, so the composer
+   * keeps the text and the guardian sends again. A refusal Rome makes before
+   * asking the channel answers the same `send` state the person read carries,
+   * so a client that raced a disconnect renders the reason it would already
+   * have shown.
    */
   app.post("/people/:id/messages", async (c) => {
     const person = await findPerson(deps, c.req.param("id"));
@@ -185,72 +203,22 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // person's address is not making a request this person's page can answer,
     // and sending anyway would deliver a message the guardian addressed to
     // someone else.
-    const held = person.channelMappings.some(
-      (mapping) =>
-        mapping.channel === parsed.request.channel &&
-        mapping.channelUserId === parsed.request.channelUserId,
+    const account = accountOfWire(parsed.request);
+    const held = person.links.some(
+      (link) => link.platform === account.platform && link.id === account.id,
     );
     if (!held) {
       return c.json({ error: "That account is not linked to this person" }, 400);
     }
 
-    const result = await sendToAccount(
-      deps,
-      parsed.request,
-      parsed.request.text,
-      parsed.request.id,
-    );
-    if (!result.ok && "error" in result) return c.json({ error: result.error }, 409);
-    return result.ok
-      ? c.json(result.message, 202)
-      : c.json(
-          { error: sendRefusalMessage(result.send), send: result.send } satisfies SendRefusal,
-          409,
-        );
-  });
-
-  /** Every send of this person's still in flight. Unpaged — an outbox long
-   *  enough to page is an incident rather than a listing. */
-  app.get("/people/:id/outbox", async (c) => {
-    const person = await findPerson(deps, c.req.param("id"));
-    if (!person) return c.json({ error: "Unknown person" }, 404);
-
-    const [accounts] = await timelineAccounts(deps, [person.channelMappings]);
-    return c.json({
-      messages: await readOutbox(deps, personMessageStores(deps), accounts),
-    } satisfies OutboxPage);
-  });
-
-  /**
-   * Try a failed send again. Under its own id, so a retry never reads as a
-   * second message the guardian did not write.
-   *
-   * Both outbox mutations are scoped to the person in the path. A message id
-   * is not a capability, and the person named is the one whose outbox this is
-   * — a row of somebody else's reached through this address is a 404, not a
-   * shortcut.
-   */
-  app.post("/people/:id/outbox/:messageId/retry", async (c) => {
-    const person = await findPerson(deps, c.req.param("id"));
-    if (!person) return c.json({ error: "Unknown person" }, 404);
-
-    const message = await retrySend(deps, person.channelMappings, c.req.param("messageId"));
-    return message
-      ? c.json(message, 202)
-      : c.json({ error: "No failed message of theirs with that id" }, 404);
-  });
-
-  /** Give up on a send. The only way a row leaves the outbox without having
-   *  been observed on the timeline. Refused only while the provider call is
-   *  outstanding, since until it answers nobody knows what happened. */
-  app.delete("/people/:id/outbox/:messageId", async (c) => {
-    const person = await findPerson(deps, c.req.param("id"));
-    if (!person) return c.json({ error: "Unknown person" }, 404);
-
-    const discarded = await discardSend(deps, person.channelMappings, c.req.param("messageId"));
-    return discarded
-      ? c.body(null, 204)
-      : c.json({ error: "No dismissable message of theirs with that id" }, 404);
+    // The account the message goes out from has to be one of Rome's accounts
+    // on the link's platform. Rome never substitutes another for it.
+    // `sendToAccount` checks it.
+    // TODO(people-send-from dashboard PR): require `from` once the dashboard
+    // sends it. Until then a send without it goes out from Rome's only account
+    // on the platform, and is refused while Rome holds several.
+    const result = await sendToAccount(deps, account, parsed.request.text, parsed.request.from);
+    return respondToSend(c, result);
   });
 
   app.get("/people/:id/messages", async (c) => {
@@ -263,17 +231,20 @@ export function peopleRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "cursor is not a timeline cursor" }, 400);
     }
 
-    // A channel this person holds no account on answers an empty page rather
-    // than a 400: channels are open — a Rome App brings its own — so there is
-    // no set of names to check one against, and "no history there" is the true
-    // answer for every name that is not a typo.
+    // `?channel=` names a platform, as an account's `channel` does, and a kind
+    // of connection reads as its platform. One this person holds no account
+    // on answers an empty page rather than a 400: channels are open — a Rome
+    // App brings its own — so there is no set of names to check one against,
+    // and "no history there" is the true answer for every name that is not a
+    // typo.
     const channel = c.req.query("channel");
-    const [accounts] = await timelineAccounts(deps, [person.channelMappings]);
+    const platform = channel && platformOf(channel);
+    const [accounts] = await timelineAccounts(deps, [person.links]);
 
     return c.json(
       await readPersonTimeline(
         personMessageStores(deps),
-        accounts.filter((account) => !channel || account.channel === channel),
+        accounts.filter((account) => !platform || account.channel === platform),
         { cursor, limit: timelinePageLimit(c.req.query("limit")) },
       ),
     );
@@ -288,4 +259,15 @@ export function peopleRoutes(deps: ApiDeps): Hono {
 async function respondWithPerson(deps: ApiDeps, c: Context, id: string) {
   const person = await readPerson(deps, id);
   return person ? c.json(person) : c.json({ error: "Unknown person" }, 404);
+}
+
+/** The one answer every send route gives, so the dashboard reads one shape. */
+export function respondToSend(c: Context, result: SendResult) {
+  if (result.ok) return c.json(result.sent, 200);
+  if ("invalid" in result) return c.json({ error: result.invalid }, 400);
+  if ("error" in result) return c.json({ error: result.error }, 502);
+  return c.json(
+    { error: sendRefusalMessage(result.send), send: result.send } satisfies SendRefusal,
+    409,
+  );
 }

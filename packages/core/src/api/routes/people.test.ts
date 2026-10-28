@@ -11,8 +11,7 @@ import {
 import { peopleRoutes } from "./people.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
-import { romeAgentMessages } from "../../db/schema.js";
-import { STRANGER_PERSON_ID } from "../../constants.js";
+import { channels as channelRows, romeAgentMessages } from "../../db/schema.js";
 
 // GET /people/:id/messages — one person's history merged across every account
 // they are linked to. These tests pin what the merge answers over real stores:
@@ -53,13 +52,13 @@ describe("People timeline API", () => {
     deps = await buildTestDeps(testDb.db);
     app = new Hono().route("/", peopleRoutes(deps));
 
-    personId = await deps.personMappingRepo.create({
+    personId = await deps.peopleRepo.create({
       displayName: "Nadia Cross",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [
-        { channel: "whatsapp", channelUserId: WA_JID },
-        { channel: "telegram", channelUserId: TG_THREAD },
+      links: [
+        { platform: "whatsapp", id: WA_JID },
+        { platform: "telegram", id: TG_THREAD },
       ],
     });
 
@@ -250,11 +249,11 @@ describe("People timeline API", () => {
   });
 
   it("gives a sender with only sentinel history both halves of the exchange", async () => {
-    const sentinelOnly = await deps.personMappingRepo.create({
+    const sentinelOnly = await deps.peopleRepo.create({
       displayName: "Sentinel Only",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "telegram", channelUserId: "tg-triaged" }],
+      links: [{ platform: "telegram", id: "tg-triaged" }],
     });
     await deps.sentinelLogRepo.create({
       messageId: "tg-900",
@@ -313,11 +312,11 @@ describe("People timeline API", () => {
   it("falls back to the channel transcript for an account no mirror holds", async () => {
     // The same overlap without a mirror: the transcript outranks the sentinel,
     // so the exchange reads as Rome's own record of it.
-    const triaged = await deps.personMappingRepo.create({
+    const triaged = await deps.peopleRepo.create({
       displayName: "Triaged Talker",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "telegram", channelUserId: "tg-both" }],
+      links: [{ platform: "telegram", id: "tg-both" }],
     });
     const conversation = await deps.webchatRepo.ensureChannelChat({
       channel: "telegram",
@@ -348,11 +347,11 @@ describe("People timeline API", () => {
   });
 
   it("holds a sentinel row back when the thread it names is a group", async () => {
-    const inGroup = await deps.personMappingRepo.create({
+    const inGroup = await deps.peopleRepo.create({
       displayName: "Group Talker",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "telegram", channelUserId: "tg-in-group" }],
+      links: [{ platform: "telegram", id: "tg-in-group" }],
     });
     await deps.webchatRepo.ensureChannelChat({
       channel: "telegram",
@@ -387,11 +386,11 @@ describe("People timeline API", () => {
     await deps.whatsAppStoreRepo.upsertContacts([
       { jid: WA_LID, phoneNumber: "15550009999", notify: "Nadia" },
     ]);
-    const byLid = await deps.personMappingRepo.create({
+    const byLid = await deps.peopleRepo.create({
       displayName: "Nadia By LID",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "whatsapp", channelUserId: WA_LID }],
+      links: [{ platform: "whatsapp", id: WA_LID }],
     });
 
     const page = await fetchTimeline(byLid);
@@ -455,11 +454,11 @@ describe("People timeline API", () => {
         text: "posted in the unread group",
       },
     ]);
-    const priya = await deps.personMappingRepo.create({
+    const priya = await deps.peopleRepo.create({
       displayName: "Priya Nair",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "linkedin", channelUserId: member }],
+      links: [{ platform: "linkedin", id: member }],
     });
 
     const page = await fetchTimeline(priya);
@@ -469,10 +468,8 @@ describe("People timeline API", () => {
     ]);
   });
 
-  it("answers 404 for an unknown person and for the stranger sentinel", async () => {
+  it("answers 404 for an unknown person", async () => {
     expect((await app.request("/people/nobody-here/messages")).status).toBe(404);
-    expect((await app.request(`/people/${STRANGER_PERSON_ID}/messages`)).status).toBe(404);
-    expect(baseline.persons.strangerId).toBe(STRANGER_PERSON_ID);
   });
 
   it("refuses a cursor that is not one", async () => {
@@ -481,11 +478,11 @@ describe("People timeline API", () => {
   });
 
   it("answers an empty page for a person with no accounts", async () => {
-    const unreachable = await deps.personMappingRepo.create({
+    const unreachable = await deps.peopleRepo.create({
       displayName: "No Channels",
       bondLevel: "other",
       approved: true,
-      channelMappings: [],
+      links: [],
     });
     expect(await fetchTimeline(unreachable)).toEqual({ entries: [], nextCursor: null });
   });
@@ -563,13 +560,13 @@ describe("People API", () => {
       },
     ]);
 
-    nadiaId = await deps.personMappingRepo.create({
+    nadiaId = await deps.peopleRepo.create({
       displayName: "Nadia Cross",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [
-        { channel: "whatsapp", channelUserId: NADIA_JID },
-        { channel: "whatsapp", channelUserId: NADIA_LID },
+      links: [
+        { platform: "whatsapp", id: NADIA_JID },
+        { platform: "whatsapp", id: NADIA_LID },
       ],
     });
   });
@@ -601,9 +598,6 @@ describe("People API", () => {
         nadiaId,
       ]),
     );
-    // The sentinel is the row dismissed accounts are linked to, not someone
-    // the guardian knows.
-    expect(ids).not.toContain(STRANGER_PERSON_ID);
 
     const alice = people.find((person) => person.id === baseline.persons.innerCircleId);
     expect(naming(alice?.accounts ?? [])).toEqual([
@@ -630,10 +624,8 @@ describe("People API", () => {
     ]);
   });
 
-  it("answers 404 for the stranger sentinel and for an id naming no person", async () => {
-    expect((await app.request(`/people/${STRANGER_PERSON_ID}`)).status).toBe(404);
+  it("answers 404 for an id naming no person", async () => {
     expect((await app.request("/people/nobody-here")).status).toBe(404);
-    expect(baseline.persons.strangerId).toBe(STRANGER_PERSON_ID);
   });
 
   it("keeps a stored bond level the ladder does not name, and counts it as other", async () => {
@@ -750,17 +742,48 @@ describe("People API", () => {
   });
 
   it("answers a person with no accounts as one with no history", async () => {
-    const unreachable = await deps.personMappingRepo.create({
+    const unreachable = await deps.peopleRepo.create({
       displayName: "No Channels",
       bondLevel: "other",
       approved: true,
-      channelMappings: [],
+      links: [],
     });
     const person = await fetchPerson(unreachable);
     expect(person.accounts).toEqual([]);
     expect(person.messageCount).toBe(0);
     expect(person.latest).toBeNull();
   });
+
+  // An account's history is read under every channel Rome has held on its
+  // platform, so a listing asks about each account once per channel. With
+  // channels released over time that outgrows one statement.
+  it("lists many people on a platform Rome has held many channels on", async () => {
+    for (let i = 0; i < 6; i++) {
+      testDb.db
+        .insert(channelRows)
+        .values({
+          id: `tg-released-${i}`,
+          connectionKind: "telegram",
+          platform: "telegram",
+          createdAt: new Date(i),
+        })
+        .run();
+    }
+    const PEOPLE = 1000;
+    for (let i = 0; i < PEOPLE; i++) {
+      await deps.peopleRepo.create({
+        displayName: `Telegram ${i}`,
+        bondLevel: "other",
+        approved: true,
+        links: [{ platform: "telegram", id: `tg-many-${i}` }],
+      });
+    }
+
+    const res = await app.request("/people");
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as PeopleList).people.length).toBeGreaterThanOrEqual(PEOPLE);
+  }, 60_000);
 
   async function fetchTimelineFor(id: string): Promise<TimelinePage> {
     const res = await app.request(`/people/${id}/messages?limit=300`);
@@ -829,11 +852,11 @@ describe("People create API", () => {
   });
 
   it("refuses the whole request over one held account, and writes nothing", async () => {
-    const alice = await deps.personMappingRepo.create({
+    const alice = await deps.peopleRepo.create({
       displayName: "Alice Marsh",
       bondLevel: "inner-circle",
       approved: true,
-      channelMappings: [{ channel: "whatsapp", channelUserId: ALICE_JID }],
+      links: [{ platform: "whatsapp", id: ALICE_JID }],
     });
 
     const res = await create({
@@ -856,17 +879,16 @@ describe("People create API", () => {
     // Neither half of the request survived: no person, and the account that
     // was free before the call is still free.
     expect((await fetchPeopleRes("bob-reyes")).status).toBe(404);
-    expect(await deps.personMappingRepo.findByChannelUser("telegram", "tg-bob-reyes")).toBeNull();
-    expect((await deps.personMappingRepo.findByChannelUser("whatsapp", ALICE_JID))?.id).toBe(alice);
+    expect(
+      await deps.peopleRepo.byAccount({ platform: "telegram", id: "tg-bob-reyes" }),
+    ).toBeNull();
+    expect((await deps.peopleRepo.byAccount({ platform: "whatsapp", id: ALICE_JID }))?.id).toBe(
+      alice,
+    );
   });
 
   it("links an account that only a dismissal held", async () => {
-    await deps.personMappingRepo.addChannelMapping(
-      STRANGER_PERSON_ID,
-      "whatsapp",
-      BOB_JID,
-      "Bob Reyes",
-    );
+    await deps.peopleRepo.dismiss({ platform: "whatsapp", id: BOB_JID });
 
     const res = await create({
       displayName: "Bob Reyes",
@@ -874,11 +896,10 @@ describe("People create API", () => {
     });
 
     expect(res.status).toBe(201);
-    expect((await deps.personMappingRepo.findByChannelUser("whatsapp", BOB_JID))?.id).toBe(
+    expect((await deps.peopleRepo.byAccount({ platform: "whatsapp", id: BOB_JID }))?.id).toBe(
       "bob-reyes",
     );
-    const sentinel = await deps.personMappingRepo.findById(STRANGER_PERSON_ID);
-    expect(sentinel!.channelMappings).toHaveLength(0);
+    expect(await deps.peopleRepo.isDismissed({ platform: "whatsapp", id: BOB_JID })).toBe(false);
   });
 
   it("numbers people who share a name, counting the first as one", async () => {
@@ -983,14 +1004,9 @@ describe("People account links", () => {
     bob = baseline.persons.acquaintanceId;
     carol = baseline.persons.otherId;
 
-    // An account the guardian set aside: stored as a link onto the sentinel,
-    // which is a dismissal rather than a person holding it.
-    await deps.personMappingRepo.addChannelMapping(
-      STRANGER_PERSON_ID,
-      DISMISSED.channel,
-      DISMISSED.channelUserId,
-      "Dismissed Sender",
-    );
+    // An account the guardian set aside: a dismissal, with no person holding
+    // it.
+    await deps.peopleRepo.dismiss({ platform: DISMISSED.channel, id: DISMISSED.channelUserId });
   });
 
   afterEach(() => testDb.close());
@@ -1018,10 +1034,10 @@ describe("People account links", () => {
 
   /** Who the stored link says holds an account, or null when nothing does. */
   async function holderOf(account: { channel: string; channelUserId: string }) {
-    const person = await deps.personMappingRepo.findByChannelUser(
-      account.channel,
-      account.channelUserId,
-    );
+    const person = await deps.peopleRepo.byAccount({
+      platform: account.channel,
+      id: account.channelUserId,
+    });
     return person?.id ?? null;
   }
 
@@ -1084,14 +1100,19 @@ describe("People account links", () => {
     expect(await holderOf(NEWCOMER)).toBeNull();
   });
 
-  it("never names the sentinel as an account's holder", async () => {
+  it("names no holder for a dismissed account", async () => {
     const res = await link(alice, { ...DISMISSED, transferFrom: bob });
 
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body).toMatchObject({ linkedPersonId: null, linkedPersonName: null });
-    expect(JSON.stringify(body)).not.toContain(STRANGER_PERSON_ID);
-    expect(await holderOf(DISMISSED)).toBe(STRANGER_PERSON_ID);
+    expect(await holderOf(DISMISSED)).toBeNull();
+    expect(
+      await deps.peopleRepo.isDismissed({
+        platform: DISMISSED.channel,
+        id: DISMISSED.channelUserId,
+      }),
+    ).toBe(true);
   });
 
   it("answers a re-link to the same person without disturbing their accounts", async () => {
@@ -1131,12 +1152,9 @@ describe("People account links", () => {
     expect(await accountsOf(alice)).toEqual(["telegram:tg-alice"]);
   });
 
-  it("answers 404 for an unknown person and for the stranger sentinel", async () => {
+  it("answers 404 for an unknown person", async () => {
     expect((await link("nobody-here", NEWCOMER)).status).toBe(404);
-    expect((await link(STRANGER_PERSON_ID, NEWCOMER)).status).toBe(404);
     expect((await unlink("nobody-here", ALICES)).status).toBe(404);
-    expect((await unlink(STRANGER_PERSON_ID, DISMISSED)).status).toBe(404);
-    expect(await holderOf(DISMISSED)).toBe(STRANGER_PERSON_ID);
   });
 
   it("unlinks only the account named", async () => {
@@ -1195,7 +1213,7 @@ describe("People updates", () => {
       body: JSON.stringify(body),
     });
 
-  const stored = async (id: string) => await deps.personMappingRepo.findById(id);
+  const stored = async (id: string) => await deps.peopleRepo.byId(id);
 
   it("moves a person along the ladder and answers with them", async () => {
     const res = await patch(baseline.persons.otherId, { bondLevel: "inner-circle" });
@@ -1273,17 +1291,106 @@ describe("People updates", () => {
     expect((await stored(baseline.persons.otherId))?.displayName).toBe("Carol Other");
   });
 
-  it("answers 404 for an unknown person and for the stranger sentinel", async () => {
+  it("answers 404 for an unknown person", async () => {
     expect((await patch("nobody-here", { displayName: "Nobody" })).status).toBe(404);
-    expect((await patch(STRANGER_PERSON_ID, { displayName: "Nobody" })).status).toBe(404);
-    expect((await stored(STRANGER_PERSON_ID))?.displayName).toBe("Stranger");
+  });
+});
+
+// A delegate link reads as one, so the page can say it is someone's agent.
+describe("People delegate links", () => {
+  let testDb: TestDb;
+  let deps: TestDeps;
+  let app: Hono;
+  let baseline: BaselineIds;
+
+  beforeEach(async () => {
+    testDb = createTestDb();
+    baseline = await seedBaseline(testDb.db);
+    deps = await buildTestDeps(testDb.db);
+    app = new Hono().route("/", peopleRoutes(deps));
+  });
+
+  afterEach(() => testDb.close());
+
+  it("marks the agent's account and leaves the person's own unmarked", async () => {
+    const guardian = baseline.persons.guardianId;
+    deps.peopleRepo.linkDelegate({ platform: "agents", id: "agt-atlas" }, guardian);
+
+    const person = (await (await app.request(`/people/${guardian}`)).json()) as PersonResource;
+
+    const marks = Object.fromEntries(
+      person.accounts.map((account) => [account.channelUserId, account.delegate ?? false]),
+    );
+    expect(marks["agt-atlas"]).toBe(true);
+    expect(marks["tg-guardian"]).toBe(false);
+
+    // The listing carries the same mark as the single read.
+    const list = (await (await app.request("/people")).json()) as PeopleList;
+    const listed = list.people.find((p) => p.id === guardian);
+    expect(listed?.accounts.find((a) => a.channelUserId === "agt-atlas")?.delegate).toBe(true);
+  });
+});
+
+// DELETE /people/:id — the guardian deletes a person. What these pin is that
+// the person and every link go together, that the accounts become strangers
+// rather than dismissals, and that the guardian cannot be deleted.
+describe("People delete", () => {
+  let testDb: TestDb;
+  let deps: TestDeps;
+  let app: Hono;
+  let baseline: BaselineIds;
+
+  beforeEach(async () => {
+    testDb = createTestDb();
+    baseline = await seedBaseline(testDb.db);
+    deps = await buildTestDeps(testDb.db);
+    app = new Hono().route("/", peopleRoutes(deps));
+  });
+
+  afterEach(() => testDb.close());
+
+  const remove = (id: string) => app.request(`/people/${id}`, { method: "DELETE" });
+
+  it("deletes the person and returns their accounts to strangers", async () => {
+    const bob = baseline.persons.acquaintanceId;
+    const wa = { platform: "whatsapp", id: "wa-bob" };
+    await deps.peopleRepo.linkStated(wa, bob);
+
+    const res = await remove(bob);
+
+    expect(res.status).toBe(204);
+    expect((await app.request(`/people/${bob}`)).status).toBe(404);
+    const list = (await (await app.request("/people")).json()) as PeopleList;
+    expect(list.people.map((person) => person.id)).not.toContain(bob);
+    for (const account of [{ platform: "telegram", id: "tg-bob" }, wa]) {
+      expect(await deps.peopleRepo.byAccount(account)).toBeNull();
+      expect(await deps.peopleRepo.isDismissed(account)).toBe(false);
+    }
+  });
+
+  it("refuses to delete the guardian, and unlinks nothing", async () => {
+    const res = await remove(baseline.persons.guardianId);
+
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "the guardian cannot be deleted",
+    });
+    expect((await deps.peopleRepo.byAccount({ platform: "telegram", id: "tg-guardian" }))?.id).toBe(
+      baseline.persons.guardianId,
+    );
+  });
+
+  it("answers 404 for an id that names nobody, including one already deleted", async () => {
+    const bob = baseline.persons.acquaintanceId;
+    expect((await remove(bob)).status).toBe(204);
+    expect((await remove(bob)).status).toBe(404);
+    expect((await remove("nobody")).status).toBe(404);
   });
 });
 
 // POST /people/:id/merge — one person absorbs another. What these pin is that
 // the links all move together, that the duplicate is gone rather than emptied,
-// and that the two rows which are structure rather than people are not
-// addressable on either side of it.
+// and that the guardian is never the one merged away.
 describe("People merge", () => {
   let testDb: TestDb;
   let deps: TestDeps;
@@ -1316,16 +1423,16 @@ describe("People merge", () => {
     person.accounts.map((account) => `${account.channel}:${account.channelUserId}`);
 
   async function holderOf(account: { channel: string; channelUserId: string }) {
-    const person = await deps.personMappingRepo.findByChannelUser(
-      account.channel,
-      account.channelUserId,
-    );
+    const person = await deps.peopleRepo.byAccount({
+      platform: account.channel,
+      id: account.channelUserId,
+    });
     return person?.id ?? null;
   }
 
   it("moves every account onto the survivor and deletes the duplicate", async () => {
     // Bob holds a second account, so the merge has more than one link to move.
-    await deps.personMappingRepo.addChannelMapping(bob, "whatsapp", "wa-bob", "Bob");
+    await deps.peopleRepo.linkStated({ platform: "whatsapp", id: "wa-bob" }, bob);
 
     const res = await merge(alice, { from: bob });
 
@@ -1338,7 +1445,7 @@ describe("People merge", () => {
 
     // Gone rather than emptied: the duplicate is not a person with no accounts.
     expect((await app.request(`/people/${bob}`)).status).toBe(404);
-    expect(await deps.personMappingRepo.findById(bob)).toBeNull();
+    expect(await deps.peopleRepo.byId(bob)).toBeNull();
     const list = (await (await app.request("/people")).json()) as PeopleList;
     expect(list.people.map((person) => person.id)).not.toContain(bob);
   });
@@ -1357,7 +1464,7 @@ describe("People merge", () => {
   });
 
   it("absorbs a duplicate holding no account at all", async () => {
-    const empty = await deps.personMappingRepo.create({
+    const empty = await deps.peopleRepo.create({
       displayName: "Alice Again",
       bondLevel: "other",
       approved: true,
@@ -1367,7 +1474,7 @@ describe("People merge", () => {
 
     expect(res.status).toBe(200);
     expect(refs((await res.json()) as PersonResource)).toEqual(["telegram:tg-alice"]);
-    expect(await deps.personMappingRepo.findById(empty)).toBeNull();
+    expect(await deps.peopleRepo.byId(empty)).toBeNull();
   });
 
   it("keeps the survivor's own name and bond level", async () => {
@@ -1386,18 +1493,18 @@ describe("People merge", () => {
     expect((await res.json()) as { error: string }).toEqual({
       error: "the guardian cannot be merged away",
     });
-    expect(await deps.personMappingRepo.findById(baseline.persons.guardianId)).not.toBeNull();
+    expect(await deps.peopleRepo.byId(baseline.persons.guardianId)).not.toBeNull();
     expect(await holderOf({ channel: "telegram", channelUserId: "tg-guardian" })).toBe(
       baseline.persons.guardianId,
     );
   });
 
   it("lets the guardian absorb a duplicate of themselves", async () => {
-    const duplicate = await deps.personMappingRepo.create({
+    const duplicate = await deps.peopleRepo.create({
       displayName: "Me",
       bondLevel: "other",
       approved: true,
-      channelMappings: [{ channel: "whatsapp", channelUserId: "wa-me" }],
+      links: [{ platform: "whatsapp", id: "wa-me" }],
     });
 
     const res = await merge(baseline.persons.guardianId, { from: duplicate });
@@ -1433,7 +1540,7 @@ describe("People merge", () => {
     expect((await res.json()) as { error: string }).toEqual({
       error: "a person cannot be merged into themselves",
     });
-    expect(await deps.personMappingRepo.findById(alice)).not.toBeNull();
+    expect(await deps.peopleRepo.byId(alice)).not.toBeNull();
   });
 
   it("refuses a body that names no duplicate", async () => {
@@ -1444,29 +1551,9 @@ describe("People merge", () => {
     ).toBe(400);
   });
 
-  it("does not address the stranger sentinel as either side", async () => {
-    // A dismissal is a link onto the sentinel, so absorbing it would read every
-    // dismissed account as this person's, and merging a person into it would
-    // read their accounts as dismissed.
-    await deps.personMappingRepo.addChannelMapping(
-      STRANGER_PERSON_ID,
-      "telegram",
-      "tg-dismissed",
-      "Dismissed Sender",
-    );
-
-    expect((await merge(alice, { from: STRANGER_PERSON_ID })).status).toBe(404);
-    expect((await merge(STRANGER_PERSON_ID, { from: alice })).status).toBe(404);
-
-    expect(await holderOf({ channel: "telegram", channelUserId: "tg-dismissed" })).toBe(
-      STRANGER_PERSON_ID,
-    );
-    expect(await holderOf({ channel: "telegram", channelUserId: "tg-alice" })).toBe(alice);
-  });
-
   it("answers 404 for an unknown person on either side", async () => {
     expect((await merge(alice, { from: "nobody-here" })).status).toBe(404);
     expect((await merge("nobody-here", { from: alice })).status).toBe(404);
-    expect(await deps.personMappingRepo.findById(alice)).not.toBeNull();
+    expect(await deps.peopleRepo.byId(alice)).not.toBeNull();
   });
 });

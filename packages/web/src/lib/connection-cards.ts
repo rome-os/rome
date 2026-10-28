@@ -9,23 +9,23 @@
  * personal account folds onto the Telegram card as its `session` slot; the
  * Composio account broker appends as a synthetic card since it is not a
  * registry connection). Connection state stays registry vocabulary
- * (`GrantState`) verbatim — the old client-side fold of
+ * (`ConnectionState`) verbatim — the old client-side fold of
  * `/api/channels/status` + `/api/integrations` and its
  * `UnifiedConnection`/`CredentialSlot` vocabulary are gone.
  *
- * Two presentation rules carried over from the old fold:
- *   - Always-on — webchat has no ceremony and always reads Connected.
- *   - Unavailable ≠ disconnected — an OAuth service whose connect hint reports
- *     `available: false` renders as "Unavailable" with the reason, not as a
- *     plain "Not connected".
+ * One presentation rule carried over from the old fold: unavailable is not
+ * disconnected. An OAuth service whose connect hint reports
+ * `available: false` renders as "Unavailable" with the reason, not as a plain
+ * "Not connected".
  */
 
+import type { AccountLink } from "@rome/api-types/account-agents";
 import type {
   ApiConnection,
   CapabilityDegradation,
   ConnectHint,
+  ConnectionState,
   GrantDisplay,
-  GrantState,
 } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 
@@ -41,13 +41,17 @@ export interface ConnectionSlot {
   /** The registry grant name this slot revokes (`DELETE
    *  /api/connections/:id/grants/:grant`); null for zero-grant services. */
   grant: string | null;
-  state: GrantState;
+  /** The backing connection's state: null while it gives Rome no access. */
+  state: ConnectionState | null;
   display: GrantDisplay | null;
   /** Folded display identity (displayName, else handle, else email). */
   identity: string | null;
-  /** The id of the live conferral setup for this grant, if one is
+  /** The id of the live setup for this grant, if one is
    *  in progress; the connect card re-attaches to it on reopen. Null otherwise. */
   activeSetupCid: string | null;
+  /** The kind of link an agent has to this slot's account, or null when its
+   *  kind of connection takes none. */
+  link: AccountLink | null;
 }
 
 export interface ConnectionCard {
@@ -60,16 +64,11 @@ export interface ConnectionCard {
   service: string;
   label: string;
   kind: "channel" | "oauth" | "composio";
-  /** Webchat: boot-wired, no ceremony, always Connected. */
-  alwaysOn: boolean;
   /** Transient runtime impairment. The underlying grant can remain authorized
    *  and recover automatically while this warning is present. */
   degradation: CapabilityDegradation | null;
   slots: ConnectionSlot[];
   connect: ConnectHint | null;
-  /** The account's channel id; null for placeholders and services without a
-   *  Talk. Never shown on screens. */
-  channel: string | null;
   /** Canonical id of the account's agent, or null when it has none and Rome
    *  does not listen to it. */
   agent: string | null;
@@ -77,11 +76,14 @@ export interface ConnectionCard {
    *  serves accounts before agent links omits `agent`, and the picker
    *  stays hidden. */
   linkReported: boolean;
+  /** The kind of link the account's agent has, or null when its kind of
+   *  connection takes none. */
+  link: AccountLink | null;
   /** Whether the service offers "add another account". */
   severalAccounts: boolean;
 }
 
-/** Fixed dashboard ordering: Talk channels, webchat, OAuth services; services
+/** Fixed dashboard ordering: Talk channels, then OAuth services; services
  *  the registry reports that we have no order for follow alphabetically, and
  *  the Composio broker card always closes the list. */
 const SERVICE_ORDER = [
@@ -94,7 +96,6 @@ const SERVICE_ORDER = [
   "feishu",
   "slack_bot",
   "agents",
-  "webchat",
   "github",
   "google",
   "slack",
@@ -124,7 +125,7 @@ const OAUTH_SERVICES = new Set(["github", "google", "slack", "shopify"]);
 
 /** The copy slot key each registry grant renders under. A channel's single
  *  Talk grant is the generic `bot` slot whatever the grant is named; an OAuth
- *  conferral is the `user` slot (Slack's `workspace` grant included). */
+ *  grant is the `user` slot (Slack's `workspace` grant included). */
 const SLOT_KEY_BY_GRANT: Record<string, Record<string, SlotKey>> = {
   telegram: { bot: "bot" },
   whatsapp: { session: "bot" },
@@ -152,16 +153,17 @@ function foldIdentity(display: GrantDisplay | null): string | null {
 }
 
 function toSlots(connection: ApiConnection, key?: SlotKey): ConnectionSlot[] {
-  return Object.entries(connection.grants).map(([grant, state]) => {
+  return Object.keys(connection.grants).map((grant) => {
     const display = connection.display[grant] ?? null;
     return {
       key: key ?? slotKeyFor(connection.connectionKind, grant),
       connectionId: connection.id,
       grant,
-      state,
+      state: connection.state,
       display,
       identity: foldIdentity(display),
       activeSetupCid: connection.setups[grant] ?? null,
+      link: connection.link ?? null,
     };
   });
 }
@@ -198,21 +200,7 @@ export function accountRoute(cards: ConnectionCard[], connectionId: string): str
 }
 
 function toCard(connection: ApiConnection): ConnectionCard {
-  const alwaysOn = connection.connectionKind === "webchat";
-  const slots = alwaysOn
-    ? // Zero-grant: synthesize the single always-authorized presentation slot.
-      [
-        {
-          key: "bot" as const,
-          connectionId: connection.id,
-          grant: null,
-          state: "authorized" as const,
-          display: null,
-          identity: null,
-          activeSetupCid: null,
-        },
-      ]
-    : toSlots(connection);
+  const slots = toSlots(connection);
   return {
     route: connectionRoute(connection),
     service: connection.connectionKind,
@@ -220,16 +208,14 @@ function toCard(connection: ApiConnection): ConnectionCard {
     // list is known (`labelAccounts`).
     label: serviceLabel(connection.connectionKind),
     kind: OAUTH_SERVICES.has(connection.connectionKind) ? "oauth" : "channel",
-    alwaysOn,
     degradation: runtimeDegradation(connection),
     slots,
     connect: connection.connect,
-    // Read defensively: a core that predates accounts omits these fields.
-    channel: connection.channel ?? null,
     // The bot's link only. A folded personal account (`telegram_user`) keeps
     // its own link, which this card does not show or set yet.
     agent: connection.agent ?? null,
     linkReported: connection.agent !== undefined,
+    link: connection.link ?? null,
     severalAccounts: connection.severalAccounts === true,
   };
 }
@@ -244,23 +230,23 @@ function composioCard(status: ComposioCliStatus): ConnectionCard {
     service: "composio",
     label: serviceLabel("composio"),
     kind: "composio",
-    alwaysOn: false,
     degradation: null,
     slots: [
       {
         key: "user",
         connectionId: null,
         grant: null,
-        state: status.loggedIn ? "authorized" : "unauthorized",
+        state: status.loggedIn ? "working" : null,
         display: null,
         identity: null,
         activeSetupCid: null,
+        link: null,
       },
     ],
     connect: null,
-    channel: null,
     agent: null,
     linkReported: false,
+    link: null,
     severalAccounts: false,
   };
 }
@@ -316,13 +302,12 @@ export function buildConnectionCards(
         service: brand,
         label: serviceLabel(brand),
         kind: "channel",
-        alwaysOn: false,
         degradation: runtimeDegradation(connection),
         slots: sessionSlots,
         connect: null,
-        channel: null,
         agent: null,
         linkReported: false,
+        link: null,
         severalAccounts: false,
       });
     }

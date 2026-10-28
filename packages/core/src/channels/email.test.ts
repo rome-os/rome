@@ -14,7 +14,7 @@ import type {
   SendMailResult,
 } from "../lib/rome-cloud-mail.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 
 const INBOUND_SECRET = "test-inbound-secret";
 const GUARDIAN = "guardian@example.com";
@@ -66,7 +66,7 @@ function makeAdapter(
   return new EmailAdapter({
     provider,
     settingsRepo: {} as unknown as SettingsRepository,
-    personMappingRepo: {} as unknown as PersonMappingRepository,
+    peopleRepo: {} as unknown as PeopleRepository,
     // The adapter runs on the provisioned coordinates (the `inbox` grant
     // material); guardianEmail is durable settings config, sourced in start().
     config: {
@@ -274,10 +274,11 @@ describe("EmailAdapter.send", () => {
         get: async () => ({ enabled: true, guardianEmail: GUARDIAN }),
         set: async () => {},
       } as unknown as SettingsRepository,
-      personMappingRepo: {
-        findByChannelUser: async () => null,
-        findByBondLevel: async () => [],
-      } as unknown as PersonMappingRepository,
+      peopleRepo: {
+        byAccount: async () => null,
+        isDismissed: async () => false,
+        byBondLevel: async () => [],
+      } as unknown as PeopleRepository,
       config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
     });
     await adapter.start();
@@ -503,16 +504,17 @@ describe("EmailAdapter.start guardian resolution", () => {
         stored[key] = value;
       }),
     } as unknown as SettingsRepository;
-    const personMappingRepo = {
-      findByChannelUser: rs.fn(async () => null),
-      findByBondLevel: rs.fn(async () => []),
-      addChannelMapping: rs.fn(async () => {}),
-    } as unknown as PersonMappingRepository;
+    const peopleRepo = {
+      byAccount: rs.fn(async () => null),
+      isDismissed: async () => false,
+      byBondLevel: rs.fn(async () => []),
+      linkStated: rs.fn(async () => {}),
+    } as unknown as PeopleRepository;
 
     const adapter = new EmailAdapter({
       provider,
       settingsRepo,
-      personMappingRepo,
+      peopleRepo,
       // No guardianEmail in settings → self-heal resolves it from Rome Cloud.
       config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
       ownerEmailResolver: async () => "Owner@Example.com",
@@ -520,7 +522,7 @@ describe("EmailAdapter.start guardian resolution", () => {
 
     await adapter.start();
 
-    // start() never provisions (route-driven conferral).
+    // start() never provisions (route-driven grant).
     expect(provider.provision).not.toHaveBeenCalled();
     // Normalized (lowercased) and persisted back into the email setting.
     expect(settingsRepo.set).toHaveBeenCalledWith(
@@ -528,7 +530,10 @@ describe("EmailAdapter.start guardian resolution", () => {
       expect.objectContaining({ guardianEmail: "owner@example.com" }),
     );
     // The resolved address is used to seed the guardian channel mapping.
-    expect(personMappingRepo.findByChannelUser).toHaveBeenCalledWith("email", "owner@example.com");
+    expect(peopleRepo.byAccount).toHaveBeenCalledWith({
+      platform: "email",
+      id: "owner@example.com",
+    });
   });
 
   it("keeps a settings-configured guardian email and never calls the cloud resolver", async () => {
@@ -539,17 +544,18 @@ describe("EmailAdapter.start guardian resolution", () => {
       get: rs.fn(async () => ({ enabled: true, guardianEmail: "set@example.com" })),
       set: rs.fn(async () => {}),
     } as unknown as SettingsRepository;
-    const personMappingRepo = {
-      findByChannelUser: rs.fn(async () => null),
-      findByBondLevel: rs.fn(async () => []),
-      addChannelMapping: rs.fn(async () => {}),
-    } as unknown as PersonMappingRepository;
+    const peopleRepo = {
+      byAccount: rs.fn(async () => null),
+      isDismissed: async () => false,
+      byBondLevel: rs.fn(async () => []),
+      linkStated: rs.fn(async () => {}),
+    } as unknown as PeopleRepository;
     const resolver = rs.fn(async () => "owner@example.com");
 
     const adapter = new EmailAdapter({
       provider,
       settingsRepo,
-      personMappingRepo,
+      peopleRepo,
       config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
       ownerEmailResolver: resolver,
     });
@@ -557,7 +563,10 @@ describe("EmailAdapter.start guardian resolution", () => {
     await adapter.start();
 
     expect(resolver).not.toHaveBeenCalled();
-    expect(personMappingRepo.findByChannelUser).toHaveBeenCalledWith("email", "set@example.com");
+    expect(peopleRepo.byAccount).toHaveBeenCalledWith({
+      platform: "email",
+      id: "set@example.com",
+    });
   });
 
   it("resolves guardianEmail from Rome Cloud on a later boot when it was unresolvable at connect", async () => {
@@ -570,11 +579,12 @@ describe("EmailAdapter.start guardian resolution", () => {
         stored[key] = value;
       }),
     } as unknown as SettingsRepository;
-    const personMappingRepo = {
-      findByChannelUser: rs.fn(async () => null),
-      findByBondLevel: rs.fn(async () => []),
-      addChannelMapping: rs.fn(async () => {}),
-    } as unknown as PersonMappingRepository;
+    const peopleRepo = {
+      byAccount: rs.fn(async () => null),
+      isDismissed: async () => false,
+      byBondLevel: rs.fn(async () => []),
+      linkStated: rs.fn(async () => {}),
+    } as unknown as PeopleRepository;
 
     // Rome Cloud can't answer yet at connect-time boot.
     let ownerEmail: string | undefined;
@@ -582,7 +592,7 @@ describe("EmailAdapter.start guardian resolution", () => {
       new EmailAdapter({
         provider,
         settingsRepo,
-        personMappingRepo,
+        peopleRepo,
         config: { address: "slug@mail.romeos.cc", inboundSecret: INBOUND_SECRET },
         ownerEmailResolver: async () => ownerEmail,
       });
@@ -596,10 +606,10 @@ describe("EmailAdapter.start guardian resolution", () => {
     ownerEmail = "Owner@Example.com";
     await bootAdapter().start();
     expect((stored.email as { guardianEmail?: string }).guardianEmail).toBe("owner@example.com");
-    expect(personMappingRepo.findByChannelUser).toHaveBeenLastCalledWith(
-      "email",
-      "owner@example.com",
-    );
+    expect(peopleRepo.byAccount).toHaveBeenLastCalledWith({
+      platform: "email",
+      id: "owner@example.com",
+    });
   });
 });
 

@@ -10,6 +10,7 @@ import {
 import {
   composioActionError,
   isRomeManagedToolkit,
+  isInlineConnectRomeManagedToolkit,
   isSupportedToolkit,
   loadConnectorClient,
   romeManagedConnectHint,
@@ -28,9 +29,6 @@ const inputSchema = z.object({
     .describe("Toolkit slug to connect, e.g. 'github', 'gmail', 'slack', 'supabase', 'neon'"),
 });
 
-/** Rome-managed toolkits whose connect the inline card can drive. */
-const INLINE_CONNECT_ROME_MANAGED = new Set(["github", "shopify"]);
-
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
   return defineAction({
     config,
@@ -45,11 +43,11 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       // authoritative status check both reach core's /api/integrations directly —
       // the connector server can't see Rome Cloud's connection state, so they must
       // live in the browser component. A non-webchat surface that can't mount the
-      // card falls back to `promptText` (the Settings → Connections hint). Once
+      // card falls back to the guardian-facing `promptText`. Once
       // connected, GitHub is driven through gh/git or connector_proxy — never
       // connector_tool_execute, which is Composio-only.
       if (isRomeManagedToolkit(toolkit)) {
-        if (INLINE_CONNECT_ROME_MANAGED.has(toolkit.toLowerCase())) {
+        if (isInlineConnectRomeManagedToolkit(toolkit)) {
           // The unified connect card selects the Rome-managed (Rome Cloud OAuth)
           // adapter from the toolkit prop — same componentId the Composio branch
           // renders below, so there's one card for both brokers. Shopify's card
@@ -58,7 +56,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
             status: "pending_interaction",
             interaction: {
               appId: "connector",
-              promptText: romeManagedConnectHint(toolkit),
+              promptText: `Connect ${toolkit}: click Connect on the card to start authorization. If no card is shown, connect ${toolkit} in Settings → Connections.`,
               render: { kind: "inline", componentId: "connect-card", props: { toolkit } },
             },
           };

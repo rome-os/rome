@@ -149,6 +149,25 @@ rm -rf ~/.rome-worktrees/<slug>
 `git worktree remove` without first running `down -v` leaves an orphan
 host dir, but it cannot pollute any other worktree.
 
+The slug is the branch name, so switching branches in one checkout starts a
+different stack with its own data and address. To keep one stack across
+branches, pass `ROME_DEV_SLUG` with that checkout's commands:
+
+```bash
+ROME_DEV_SLUG=rome pnpm dev:all   # always http://rome.rome.localhost:3000
+ROME_DEV_SLUG=rome ./r pnpm test  # ./r finds the container by the same slug
+```
+
+Pass it per command, not from a shell profile or a direnv `.envrc`: both reach
+other worktrees, including the ones nested under the main checkout, and pin
+them all to one stack. Use a value from one checkout only: another checkout
+passing the same value starts the same stack, database included, once it is
+stopped. Every branch then shares that stack's data, so a
+migration from one branch stays applied after a switch. Do not give the pin
+the name of a worktree directory: `pnpm gc:worktrees` names a worktree's
+stack after its directory, and keeps it only while its containers show
+another checkout started it (#1314).
+
 **Gotcha:** bare-metal `pnpm start` (host Node, no container) still
 writes to `~/.rome/<profile>/`, so it does *not* share state with
 `pnpm dev:all`. Mixing the two paths against the same source tree

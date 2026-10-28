@@ -7,6 +7,11 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 rs.mock("@/components/logo", () => ({
   RomeLogo: (props: Record<string, unknown>) => <div data-testid="rome-logo" {...props} />,
 }));
+rs.mock("@/hooks/use-dashboard-identity", () => ({
+  useDashboardIdentity: () => ({
+    data: { kind: "guardian", userId: "seat", displayName: null, avatarUrl: null },
+  }),
+}));
 rs.mock("@/components/chat/TurnBranchButton", () => ({
   TurnBranchButton: () => <button type="button">side-chat-branch</button>,
 }));
@@ -25,6 +30,7 @@ import {
 import { buildRows, type AgentIdentity } from "./chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ThemeProvider } from "@/hooks/use-theme";
+import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
 
 afterEach(() => cleanup());
 
@@ -218,6 +224,53 @@ function renderList(streaming: boolean) {
     ),
   };
 }
+
+describe("MessageList archived steps", () => {
+  it.each([true, false])("keeps replies and cards when assistant rows exist: %s", (hasReply) => {
+    const trace: ChatMessage = {
+      id: "archived-trace",
+      sessionId: "s-1",
+      turnId: "turn-1",
+      role: "trace",
+      content: "[]",
+      createdAt: "2026-06-13T00:00:00Z",
+      traceArchived: true,
+    };
+    const reply = questionCardTurn();
+    const finalReply = {
+      ...reply,
+      id: "final-reply",
+      content: JSON.stringify([{ type: "text", content: "The final answer" }]),
+    };
+    const messages = hasReply ? [humanReply("My question"), reply, finalReply, trace] : [trace];
+    const rows = buildRows(messages, new Map([["s-1", IDENTITY]]), IDENTITY, {
+      runningTurnId: null,
+      isStreaming: false,
+    });
+    const { live, actions } = renderList(false);
+    const onOpenStoredTrace = rs.fn();
+    render(
+      <ThemeProvider>
+        <MessageList
+          rows={rows}
+          live={{ ...live, runningTurnId: null }}
+          actions={actions}
+          contentRef={() => {}}
+          onOpenLiveTrace={() => {}}
+          onOpenStoredTrace={onOpenStoredTrace}
+        />
+      </ThemeProvider>,
+    );
+    expect(screen.getAllByText("Steps from this turn are archived.")).toHaveLength(1);
+    expect(onOpenStoredTrace).not.toHaveBeenCalled();
+    if (hasReply) {
+      expect(screen.getByText("My question")).toBeTruthy();
+      expect(screen.getByText("The final answer")).toBeTruthy();
+      expect(screen.getByPlaceholderText("Type your answer…")).toBeTruthy();
+    }
+    expect(screen.queryByRole("button", { name: /step/i })).toBeNull();
+  });
+});
 
 describe("MessageList inline-card state across streaming→settled", () => {
   it("keeps an inline question card's typed input when the turn finalizes", () => {
@@ -638,12 +691,19 @@ function anchorIds(container: HTMLElement): (string | null)[] {
 }
 
 describe("timeline anchors", () => {
-  it("tags every user row with its message id, and nothing else", () => {
+  it("tags every user row with its message id and every agent row with all of its ids", () => {
     const first = questionTurn("first question", "u-first");
     const second = questionTurn("second question", "u-second");
-    const { container } = render(settledList([first, commentary("an answer", "a-answer"), second]));
+    const { container } = render(
+      settledList([
+        first,
+        commentary("an answer", "a-answer"),
+        { ...commentary("more", "a-more"), turnId: "turn-1" },
+        second,
+      ]),
+    );
 
-    expect(anchorIds(container)).toEqual(["u-first", "u-second"]);
+    expect(anchorIds(container)).toEqual(["u-first", "a-answer a-more", "u-second"]);
   });
 
   it("keeps the anchor on a selectable row during share selection", () => {
@@ -678,5 +738,135 @@ describe("timeline anchors", () => {
     );
 
     expect(anchorIds(container)).toEqual(["u-dimmed"]);
+  });
+});
+
+describe("replying to an agent turn", () => {
+  const turn = (id: string, content: unknown[]): ChatMessage => ({
+    id,
+    sessionId: "s-1",
+    turnId: "turn-1",
+    role: "assistant",
+    content: JSON.stringify(content),
+    createdAt: "2026-06-13T00:00:01.000Z",
+  });
+  const draftOf = (overrides: Partial<ReplyDraft> = {}): ReplyDraft => ({
+    sessionId: "s-1",
+    target: null,
+    set: rs.fn(),
+    clear: rs.fn(),
+    restore: rs.fn(),
+    has: () => true,
+    jump: rs.fn(),
+    ...overrides,
+  });
+  const messages = [
+    questionTurn("plan it", "u-1", "turn-1"),
+    turn("a-1", [{ type: "text", content: "Checking flights.", turnPhase: "commentary" }]),
+    turn("a-2", [{ type: "text", content: "Fly to Lisbon.", turnPhase: "final" }]),
+    turn("a-3", [{ type: "pending_interaction", toolUseId: "t", appId: "x", render: {} }]),
+  ];
+
+  it("quotes the turn's answer, named by its last row with text", () => {
+    const draft = draftOf();
+    render(<ReplyDraftProvider value={draft}>{settledList(messages)}</ReplyDraftProvider>);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Reply" })[1]);
+
+    expect(draft.set).toHaveBeenCalledWith({
+      messageId: "a-2",
+      author: "agent",
+      preview: "Fly to Lisbon.",
+    });
+  });
+
+  it("offers Reply on the guardian's own message too", () => {
+    const draft = draftOf();
+    render(<ReplyDraftProvider value={draft}>{settledList(messages)}</ReplyDraftProvider>);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Reply" })[0]);
+
+    expect(draft.set).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "u-1", author: "guardian", preview: "plan it" }),
+    );
+  });
+
+  it("offers no Reply where the chat has no reply state", () => {
+    render(settledList(messages));
+
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+  });
+
+  it("offers no Reply on a turn of a session the composer does not send to", () => {
+    render(
+      <ReplyDraftProvider value={draftOf({ sessionId: "child" })}>
+        {settledList(messages)}
+      </ReplyDraftProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+  });
+});
+
+describe("MessageList model switch notice", () => {
+  it("shows a centered line naming the model the chat moved to", () => {
+    const turn = (turnId: string, model: string): ChatMessage[] => [
+      {
+        id: `u-${turnId}`,
+        sessionId: "s-1",
+        turnId,
+        role: "user",
+        content: `ask ${turnId}`,
+        createdAt: "2026-10-26T00:00:00.000Z",
+      },
+      {
+        id: `t-${turnId}`,
+        sessionId: "s-1",
+        turnId,
+        role: "trace",
+        content: "[]",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        traceSummary: { distinctApps: [], totalSteps: 0, invocationCounts: {}, model },
+      },
+      {
+        id: `a-${turnId}`,
+        sessionId: "s-1",
+        turnId,
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: `reply ${turnId}` }]),
+        createdAt: "2026-10-26T00:00:00.000Z",
+      },
+    ];
+    const rows = buildRows(
+      [...turn("t1", "claude-sonnet-5-5"), ...turn("t2", "gpt-6-luna")],
+      new Map([["s-1", IDENTITY]]),
+      IDENTITY,
+      { runningTurnId: null, isStreaming: false },
+    );
+    render(
+      <ThemeProvider>
+        <MessageList
+          rows={rows}
+          live={{
+            isStreaming: false,
+            runningTurnId: null,
+            snapshot: null,
+            text: "",
+            identity: IDENTITY,
+          }}
+          contentRef={() => {}}
+          onOpenLiveTrace={() => {}}
+          onOpenStoredTrace={() => {}}
+          actions={{
+            onApprovalResolved: () => {},
+            onSubmitAppComponent: () => {},
+            onDismissAppComponent: () => {},
+            interactionResults: new Map(),
+          }}
+        />
+      </ThemeProvider>,
+    );
+    const notes = screen.getAllByRole("note");
+    expect(notes.map((note) => note.textContent)).toEqual(["Switched to GPT-6 Luna"]);
   });
 });

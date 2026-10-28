@@ -8,14 +8,12 @@
  * because the two listings are two views of one store and a write visible to
  * only one of them is the bug this walkthrough is for.
  *
- * The other contract pinned here: the stranger sentinel never crosses the
- * wire. Dismissal reads as `state: "dismissed"` with a null person, and no
- * /api/people route resolves the sentinel id.
+ * The other contract pinned here: a dismissal names nobody. It reads as
+ * `state: "dismissed"` with a null person.
  */
 // @rstest-environment jsdom
 import { afterAll, beforeAll, expect, test } from "@rstest/core";
 import { setupServer } from "msw/node";
-import { STRANGER_PERSON_ID } from "@rome/api-types/persons";
 import { peopleHandlers } from "../../../mock/handlers/people-api";
 
 const server = setupServer(...peopleHandlers);
@@ -40,19 +38,18 @@ const call = async (method: string, path: string, body?: unknown): Promise<any> 
 };
 
 test("proposed /people contract walkthrough", async () => {
-  // Curated list: no sentinel, Ray holds two accounts.
+  // Curated list: Ray holds two accounts.
   let r = await call("GET", "/api/people");
   expect(r.status).toBe(200);
-  expect(r.body.people.map((p: { id: string }) => p.id)).not.toContain(STRANGER_PERSON_ID);
   const ray = r.body.people.find((p: { id: string }) => p.id === "ray-oster");
   expect(ray.accounts).toHaveLength(2);
   // Counts ride the listing and cover the whole match.
   expect(r.body.counts.all).toBe(r.body.people.length);
 
-  // The sentinel is not addressable as a person.
-  r = await call("GET", `/api/people/${STRANGER_PERSON_ID}`);
+  // An id naming no person is not addressable.
+  r = await call("GET", "/api/people/nobody-here");
   expect(r.status).toBe(404);
-  r = await call("POST", `/api/people/${STRANGER_PERSON_ID}/accounts`, {
+  r = await call("POST", "/api/people/nobody-here/accounts", {
     channel: "telegram",
     channelUserId: JULES_TG,
   });
@@ -184,15 +181,14 @@ test("proposed /people contract walkthrough", async () => {
   expect(r.status).toBe(200);
   expect(r.body.accounts).toHaveLength(1);
 
-  // The account state machine, sentinel never on the wire:
-  // unlinked -> dismissed. The response carries the state, not the sentinel.
+  // The account state machine: unlinked -> dismissed. The response carries
+  // the state and names nobody.
   r = await call("POST", `/api/accounts/telegram/${JULES_TG}/dismiss`);
   expect(r.status).toBe(200);
   expect(r.body.state).toBe("dismissed");
   expect(r.body.personId).toBeNull();
   expect(r.body.personName).toBeNull();
-  // Dismissed accounts leave discovery, appear under ?state=dismissed, and the
-  // legacy store shows the same fact as a sentinel mapping (one store).
+  // Dismissed accounts leave discovery and appear under ?state=dismissed.
   r = await call("GET", "/api/accounts?state=unlinked");
   expect(r.body.accounts.map((a: { channelUserId: string }) => a.channelUserId)).not.toContain(
     JULES_TG,
@@ -201,8 +197,8 @@ test("proposed /people contract walkthrough", async () => {
   expect(r.body.accounts.map((a: { channelUserId: string }) => a.channelUserId)).toContain(
     JULES_TG,
   );
-  // Dismissal is stored as a link onto the sentinel, and that is exactly what
-  // never crosses the wire: the row says "dismissed" and names nobody.
+  // A dismissal is a decision about the account, not a person: the row says
+  // "dismissed" and names nobody.
   expect(
     r.body.accounts.find((a: { channelUserId: string }) => a.channelUserId === JULES_TG),
   ).toMatchObject({ state: "dismissed", personId: null });

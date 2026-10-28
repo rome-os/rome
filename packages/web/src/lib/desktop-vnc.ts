@@ -618,6 +618,11 @@ function dispatchSyntheticPointerCancel(target: Element | null, pointerId: numbe
   } catch {}
 }
 
+/** Milliseconds before reconnect attempt `attempt`, counted from 0: 1 s, doubling to at most 10 s. */
+export function reconnectDelayMs(attempt: number): number {
+  return Math.min(1000 * 2 ** attempt, 10_000);
+}
+
 export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
   const screen = document.getElementById("screen");
   const wrap = document.getElementById("screen-wrap");
@@ -633,6 +638,8 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
     throw new Error("Desktop VNC UI is missing required elements.");
   }
   const screenElement = screen;
+  const wrapElement = wrap;
+  const frameElement = frame;
 
   const params = new URLSearchParams(window.location.search);
   const path = params.get("path") ?? "desktop-proxy/websockify";
@@ -647,12 +654,20 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   const wsUrl = `${protocol}://${window.location.host}/${path}`;
 
-  const rfb = new RFB(screenElement, wsUrl);
   const platform =
     (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ??
     navigator.platform ??
     "";
-  const metaToControl = createMetaToControlController(rfb, isApplePlatform(platform));
+  // The controllers outlive each connection, so they send through `remote`,
+  // which follows `rfb` as reconnects replace it.
+  const remote: RemoteKeySender = {
+    sendKey: (keysym, code, down) => rfb.sendKey(keysym, code, down),
+  };
+  const metaToControl = createMetaToControlController(remote, isApplePlatform(platform));
+  const status = document.getElementById("connection-status");
+  let reconnectAttempt = 0;
+  let reconnectTimer: TimerHandle | null = null;
+  let closed = false;
 
   function focusRemote() {
     screenElement.focus();
@@ -695,21 +710,12 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
     onPasteError: () => {},
   });
 
-  rfb.viewOnly = false;
-
   let touchViewport: ReturnType<typeof createTouchViewport> | null = null;
   let keyboardToolbar: ReturnType<typeof setupKeyboardToolbar> | null = null;
 
   if (touchMode) {
     frame.classList.add("touch-mode");
     document.body.classList.add("touch-mode");
-    rfb.scaleViewport = true;
-    rfb.clipViewport = false;
-    rfb.dragViewport = false;
-    rfb.resizeSession = false;
-  } else {
-    rfb.scaleViewport = resize === "scale";
-    rfb.resizeSession = resize === "remote";
   }
 
   function getCanvas() {
@@ -724,36 +730,76 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
     return { width: canvas.width, height: canvas.height };
   }
 
-  rfb.addEventListener("connect", () => {
-    focusRemote();
-    if (touchMode) {
-      touchViewport = createTouchViewport({
-        frame,
-        wrap,
-        getContentSize: getCanvasSize,
-        cancelPointer: (id) => dispatchSyntheticPointerCancel(getCanvas(), id),
-      });
-      touchViewport.fitToFrame();
-    }
-  });
+  const refit = () => touchViewport?.fitToFrame();
 
-  if (touchMode) {
-    const refit = () => touchViewport?.fitToFrame();
-    rfb.addEventListener("desktopname", refit);
-    window.addEventListener("resize", refit);
-    keyboardToolbar = setupKeyboardToolbar(rfb, screenElement);
+  function connect(): DesktopRfb {
+    const next = new RFB(screenElement, wsUrl);
+    next.viewOnly = false;
+    if (touchMode) {
+      next.scaleViewport = true;
+      next.clipViewport = false;
+      next.dragViewport = false;
+      next.resizeSession = false;
+    } else {
+      next.scaleViewport = resize === "scale";
+      next.resizeSession = resize === "remote";
+    }
+
+    next.addEventListener("connect", () => {
+      reconnectAttempt = 0;
+      status?.setAttribute("hidden", "");
+      focusRemote();
+      if (touchMode) {
+        touchViewport?.destroy();
+        touchViewport = createTouchViewport({
+          frame: frameElement,
+          wrap: wrapElement,
+          getContentSize: getCanvasSize,
+          cancelPointer: (id) => dispatchSyntheticPointerCancel(getCanvas(), id),
+        });
+        touchViewport.fitToFrame();
+      }
+    });
+
+    next.addEventListener("disconnect", () => {
+      if (closed || next !== rfb) return;
+      touchViewport?.destroy();
+      touchViewport = null;
+      status?.removeAttribute("hidden");
+      reconnectTimer = setTimeout(reconnect, reconnectDelayMs(reconnectAttempt));
+      reconnectAttempt += 1;
+    });
+
+    if (touchMode) {
+      next.addEventListener("desktopname", refit);
+    }
+
+    next.addEventListener("clipboard", async (event) => {
+      const text = (event as CustomEvent<{ text?: string }>).detail.text ?? "";
+      if (!text) {
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {}
+    });
+
+    return next;
   }
 
-  rfb.addEventListener("clipboard", async (event) => {
-    const text = (event as CustomEvent<{ text?: string }>).detail.text ?? "";
-    if (!text) {
-      return;
-    }
+  function reconnect() {
+    if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    rfb = connect();
+  }
 
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {}
-  });
+  let rfb = connect();
+
+  if (touchMode) {
+    window.addEventListener("resize", refit);
+    keyboardToolbar = setupKeyboardToolbar(remote, screenElement);
+  }
 
   document.addEventListener(
     "keydown",
@@ -787,12 +833,29 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
     metaToControl.release();
     rfb.blur();
   });
+  // A tab that slept or sat in the background waits out no backoff once the
+  // guardian looks at it again.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && reconnectTimer !== null) reconnect();
+  });
   window.addEventListener("pagehide", () => {
+    closed = true;
     deferredPaste.cancel();
     metaToControl.release();
     keyboardToolbar?.cancel();
     touchViewport?.destroy();
-    rfb.disconnect();
+    touchViewport = null;
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    } else {
+      rfb.disconnect();
+    }
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) return;
+    closed = false;
+    reconnect();
   });
 
   focusRemote();

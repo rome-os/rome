@@ -15,7 +15,7 @@ import type {
   SendInput,
   SendOptions,
 } from "@larksuiteoapi/node-sdk";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { Link, PeopleRepository } from "../db/repositories/people.js";
 import { LarkChannelError } from "@larksuiteoapi/node-sdk";
 import { FeishuAdapter, isFeishuAuthError, resolveMentions } from "./feishu.js";
 
@@ -212,27 +212,28 @@ function makeChatSettings(initial: ChatSettingsOverrides = {}) {
   return { control, get, update, reset, current: () => structuredClone(effective) };
 }
 
-function guardianPersonRepo(channelUserId: string): PersonMappingRepository {
+function guardianPersonRepo(channelUserId: string): PeopleRepository {
   return {
-    findByChannelUser: async (channelName: string, userId: string) =>
-      channelName === "feishu" && userId === channelUserId
+    byAccount: async (account: Link) =>
+      account.platform === "feishu" && account.id === channelUserId
         ? {
             id: "guardian",
             displayName: "Guardian",
             bondLevel: "guardian",
-            channelMappings: [{ channel: "feishu", channelUserId }],
+            links: [{ channel: "feishu", channelUserId }],
           }
         : null,
-    findByBondLevel: async () => [
+    isDismissed: async () => false,
+    byBondLevel: async () => [
       {
         id: "guardian",
         displayName: "Guardian",
         bondLevel: "guardian",
-        channelMappings: [],
+        links: [],
       },
     ],
-    addChannelMapping: async () => "mapping-id",
-  } as unknown as PersonMappingRepository;
+    linkStated: async () => "mapping-id",
+  } as unknown as PeopleRepository;
 }
 
 describe("FeishuAdapter", () => {
@@ -395,9 +396,9 @@ describe("FeishuAdapter", () => {
     ]);
   });
 
-  it("carries the replied-to message and a fallback sender name", async () => {
+  it("carries the replied-to message, and no sender name where Feishu gave none", async () => {
     await channel.emit({ senderName: undefined, replyToMessageId: "om_parent" });
-    expect(captured[0].senderDisplayName).toBe("Feishu User");
+    expect(captured[0].senderDisplayName).toBeUndefined();
     expect(captured[0].replyTo).toStrictEqual({ messageId: "om_parent" });
   });
 
@@ -470,7 +471,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: guardianPersonRepo("ou_alice"),
+        peopleRepo: guardianPersonRepo("ou_alice"),
       },
       () => channel as unknown as LarkChannel,
     );
@@ -561,7 +562,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: guardianPersonRepo("ou_alice"),
+        peopleRepo: guardianPersonRepo("ou_alice"),
       },
       () => channel as unknown as LarkChannel,
     );
@@ -620,7 +621,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: guardianPersonRepo("ou_alice"),
+        peopleRepo: guardianPersonRepo("ou_alice"),
       },
       () => channel as unknown as LarkChannel,
     );
@@ -657,7 +658,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: guardianPersonRepo("ou_alice"),
+        peopleRepo: guardianPersonRepo("ou_alice"),
         listAgents: () => ["sales:agent", "support:agent"],
         accountAgent: () => linked,
       },
@@ -694,7 +695,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: guardianPersonRepo("ou_alice"),
+        peopleRepo: guardianPersonRepo("ou_alice"),
         accountAgent: () => null,
       },
       () => channel as unknown as LarkChannel,
@@ -728,7 +729,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: guardianPersonRepo("ou_alice"),
+        peopleRepo: guardianPersonRepo("ou_alice"),
         listAgents: () => ["sales:agent"],
         hasAgent: (name) => name === "sales:agent",
         accountAgent: () => "sales:agent",
@@ -754,7 +755,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: guardianPersonRepo("ou_alice"),
+        peopleRepo: guardianPersonRepo("ou_alice"),
         accountAgent: () => null,
       },
       () => channel as unknown as LarkChannel,
@@ -863,7 +864,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: guardianPersonRepo("ou_alice"),
+        peopleRepo: guardianPersonRepo("ou_alice"),
         listAgents: () => ["main", "pm-assistant"],
       },
       () => channel as unknown as LarkChannel,
@@ -927,9 +928,9 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: {
-          findByChannelUser: async () => null,
-        } as unknown as PersonMappingRepository,
+        peopleRepo: {
+          byAccount: async () => null,
+        } as unknown as PeopleRepository,
       },
       () => channel as unknown as LarkChannel,
     );
@@ -973,7 +974,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: guardianPersonRepo("ou_alice"),
+        peopleRepo: guardianPersonRepo("ou_alice"),
         listAgents: () => ["main", "pm-assistant"],
       },
       () => channel as unknown as LarkChannel,
@@ -1034,7 +1035,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: guardianPersonRepo("ou_alice"),
+        peopleRepo: guardianPersonRepo("ou_alice"),
       },
       () => channel as unknown as LarkChannel,
     );
@@ -1068,7 +1069,7 @@ describe("FeishuAdapter", () => {
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
         chatSettings: chatSettings.control,
-        personMappingRepo: guardianPersonRepo("ou_alice"),
+        peopleRepo: guardianPersonRepo("ou_alice"),
         listAgents: () => ["main", "pm-assistant"],
       },
       () => channel as unknown as LarkChannel,

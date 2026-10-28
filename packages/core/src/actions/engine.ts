@@ -22,7 +22,7 @@ import type {
 } from "../db/repositories/action-executions.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
-import { actionExecutionContext } from "./context.js";
+import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../logger.js";
 import { currentSessionId } from "../telemetry-context.js";
@@ -138,6 +138,9 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "system:send_user_message",
   "system:create_routine",
   "system:send_feedback",
+  "core:app_connection_read",
+  "core:app_connection_write",
+  "core:app_connection_write_without_approval",
 ]);
 
 export interface ActionRunContext {
@@ -2067,6 +2070,33 @@ export class ActionEngine {
     store: ReplayStore,
     context: ActionRunContext | undefined,
   ): Promise<string> {
+    let preview: PreviewPayload | undefined;
+    try {
+      const action = this.registry.get(actionName);
+      const previewStore: ActionExecutionStore = {
+        actionName,
+        executionId: context?.executionId ?? store.rootExecutionId,
+        rootExecutionId: store.rootExecutionId,
+        parentExecutionId: context?.parentExecutionId,
+        parentActionName: context?.parentActionName,
+        initiator: context?.initiator ?? "unknown",
+        actor: context?.actor,
+        callerAppId: context?.callerAppId,
+        engine: this,
+        channelContext: context?.channelContext,
+        sharedContext: context?.sharedContext,
+        sessionId: context?.sessionId,
+        turnId: context?.turnId,
+        agentName: context?.agentName,
+        channelThreadKey: context?.channelThreadKey,
+      };
+      preview = await actionExecutionContext.run(previewStore, () => action?.preview?.(args));
+    } catch (previewErr) {
+      log.warn("action preview renderer threw", {
+        actionName,
+        error: previewErr instanceof Error ? previewErr.message : String(previewErr),
+      });
+    }
     const approvalId = await this.approvalsRepo.create({
       type: "action_execution",
       requestedBy: context?.initiator ?? "unknown",
@@ -2083,21 +2113,11 @@ export class ActionEngine {
         sessionId: context?.sessionId,
         agentName: context?.agentName,
         channelThreadKey: context?.channelThreadKey,
+        preview,
       },
     });
 
     if (this.onApprovalCreated) {
-      let preview: PreviewPayload | undefined;
-      try {
-        const action = this.registry.get(actionName);
-        preview = await action?.preview?.(args);
-      } catch (previewErr) {
-        log.warn("action preview renderer threw", {
-          actionName,
-          error: previewErr instanceof Error ? previewErr.message : String(previewErr),
-        });
-      }
-
       try {
         await this.onApprovalCreated({
           approvalId,

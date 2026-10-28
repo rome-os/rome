@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import type { DrizzleDb } from "../db/index.js";
 import { guardianAuth, persons } from "../db/schema.js";
 import { pickRandomAgentPreset } from "./agent-presets.js";
-import { generatePersonSlug } from "../db/repositories/person-mapping.js";
+import { generatePersonSlug } from "@rome/api-types/persons";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
 import {

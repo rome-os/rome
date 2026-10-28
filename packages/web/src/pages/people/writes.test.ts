@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import type { TFunction } from "i18next";
 import { linkConflict, type DirectoryAccount } from "@rome/api-types/people";
 import i18n from "@/i18n";
-import { createPerson, dismissAccount, linkAccount, mergePeople } from "./writes";
+import { createPerson, dismissAccount, linkAccount, mergePeople, sendMessage } from "./writes";
 
 // The People page's writes, at the wire: what each answer becomes, which is not
 // visible from a rendered row. The requests themselves run against the contract's
@@ -98,9 +98,8 @@ describe("people writes — what an answer becomes", () => {
 
     const result = await createPerson({ displayName: " " }, t);
 
-    // The status rides along beside the message: most callers render the line
-    // and ignore it, and the outbox gestures read it to tell a row that is not
-    // theirs to act on from a write that actually failed.
+    // The status rides along beside the message for a caller with something
+    // to say about the code.
     expect(result).toEqual({ ok: false, message: "displayName is required", status: 400 });
   });
 
@@ -112,6 +111,20 @@ describe("people writes — what an answer becomes", () => {
     // A 5xx body carries the same shape as a 4xx one and not the same meaning:
     // the API error handler serializes an unhandled exception into it.
     expect(result).toEqual({ ok: false, message: t("errors.requestFailed"), status: 500 });
+  });
+
+  it("shows a channel's refusal of a send in the channel's own words", async () => {
+    stubFetch({ error: "chat not found" }, 502);
+
+    const result = await sendMessage(
+      "wei-chen",
+      { channel: "telegram", channelUserId: "42", text: "hi" },
+      t,
+    );
+
+    // Rome answers a send with 502 only to pass the channel's refusal on, and
+    // those words are the only account of what went wrong.
+    expect(result).toEqual({ ok: false, message: "chat not found", status: 502 });
   });
 
   it("says the server was unreachable rather than throwing at a click handler", async () => {

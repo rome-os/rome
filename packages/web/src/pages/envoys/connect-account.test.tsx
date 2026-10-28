@@ -8,6 +8,8 @@ import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import i18n from "@/i18n";
 import type { ApiConnection } from "@/lib/connections-api";
 import EnvoysPage from "./EnvoysPage";
+import { stateOfGrants } from "@/test/connection-state";
+import { linkOf } from "@/test/account-links";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -23,10 +25,11 @@ function connection(service: string, overrides: Partial<ApiConnection> = {}): Ap
     id: `${service}-id`,
     connectionKind: service,
     label: service,
+    state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? { bot: "authorized" }),
     grants: { bot: "authorized" },
     display: { bot: { displayName: service } },
     capabilities: {
-      talk: { state: "unlocked" },
+      chat: { state: "unlocked" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
@@ -34,6 +37,7 @@ function connection(service: string, overrides: Partial<ApiConnection> = {}): Ap
     setups: {},
     channel: service,
     agent: MAIN_AGENT_ID,
+    link: linkOf(service),
     severalAccounts: true,
     ...overrides,
   } as ApiConnection;
@@ -86,17 +90,17 @@ function mockServer(
       }
       return Response.json({
         cid: "cid-new",
-        state: { status: "done", conferral: added ? { connectionId: added.id } : {} },
+        state: { status: "done", grant: added ? { connectionId: added.id } : {} },
         reattached: false,
       });
     }
-    const link = url.match(/^\/api\/channels\/accounts\/(.+)\/agent$/);
+    const link = url.match(/^\/api\/accounts\/(.+)\/agent$/);
     if (link && method === "PUT") {
       const { agent } = body as { agent: string | null };
       if (options.failLinks?.(agent)) {
         return Response.json({ error: "Unknown agent" }, { status: 400 });
       }
-      const account = connections.find((c) => c.channel === decodeURIComponent(link[1]!))!;
+      const account = connections.find((c) => c.id === decodeURIComponent(link[1]!))!;
       account.agent = agent;
       return Response.json({ account: {} });
     }
@@ -164,18 +168,18 @@ describe("Connect an account", () => {
     });
     expect(calls.filter((call) => call.method === "PUT")).toEqual([
       {
-        url: "/api/channels/accounts/discord-2/agent",
+        url: "/api/accounts/discord-2/agent",
         method: "PUT",
         body: { agent: "sales:agent" },
       },
     ]);
   });
 
-  it("connects a service's first account as a new one, keeping core's main link", async () => {
+  it("connects a service's first account as a new one and links the picked agent", async () => {
     const { calls } = mockServer([placeholder("telegram")], {
       id: "telegram-id",
       service: "telegram",
-      agent: MAIN_AGENT_ID,
+      agent: null,
     });
     renderAt("/envoys/connect/main/telegram");
     const user = userEvent.setup();
@@ -186,16 +190,21 @@ describe("Connect an account", () => {
     const setup = calls.find((call) => call.url.endsWith("/setup"));
     expect(setup?.url).toBe("/api/connections/telegram/grants/bot/setup");
     expect(setup?.body).toMatchObject({ another: true });
-    // Core already linked main to the service's first account.
-    expect(calls.filter((call) => call.method === "PUT")).toEqual([]);
+    expect(calls.filter((call) => call.method === "PUT")).toEqual([
+      {
+        url: "/api/accounts/telegram-id/agent",
+        method: "PUT",
+        body: { agent: MAIN_AGENT_ID },
+      },
+    ]);
   });
 
-  it("unlinks main from a first account when the picked agent cannot be linked", async () => {
+  it("leaves the account with no agent when the picked agent cannot be linked", async () => {
     const connections = [placeholder("telegram")];
     const { calls } = mockServer(
       connections,
-      { id: "telegram-id", service: "telegram", agent: MAIN_AGENT_ID },
-      { failLinks: (agent) => agent === "sales:agent" },
+      { id: "telegram-id", service: "telegram", agent: null },
+      { failLinks: () => true },
     );
     renderAt("/envoys/connect/sales:agent/telegram");
     const user = userEvent.setup();
@@ -205,28 +214,11 @@ describe("Connect an account", () => {
     await rs.waitFor(() => expect(location()).toBe("/envoys"));
     expect(calls.filter((call) => call.method === "PUT").map((call) => call.body)).toEqual([
       { agent: "sales:agent" },
-      { agent: null },
     ]);
     expect(connections.find((c) => c.id === "telegram-id")?.agent).toBeNull();
   });
 
-  it("returns to the list when neither link nor unlink lands", async () => {
-    const connections = [placeholder("telegram")];
-    mockServer(
-      connections,
-      { id: "telegram-id", service: "telegram", agent: MAIN_AGENT_ID },
-      { failLinks: () => true },
-    );
-    renderAt("/envoys/connect/sales:agent/telegram");
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("button", { name: "Connect" }));
-
-    await rs.waitFor(() => expect(location()).toBe("/envoys"));
-    expect(connections.find((c) => c.id === "telegram-id")?.agent).toBe(MAIN_AGENT_ID);
-  });
-
-  it("finds the new account even while an older poll is in flight", async () => {
+  it("links the new account by its connection while an older poll is in flight", async () => {
     const server = mockServer([connection("discord")], {
       id: "discord-2",
       service: "discord",
@@ -248,7 +240,7 @@ describe("Connect an account", () => {
     release();
     expect(server.calls.filter((call) => call.method === "PUT")).toEqual([
       {
-        url: "/api/channels/accounts/discord-2/agent",
+        url: "/api/accounts/discord-2/agent",
         method: "PUT",
         body: { agent: "sales:agent" },
       },
@@ -324,7 +316,7 @@ describe("Connect an account", () => {
     );
   });
 
-  it("returns to the list when the new account cannot be found to link", async () => {
+  it("returns to the list when the setup names no connection to link", async () => {
     mockServer([connection("discord")], null);
     renderAt("/envoys/connect/sales:agent/discord");
     const user = userEvent.setup();

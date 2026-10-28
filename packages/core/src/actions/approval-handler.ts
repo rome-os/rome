@@ -24,6 +24,10 @@ interface ApprovalPayload {
   channelThreadKey?: string;
 }
 
+export interface ActionApprovalResolutionObserver {
+  approvalRejected(actionName: string, args: Record<string, unknown>): Promise<void> | void;
+}
+
 function formatResultForAgent(result: ActionResult): string {
   if (result.status === "error") {
     return `The action failed with error: ${result.error}`;
@@ -61,6 +65,7 @@ export class ApprovalHandler {
      * default project and the per-cwd transcript resume fails with "No
      * conversation found". Undefined ⇒ keep the default-dir fallback. */
     private resolveWorkingDir?: (channel: string, threadId: string) => Promise<string | undefined>,
+    private resolutionObserver?: ActionApprovalResolutionObserver,
   ) {}
 
   async onApproved(approvalId: string): Promise<void> {
@@ -246,6 +251,18 @@ export class ApprovalHandler {
     if (!approval) return;
 
     const payload = approval.payload as ApprovalPayload | null;
+
+    if (payload?.actionName && payload.args) {
+      try {
+        await this.resolutionObserver?.approvalRejected(payload.actionName, payload.args);
+      } catch (err) {
+        log.error("approval rejection observer failed", {
+          approvalId,
+          actionName: payload.actionName,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     if (payload?.sessionId) {
       try {

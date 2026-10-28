@@ -112,6 +112,11 @@ jobs:
         run: pnpm -C opencli-plugins/southwest test
       - name: Test Gemini OpenCLI plugin
         run: pnpm -C opencli-plugins/gemini test
+      - name: Install LinkedIn OpenCLI test dependency
+        working-directory: opencli-plugins/linkedin
+        run: npm install --ignore-scripts --no-package-lock --include=dev
+      - name: Test LinkedIn OpenCLI plugin
+        run: pnpm -C opencli-plugins/linkedin test
       - run: pnpm lint
       - run: pnpm lint:prose
       - run: pnpm check:ui:tailwind

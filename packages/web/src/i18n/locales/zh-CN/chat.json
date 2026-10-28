@@ -4,6 +4,35 @@
     "mermaid": "Mermaid 图表"
   },
   "title": "Rome",
+  "concierge": {
+    "typing": "正在输入",
+    "taskChat": "任务对话",
+    "taskStatus": {
+      "running": "进行中",
+      "waiting": "等你处理",
+      "failed": "出错停止了",
+      "idle": "已完成"
+    },
+    "openTaskChat": "打开",
+    "messageDetails": "消息详情",
+    "composerMenu": "添加文件或切换模型",
+    "placeholder": "发消息",
+    "empty": {
+      "title": "直接告诉我你想做什么",
+      "prompts": {
+        "weather": "今天天气怎么样？",
+        "reminder": "一小时后提醒我起来活动一下",
+        "email": "总结一下我的未读邮件",
+        "task": "帮我做一个简单的习惯打卡 app"
+      }
+    }
+  },
+  "reply": {
+    "action": "回复",
+    "dismiss": "取消回复",
+    "jump": "跳到原消息"
+  },
+  "senderGuardian": "守护者",
   "inputState": {
     "queued": "等待加入对话",
     "submitted": "正在发送给 Agent",
@@ -225,7 +254,17 @@
   },
   "composer": {
     "placeholderDefault": "今天我能帮你做点什么?",
+    "lockedByCard": "请先回答上方的卡片，再继续。",
     "placeholderWithUploads": "添加消息或直接发送已上传的文件...",
+    "hints": {
+      "skill": "输入 / 使用技能",
+      "agent": "输入 @ 选择 agent",
+      "project": "在下方选择项目，让 agent 在里面工作",
+      "attach": "粘贴或拖入文件即可附上",
+      "newline": "Shift+Enter 换行",
+      "search": "{{shortcut}} 搜索对话",
+      "sendWhileWorking": "agent 工作时也可以继续发消息"
+    },
     "uploadFiles": "上传文件",
     "dropFiles": "拖放文件以上传",
     "removeFile": "移除 {{name}}",
@@ -255,6 +294,9 @@
     "dismiss": "跳过",
     "send": "发送"
   },
+  "appComponent": {
+    "dismiss": "跳过"
+  },
   "aiToolsCard": {
     "title": "连接 Claude 或 ChatGPT",
     "hint": "我会使用你已有的订阅来思考。登录其中一个，我就可以开始工作了。",
@@ -262,6 +304,8 @@
     "connected": "已连接",
     "skipped": "暂时跳过",
     "skip": "暂时跳过",
+    "sendFailed": "没能发送出去。",
+    "retry": "重试",
     "connectedSummary": "已连接 AI",
     "skippedSummary": "暂时跳过连接 AI",
     "connectedTitle": "AI 已连接",
@@ -275,6 +319,9 @@
       "using": "Rome 额度使用中",
       "ready": "Rome 额度可用"
     }
+  },
+  "modelSwitch": {
+    "notice": "已切换到 {{model}}"
   },
   "modelSelector": {
     "label": "模型",
@@ -379,6 +426,7 @@
       "truncated": "只显示前 1,000 项。",
       "up": "返回上一级",
       "useFolder": "使用此文件夹",
+      "thisDevice": "本机",
       "reasons": {
         "offline": "离线",
         "upgrade_required": "需更新 rome-node"
@@ -397,7 +445,8 @@
       "listLabel": "位置",
       "searchPlaceholder": "搜索 Rome Cloud 和设备…",
       "noMatchesQuery": "没有匹配 “{{query}}” 的结果。",
-      "back": "返回"
+      "back": "返回",
+      "loading": "正在加载设备…"
     }
   },
   "stream": {

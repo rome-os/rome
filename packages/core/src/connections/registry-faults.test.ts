@@ -11,11 +11,20 @@
 
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
+import type { DrizzleTx, SqliteExec } from "../db/index.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
-import { DrizzleGrantLedger } from "./ledger-db.js";
-import type { GrantLedger, GrantPatch } from "./ledger.js";
+import { DrizzleConnectionsRepository } from "./repository-db.js";
+import type { GrantValue } from "./grant.js";
+import type { ConnectionsRepository, StoredConnection } from "./repository.js";
 import { ConnectionRegistry } from "./registry.js";
-import type { Act, Connection, ConnectionDescriptor, Credential, GrantName } from "./types.js";
+import type {
+  Act,
+  Connection,
+  ConnectionDescriptor,
+  ConnectionId,
+  Credential,
+  GrantName,
+} from "./types.js";
 import {
   CredentialRejected,
   Disconnected,
@@ -24,7 +33,7 @@ import {
   makeRecordingSleep,
   makeRenewableAct,
   makePasteTalk,
-  makeTwoGrant,
+  makeBotAll,
 } from "./test-fixtures.js";
 
 // A macrotask flush: lets the async `void handle…` fault flows (which chain
@@ -34,66 +43,63 @@ function flush(): Promise<void> {
 }
 
 // A fresh drizzle-backed ledger per test.
-function makeLedger(): GrantLedger {
-  return new DrizzleGrantLedger(createTestDb().db);
+function makeLedger(): ConnectionsRepository {
+  return new DrizzleConnectionsRepository(createTestDb().db);
 }
 
-/** A ledger whose `updateGrant` rejects (a transient DB error) whenever
- *  `shouldFail` matches the patch. */
-function makeFailingLedger(shouldFail: (patch: GrantPatch) => boolean): GrantLedger {
-  class FailingLedger extends DrizzleGrantLedger {
-    override async updateGrant(custody: string, name: GrantName, patch: GrantPatch) {
-      if (shouldFail(patch)) throw new Error("LEDGER_WRITE_FAILED");
-      return super.updateGrant(custody, name, patch);
+/** A ledger whose grant writes throw (a transient DB error) whenever
+ *  `shouldFail` matches the grant the write would leave. Every grant write,
+ *  a grant's and an update's alike, goes through `save`. */
+function makeFailingLedger(shouldFail: (grant: GrantValue) => boolean): ConnectionsRepository {
+  class FailingLedger extends DrizzleConnectionsRepository {
+    override save(exec: SqliteExec, connection: StoredConnection) {
+      if (shouldFail(connection.grant)) throw new Error("LEDGER_WRITE_FAILED");
+      super.save(exec, connection);
     }
   }
   return new FailingLedger(createTestDb().db);
 }
 
 describe("registry faults", () => {
-  // Scenario 5 — degrade relocks only dependents
-  describe("scenario 5: degrade relocks only dependents", () => {
-    it("degrading user (act) leaves talk live", async () => {
+  // Scenario 5 — a degraded grant relocks every capability
+  describe("scenario 5: a degraded grant relocks every capability", () => {
+    it("a rejection on act degrades the one grant and relocks talk and watch with it", async () => {
       const ledger = makeLedger();
-      const registry = new ConnectionRegistry({ ledger });
-      const fx = makeTwoGrant();
+      const heard: string[] = [];
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        onEvent: (_tx, event) => heard.push(event.kind),
+      });
+      const fx = makeBotAll();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-discord");
-
-      // Authorize both grants: bot → talk+watch, user → act.
-      await registry.importCredential(conn.id, "bot", fx.botCredential());
-      // user scheme renews then re-confers; make renew return "re-confer" so the
-      // very first CredentialRejected degrades immediately (renew-once path
-      // covered in scenario 6). successCount:3 by default → force to 0.
-      fx.userScheme.renewsRemaining = 0;
-      await registry.importCredential(conn.id, "user", fx.userCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.botCredential());
 
       expect(conn.act).not.toBeNull();
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
+      expect(conn.isUnlocked("watch")).toBe(true);
 
-      // Trigger CredentialRejected from act.invoke → renew re-confers → degrade.
+      // Trigger CredentialRejected from act.invoke → tokenPaste fixes → degrade.
       const act = conn.act as Act;
       const actor = fx.actorFactory.instances.at(-1);
       if (!actor) throw new Error("actor not built");
-      actor.state.nextInvokeError = new CredentialRejected({ grant: "user" });
+      actor.state.nextInvokeError = new CredentialRejected({ grant: "bot" });
       await expect(act.invoke({ operation: "op" })).rejects.toBeInstanceOf(CredentialRejected);
       await flush();
 
-      // Act relocked; user grant degraded; talk (bot grant) untouched.
+      expect(conn.auth.grants().bot).toBe("degraded");
+      expect(heard).toEqual(["connected", "fixed", "broken"]);
       expect(conn.act).toBeNull();
-      expect(conn.status().act).toEqual({ state: "needs-auth", missingGrants: ["user"] });
-      expect(conn.status().talk).toEqual({ state: "unlocked" });
-      expect(conn.isUnlocked("talk")).toBe(true);
-      expect(conn.auth.grants().user).toBe("degraded");
-      expect(conn.auth.grants().bot).toBe("authorized");
-
-      // Talk still works after the degrade — send is recorded.
-      await conn.withTalker((talker) => talker.send("thread-1" as ChatId, { text: "still alive" }));
+      expect(conn.isUnlocked("chat")).toBe(false);
+      expect(conn.isUnlocked("watch")).toBe(false);
+      expect(conn.status()).toEqual({
+        chat: { state: "needs-auth", missingGrants: ["bot"] },
+        act: { state: "needs-auth", missingGrants: ["bot"] },
+        watch: { state: "needs-auth", missingGrants: ["bot"] },
+      });
       const talker = fx.talkerFactory.instances.at(-1);
       if (!talker) throw new Error("talker not built");
-      expect(talker.state.sends.map((s) => s.msg)).toContainEqual({ text: "still alive" });
-      // Talk was never stopped by the user-grant degrade.
-      expect(talker.state.stopCount).toBe(0);
+      expect(talker.state.stopCount).toBe(1);
     });
   });
 
@@ -101,12 +107,12 @@ describe("registry faults", () => {
   describe("scenario 6: renew-once-then-degrade", () => {
     it("first rejection renews (old actor discarded, new material), original error rethrown; second degrades", async () => {
       const ledger = makeLedger();
-      const registry = new ConnectionRegistry({ ledger });
-      // successCount:1 → renews once, then re-confers.
+      const registry = new ConnectionRegistry({ repository: ledger });
+      // successCount:1 → renews once, then fixes.
       const fx = makeRenewableAct({ successCount: 1 });
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-github");
-      await registry.importCredential(conn.id, "user", fx.userCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "user", fx.userCredential());
 
       expect(conn.act).not.toBeNull();
       const act = conn.act as Act;
@@ -132,14 +138,14 @@ describe("registry faults", () => {
       expect(conn.act).not.toBeNull();
 
       // The new actor was built with the RENEWED material, not the original.
-      // renew() hands out { token: "renewed-<n>" }; confer'd/imported was
+      // renew() hands out { token: "renewed-<n>" }; grant'd/imported was
       // "initial-user-token". Assert the build creds differ from the original.
       const newCred = secondActor.state.invocations; // not yet invoked
       expect(newCred.length).toBe(0);
       // Inspect the creds the second actor was constructed with via a probe call.
       const probe = conn.act as Act;
       await probe.invoke({ operation: "probe" });
-      const usedMaterial = secondActor.state.invocations[0]?.creds.user.material;
+      const usedMaterial = secondActor.state.invocations[0]?.cred.material;
       expect(typeof usedMaterial).toBe("object");
       expect((usedMaterial as Record<string, string>).token).toMatch(/^renewed-/);
       expect((usedMaterial as Record<string, string>).token).not.toBe("initial-user-token");
@@ -156,11 +162,11 @@ describe("registry faults", () => {
       expect(secondActor.state.stopCount).toBe(1);
 
       // Degrade reason is persisted in the ledger.
-      const rec = await ledger.getGrant(conn.id, "user");
+      const rec = await ledger.grantOf(conn.id);
       expect(rec?.state).toBe("degraded");
       expect(rec?.degraded?.reason).toBeTruthy();
       // Invariant: credential present ⇔ state !== "unauthorized".
-      // "degraded" retains the last (now inert) credential; only re-confer
+      // "degraded" retains the last (now inert) credential; only fix
       // replaces it. The in-memory live credential is dropped so nothing uses it.
       expect(rec?.credential).toBeDefined();
     });
@@ -175,13 +181,13 @@ describe("registry faults", () => {
       // The degrade write rejects (transient DB error) only while `failDegrade`
       // is set; flip it off to let a later degrade land.
       let failDegrade = true;
-      const failing = makeFailingLedger((patch) => patch.state === "degraded" && failDegrade);
-      const registry = new ConnectionRegistry({ ledger: failing });
-      // successCount:0 → renew always re-confers → degrade attempt → write throws.
+      const failing = makeFailingLedger((grant) => grant.state === "degraded" && failDegrade);
+      const registry = new ConnectionRegistry({ repository: failing });
+      // successCount:0 → renew always fixes → degrade attempt → write throws.
       const fx = makeRenewableAct({ successCount: 0 });
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-github");
-      await registry.importCredential(conn.id, "user", fx.userCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "user", fx.userCredential());
 
       const act = conn.act as Act;
       const actor = fx.actorFactory.instances.at(-1);
@@ -212,12 +218,12 @@ describe("registry faults", () => {
       expect(conn.auth.grants().user).toBe("authorized");
       expect(conn.act).not.toBeNull();
       // And the ledger row is unchanged — still authorized, not degraded.
-      const rec = await failing.getGrant(conn.id, "user");
+      const rec = await failing.grantOf(conn.id);
       expect(rec?.state).toBe("authorized");
       expect(rec?.degraded).toBeUndefined();
 
       // With the ledger healthy again, a subsequent CredentialRejected degrades
-      // normally (renew re-confers → degrade write now lands).
+      // normally (renew fixes → degrade write now lands).
       failDegrade = false;
       const actor2 = fx.actorFactory.instances.at(-1);
       if (!actor2) throw new Error("actor2 not built");
@@ -229,49 +235,49 @@ describe("registry faults", () => {
 
       expect(conn.auth.grants().user).toBe("degraded");
       expect(conn.act).toBeNull();
-      const rec2 = await failing.getGrant(conn.id, "user");
+      const rec2 = await failing.grantOf(conn.id);
       expect(rec2?.state).toBe("degraded");
       expect(rec2?.degraded?.reason).toBeTruthy();
     });
 
     // Regression (ledger-first invariant): a ledger write failure during
-    // importCredential must reject the call and leave the mirror untouched —
+    // a grant must reject the call and leave the mirror untouched —
     // the grant stays in its PRIOR state with no split-brain (status(), the
     // capability handle, and the ledger row all agree), and no rebuild happens.
-    it("a ledger write failure during importCredential rejects and leaves the prior state coherent", async () => {
+    it("a ledger write failure during a grant rejects and leaves the prior state coherent", async () => {
       let failImport = false;
-      const failing = makeFailingLedger((patch) => patch.state === "authorized" && failImport);
-      const registry = new ConnectionRegistry({ ledger: failing });
+      const failing = makeFailingLedger((grant) => grant.state === "authorized" && failImport);
+      const registry = new ConnectionRegistry({ repository: failing });
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
 
       // Prior state: unauthorized, no talk handle.
       expect(conn.auth.grants().bot).toBe("unauthorized");
-      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.isUnlocked("chat")).toBe(false);
       const buildsBefore = fx.talkerFactory.instances.length;
 
       // The import's authorize write throws → the call rejects.
       failImport = true;
-      await expect(registry.importCredential(conn.id, "bot", fx.validCredential())).rejects.toThrow(
-        /LEDGER_WRITE_FAILED/,
-      );
+      await expect(
+        registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential()),
+      ).rejects.toThrow(/LEDGER_WRITE_FAILED/);
 
       // Mirror untouched: grant still unauthorized, no epoch built, status agrees,
       // and the ledger row is unchanged (still unauthorized).
       expect(conn.auth.grants().bot).toBe("unauthorized");
-      expect(conn.isUnlocked("talk")).toBe(false);
-      expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
+      expect(conn.isUnlocked("chat")).toBe(false);
+      expect(conn.status().chat).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
       expect(fx.talkerFactory.instances.length).toBe(buildsBefore);
-      const rec = await failing.getGrant(conn.id, "bot");
+      const rec = await failing.grantOf(conn.id);
       expect(rec?.state).toBe("unauthorized");
       expect(rec?.credential).toBeUndefined();
 
       // With the ledger healthy, the same import now succeeds and unlocks talk.
       failImport = false;
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
       expect(conn.auth.grants().bot).toBe("authorized");
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
     });
   });
 
@@ -279,7 +285,7 @@ describe("registry faults", () => {
   describe("scenario 7: re-authorize clears renewed flag", () => {
     it("after degrade, re-authorize re-unlocks + fires onUnlocked; a later rejection renews again instead of instantly degrading", async () => {
       const ledger = makeLedger();
-      const registry = new ConnectionRegistry({ ledger });
+      const registry = new ConnectionRegistry({ repository: ledger });
       // Allow many renewals so the flag (not exhaustion) is what would degrade.
       const fx = makeRenewableAct({ successCount: 100 });
       registry.register(fx.descriptor);
@@ -288,7 +294,7 @@ describe("registry faults", () => {
       const unlocks: Connection[] = [];
       registry.onUnlocked("act", (c) => unlocks.push(c));
 
-      await registry.importCredential(conn.id, "user", fx.userCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "user", fx.userCredential());
       expect(unlocks.length).toBe(1); // initial unlock
 
       const actor1 = fx.actorFactory.instances.at(-1);
@@ -313,9 +319,9 @@ describe("registry faults", () => {
       expect(conn.auth.grants().user).toBe("degraded");
       expect(conn.act).toBeNull();
 
-      // Re-authorize via importCredential (new material clears the flag + re-unlocks).
+      // Re-authorize via grant (new material clears the flag + re-unlocks).
       const unlocksBeforeReauth = unlocks.length;
-      await registry.importCredential(conn.id, "user", {
+      await registry.giveGrant(conn.connectionKind, conn.id, "user", {
         material: { token: "reauthorized-token" },
         expiresAt: "never",
       });
@@ -342,13 +348,13 @@ describe("registry faults", () => {
   describe("scenario 8: epoch handle death + fresh talker", () => {
     it("revoke ends the talker's epoch and its listeners; re-import reaches a NEW talker", async () => {
       const ledger = makeLedger();
-      const registry = new ConnectionRegistry({ ledger });
+      const registry = new ConnectionRegistry({ repository: ledger });
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
 
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
       const heard: ChannelMessage[] = [];
       expect(conn.hearTalker(async (msg) => void heard.push(msg))).not.toBeNull();
       await conn.withTalker((talker) =>
@@ -359,14 +365,14 @@ describe("registry faults", () => {
 
       // Revoke the grant → epoch dies, and nothing reaches a talker.
       await conn.auth.revoke("bot");
-      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.isUnlocked("chat")).toBe(false);
       expect(conn.auth.grants().bot).toBe("unauthorized");
       expect(conn.withTalker(() => "reached")).toBeUndefined();
       expect(conn.hearTalker(async () => {})).toBeNull();
 
       // Re-import → a NEW talker, which the old epoch's listener does not hear.
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
-      expect(conn.isUnlocked("talk")).toBe(true);
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
+      expect(conn.isUnlocked("chat")).toBe(true);
       const newTalker = fx.talkerFactory.instances.at(-1);
       if (!newTalker) throw new Error("talker not rebuilt");
       expect(newTalker).not.toBe(oldTalker);
@@ -384,11 +390,11 @@ describe("registry faults", () => {
   // `act.invoke` does: thrown or rejected, from `send` or from a feature.
   describe("faults through withTalker", () => {
     async function unlocked() {
-      const registry = new ConnectionRegistry({ ledger: makeLedger() });
+      const registry = new ConnectionRegistry({ repository: makeLedger() });
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
       const talker = fx.talkerFactory.instances.at(-1);
       if (!talker) throw new Error("talker not built");
       return { registry, fx, conn, talker };
@@ -408,7 +414,7 @@ describe("registry faults", () => {
       await flush();
 
       expect(conn.auth.grants().bot).toBe("degraded");
-      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.isUnlocked("chat")).toBe(false);
     });
 
     it("degrades the grant when the call throws CredentialRejected", async () => {
@@ -422,7 +428,7 @@ describe("registry faults", () => {
       await flush();
 
       expect(conn.auth.grants().bot).toBe("degraded");
-      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.isUnlocked("chat")).toBe(false);
     });
 
     it("ignores a rejection that settles after its epoch was replaced", async () => {
@@ -437,13 +443,13 @@ describe("registry faults", () => {
       const pending = conn.withTalker((live) => live.history?.query({}));
 
       await conn.auth.revoke("bot");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
       reject(new CredentialRejected({ grant: "bot" }));
       await expect(pending).rejects.toBeInstanceOf(CredentialRejected);
       await flush();
 
       expect(conn.auth.grants().bot).toBe("authorized");
-      expect(conn.isUnlocked("talk")).toBe(true);
+      expect(conn.isUnlocked("chat")).toBe(true);
     });
   });
 
@@ -454,11 +460,11 @@ describe("registry faults", () => {
   describe("late fault after epoch discard", () => {
     it("a CredentialRejected fired by the OLD instance after revoke leaves the grant unauthorized", async () => {
       const ledger = makeLedger();
-      const registry = new ConnectionRegistry({ ledger });
+      const registry = new ConnectionRegistry({ repository: ledger });
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
 
       // Capture the OLD instance's fault callback, then revoke (epoch dies).
       const oldFault = fx.talkerFactory.instances[0].state.fault;
@@ -471,20 +477,20 @@ describe("registry faults", () => {
       await new Promise((r) => setTimeout(r, 0)); // let any (wrong) async flow run
 
       expect(conn.auth.grants().bot).toBe("unauthorized");
-      expect((await ledger.getGrant(conn.id, "bot"))?.state).toBe("unauthorized");
+      expect((await ledger.grantOf(conn.id))?.state).toBe("unauthorized");
     });
 
     it("a late fault from a SUPERSEDED epoch does not renew or degrade the new epoch's grant", async () => {
       const ledger = makeLedger();
-      const registry = new ConnectionRegistry({ ledger });
+      const registry = new ConnectionRegistry({ repository: ledger });
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
       const oldFault = fx.talkerFactory.instances[0].state.fault;
 
       // New material → new epoch; the old instance was discarded.
-      await registry.importCredential(conn.id, "bot", {
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", {
         material: { token: "rotated-token" },
         expiresAt: "never",
       });
@@ -495,7 +501,7 @@ describe("registry faults", () => {
 
       // Still authorized: the stale fault neither renewed nor degraded.
       expect(conn.auth.grants().bot).toBe("authorized");
-      expect((await ledger.getGrant(conn.id, "bot"))?.state).toBe("authorized");
+      expect((await ledger.grantOf(conn.id))?.state).toBe("authorized");
     });
   });
 
@@ -503,7 +509,7 @@ describe("registry faults", () => {
   describe("scenario 9: stop-before-build ordering", () => {
     it("re-authorize stops the old instance before building the new one", async () => {
       const ledger = makeLedger();
-      const registry = new ConnectionRegistry({ ledger });
+      const registry = new ConnectionRegistry({ repository: ledger });
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
@@ -514,10 +520,10 @@ describe("registry faults", () => {
       const originalBuild = fx.descriptor.capabilities.talker?.build;
       if (!originalBuild) throw new Error("talker build missing");
       let buildIndex = 0;
-      fx.descriptor.capabilities.talker!.build = (creds, kit) => {
+      fx.descriptor.capabilities.talker!.build = (cred, kit) => {
         const idx = buildIndex++;
         order.push(`build:${idx}`);
-        const instance = originalBuild(creds, kit);
+        const instance = originalBuild(cred, kit);
         const originalStop = instance.stop.bind(instance);
         instance.stop = () => {
           order.push(`stop:${idx}`);
@@ -527,11 +533,11 @@ describe("registry faults", () => {
       };
 
       // First authorize builds instance 0.
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
       expect(order).toEqual(["build:0"]);
 
       // Re-authorize with DIFFERENT material → epoch rebuild: stop old, build new.
-      await registry.importCredential(conn.id, "bot", {
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", {
         material: { token: "different-token" },
         expiresAt: "never",
       });
@@ -550,7 +556,7 @@ describe("registry faults", () => {
       const ledger = makeLedger();
       const sleep = makeRecordingSleep();
       const registry = new ConnectionRegistry({
-        ledger,
+        repository: ledger,
         sleep: sleep.fn,
         backoff: { baseMs: 100, maxMs: 10_000 },
       });
@@ -559,9 +565,9 @@ describe("registry faults", () => {
       const conn = await registry.connect("fake-telegram");
 
       const unlocks: Connection[] = [];
-      registry.onUnlocked("talk", (c) => unlocks.push(c));
+      registry.onUnlocked("chat", (c) => unlocks.push(c));
 
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
       expect(unlocks.length).toBe(1); // initial unlock only
 
       const instance0 = fx.talkerFactory.instances.at(-1);
@@ -579,8 +585,8 @@ describe("registry faults", () => {
       if (!instance1) throw new Error("instance1 not built");
       expect(instance1).not.toBe(instance0);
       // Same material used on rebuild.
-      expect(instance1.state.starts[0]?.creds.bot.material).toEqual(
-        instance0.state.starts[0]?.creds.bot.material,
+      expect(instance1.state.starts[0]?.cred.material).toEqual(
+        instance0.state.starts[0]?.cred.material,
       );
       // A send through the Connection after the backoff rebuild routes to the
       // NEW instance.
@@ -618,14 +624,14 @@ describe("registry faults", () => {
       const ledger = makeLedger();
       const sleep = makeRecordingSleep();
       const registry = new ConnectionRegistry({
-        ledger,
+        repository: ledger,
         sleep: sleep.fn,
         backoff: { baseMs: 100, maxMs: 10_000 },
       });
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
 
       const inst0 = fx.talkerFactory.instances.at(-1);
       if (!inst0) throw new Error("inst0 not built");
@@ -665,7 +671,7 @@ describe("registry faults", () => {
       const ledger = makeLedger();
       const sleep = makeRecordingSleep();
       const registry = new ConnectionRegistry({
-        ledger,
+        repository: ledger,
         sleep: sleep.fn,
         backoff: { baseMs: 1, maxMs: 1 },
       });
@@ -676,21 +682,21 @@ describe("registry faults", () => {
       const originalBuild = fx.descriptor.capabilities.talker!.build;
       fx.descriptor.capabilities.talker = {
         ...fx.descriptor.capabilities.talker!,
-        build(creds, kit) {
+        build(cred, kit) {
           capturedKit = kit;
-          return originalBuild(creds, kit);
+          return originalBuild(cred, kit);
         },
       };
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
       expect(capturedKit).not.toBeNull();
 
       const instance0 = fx.talkerFactory.instances.at(-1);
       if (!instance0) throw new Error("instance0 not built");
 
       // Write-through custody: rotate the material in place. No rebuild yet.
-      await capturedKit!.persist("bot", { token: "rotated-token" });
+      await capturedKit!.persist({ token: "rotated-token" });
       expect(fx.talkerFactory.instances.length).toBe(1); // no rebuild on persist
 
       // Now a Disconnected fault forces a backoff rebuild.
@@ -701,7 +707,7 @@ describe("registry faults", () => {
       if (!instance1) throw new Error("instance1 not built");
       expect(instance1).not.toBe(instance0);
       // The rebuilt instance must see the ROTATED material, not "fake-bot-token".
-      expect(instance1.state.starts[0]?.creds.bot.material).toEqual({ token: "rotated-token" });
+      expect(instance1.state.starts[0]?.cred.material).toEqual({ token: "rotated-token" });
     });
   });
 
@@ -709,30 +715,30 @@ describe("registry faults", () => {
   describe("scenario 11: onUnlocked fires before start()", () => {
     it("a handler registered synchronously in onUnlocked catches a message the Talker delivers from start()", async () => {
       const ledger = makeLedger();
-      const registry = new ConnectionRegistry({ ledger });
+      const registry = new ConnectionRegistry({ repository: ledger });
       const fx = makePasteTalk();
       // The Talker will synchronously flush one buffered inbound message the
       // instant its start() runs. Arm the flush on the fake talker the factory
-      // produces (build() runs synchronously inside importCredential, before
+      // produces (build() runs synchronously inside the grant, before
       // start(), so the knob is set in time).
       const flushed = makeInboundMessage({
         messageId: "buffered-1",
         text: "buffered on start",
       });
       const originalBuild = fx.talkerFactory.build.bind(fx.talkerFactory);
-      fx.talkerFactory.build = (creds) => {
-        const t = originalBuild(creds);
+      fx.talkerFactory.build = (cred) => {
+        const t = originalBuild(cred);
         t.state.flushOnStart = [flushed];
         return t;
       };
       registry.register(fx.descriptor);
       const conn = await registry.connect("fake-telegram");
 
-      // Register the unlock handler BEFORE the epoch is built. When talk unlocks,
+      // Register the unlock handler BEFORE the epoch is built. When chat unlocks,
       // the handler synchronously registers an onMessage listener — which must be
       // wired before start() runs, or the buffered flush is lost.
       const received: ChannelMessage[] = [];
-      registry.onUnlocked("talk", (c) => {
+      registry.onUnlocked("chat", (c) => {
         c.hearTalker(async (msg) => {
           received.push(msg);
         });
@@ -740,7 +746,7 @@ describe("registry faults", () => {
 
       // Authorize → buildEpoch fires onUnlocked (handler registers) → start()
       // (flushes the buffered message into the now-wired handler).
-      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
       await flush();
 
       // Before the fix (start before onUnlocked) the buffered message dropped
@@ -754,17 +760,17 @@ describe("registry faults", () => {
 // Post-callback epoch guard: the CredentialRejected flow re-checks its source
 // epoch immediately before applying state. handleFault's invocation-time guard
 // only covers the pre-callback window; the flow then awaits (scheme.renew,
-// ledger writes), and a conferral completing in that window tears down the
+// ledger writes), and a grant completing in that window tears down the
 // faulting epoch — the stale flow must become a no-op, never persist `degraded`
 // (or a renewed credential) over the fresh grant.
 
-describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
+describe("credential-rejected flow vs. a grant completing mid-flow", () => {
   it("a re-login completing while the fault flow is parked in renew() cannot degrade the fresh grant", async () => {
     const ledger = makeLedger();
-    const registry = new ConnectionRegistry({ ledger });
+    const registry = new ConnectionRegistry({ repository: ledger });
     const talkerFactory = makeFakeTalkerFactory();
     // A session-like scheme whose renew() parks on a test-controlled gate before
-    // answering "re-confer" — the widest await in the fault flow.
+    // answering "needs-fix" — the widest await in the fault flow.
     let releaseRenew!: () => void;
     const renewGate = new Promise<void>((resolve) => {
       releaseRenew = resolve;
@@ -772,25 +778,24 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     let renewStarted = false;
     const descriptor: ConnectionDescriptor = {
       connectionKind: "fake-session-svc",
+      grant: "session",
       auth: {
-        session: {
-          async confer(): Promise<Credential> {
-            throw new Error("route-driven");
-          },
-          async renew(): Promise<Credential | "re-confer"> {
-            renewStarted = true;
-            await renewGate;
-            return "re-confer";
-          },
+        async obtain(): Promise<Credential> {
+          throw new Error("route-driven");
+        },
+        async renew(): Promise<Credential | "needs-fix"> {
+          renewStarted = true;
+          await renewGate;
+          return "needs-fix";
         },
       },
       capabilities: {
-        talker: { needs: ["session"] as const, build: (creds) => talkerFactory.build(creds) },
+        talker: { build: (cred) => talkerFactory.build(cred) },
       },
     };
     registry.register(descriptor);
     const conn = await registry.connect("fake-session-svc");
-    await registry.importCredential(conn.id, "session", {
+    await registry.giveGrant(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-old" },
       expiresAt: "never",
     });
@@ -805,7 +810,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     expect(conn.auth.grants().session).toBe("authorized"); // not yet degraded
 
     // A re-login completes mid-flow: fresh credential, fresh epoch (A torn down).
-    await registry.importCredential(conn.id, "session", {
+    await registry.giveGrant(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-fresh" },
       expiresAt: "never",
     });
@@ -813,15 +818,15 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     const epochBTalker = talkerFactory.instances.at(-1);
     expect(epochBTalker).not.toBe(epochATalker);
 
-    // The parked flow now resumes and answers "re-confer" — but its source epoch
-    // is dead, so it must NOT persist `degraded` over the fresh conferral.
+    // The parked flow now resumes and answers "needs-fix" — but its source epoch
+    // is dead, so it must NOT persist `degraded` over the fresh grant.
     releaseRenew();
     await flush();
     await flush();
 
     expect(conn.auth.grants().session).toBe("authorized");
-    expect(conn.isUnlocked("talk")).toBe(true);
-    const grant = await ledger.getGrant(conn.id, "session");
+    expect(conn.isUnlocked("chat")).toBe(true);
+    const grant = await ledger.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.degraded).toBeUndefined();
     expect(grant?.credential).toMatchObject({
@@ -833,11 +838,11 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
 
   /** A ledger whose FIRST updateGrant matching `shouldGate` parks on a
    *  test-controlled gate before delegating — models a slow durable write so a
-   *  conferral can complete INSIDE the fault flow's awaited ledger call. All
-   *  other calls (including the conferral's own writes and any repair write)
+   *  grant can complete INSIDE the fault flow's awaited ledger call. All
+   *  other calls (including the grant's own writes and any repair write)
    *  pass straight through. */
-  function makeGatedLedger(shouldGate: (patch: GrantPatch) => boolean): {
-    ledger: GrantLedger;
+  function makeGatedLedger(shouldGate: (grant: GrantValue) => boolean): {
+    ledger: ConnectionsRepository;
     release: () => void;
   } {
     let release!: () => void;
@@ -845,13 +850,18 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
       release = resolve;
     });
     let gatedOnce = false;
-    class GatedLedger extends DrizzleGrantLedger {
-      override async updateGrant(custody: string, name: GrantName, patch: GrantPatch) {
-        if (!gatedOnce && shouldGate(patch)) {
+    class GatedLedger extends DrizzleConnectionsRepository {
+      override async update(
+        id: ConnectionId,
+        next: (current: StoredConnection) => StoredConnection,
+        inTx?: (tx: DrizzleTx) => void,
+      ) {
+        const current = await this.get(id);
+        if (current && !gatedOnce && shouldGate(next(current).grant)) {
           gatedOnce = true;
           await gate;
         }
-        return super.updateGrant(custody, name, patch);
+        return super.update(id, next, inTx);
       }
     }
     return { ledger: new GatedLedger(createTestDb().db), release };
@@ -859,63 +869,62 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
 
   function makeSessionDescriptor(
     talkerFactory: ReturnType<typeof makeFakeTalkerFactory>,
-    renew: () => Promise<Credential | "re-confer">,
+    renew: () => Promise<Credential | "needs-fix">,
   ): ConnectionDescriptor {
     return {
       connectionKind: "fake-session-svc",
+      grant: "session",
       auth: {
-        session: {
-          async confer(): Promise<Credential> {
-            throw new Error("route-driven");
-          },
-          renew,
+        async obtain(): Promise<Credential> {
+          throw new Error("route-driven");
         },
+        renew,
       },
       capabilities: {
-        talker: { needs: ["session"] as const, build: (creds) => talkerFactory.build(creds) },
+        talker: { build: (cred) => talkerFactory.build(cred) },
       },
     };
   }
 
-  it("a re-login completing while the degrade LEDGER WRITE is in flight leaves the fresh grant and epoch intact", async () => {
-    // Gate the degrade row write itself — the supersession window AFTER the
-    // pre-write stillCurrent check passed.
-    const { ledger, release } = makeGatedLedger((patch) => patch.state === "degraded");
-    const registry = new ConnectionRegistry({ ledger });
+  it("a re-login during the degrade write waits for it, then leaves the fresh grant and epoch", async () => {
+    // Gate the degrade row write itself, after the flow took the grant's lock.
+    const { ledger, release } = makeGatedLedger((grant) => grant.state === "degraded");
+    const registry = new ConnectionRegistry({ repository: ledger });
     const talkerFactory = makeFakeTalkerFactory();
-    registry.register(makeSessionDescriptor(talkerFactory, async () => "re-confer"));
+    registry.register(makeSessionDescriptor(talkerFactory, async () => "needs-fix"));
     const conn = await registry.connect("fake-session-svc");
-    await registry.importCredential(conn.id, "session", {
+    await registry.giveGrant(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-old" },
       expiresAt: "never",
     });
     const epochATalker = talkerFactory.instances.at(-1);
     if (!epochATalker) throw new Error("epoch A talker not built");
 
-    // Fault → renew answers "re-confer" → degradeGrant starts its ledger write
-    // and parks inside it.
+    // Fault → renew answers "needs-fix" → degradeGrant starts its write under
+    // the grant's lock and parks inside it.
     epochATalker.state.fault?.(new CredentialRejected({ grant: "session" }));
     await flush();
     expect(conn.auth.grants().session).toBe("authorized"); // write parked, nothing applied
 
-    // A re-login completes during the parked write.
-    await registry.importCredential(conn.id, "session", {
+    // A re-login arrives during the parked write. It waits for the lock, so
+    // nothing it builds can be torn down by the break.
+    const relogin = registry.giveGrant(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-fresh" },
       expiresAt: "never",
     });
+    await flush();
+    expect(talkerFactory.instances.at(-1)).toBe(epochATalker);
+
+    // The break lands, then the re-login fixes it.
+    release();
+    await relogin;
     const epochBTalker = talkerFactory.instances.at(-1);
     expect(epochBTalker).not.toBe(epochATalker);
 
-    // The parked degrade write now lands ON TOP of the conferral's row — the
-    // flow must not apply it in memory, and must repair the row it clobbered.
-    release();
-    await flush();
-    await flush();
-
     expect(conn.auth.grants().session).toBe("authorized");
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(epochBTalker?.state.stopCount).toBe(0);
-    const grant = await ledger.getGrant(conn.id, "session");
+    const grant = await ledger.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.degraded).toBeUndefined();
     expect(grant?.credential).toMatchObject({
@@ -923,10 +932,10 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     });
   });
 
-  it("a re-login completing while a SUCCESSFUL RENEWAL's ledger write is in flight is not overwritten by the stale renewal", async () => {
+  it("a re-login during a successful renewal's write waits for it, then replaces the renewed credential", async () => {
     // Gate the renewal row write (the only fault-path write with lastRenewedAt).
-    const { ledger, release } = makeGatedLedger((patch) => patch.lastRenewedAt !== undefined);
-    const registry = new ConnectionRegistry({ ledger });
+    const { ledger, release } = makeGatedLedger((grant) => grant.lastRenewedAt !== undefined);
+    const registry = new ConnectionRegistry({ repository: ledger });
     const talkerFactory = makeFakeTalkerFactory();
     registry.register(
       makeSessionDescriptor(talkerFactory, async () => ({
@@ -935,38 +944,39 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
       })),
     );
     const conn = await registry.connect("fake-session-svc");
-    await registry.importCredential(conn.id, "session", {
+    await registry.giveGrant(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-old" },
       expiresAt: "never",
     });
     const epochATalker = talkerFactory.instances.at(-1);
     if (!epochATalker) throw new Error("epoch A talker not built");
 
-    // Fault → renew succeeds → the authorized+renewed write parks.
+    // Fault → renew succeeds → the authorized+renewed write parks under the
+    // grant's lock.
     epochATalker.state.fault?.(new CredentialRejected({ grant: "session" }));
     await flush();
 
-    // A re-login completes during the parked write.
-    await registry.importCredential(conn.id, "session", {
+    // A re-login arrives during the parked write and waits for the lock.
+    const relogin = registry.giveGrant(conn.connectionKind, conn.id, "session", {
       material: { token: "tok-fresh" },
       expiresAt: "never",
     });
+    await flush();
+
+    // The renewal lands, then the re-login replaces it.
+    release();
+    await relogin;
     const epochBTalker = talkerFactory.instances.at(-1);
     expect(epochBTalker).not.toBe(epochATalker);
     const buildsAfterRelogin = talkerFactory.instances.length;
-
-    // The stale renewal write lands on top of the conferral — the flow must not
-    // swap the live credential to the stale renewal, rebuild the epoch, or leave
-    // the stale credential in the row.
-    release();
     await flush();
     await flush();
 
     expect(conn.auth.grants().session).toBe("authorized");
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
     expect(epochBTalker?.state.stopCount).toBe(0);
-    expect(talkerFactory.instances.length).toBe(buildsAfterRelogin); // no stale rebuild
-    const grant = await ledger.getGrant(conn.id, "session");
+    expect(talkerFactory.instances.length).toBe(buildsAfterRelogin); // nothing rebuilt after
+    const grant = await ledger.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.credential).toMatchObject({
       material: { kind: "inline", record: { token: "tok-fresh" } },

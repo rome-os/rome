@@ -91,6 +91,9 @@ export interface BackendTurnRunnerDeps {
   ) => Promise<ThreadContext["deviceFolder"] | undefined>;
   /** Durable conversation projection used to attach provider delivery ids. */
   chats?: ChatRepository;
+  /** Whether the agent's session policy keeps its text private, so its turn
+   * delivers no reply. Absent ⇒ every agent's reply is delivered. */
+  isTextPrivate?: (agentName: string) => boolean;
 }
 
 export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBackendTurnRunner {
@@ -176,7 +179,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             if (msg.type === "result") reply = msg.content;
             await emit({ ...msg, agent: params.agentName }, { recorded: true });
           }
-          if (!reply.trim()) return;
+          if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) return;
           await send.send(params.threadId as ChatId, {
             text: reply,
             ...(turnId ? { turnId } : {}),
@@ -193,7 +196,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         if (msg.type === "turn_start") turnId = msg.turnId;
         if (msg.type === "result") reply = msg.content;
       }
-      if (!reply.trim()) {
+      if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) {
         log.info("backend turn produced no reply; nothing to deliver", {
           channel: params.channel,
           threadId: params.threadId,

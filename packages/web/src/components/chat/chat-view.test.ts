@@ -3,9 +3,11 @@ import type { ChatMessage } from "@/lib/chat-types";
 import {
   buildChatView,
   buildRows,
+  canPickChatModel,
   currentReplyMessages,
   interactionResultKey,
   isAwaitingGuardian,
+  isLockedByCard,
   isLastTurnFailed,
   type AgentIdentity,
 } from "./chat-view";
@@ -263,6 +265,77 @@ describe("buildRows", () => {
   });
 });
 
+describe("buildRows model switch notice", () => {
+  const idMap = new Map([[MAIN, MAIN_IDENTITY]]);
+  const turn = (sessionId: string, turnId: string, model?: string) => [
+    mk(sessionId, "user", turnId, [{ type: "text", content: `ask ${turnId}` }]),
+    mk(sessionId, "trace", turnId, [], {
+      traceSummary: {
+        distinctApps: [],
+        totalSteps: 0,
+        invocationCounts: {},
+        ...(model ? { model } : {}),
+      },
+    }),
+    mk(sessionId, "assistant", turnId, [{ type: "text", content: `reply ${turnId}` }]),
+  ];
+  const rowsOf = (messages: ChatMessage[], runningTurnId: string | null = null) =>
+    buildRows(messages, idMap, MAIN_IDENTITY, { runningTurnId, isStreaming: !!runningTurnId });
+
+  it("puts a notice before the first turn that ran on another model", () => {
+    const rows = rowsOf([
+      ...turn(MAIN, "t1", "claude-sonnet-5-5"),
+      ...turn(MAIN, "t2", "claude-sonnet-5-5"),
+      ...turn(MAIN, "t3", "gpt-6-luna"),
+      ...turn(MAIN, "t4", "gpt-6-luna"),
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual([
+      "user",
+      "agent",
+      "user",
+      "agent",
+      "model_switch",
+      "user",
+      "agent",
+      "user",
+      "agent",
+    ]);
+    expect(rows[4]).toMatchObject({ kind: "model_switch", model: "gpt-6-luna", turnId: "t3" });
+  });
+
+  it("skips turns with no known model and compares within one session", () => {
+    const rows = rowsOf([
+      ...turn(MAIN, "t1", "gpt-6-luna"),
+      ...turn(MAIN, "t2"),
+      ...turn(CHILD, "c1", "claude-sonnet-5-5"),
+      ...turn(MAIN, "t3", "gpt-6-luna"),
+    ]);
+    expect(rows.some((r) => r.kind === "model_switch")).toBe(false);
+  });
+
+  it("shows no notice for the first turn or the running turn", () => {
+    const messages = [...turn(MAIN, "t1", "claude-sonnet-5-5"), ...turn(MAIN, "t2")];
+    expect(rowsOf(messages, "t2").some((r) => r.kind === "model_switch")).toBe(false);
+  });
+});
+
+describe("canPickChatModel", () => {
+  it("shows the picker in an open chat with no handoff", () => {
+    expect(canPickChatModel({ mainSessionId: MAIN, floorSessionId: MAIN, isSideChat: false })).toBe(
+      true,
+    );
+  });
+
+  it("hides it during an open handoff and in a promoted side chat", () => {
+    expect(
+      canPickChatModel({ mainSessionId: MAIN, floorSessionId: CHILD, isSideChat: false }),
+    ).toBe(false);
+    expect(canPickChatModel({ mainSessionId: MAIN, floorSessionId: MAIN, isSideChat: true })).toBe(
+      false,
+    );
+  });
+});
+
 describe("isLastTurnFailed", () => {
   const trace = (sessionId: string, turnId: string, turnStatus?: "completed" | "error") =>
     mk(sessionId, "trace", turnId, [], {
@@ -402,6 +475,67 @@ describe("isAwaitingGuardian", () => {
         [mk(CHILD, "assistant", "c1", [questionCard("q_0")])],
       ),
     ).toBe(true);
+  });
+});
+
+describe("isLockedByCard", () => {
+  const card = (toolUseId: string, requiresCard?: boolean) => ({
+    type: "pending_interaction",
+    toolUseId,
+    appId: "welcome-to-rome",
+    render: {
+      kind: "inline",
+      componentId: "name-card",
+      props: {},
+      ...(requiresCard === undefined ? {} : { requiresCard }),
+    },
+  });
+  const locked = (main: ChatMessage[], runningTurnId?: string) =>
+    isLockedByCard(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY), runningTurnId);
+
+  it("is true while a card that is the only way to answer waits", () => {
+    expect(
+      locked([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+        mk(MAIN, "assistant", "t1", [card("c_0", true)]),
+      ]),
+    ).toBe(true);
+  });
+
+  it("is false for a card typed text may replace", () => {
+    expect(
+      locked([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+        mk(MAIN, "assistant", "t1", [card("c_0")]),
+      ]),
+    ).toBe(false);
+    expect(
+      locked([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+        mk(MAIN, "assistant", "t1", [card("c_0", false)]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is false once the card is answered", () => {
+    expect(
+      locked([
+        mk(MAIN, "assistant", "t1", [card("c_0", true)]),
+        mk(MAIN, "user", "t2", [{ type: "interaction_result", toolUseId: "c_0", output: {} }]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is false while a newer turn runs that has saved nothing yet", () => {
+    expect(
+      locked(
+        [
+          mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+          mk(MAIN, "assistant", "t1", [card("c_0", true)]),
+        ],
+        "backend:b1",
+      ),
+    ).toBe(false);
   });
 });
 

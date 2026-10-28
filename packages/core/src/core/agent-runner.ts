@@ -1,7 +1,7 @@
 import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../types.js";
 import type { ActionConfig, ActionRegistry } from "../actions/types.js";
 import type { DeferInput } from "./defer.js";
-import type { RoutineActivationGate } from "./mcp-facade.js";
+import type { FacadeToolDef, RoutineActivationGate } from "./mcp-facade.js";
 import type { UsageFunding } from "../usage/events.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
 import type { AgentSessionManager } from "./agent-session.js";
@@ -149,6 +149,11 @@ export interface ModelSessionParams {
   /** The channel the session's turns are delivered on, from its key. Shell
    *  tools such as the Discord CLI read it to act as that channel's account. */
   channel?: string;
+  /**
+   * The agent's text stays in its trace (`policy.finalText: private`), so it
+   * reaches the guardian only through its tools.
+   */
+  textPrivate?: boolean;
   externalMcpServers?: Record<string, McpServerConfig>;
   /**
    * The session identifier, a bare UUID. The Anthropic provider passes a new
@@ -183,6 +188,8 @@ export interface ModelSessionParams {
    * one-off wakeup back into this same thread. Absent for sessions with no
    * live thread to wake. */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
+  /** See FacadeParams.sessionTools. */
+  sessionTools?: FacadeToolDef[];
   /** See FacadeParams.routineActivation. */
   routineActivation?: RoutineActivationGate;
   /**

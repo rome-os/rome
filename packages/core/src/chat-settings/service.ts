@@ -658,7 +658,7 @@ export class ChatSettingsService implements ChatSettingsControl {
     } catch {
       return "not-connected";
     }
-    return connection.isUnlocked("talk") ? "online" : "offline";
+    return connection.isUnlocked("chat") ? "online" : "offline";
   }
 
   private isThread(descriptor: ChatDescriptor): boolean {

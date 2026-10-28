@@ -401,7 +401,6 @@ install_opencli_plugins() {
   local plugin_link=""
   local failed=0
 
-  [ -d "$plugins_root" ] || return 0
   command -v opencli >/dev/null 2>&1 || return 0
 
   for plugin_src in "$plugins_root"/*/; do
@@ -418,6 +417,18 @@ install_opencli_plugins() {
     fi
     rm -rf "$plugin_link"
     run_as_rome opencli plugin install "$plugin_src" || failed=1
+  done
+  for plugin_src in /home/rome/.rome/*/projects/browser-automation/*/; do
+    plugin_src="${plugin_src%/}"
+    [ -f "$plugin_src/opencli-plugin.json" ] || continue
+    plugin_link="/home/rome/.opencli/plugins/user-$(basename "$plugin_src")"
+    if [ "$(readlink "$plugin_link" 2>/dev/null)" = "$plugin_src" ] &&
+      [ -e "$plugin_src/node_modules/@jackwener/opencli/package.json" ]; then
+      continue
+    fi
+    if ! { run_as_rome rm -f "$plugin_link" && run_as_rome opencli plugin install "$plugin_src"; }; then
+      echo "Warning: user opencli plugin install failed: $plugin_src; continuing."
+    fi
   done
   return "$failed"
 }

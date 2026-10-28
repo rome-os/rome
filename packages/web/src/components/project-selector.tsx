@@ -22,6 +22,8 @@ import {
 } from "@/lib/device-folder";
 import type { DeviceFilesErrorCode } from "@rome/api-types/devices";
 import { useDeviceFolderBrowser, type PickerDevice } from "./use-device-folder-browser";
+import { useThisDevice } from "@/hooks/use-this-device";
+import { desktopFolderPicker } from "@/lib/electron-shell";
 import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import {
   Command,
@@ -33,6 +35,8 @@ import {
 import { IconButton } from "@/components/ui/icon-button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
@@ -61,6 +65,8 @@ interface ProjectSelectorProps {
   onToggleMenu: () => void;
   onPickProject: (name: string) => void;
   onCreateProject: () => void;
+  /** Cloud's devices, or null when Rome could not read them. Empty keeps one level. */
+  devices?: PickerDevice[] | null;
   /** The draft's device folder. It excludes a project: the draft holds one or the other. */
   deviceFolder?: DraftDeviceFolder | null;
   /**
@@ -93,6 +99,7 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
     onToggleMenu,
     onPickProject,
     onCreateProject,
+    devices = null,
     deviceFolder = null,
     onPickDeviceFolder,
   }: ProjectSelectorProps,
@@ -101,14 +108,19 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const isDefault = draftProjectName === defaultProjectName;
   const projects = projectCatalog?.projects ?? [];
-  const browser = useDeviceFolderBrowser(Boolean(onPickDeviceFolder), menuOpen && !disabled);
+  const browser = useDeviceFolderBrowser(menuOpen && !disabled);
   const browse = browser.browse;
+  const thisDevice = useThisDevice();
+  const [pickNative] = useState(desktopFolderPicker);
   const [view, setView] = useState<"root" | "rome">("root");
   useEffect(() => {
     if (!menuOpen) setView("root");
   }, [menuOpen]);
-  // With no device the menu stays one level: Rome's projects only.
-  const twoLevel = Boolean(onPickDeviceFolder) && browser.devices.length > 0;
+  // Projects and devices arrive in one answer. Until then the menu shows the
+  // first level with placeholder devices, so it does not open on the projects
+  // and then change shape. With no device it stays one level: projects only.
+  const locationsPending = Boolean(onPickDeviceFolder) && projectsLoading;
+  const twoLevel = Boolean(onPickDeviceFolder) && (locationsPending || (devices?.length ?? 0) > 0);
   const atRoot = twoLevel && !browse && view === "root";
   const inProjects = !browse && !atRoot;
   const romeLabel = t("project.locations.rome");
@@ -143,6 +155,26 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
     browser.close();
     setView("root");
     setSearchQuery("");
+  };
+  // This computer picks with the system dialog. The menu stays open behind it,
+  // so a cancel leaves the user where they were.
+  const openDevice = (device: PickerDevice) => {
+    setSearchQuery("");
+    if (!pickNative || thisDevice?.id !== device.id || thisDevice.state !== "connected") {
+      void browser.open(device);
+      return;
+    }
+    pickNative(deviceFolder?.deviceId === device.id ? deviceFolder.path : undefined)
+      .then((picked) => {
+        if (!picked || !onPickDeviceFolder) return;
+        onPickDeviceFolder({
+          deviceId: device.id,
+          deviceName: device.name,
+          path: picked.path,
+          home: picked.home,
+        });
+      })
+      .catch(() => void browser.open(device));
   };
 
   const filtered = useMemo(() => {
@@ -312,17 +344,16 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
                 romeSelection={
                   deviceFolder ? null : isDefault ? defaultProjectName : draftProjectLabel
                 }
-                devices={browser.devices}
+                devices={devices ?? []}
+                loading={locationsPending}
                 deviceErrorById={browser.deviceErrorById}
                 deviceFolder={deviceFolder}
+                thisDeviceId={thisDevice?.id ?? null}
                 onRome={() => {
                   setView("rome");
                   setSearchQuery("");
                 }}
-                onDevice={(device) => {
-                  setSearchQuery("");
-                  void browser.open(device);
-                }}
+                onDevice={openDevice}
               />
             ) : null}
 
@@ -591,6 +622,10 @@ interface LocationListProps {
   devices: PickerDevice[];
   deviceErrorById: Record<string, DeviceFilesErrorCode>;
   deviceFolder: DraftDeviceFolder | null;
+  /** The computer the Mac app runs on. It lists first, marked. */
+  thisDeviceId: string | null;
+  /** The devices are not known yet; placeholders stand in for them. */
+  loading: boolean;
   onRome: () => void;
   onDevice: (device: PickerDevice) => void;
 }
@@ -604,15 +639,19 @@ function LocationList({
   devices,
   deviceErrorById,
   deviceFolder,
+  thisDeviceId,
+  loading,
   onRome,
   onDevice,
 }: LocationListProps) {
   const matches = (name: string) => !query || name.toLowerCase().includes(query);
-  const visibleDevices = devices.filter((device) => matches(device.name));
+  const visibleDevices = devices
+    .filter((device) => matches(device.name))
+    .sort((a, b) => Number(b.id === thisDeviceId) - Number(a.id === thisDeviceId));
   const romeVisible = matches(romeLabel);
   return (
     <>
-      {romeVisible || visibleDevices.length > 0 ? null : (
+      {romeVisible || visibleDevices.length > 0 || loading ? null : (
         <EmptyState>
           <EmptyStateTitle>{t("project.locations.noMatchesQuery", { query })}</EmptyStateTitle>
         </EmptyState>
@@ -644,10 +683,15 @@ function LocationList({
                 className="text-foreground"
               >
                 <Laptop className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="min-w-0 flex-1 truncate">
-                  {device.name}
+                <span className="flex min-w-0 flex-1 items-center gap-2">
+                  <span className="min-w-0 truncate">{device.name}</span>
+                  {device.id === thisDeviceId ? (
+                    <Badge variant="muted" className="h-5 shrink-0">
+                      {t("project.devices.thisDevice")}
+                    </Badge>
+                  ) : null}
                   {selected && deviceFolder ? (
-                    <span className="ml-2 text-aux text-subtle-foreground">
+                    <span className="min-w-0 truncate text-aux text-subtle-foreground">
                       {tildePath(deviceFolder.path, deviceFolder.home)}
                     </span>
                   ) : null}
@@ -664,6 +708,18 @@ function LocationList({
           })}
         </CommandGroup>
       </CommandList>
+      {/* Outside the listbox, whose children have to be options or groups. */}
+      {loading ? (
+        <div role="status" className="flex flex-col gap-1 px-1 pb-1">
+          <span className="sr-only">{t("project.locations.loading")}</span>
+          {["first", "second"].map((key) => (
+            <div key={key} aria-hidden className="flex h-8 items-center gap-2 px-2">
+              <Skeleton className="size-4 shrink-0" />
+              <Skeleton className="h-3 w-32" />
+            </div>
+          ))}
+        </div>
+      ) : null}
     </>
   );
 }

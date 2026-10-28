@@ -30,7 +30,8 @@ import type {
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
-import { webchatProjects, romeAgentMessages } from "../../db/schema.js";
+import { guardianAuth, webchatProjects, romeAgentMessages } from "../../db/schema.js";
+import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
@@ -99,6 +100,60 @@ describe("Webchat API", () => {
     const all = [guardianId, visitorId, otherId, "legacy"].sort();
     expect(await list(visitor)).toEqual(all);
     expect(await list(visitor, "all")).toEqual(all);
+  });
+
+  it("names each user message's sender with their current picture", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const sessionId = "people";
+    await deps.webchatRepo.createSession(sessionId, "People");
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const ada = { kind: "visitor" as const, accountId: "acct-ada", email: "ada@example.com" };
+    const lin = { kind: "visitor" as const, accountId: "acct-lin", email: "lin@example.com" };
+    await deps.webchatRepo.recordUserInput("from-guardian", sessionId, "[]", guardian);
+    await deps.webchatRepo.recordUserInput("from-ada", sessionId, "[]", ada);
+    await deps.webchatRepo.recordUserInput("from-lin", sessionId, "[]", lin);
+    await deps.webchatRepo.recordUserInput("unattributed", sessionId, "[]");
+    // Pictures recorded after the messages still show on them.
+    await testDb.db.insert(guardianAuth).values({
+      id: "seat-row",
+      userId: "seat",
+      passwordHash: "x",
+      email: "ray@example.com",
+      avatarUrl: "https://example.com/ray.png",
+      createdAt: new Date(),
+    });
+    await deps.settingsRepo.set("guardianName", "Ray");
+    await new VisitorProfilesRepository(testDb.db).record("acct-ada", {
+      email: "ada@new.example.com",
+      avatarUrl: "https://example.com/ada.png",
+    });
+
+    const response = await app.request(`/chat/sessions/${sessionId}/messages`);
+
+    expect(response.status).toBe(200);
+    const senders = Object.fromEntries(
+      ((await response.json()) as { id: string; sender?: unknown }[]).map((message) => [
+        message.id,
+        message.sender,
+      ]),
+    );
+    expect(senders).toEqual({
+      "from-guardian": { kind: "guardian", name: "Ray", avatarUrl: "https://example.com/ray.png" },
+      "from-ada": {
+        kind: "visitor",
+        accountId: "acct-ada",
+        name: "ada@new.example.com",
+        avatarUrl: "https://example.com/ada.png",
+      },
+      // Signed in before profiles were kept: the email the message recorded.
+      "from-lin": {
+        kind: "visitor",
+        accountId: "acct-lin",
+        name: "lin@example.com",
+        avatarUrl: null,
+      },
+      unattributed: undefined,
+    });
   });
 
   it("persists appended inputs once and keeps one stream owner", async () => {
@@ -318,7 +373,157 @@ describe("Webchat API", () => {
     ]);
   });
 
-  it("aggregates completed child trace summaries without duplicating them in storage", async () => {
+  it.each([
+    "webchat",
+    "action",
+    "subagent",
+    "fork",
+    "promoted-fork",
+  ] as const)("uses session inactivity for all %s history, lazy reads, and downloads", async (variant) => {
+    const type = variant === "promoted-fork" ? "fork" : variant;
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
+    const sessionId = `retention-${variant}`;
+    await deps.webchatRepo.createSession("idle-source", "Idle source");
+    await deps.webchatRepo.addMessage("source-message", "idle-source", "user", "Old source");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-10T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "source-message"));
+    await deps.webchatRepo.ensureRomeSession({
+      id: sessionId,
+      parentSessionId: "idle-source",
+      type,
+      name: "Retention",
+      agentName: "main",
+    });
+    if (variant === "promoted-fork") {
+      await deps.webchatRepo.promoteForkToChat(sessionId);
+      expect(await deps.webchatRepo.getSession(sessionId)).toMatchObject({
+        type: "webchat",
+        parentSessionId: "idle-source",
+      });
+    }
+    const isWebchat = type === "webchat" || variant === "promoted-fork";
+    const reply = JSON.stringify([
+      { type: "text", content: "The final reply" },
+      {
+        type: "pending_interaction",
+        toolUseId: "question",
+        appId: "questions",
+        render: { type: "text", text: "Pick one" },
+      },
+    ]);
+    for (const turnId of ["old", "older"]) {
+      await deps.webchatRepo.addMessage(
+        `${sessionId}-${turnId}-user`,
+        sessionId,
+        "user",
+        "My question",
+        turnId,
+      );
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: `${sessionId}-${turnId}`,
+        sessionId,
+        turnId,
+        startSeq: 0,
+        blocks: [
+          { type: "thinking", content: "Private thinking" },
+          { type: "tool_use", id: "read", tool: "Read", input: {} },
+          { type: "tool_result", toolUseId: "read", tool: "Read", output: "Heavy output" },
+          { type: "result", content: "The final reply" },
+          { type: "turn_end", turnId, status: "completed", durationMs: 1000 },
+        ],
+      });
+      await deps.webchatRepo.addMessage(
+        `${sessionId}-${turnId}-reply`,
+        sessionId,
+        "assistant",
+        reply,
+        turnId,
+      );
+    }
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-09-24T12:00:00Z") })
+      .where(eq(romeAgentMessages.sessionId, sessionId));
+    await deps.webchatRepo.addMessage(
+      `${sessionId}-latest`,
+      sessionId,
+      "user",
+      "Continue",
+      "latest",
+    );
+    const app = createWebchatRuntime(deps).routes;
+    for (const [lastMessageAt, archived] of [
+      ["2026-10-18T12:00:00Z", false],
+      ["2026-10-16T12:00:00Z", true],
+      ["2026-10-17T12:00:00Z", true],
+      ["2026-10-17T12:00:01Z", false],
+    ] as const) {
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ createdAt: new Date(lastMessageAt) })
+        .where(eq(romeAgentMessages.id, `${sessionId}-latest`));
+      const activityQuery = rs.spyOn(deps.webchatRepo, "getTraceArchivedSessionIds");
+      const response = await app.request(`/sessions/${sessionId}/messages`);
+      expect(activityQuery).toHaveBeenCalledTimes(1);
+      activityQuery.mockRestore();
+      const messages = (await response.json()) as Array<{
+        id: string;
+        content: string;
+        traceArchived?: boolean;
+        traceSummary?: unknown;
+      }>;
+      for (const turnId of ["old", "older"]) {
+        const trace = messages.find((m) => m.id === `${sessionId}-${turnId}`);
+        expect(trace?.content).toBe("[]");
+        expect(trace?.traceArchived).toBe(archived ? true : undefined);
+        expect(Boolean(trace?.traceSummary)).toBe(!archived);
+      }
+      expect(messages.find((m) => m.id === `${sessionId}-old-reply`)?.content).toBe(reply);
+      expect(messages.find((m) => m.id === `${sessionId}-old-user`)?.content).toBe("My question");
+      for (const endpoint of [
+        `/sessions/messages/${sessionId}-old/content`,
+        `/chat/messages/${sessionId}-old/content`,
+        `/sessions/${sessionId}/turns/old/trace`,
+        `/sessions/${sessionId}/turns/old/trace.json`,
+        ...(isWebchat ? [`/chat/sessions/${sessionId}/turns/old/trace.json`] : []),
+      ]) {
+        const result = await app.request(endpoint);
+        expect(result.status).toBe(200);
+        const payload = await result.json();
+        if (archived) expect(payload).toEqual({ trace: null, traceArchived: true });
+        else expect(JSON.stringify(payload)).toContain("Heavy output");
+      }
+      expect(await deps.webchatRepo.getMessageContent(`${sessionId}-old`)).toContain(
+        "Heavy output",
+      );
+      if (isWebchat)
+        expect(await (await app.request(`/chat/sessions/${sessionId}/messages`)).json()).toEqual(
+          messages,
+        );
+    }
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, `${sessionId}-latest`));
+    expect(await (await app.request(`/chat/messages/${sessionId}-old/content`)).json()).toEqual({
+      trace: null,
+      traceArchived: true,
+    });
+    await deps.webchatRepo.addMessage(`${sessionId}-reactivate`, sessionId, "user", "New message");
+    const restored = await (await app.request(`/chat/messages/${sessionId}-old/content`)).json();
+    expect(JSON.stringify(restored)).toContain("Heavy output");
+    const history = JSON.stringify(
+      await (await app.request(`/sessions/${sessionId}/messages`)).json(),
+    );
+    expect(history).not.toContain('"traceArchived":true');
+  });
+
+  it("keeps 30-day-old child summaries while their root is active, and hides the tree when idle", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
     const parentSessionId = "parent-summary-session";
     const parentTurnId = "parent-summary-turn";
     const childSessionId = "child-summary-session";
@@ -430,6 +635,12 @@ describe("Webchat API", () => {
       ]),
       parentTurnId,
     );
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "root-latest"));
     const app = createWebchatRuntime(deps).routes;
     const getTraceContentsByTurns = rs.spyOn(deps.webchatRepo, "getTraceContentsByTurns");
     const getTraceContentByTurn = rs.spyOn(deps.webchatRepo, "getTraceContentByTurn");
@@ -455,17 +666,35 @@ describe("Webchat API", () => {
       ],
     });
     expect(getTraceContentsByTurns).toHaveBeenCalledTimes(1);
-    expect(getTraceContentsByTurns).toHaveBeenCalledWith([
-      { sessionId: childSessionId, turnId: childTurnId },
-      { sessionId: secondChildSessionId, turnId: secondChildTurnId },
-    ]);
+    expect(getTraceContentsByTurns).toHaveBeenCalledWith(
+      [
+        { sessionId: childSessionId, turnId: childTurnId },
+        { sessionId: secondChildSessionId, turnId: secondChildTurnId },
+      ],
+      { sessionActivityCutoff: expect.any(Date) },
+    );
     expect(getTraceContentByTurn).not.toHaveBeenCalled();
     expect(await deps.webchatRepo.getMessageContent("parent-summary-trace")).not.toContain(
       "traceSummary",
     );
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-16T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "root-latest"));
+    for (const sessionId of [parentSessionId, childSessionId, secondChildSessionId]) {
+      const history = (await (
+        await app.request(`/sessions/${sessionId}/messages`)
+      ).json()) as Array<{ role: string; traceArchived?: boolean; traceSummary?: unknown }>;
+      const traces = history.filter((row) => row.role === "trace");
+      expect(traces).toHaveLength(1);
+      expect(traces[0]?.traceArchived).toBe(true);
+      expect(traces[0]?.traceSummary).toBeUndefined();
+    }
   });
 
-  it("aggregates descendant token usage only on trace reads", async () => {
+  it("keeps complete cost and usage from 30-day-old descendants while their root is active", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
     const parentSessionId = "parent-usage-session";
     const parentTurnId = "parent-usage-turn";
     const childSessionId = "child-usage-session";
@@ -577,6 +806,12 @@ describe("Webchat API", () => {
       ]),
       parentTurnId,
     );
+    await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-10-23T12:00:00Z") })
+      .where(eq(romeAgentMessages.id, "root-latest"));
     const app = createWebchatRuntime(deps).routes;
     const readAccounting = async (path: string) => {
       const response = await app.request(path);
@@ -652,6 +887,54 @@ describe("Webchat API", () => {
     expect(await deps.webchatRepo.getMessageContent("parent-usage-trace")).not.toContain(
       "usageByModel",
     );
+  });
+
+  describe("chat locations", () => {
+    const mac = { id: "mac-1", name: "macbook", platform: "macos" };
+
+    it("answers the projects and Cloud's devices together", async () => {
+      deps.nodeDevices = { ...deps.nodeDevices, listDevices: async () => ({ devices: [mac] }) };
+      const res = await createWebchatRuntime(deps).routes.request("/chat/locations");
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        projects: { rootPath: string; projects: Array<{ name: string }> };
+        devices: unknown;
+      };
+      expect(body.projects.rootPath).toBe(projectsRoot);
+      expect(body.projects.projects.map((project) => project.name)).toEqual(["default"]);
+      expect(body.devices).toEqual([mac]);
+    });
+
+    it("answers without devices when Cloud's list is unavailable", async () => {
+      deps.nodeDevices = { ...deps.nodeDevices, listDevices: async () => null };
+      const res = await createWebchatRuntime(deps).routes.request("/chat/locations");
+      expect(await res.json()).toMatchObject({ devices: null });
+
+      deps.nodeDevices = {
+        ...deps.nodeDevices,
+        listDevices: async () => {
+          throw new Error("daemon gone");
+        },
+      };
+      const failed = await createWebchatRuntime(deps).routes.request("/chat/locations");
+      expect(failed.status).toBe(200);
+      expect(await failed.json()).toMatchObject({ devices: null });
+    });
+
+    it("does not wait past its budget for a slow device list", async () => {
+      rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        deps.nodeDevices = { ...deps.nodeDevices, listDevices: () => new Promise(() => {}) };
+        const pending = createWebchatRuntime(deps).routes.request("/chat/locations");
+        await rs.advanceTimersByTimeAsync(3_000);
+        const res = await pending;
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({ devices: null });
+      } finally {
+        rs.useRealTimers();
+      }
+    });
   });
 
   describe("project routes", () => {
@@ -2239,6 +2522,79 @@ describe("Webchat API", () => {
       ]);
     });
 
+    it("passes an input's priority to the session and rejects an unknown one", async () => {
+      const priorities: unknown[] = [];
+      deps.agentSessionManager = fakeSessionManager(async (key) => ({
+        key: { agentName: key.agentName, channelThreadKey: "webchat:priority" },
+        sessionId: "agent-session",
+        status: "idle",
+        sendTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+          priorities.push((options as SubmitInputOptions | undefined)?.priority);
+          return {
+            turnId: `turn-priority-${priorities.length}`,
+            events: (async function* () {
+              yield { type: "result", content: "ok" };
+            })() as AsyncGenerator<never>,
+            turnContext: otelContext.active(),
+          };
+        },
+        subscribe: () => () => undefined,
+        onStatusChange: () => () => undefined,
+        interrupt: async () => undefined,
+        close: async () => undefined,
+      }));
+      deps.actionEngine = {
+        run: rs.fn(async () => ({ status: "ok" })),
+      } as unknown as typeof deps.actionEngine;
+      const app = createWebchatRuntime(deps).routes;
+      const session = (await (
+        await app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "Priority" }),
+        })
+      ).json()) as { id: string };
+      const post = (body: Record<string, unknown>) =>
+        app.request(`/chat/sessions/${session.id}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+      expect((await post({ text: "a" })).status).toBe(200);
+      expect((await post({ text: "b", priority: "now" })).status).toBe(200);
+      expect((await post({ text: "c", priority: "later" })).status).toBe(400);
+      expect(priorities).toEqual([undefined, "now"]);
+    });
+
+    it("keeps a private agent's text in the trace: no commentary message, no reply", async () => {
+      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      rs.spyOn(deps.agentLoader, "get").mockReturnValue({
+        name: "main",
+        policy: { finalText: "private", autoTitle: false },
+      } as ReturnType<typeof deps.agentLoader.get>);
+      const { sendMessageRun, sessionId } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "text", content: "Note to self.", turnPhase: "commentary" };
+            yield { type: "tool_use", id: "tu-1", tool: "some_tool", input: {} };
+            yield { type: "tool_result", toolUseId: "tu-1", tool: "some_tool", output: {} };
+            yield { type: "text", content: "Private answer.", turnPhase: "final" };
+            yield { type: "result", content: "Private answer." };
+          })() as AsyncGenerator<never>,
+      );
+
+      expect(sendMessageRun).not.toHaveBeenCalledWith(
+        "send_message",
+        expect.anything(),
+        expect.anything(),
+      );
+      const messages = await deps.webchatRepo.getMessages(sessionId);
+      expect(messages.filter((m) => m.role === "assistant")).toEqual([]);
+      const trace = messages.find((m) => m.role === "trace");
+      expect(trace).toBeTruthy();
+    });
+
     it("persists each text block's block id beside its block index", async () => {
       const { sendMessageRun, sessionId } = await runScriptedStream(
         () =>
@@ -3034,6 +3390,81 @@ describe("Webchat API", () => {
       await streamRes.text();
     }
 
+    it("stores an open chat's model pick and hands it to the next turn's acquire", async () => {
+      await deps.settingsRepo.set("enableModelSelector", true);
+      mockScriptedManager();
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      const send = (text: string) =>
+        app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+      const pick = (largeModelSelection: unknown) =>
+        app.request(`/chat/sessions/${sessionId}/model`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ largeModelSelection }),
+        });
+      await drainTurn(app, await send("first"));
+      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ selectionId: null }),
+      );
+
+      const picked = await pick("gpt-6-luna");
+      expect(picked.status).toBe(200);
+      await expect(picked.json()).resolves.toMatchObject({ largeModelSelection: "gpt-6-luna" });
+      await drainTurn(app, await send("second"));
+      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ selectionId: "gpt-6-luna" }),
+      );
+
+      // Auto clears the pick, and the next acquire clears it on a live session.
+      const cleared = await pick("auto");
+      await expect(cleared.json()).resolves.toMatchObject({ largeModelSelection: null });
+      await drainTurn(app, await send("third"));
+      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ selectionId: null }),
+      );
+
+      expect((await pick("gpt-99")).status).toBe(400);
+      expect((await pick(null)).status).toBe(400);
+      await deps.settingsRepo.set("enableModelSelector", false);
+      expect((await pick("gpt-6-luna")).status).toBe(409);
+      expect(await deps.webchatRepo.getSession(sessionId)).toMatchObject({
+        largeModelSelection: null,
+      });
+      // A side chat promoted to a chat keeps the model it branched with.
+      await deps.settingsRepo.set("enableModelSelector", true);
+      await deps.webchatRepo.ensureRomeSession({
+        id: "promoted-side-chat",
+        parentSessionId: sessionId,
+        type: "fork",
+        name: "Side chat",
+        agentName: "main",
+      });
+      await deps.webchatRepo.promoteForkToChat("promoted-side-chat");
+      const sideChat = await app.request("/chat/sessions/promoted-side-chat/model", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ largeModelSelection: "gpt-6-luna" }),
+      });
+      expect(sideChat.status).toBe(409);
+      await expect(sideChat.json()).resolves.toEqual({
+        error: "A side chat keeps the model it branched with",
+      });
+      const missing = await app.request("/chat/sessions/does-not-exist/model", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ largeModelSelection: "gpt-6-luna" }),
+      });
+      expect(missing.status).toBe(404);
+    });
+
     const handoffEvents = (toolUseId: string) =>
       async function* () {
         // Mirror the real MCP facade tool_result shape: the action's JSON is
@@ -3079,27 +3510,67 @@ describe("Webchat API", () => {
       });
     });
 
-    it("mints a child handoff session locked to the specialist agent and links it via the card", async () => {
+    it("keeps real handoff history on its own clock without including it in parent summaries or cost reads", async () => {
+      rs.useFakeTimers({ toFake: ["Date"] });
+      rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
       const ctl = mockScriptedManager();
       ctl.setEvents(handoffEvents("tu-child-1"));
       const app = createWebchatRuntime(deps).routes;
       const sessionId = await newSession(app);
 
-      await app.request(`/chat/sessions/${sessionId}/turns`, {
+      const send = await app.request(`/chat/sessions/${sessionId}/turns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: "design a workflow" }),
       });
-
+      await drainTurn(app, send);
       const card = await findCard(sessionId, "tu-child-1");
-      const childSessionId = card?.childSessionId;
-      // The design conversation gets its own session — never the parent's.
+      const childSessionId = card?.childSessionId as string;
       expect(typeof childSessionId).toBe("string");
       expect(childSessionId).not.toBe(sessionId);
+      expect(await deps.webchatRepo.getSession(childSessionId)).toMatchObject({
+        type: "webchat_handoff",
+        parentSessionId: null,
+        agentName: "workflow-studio:workflow-planner",
+      });
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: "handoff-child-trace",
+        sessionId: childSessionId,
+        turnId: "child-turn",
+        startSeq: 0,
+        blocks: [{ type: "thinking", content: "Child-only trace payload" }],
+      });
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ createdAt: new Date("2026-09-24T12:00:00Z") })
+        .where(eq(romeAgentMessages.sessionId, childSessionId));
 
-      const child = await deps.webchatRepo.getSession(childSessionId as string);
-      expect(child?.type).toBe("webchat_handoff");
-      expect(child?.agentName).toBe("workflow-studio:workflow-planner");
+      const traceReads = rs.spyOn(deps.webchatRepo, "getTraceContents");
+      const descendantReads = rs.spyOn(deps.webchatRepo, "getTraceContentsByTurns");
+      const history = (await (
+        await app.request(`/chat/sessions/${sessionId}/messages`)
+      ).json()) as Array<{ id: string; role: string; content: string }>;
+      expect(JSON.stringify(history)).toContain(childSessionId);
+      expect(traceReads.mock.calls.map(([id]) => id)).toEqual([sessionId]);
+      const parentTrace = history.find((row) => row.role === "trace");
+      expect(parentTrace).toBeDefined();
+      await app.request(`/chat/messages/${parentTrace!.id}/content?includeSubagentUsage=true`);
+      expect(descendantReads.mock.calls.flatMap(([refs]) => refs)).toEqual([]);
+      traceReads.mockRestore();
+      descendantReads.mockRestore();
+
+      const childHistory = await (
+        await app.request(`/chat/sessions/${childSessionId}/messages`)
+      ).json();
+      expect(childHistory).toContainEqual(
+        expect.objectContaining({
+          id: "handoff-child-trace",
+          traceArchived: true,
+        }),
+      );
+      expect(
+        await (await app.request("/chat/messages/handoff-child-trace/content")).json(),
+      ).toEqual({ trace: null, traceArchived: true });
     });
 
     it("gives the handoff child the parent chat's device folder", async () => {
@@ -3256,6 +3727,37 @@ describe("Webchat API", () => {
             p && typeof p === "object" && (p as { type?: unknown }).type === "interaction_result",
         ),
       ).toBe(true);
+    });
+
+    it("ignores a reply on an interaction resolution", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(handoffEvents("tu-park-reply"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "design a workflow" }),
+      });
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+
+      const resolveRes = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          replyToMessageId: "not-a-message",
+          parts: [{ type: "interaction_result", toolUseId: "tu-park-reply", output: { ok: true } }],
+        }),
+      });
+
+      expect(resolveRes.status).toBe(200);
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").not.toContain("<reply_context>");
+      const stored = (await deps.webchatRepo.getMessages(sessionId)).filter(
+        (m) => m.role === "user",
+      );
+      expect(stored.at(-1)?.content).not.toContain("reply_to");
     });
 
     it("frames a dismissal so the agent does not retry", async () => {
@@ -3416,7 +3918,12 @@ describe("Webchat API", () => {
     // An inline component goes through the same suspension lifecycle as a
     // handoff — toolUseId-keyed card and resolution — but keeps its own
     // `pending_interaction` part type and spawns no child session.
-    const inlineRenderEvents = (toolUseId: string, appId: string, componentId: string) =>
+    const inlineRenderEvents = (
+      toolUseId: string,
+      appId: string,
+      componentId: string,
+      render: Record<string, unknown> = {},
+    ) =>
       async function* () {
         yield {
           type: "tool_result",
@@ -3428,13 +3935,44 @@ describe("Webchat API", () => {
               text: JSON.stringify({
                 pendingInteraction: true,
                 appId,
-                render: { kind: "inline", componentId, props: { q: "ok?" } },
+                render: { kind: "inline", componentId, props: { q: "ok?" }, ...render },
               }),
             },
           ],
         };
         yield { type: "result", content: "" };
       };
+
+    it("keeps requiresCard on the stored card, and only when the payload set it", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(
+        inlineRenderEvents("tu-required-1", "ask-user", "question-card", { requiresCard: true }),
+      );
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "ask me something" }),
+      });
+      expect((await findCard(sessionId, "tu-required-1"))?.render).toMatchObject({
+        componentId: "question-card",
+        requiresCard: true,
+      });
+
+      // A payload that says "yes" in any other shape, or says nothing, stores no flag.
+      ctl.setEvents(
+        inlineRenderEvents("tu-required-2", "ask-user", "question-card", { requiresCard: "yes" }),
+      );
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "again" }),
+      });
+      expect((await findCard(sessionId, "tu-required-2"))?.render).not.toHaveProperty(
+        "requiresCard",
+      );
+    });
 
     it("snapshots an inline pending_interaction card with no child session", async () => {
       const ctl = mockScriptedManager();
@@ -5258,6 +5796,251 @@ describe("Webchat API", () => {
       } finally {
         rs.useRealTimers();
       }
+    });
+  });
+
+  describe("replying to a message", () => {
+    const prompts: string[] = [];
+
+    /** A session whose agent records each submitted prompt; rows are seeded straight into the repo. */
+    const setup = async (options: { agentName?: string; id?: string } = {}) => {
+      prompts.length = 0;
+      const sessionId = options.id ?? "reply-chat";
+      deps.agentSessionManager = fakeSessionManager(async () => ({
+        key: { agentName: "main", channelThreadKey: "webchat:test" },
+        sessionId: "agent-session",
+        status: "idle",
+        sendTurn(input: AgentTurnInput) {
+          prompts.push(input.prompt);
+          return {
+            turnId: `turn-${prompts.length}`,
+            events: (async function* () {
+              yield { type: "result" as const, content: "" };
+            })(),
+            turnContext: otelContext.active(),
+          };
+        },
+        subscribe: () => () => undefined,
+        onStatusChange: () => () => undefined,
+        interrupt: async () => undefined,
+        close: async () => undefined,
+      }));
+      if (options.agentName) {
+        deps.agentLoader = {
+          get: (name: string) => ({ name, policy: { finalText: "private" } }),
+          has: () => true,
+        } as never;
+      }
+      await deps.webchatRepo.createSession(
+        sessionId,
+        "Reply",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        options.agentName ?? null,
+      );
+      const text = (content: string, extra: Record<string, unknown> = {}) => [
+        { type: "text", content, ...extra },
+      ];
+      const seed = (id: string, role: string, parts: unknown[], turnId: string | null) =>
+        deps.webchatRepo.addMessage(id, sessionId, role, JSON.stringify(parts), turnId);
+      const app = createWebchatRuntime(deps).routes;
+      const send = (fields: Record<string, unknown>) =>
+        app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "and then?", ...fields }),
+        });
+      const lastUser = async () => {
+        const rows = (await deps.webchatRepo.getMessages(sessionId)).filter(
+          (row) => row.role === "user",
+        );
+        return JSON.parse(rows.at(-1)!.content) as Array<Record<string, unknown>>;
+      };
+      return { sessionId, text, seed, send, lastUser };
+    };
+
+    it("stores the quote as the first part and puts it ahead of the message in the prompt", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("u1", "user", text("Plan the trip"), "t1");
+      await seed("a1", "assistant", text("Start in Lisbon."), "t1");
+
+      const res = await send({ replyToMessageId: "a1" });
+
+      expect(res.status).toBe(200);
+      expect(await lastUser()).toEqual([
+        { type: "reply_to", messageId: "a1", author: "agent", text: "Start in Lisbon." },
+        { type: "text", content: "and then?" },
+      ]);
+      const [prompt] = prompts;
+      expect(prompt).toMatch(
+        /^<reply_context>\n\[[\d\-T:.]+Z\] Assistant: Start in Lisbon\.\n<\/reply_context>\n<current_message>\nand then\?\n<\/current_message>$/,
+      );
+    });
+
+    it("quotes a guardian message as the guardian", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("u1", "user", text("Plan the trip"), "t1");
+
+      expect((await send({ replyToMessageId: "u1" })).status).toBe(200);
+
+      expect((await lastUser())[0]).toMatchObject({
+        type: "reply_to",
+        messageId: "u1",
+        author: "guardian",
+        text: "Plan the trip",
+      });
+      expect(prompts[0]).toContain("Guardian: Plan the trip");
+    });
+
+    it("wraps the expanded skill prompt and keeps the workspace block outside the reply", async () => {
+      const { text, seed, send } = await setup();
+      deps.skillCatalog = {
+        get: (name) => (name === "app_creation" ? ({ name } as never) : undefined),
+        getAll: () => [{ name: "app_creation" }] as never[],
+        getRegistryLoadFailures: () => [],
+      };
+      await seed("a1", "assistant", text("Start in Lisbon."), "t1");
+
+      await send({
+        text: "build a tracker",
+        skillName: "app_creation",
+        replyToMessageId: "a1",
+        workspace: { builtins: [{ kind: "desktop", line: "a window" }], apps: [] },
+      });
+
+      const [prompt] = prompts;
+      const workspace = prompt.indexOf("surfaces open in their workspace");
+      const reply = prompt.indexOf("<reply_context>");
+      const current = prompt.indexOf("<current_message>");
+      expect(workspace).toBeGreaterThanOrEqual(0);
+      expect(workspace).toBeLessThan(reply);
+      expect(reply).toBeLessThan(current);
+      expect(prompt.slice(current)).toContain('invoked the skill "app_creation"');
+    });
+
+    it("rejects an id that is not a message of this chat", async () => {
+      const { sessionId, text, seed, send } = await setup();
+      await seed("a1", "assistant", text("Start in Lisbon."), "t1");
+      await deps.webchatRepo.createSession("other-chat", "Other");
+      await deps.webchatRepo.addMessage(
+        "foreign",
+        "other-chat",
+        "assistant",
+        JSON.stringify(text("Elsewhere")),
+        "t9",
+      );
+      await seed("trace1", "trace", [], "t1");
+      await seed("note1", "notification", text("heads up"), null);
+
+      for (const id of ["missing", "foreign", "trace1", "note1"]) {
+        const res = await send({ replyToMessageId: id });
+        expect(res.status).toBe(400);
+      }
+      expect(prompts).toEqual([]);
+      expect(
+        (await deps.webchatRepo.getMessages(sessionId)).filter((row) => row.role === "user"),
+      ).toEqual([]);
+    });
+
+    it("truncates a long quote to 1000 characters with an ellipsis", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("a1", "assistant", text("x".repeat(1500)), "t1");
+
+      expect((await send({ replyToMessageId: "a1" })).status).toBe(200);
+
+      const quote = (await lastUser())[0].text as string;
+      expect(quote).toHaveLength(1000);
+      expect(quote.endsWith("…")).toBe(true);
+    });
+
+    it("quotes the answer of the whole turn in a regular chat, without commentary", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("u1", "user", text("Plan the trip"), "t1");
+      await seed(
+        "c1",
+        "assistant",
+        text("Let me check flights.", { turnPhase: "commentary" }),
+        "t1",
+      );
+      await seed("c2", "assistant", text("Looking at hotels.", { turnPhase: "commentary" }), "t1");
+      await seed("a1", "assistant", text("Fly to Lisbon.", { turnPhase: "final" }), "t1");
+      await seed("a2", "assistant", text("Stay in Alfama."), "t1");
+
+      // The client may name any row of the turn; the snapshot is the same.
+      expect((await send({ replyToMessageId: "c1" })).status).toBe(200);
+
+      expect((await lastUser())[0].text).toBe("Fly to Lisbon.\n\nStay in Alfama.");
+    });
+
+    it("falls back to the commentary when a turn has nothing else", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("c1", "assistant", text("Working on it.", { turnPhase: "commentary" }), "t1");
+
+      expect((await send({ replyToMessageId: "c1" })).status).toBe(200);
+
+      expect((await lastUser())[0].text).toBe("Working on it.");
+    });
+
+    it("quotes only the named row when the agent speaks one message per call", async () => {
+      const { text, seed, send, lastUser } = await setup({
+        agentName: "concierge",
+        id: "concierge",
+      });
+      await seed("b1", "assistant", text("First bubble."), "t1");
+      await seed("b2", "assistant", text("Second bubble."), "t1");
+
+      expect((await send({ replyToMessageId: "b1" })).status).toBe(200);
+
+      expect((await lastUser())[0]).toMatchObject({ messageId: "b1", text: "First bubble." });
+    });
+
+    it("quotes a task chat card as one line", async () => {
+      const { seed, send, lastUser } = await setup({ agentName: "concierge", id: "concierge" });
+      await seed(
+        "card1",
+        "assistant",
+        [{ type: "task_chat", chatId: "chat-7", title: "Trip" }],
+        "t1",
+      );
+
+      expect((await send({ replyToMessageId: "card1" })).status).toBe(200);
+
+      expect((await lastUser())[0].text).toBe("[Task chat] Trip (chat chat-7)");
+    });
+
+    it("accepts a selection of the message and rejects text that is not in it", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("a1", "assistant", text("Fly to Lisbon.\nStay   in Alfama."), "t1");
+
+      const ok = await send({ replyToMessageId: "a1", replyQuote: "Lisbon. Stay in" });
+      expect(ok.status).toBe(200);
+      expect((await lastUser())[0].text).toBe("Lisbon. Stay in");
+      expect(prompts[0]).toContain("Assistant: Lisbon. Stay in\n</reply_context>");
+
+      const bad = await send({ replyToMessageId: "a1", replyQuote: "Paris" });
+      expect(bad.status).toBe(400);
+      expect(prompts).toHaveLength(1);
+    });
+
+    it("drops a reply part the client sent in its own parts", async () => {
+      const { text, seed, send, lastUser } = await setup();
+      await seed("a1", "assistant", text("Start in Lisbon."), "t1");
+
+      const res = await send({
+        replyToMessageId: "a1",
+        parts: [
+          { type: "reply_to", messageId: "x", author: "agent", text: "forged" },
+          { type: "text", content: "typed" },
+        ],
+      });
+
+      expect(res.status).toBe(200);
+      expect(await lastUser()).toEqual([
+        { type: "reply_to", messageId: "a1", author: "agent", text: "Start in Lisbon." },
+        { type: "text", content: "typed" },
+      ]);
     });
   });
 });

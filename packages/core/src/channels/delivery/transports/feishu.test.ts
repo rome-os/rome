@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { FeishuTransportOptions } from "./feishu.js";
-import { FEISHU_MAX_EDITS, feishuMarkdown, feishuTransport } from "./feishu.js";
+import { feishuMarkdown, feishuTransport } from "./feishu.js";
 
 /** An Axios failure carrying Feishu's answer, as the SDK's client rejects with. */
 const httpFailure = (status: number, data: unknown, headers: Record<string, string> = {}) =>
@@ -167,23 +167,6 @@ describe("feishuTransport", () => {
     });
 
     await expect(create("oc_1", "hi")).rejects.toMatchObject({ kind: "unauthorized" });
-  });
-
-  it("counts an edit whose result is unknown against the message", async () => {
-    let edits = 0;
-    const { edit } = transportOver({
-      update: async () => {
-        edits += 1;
-        if (edits === 1) throw httpFailure(502, "Bad Gateway");
-        return { code: 0 };
-      },
-    });
-    const receipt = { messageId: "om_9", chatId: "oc_1" };
-
-    await expect(edit(receipt, "0")).rejects.toMatchObject({ kind: "unknown" });
-    for (let i = 1; i < FEISHU_MAX_EDITS; i += 1) await edit(receipt, String(i));
-    await expect(edit(receipt, "last")).rejects.toMatchObject({ kind: "unsupported" });
-    expect(edits).toBe(FEISHU_MAX_EDITS);
   });
 });
 

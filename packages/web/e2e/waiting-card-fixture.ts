@@ -148,12 +148,15 @@ export async function openWaitingCard(
       let approvalStatus = "pending";
       const fetch = window.fetch.bind(window);
       window.fetch = async (input, init) => {
-        const path = new URL(input instanceof Request ? input.url : String(input), location.origin)
-          .pathname;
+        const url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+        const path = url.pathname;
         const method = (
           init?.method ?? (input instanceof Request ? input.method : "GET")
         ).toUpperCase();
-        if (path === `/api/chat/sessions/${sessionId}/messages`) return Response.json(messages);
+        if (path === `/api/chat/sessions/${sessionId}/messages`)
+          return Response.json(
+            url.searchParams.has("limit") ? { messages, nextCursor: null } : messages,
+          );
         if (path === "/api/ai-tools/status")
           return Response.json({ claude: { loggedIn: false }, codex: { loggedIn: false } });
         if (path === "/api/ai-tools/rome-credits") return Response.json({ credits: null });

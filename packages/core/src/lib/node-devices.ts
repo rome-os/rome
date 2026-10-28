@@ -3,6 +3,7 @@ import {
   nodeConfigFromEnvironment,
   CallerConfigurationError,
   DaemonVersionError,
+  DeviceActionError,
   startDaemon,
 } from "@rome-os/node-core/client";
 import {
@@ -11,9 +12,18 @@ import {
   type DeviceList,
   type DeviceFilesErrorCode,
   type DeviceFilesResponse,
+  type DeviceManageErrorCode,
   type DevicesStatus,
 } from "@rome/api-types/devices";
 import { withTracingSuppressed } from "../telemetry.js";
+
+export type DeviceManageResult = { ok: true } | { ok: false; code: DeviceManageErrorCode };
+
+const manageErrors = new Set<string>([
+  "device_not_found",
+  "invalid_device_name",
+  "revocation_pending",
+]);
 
 export type DeviceFilesResult =
   | { ok: true; folder: DeviceFilesResponse }
@@ -31,13 +41,30 @@ function filesErrorCode(code: string): DeviceFilesErrorCode {
 export function createNodeDevicesService(
   createClient: () => Pick<
     ReturnType<typeof createNodeClient>,
-    "getDevicesStatus" | "listDevices" | "run" | "disconnect"
+    "getDevicesStatus" | "listDevices" | "run" | "renameDevice" | "removeDevice" | "disconnect"
   > = () => createNodeClient(nodeConfigFromEnvironment(process.env)),
   // Discovery is refused until the spawned daemon listens. A real failure rejects.
   start: () => Promise<unknown> = () =>
     withTracingSuppressed(() => startDaemon(nodeConfigFromEnvironment(process.env))),
 ) {
   let client: ReturnType<typeof createClient> | undefined;
+  async function manage(
+    request: (client: ReturnType<typeof createClient>) => Promise<void>,
+  ): Promise<DeviceManageResult> {
+    try {
+      client ??= createClient();
+      await request(client);
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof DeviceActionError && manageErrors.has(error.code))
+        return { ok: false, code: error.code as DeviceManageErrorCode };
+      if (error instanceof DaemonVersionError) {
+        client?.disconnect();
+        client = undefined;
+      }
+      return { ok: false, code: "unavailable" };
+    }
+  }
   return {
     async start(): Promise<void> {
       await start();
@@ -108,6 +135,14 @@ export function createNodeDevicesService(
         }
         return { ok: false, code: "unavailable" };
       }
+    },
+    /** Renames a device in the account through Cloud. */
+    renameDevice(deviceId: string, name: string): Promise<DeviceManageResult> {
+      return manage((c) => c.renameDevice(deviceId, name));
+    },
+    /** Revokes a device and deletes it from the account through Cloud. */
+    removeDevice(deviceId: string): Promise<DeviceManageResult> {
+      return manage((c) => c.removeDevice(deviceId));
     },
     close: () => {
       client?.disconnect();

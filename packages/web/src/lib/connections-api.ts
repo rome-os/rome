@@ -1,7 +1,7 @@
 /**
  * Client types + fetchers for the registry-native connection surface
  * (`GET /api/connections`). The types mirror the backend's
- * ConnectionView projection verbatim — registry vocabulary (GrantState /
+ * ConnectionView projection verbatim — registry vocabulary (ConnectionState /
  * CapabilityStatus), identity only through the generic display projection.
  * Presentation (labels, icons, ordering, slot grouping) lives in
  * `connection-cards.ts`, not here.
@@ -11,7 +11,7 @@ import type {
   ConnectionAccountFields,
   LinkAccountAgentRequest,
   LinkAccountAgentResult,
-} from "@rome/api-types/channel-accounts";
+} from "@rome/api-types/connected-accounts";
 import { fetchJson } from "@/lib/fetch-json";
 
 /** Runtime health can change without a grant ceremony (for example, a long-poll
@@ -21,7 +21,11 @@ export const CONNECTIONS_REFRESH_INTERVAL_MS = 30_000;
 
 export type GrantState = "unauthorized" | "authorized" | "degraded";
 
-export type Capability = "talk" | "act" | "watch";
+/** Whether the platform accepts the connection's grant
+ *  (docs/domains/connections.md). */
+export type ConnectionState = "working" | "broken";
+
+export type Capability = "chat" | "act" | "watch";
 
 export interface CapabilityDegradation {
   reason: string;
@@ -43,7 +47,7 @@ export interface GrantDisplay {
   avatarUrl: string | null;
 }
 
-/** Where the guardian goes to (re-)confer this connection's grants. Resolved
+/** Where the guardian goes to (re-)grant this connection's grants. Resolved
  *  server-side for Rome Cloud-brokered OAuth services; null for services whose
  *  connect ceremony is dashboard-local (channels). */
 export interface ConnectHint {
@@ -59,11 +63,16 @@ export interface ApiConnection extends ConnectionAccountFields {
   /** The kind of connection, such as `telegram_user`. */
   connectionKind: string;
   label: string;
+  /** Working or broken. Null for a placeholder, and for a connection a
+   *  disconnect kept with no access. */
+  state: ConnectionState | null;
+  /** The grant names, each a slot the dashboard can revoke. Read the
+   *  connection's state from `state`, not from these. */
   grants: Record<string, GrantState>;
   display: Record<string, GrantDisplay | null>;
   capabilities: Record<Capability, CapabilityStatus>;
   connect: ConnectHint | null;
-  /** Active-setup discovery: per grant, the id of the live conferral
+  /** Active-setup discovery: per grant, the id of the live grant
    *  setup (if any). Lets a reopened dashboard re-attach instead of starting
    *  a fresh one. Empty when no setup is in progress. */
   setups: Record<string, string>;
@@ -79,10 +88,9 @@ export async function fetchConnections(): Promise<ApiConnection[]> {
 /** Structured, non-throwing result from a teardown call. */
 export type TeardownResult = { ok: true } | { ok: false; error: string };
 
-/** Revoke one grant — the registry-native disconnect. The transport relocks
- *  and custody artifacts clear off the transition. A channel account whose
- *  last grant this was is removed with it; any other connection row persists
- *  so a later reconnect re-confers in place. */
+/** Revoke the grant — the registry-native disconnect. The transport relocks
+ *  and custody artifacts clear off the transition. The connection ends with
+ *  it, whatever its kind, and a later connect makes a new one. */
 export async function revokeConnectionGrant(
   connectionId: string,
   grant: string,
@@ -98,16 +106,17 @@ export async function revokeConnectionGrant(
   return { ok: true };
 }
 
-/** Link an agent to an account by its channel id, or pass null to unlink it,
- *  so Rome stops listening to the account. `fallback` is the error message when the server gives none. */
+/** Link an agent to a connected account, named by its connection's id, or
+ *  pass null to unlink it, so Rome stops listening to the account. `fallback`
+ *  is the error message when the server gives none. */
 export async function linkAccountAgent(
-  id: string,
+  connectionId: string,
   agent: string | null,
   fallback: string,
 ): Promise<LinkAccountAgentResult> {
   const body: LinkAccountAgentRequest = { agent };
   return fetchJson<LinkAccountAgentResult>(
-    `/api/channels/accounts/${encodeURIComponent(id)}/agent`,
+    `/api/accounts/${encodeURIComponent(connectionId)}/agent`,
     { method: "PUT", json: body, fallback },
   );
 }

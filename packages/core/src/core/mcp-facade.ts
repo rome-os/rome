@@ -18,6 +18,7 @@
 // The Anthropic MCP-server test (`anthropic-mcp-servers.test.ts`) is the
 // regression gate for this module.
 
+import { isValidTimeZone } from "../lib/timezone.js";
 import { createLogger } from "../logger.js";
 import type { DeferInput } from "./defer.js";
 import type {
@@ -130,10 +131,20 @@ export interface FacadeParams {
    */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
   /**
+   * Tools this session alone carries, registered on every surface beside
+   * `defer`. Their handlers own their own context.
+   */
+  sessionTools?: FacadeToolDef[];
+  /**
    * Lets `propose_routine` with `activate: true` create the routine itself.
    * Absent → auto-enable is unavailable and the draft card is shown instead.
    */
   routineActivation?: RoutineActivationGate;
+  /**
+   * The agent's text never reaches the guardian, so `defer` does not ask it
+   * to confirm in text: it could only confirm with another message.
+   */
+  textPrivate?: boolean;
 }
 
 /** What `propose_routine` checks before it creates a routine without the
@@ -724,6 +735,8 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
       params.routineActivation
         ? { ...params.routineActivation, executeAction: params.executeAction }
         : undefined,
+      params.sessionTools,
+      params.textPrivate ?? false,
     ),
   };
 }
@@ -1003,12 +1016,8 @@ function buildScheduleTriggerFromInput(
       error: `propose_routine.localTime "${localTime}" is invalid — expected HH:mm (24-hour), e.g. 09:30`,
     };
   }
-  if (tzid !== "UTC") {
-    const supported =
-      typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
-    if (supported.length > 0 && !supported.includes(tzid)) {
-      return { ok: false, error: `propose_routine.tzid "${tzid}" is not a valid IANA timezone` };
-    }
+  if (!isValidTimeZone(tzid)) {
+    return { ok: false, error: `propose_routine.tzid "${tzid}" is not a valid IANA timezone` };
   }
 
   const rrule = typeof o.rrule === "string" && o.rrule.trim() ? o.rrule.trim() : undefined;
@@ -1153,17 +1162,29 @@ function askQuestionsToPromptText(questions: Record<string, unknown>[]): string 
 const DEFER_DESCRIPTION =
   "Schedule a wake-up later in THIS SAME conversation, with full context intact — use it when you're " +
   "watching something that isn't ready yet (a CI run, a build, a reply) instead of ending the turn empty. " +
-  "Give a short `name` for what you're watching (it becomes the routine's name) and one of `afterMinutes` or `at`. " +
-  "When the time comes you're pinged back in this thread with the whole conversation still in context, so just " +
-  "re-evaluate and either finish or `defer` again to check later (minimum one minute, no limit on re-defers). " +
+  "Give a short `name` for what you're watching (it becomes the routine's name) and exactly one of " +
+  "`afterMinutes`, `at`, or `event`. Prefer `event` when something announces completion (CI finished, a PR " +
+  "merged, a reply): it wakes as soon as a matching event-bus event is published, once, on the first match, " +
+  "with no timeout. Look up the event name and payload fields with the search_event_catalog action first. " +
+  "For a `subscribable` type, filter on one of its `keys` (e.g. repository.full_name); defer then subscribes " +
+  "at the provider and fails with the reason if it can't. Events are not replayed and a new subscription " +
+  "only sees future events: after an event defer, check the current state once more, and if what you're " +
+  "waiting for already happened, handle it now. When you wake you're pinged back in this thread with the whole conversation still in context, so " +
+  "just re-evaluate and either finish or `defer` again (minimum one minute, no limit on re-defers). ";
+
+const DEFER_END_OF_TURN =
   "After calling defer, write one short line confirming you'll keep watch, then end your turn.";
+const DEFER_END_OF_TURN_TEXT_PRIVATE =
+  "After calling defer, end your turn. It needs no confirmation.";
 
 function buildDeferFacadeTool(
   executeDefer: (input: DeferInput) => Promise<unknown>,
+  textPrivate: boolean,
 ): FacadeToolDef {
   return {
     name: "defer",
-    description: DEFER_DESCRIPTION,
+    description:
+      DEFER_DESCRIPTION + (textPrivate ? DEFER_END_OF_TURN_TEXT_PRIVATE : DEFER_END_OF_TURN),
     inputSchema: {
       type: "object",
       required: ["name"],
@@ -1178,12 +1199,46 @@ function buildDeferFacadeTool(
           type: "integer",
           minimum: 1,
           description:
-            "Minutes from now until wakeup, e.g. 5 (five minutes) or 120 (two hours). Minimum 1. Provide exactly one of afterMinutes or at.",
+            "Minutes from now until wakeup, e.g. 5 (five minutes) or 120 (two hours). Minimum 1. Provide exactly one of afterMinutes, at, or event.",
         },
         at: {
           type: "string",
           description:
-            "Absolute wakeup time as an ISO 8601 instant, e.g. 2026-06-25T14:30:00Z. Provide exactly one of afterMinutes or at.",
+            "Absolute wakeup time as an ISO 8601 instant, e.g. 2026-06-25T14:30:00Z. Provide exactly one of afterMinutes, at, or event.",
+        },
+        event: {
+          type: "object",
+          description:
+            "Wake on the next event-bus event that matches. Provide exactly one of afterMinutes, at, or event.",
+          required: ["eventName"],
+          properties: {
+            eventName: {
+              type: "string",
+              description:
+                "The exact event type, from search_event_catalog, e.g. provider:event:github.workflow_run.",
+            },
+            sourcePattern: {
+              type: "string",
+              description:
+                "Optional: only match events from this source (an appId); a single * matches any run of characters.",
+            },
+            filter: {
+              type: "array",
+              description:
+                "Optional payload conditions, AND-ed together. Each compares the payload value at a dot-path, as a string, for equality.",
+              items: {
+                type: "object",
+                required: ["field", "equals"],
+                properties: {
+                  field: {
+                    type: "string",
+                    description: "Dot-path into the payload, e.g. pull_request.number",
+                  },
+                  equals: { type: "string", description: "Value the field must equal" },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -1200,6 +1255,8 @@ function buildInteractiveTools(
   hasHandback: boolean,
   executeDefer?: (input: DeferInput) => Promise<unknown>,
   activation?: ActivationDeps,
+  sessionTools: FacadeToolDef[] = [],
+  textPrivate = false,
 ): FacadeToolDef[] {
   // `ask_question` is registered on every surface: webchat mounts the card; other
   // surfaces (messaging channels, subagents, CLI) get the questions relayed as
@@ -1302,8 +1359,9 @@ function buildInteractiveTools(
   // — it injects an inbound message rather than rendering UI, so it needs no
   // interactive surface. Only absent when the session has no defer impl wired.
   if (executeDefer) {
-    tools.push(buildDeferFacadeTool(executeDefer));
+    tools.push(buildDeferFacadeTool(executeDefer, textPrivate));
   }
+  tools.push(...sessionTools);
   // propose_routine and confirm_output render/resolve UI and have no prose
   // fallback, so keep them on interactive surfaces only. Detached sessions
   // (exact forks) keep advertising them — the catalog must stay byte-identical

@@ -1,0 +1,22 @@
+name: connector_event_ensure
+type: custom
+description: |
+  Make sure a provider event reaches Rome's event bus. Core calls it when an
+  agent waits on an event this app declares under `eventSources` (a `defer`
+  with `event`), and with `dryRun` when `search_event_catalog` gets `match`.
+  Pass the bus `eventName` (e.g. `provider:event:github.workflow_run`) and the
+  wait's equality `filter`; for GitHub the filter must name the repository
+  (`repository.full_name`) or the organization (`organization.login`).
+  `dryRun: true` only checks and returns `subscription: active | inactive`;
+  otherwise it subscribes when needed and returns `existing | created`. A
+  GitHub subscription merges the event into Rome's existing webhook on that
+  repo or org. Fails with a readable reason: GitHub not connected, no target
+  in the filter, a repo or org name whose case differs from GitHub's (the
+  error gives the exact spelling), or GitHub refusing the webhook (admin
+  access needed).
+entry: ./index.ts
+visibility: explicit
+complexity: simple
+speed: moderate
+reliability: medium
+sideEffects: write

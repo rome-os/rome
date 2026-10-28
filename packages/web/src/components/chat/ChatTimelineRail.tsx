@@ -142,8 +142,8 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
     // width below 1024 safe.
     //
     // The container is `transcript`, declared on Chat's scroller wrapper — NOT
-    // `chat`, which is declared on an outer element that never narrows when the
-    // trace drawer takes its 480px.
+    // `chat`, which is declared on an outer element that also holds the
+    // standalone trace overlay.
     //
     // Pointer events stay off the whole strip and are re-enabled only on the
     // markers, so the native scrollbar and the composer's right edge remain

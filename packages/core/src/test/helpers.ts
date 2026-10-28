@@ -1,3 +1,4 @@
+import type { ExternalAgents } from "../channels/agents-accounts.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -50,11 +51,11 @@ import type {
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
+import { PeopleRepository } from "../db/repositories/people.js";
 import { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
-import { OutboxRepository } from "../db/repositories/outbox.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
@@ -68,6 +69,8 @@ import { createChannelsService } from "../channels/channels-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
+import type { AccountLink } from "@rome/api-types/account-agents";
+import type { AccountLinkOf } from "../channels/account-links.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
@@ -136,12 +139,26 @@ function migratedSystemImage(): Buffer {
   return migratedImage;
 }
 
+/** The kinds of link the built-in descriptors declare, for tests that build a
+ *  channel record without a registry. `connections/integrations/index.test.ts`
+ *  keeps it in step with the descriptors. */
+export const BUILTIN_ACCOUNT_LINKS: Readonly<Record<string, AccountLink>> = {
+  feishu: "own_account",
+  telegram: "own_account",
+  discord: "own_account",
+  slack_bot: "own_account",
+  telegram_user: "delegate",
+};
+
+/** {@link BUILTIN_ACCOUNT_LINKS} as a lookup. */
+export const testAccountLinkOf: AccountLinkOf = (kind) => BUILTIN_ACCOUNT_LINKS[kind] ?? null;
+
 /** Maps every channel to itself. Valid only where no connection kind has a later channel. */
 export const identityConnectionKindOf: ConnectionKindOfChannel = (channel) => channel;
 
 /** Maps a channel to its connection kind through `db`'s channel records, as Rome does. */
 export function recordedConnectionKindOf(db: DrizzleDb): ConnectionKindOfChannel {
-  const records = new ChannelRecordsRepository(db);
+  const records = new ChannelRecordsRepository(db, testAccountLinkOf);
   return (channel) => records.connectionKindOf(channel);
 }
 
@@ -255,9 +272,8 @@ export class FakeTransport {
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     this.sentMessages.push({ chatId, message });
-    // A message id, the way every real talker answers with one. The outbox
-    // recognizes a delivered message by it, so a Talk that named nothing
-    // would make every send untrackable in tests and only in tests.
+    // A message id, the way every real talker answers with one, so Rome's
+    // transcript of a send is recorded under it as it is in production.
     return { chatId, messageId: `sent-${++sentCount}` };
   }
 
@@ -313,8 +329,8 @@ export function createTestConnections(
       withTalker: (call: (talker: TestTalker) => unknown) => call(live),
       hearTalker: (handler: (message: ChannelMessage) => Promise<void>) =>
         transport.listen(handler),
-      isUnlocked: (capability: string) => capability === "talk",
-      status: () => ({ talk: { state: "unlocked" } }),
+      isUnlocked: (capability: string) => capability === "chat",
+      status: () => ({ chat: { state: "unlocked" } }),
     } as unknown as Connection);
   }
   const find = (connectionKind: string) => connections.get(`test:${connectionKind}`);
@@ -478,6 +494,8 @@ export interface TestDeps extends ApiDeps {
 
 export interface BuildTestDepsOptions {
   channels?: string[];
+  /** The agents Rome Cloud lists. Agents is not connected by default. */
+  assistants?: ExternalAgents;
 }
 
 const unavailableFavorService: FavorService = {
@@ -536,16 +554,23 @@ export async function buildTestDeps(
   }
 
   const sessionsRepo = new SessionsRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db, recordedConnectionKindOf(db));
+  const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
+  const peopleRepo = new PeopleRepository(db);
+  const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
-  const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
-  const sentinelLogRepo = new SentinelLogRepository(db);
+  const sentinelLogRepo = new SentinelLogRepository(db, (name) =>
+    channelRecords.platformOfChannel(name),
+  );
   const connections = createTestConnections(transports);
   const channels = testChannels({ db, whatsAppAccounts, linkedInAccounts }, connections);
-  const accountNames = createAccountNames({ channels, sentinelLogRepo });
+  const accountNames = createAccountNames({
+    channels,
+    sentinelLogRepo,
+    platformOfChannel: (name) => channelRecords.platformOfChannel(name),
+  });
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
   // A private env object per deps bag: route tests exercise apply/remove
@@ -689,7 +714,10 @@ export async function buildTestDeps(
   // Same provider set the daemon registers before the API comes up, so
   // routine trigger validation behaves identically here.
   routineEngine.registerProvider("schedule", new ScheduleTriggerProvider(routinesRepo));
-  routineEngine.registerProvider("event-bus", new EventBusTriggerProvider(new EventBus()));
+  routineEngine.registerProvider(
+    "event-bus",
+    new EventBusTriggerProvider(new EventBus(), routinesRepo),
+  );
 
   // Mirror daemon boot: the auth-edge snapshot is loaded from the persisted
   // `publicAccess` setting before serving (src/index.ts). Tests that change
@@ -714,16 +742,21 @@ export async function buildTestDeps(
     actionEngine,
     actionLoader,
     db,
+    appConnectionAccessRepo,
     sessionsRepo,
-    personMappingRepo,
+    peopleRepo,
     guardianLinkCodes: new GuardianLinkCodes(),
-    outboxRepo,
     whatsAppStoreRepo,
     whatsAppAccounts,
     linkedInStoreRepo,
     linkedInAccounts,
     channels,
+    platformOfChannel: (name: string) => channelRecords.platformOfChannel(name),
+    recordedOn: (platform: string) => channelRecords.namesOn(platform),
+    sendersOn: (platform: string) => channelRecords.sendersOn(platform),
+    accountOf: (channel: string) => channelRecords.accountOf(channel),
     accountNames,
+    assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,
     approvalsRepo,
     approvalHandler,
@@ -773,6 +806,8 @@ export async function buildTestDeps(
       start: async () => {},
       listFiles: async () => ({ ok: false, code: "offline" }),
       listDevices: async () => ({ devices: [] }),
+      renameDevice: async () => ({ ok: true }),
+      removeDevice: async () => ({ ok: true }),
       getStatus: async () => ({
         connection: "not_configured",
         checkedAt: new Date().toISOString(),

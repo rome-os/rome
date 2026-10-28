@@ -9,9 +9,9 @@
 // transport already speaks the channel's record, so inbound and send pass
 // through without a projection.
 //
-// The `app` grant is conferred by pasting the two fields (`credentialsPaste`);
+// The `app` grant is granted by pasting the two fields (`credentialsPaste`);
 // `validate` mints a tenant-access-token via a transient connect so a bad
-// appId/appSecret is refused at confer time.
+// appId/appSecret is refused at grant time.
 //
 // Fault mapping: a tenant-access-token auth failure
 // (`isFeishuAuthError`) is a CredentialRejected{ grant: "app" }; every other
@@ -27,8 +27,9 @@ import {
   LoggerLevel,
   type NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
+import type { FeishuStreamingStyle } from "../../channels/delivery/streaming-switch.js";
 import {
   type CreateLarkChannel,
   FeishuAdapter,
@@ -132,13 +133,15 @@ export function feishuProfileFromSettings(
  */
 export interface FeishuDescriptorDeps {
   chatSettings: ChatSettingsService;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
   listAgents: () => string[];
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
+  /** How a streamed reply shows, read for each message it creates. */
+  replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
   createChannel?: CreateLarkChannel;
   /** Injectable setup seams so tests drive the ceremony without the
    *  network / SDK long connection. Production uses the defaults below. */
@@ -147,7 +150,7 @@ export interface FeishuDescriptorDeps {
   fetchBotName?: FeishuSetupDeps["fetchBotName"];
 }
 
-/** The credential fields a Feishu setup holds before conferral (the pending,
+/** The credential fields a Feishu setup holds before grant (the pending,
  *  un-set-up material the in-ceremony probes run against). */
 export interface FeishuPendingMaterial {
   appId: string;
@@ -503,7 +506,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
       { name: "domain", label: "Domain", secret: false, options: ["feishu", "lark"] },
     ],
     // A transient connect mints the tenant-access-token; a bad appId/appSecret
-    // rejects here so confer refuses invalid credentials.
+    // rejects here so grant refuses invalid credentials.
     validate: async (material) => {
       const channel = createChannel({
         appId: material.appId,
@@ -517,7 +520,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
       }
     },
   });
-  // The Feishu conferral setup: mode + domain prompt, then either the
+  // The Feishu setup: mode + domain prompt, then either the
   // manual credential probe or the agent-ready registerApp QR dance, then the
   // before the single terminal write of credential and profile.
   appScheme.setup = makeFeishuSetup({
@@ -529,18 +532,17 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
   return {
     connectionKind: "feishu",
     severalAccounts: true,
-    reviveProfile: (_grant, record) => reviveFeishuProfile(record),
-    accountIdOf: (_grant, record) => (typeof record.appId === "string" && record.appId) || null,
-    auth: {
-      app: appScheme,
-    },
+    reviveProfile: (record) => reviveFeishuProfile(record),
+    accountIdOf: (record) => (typeof record.appId === "string" && record.appId) || null,
+    link: "own_account",
+    grant: "app",
+    auth: appScheme,
     capabilities: {
       talker: {
-        needs: ["app"] as const,
-        build(creds, kit): Talker {
+        build(cred, kit): Talker {
           // Inline material for the `app` grant (never an external resolver for
           // a Talk grant); credentialsPaste packs these fields.
-          const app = creds.app.material as unknown as FeishuAppMaterial;
+          const app = cred.material as unknown as FeishuAppMaterial;
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           const routeFault = (err: unknown): void => {
             faultSink?.(
@@ -556,10 +558,11 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             domain: app.domain,
             connectionId: kit.connectionId,
             chatSettings: deps.chatSettings,
-            personMappingRepo: deps.personMappingRepo,
+            peopleRepo: deps.peopleRepo,
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,
+            replyStreamingStyle: deps.replyStreamingStyle,
             onFault: routeFault,
           };
           const adapter = new FeishuAdapter(config, createChannel);

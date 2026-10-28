@@ -59,7 +59,8 @@
       "newAccount": "New account",
       "noAgent": "None. Rome does not listen to this account.",
       "changeInEnvoys": "Change in Envoys",
-      "agentAnswers": "Answers messages on this account",
+      "agentSpeaksAs": "Speaks as this account",
+      "agentAnswersForYou": "Answers for you from this account",
       "noAgentTitle": "No agent",
       "agentNone": "Rome does not listen to this account"
     },
@@ -197,15 +198,6 @@
             "reply": "Your dots message your agent through Rome Cloud",
             "start": "Your agent messages a dot when something needs its attention"
           }
-        }
-      },
-      "webchat": {
-        "bot": {
-          "title": "Dashboard chat",
-          "bullets": {
-            "chat": "Chat with your agent right here in the dashboard"
-          },
-          "alwaysOn": "Always on — nothing to configure."
         }
       },
       "github": {
@@ -727,15 +719,21 @@
         "title": "Reply streaming",
         "description": "Applies to the guardian's direct chats on Telegram and Feishu. On Telegram, replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
         "toggleLabel": "Stream replies as they are written"
+      },
+      "concierge": {
+        "title": "Concierge",
+        "description": "Adds one chat under Chats where your agent texts with you in short messages and hands longer work to task chats you can open.",
+        "toggleLabel": "Show Concierge in Chats"
+      },
+      "feishuStreamingStyle": {
+        "title": "Feishu streaming style",
+        "description": "Messages take up to 20 edits each, then the reply goes on in a new one. Cards show the text as it is typed.",
+        "message": "Messages",
+        "card": "Cards"
       }
     },
     "developerSettings": {
       "title": "Developer Settings"
-    },
-    "fable": {
-      "title": "Fable",
-      "description": "Only applies when Claude is available.",
-      "toggleLabel": "Route large models to Fable"
     },
     "tierModelMappings": {
       "title": "Model ID mappings",
@@ -750,7 +748,6 @@
         "medium": "Claude medium model ID",
         "small": "Claude small model ID"
       },
-      "fableNote": "A Claude large mapping replaces Fable's model ID while Fable still prefers Claude for large tiers.",
       "save": "Save mappings"
     },
     "modelSelector": {

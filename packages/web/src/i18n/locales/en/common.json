@@ -2,15 +2,16 @@
   "appName": "Rome",
   "nav": {
     "chat": "Chat",
+    "chatList": "Chat list",
     "activity": "Activity",
     "people": "People",
+    "assistants": "Assistants",
     "envoys": "Envoys",
     "memory": "Memory",
     "projects": "Projects",
     "sessions": "Sessions",
     "routines": "Routines",
     "apps": "Apps",
-    "store": "App Store",
     "desktop": "Browser",
     "settings": "Settings",
     "openSidebar": "Open sidebar",
@@ -28,8 +29,12 @@
   "sidebar": {
     "aiApps": "AI Apps",
     "appDisabled": "Disabled",
+    "hideNames": "Hide names",
+    "more": "More",
     "moreRecentApps": "More recent apps",
-    "notOpened": "Not opened on this device"
+    "notOpened": "Not opened on this device",
+    "search": "Search",
+    "showNames": "Show names"
   },
   "recentChats": {
     "myChats": "My chats",
@@ -37,6 +42,10 @@
     "title": "Chats",
     "newChat": "New chat",
     "empty": "No chats yet",
+    "concierge": "Concierge",
+    "conciergeUnread_one": "Concierge, {{label}} unread message",
+    "conciergeUnread_other": "Concierge, {{label}} unread messages",
+    "startedByConcierge": "Started by Concierge",
     "rowStatus": {
       "waiting": "Waiting for you",
       "running": "Replying now",
@@ -194,7 +203,8 @@
   "desktop": {
     "iframeTitle": "Rome Desktop",
     "namedIframeTitle": "Rome desktop “{{name}}”",
-    "notFound": "There is no desktop called “{{name}}”."
+    "notFound": "There is no desktop called “{{name}}”.",
+    "reconnecting": "Reconnecting…"
   },
   "wechatApp": {
     "loading": "Checking WeChat…",
@@ -275,5 +285,35 @@
     "cancel": "Cancel",
     "sent": "Thanks for the feedback!",
     "error": "Couldn't send feedback. Please try again."
+  },
+  "assistants": {
+    "title": "Assistants",
+    "kind": {
+      "dot": "Dot",
+      "muse": "Muse",
+      "rome": "Rome"
+    },
+    "empty": {
+      "title": "No assistants yet",
+      "body": "Connect a Dot or Muse under Settings → Agents in Rome Cloud. It shows up here once this Rome's Agents connection is on."
+    },
+    "noMessages": "No messages yet",
+    "loadFailed": "Failed to load assistants",
+    "switch": "Switch assistant, now {{name}}",
+    "notFound": {
+      "title": "This assistant isn't available",
+      "body": "Rome Cloud doesn't list it for this Rome, so the link may be out of date.",
+      "openLatest": "Open the latest chat"
+    }
+  },
+  "assistantChat": {
+    "description": "Main answers {{name}}'s messages as Rome. What you write here goes to {{name}}.",
+    "otherAccount": "An assistant of @{{account}}. Main answers its messages as Rome. What you write here goes to {{name}}.",
+    "loadOlder": "Load older messages",
+    "loading": "Loading…",
+    "empty": "No messages with {{name}} yet.",
+    "noText": "No text",
+    "placeholder": "Message {{name}}",
+    "loadOlderFailed": "Failed to load older messages"
   }
 }

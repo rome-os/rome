@@ -4,7 +4,12 @@ import {
   ROME_CREDITS_MODEL_PROVIDER_ID,
 } from "./rome-credits-provider.js";
 
-const BASE_ARGS = ["-c", 'shell_environment_policy.exclude=["ROME_CREDITS_TOKEN"]'];
+const BASE_ARGS = [
+  "-c",
+  'shell_environment_policy.exclude=["ROME_CREDITS_TOKEN"]',
+  "-c",
+  "skills.bundled.enabled=false",
+];
 
 describe("codexAppServerConfigArgs", () => {
   it("keeps the credential out of agent commands even without a Rome Cloud origin", () => {
@@ -13,9 +18,9 @@ describe("codexAppServerConfigArgs", () => {
 
   it("defines the credits provider against the Rome Cloud gateway", () => {
     const args = codexAppServerConfigArgs("https://romeos.cc");
-    expect(args.slice(0, 2)).toEqual(BASE_ARGS);
-    expect(args[2]).toBe("-c");
-    const override = args[3]!;
+    expect(args.slice(0, BASE_ARGS.length)).toEqual(BASE_ARGS);
+    expect(args[BASE_ARGS.length]).toBe("-c");
+    const override = args[BASE_ARGS.length + 1]!;
     expect(override.startsWith(`model_providers.${ROME_CREDITS_MODEL_PROVIDER_ID}={`)).toBe(true);
     expect(override).toContain('base_url="https://romeos.cc/v1"');
     expect(override).toContain('env_key="ROME_CREDITS_TOKEN"');

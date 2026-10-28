@@ -3,7 +3,7 @@
 // meets are messages.ts's.
 
 import { compareMessages, isAfterMessageCursor, type Message } from "@rome/api-types/message";
-import type { AccountMessages, MessageAccount, MessageRead } from "./messages.js";
+import { heldOn, type AccountMessages, type MessageAccount, type MessageRead } from "./messages.js";
 
 /** One message the store holds, at the address it arrived on. A group's
  *  messages are held at the group, since that is what addresses one, so no
@@ -24,19 +24,23 @@ export interface HeldMessage {
  * address.
  */
 export function memoryMessages(held: readonly HeldMessage[]): AccountMessages {
-  const ranked = (holds: (message: HeldMessage) => boolean): Message[] =>
-    held
-      .filter(holds)
-      .map((message) => message.entry)
-      .sort(compareMessages);
-
+  /** Each held pair the accounts name, and the `source` its entries carry:
+   *  the account's own `channel`, as the SQL stores answer it. */
   const full = (accounts: readonly MessageAccount[]): Message[] => {
-    const scope = new Set(
-      accounts.flatMap((account) =>
-        account.addresses.map((address) => pair(account.channel, address)),
-      ),
-    );
-    return ranked((message) => scope.has(pair(message.channel, message.address)));
+    const scope = new Map<string, string>();
+    for (const account of accounts) {
+      for (const on of heldOn(account)) {
+        for (const address of account.addresses) {
+          if (!scope.has(pair(on, address))) scope.set(pair(on, address), account.channel);
+        }
+      }
+    }
+    return held
+      .flatMap((message) => {
+        const shown = scope.get(pair(message.channel, message.address));
+        return shown === undefined ? [] : [{ ...message.entry, source: shown }];
+      })
+      .sort(compareMessages);
   };
 
   /** One page off a ranking: what every read here answers, and the only place

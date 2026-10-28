@@ -8,24 +8,24 @@ const notConnected: ConnectionCard = {
   service: "discord",
   label: "Discord",
   kind: "channel",
-  alwaysOn: false,
   degradation: null,
   slots: [
     {
       key: "bot",
       connectionId: null,
       grant: "bot",
-      state: "unauthorized",
+      state: null,
       display: null,
       identity: null,
       activeSetupCid: null,
+      link: "own_account",
     },
   ],
   connect: { url: "/api/connections/discord/start", available: true, unavailableReason: null },
   route: "discord",
-  channel: null,
   agent: null,
   linkReported: false,
+  link: "own_account",
   severalAccounts: false,
 };
 
@@ -35,7 +35,7 @@ const connected: ConnectionCard = {
     {
       ...notConnected.slots[0],
       connectionId: "storybook-discord",
-      state: "authorized",
+      state: "working",
       identity: "Rome Bot",
     },
   ],

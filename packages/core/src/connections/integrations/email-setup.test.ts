@@ -1,10 +1,10 @@
-// The Email conferral setup, driven through the real
+// The Email setup, driven through the real
 // SetupSession runtime and, end-to-end, through the generic setup routes over a
 // real ConnectionRegistry (no network: fake MailProvider).
 //
 // Seams under test:
 //   1. makeEmailSetup's coroutine — show progress → `ctx.step("provision")` →
-//      pure-config settings write → terminal conferral — observed via the
+//      pure-config settings write → terminal grant — observed via the
 //      session's poll-able state and the single commit call.
 //   2. The cutover surface — enable via POST
 //      /connections/email/grants/inbox/setup + poll, tear down via the
@@ -24,10 +24,10 @@ import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createTestDb } from "../../test/helpers.js";
 import type { MailProvider, RomeMailEvent, RomeMailMessage } from "../../lib/rome-cloud-mail.js";
 import { ConnectionRegistry } from "../registry.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { SetupManager } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
-import type { SetupConferral } from "../setup/types.js";
+import type { SetupGrant } from "../setup/types.js";
 import { autoConnectEmail, makeEmailDescriptor, makeEmailSetup } from "./email.js";
 
 const EMAIL_ADDRESS = "slug@mail.romeos.cc";
@@ -60,12 +60,12 @@ function makeSettingsStore(initial?: Record<string, unknown>) {
 }
 
 describe("makeEmailSetup (coroutine)", () => {
-  it("shows provisioning progress, then confers the provisioned coordinates + email profile", async () => {
+  it("shows provisioning progress, then grants the provisioned coordinates + email profile", async () => {
     const provision = deferred<{ address: string; inboundSecret: string }>();
     const { values, repo } = makeSettingsStore();
     const fn = makeEmailSetup({ provision: () => provision.promise, settings: repo });
     let rowAtCommit: unknown;
-    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {
+    const commit = rs.fn(async (_c: SetupGrant, _s: AbortSignal) => {
       rowAtCommit = values.get("email");
     });
     const session = new SetupSession({ fn, commit });
@@ -92,7 +92,7 @@ describe("makeEmailSetup (coroutine)", () => {
       },
     });
 
-    // The settings row is pure config, and it landed BEFORE the conferral (the
+    // The settings row is pure config, and it landed BEFORE the grant (the
     // row the fresh adapter epoch reads at start()).
     expect(rowAtCommit).toEqual({ enabled: true });
     expect(values.get("email")).toEqual({ enabled: true });
@@ -223,47 +223,48 @@ function makeSetupApp() {
     inboundSecret: EMAIL_SECRET,
   }));
   // Fault injection at the persistence seam: while armed, the ledger's
-  // writeGrant (the credential write inside `confer`'s terminal transaction)
-  // throws, so the whole conferral transaction rolls back AFTER provisioning
+  // writeGrant (the credential write inside `grant`'s terminal transaction)
+  // throws, so the whole grant transaction rolls back AFTER provisioning
   // succeeded — the placeholder mint reverts with it.
   let grantWriteFailures = 0;
-  const realLedger = new DrizzleGrantLedger(testDb);
+  const realLedger = new DrizzleConnectionsRepository(testDb);
   const ledger = new Proxy(realLedger, {
     get(target, prop, receiver) {
-      if (prop === "writeGrant") {
-        return (...args: Parameters<DrizzleGrantLedger["writeGrant"]>) => {
-          if (grantWriteFailures > 0) {
+      if (prop === "save") {
+        return (...args: Parameters<DrizzleConnectionsRepository["save"]>) => {
+          if (grantWriteFailures > 0 && args[1].grant.state !== "unauthorized") {
             grantWriteFailures--;
-            throw new Error("ledger write failed (injected)");
+            throw new Error("store write failed (injected)");
           }
-          return target.writeGrant(...args);
+          return target.save(...args);
         };
       }
       const value = Reflect.get(target, prop, receiver);
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
-  const registry = new ConnectionRegistry({ ledger });
-  const personMappingRepo = {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [],
-  } as unknown as ApiDeps["personMappingRepo"];
+  const registry = new ConnectionRegistry({ repository: ledger });
+  const peopleRepo = {
+    byAccount: async () => null,
+    isDismissed: async () => false,
+    byBondLevel: async () => [],
+  } as unknown as ApiDeps["peopleRepo"];
   registry.register(
     makeEmailDescriptor({
       provider: makeMailProvider(provisionMock),
       settingsRepo,
-      personMappingRepo,
+      peopleRepo,
       ownerEmailResolver: async () => undefined,
     }),
   );
-  const setupManager = new SetupManager({ registry, personMappingRepo });
+  const setupManager = new SetupManager({ registry, peopleRepo });
   const deps = {
     settingsRepo,
     connectionRegistry: registry,
     setupManager,
     db: testDb,
     approvalsRepo: new ApprovalsRepository(testDb),
-    personMappingRepo,
+    peopleRepo,
   } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
   return {
@@ -295,7 +296,7 @@ async function runSetup(app: Hono, idOrKind = "email") {
 }
 
 describe("Email cutover — generic setup routes + registry-native teardown", () => {
-  it("enables end-to-end: provisions, confers the inbox grant, unlocks Talk, delivers signed mail — no credential in settings", async () => {
+  it("enables end-to-end: provisions, grants the inbox grant, unlocks Talk, delivers signed mail — no credential in settings", async () => {
     const { app, registry, settingsRepo, provisionMock } = makeSetupApp();
 
     const { state } = await runSetup(app);
@@ -304,7 +305,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
 
     const conn = registry.find("email")[0];
     expect(conn.auth.grants().inbox).toBe("authorized");
-    expect(conn.isUnlocked("talk")).toBe(true);
+    expect(conn.isUnlocked("chat")).toBe(true);
 
     // The provisioned address renders from the grant profile.
     const list = await app.request("/connections");
@@ -335,7 +336,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     expect(received).toHaveLength(1);
   });
 
-  it("registry-native DELETE tears down the grant while guardianEmail config survives; a fresh setup re-provisions", async () => {
+  it("disconnecting ends the connection while guardianEmail config survives; a fresh setup re-provisions", async () => {
     const { app, registry, settingsRepo, provisionMock } = makeSetupApp();
     // A configured guardian address predates the connect (e.g. adapter
     // self-heal) — the lifecycle rule says it must ride out revoke.
@@ -350,24 +351,26 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
       headers: SAME_ORIGIN,
     });
     expect(del.status).toBe(200);
-    expect(conn.auth.grants().inbox).toBe("unauthorized");
-    expect(conn.isUnlocked("talk")).toBe(false);
+    expect(registry.find("email")).toHaveLength(0);
+    expect(conn.isUnlocked("chat")).toBe(false);
     // guardianEmail rides the settings row, which the teardown never touches.
     expect(await settingsRepo.get("email")).toEqual({
       enabled: true,
       guardianEmail: "g@example.com",
     });
 
-    // Re-enable → provision runs AGAIN → a fresh working inbox on the SAME row.
-    const { state } = await runSetup(app, conn.id);
+    // Connect again → provision runs AGAIN → a fresh working inbox on a new
+    // connection.
+    const { state } = await runSetup(app);
     expect(state.status).toBe("done");
     expect(provisionMock).toHaveBeenCalledTimes(2);
-    expect(registry.find("email")).toHaveLength(1);
-    expect(conn.auth.grants().inbox).toBe("authorized");
-    expect(conn.isUnlocked("talk")).toBe(true);
+    const [again] = registry.find("email");
+    expect(again.id).not.toBe(conn.id);
+    expect(again.auth.grants().inbox).toBe("authorized");
+    expect(again.isUnlocked("chat")).toBe(true);
   });
 
-  it("a failed conferral fails the setup (grant stays unauthorized); a retry converges", async () => {
+  it("a failed grant fails the setup (grant stays unauthorized); a retry converges", async () => {
     const { app, registry, failNextGrantWrite } = makeSetupApp();
 
     failNextGrantWrite();
@@ -375,21 +378,21 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     expect(failed.state.status).toBe("failed");
     const conn = registry.find("email")[0];
     expect(conn?.auth.grants().inbox ?? "unauthorized").toBe("unauthorized");
-    expect(conn?.isUnlocked("talk") ?? false).toBe(false);
+    expect(conn?.isUnlocked("chat") ?? false).toBe(false);
 
     // The failed setup is terminal, so the next start begins fresh and lands.
     const retried = await runSetup(app);
     expect(retried.state.status).toBe("done");
     const after = registry.find("email")[0];
     expect(after.auth.grants().inbox).toBe("authorized");
-    expect(after.isUnlocked("talk")).toBe(true);
+    expect(after.isUnlocked("chat")).toBe(true);
   });
 });
 
 describe("autoConnectEmail", () => {
   const inbox = { address: EMAIL_ADDRESS, inboundSecret: EMAIL_SECRET };
 
-  it("provisions and confers the inbox grant when no email connection exists", async () => {
+  it("provisions and grants the inbox grant when no email connection exists", async () => {
     const { registry, settingsRepo } = makeSetupApp();
     const provision = rs.fn(async () => inbox);
 
@@ -399,11 +402,11 @@ describe("autoConnectEmail", () => {
     const conns = registry.find("email");
     expect(conns).toHaveLength(1);
     expect(conns[0].auth.grants().inbox).toBe("authorized");
-    expect(conns[0].isUnlocked("talk")).toBe(true);
+    expect(conns[0].isUnlocked("chat")).toBe(true);
     expect(await settingsRepo.get("email")).toEqual({ enabled: true });
   });
 
-  it("leaves a revoked connection alone and provisions nothing", async () => {
+  it("never reconnects email the guardian disconnected", async () => {
     const { app, registry, settingsRepo } = makeSetupApp();
     await runSetup(app);
     const conn = registry.find("email")[0];
@@ -416,8 +419,40 @@ describe("autoConnectEmail", () => {
     expect(await autoConnectEmail({ registry, provision, settings: settingsRepo })).toBe(false);
 
     expect(provision).not.toHaveBeenCalled();
-    expect(registry.find("email")).toHaveLength(1);
-    expect(conn.auth.grants().inbox).toBe("unauthorized");
+    expect(registry.find("email")).toHaveLength(0);
+  });
+
+  it("never reconnects email the guardian removed, though no connection is left", async () => {
+    const { app, registry, settingsRepo } = makeSetupApp();
+    await runSetup(app);
+    const conn = registry.find("email")[0];
+    const del = await app.request(`/connections/${conn.id}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+    expect(del.status).toBe(200);
+    expect(registry.find("email")).toHaveLength(0);
+    const provision = rs.fn(async () => inbox);
+
+    expect(await autoConnectEmail({ registry, provision, settings: settingsRepo })).toBe(false);
+
+    expect(provision).not.toHaveBeenCalled();
+    expect(registry.find("email")).toHaveLength(0);
+  });
+
+  it("connects on a later call after a failed provision", async () => {
+    const { registry, settingsRepo } = makeSetupApp();
+    const failing = async (): Promise<typeof inbox> => {
+      throw new Error("Rome Cloud mail API /api/instance/mail/provision failed (502)");
+    };
+    await expect(
+      autoConnectEmail({ registry, provision: failing, settings: settingsRepo }),
+    ).rejects.toThrow("failed (502)");
+
+    expect(
+      await autoConnectEmail({ registry, provision: async () => inbox, settings: settingsRepo }),
+    ).toBe(true);
+    expect(registry.find("email")[0].auth.grants().inbox).toBe("authorized");
   });
 
   it("yields to a Connect click that commits while the provision is in flight", async () => {
@@ -435,6 +470,28 @@ describe("autoConnectEmail", () => {
 
     expect(await auto).toBe(false);
     expect(registry.find("email")).toHaveLength(1);
+  });
+
+  it("never reconnects email the guardian connected and removed while the provision was in flight", async () => {
+    const { app, registry, settingsRepo } = makeSetupApp();
+    const provision = deferred<{ address: string; inboundSecret: string }>();
+    const auto = autoConnectEmail({
+      registry,
+      provision: () => provision.promise,
+      settings: settingsRepo,
+    });
+
+    await runSetup(app);
+    const conn = registry.find("email")[0];
+    const del = await app.request(`/connections/${conn.id}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+    expect(del.status).toBe(200);
+    provision.resolve(inbox);
+
+    expect(await auto).toBe(false);
+    expect(registry.find("email")).toHaveLength(0);
   });
 
   it("rejects on a provision error and leaves no connection behind", async () => {

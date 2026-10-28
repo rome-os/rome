@@ -3,6 +3,7 @@ import {
   describeEvent,
   describeOutcome,
   describeSchedule,
+  describeTrigger,
   type ScheduleTrigger,
 } from "./routine-language";
 
@@ -71,5 +72,16 @@ describe("describeEvent", () => {
     expect(
       describeEvent({ type: "event-bus", eventName: "provider:event:github.pull_request" }),
     ).toBe("the github pull request event happens");
+  });
+});
+
+describe("describeTrigger for a one-shot event wait", () => {
+  it("says it fires the next time, not whenever", () => {
+    expect(describeTrigger({ type: "event-bus", eventName: "ci.done", once: true })).toBe(
+      "The next time the ci done event happens",
+    );
+    expect(describeTrigger({ type: "event-bus", eventName: "ci.done" })).toBe(
+      "Whenever the ci done event happens",
+    );
   });
 });

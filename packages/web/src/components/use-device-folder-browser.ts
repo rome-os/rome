@@ -4,7 +4,7 @@ import type {
   DeviceFilesResponse,
   DeviceList,
 } from "@rome/api-types/devices";
-import { ChatApiError, listDeviceFiles, listDevices } from "@/lib/chat-api";
+import { ChatApiError, listDeviceFiles } from "@/lib/chat-api";
 
 export type PickerDevice = DeviceList["devices"][number];
 
@@ -27,44 +27,26 @@ function errorCode(error: unknown): DeviceFilesErrorCode {
 }
 
 /**
- * Device list and folder browsing for the project selector. The list probes
- * no device: opening one is its probe. Folders load one `fs.list` at a time,
- * and a newer request discards the answer of an older one.
+ * Folder browsing for the project selector. Opening a device is its only
+ * probe. Folders load one `fs.list` at a time, and a newer request discards
+ * the answer of an older one.
  */
-export function useDeviceFolderBrowser(enabled: boolean, menuOpen: boolean) {
-  const [devices, setDevices] = useState<PickerDevice[]>([]);
+export function useDeviceFolderBrowser(menuOpen: boolean) {
   const [browse, setBrowse] = useState<DeviceBrowse | null>(null);
   // A device that answered offline or upgrade_required stays disabled until
-  // the menu reopens and reloads the list.
+  // the menu reopens.
   const [deviceErrorById, setDeviceErrorById] = useState<Record<string, DeviceFilesErrorCode>>({});
   const homeById = useRef(new Map<string, string>());
   const request = useRef<AbortController | null>(null);
-  const loaded = useRef(false);
 
   useEffect(() => {
-    if (menuOpen) return;
+    if (menuOpen) {
+      setDeviceErrorById({});
+      return;
+    }
     request.current?.abort();
     setBrowse(null);
   }, [menuOpen]);
-
-  // Loads once on mount, so the menu opens on the right level, and again on
-  // every open, so the list is fresh.
-  useEffect(() => {
-    if (!enabled || (!menuOpen && loaded.current)) return;
-    loaded.current = true;
-    let live = true;
-    if (menuOpen) setDeviceErrorById({});
-    listDevices()
-      .then((list) => {
-        if (live) setDevices(list.devices);
-      })
-      .catch(() => {
-        if (live) setDevices([]);
-      });
-    return () => {
-      live = false;
-    };
-  }, [enabled, menuOpen]);
 
   const open = useCallback(async (device: PickerDevice, path?: string) => {
     request.current?.abort();
@@ -97,7 +79,6 @@ export function useDeviceFolderBrowser(enabled: boolean, menuOpen: boolean) {
   }, []);
 
   return {
-    devices,
     browse,
     deviceErrorById,
     homeOf: (deviceId: string) => homeById.current.get(deviceId) ?? null,

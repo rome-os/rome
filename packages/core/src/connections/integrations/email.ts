@@ -15,7 +15,7 @@
 //   - `ingestInbound`'s local HMAC verification fails (`bad_signature`) → the
 //     inboundSecret we hold no longer matches what Rome Cloud is signing with —
 //     a refused credential → CredentialRejected{ grant: "inbox" } → runtime
-//     renews once (route-driven ⇒ immediate re-confer), then degrades.
+//     renews once (route-driven ⇒ immediate fix), then degrades.
 //   - `adapter.start()` rejects → Disconnected → runtime backs off and
 //     rebuilds. start() does NOT provision: the registry only ever
 //     builds this adapter from complete grant material, so a start-time failure
@@ -24,12 +24,13 @@
 //     automatically.
 //
 // Provisioning is setup-driven: the `inbox` grant carries a
-// near-degenerate conferral setup — the guardian's Connect click confirms, the
+// near-degenerate setup — the guardian's Connect click confirms, the
 // coroutine provisions the `<slug>@romeos.cc` inbox via
 // `MailProvider.provision()` (get-or-create) inside `ctx.step`, and the
-// terminal conferral is the single ledger write. No credential ever touches the
-// settings table, so `confer()` here throws (see cross-stage notes). The first
-// Rome Cloud sign-in makes the same write without the click (`autoConnectEmail`).
+// terminal grant is the single ledger write. No credential ever touches the
+// settings table, so `obtain()` here throws (see cross-stage notes). The first
+// Rome Cloud sign-in, and the first boot of an older seat that never had email,
+// make the same write without the click (`autoConnectEmail`).
 
 import type { TalkFeatures } from "../types.js";
 import {
@@ -37,7 +38,7 @@ import {
   EmailAdapter,
   type EmailInboxCoordinates,
 } from "../../channels/email.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
 import { z } from "zod";
@@ -84,14 +85,14 @@ export function reviveEmailProfile(record: ProfileRecord): ProfileDisplay {
 
 /** Parse the provisioned address into the `inbox` grant profile — the pure
  *  non-secret identity recorded alongside the credential in the SAME
- *  `importCredential` update. The connect route calls this with the
+ *  grant write. The connect route calls this with the
  *  freshly provisioned address; a wrong-typed value throws (fail-closed). */
 export function emailGrantProfile(address: string): EmailGrantProfile {
   return emailGrantProfileSchema.parse({ address });
 }
 
 /** The `inbox` grant material (grant table): exactly the
- *  Rome Cloud-provisioned coordinates the connect route confers. `guardianEmail`
+ *  Rome Cloud-provisioned coordinates the connect route grants. `guardianEmail`
  *  is NOT here — it is durable settings config that survives revoke, sourced
  *  by the adapter from the settings row. */
 export interface EmailInboxMaterial {
@@ -107,7 +108,7 @@ export interface EmailInboxMaterial {
 export interface EmailDescriptorDeps {
   provider: MailProvider;
   settingsRepo: SettingsRepository;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
   /** Defaults to the whoami lookup (see EmailAdapter). Injectable for
    *  tests and for the descriptor-factory call site to share one resolver. */
   ownerEmailResolver?: () => Promise<string | undefined>;
@@ -123,19 +124,19 @@ export interface EmailDescriptorDeps {
 }
 
 /**
- * The `inbox` grant scheme. Conferral is setup-driven: the generic
+ * The `inbox` grant scheme. Grant is setup-driven: the generic
  * setup surface pumps `makeEmailSetup` and performs the terminal
- * `importCredential` — so `confer()` throws; `renew()` always answers
- * "re-confer" (a refused/rotated secret needs fresh provisioning, not a
+ * grant — so the scheme's `obtain()` throws; `renew()` always answers
+ * "needs-fix" (a refused/rotated secret needs fresh provisioning, not a
  * headless renewal).
  */
 function emailInboxScheme(): AuthScheme {
   return {
-    async confer(): Promise<Credential> {
-      throw new Error("conferral driven by the connect setup");
+    async obtain(): Promise<Credential> {
+      throw new Error("grant driven by the connect setup");
     },
-    async renew(): Promise<Credential | "re-confer"> {
-      return "re-confer";
+    async renew(): Promise<Credential | "needs-fix"> {
+      return "needs-fix";
     },
   };
 }
@@ -148,12 +149,12 @@ export interface EmailSetupSettings {
 }
 
 /** Write the pure-config settings row `{ enabled: true }` for a freshly
- *  provisioned inbox and return its terminal conferral. Call it BEFORE the
- *  conferral is committed: the epoch build that commit triggers starts the
+ *  provisioned inbox and return its terminal grant. Call it BEFORE the
+ *  grant is committed: the epoch build that commit triggers starts the
  *  adapter, which reads this row. `guardianEmail` survives (amendment 2), and
  *  stale pre-4c credential fields are stripped so the row never carries a
  *  credential. */
-async function emailConferral(
+async function emailGrant(
   settings: EmailSetupSettings,
   inbox: EmailInboxMaterial,
 ): Promise<{ credential: Credential; profile: EmailGrantProfile }> {
@@ -170,16 +171,16 @@ async function emailConferral(
 }
 
 /**
- * Build the Email conferral setup. Near-degenerate: the
+ * Build the Email setup. Near-degenerate: the
  * guardian's Connect click is the confirmation, so the coroutine is linear:
  *   1. show the provisioning progress view,
  *   2. `ctx.step("provision")` — the Rome Cloud mail provision (get-or-create;
  *      a cancel interrupts the wait and leaves zero durable state),
- *   3. persist the pure-config settings row (see `emailConferral`),
- *   4. return the terminal conferral: the provisioned coordinates as the
+ *   3. persist the pure-config settings row (see `emailGrant`),
+ *   4. return the terminal grant: the provisioned coordinates as the
  *      `inbox` material + the address as the grant profile.
  *
- * The old connect route compensated the config write when its conferral threw;
+ * The old connect route compensated the config write when its grant threw;
  * this setup deliberately doesn't. `enabled: true` over no grant is benign and
  * ordinary post-cutover (the registry-native teardown never touches the row
  * either): pure-config rows hydrate nothing at boot, adapters start only from
@@ -196,7 +197,7 @@ export function makeEmailSetup(deps: {
       progress: true,
     });
     const inbox = await ctx.step("provision", () => deps.provision());
-    const { credential, profile } = await emailConferral(deps.settings, inbox);
+    const { credential, profile } = await emailGrant(deps.settings, inbox);
     return {
       credential,
       profile,
@@ -213,7 +214,7 @@ export function makeEmailSetup(deps: {
 export interface EmailAutoConnectRegistry {
   find(connectionKind: string): readonly unknown[];
   withGrantSection<T>(connectionKind: string, grant: string, fn: () => Promise<T>): Promise<T>;
-  confer(
+  giveGrant(
     connectionKind: string,
     connectionId: string | undefined,
     grant: string,
@@ -224,26 +225,34 @@ export interface EmailAutoConnectRegistry {
 
 /**
  * Connect email without the guardian's Connect click: provision the inbox and
- * confer the `inbox` grant, the same terminal write the setup makes.
+ * grant the `inbox` grant, the same terminal write the setup makes.
  *
- * Resolves `false` and provisions nothing when any email connection exists,
- * whatever its grant state, so a connection the guardian set up or revoked is
- * never touched. Resolves `true` once the grant is conferred. Rejects when the
- * provision or the conferral fails; the guardian can still connect by hand.
+ * Resolves `false` and provisions nothing when the instance has ever had email:
+ * an email connection exists in any grant state, or the email settings row
+ * exists. Every grant writes that row and nothing deletes it, so it outlives
+ * a connection the guardian disconnected, and a disconnected one is never
+ * reconnected. Resolves `true` once the grant is granted. Rejects when
+ * the provision or the grant fails. A failed provision writes nothing, so a
+ * later call retries; a failed grant has already written the row, so only
+ * the guardian's Connect click retries it.
  */
 export async function autoConnectEmail(deps: {
   registry: EmailAutoConnectRegistry;
   provision: () => Promise<EmailInboxMaterial>;
   settings: EmailSetupSettings;
 }): Promise<boolean> {
-  if (deps.registry.find("email").length > 0) return false;
+  const hasHadEmail = async () =>
+    deps.registry.find("email").length > 0 ||
+    (await deps.settings.get(EMAIL_SETTINGS_KEY)) !== null;
+  if (await hasHadEmail()) return false;
   const inbox = await deps.provision();
   return deps.registry.withGrantSection("email", "inbox", async () => {
-    // The provision ran outside the section, so a Connect click can have
-    // committed meanwhile. Re-check under the section the setup commits in.
-    if (deps.registry.find("email").length > 0) return false;
-    const { credential, profile } = await emailConferral(deps.settings, inbox);
-    await deps.registry.confer("email", undefined, "inbox", credential, profile);
+    // The provision ran outside the section, so the guardian can have
+    // connected, and even removed, email meanwhile. Re-check under the section
+    // the setup commits in.
+    if (await hasHadEmail()) return false;
+    const { credential, profile } = await emailGrant(deps.settings, inbox);
+    await deps.registry.giveGrant("email", undefined, "inbox", credential, profile);
     return true;
   });
 }
@@ -265,16 +274,15 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
 
   return {
     connectionKind: "email",
-    reviveProfile: (_grant, record) => reviveEmailProfile(record),
-    auth: {
-      inbox: inboxScheme,
-    },
+    reviveProfile: (record) => reviveEmailProfile(record),
+    accountIdOf: (record) => (typeof record.address === "string" && record.address) || null,
+    grant: "inbox",
+    auth: inboxScheme,
     capabilities: {
       talker: {
-        needs: ["inbox"] as const,
         history: true,
-        build(creds, kit): Talker {
-          const material = creds.inbox.material as unknown as EmailInboxMaterial;
+        build(cred, kit): Talker {
+          const material = cred.material as unknown as EmailInboxMaterial;
           const config: EmailInboxCoordinates = {
             address: material.address,
             inboundSecret: material.inboundSecret,
@@ -282,7 +290,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
           const adapter = new EmailAdapter({
             provider: deps.provider,
             settingsRepo: deps.settingsRepo,
-            personMappingRepo: deps.personMappingRepo,
+            peopleRepo: deps.peopleRepo,
             config,
             ownerEmailResolver: deps.ownerEmailResolver,
           });

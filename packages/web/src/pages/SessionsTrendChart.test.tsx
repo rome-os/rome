@@ -146,6 +146,21 @@ describe("SessionsTrendChart", () => {
     expect(onSeriesSelect).toHaveBeenCalledWith(series[0]);
   });
 
+  it("names model series by the shared model display name", () => {
+    render(
+      <SessionsTrendChart
+        buckets={buckets}
+        series={series}
+        metric="tokens"
+        onSeriesSelect={rs.fn()}
+      />,
+    );
+
+    // A known id reads by its display name; an unknown one stays as recorded.
+    expect(screen.getByRole("button", { name: "Filter Sessions by Sonnet 5" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Filter Sessions by gpt-5.6" })).toBeTruthy();
+  });
+
   it("keeps an explicit empty state", () => {
     render(<SessionsTrendChart buckets={[]} series={[]} metric="runs" onSeriesSelect={rs.fn()} />);
 

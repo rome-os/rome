@@ -2,19 +2,18 @@
 //
 // The test drives only HTTP and observes only setup states. Everything Rome
 // owns is real: Hono routes, SetupManager/SetupSession, the WhatsApp setup
-// coroutine, and WhatsAppAdapter. The sole fake is the external WhatsApp socket
-// boundary. It models the reported failure: requesting a code before the
-// registration-ready QR event returns a locally generated code, then closes
-// with 401. The public setup must wait for readiness and remain presenting.
+// coroutine, the QR renderer, and WhatsAppAdapter. The sole fake is the
+// external WhatsApp socket boundary, which issues rotating linking QRs and then
+// opens once "scanned".
 
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
 import { WhatsAppAdapter, type WhatsAppSocketFactory } from "../../channels/whatsapp.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import { createTestDb } from "../../test/helpers.js";
-import { DrizzleGrantLedger } from "../ledger-db.js";
+import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { SetupManager } from "../setup/manager.js";
 import type { SetupState } from "../setup/types.js";
@@ -23,22 +22,14 @@ import { createWhatsAppDescriptor } from "./whatsapp.js";
 const SAME_ORIGIN = { "content-type": "application/json", "sec-fetch-site": "same-origin" };
 
 interface FakeWhatsAppSocket {
-  ready: boolean;
+  user?: { id: string };
   emit(event: string, payload: unknown): void;
 }
 
 function fakeSocketFactory(controls: FakeWhatsAppSocket[]): WhatsAppSocketFactory {
   return (() => {
     const handlers = new Map<string, Array<(payload: unknown) => void>>();
-    const control: FakeWhatsAppSocket = {
-      ready: false,
-      emit(event, payload) {
-        for (const handler of handlers.get(event) ?? []) handler(payload);
-      },
-    };
-    controls.push(control);
-
-    return {
+    const socket = {
       ev: {
         on(event: string, handler: (payload: unknown) => void) {
           const listeners = handlers.get(event) ?? [];
@@ -46,29 +37,15 @@ function fakeSocketFactory(controls: FakeWhatsAppSocket[]): WhatsAppSocketFactor
           handlers.set(event, listeners);
         },
       },
-      requestPairingCode: async () => {
-        if (!control.ready) {
-          // Baileys can return its locally generated code before WhatsApp has
-          // accepted the companion-registration state. Reproduce the observed
-          // follow-up rejection at the external socket boundary.
-          setTimeout(() => {
-            control.emit("connection.update", {
-              connection: "close",
-              lastDisconnect: {
-                error: {
-                  message: "Connection Failure",
-                  output: { statusCode: 401 },
-                },
-              },
-            });
-          }, 0);
-        }
-        return "ABCD1234";
-      },
       end: rs.fn(),
       sendMessage: rs.fn(),
-      user: undefined,
+      user: undefined as { id: string } | undefined,
+      emit(event: string, payload: unknown) {
+        for (const handler of handlers.get(event) ?? []) handler(payload);
+      },
     };
+    controls.push(socket);
+    return socket;
   }) as unknown as WhatsAppSocketFactory;
 }
 
@@ -80,7 +57,7 @@ afterEach(() => {
 function harness() {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
   const sockets: FakeWhatsAppSocket[] = [];
   const socketFactory = fakeSocketFactory(sockets);
   registry.register(
@@ -94,11 +71,12 @@ function harness() {
       createAdapter: (authProvider) => new WhatsAppAdapter({ authProvider }, socketFactory),
     }),
   );
-  const personMappingRepo = {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [],
-  } as unknown as PersonMappingRepository;
-  const setupManager = new SetupManager({ registry, personMappingRepo });
+  const peopleRepo = {
+    byAccount: async () => null,
+    isDismissed: async () => false,
+    byBondLevel: async () => [],
+  } as unknown as PeopleRepository;
+  const setupManager = new SetupManager({ registry, peopleRepo });
   const deps = { connectionRegistry: registry, setupManager } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps));
   return { app, sockets };
@@ -110,8 +88,14 @@ async function setupState(app: Hono, cid: string): Promise<SetupState> {
   return ((await response.json()) as { state: SetupState }).state;
 }
 
-describe("WhatsApp generic setup — pairing readiness", () => {
-  it("does not surface a code that WhatsApp immediately rejects before registration is ready", async () => {
+async function presentedQr(app: Hono, cid: string): Promise<string | undefined> {
+  const state = await setupState(app, cid);
+  expect(state.status).toBe("presenting");
+  return state.status === "presenting" ? state.view.qr : undefined;
+}
+
+describe("WhatsApp generic setup — QR linking", () => {
+  it("presents each rotating QR as an image and grants once the phone links", async () => {
     const { app, sockets } = harness();
     const started = await app.request("/connections/whatsapp/grants/session/setup", {
       method: "POST",
@@ -121,43 +105,33 @@ describe("WhatsApp generic setup — pairing readiness", () => {
     expect(started.status).toBe(200);
     const { cid } = (await started.json()) as { cid: string };
 
-    const input = await app.request(`/setups/${cid}/input`, {
-      method: "POST",
-      headers: SAME_ORIGIN,
-      body: JSON.stringify({ answers: { phoneNumber: "14155550134" } }),
-    });
-    expect(input.status).toBe(200);
-
+    // No form to fill: the transient socket starts immediately.
     await rs.waitFor(() => expect(sockets).toHaveLength(1));
-    // Leave a scheduling window in which the old implementation called
-    // requestPairingCode too early and the fake WhatsApp server returned 401.
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(await presentedQr(app, cid)).toBeUndefined();
 
-    sockets[0].ready = true;
-    sockets[0].emit("connection.update", { qr: "registration-ready" });
-
-    await rs.waitFor(
-      async () => {
-        const state = await setupState(app, cid);
-        expect(state.status).toBe("presenting");
-        if (state.status === "presenting") {
-          expect(state.view.body).toContain("ABCD-1234");
-        }
-      },
-      { timeout: 2_000 },
-    );
-
-    // Let any modeled immediate rejection land, then verify the setup remains
-    // on the usable code rather than flipping to the reported failed state.
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    const final = await setupState(app, cid);
-    expect(final.status).toBe("presenting");
-
-    const cancelled = await app.request(`/setups/${cid}/cancel`, {
-      method: "POST",
-      headers: SAME_ORIGIN,
-      body: "{}",
+    sockets[0].emit("connection.update", { qr: "2@first-ref,key,adv" });
+    let first: string | undefined;
+    await rs.waitFor(async () => {
+      first = await presentedQr(app, cid);
+      expect(first).toMatch(/^data:image\/png;base64,/);
     });
-    expect(cancelled.status).toBe(200);
+
+    sockets[0].emit("connection.update", { qr: "2@second-ref,key,adv" });
+    await rs.waitFor(async () => {
+      const second = await presentedQr(app, cid);
+      expect(second).toMatch(/^data:image\/png;base64,/);
+      expect(second).not.toBe(first);
+    });
+
+    // The phone scans: WhatsApp opens the session as the linked account.
+    sockets[0].user = { id: "14155550134:7@s.whatsapp.net" };
+    sockets[0].emit("connection.update", { connection: "open" });
+    await rs.waitFor(async () => {
+      const state = await setupState(app, cid);
+      expect(state.status).toBe("done");
+      if (state.status === "done") {
+        expect(state.grant.summary?.body?.[0]).toContain("+14155550134");
+      }
+    });
   });
 });

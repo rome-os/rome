@@ -69,6 +69,12 @@ export interface AgentConfig {
    * session (no provider query — nothing to resume or bill).
    */
   codeBacked?: boolean;
+  /** Per-field overrides of the chat's session policy. See `resolveSessionPolicy`. */
+  policy?: {
+    finalText?: "deliver" | "private";
+    autoTitle?: boolean;
+    loadMemory?: boolean;
+  };
 }
 
 export interface AgentSession {
@@ -82,27 +88,6 @@ export interface AgentSession {
   createdAt: Date;
   lastActiveAt: Date;
   status: "active" | "completed" | "error";
-}
-
-/**
- * A person and the accounts linked to them.
- *
- * `channelMappings` keeps the table's and the wire's name — a channel mapping is
- * a [link](docs/concepts/people.md#link), and `channelUserId` is the account's
- * own [address](docs/concepts/people.md#address) — because
- * `@rome-os/app-runtime` publishes the field to apps.
- */
-export interface PersonMapping {
-  id: string;
-  displayName: string;
-  channelMappings: {
-    channel: string;
-    channelUserId: string;
-  }[];
-  bondLevel: "guardian" | "inner-circle" | "acquaintance" | "other";
-  profilePath?: string;
-  approved: boolean;
-  createdAt: Date;
 }
 
 export interface Policy {

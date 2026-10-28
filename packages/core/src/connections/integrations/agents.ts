@@ -144,17 +144,17 @@ export function makeAgentsSetup(client: AgentMessagingClient): SetupFn {
 
 function agentsScheme(client: AgentMessagingClient): AuthScheme {
   return {
-    async confer(): Promise<Credential> {
-      throw new Error("conferral driven by the connect setup");
+    async obtain(): Promise<Credential> {
+      throw new Error("grant driven by the connect setup");
     },
     // The instance token is the real credential and Cloud renews nothing here.
     // A token Cloud still refuses needs the guardian, so renewal only confirms
     // it works; returning it unchanged would rebuild a talker that faults again.
-    async renew(cred: Credential): Promise<Credential | "re-confer"> {
+    async renew(cred: Credential): Promise<Credential | "needs-fix"> {
       try {
         await client.agents();
       } catch (err) {
-        if (isRejectedToken(err)) return "re-confer";
+        if (isRejectedToken(err)) return "needs-fix";
       }
       return cred;
     },
@@ -293,11 +293,13 @@ export function makeAgentsDescriptor(
 ): ConnectionDescriptor {
   return {
     connectionKind: AGENTS_KIND,
-    reviveProfile: (_grant, record) => reviveAgentsProfile(record),
-    auth: { cloud: agentsScheme(client) },
+    reviveProfile: (record) => reviveAgentsProfile(record),
+    // The agent Rome Cloud assigned this Rome.
+    accountIdOf: (record) => (typeof record.agentId === "string" && record.agentId) || null,
+    grant: "cloud",
+    auth: agentsScheme(client),
     capabilities: {
       talker: {
-        needs: ["cloud"] as const,
         build: () => createAgentsTalker(client),
       },
     },

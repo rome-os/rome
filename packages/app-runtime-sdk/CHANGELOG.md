@@ -1,5 +1,53 @@
 # @rome-os/app-runtime
 
+## [0.9.3](https://github.com/rome-os/rome/compare/app-runtime-v0.9.2...app-runtime-v0.9.3) (2026-10-27)
+
+
+### Features
+
+* **core:** key People links by platform ([#1459](https://github.com/rome-os/rome/issues/1459)) ([93401a8](https://github.com/rome-os/rome/commit/93401a8cb659d4d75d8889b1929d3abb7090298a))
+
+## [0.9.2](https://github.com/rome-os/rome/compare/app-runtime-v0.9.1...app-runtime-v0.9.2) (2026-10-27)
+
+
+### Features
+
+* **chat:** close the composer while a card is the only way to answer ([#1275](https://github.com/rome-os/rome/issues/1275)) ([dbd1fea](https://github.com/rome-os/rome/commit/dbd1feae47b3196286cc4f6831c89694b9a1c518))
+
+## [0.9.1](https://github.com/rome-os/rome/compare/app-runtime-v0.9.0...app-runtime-v0.9.1) (2026-10-27)
+
+
+### Features
+
+* **app-runtime:** name Rome's accounts by platform and id ([#1415](https://github.com/rome-os/rome/issues/1415)) ([65c7e1a](https://github.com/rome-os/rome/commit/65c7e1a2d8ef998bdd99ba7fe05a73ca9dde81d9))
+
+## [0.9.0](https://github.com/rome-os/rome/compare/app-runtime-v0.8.2...app-runtime-v0.9.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **app-runtime:** add restricted connection access
+
+### Features
+
+* **app-runtime:** add restricted connection access ([d90d3e4](https://github.com/rome-os/rome/commit/d90d3e4f7a007d96ae172200bda270d5d9f58e51))
+* **core:** let an open chat change its model and tell a new thread what it missed ([#1377](https://github.com/rome-os/rome/issues/1377)) ([b278aa9](https://github.com/rome-os/rome/commit/b278aa9839379619f0bc2ab76feb5c110bcd87c0))
+
+## [0.8.2](https://github.com/rome-os/rome/compare/app-runtime-v0.8.1...app-runtime-v0.8.2) (2026-10-24)
+
+
+### Features
+
+* **core:** subscribe to an event's source when defer waits on it ([#1315](https://github.com/rome-os/rome/issues/1315)) ([55cfac3](https://github.com/rome-os/rome/commit/55cfac3eb4155b4826f3078f9aa9a820258b41f3))
+
+## [0.8.1](https://github.com/rome-os/rome/compare/app-runtime-v0.8.0...app-runtime-v0.8.1) (2026-10-23)
+
+
+### Features
+
+* **core:** let defer wake a session when an event arrives ([#1285](https://github.com/rome-os/rome/issues/1285)) ([174a3bc](https://github.com/rome-os/rome/commit/174a3bc519d7ada7095c4667bde6970072f72362))
+* let a new chat work in a folder on a connected device ([#1267](https://github.com/rome-os/rome/issues/1267)) ([c327426](https://github.com/rome-os/rome/commit/c3274267262499ebb2a8a9354b962e74c6a00c36))
+
 ## [0.8.0](https://github.com/rome-os/rome/compare/app-runtime-v0.7.9...app-runtime-v0.8.0) (2026-10-21)
 
 

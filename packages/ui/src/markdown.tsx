@@ -10,6 +10,7 @@ import {
   type ComponentPropsWithoutRef,
 } from "react";
 import {
+  defaultRehypePlugins,
   defaultRemarkPlugins,
   Streamdown,
   type Components,
@@ -178,6 +179,33 @@ function remarkDropTrailingEmptyListItems() {
 const REMARK_PLUGINS: NonNullable<StreamdownProps["remarkPlugins"]> = [
   ...Object.values(defaultRemarkPlugins),
   remarkDropTrailingEmptyListItems,
+];
+
+interface HastNode {
+  type: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+}
+
+function deferImages(node: HastNode): void {
+  if (node.type === "element" && node.tagName === "img") {
+    node.properties = { ...node.properties, loading: "lazy", decoding: "async" };
+  }
+  for (const child of node.children ?? []) deferImages(child);
+}
+
+// A message with many images would otherwise fetch every one when it mounts,
+// including those far below the viewport. Named, since Streamdown keys its
+// shared processor cache by plugin name.
+function rehypeDeferImages() {
+  return deferImages;
+}
+
+// Last, so the sanitizer that runs before it cannot strip what it adds.
+const REHYPE_PLUGINS: NonNullable<StreamdownProps["rehypePlugins"]> = [
+  ...Object.values(defaultRehypePlugins),
+  rehypeDeferImages,
 ];
 
 const DEFAULT_TOKENS: MarkdownThemeTokens = {
@@ -474,6 +502,7 @@ function MarkdownImpl({
         lineNumbers={lineNumbers}
         mermaid={mermaidOptions}
         plugins={plugins}
+        rehypePlugins={REHYPE_PLUGINS}
         remarkPlugins={REMARK_PLUGINS}
         // Streamdown caps a table at 300px by default and scrolls the rest
         // inside the table. Rome sets a table as text in the column, so it

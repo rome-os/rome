@@ -37,4 +37,15 @@ describe("parseEntries", () => {
       { ...card, preview: { kind: "generic", title: "T", summary: "S" } },
     ]);
   });
+
+  it("keeps a reply part and drops one without its quote", () => {
+    const reply = { type: "reply_to", messageId: "m1", author: "agent", name: "Rome", text: "Hi" };
+    const content = JSON.stringify([
+      reply,
+      { type: "reply_to", messageId: "m2", author: "agent" },
+      { type: "text", content: "answer" },
+    ]);
+
+    expect(parseEntries(content)).toEqual([reply, { type: "text", content: "answer" }]);
+  });
 });

@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatDescriptor, ChatId, ChatRef } from "@rome-os/app-runtime";
 import type { TalkDirectory } from "../connections/types.js";
 import { createTestDb, kindChannelOf, type TestDb } from "../test/helpers.js";
-import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
+import { tokenPaste } from "../connections/schemes.js";
 import type { Channels } from "../channels/channel.js";
 import { connectionPorts } from "../channels/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
@@ -17,11 +18,11 @@ function directoryDescriptor(
 ): ConnectionDescriptor {
   return {
     connectionKind: service,
-    auth: {},
+    grant: "bot",
+    auth: tokenPaste({ label: "token", validate: async () => {} }),
     capabilities: {
       talker: {
-        needs: [],
-        build(_creds, kit): Talker {
+        build(_cred, kit): Talker {
           const directory: TalkDirectory = {
             async listConversations(input) {
               const all = conversations(kit.connectionId).filter(
@@ -47,6 +48,16 @@ function directoryDescriptor(
   };
 }
 
+/** Connects `kind` and gives it access, so its Talk is live. */
+async function connectLive(registry: ConnectionRegistry, kind: string) {
+  const connection = await registry.connect(kind);
+  await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+    material: { token: "token" },
+    expiresAt: "never",
+  });
+  return connection;
+}
+
 /** The channels the registry's Talks back, built by the production ports,
  *  once per service as `channelList` builds them. */
 function channelsOver(registry: ConnectionRegistry): () => Channels {
@@ -67,7 +78,9 @@ describe("ChatSettingsService", () => {
 
   async function setup(onChanged = rs.fn()) {
     testDb = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(
       directoryDescriptor("discord", (connectionId) => [
         {
@@ -91,9 +104,9 @@ describe("ChatSettingsService", () => {
     );
     registry.register(directoryDescriptor("feishu", () => []));
     registry.register(directoryDescriptor("wechat", () => []));
-    const discord = await registry.connect("discord");
-    const feishu = await registry.connect("feishu");
-    const wechat = await registry.connect("wechat");
+    const discord = await connectLive(registry, "discord");
+    const feishu = await connectLive(registry, "feishu");
+    const wechat = await connectLive(registry, "wechat");
     const repository = new ChatSettingsRepository(testDb.db);
     const service = new ChatSettingsService({
       repository,
@@ -483,7 +496,7 @@ describe("ChatSettingsService", () => {
     ).toBe("configured");
 
     await registry.stopAll();
-    expect(discord.isUnlocked("talk")).toBe(false);
+    expect(discord.isUnlocked("chat")).toBe(false);
     await expect(
       service.update({
         ref: parent,
@@ -620,7 +633,9 @@ describe("ChatSettingsService", () => {
 
   it("paginates beyond a bounded live directory first page", async () => {
     testDb = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(
       directoryDescriptor("discord", (connectionId) =>
         Array.from({ length: 5 }, (_, index) => ({
@@ -635,7 +650,7 @@ describe("ChatSettingsService", () => {
         })),
       ),
     );
-    await registry.connect("discord");
+    await connectLive(registry, "discord");
     const service = new ChatSettingsService({
       repository: new ChatSettingsRepository(testDb.db),
       connections: registry,
@@ -662,9 +677,11 @@ describe("ChatSettingsService", () => {
 
   it("hydrates only the requested page and skips persisted native threads early", async () => {
     testDb = createTestDb();
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    const registry = new ConnectionRegistry({
+      repository: new DrizzleConnectionsRepository(testDb.db),
+    });
     registry.register(directoryDescriptor("discord", () => []));
-    const discord = await registry.connect("discord");
+    const discord = await connectLive(registry, "discord");
     const repository = new ChatSettingsRepository(testDb.db);
     const descriptors = Array.from({ length: 5 }, (_, index) => ({
       ref: {

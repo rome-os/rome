@@ -1,6 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatMessage } from "./chat-types";
-import { mergeFetchedChatMessages, orderChatMessages } from "./chat-message-ordering";
+import {
+  mergeFetchedChatMessages,
+  mergeLatestMessagePage,
+  orderChatMessages,
+  startsNewHistory,
+} from "./chat-message-ordering";
 
 function message(
   id: string,
@@ -56,5 +61,60 @@ describe("chat message ordering", () => {
     });
 
     expect(merged.map((item) => item.id)).toEqual(["db-user"]);
+  });
+});
+
+describe("refetching the newest page of a paged chat", () => {
+  const older = [
+    message("o-user", "turn-o", "2026-01-01T00:00:00.000Z", "user"),
+    message("o-assistant", "turn-o", "2026-01-01T00:00:01.000Z"),
+  ];
+  const newest = [
+    message("n-user", "turn-n", "2026-01-01T01:00:00.000Z", "user"),
+    message("n-assistant", "turn-n", "2026-01-01T01:00:01.000Z"),
+  ];
+
+  it("keeps the older pages already loaded", () => {
+    const refetched = [...newest, message("n-recap", "turn-n", "2026-01-01T01:00:02.000Z")];
+
+    const merged = mergeLatestMessagePage([...older, ...newest], refetched);
+
+    expect(merged.map((item) => item.id)).toEqual([
+      "o-user",
+      "o-assistant",
+      "n-user",
+      "n-assistant",
+      "n-recap",
+    ]);
+  });
+
+  it("does not start over when the page overlaps what is loaded", () => {
+    expect(startsNewHistory([...older, ...newest], { messages: newest, hasOlder: true })).toBe(
+      false,
+    );
+  });
+
+  it("does not start over when nothing is loaded yet", () => {
+    expect(startsNewHistory([], { messages: newest, hasOlder: true })).toBe(false);
+  });
+
+  it("does not start over when the page reaches the start of the chat", () => {
+    expect(startsNewHistory(older, { messages: newest, hasOlder: false })).toBe(false);
+  });
+
+  it("starts over when turns between the loaded history and the page were never fetched", () => {
+    expect(startsNewHistory(older, { messages: newest, hasOlder: true })).toBe(true);
+
+    const merged = mergeLatestMessagePage(older, newest, { restart: true });
+
+    expect(merged.map((item) => item.id)).toEqual(["n-user", "n-assistant"]);
+  });
+
+  it("keeps a local message newer than the page when it starts over", () => {
+    const optimistic = message("local-user", null, "2026-01-01T02:00:00.000Z", "user");
+
+    const merged = mergeLatestMessagePage([...older, optimistic], newest, { restart: true });
+
+    expect(merged.map((item) => item.id)).toEqual(["n-user", "n-assistant", "local-user"]);
   });
 });

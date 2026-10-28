@@ -6,18 +6,18 @@
 
 import { describe, expect, it, rs } from "@rstest/core";
 import type { DrizzleTx } from "../../db/index.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupManager, NoSetupError, type SetupRegistry } from "./manager.js";
 import type { SetupFn } from "./types.js";
 
-/** A stand-in transaction handle for the fake registry's `confer` participant. */
+/** A stand-in transaction handle for the fake registry's `giveGrant` participant. */
 const FAKE_TX = {} as unknown as DrizzleTx;
 
 const CRED: Credential = { material: { token: "t" }, expiresAt: "never" };
 
 /** The Discord-shaped setup used across these tests: prompt a token, then
- *  confer credential + profile + guardian mapping. */
+ *  grant credential + profile + guardian mapping. */
 const discordSetup: SetupFn = async (interact) => {
   const { token } = await interact.prompt({
     fields: [{ name: "token", label: "Token", secret: true }],
@@ -32,7 +32,7 @@ const discordSetup: SetupFn = async (interact) => {
 const mkConn = (id: string, service = "discord"): Connection =>
   ({ id, service }) as unknown as Connection;
 
-/** A registry double whose `confer` records the terminal write and runs sections
+/** A registry double whose `grant` records the terminal write and runs sections
  *  inline. `seed` pre-populates existing connections (for addressed-connection
  *  tests). `mint` stands in for the placeholder mint so the tests can assert
  *  whether a connection was created. */
@@ -51,28 +51,27 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
   });
   const descriptor = {
     service: "discord",
+    grant: "bot",
     auth: {
-      bot: {
-        confer: async () => CRED,
-        renew: async () => "re-confer" as const,
-        ...(setup ? { setup } : {}),
-      },
+      obtain: async () => CRED,
+      renew: async () => "needs-fix" as const,
+      ...(setup ? { setup } : {}),
     },
     capabilities: {},
   } as unknown as ConnectionDescriptor;
   const registry: SetupRegistry = {
     getDescriptor: () => descriptor,
     withGrantSection: (_s, _g, fn) => fn(),
-    confer: async (service, connectionId, grant, credential, profile, opts) => {
+    giveGrant: async (service, connectionId, grant, credential, profile, opts) => {
       let conn = connectionId
         ? connected.find((c) => c.id === connectionId)
         : connected.find((c) => c.connectionKind === service);
       if (connectionId && !conn) {
-        throw new Error(`Connection "${connectionId}" no longer exists; setup cannot confer.`);
+        throw new Error(`Connection "${connectionId}" no longer exists; setup cannot grant.`);
       }
       if (!conn) conn = mint(service);
       // The atomic write: record the credential, then run the guardian-mapping
-      // participant exactly as the real `confer` does inside its transaction.
+      // participant exactly as the real `grant` does inside its transaction.
       imports.push({ id: conn.id, grant, credential, profile });
       opts?.inTx?.(FAKE_TX);
       return conn;
@@ -81,15 +80,16 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
   return { registry, imports, connect: mint };
 }
 
-/** A person-mapping repo double; `writeChannelMapping` is the guardian-map sink
- *  (the participant the conferral transaction runs). */
-function fakePersonRepo(writeChannelMapping = rs.fn(() => "id")): PersonMappingRepository {
+/** A People repository double; `linkStated` is the guardian-map sink
+ *  (the participant the grant transaction runs). */
+function fakePersonRepo(linkStated = rs.fn(() => "id")): PeopleRepository {
   return {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [{ id: "guardian", channelMappings: [] }],
-    writeChannelUserId: () => {},
-    writeChannelMapping,
-  } as unknown as PersonMappingRepository;
+    byAccount: async () => null,
+    isDismissed: async () => false,
+    byBondLevel: async () => [{ id: "guardian", links: [] }],
+    readdress: () => {},
+    linkStated,
+  } as unknown as PeopleRepository;
 }
 
 const PLACEHOLDER = { connectionKind: "discord" } as const;
@@ -97,7 +97,7 @@ const PLACEHOLDER = { connectionKind: "discord" } as const;
 describe("SetupManager", () => {
   it("starts a setup and exposes its initial awaiting-input state", async () => {
     const { registry } = fakeRegistry(discordSetup);
-    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     const started = await mgr.start(PLACEHOLDER, "bot");
     expect(started.reattached).toBe(false);
     expect(started.state.status).toBe("awaiting-input");
@@ -107,7 +107,7 @@ describe("SetupManager", () => {
 
   it("re-attaches a duplicate start to the live setup (same cid)", async () => {
     const { registry } = fakeRegistry(discordSetup);
-    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     const first = await mgr.start(PLACEHOLDER, "bot");
     const second = await mgr.start(PLACEHOLDER, "bot");
     expect(second.reattached).toBe(true);
@@ -116,7 +116,7 @@ describe("SetupManager", () => {
 
   it("force-starts a fresh setup, cancelling the prior one", async () => {
     const { registry } = fakeRegistry(discordSetup);
-    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     const first = await mgr.start(PLACEHOLDER, "bot");
     const forced = await mgr.start(PLACEHOLDER, "bot", { force: true });
     expect(forced.cid).not.toBe(first.cid);
@@ -126,10 +126,10 @@ describe("SetupManager", () => {
 
   it("placeholder flow: mints the connection, imports, and maps the guardian", async () => {
     const { registry, imports, connect } = fakeRegistry(discordSetup);
-    const writeChannelMapping = rs.fn(() => "id");
+    const linkStated = rs.fn(() => "id");
     const mgr = new SetupManager({
       registry,
-      personMappingRepo: fakePersonRepo(writeChannelMapping),
+      peopleRepo: fakePersonRepo(linkStated),
     });
     const started = await mgr.start(PLACEHOLDER, "bot");
     const outcome = await mgr.provideInput(started.cid, { token: "abc" })!;
@@ -143,7 +143,11 @@ describe("SetupManager", () => {
         profile: { botUsername: "rome" },
       },
     ]);
-    expect(writeChannelMapping).toHaveBeenCalledWith(FAKE_TX, "guardian", "discord", "guardian-1");
+    expect(linkStated).toHaveBeenCalledWith(
+      { platform: "discord", id: "guardian-1" },
+      "guardian",
+      FAKE_TX,
+    );
   });
 
   it("imports into the ADDRESSED connection, never find()[0]", async () => {
@@ -152,7 +156,7 @@ describe("SetupManager", () => {
       mkConn("conn-A"),
       mkConn("conn-B"),
     ]);
-    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     const started = await mgr.start({ connectionKind: "discord", connectionId: "conn-B" }, "bot");
     expect(mgr.activeFor("conn-B", "bot")).toBe(started.cid);
     await mgr.provideInput(started.cid, { token: "abc" })!;
@@ -162,7 +166,7 @@ describe("SetupManager", () => {
 
   it("fails the setup when the addressed connection has vanished (no resurrection)", async () => {
     const { registry, imports, connect } = fakeRegistry(discordSetup, []);
-    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     const started = await mgr.start({ connectionKind: "discord", connectionId: "gone" }, "bot");
     const outcome = await mgr.provideInput(started.cid, { token: "abc" })!;
     expect(outcome.state.status).toBe("failed");
@@ -182,7 +186,7 @@ describe("SetupManager", () => {
       await gate;
       return fn();
     };
-    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     const started = await mgr.start(PLACEHOLDER, "bot");
     const input = mgr.provideInput(started.cid, { token: "abc" })!;
     await rs.waitFor(() => expect(entered).toHaveBeenCalled());
@@ -196,7 +200,7 @@ describe("SetupManager", () => {
 
   it("begins fresh after an explicit cancel", async () => {
     const { registry } = fakeRegistry(discordSetup);
-    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     const first = await mgr.start(PLACEHOLDER, "bot");
     await mgr.cancel(first.cid);
     expect(mgr.activeFor("discord", "bot")).toBeNull();
@@ -207,7 +211,7 @@ describe("SetupManager", () => {
 
   it("cancelActive cancels a live setup for the addressed grant", async () => {
     const { registry } = fakeRegistry(discordSetup, [mkConn("conn-A")]);
-    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     const started = await mgr.start({ connectionKind: "discord", connectionId: "conn-A" }, "bot");
     await mgr.cancelActive("conn-A", "bot");
     expect(mgr.state(started.cid)).toEqual({ status: "cancelled" });
@@ -218,7 +222,7 @@ describe("SetupManager", () => {
 
   it("serializes concurrent forced starts so exactly one setup stays active", async () => {
     const { registry } = fakeRegistry(discordSetup);
-    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     const first = await mgr.start(PLACEHOLDER, "bot");
 
     // Two forced starts fired concurrently must not both survive.
@@ -242,7 +246,7 @@ describe("SetupManager", () => {
 
   it("throws NoSetupError when the grant declares no setup", async () => {
     const { registry } = fakeRegistry(undefined);
-    const mgr = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     await expect(mgr.start(PLACEHOLDER, "bot")).rejects.toBeInstanceOf(NoSetupError);
   });
 });

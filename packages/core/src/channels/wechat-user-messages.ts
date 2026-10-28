@@ -18,7 +18,9 @@ import { sharedRead } from "./account-snapshot.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   channelMessageDetail,
+  heldOn,
   queryLimit,
+  queryPage,
   querySince,
   type AccountMessages,
   type MessageAccount,
@@ -90,7 +92,7 @@ function directAddresses(accounts: readonly MessageAccount[]): string[] {
   return [
     ...new Set(
       accounts
-        .filter((account) => account.channel === WECHAT_USER_CHANNEL)
+        .filter((account) => heldOn(account).includes(WECHAT_USER_CHANNEL))
         .flatMap((account) => account.addresses),
     ),
   ];
@@ -109,15 +111,18 @@ function directAddresses(accounts: readonly MessageAccount[]): string[] {
  */
 export function wechatUserMessages(reader: WechatUserReader): Messages {
   return {
-    async query({ chatId, since, limit }) {
+    async query({ chatId, since, after, limit }) {
       const messages = await reader.messages({
         ...(chatId ? { chatId } : {}),
         ...(since ? { since: querySince(since) } : {}),
+        // After a cursor: up to its second with every tie there, which the
+        // page then settles.
+        ...(after ? { before: new Date(after.timestamp * 1000), includeBoundaryTies: true } : {}),
         limit: queryLimit(limit),
       });
       // The reader answers oldest first, same-second messages included; the
       // port answers newest first.
-      return messages.map(toWechatUserChannelMessage).reverse();
+      return queryPage(messages.map(toWechatUserChannelMessage).reverse(), { after, limit });
     },
     byAccount: wechatUserAccountMessages(reader),
   };

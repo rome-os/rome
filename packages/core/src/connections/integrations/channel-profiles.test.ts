@@ -56,7 +56,7 @@ const CASES: ChannelCase[] = [
     connectionKind: "discord",
     descriptor: makeDiscordDescriptor({
       chatSettings: stub,
-      personMappingRepo: stub,
+      peopleRepo: stub,
       listAgents: () => [],
     }),
     grant: "bot",
@@ -73,7 +73,7 @@ const CASES: ChannelCase[] = [
     connectionKind: "feishu",
     descriptor: createFeishuDescriptor({
       chatSettings: stub,
-      personMappingRepo: stub,
+      peopleRepo: stub,
       listAgents: () => [],
     }),
     grant: "app",
@@ -104,7 +104,7 @@ const CASES: ChannelCase[] = [
     descriptor: makeEmailDescriptor({
       provider: stub,
       settingsRepo: stub,
-      personMappingRepo: stub,
+      peopleRepo: stub,
     }),
     grant: "inbox",
     full: { address: "slug@romeos.cc" },
@@ -140,7 +140,7 @@ const CASES: ChannelCase[] = [
 describe.each(CASES)("$connectionKind descriptor reviveProfile", (c) => {
   it("wires reviveProfile and projects the stored record onto the display slots", () => {
     expect(c.descriptor.reviveProfile).toBeDefined();
-    const display = c.descriptor.reviveProfile?.(c.grant, c.full);
+    const display = c.descriptor.reviveProfile?.(c.full);
     expect(display).toMatchObject(c.expectedDisplay);
     // Service-specific keys (botId, domain, teamId-style ids) never widen the
     // display surface — only the four ProfileDisplay slots exist.
@@ -153,10 +153,10 @@ describe.each(CASES)("$connectionKind descriptor reviveProfile", (c) => {
   });
 
   it("keeps a sparse-but-valid record sparse (no thrown or defaulted display)", () => {
-    const display = c.descriptor.reviveProfile?.(c.grant, c.sparse.record);
+    const display = c.descriptor.reviveProfile?.(c.sparse.record);
     expect(display).toMatchObject(c.sparse.expect);
     // An empty record is still valid and fully sparse.
-    const empty = c.descriptor.reviveProfile?.(c.grant, {});
+    const empty = c.descriptor.reviveProfile?.({});
     expect(empty?.displayName).toBeUndefined();
     expect(empty?.handle).toBeUndefined();
     expect(empty?.email).toBeUndefined();
@@ -167,10 +167,8 @@ describe.each(CASES)("$connectionKind descriptor reviveProfile", (c) => {
     // A wrong-typed value on a known field (every full record's first key is a
     // schema string field).
     const [firstKey] = Object.keys(c.full);
-    expect(() => c.descriptor.reviveProfile?.(c.grant, { ...c.full, [firstKey]: 42 })).toThrow();
+    expect(() => c.descriptor.reviveProfile?.({ ...c.full, [firstKey]: 42 })).toThrow();
     // A key outside the service's schema (strict) fails loudly.
-    expect(() =>
-      c.descriptor.reviveProfile?.(c.grant, { ...c.full, unexpectedKey: "x" }),
-    ).toThrow();
+    expect(() => c.descriptor.reviveProfile?.({ ...c.full, unexpectedKey: "x" })).toThrow();
   });
 });

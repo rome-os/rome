@@ -3,7 +3,7 @@
 // each, in channels/ — and the merge over them is timeline.ts's.
 //
 // Also the fold from a person's links to the accounts those stores are read
-// for, since the two are the same question asked of one channel: which
+// for, since the two are the same question asked of one platform: which
 // addresses are one account, and what was said at them.
 //
 // Vocabulary: docs/concepts/people.md.
@@ -12,13 +12,17 @@
 // so a group conversation — addressed by the group rather than by the person —
 // never reaches a person's timeline.
 
+import type { Account } from "@rome-os/app-runtime";
+import { platformOf } from "@rome/api-types/platform";
+import { foldAccounts, type AccountFold, type AddressBooks } from "../channels/account-fold.js";
 import {
-  foldAccounts,
-  type AccountFold,
-  type AddressBooks,
-  type StoredAddress,
-} from "../channels/account-fold.js";
-import { addressBooks, messageStores, type Channels } from "../channels/channel.js";
+  addressBooks,
+  storedOn,
+  type RecordedOn,
+  messageStores,
+  type Channels,
+  type PlatformOfChannel,
+} from "../channels/channel.js";
 import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 import { agentMessages } from "../channels/messages-agent.js";
 import { sentinelLogMessages } from "../channels/messages-sentinel.js";
@@ -51,59 +55,104 @@ export function personMessageStores(deps: {
 }
 
 /**
- * Every account each group of linked addresses is reachable at, with every
- * address the channel folds onto it — one result per group, in the order given.
+ * Every account each group of links is reachable at, with every address the
+ * platform's address book folds onto it — one result per group, in the order
+ * given.
+ *
+ * Each account keeps the platform its link names as `channel`, and is read
+ * under every channel on that platform (`platformOfChannel`, absent the
+ * platform of the connection kind a channel is named after): a message is stored under the channel
+ * it arrived on, and an account hears from Rome on any of Rome's accounts on
+ * its platform, so one timeline holds what was said on all of them.
  *
  * Two links that name two addresses of one account collapse to one account, so
  * a person linked under both a WhatsApp phone JID and its `@lid` form reads one
  * timeline rather than two halves of one.
  *
- * A channel with no address book contributes the link's own address and nothing
- * else, which is all the channel can say about who it can reach.
+ * A platform with no address book contributes the link's own address and
+ * nothing else, which is all Rome can say about who it can reach there.
  *
  * Positional and over every group at once, like `AccountNames.displayNames`
- * next door: each channel's address book costs a full read, so one caller
- * asking about a directory of people must not pay for one read per row.
+ * next door: each address book costs a full read, so one caller asking about a
+ * directory of people must not pay for one read per row.
  */
 export async function timelineAccounts(
-  deps: { channels: Channels },
-  groups: readonly (readonly StoredAddress[])[],
+  deps: { channels: Channels; platformOfChannel?: PlatformOfChannel; recordedOn?: RecordedOn },
+  groups: readonly (readonly Account[])[],
 ): Promise<MessageAccount[][]> {
   const links = groups.flat();
-  const fold = await foldAccounts(booksNamed(deps.channels, links), { stored: links });
-  return groups.map((group) => accountsOf(fold, group));
+  const platformOfChannel = deps.platformOfChannel ?? platformOf;
+  const fold = await foldAccounts(booksNamed(deps.channels, platformOfChannel, links), {
+    stored: links,
+  });
+  const stored = new Map<string, string[]>();
+  const storedUnder = (platform: string) => {
+    let names = stored.get(platform);
+    if (!names) {
+      names = storedOn(deps.channels, platformOfChannel, platform, deps.recordedOn);
+      stored.set(platform, names);
+    }
+    return names;
+  };
+  return groups.map((group) => accountsOf(fold, storedUnder, group));
 }
 
-/** The address books of the channels the links name, and nothing else. An
- *  address book costs a full read, and a channel no link names folds nothing,
- *  so a person on one channel pays for one book rather than for the list. */
-function booksNamed(channels: Channels, links: readonly StoredAddress[]): AddressBooks {
-  const named = new Set(links.map((link) => link.channel));
+/** The address books of the platforms the links name, and nothing else. An
+ *  address book costs a full read, and a platform no link names folds nothing,
+ *  so a person on one platform pays for one book rather than for the list. */
+function booksNamed(
+  channels: Channels,
+  platformOfChannel: PlatformOfChannel,
+  links: readonly Account[],
+): AddressBooks {
+  const named = new Set(links.map((link) => link.platform));
   return Object.fromEntries(
-    Object.entries(addressBooks(channels)).filter(([channel]) => named.has(channel)),
+    Object.entries(addressBooks(channels, platformOfChannel)).filter(([platform]) =>
+      named.has(platform),
+    ),
   );
 }
 
 /** One group's links as the accounts they reach, keyed by the account rather
  *  than by the address a link happened to name, so two links onto one account
- *  are one entry. */
-function accountsOf(fold: AccountFold, links: readonly StoredAddress[]): MessageAccount[] {
-  const byAccount = new Map<string, MessageAccount>();
+ *  are one entry per channel it is stored under (see {@link perChannel}). */
+function accountsOf(
+  fold: AccountFold,
+  storedUnder: (platform: string) => string[],
+  links: readonly Account[],
+): MessageAccount[] {
+  const byAccount = new Map<string, MessageAccount[]>();
   for (const link of links) {
-    const key = fold.key(link.channel, link.channelUserId);
+    const key = fold.key(link.platform, link.id);
     if (byAccount.has(key)) continue;
-    byAccount.set(key, {
-      channel: link.channel,
-      // The link's own address among them, whatever the book says: a channel
-      // that folds nothing onto it is still read at the address the guardian
-      // stored.
-      addresses: [
-        ...new Set([
-          link.channelUserId,
-          ...(fold.accountFor(link.channel, link.channelUserId)?.aliases ?? []),
-        ]),
-      ],
-    });
+    byAccount.set(
+      key,
+      perChannel({
+        channel: link.platform,
+        storedUnder: storedUnder(link.platform),
+        // The link's own address among them, whatever the book says: a
+        // platform that folds nothing onto it is still read at the address the
+        // guardian stored.
+        addresses: [
+          ...new Set([link.id, ...(fold.accountFor(link.platform, link.id)?.aliases ?? [])]),
+        ],
+      }),
+    );
   }
-  return [...byAccount.values()];
+  return [...byAccount.values()].flat();
+}
+
+/**
+ * An account read under several channels as one read per channel.
+ *
+ * A store owns an account's history only as a whole (`assignAccounts`), and
+ * what was said on two of Rome's accounts is stored apart: an old transcript
+ * under a released channel and a recent triage under a live one. Asked as one,
+ * the first store holding either would claim both and drop the other's. Asked
+ * per channel, each channel's history is claimed by its own store and the
+ * timeline merges them, as it merges a person's accounts.
+ */
+export function perChannel(account: MessageAccount): MessageAccount[] {
+  const names = account.storedUnder ?? [account.channel];
+  return names.length <= 1 ? [account] : names.map((name) => ({ ...account, storedUnder: [name] }));
 }

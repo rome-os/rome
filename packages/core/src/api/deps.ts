@@ -2,12 +2,15 @@ import type { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
+import type { ConciergeService } from "../concierge/service.js";
 import type { ActionLoader } from "../actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { OutboxRepository } from "../db/repositories/outbox.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
-import type { Channels } from "../channels/channel.js";
+import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
+import type { Channels, PlatformOfChannel, RecordedOn } from "../channels/channel.js";
+import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { AccountNames } from "../channels/account-names.js";
+import type { ExternalAgents } from "../channels/agents-accounts.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -56,6 +59,7 @@ import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
 import type { ComputerUseService } from "../computer-use/service.js";
 import type { WechatApp } from "../desktop-apps/wechat-app.js";
+import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
 
 export interface ApiConfig {
   port: number;
@@ -75,28 +79,42 @@ export interface ApiConfig {
  * exception is `appsRoot`, a genuine config override rather than a service.
  */
 export interface ApiDeps {
+  /** The Concierge feature. Absent ⇒ its routes answer as if the setting were off. */
+  concierge?: ConciergeService;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
   chatSettings: ChatSettingsControl;
   actionEngine: ActionEngine;
   actionLoader: Pick<ActionLoader, "get" | "getRegistryLoadFailures">;
   db: DrizzleDb;
-  personMappingRepo: PersonMappingRepository;
+  /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
+  appConnectionAccessRepo: AppConnectionAccessRepository;
+  peopleRepo: PeopleRepository;
   /** The guardian's link code, shown in People (channels/guardian-link-code.ts). */
   guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route
    *  reads either store directly. */
   channels: Channels;
+  /** The platform a channel's accounts live on, for a row that still names a
+   *  channel, such as a message store's. */
+  platformOfChannel: PlatformOfChannel;
+  /** Every channel recorded on a platform, released ones included: where a
+   *  history told to a disconnected account is still stored. */
+  recordedOn: RecordedOn;
+  /** The channels of Rome's accounts on a platform a send may go out from. */
+  sendersOn: SendersOn;
+  /** Rome's own account on a channel, which a send names as `from`. */
+  accountOf: ChannelRecordsRepository["accountOf"];
   /** What each platform calls an account, over every address book Rome mirrors
    *  and the names senders put on their own messages — the display name a
    *  person or account serializer puts on the wire. */
   accountNames: AccountNames;
+  /** The agents Rome Cloud lists for this Rome. Each is an assistant with one
+   *  chat (docs/domains/chats.md#assistant), and the dashboard shows all but
+   *  other Romes. */
+  assistants: ExternalAgents;
   webchatRepo: WebChatRepository;
-  /** Messages Rome is still trying to deliver — the People surface's
-   *  outbox. Separate from every message store on purpose: a row here is a
-   *  send that has not happened yet. */
-  outboxRepo: OutboxRepository;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;
@@ -135,7 +153,7 @@ export interface ApiDeps {
   feedback: FeedbackRelay;
   nodeDevices: Pick<
     ReturnType<typeof createNodeDevicesService>,
-    "getStatus" | "start" | "listFiles" | "listDevices"
+    "getStatus" | "start" | "listFiles" | "listDevices" | "renameDevice" | "removeDevice"
   >;
   provisionNodeCaller?: () => Promise<void>;
   /** Connects the Rome Cloud email inbox unless an email connection exists.
@@ -151,6 +169,7 @@ export interface ApiDeps {
    * the hook chains. See `refreshAppRuntimeEnv` in `src/index.ts`. */
   refreshAppRuntime: () => Promise<void>;
   appRuntimeRepositories: AppRuntimeRepositories;
+  appConnections?: AppConnectionsContextFactory;
   sentinelLogRepo: SentinelLogRepository;
   actionExecutionsRepo: ActionExecutionsRepository;
   sessionManager: SessionManager;
@@ -201,7 +220,7 @@ export interface ApiDeps {
   /** Use-side registry. Present but with zero registered descriptors in
    *  this phase — later phases register real integrations and route through it. */
   connectionRegistry?: ConnectionRegistry;
-  /** Conferral-setup sessions. In-memory, created alongside the
+  /** Grant-setup sessions. In-memory, created alongside the
    *  registry; drives the generic setup routes. Present only when the
    *  registry is. */
   setupManager?: SetupManager;

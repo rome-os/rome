@@ -113,6 +113,39 @@ describe("ApprovalsRepository", () => {
     expect(approval!.payload).toEqual(payload);
   });
 
+  it("findActiveActionArgs() returns only active approvals for the named action", async () => {
+    const matching = await repo.create({
+      type: "action_execution",
+      requestedBy: "app:notes",
+      description: "Create a document",
+      payload: {
+        actionName: "core:app_connection_write",
+        args: { invocationId: "invocation-active" },
+      },
+    });
+    const rejected = await repo.create({
+      type: "action_execution",
+      requestedBy: "app:notes",
+      description: "Create another document",
+      payload: {
+        actionName: "core:app_connection_write",
+        args: { invocationId: "invocation-rejected" },
+      },
+    });
+    await repo.create({
+      type: "action_execution",
+      requestedBy: "app:notes",
+      description: "Run another action",
+      payload: { actionName: "other", args: { invocationId: "other" } },
+    });
+    await repo.resolvePending(rejected, "reject", "guardian");
+
+    expect(await repo.findActiveActionArgs("core:app_connection_write")).toEqual([
+      { invocationId: "invocation-active" },
+    ]);
+    expect(await repo.findById(matching)).toMatchObject({ status: "pending" });
+  });
+
   it("resolvePending() atomically resolves pending action_execution and queues execution", async () => {
     const id = await repo.create({
       type: "action_execution",

@@ -2,15 +2,16 @@
   "appName": "Rome",
   "nav": {
     "chat": "对话",
+    "chatList": "对话列表",
     "activity": "动态",
     "people": "联系人",
+    "assistants": "助手",
     "envoys": "外派智能体",
     "memory": "记忆",
     "projects": "项目",
     "sessions": "会话",
     "routines": "例程",
     "apps": "应用",
-    "store": "应用市场",
     "desktop": "浏览器",
     "settings": "设置",
     "openSidebar": "打开侧边栏",
@@ -28,14 +29,22 @@
   "sidebar": {
     "aiApps": "AI 应用",
     "appDisabled": "已停用",
+    "hideNames": "隐藏名称",
+    "more": "更多",
     "moreRecentApps": "更多最近应用",
-    "notOpened": "尚未在此设备打开"
+    "notOpened": "尚未在此设备打开",
+    "search": "搜索",
+    "showNames": "显示名称"
   },
   "recentChats": {
     "myChats": "我的聊天",
     "allChats": "所有聊天",
     "title": "最近对话",
     "newChat": "新对话",
+    "concierge": "Concierge",
+    "conciergeUnread_one": "Concierge，{{label}} 条未读消息",
+    "conciergeUnread_other": "Concierge，{{label}} 条未读消息",
+    "startedByConcierge": "由 Concierge 发起",
     "empty": "还没有对话",
     "rowStatus": {
       "waiting": "等你处理",
@@ -194,7 +203,8 @@
   "desktop": {
     "iframeTitle": "Rome 桌面",
     "namedIframeTitle": "Rome 桌面“{{name}}”",
-    "notFound": "没有名为“{{name}}”的桌面。"
+    "notFound": "没有名为“{{name}}”的桌面。",
+    "reconnecting": "正在重新连接…"
   },
   "wechatApp": {
     "loading": "正在检查微信…",
@@ -275,5 +285,35 @@
     "cancel": "取消",
     "sent": "感谢你的反馈！",
     "error": "反馈发送失败，请重试。"
+  },
+  "assistants": {
+    "title": "助手",
+    "kind": {
+      "dot": "Dot",
+      "muse": "Muse",
+      "rome": "Rome"
+    },
+    "empty": {
+      "title": "还没有助手",
+      "body": "在 Rome Cloud 的 Settings → Agents 里连接 Dot 或 Muse。打开这个 Rome 的 Agents 连接后，它会出现在这里。"
+    },
+    "noMessages": "还没有消息",
+    "loadFailed": "助手加载失败",
+    "switch": "切换助手，当前是 {{name}}",
+    "notFound": {
+      "title": "这个助手不可用",
+      "body": "Rome Cloud 没有为这个 Rome 列出它，链接可能已经过期。",
+      "openLatest": "打开最近的对话"
+    }
+  },
+  "assistantChat": {
+    "description": "{{name}} 发来的消息由 main 以 Rome 的身份回复。你在这里写的内容会发给 {{name}}。",
+    "otherAccount": "@{{account}} 的助手。它发来的消息由 main 以 Rome 的身份回复。你在这里写的内容会发给 {{name}}。",
+    "loadOlder": "加载更早的消息",
+    "loading": "加载中…",
+    "empty": "还没有和 {{name}} 的消息。",
+    "noText": "无文本",
+    "placeholder": "发消息给 {{name}}",
+    "loadOlderFailed": "更早的消息加载失败"
   }
 }

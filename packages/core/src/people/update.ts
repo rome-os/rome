@@ -7,12 +7,11 @@
 
 import { type PersonResource, type UpdatePersonRequest } from "@rome/api-types/people";
 import { protectedPersonReason } from "@rome/api-types/persons";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import { findPerson, readPerson, type PeopleReadDeps } from "./resource.js";
 
 export interface PeopleUpdateDeps extends PeopleReadDeps {
-  personMappingRepo: PeopleReadDeps["personMappingRepo"] &
-    Pick<PersonMappingRepository, "updatePerson">;
+  peopleRepo: PeopleReadDeps["peopleRepo"] & Pick<PeopleRepository, "update">;
 }
 
 /** The person as they now read, or why the edit did not happen: `unknown` for
@@ -51,7 +50,7 @@ export async function updatePerson(
   // with the person rather than written: an empty write is not a statement the
   // repository can make, and there is nothing here to make it about.
   if (Object.keys(update).length > 0) {
-    await deps.personMappingRepo.updatePerson(id, update);
+    await deps.peopleRepo.update(id, update);
   }
 
   const updated = await readPerson(deps, id);

@@ -7,6 +7,7 @@ When an agent takes part in a chat: what wakes it, what it reads, and where it s
 The moment a message is judged to need the agent and the agent starts a turn. The chat's [reply rule](chats.md#reply-rule) decides it.
 
 - Not every message wakes the agent. Under "when it is needed" a lightweight check decides whether the message needs the agent, and a mention always does.
+- What the guardian writes in an [assistant's](chats.md#assistant) chat wakes no agent. It goes to the assistant, and main wakes on the assistant's answer.
 - A woken agent first catches up on what it has not seen, then acts.
 - Waking and speaking are two decisions. A woken agent may read, remember and act with its tools, and end its turn without saying anything in the chat.
 

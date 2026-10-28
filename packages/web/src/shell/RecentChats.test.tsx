@@ -1,5 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -11,7 +12,18 @@ import {
   FakeWebSocket,
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
+import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
+import { chatSessionTopicName } from "@rome/api-types/live-events";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { RecentChats } from "./RecentChats";
+
+// Concierge's chat id comes from its own query, which these tests do not
+// serve; each test that needs the entry sets the id here.
+const concierge = rs.hoisted(() => ({ chatId: null as string | null }));
+rs.mock("@/hooks/use-concierge", () => ({
+  ...conciergeModule,
+  useConciergeChatId: () => concierge.chatId,
+}));
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -22,6 +34,7 @@ afterEach(() => {
   rs.useRealTimers();
   localStorage.clear();
   rs.restoreAllMocks();
+  concierge.chatId = null;
 });
 
 interface MockSession {
@@ -96,12 +109,23 @@ function mockSessions(sessions: MockSession[]) {
   return spy;
 }
 
-function renderRecentChats(initialEntry = "/chat", live?: LiveEventsClient) {
+function testQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+// A fresh cache per mount unless a test passes one in to remount against it.
+function renderRecentChats(
+  initialEntry = "/chat",
+  live?: LiveEventsClient,
+  queryClient = testQueryClient(),
+) {
   const routed = (
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <RecentChats />
-      <LocationProbe />
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <RecentChats />
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
   return render(
     live ? (
@@ -127,6 +151,122 @@ function textIndex(container: HTMLElement, text: string): number {
 }
 
 describe("RecentChats", () => {
+  it("lists Concierge as its own entry and marks the task chats it started", async () => {
+    concierge.chatId = "concierge";
+    const row = (id: string, name: string) => ({
+      id,
+      name,
+      createdAt: new Date().toISOString(),
+      activityAt: new Date().toISOString(),
+      lastSeenActivityAt: null,
+      unread: false,
+      projectName: "default",
+      projectPath: "default",
+    });
+    mockSessions([
+      { ...row("concierge", "Concierge"), agentName: "core:concierge" } as MockSession,
+      { ...row("task-1", "Find flights"), triggerKind: "concierge" } as MockSession,
+    ]);
+    renderRecentChats();
+    const entry = await screen.findByRole("link", { name: "Concierge" });
+    expect(entry.getAttribute("href")).toBe("/chat/concierge");
+    const task = await screen.findByRole("link", { name: /Find flights/ });
+    expect(within(task).getByRole("img", { name: "Started by Concierge" })).toBeTruthy();
+    // The Concierge chat itself stays out of the list.
+    expect(screen.getAllByRole("link", { name: "Concierge" })).toHaveLength(1);
+  });
+
+  describe("Concierge unread badge", () => {
+    const server = { unread: 0 };
+    const conciergeCalls = (spy: { mock: { calls: unknown[][] } }) =>
+      spy.mock.calls.filter(([input]) => String(input) === "/api/concierge/session").length;
+    const mockConcierge = () =>
+      rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const body = url.startsWith("/api/chat/sessions")
+          ? []
+          : url === "/api/concierge/session"
+            ? { id: "concierge", unread: server.unread }
+            : null;
+        if (body === null) return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch);
+
+    beforeEach(() => {
+      concierge.chatId = "concierge";
+      server.unread = 0;
+      FakeWebSocket.instances = [];
+    });
+
+    it("counts unread messages", async () => {
+      server.unread = 3;
+      mockConcierge();
+      renderRecentChats();
+      expect(
+        await screen.findByRole("link", { name: "Concierge, 3 unread messages" }),
+      ).toBeTruthy();
+    });
+
+    it("shows no badge at 0", async () => {
+      const fetchSpy = mockConcierge();
+      renderRecentChats();
+      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
+      await act(async () => {});
+      expect(await screen.findByRole("link", { name: "Concierge" })).toBeTruthy();
+      expect(document.querySelector("[data-concierge-unread]")).toBeNull();
+    });
+
+    it("caps the count at 99+", async () => {
+      server.unread = 100;
+      mockConcierge();
+      renderRecentChats();
+      const entry = await screen.findByRole("link", { name: "Concierge, 99+ unread messages" });
+      expect(entry.querySelector("[data-concierge-unread]")?.textContent).toContain("99+");
+    });
+
+    it("shows no badge on the Concierge page", async () => {
+      server.unread = 3;
+      const fetchSpy = mockConcierge();
+      renderRecentChats("/chat/concierge");
+      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
+      await act(async () => {});
+      expect(screen.getByRole("link", { name: "Concierge" })).toBeTruthy();
+      expect(document.querySelector("[data-concierge-unread]")).toBeNull();
+    });
+
+    it("recounts on a new Concierge message and on a read in this tab", async () => {
+      const fetchSpy = mockConcierge();
+      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBe(1));
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      expect(socket.sent).toContainEqual({
+        type: "subscribe",
+        topic: chatSessionTopicName("concierge"),
+      });
+
+      server.unread = 1;
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: chatSessionTopicName("concierge"),
+          event: "message_insert",
+          data: { id: "m1", sessionId: "concierge", role: "assistant" },
+        }),
+      );
+      expect(await screen.findByRole("link", { name: "Concierge, 1 unread message" })).toBeTruthy();
+
+      server.unread = 0;
+      act(() => emitSessionsChanged());
+      await waitFor(() => expect(document.querySelector("[data-concierge-unread]")).toBeNull());
+    });
+  });
+
   it("defaults to All chats and persists a scope toggle across remounts", async () => {
     const fetchSpy = mockSessions([]);
     const user = userEvent.setup();
@@ -221,6 +361,63 @@ describe("RecentChats", () => {
     await screen.findByText("No chats yet");
     expect(screen.queryByRole("button", { name: "Search pages, apps, and chats" })).toBeNull();
     expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
+  });
+
+  it("shows the cached list at once on remount and refetches behind it", async () => {
+    const fetchSpy = mockSessions([
+      {
+        id: "cached",
+        name: "Cached chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-01T00:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "alpha",
+        projectPath: "alpha",
+      },
+    ]);
+    const listCalls = () =>
+      fetchSpy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions"))
+        .length;
+    const queryClient = testQueryClient();
+    const view = renderRecentChats("/chat", undefined, queryClient);
+    await screen.findByText("Cached chat");
+    view.unmount();
+    const before = listCalls();
+
+    renderRecentChats("/chat", undefined, queryClient);
+
+    // Synchronously, before any response: the rows, not the skeleton.
+    expect(screen.getByText("Cached chat")).toBeTruthy();
+    await waitFor(() => expect(listCalls()).toBe(before + 1));
+  });
+
+  it("still shows the cached list after a long time away", async () => {
+    mockSessions([
+      {
+        id: "cached",
+        name: "Cached chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-01T00:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "alpha",
+        projectPath: "alpha",
+      },
+    ]);
+    const queryClient = testQueryClient();
+    const view = renderRecentChats("/chat", undefined, queryClient);
+    await screen.findByText("Cached chat");
+    rs.useFakeTimers();
+    view.unmount();
+    // Past React Query's default five-minute garbage collection.
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(10 * 60_000);
+    });
+
+    renderRecentChats("/chat", undefined, queryClient);
+
+    expect(screen.getByText("Cached chat")).toBeTruthy();
   });
 
   it("offers a retry instead of claiming the guardian has no chats when the fetch fails", async () => {
@@ -406,6 +603,23 @@ describe("RecentChats", () => {
       send(true);
       expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
       expect(screen.queryByRole("img", { name: label })).toBeNull();
+    });
+
+    it("drops a cached spinner on remount once the refetch says the turn stopped", async () => {
+      mockSessions([live]);
+      const queryClient = testQueryClient();
+      const view = renderRecentChats("/chat", undefined, queryClient);
+      await screen.findByText("Live chat");
+      send(true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      // The stop arrives while the list is unmounted, so only the refetch
+      // can tell the remounted list about it.
+      view.unmount();
+
+      renderRecentChats("/chat", undefined, queryClient);
+
+      expect(screen.getByText("Live chat")).toBeTruthy();
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
     });
 
     it("keeps a start that arrives while the list is loading", async () => {
@@ -652,7 +866,9 @@ describe("RecentChats", () => {
 
     renderRecentChats();
 
-    const pinnedSection = await screen.findByRole("region", { name: "Pinned" });
+    // The pinned project's section shows before the list lands, so wait for a row.
+    await screen.findByRole("link", { name: "Pinned standalone chat" });
+    const pinnedSection = screen.getByRole("region", { name: "Pinned" });
     const projectsSection = screen.getByRole("region", { name: "Projects" });
 
     expect(
@@ -811,7 +1027,8 @@ describe("RecentChats", () => {
     const user = userEvent.setup();
     renderRecentChats();
 
-    const pinnedSection = await screen.findByRole("region", { name: "Pinned" });
+    await screen.findByRole("link", { name: "Default chat" });
+    const pinnedSection = screen.getByRole("region", { name: "Pinned" });
     expect(within(pinnedSection).getByRole("link", { name: "Default chat" })).toBeTruthy();
     expect(within(pinnedSection).queryByRole("link", { name: "Device chat" })).toBeNull();
 
@@ -1181,8 +1398,7 @@ describe("RecentChats row menu shortcuts", () => {
   async function openRowMenu() {
     const user = userEvent.setup();
     renderRecentChats();
-    await screen.findByRole("link");
-    await user.click(screen.getByRole("button", { name: "Chat actions" }));
+    await user.click(await screen.findByRole("button", { name: "Chat actions" }));
     return user;
   }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/helpers.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../db/repositories/people.js";
 import { linkedInHistoryMessage } from "./linkedin-history.js";
 import type { LinkedInHistoryMessage } from "./linkedin-sync.js";
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -32,11 +32,11 @@ async function readHistory(rows: LinkedInHistoryMessage[]): Promise<ChannelMessa
  */
 describe("LinkedIn message addressing", () => {
   let testDb: TestDb;
-  let people: PersonMappingRepository;
+  let people: PeopleRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
-    people = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
+    people = new PeopleRepository(testDb.db);
   });
 
   afterEach(() => {
@@ -53,21 +53,21 @@ describe("LinkedIn message addressing", () => {
       displayName: "Ada Lovelace",
       bondLevel: "acquaintance",
       approved: true,
-      channelMappings: [{ channel: "linkedin", channelUserId: "ACoAAAda0001" }],
+      links: [{ platform: "linkedin", id: "ACoAAAda0001" }],
     });
 
     const [message] = await readHistory([historyMessage()]);
-    const person = await people.findByChannelUser("linkedin", message.senderId);
+    const person = await people.byAccount({ platform: "linkedin", id: message.senderId });
 
     expect(person?.id).toBe("ada-lovelace");
   });
 
   it("does not resolve a participant nobody promoted", async () => {
     const [message] = await readHistory([historyMessage()]);
-    expect(await people.findByChannelUser("linkedin", message.senderId)).toBeNull();
+    expect(await people.byAccount({ platform: "linkedin", id: message.senderId })).toBeNull();
   });
 
-  // The guardian's own mapping is conferred at connect time from their public
+  // The guardian's own mapping is granted at connect time from their public
   // profile URL, which carries a vanity handle and no member id. Falling back to
   // the URL keeps that mapping resolving instead of stranding it.
   it("falls back to the profile URL when it carries no member id", async () => {

@@ -592,7 +592,7 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
    * promoted to a person and what its direct threads last carried. The join is
    * on the member id itself — no translation step — because
    * `linkedin_participants.participant_id` and a `linkedin`
-   * `channel_mappings.channel_user_id` are the same identifier by construction.
+   * `links.account_id` are the same identifier by construction.
    *
    * Promotion is a guardian action against these rows, not something this
    * repository performs: a LinkedIn inbox holds many accounts that should
@@ -634,8 +634,8 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
            JOIN direct_threads d ON d.threadId = m.thread_id
            WHERE d.participantId = p.participant_id) AS messageCount
       FROM linkedin_participants p
-      LEFT JOIN channel_mappings cm
-        ON cm.channel = 'linkedin' AND cm.channel_user_id = p.participant_id
+      LEFT JOIN links cm
+        ON cm.platform = 'linkedin' AND cm.account_id = p.participant_id
       LEFT JOIN persons person ON person.id = cm.person_id
       ORDER BY lower(coalesce(p.name, p.participant_id)) ASC, p.participant_id ASC
       ${limitClause}
@@ -700,14 +700,19 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
     threadId: string | null,
     since: Date,
     limit: number = HISTORY_READ_LIMIT,
+    /** Only messages at or before this second. */
+    until?: Date,
   ): Promise<LinkedInHistoryMessage[]> {
     const sinceSeconds = Math.floor(since.getTime() / 1000);
     const threadClause = threadId != null ? sql`AND m.thread_id = ${threadId}` : sql``;
+    const untilClause = until
+      ? sql`AND coalesce(m.sent_at, m.created_at) <= ${Math.floor(until.getTime() / 1000)}`
+      : sql``;
     const rows = (await this.db.all(sql`
       SELECT ${linkedInHistoryColumns()}
       FROM linkedin_messages m
       LEFT JOIN linkedin_threads t ON t.thread_id = m.thread_id
-      WHERE coalesce(m.sent_at, m.created_at) >= ${sinceSeconds} ${threadClause}
+      WHERE coalesce(m.sent_at, m.created_at) >= ${sinceSeconds} ${threadClause} ${untilClause}
       ORDER BY coalesce(m.sent_at, m.created_at) DESC, m.rowid DESC
       LIMIT ${Math.min(limit, HISTORY_READ_LIMIT)}
     `)) as Array<Record<string, unknown>>;

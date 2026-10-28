@@ -218,6 +218,19 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
   return map;
 }
 
+/**
+ * Whether the open chat's model picker shows. A side chat promoted to a chat
+ * still runs on its branch (#1384), and during an open handoff the composer
+ * talks to the specialist, whose model the picker does not hold.
+ */
+export function canPickChatModel(chat: {
+  mainSessionId: string;
+  floorSessionId: string;
+  isSideChat: boolean;
+}): boolean {
+  return !chat.isSideChat && chat.floorSessionId === chat.mainSessionId;
+}
+
 export function buildChatView(
   messages: Map<string, ChatMessage[]>,
   mainSessionId: string,
@@ -293,13 +306,39 @@ export function isAwaitingGuardian(
   view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
   runningTurnId: string | null = null,
 ): boolean {
-  return currentReplyMessages(view, runningTurnId).some((msg) =>
-    parseMessageEntries(msg).some(
-      (b) =>
+  return openFloorCards(view, runningTurnId).length > 0;
+}
+
+// Whether the floor session waits on a card that is the only way to answer
+// (`render.requiresCard`), in the same window as isAwaitingGuardian. The
+// composer locks while this holds.
+export function isLockedByCard(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  runningTurnId: string | null = null,
+): boolean {
+  return openFloorCards(view, runningTurnId).some((card) => card.render.requiresCard === true);
+}
+
+type PendingCard = Extract<TranscriptPart, { type: "pending_interaction" }>;
+
+// The unanswered cards of the floor session's latest turn, in the window
+// isAwaitingGuardian describes.
+function openFloorCards(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  runningTurnId: string | null,
+): PendingCard[] {
+  const cards: PendingCard[] = [];
+  for (const msg of currentReplyMessages(view, runningTurnId)) {
+    for (const b of parseMessageEntries(msg)) {
+      if (
         b.type === "pending_interaction" &&
-        !view.interactionResults.has(interactionResultKey(msg.sessionId, b.toolUseId)),
-    ),
-  );
+        !view.interactionResults.has(interactionResultKey(view.floorSessionId, b.toolUseId))
+      ) {
+        cards.push(b);
+      }
+    }
+  }
+  return cards;
 }
 
 // Whether the floor session's latest finished turn ended with an error: the
@@ -338,7 +377,10 @@ export type ChatRow =
       identity: AgentIdentity;
       trace: ChatMessage | null;
       messages: ChatMessage[];
-    });
+    })
+  // The chat moved to another model: the turn after it ran on `model`, the
+  // session's turn before it on another one.
+  | (RowBase & { kind: "model_switch"; model: string; turnId: string; sessionId: string });
 
 export function buildRows(
   messages: ChatMessage[],
@@ -351,7 +393,8 @@ export function buildRows(
   const tracesByTurn = new Map<string, ChatMessage>();
   const turnsWithAssistant = new Set<string>();
   for (const m of messages) {
-    if (m.role === "trace" && m.turnId && m.traceSummary) tracesByTurn.set(m.turnId, m);
+    if (m.role === "trace" && m.turnId && (m.traceSummary || m.traceArchived))
+      tracesByTurn.set(m.turnId, m);
     if (m.role === "assistant" && m.turnId) turnsWithAssistant.add(m.turnId);
   }
   const isRunningTurn = (turnId: string | null | undefined) =>
@@ -366,7 +409,7 @@ export function buildRows(
       continue;
     }
     if (msg.role === "trace") {
-      if (!msg.traceSummary) continue;
+      if (!msg.traceSummary && !msg.traceArchived) continue;
       // Merged into the turn's grouped row when it has assistant replies; only
       // stands alone for a reply-less turn. Never mid-stream for the running
       // turn (the live trace button carries it).
@@ -405,5 +448,46 @@ export function buildRows(
       messages: group,
     });
   }
-  return rows;
+  return withModelSwitches(rows, tracesByTurn);
+}
+
+/** The turn and session a row belongs to, or null for a row with no turn. */
+function rowTurn(row: ChatRow): { turnId: string; sessionId: string } | null {
+  if (row.kind === "model_switch") return null;
+  const message = row.kind === "agent" ? row.messages[0] : row.message;
+  return message?.turnId ? { turnId: message.turnId, sessionId: message.sessionId } : null;
+}
+
+/**
+ * Put a model-switch notice before the first row of each turn that ran on
+ * another model than the same session's last turn with a known model. A turn's
+ * model comes from its trace summary, so a running turn shows its notice once
+ * it ends, and a turn without one changes nothing.
+ */
+function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessage>): ChatRow[] {
+  const lastModelBySession = new Map<string, string>();
+  const seenTurns = new Set<string>();
+  const out: ChatRow[] = [];
+  for (const row of rows) {
+    const turn = rowTurn(row);
+    if (turn && !seenTurns.has(turn.turnId)) {
+      seenTurns.add(turn.turnId);
+      const model = tracesByTurn.get(turn.turnId)?.traceSummary?.model;
+      if (model) {
+        const previous = lastModelBySession.get(turn.sessionId);
+        if (previous && previous !== model) {
+          out.push({
+            kind: "model_switch",
+            key: `model-switch:${turn.turnId}`,
+            model,
+            turnId: turn.turnId,
+            sessionId: turn.sessionId,
+          });
+        }
+        lastModelBySession.set(turn.sessionId, model);
+      }
+    }
+    out.push(row);
+  }
+  return out;
 }

@@ -144,26 +144,34 @@ export function buildConnectionViews(accounts: ConnectedAccount[]): ConnectionVi
     for them. */
 export const ROME_MANAGED_CATALOG: CatalogEntry[] = CATALOG.filter((e) => e.romeManaged);
 
-/**
- * Whether a Rome-managed connection's grants can serve the agent, which is what
- * the inline connect card waits for. Only an authorized grant counts: a degraded
- * one is still on file (the dashboard lists it) but its token no longer works,
- * so the card must keep offering the reconnect instead of reporting success.
- */
-export function romeManagedGrantsUsable(grants: Record<string, string> | undefined): boolean {
-  return Object.values(grants ?? {}).some((state) => state === "authorized");
-}
-
 /** A connection as core's registry reports it (`/api/connections`). */
 export interface RegistryConnectionStatus {
   connectionKind?: string;
   /** The kind of connection, as a host from before the rename names it. */
   service?: string;
-  grants: Record<string, string>;
+  /** Working or broken, or null with no access. A host from before connection
+   *  states omits it. */
+  state?: "working" | "broken" | null;
+  /** Per-grant states, which a host from before connection states sends alone. */
+  grants?: Record<string, string>;
 }
 
 /**
- * The Rome-managed catalog slugs whose registry grants are usable. Core's
+ * Whether a Rome-managed connection can serve the agent, which is what the
+ * inline connect card waits for. Only a working connection counts: a broken one
+ * is still on file (the dashboard lists it) but its token no longer works, so
+ * the card must keep offering the reconnect instead of reporting success.
+ */
+export function romeManagedConnectionWorking(
+  connection: RegistryConnectionStatus | null | undefined,
+): boolean {
+  if (!connection) return false;
+  if (connection.state !== undefined) return connection.state === "working";
+  return Object.values(connection.grants ?? {}).some((state) => state === "authorized");
+}
+
+/**
+ * The Rome-managed catalog slugs whose registry connection is working. Core's
  * registry is the system of record for these providers; the Composio account
  * list says nothing about them (a Rome-managed Shopify connection has no
  * Composio account, and a leftover Composio one doesn't make it connected).
@@ -174,9 +182,9 @@ export function connectedRomeManagedSlugs(
   const managed = new Set(ROME_MANAGED_CATALOG.map((e) => e.slug.toLowerCase()));
   return new Set(
     (connections ?? [])
-      .map((c) => ({ kind: (c.connectionKind ?? c.service ?? "").toLowerCase(), grants: c.grants }))
-      .filter((c) => managed.has(c.kind) && romeManagedGrantsUsable(c.grants))
-      .map((c) => c.kind),
+      .filter((c) => romeManagedConnectionWorking(c))
+      .map((c) => (c.connectionKind ?? c.service ?? "").toLowerCase())
+      .filter((kind) => managed.has(kind)),
   );
 }
 

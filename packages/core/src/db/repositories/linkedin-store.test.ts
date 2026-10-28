@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { sql } from "drizzle-orm";
 import { createTestDb, type TestDb, identityConnectionKindOf } from "../../test/helpers.js";
 import { LinkedInStoreRepository, linkedInMemberIdFromProfileUrl } from "./linkedin-store.js";
-import { PersonMappingRepository } from "./person-mapping.js";
+import { PeopleRepository } from "./people.js";
 
 describe("LinkedInStoreRepository", () => {
   let testDb: TestDb;
@@ -608,7 +608,7 @@ describe("LinkedInStoreRepository", () => {
     // is the account's address on both sides, so promotion needs no translation
     // step and nothing in this repository ever writes `persons`.
     describe("promotion to a person", () => {
-      let people: PersonMappingRepository;
+      let people: PeopleRepository;
 
       const personCount = () =>
         Number(
@@ -616,7 +616,7 @@ describe("LinkedInStoreRepository", () => {
         );
 
       beforeEach(async () => {
-        people = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
+        people = new PeopleRepository(testDb.db);
         await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
         await repo.upsertThreadParticipants("t1", [ada, self]);
       });
@@ -641,18 +641,18 @@ describe("LinkedInStoreRepository", () => {
           displayName: "Ada Lovelace",
           bondLevel: "acquaintance",
           approved: true,
-          channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+          links: [{ platform: "linkedin", id: ada.participantId }],
         });
 
         const mapping = (
           testDb.db.all(
-            sql`SELECT channel, channel_user_id AS channelUserId, person_id AS personId
-                FROM channel_mappings`,
+            sql`SELECT platform, account_id AS accountId, person_id AS personId
+                FROM links`,
           ) as Array<Record<string, string>>
         )[0];
         expect(mapping).toEqual({
-          channel: "linkedin",
-          channelUserId: ada.participantId,
+          platform: "linkedin",
+          accountId: ada.participantId,
           personId: "ada-lovelace",
         });
 
@@ -660,7 +660,7 @@ describe("LinkedInStoreRepository", () => {
         const promoted = rows.find((r) => r.participantId === ada.participantId);
         expect(promoted?.linkedPersonId).toBe("ada-lovelace");
         expect(promoted?.linkedPersonName).toBe("Ada Lovelace");
-        // The headline stays on the mirror row: `channel_mappings` has nowhere
+        // The headline stays on the mirror row: `links` has nowhere
         // to put it, and it belongs in the person's memory profile.
         expect(promoted?.headline).toBe("Engineer");
         // Promoting one account says nothing about the rest of the inbox.
@@ -672,7 +672,7 @@ describe("LinkedInStoreRepository", () => {
           displayName: "Ada Lovelace",
           bondLevel: "acquaintance",
           approved: true,
-          channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+          links: [{ platform: "linkedin", id: ada.participantId }],
         });
 
         // The second promotion slugs to a free id (`ada-lovelace-2`), so the
@@ -682,7 +682,7 @@ describe("LinkedInStoreRepository", () => {
             displayName: "Ada Lovelace",
             bondLevel: "acquaintance",
             approved: true,
-            channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+            links: [{ platform: "linkedin", id: ada.participantId }],
           }),
         ).rejects.toThrow(/already belongs to person/);
 
@@ -695,14 +695,14 @@ describe("LinkedInStoreRepository", () => {
           displayName: "Ada Lovelace",
           bondLevel: "acquaintance",
           approved: true,
-          channelMappings: [{ channel: "linkedin", channelUserId: ada.participantId }],
+          links: [{ platform: "linkedin", id: ada.participantId }],
         });
         await people.createWithId("ada-byron", {
           displayName: "Ada Byron",
           bondLevel: "inner-circle",
         });
 
-        await people.addChannelMapping("ada-byron", "linkedin", ada.participantId);
+        await people.linkStated({ platform: "linkedin", id: ada.participantId }, "ada-byron");
 
         expect(personCount()).toBe(2);
         const rows = await repo.listParticipants();

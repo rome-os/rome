@@ -20,6 +20,7 @@
     "status": {
       "connected": "Connected",
       "configured": "Configured",
+      "broken": "Broken",
       "awaiting": "Awaiting verification",
       "disconnected": "Not connected",
       "alwaysOn": "Always on"

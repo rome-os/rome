@@ -1,18 +1,18 @@
-// The generic conferral-setup routes, black-box through Hono.
+// The generic grant-setup routes, black-box through Hono.
 //
 // Seams under test: the four HTTP routes over a real ConnectionRegistry (drizzle
 // ledger) + a real SetupManager, driving a fixture descriptor whose `bot`
 // grant carries a setup. We prove: start-or-re-attach, poll, input drives the
-// terminal conferral (a connection is minted and its credential imported),
+// terminal grant (a connection is minted and its credential imported),
 // cancel, idempotent late delivery, and the same-origin guard.
 
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
 // The OAuth provider descriptor's custody hook writes the tmpfs token file +
-// spawns `gh` off the terminal conferral. This suite exercises the setup
+// spawns `gh` off the terminal grant. This suite exercises the setup
 // coroutine + terminal write, not custody, so stub both custody libs: they keep
-// the confer off the real disk / `gh` binary AND deterministic — an un-mocked
+// the grant off the real disk / `gh` binary AND deterministic — an un-mocked
 // `gh` spawn (ENOENT) is slow enough on a loaded CI runner to push the `done`
 // transition past the poll's default timeout (the terminal write awaits custody).
 rs.mock("../../lib/github-shell-integration.js", () => ({
@@ -26,7 +26,7 @@ rs.mock("../../lib/provider-token-files.js", () => ({
 
 import { SetupManager } from "../../connections/setup/manager.js";
 import type { SetupFn } from "../../connections/setup/types.js";
-import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
+import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makePasteTalk } from "../../connections/test-fixtures.js";
 import {
@@ -35,7 +35,7 @@ import {
 } from "../../connections/integrations/feishu.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
-import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import { PeopleRepository } from "../../db/repositories/people.js";
 import { createTestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { setupsRoutes } from "./setups.js";
@@ -49,7 +49,7 @@ afterEach(() => {
   while (openDbs.length) openDbs.pop()?.();
 });
 
-/** A setup: prompt a token, confer it as the grant credential + a guardian
+/** A setup: prompt a token, grant it as the grant credential + a guardian
  *  mapping. Rejects the token "bad" once (re-prompt) so we can exercise that. */
 const setupFn: SetupFn = async (interact) => {
   let error: string | undefined;
@@ -72,33 +72,34 @@ const setupFn: SetupFn = async (interact) => {
   };
 };
 
-function fakePersonRepo(): PersonMappingRepository {
+function fakePersonRepo(): PeopleRepository {
   return {
-    findByChannelUser: async () => null,
-    findByBondLevel: async () => [{ id: "guardian", channelMappings: [] }],
-    // The terminal conferral applies the guardian mapping through the synchronous
+    byAccount: async () => null,
+    isDismissed: async () => false,
+    byBondLevel: async () => [{ id: "guardian", links: [] }],
+    // The terminal grant applies the guardian mapping through the synchronous
     // write helpers enlisted in its transaction — not the async setters.
-    writeChannelUserId: rs.fn(),
-    writeChannelMapping: rs.fn(() => "id"),
-  } as unknown as PersonMappingRepository;
+    readdress: rs.fn(),
+    linkStated: rs.fn(() => "id"),
+  } as unknown as PeopleRepository;
 }
 
 function harness() {
   const { db, close } = createTestDb();
   openDbs.push(close);
-  const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
   const fixture = makePasteTalk();
   fixture.descriptor.connectionKind = "fake-telegram";
-  fixture.descriptor.auth.bot.setup = setupFn;
+  fixture.descriptor.auth.setup = setupFn;
   registry.register(fixture.descriptor);
-  const personMappingRepo = fakePersonRepo();
-  const manager = new SetupManager({ registry, personMappingRepo });
+  const peopleRepo = fakePersonRepo();
+  const manager = new SetupManager({ registry, peopleRepo });
   const deps = {
     db,
     approvalsRepo: new ApprovalsRepository(db),
     connectionRegistry: registry,
     setupManager: manager,
-    personMappingRepo,
+    peopleRepo,
   } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
   return { app, registry };
@@ -174,7 +175,7 @@ describe("GET /setups/:cid", () => {
 });
 
 describe("POST /setups/:cid/input", () => {
-  it("re-prompts on a rejected token, then confers on a good one", async () => {
+  it("re-prompts on a rejected token, then grants on a good one", async () => {
     const { app, registry } = harness();
     const { json } = await start(app);
 
@@ -200,10 +201,10 @@ describe("POST /setups/:cid/input", () => {
     const goodBody = (await good.json()) as { state: { status: string } };
     expect(goodBody.state.status).toBe("done");
 
-    // Terminal conferral minted the connection and imported the credential.
+    // Terminal grant minted the connection and imported the credential.
     const conn = registry.find("fake-telegram")[0];
     expect(conn).toBeDefined();
-    const grant = await registry.getLedger().getGrant(conn.id, "bot");
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
   });
 
@@ -254,25 +255,26 @@ async function submitInput(app: Hono, cid: string, token: string): Promise<Respo
 // Cutover (#1607): the REAL Feishu descriptor's setup, end-to-end
 // through the generic routes — mode/domain prompt, manual credential probe or
 // the agent-ready registerApp dance (QR presented mid-step), the in-setup
-// guardian link, and the terminal conferral (credential + profile + guardian
+// guardian link, and the terminal grant (credential + profile + guardian
 // mapping in one write; nothing durable before it).
 describe("Feishu setup through the generic routes (#1607)", () => {
   function feishuHarness(overrides: Parameters<typeof feishuDeps>[0] = {}) {
     const { db, close } = createTestDb();
     openDbs.push(close);
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     const personRepo = {
-      findByChannelUser: async () => null,
-      findByBondLevel: async () => [{ id: "guardian", channelMappings: [] }],
-      // The terminal conferral applies the guardian mapping through the synchronous
+      byAccount: async () => null,
+      isDismissed: async () => false,
+      byBondLevel: async () => [{ id: "guardian", links: [] }],
+      // The terminal grant applies the guardian mapping through the synchronous
       // write helpers enlisted in its transaction — not the async setters.
-      writeChannelUserId: rs.fn(),
-      writeChannelMapping: rs.fn(() => "id"),
+      readdress: rs.fn(),
+      linkStated: rs.fn(() => "id"),
     };
     registry.register(feishuDeps(overrides, personRepo));
     const manager = new SetupManager({
       registry,
-      personMappingRepo: personRepo as unknown as PersonMappingRepository,
+      peopleRepo: personRepo as unknown as PeopleRepository,
     });
     const deps = { connectionRegistry: registry, setupManager: manager } as unknown as ApiDeps;
     const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
@@ -289,7 +291,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
   }
 
   function feishuDeps(fakes: FeishuFakes, personRepo: unknown) {
-    // A fake LarkChannel keeps the Talk epoch built post-conferral off the network.
+    // A fake LarkChannel keeps the Talk epoch built post-grant off the network.
     const fakeLarkChannel = {
       async connect() {},
       async disconnect() {},
@@ -299,7 +301,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     };
     return createFeishuDescriptor({
       chatSettings: {} as never,
-      personMappingRepo: personRepo as PersonMappingRepository,
+      peopleRepo: personRepo as PeopleRepository,
       listAgents: () => [],
       createChannel: () => fakeLarkChannel as never,
       probeCredentials: fakes.probeCredentials ?? (async () => {}),
@@ -321,7 +323,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     };
   }
 
-  it("manual mode: validates and confers credentials without a guardian mapping", async () => {
+  it("manual mode: validates and grants credentials without a guardian mapping", async () => {
     const { app, registry, personRepo } = feishuHarness({});
 
     const startRes = await app.request("/connections/feishu/grants/app/setup", {
@@ -344,13 +346,13 @@ describe("Feishu setup through the generic routes (#1607)", () => {
 
     const conn = registry.find("feishu")[0];
     expect(conn).toBeDefined();
-    const grant = await registry.getLedger().getGrant(conn.id, "app");
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.profile).toEqual({ appId: "cli_abc", domain: "lark", appType: "manual" });
-    expect(personRepo.writeChannelMapping).not.toHaveBeenCalled();
+    expect(personRepo.linkStated).not.toHaveBeenCalled();
   });
 
-  it("agent-ready mode: presents the QR mid-step and confers the minted credential", async () => {
+  it("agent-ready mode: presents the QR mid-step and grants the minted credential", async () => {
     let emitQr!: (qr: { url: string; qrDataUrl: string | null; expiresAt: string | null }) => void;
     let resolveMinted!: (m: FeishuPendingMaterial) => void;
     const { app, registry } = feishuHarness({
@@ -390,7 +392,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("done");
     });
     const conn = registry.find("feishu")[0];
-    const grant = await registry.getLedger().getGrant(conn.id, "app");
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     expect(grant?.profile).toEqual({ appId: "cli_minted", domain: "lark", appType: "agent_ready" });
   });
@@ -425,14 +427,14 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     expect(stepSignal?.aborted).toBe(true);
     // Zero durable state: no connection minted, no guardian mapping.
     expect(registry.find("feishu")).toHaveLength(0);
-    expect(personRepo.writeChannelMapping).not.toHaveBeenCalled();
+    expect(personRepo.linkStated).not.toHaveBeenCalled();
   });
 });
 
 // Finding #3 — the setup must import into the connection the route addressed,
 // not blindly into find(service)[0].
 describe("addressed-connection targeting (#3)", () => {
-  it("confers into the existing connection named by :id, minting no duplicate", async () => {
+  it("grants into the existing connection named by :id, minting no duplicate", async () => {
     const { app, registry } = harness();
     const first = await start(app);
     await submitInput(app, first.json.cid, "good");
@@ -443,7 +445,7 @@ describe("addressed-connection targeting (#3)", () => {
 
     // Same connection got authorized; no second connection was minted.
     expect(registry.find("fake-telegram")).toHaveLength(1);
-    const grant = await registry.getLedger().getGrant(conn.id, "bot");
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
   });
 
@@ -456,7 +458,7 @@ describe("addressed-connection targeting (#3)", () => {
 
     const connected = registry.find("fake-telegram").filter((conn) => conn.id !== leftover.id);
     expect(connected).toHaveLength(1);
-    expect((await registry.getLedger().getGrant(leftover.id, "bot"))?.state).toBe("unauthorized");
+    expect((await registry.grantOf(leftover.id))?.state).toBe("unauthorized");
   });
 
   it("refuses a setup into an account a failed removal left behind, and removes it", async () => {
@@ -499,7 +501,7 @@ describe("teardown serialization (#4)", () => {
     const first = await start(app);
     await submitInput(app, first.json.cid, "good");
     const conn = registry.find("fake-telegram")[0];
-    expect((await registry.getLedger().getGrant(conn.id, "bot"))?.state).toBe("authorized");
+    expect((await registry.grantOf(conn.id))?.state).toBe("authorized");
 
     // A second setup on the same connection, left in-flight (awaiting input).
     const second = await start(app, conn.id);
@@ -517,12 +519,27 @@ describe("teardown serialization (#4)", () => {
     expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("cancelled");
     // ...and the account, which held no other grant, is gone.
     expect(registry.find("fake-telegram")).toEqual([]);
-    expect(await registry.getLedger().getGrant(conn.id, "bot")).toBeNull();
+    expect(await registry.grantOf(conn.id)).toBeNull();
 
     // Completing the cancelled setup is a no-op (409) and never re-imports.
     const late = await submitInput(app, second.json.cid, "good");
     expect(late.status).toBe(409);
     expect(registry.find("fake-telegram")).toEqual([]);
+  });
+});
+
+describe("a dashboard tab loaded before the grant rename", () => {
+  it("still finds the finished setup's grant under conferral", async () => {
+    const { app } = harness();
+    const started = await start(app);
+    const done = await submitInput(app, started.json.cid, "good");
+
+    const state = ((await done.json()) as { state: Record<string, unknown> }).state;
+    expect(state.status).toBe("done");
+    expect(state.conferral).toEqual(state.grant);
+    const polled = await app.request(`/setups/${started.json.cid}`);
+    const polledState = ((await polled.json()) as { state: Record<string, unknown> }).state;
+    expect(polledState.conferral).toEqual(polledState.grant);
   });
 });
 
@@ -546,13 +563,12 @@ describe("another account", () => {
     expect(registry.find("fake-telegram")).toHaveLength(1);
     const done = await submitInput(app, added.json.cid, "other");
 
-    const state = ((await done.json()) as { state: { conferral?: { connectionId?: string } } })
-      .state;
+    const state = ((await done.json()) as { state: { grant?: { connectionId?: string } } }).state;
     const accounts = registry.find("fake-telegram");
     expect(accounts).toHaveLength(2);
     const minted = accounts.find((account) => account.id !== existing.id);
-    expect(state.conferral?.connectionId).toBe(minted?.id);
-    expect((await registry.getLedger().getGrant(existing.id, "bot"))?.state).toBe("authorized");
+    expect(state.grant?.connectionId).toBe(minted?.id);
+    expect((await registry.grantOf(existing.id))?.state).toBe("authorized");
   });
 
   it("leaves no account behind when the new account's setup is cancelled", async () => {
@@ -581,7 +597,7 @@ describe("another account", () => {
 // end-to-end through the generic surface — start suspends at `awaiting-redirect`
 // (broker authorize URL), `POST /setups/return` resumes the coroutine correlated
 // by the `state` param, the redeem runs in a `ctx.step`, and the terminal
-// conferral is the single durable write. Plus the return-leg edge cases the
+// grant is the single durable write. Plus the return-leg edge cases the
 // spike called out: double-delivery, return-after-cancel, unknown/expired state,
 // denied consent.
 describe("OAuth redirect setup + return leg (#1611)", () => {
@@ -598,7 +614,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
   function oauthHarness(fakes: OAuthFakes = {}) {
     const { db, close } = createTestDb();
     openDbs.push(close);
-    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
     registry.register(
       makeOAuthProviderDescriptor("github", {
         beginRedirect: fakes.beginRedirect ?? (async () => AUTHORIZE_URL),
@@ -610,7 +626,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
           })),
       }),
     );
-    const manager = new SetupManager({ registry, personMappingRepo: fakePersonRepo() });
+    const manager = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
     const deps = { connectionRegistry: registry, setupManager: manager } as unknown as ApiDeps;
     const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
     return { app, registry };
@@ -649,12 +665,12 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     );
   }
 
-  it("suspends at awaiting-redirect, resumes on the return leg, and confers once", async () => {
+  it("suspends at awaiting-redirect, resumes on the return leg, and grants once", async () => {
     const { app, registry } = oauthHarness();
     const { json } = await startOAuth(app);
     expect(json.state.status).toBe("awaiting-redirect");
     expect(json.state.url).toBe(AUTHORIZE_URL);
-    // Nothing durable before the terminal conferral.
+    // Nothing durable before the terminal grant.
     expect(registry.find("github")).toHaveLength(0);
 
     const ret = await deliverReturn(app, { state: "st-oauth-1", handoff: "h1" });
@@ -664,7 +680,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     await pollDone(app, json.cid);
     const conn = registry.find("github")[0];
     expect(conn).toBeDefined();
-    const grant = await registry.getLedger().getGrant(conn.id, "user");
+    const grant = await registry.grantOf(conn.id);
     expect(grant?.state).toBe("authorized");
     // Stored as the inline-custody envelope (`toPersisted`).
     expect(
@@ -779,7 +795,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     const body = (await ret.json()) as { matched: boolean; state: { status: string } };
     expect(body.matched).toBe(true);
     expect(body.state.status).toBe("failed");
-    // Poll confirms the terminal failed state; nothing conferred.
+    // Poll confirms the terminal failed state; nothing granted.
     const poll = await app.request(`/setups/${json.cid}`);
     expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("failed");
     expect(registry.find("github")).toHaveLength(0);

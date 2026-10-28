@@ -336,6 +336,52 @@ test("cancels a pending paste after focus leaves the iframe", async ({ page }) =
   expect(probe.clipboardPasteFrom).toEqual([]);
 });
 
+test("reconnects after the desktop connection drops", async ({ page }) => {
+  const { frame } = await openDesktopRoute(page);
+  const status = frame.locator("#connection-status");
+  await expect(status).toBeHidden();
+
+  await dropConnection(frame);
+  await expect(status).toBeVisible();
+  await expect(status).toHaveText("Reconnecting…");
+
+  await expect.poll(() => readConnects(frame), { timeout: 5_000 }).toBe(2);
+  await expect(status).toBeHidden();
+  await expect(frame.locator("#screen canvas")).toHaveCount(1);
+  await pasteViaShortcut(page, frame, "after reconnect");
+});
+
+test("sends touch keyboard input to the new connection after a drop", async ({ page }) => {
+  await page.goto("/desktop-vnc.html?touch=1&resize=scale&path=desktop-proxy/websockify");
+  const frame = page.mainFrame();
+  await waitForFakeRfb(frame);
+
+  await dropConnection(frame);
+  await expect.poll(() => readConnects(frame), { timeout: 5_000 }).toBe(2);
+  await waitForFakeRfb(frame);
+  await frame.locator("#kb-toggle").click();
+  await frame.locator("#keyboard-input").evaluate((input) => {
+    input.value = "ok";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "ok" }));
+  });
+
+  await expect
+    .poll(() => readProbe(frame))
+    .toEqual(expect.objectContaining({ sendKey: [keyCall(0x6f), keyCall(0x6b)] }));
+});
+
+async function dropConnection(frame: Frame) {
+  await frame.evaluate(() => {
+    (window as typeof window & { __desktopVncRfb: { drop(): void } }).__desktopVncRfb.drop();
+  });
+}
+
+async function readConnects(frame: Frame): Promise<number> {
+  return frame.evaluate(
+    () => (window as typeof window & { __desktopVncConnects?: number }).__desktopVncConnects ?? 0,
+  );
+}
+
 async function openDesktopRoute(page: Page) {
   await page.goto("/desktop");
   const iframe = page.locator('iframe[src^="/desktop-vnc.html"]');

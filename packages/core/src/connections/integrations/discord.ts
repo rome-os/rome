@@ -19,7 +19,7 @@ import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures, TalkHistory } from "../types.js";
 import { DiscordAdapter } from "../../channels/discord.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -105,7 +105,7 @@ export function isDiscordAuthError(err: unknown): boolean {
 export interface DiscordDeps {
   chatSettings: ChatSettingsService;
   chatStop?: ChatStopHandler;
-  personMappingRepo: PersonMappingRepository;
+  peopleRepo: PeopleRepository;
   listAgents: () => string[];
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */
@@ -238,17 +238,16 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
   return {
     connectionKind: "discord",
     severalAccounts: true,
-    reviveProfile: (_grant, record) => reviveDiscordProfile(record),
-    accountIdOf: (_grant, record) => (typeof record.botId === "string" && record.botId) || null,
-    auth: {
-      bot: botScheme,
-    },
+    reviveProfile: (record) => reviveDiscordProfile(record),
+    accountIdOf: (record) => (typeof record.botId === "string" && record.botId) || null,
+    link: "own_account",
+    grant: "bot",
+    auth: botScheme,
     capabilities: {
       talker: {
-        needs: ["bot"] as const,
         history: true,
-        build(creds, kit): Talker {
-          const token = creds.bot.material as { token: string };
+        build(cred, kit): Talker {
+          const token = cred.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
 
           const adapter = new DiscordAdapter({
@@ -260,7 +259,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
             hasAgent: deps.hasAgent,
             resolveDiscordPerson: (channelUserId) =>
-              deps.personMappingRepo.findByChannelUser("discord", channelUserId),
+              deps.peopleRepo.byAccount({ platform: "discord", id: channelUserId }),
             // Live gateway faults (post-login) route through here; the descriptor
             // maps the adapter's kind onto grant state vs. transport.
             onGatewayFault: ({ kind, cause }) => {
@@ -379,9 +378,8 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
         },
       },
       actor: {
-        needs: ["bot"] as const,
-        build(creds) {
-          const token = creds.bot.material as { token: string };
+        build(cred) {
+          const token = cred.material as { token: string };
           const adapter = new DiscordAdapter({ botToken: token.token });
           return {
             operations: () => [

@@ -231,8 +231,8 @@ interface LoginAttempt {
   qrContent: string;
   createdAt: number;
   /** Set once the provider reports the scan confirmed. The attempt is retained
-   *  (with this cached account) until the route's ledger conferral succeeds and
-   *  calls `completeLogin`, so a transient conferral failure is retryable from
+   *  (with this cached account) until the route's ledger grant succeeds and
+   *  calls `completeLogin`, so a transient grant failure is retryable from
    *  the cache without redoing the QR scan. */
   confirmedAccount?: WechatSettings;
 }
@@ -1110,9 +1110,9 @@ export class WechatAuthService {
     const attempt = this.attempts.get(attemptId);
     if (!attempt) return { status: "expired" };
 
-    // A previously-confirmed attempt whose ledger conferral failed: answer from
+    // A previously-confirmed attempt whose ledger grant failed: answer from
     // the cache (the provider's QR is single-use post-scan) so the route can
-    // retry the conferral without a new scan.
+    // retry the grant without a new scan.
     if (attempt.confirmedAccount) {
       return { status: "confirmed", account: attempt.confirmedAccount };
     }
@@ -1128,10 +1128,10 @@ export class WechatAuthService {
     }
 
     // Return the confirmed account to the route WITHOUT persisting it: the route
-    // confers it directly into the grant ledger. The
+    // grants it directly into the grant ledger. The
     // attempt is retained (account cached) until `completeLogin`, so the only
     // copy of the confirmed credential can never be discarded by a failed
-    // conferral.
+    // grant.
     const account: WechatSettings = {
       token: status.bot_token,
       baseUrl: normalizeWechatBaseUrl(status.baseurl || attempt.baseUrl),
@@ -1144,9 +1144,9 @@ export class WechatAuthService {
     return { status: "confirmed", account };
   }
 
-  /** Discard a confirmed attempt once its account has been conferred into the
+  /** Discard a confirmed attempt once its account has been granted into the
    *  grant ledger. Until this is called, `pollLogin` keeps answering from the
-   *  cached confirmed account so a failed conferral is retryable. */
+   *  cached confirmed account so a failed grant is retryable. */
   completeLogin(attemptId: string): void {
     this.attempts.delete(attemptId);
   }

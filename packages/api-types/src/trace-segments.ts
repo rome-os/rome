@@ -276,6 +276,9 @@ export interface TraceSummary {
    *  with an error rather than a user stop. */
   terminalError?: string;
   plan?: AgentPlan;
+  /** The model that produced the turn, from the accounting on its terminal
+   *  block. Absent while the turn runs and when the terminal recorded none. */
+  model?: string;
 }
 
 export interface TraceSnapshot {

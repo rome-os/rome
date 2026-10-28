@@ -1,12 +1,14 @@
 // Every account Rome has observed, in the shape the account contract puts on
-// the wire (@rome/api-types/people). Three sources, folded into one list: the
-// links the guardian has made, the sentinel log's senders, and the address
-// books Rome mirrors.
+// the wire (@rome/api-types/people). Four sources, folded into one list: the
+// links and dismissals the guardian has made, the sentinel log's senders, and
+// the address books Rome mirrors.
 //
-// An account is one person on one channel, whatever addresses that channel
-// reaches them at. Which of them fold together is the channel's own answer,
-// read once through `AccountFold` (../channels/account-fold.ts), so nothing
-// here is channel-specific and adding a mirror changes nothing in this file.
+// An account is one person on one platform, whatever addresses that platform
+// reaches them at. Which of them fold together is the address book's own
+// answer, read once through `AccountFold` (../channels/account-fold.ts), so
+// nothing here is platform-specific and adding a mirror changes nothing in this
+// file. The sentinel log still names the channel a sender wrote on, so its
+// rows are read as accounts on that channel's platform where they are folded.
 //
 // Two reads, because the two surfaces ask two questions — "who does Rome know"
 // and "who has something new". They fold the same address books to decide which
@@ -16,37 +18,42 @@ import {
   accountPresentation,
   compareCodePoints,
   latestDynamic,
+  type AccountLink,
   type DirectoryAccount,
   type StreamAccount,
 } from "@rome/api-types/people";
-import type { Message } from "@rome/api-types/message";
-import { STRANGER_PERSON_ID } from "../constants.js";
+import type { Account } from "@rome-os/app-runtime";
+import { compareMessages, type Message } from "@rome/api-types/message";
 import type { AccountNames } from "../channels/account-names.js";
 import { foldAccounts } from "../channels/account-fold.js";
-import { addressBooks, type Channels } from "../channels/channel.js";
+import {
+  addressBooks,
+  storedOn,
+  type RecordedOn,
+  type Channels,
+  type PlatformOfChannel,
+} from "../channels/channel.js";
+import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { PeopleRepository } from "../db/repositories/people.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { assignAccountHeads } from "./timeline.js";
-import { personMessageStores } from "./timeline-sources.js";
+import { perChannel, personMessageStores } from "./timeline-sources.js";
 
 export interface AccountDirectoryDeps {
   /** Every channel Rome mirrors — the address books this folds, and the stores
    *  the stream reads a history from. */
   channels: Channels;
-  personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings">;
+  peopleRepo: Pick<PeopleRepository, "all" | "dismissals">;
   sentinelLogRepo: Pick<SentinelLogRepository, "listSenders">;
   accountNames: Pick<AccountNames, "displayNames">;
+  platformOfChannel: PlatformOfChannel;
+  /** Every channel recorded on a platform, released ones included, so a
+   *  history told to a disconnected account still reads. */
+  recordedOn?: RecordedOn;
   /** Where the message stores live. Read by the stream alone — the contacts
    *  list never reaches a history. */
   db: DrizzleDb;
-}
-
-/** The link an account carries, before {@link accountPresentation} decides how
- *  it renders. */
-interface AccountLink {
-  personId: string;
-  displayName: string;
 }
 
 /**
@@ -118,7 +125,7 @@ export function accountStreamReader(deps: AccountDirectoryDeps): () => Promise<S
   };
 }
 
-/** What a head read depends on: the channel and every address of the account. */
+/** What a head read depends on: the platform and every address of the account. */
 function headKey(account: DirectoryAccount): string {
   return JSON.stringify([account.channel, [...account.addresses].sort(compareCodePoints)]);
 }
@@ -135,9 +142,35 @@ async function readHeads(
 ): Promise<Map<string, Message>> {
   const stores = personMessageStores(deps);
   const heads = new Map<string, Message>();
-  for (const round of rounds(accounts)) {
-    for (const [account, owned] of await assignAccountHeads(stores, round)) {
-      heads.set(headKey(account), owned.head);
+  // An account is read under every channel on its platform, as a person's
+  // timeline is (`timelineAccounts`).
+  const stored = new Map<string, string[]>();
+  const storedUnder = (platform: string) => {
+    let names = stored.get(platform);
+    if (!names) {
+      names = storedOn(deps.channels, deps.platformOfChannel, platform, deps.recordedOn);
+      stored.set(platform, names);
+    }
+    return names;
+  };
+  const cost = (account: DirectoryAccount) =>
+    account.addresses.length * Math.max(storedUnder(account.channel).length, 1);
+  for (const round of rounds(accounts, cost)) {
+    // Asked once per channel the account is stored under, as a timeline reads
+    // it (`perChannel`), and previewed by the newest of those heads.
+    const asked = new Map<MessageAccount, DirectoryAccount>(
+      round.flatMap((account) =>
+        perChannel({
+          channel: account.channel,
+          addresses: account.addresses,
+          storedUnder: storedUnder(account.channel),
+        }).map((read) => [read, account] as const),
+      ),
+    );
+    for (const [read, owned] of await assignAccountHeads(stores, [...asked.keys()])) {
+      const key = headKey(asked.get(read)!);
+      const held = heads.get(key);
+      if (!held || compareMessages(owned.head, held) < 0) heads.set(key, owned.head);
     }
   }
   return heads;
@@ -157,10 +190,11 @@ function streamRows(
 }
 
 /**
- * How many addresses one round of ownership reads covers.
+ * How many stored addresses one round of ownership reads covers: each address
+ * once per channel it may be stored under.
  *
  * A SQL store answers a whole round in one statement, binding a bounded handful
- * of variables per address in it, and SQLite refuses any statement carrying
+ * of variables per stored address in it, and SQLite refuses any statement carrying
  * more than 32,766 of them. This is the one read that asks about a whole
  * address book at once, and an address book is thousands of contacts — so
  * asking about all of them in a single round is a stream that fails outright on
@@ -171,32 +205,37 @@ function streamRows(
  * the grouping that makes a directory cost one pass instead of one per row
  * still holds, just per round rather than once.
  *
- * Bounded here rather than inside the stores: the ceiling is a property of the
- * statement a store builds, but only a caller knows it is about to ask about
- * every account there is, and a store cannot chunk work it is handed a call at
- * a time.
+ * The SQL stores also split a batch that would outgrow one statement
+ * (`messages-sql.ts`), so the rounds are not what keeps a read under the
+ * ceiling. They keep each pass, and what it holds in memory, bounded for the
+ * one read that asks about every account there is.
  */
 const ADDRESSES_PER_ROUND = 1000;
 
 /**
  * The accounts split into rounds no wider than {@link ADDRESSES_PER_ROUND}.
  *
- * By addresses rather than by accounts because that is what the stores are
- * scoped by: an account reachable three ways costs three times what one
- * reachable a single way does. An account wider than a whole round still gets
- * one of its own rather than being dropped.
+ * By stored addresses rather than by accounts because that is what the stores
+ * are scoped by: an account reachable three ways costs three times what one
+ * reachable a single way does, and an account on a platform where Rome has
+ * held several channels costs that again per channel. An account wider than a
+ * whole round still gets one of its own rather than being dropped.
  */
-function* rounds(accounts: readonly DirectoryAccount[]): Generator<DirectoryAccount[]> {
+function* rounds(
+  accounts: readonly DirectoryAccount[],
+  cost: (account: DirectoryAccount) => number,
+): Generator<DirectoryAccount[]> {
   let round: DirectoryAccount[] = [];
-  let addresses = 0;
+  let width = 0;
   for (const account of accounts) {
-    if (round.length > 0 && addresses + account.addresses.length > ADDRESSES_PER_ROUND) {
+    const wide = cost(account);
+    if (round.length > 0 && width + wide > ADDRESSES_PER_ROUND) {
       yield round;
       round = [];
-      addresses = 0;
+      width = 0;
     }
     round.push(account);
-    addresses += account.addresses.length;
+    width += wide;
   }
   if (round.length > 0) yield round;
 }
@@ -220,7 +259,7 @@ function* rounds(accounts: readonly DirectoryAccount[]): Generator<DirectoryAcco
 export async function readAccountDirectory(
   deps: AccountDirectoryDeps,
 ): Promise<DirectoryAccount[]> {
-  const [senders, persons] = await Promise.all([
+  const [senders, persons, dismissals] = await Promise.all([
     // The triage record, for the senders it is the only source of: a channel
     // Rome mirrors no address book for has no other row saying the account
     // exists. Only that it saw them is read here; what they said is a message
@@ -228,32 +267,27 @@ export async function readAccountDirectory(
     deps.sentinelLogRepo.listSenders(),
     // One statement, so an account moving between two people mid-read cannot
     // land under both of them.
-    deps.personMappingRepo.findAllWithMappings(),
+    deps.peopleRepo.all(),
+    deps.peopleRepo.dismissals(),
   ]);
 
-  const mappings = persons.flatMap((person) =>
-    person.channelMappings.map((mapping) => ({ ...mapping, person })),
-  );
-  const fold = await foldAccounts(addressBooks(deps.channels), {
-    stored: [...senders, ...mappings],
+  const links = persons.flatMap((person) => person.links.map((link) => ({ ...link, person })));
+  const fold = await foldAccounts(addressBooks(deps.channels, deps.platformOfChannel), {
+    stored: [...senders, ...links, ...dismissals],
   });
 
   /** Who holds each account, decided once before any row is built. */
   const linkOf = new Map<string, AccountLink>();
   // The account behind every address the three sources name, each one under the
-  // address the channel folds it onto.
-  const observed = new Map<
-    string,
-    { channel: string; channelUserId: string; addresses: string[] }
-  >();
-  const observe = (channel: string, channelUserId: string, addresses?: string[]) => {
-    const key = fold.key(channel, channelUserId);
+  // address the platform's address book folds it onto.
+  const observed = new Map<string, { account: Account; addresses: string[] }>();
+  const observe = (platform: string, address: string, addresses?: string[]) => {
+    const key = fold.key(platform, address);
     if (!observed.has(key)) {
-      const own = fold.canonical(channel, channelUserId);
+      const own = fold.canonical(platform, address);
       observed.set(key, {
-        channel,
-        channelUserId: own,
-        // A channel with no address book can say nothing about which
+        account: { platform, id: own },
+        // A platform with no address book can say nothing about which
         // addresses are the same account, so an address it named is an
         // account of its own.
         addresses: [...(addresses ?? [own])].sort(compareCodePoints),
@@ -262,42 +296,45 @@ export async function readAccountDirectory(
     return key;
   };
 
-  for (const account of fold.accounts) {
-    observe(account.channel, account.channelUserId, account.aliases);
-  }
-  for (const sender of senders) observe(sender.channel, sender.channelUserId);
-  for (const mapping of mappings) {
-    const key = observe(mapping.channel, mapping.channelUserId);
+  for (const account of fold.accounts) observe(account.platform, account.id, account.aliases);
+  for (const sender of senders) observe(sender.platform, sender.id);
+  for (const link of links) {
+    const key = observe(link.platform, link.id);
     const held = linkOf.get(key);
-    if (held && !outranks(mapping.person.id, held.personId)) continue;
-    linkOf.set(key, { personId: mapping.person.id, displayName: mapping.person.displayName });
+    if (held && !outranks(link.person.id, held)) continue;
+    linkOf.set(key, { personId: link.person.id, displayName: link.person.displayName });
+  }
+  // A dismissal of one address never hides a link on another address of the
+  // same account: a placement the guardian made is what the row should say.
+  for (const dismissal of dismissals) {
+    const key = observe(dismissal.platform, dismissal.id);
+    if (!linkOf.has(key)) linkOf.set(key, { dismissed: true });
   }
 
   const rows = [...observed];
   // One naming read for the whole directory: every mirror answers from a single
   // fold of its address book, and the sentinel log's push names are read once,
   // and only where a mirror left a name unanswered.
-  const names = await deps.accountNames.displayNames(rows.map(([, account]) => account));
+  const names = await deps.accountNames.displayNames(rows.map(([, row]) => row.account));
 
-  return rows.map(([key, account], i) => ({
-    ...account,
+  // On the wire an account is still a channel and an address, and the channel
+  // a link names is its platform.
+  return rows.map(([key, row], i) => ({
+    channel: row.account.platform,
+    channelUserId: row.account.id,
+    addresses: row.addresses,
     displayName: names[i],
     ...accountPresentation(linkOf.get(key)),
   }));
 }
 
 /**
- * Whether a claim on an account beats the one already held.
+ * Whether a link on an account beats the one already held.
  *
- * A real person outranks the stranger sentinel. The unique index already holds
- * one mapping per identifier, but two mappings can name two addresses of one
- * account, and that account is one row: a placement the guardian made is what
- * it should say, and reading the dismissal of a second address instead would
- * hide someone they already placed. Among real people the lowest id wins, so
- * the answer does not depend on read order.
+ * The unique index holds one link per address, but two links can name two
+ * addresses of one account, and that account is one row. The lowest person id
+ * wins, so the answer does not depend on read order.
  */
-function outranks(personId: string, held: string): boolean {
-  if (personId === STRANGER_PERSON_ID) return false;
-  if (held === STRANGER_PERSON_ID) return true;
-  return compareCodePoints(personId, held) < 0;
+function outranks(personId: string, held: AccountLink): boolean {
+  return "dismissed" in held || compareCodePoints(personId, held.personId) < 0;
 }

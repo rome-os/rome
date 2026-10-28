@@ -421,21 +421,33 @@ describe("wechatUserAccounts", () => {
 
 /**
  * A reader that answers `messages` the way the real one does: every conversation
- * unless one is named, at or after `since`, the newest `limit` of them, oldest
- * first.
+ * unless one is named, at or after `since` and at or before `before`, the newest
+ * `limit` of them, oldest first. With `includeBoundaryTies`, every message of the
+ * `before` second plus the newest `limit` older ones.
  */
 function readerOrderReader(rows: WechatUserMessage[]): WechatUserReader {
   return {
     async lastActivity() {
       return new Map<string, string>();
     },
-    async messages(input: { chatId?: string; since?: Date; limit: number }) {
+    async messages(input: {
+      chatId?: string;
+      since?: Date;
+      before?: Date;
+      limit: number;
+      includeBoundaryTies?: boolean;
+    }) {
       const since = input.since ? Math.floor(input.since.getTime() / 1000) : null;
+      const before = input.before ? Math.floor(input.before.getTime() / 1000) : null;
       const held = rows
         .filter((row) => !input.chatId || row.chatId === input.chatId)
         .filter((row) => since === null || row.timestamp >= since)
+        .filter((row) => before === null || row.timestamp <= before)
         .sort((a, b) => a.timestamp - b.timestamp);
-      return held.slice(-input.limit);
+      if (!input.includeBoundaryTies || before === null) return held.slice(-input.limit);
+      const atBefore = held.filter((row) => row.timestamp === before);
+      const older = held.filter((row) => row.timestamp < before).slice(-input.limit);
+      return [...older, ...atBefore];
     },
   } as unknown as WechatUserReader;
 }

@@ -15,7 +15,7 @@ const sharedConfig = {
   target: "node20",
   sourcemap: false,
   minify: true,
-  external: ["electron", "better-sqlite3"],
+  external: ["electron", "better-sqlite3", "koffi"],
 };
 
 ensureBetterSqlite3Binding();

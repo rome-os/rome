@@ -10,6 +10,8 @@ import { buildConnectionCards, type ConnectionCard } from "@/lib/connection-card
 import type { ApiConnection, ConnectHint, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import { toast } from "sonner";
+import { stateOfGrants } from "@/test/connection-state";
+import { linkOf } from "@/test/account-links";
 
 rs.mock("sonner", () => ({
   toast: Object.assign(
@@ -62,10 +64,11 @@ function connection(
   return {
     id: `conn-${overrides.connectionKind}`,
     label: overrides.connectionKind,
+    state: overrides.id === null ? null : stateOfGrants(overrides.grants ?? {}),
     grants: {},
     display: {},
     capabilities: {
-      talk: { state: "unsupported" },
+      chat: { state: "unsupported" },
       act: { state: "unsupported" },
       watch: { state: "unsupported" },
     },
@@ -73,6 +76,7 @@ function connection(
     setups: {},
     channel: null,
     agent: null,
+    link: linkOf(overrides.connectionKind),
     severalAccounts: false,
     ...overrides,
   };
@@ -313,18 +317,7 @@ describe("ConnectionDetailBody — OAuth single-slot cards", () => {
   });
 });
 
-describe("ConnectionDetailBody — webchat and remaining channels", () => {
-  it("always-on webchat: connected card with its chat bullet and the nothing-to-configure note", () => {
-    const webchat = cardFor([connection({ connectionKind: "webchat" })], "webchat");
-    renderBody(webchat);
-
-    expect(screen.getByText("Chat with your agent right here in the dashboard")).toBeTruthy();
-    expect(screen.getByText("Always on — nothing to configure.")).toBeTruthy();
-    // The internal Talk/Act/Watch taxonomy is never surfaced.
-    expect(screen.queryByText("Talk")).toBeNull();
-    expect(screen.queryByText("Capabilities")).toBeNull();
-  });
-
+describe("ConnectionDetailBody — remaining channels", () => {
   it("whatsapp: bot-slot card with its bullets and the generic setup entry point", () => {
     const whatsapp = cardFor(
       [connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" } })],
@@ -393,7 +386,7 @@ describe("ConnectionDetailBody — accounts", () => {
       grants: { app: "authorized" },
       display: { app: grantDisplay({ displayName: "Support Bot" }) },
       capabilities: {
-        talk: { state: "unlocked" },
+        chat: { state: "unlocked" },
         act: { state: "unsupported" },
         watch: { state: "unsupported" },
       },
@@ -434,6 +427,7 @@ describe("ConnectionDetailBody — accounts", () => {
     renderAccountBody(cardFor([feishu({ agent: "sales:agent" })], "feishu"));
 
     expect(screen.getByText("sales:agent")).toBeTruthy();
+    expect(screen.getByText("Speaks as this account")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
       `/envoys/${encodeURIComponent("sales:agent")}/settings`,
@@ -458,6 +452,12 @@ describe("ConnectionDetailBody — accounts", () => {
     );
   });
 
+  it("shows no agent for a kind of connection core reports takes none", () => {
+    renderAccountBody(cardFor([feishu({ agent: "sales:agent", link: null })], "feishu"));
+
+    expect(screen.queryByText("sales:agent")).toBeNull();
+  });
+
   it("hides the agent until the server reports links", () => {
     const { agent: _omitted, ...older } = feishu();
     renderAccountBody(cardFor([older], "feishu"), { onOpenAccount: rs.fn() });
@@ -474,11 +474,11 @@ describe("ConnectionDetailBody — accounts", () => {
       const method = init?.method ?? "GET";
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       if (url.endsWith("/setup") && method === "POST") {
-        const conferral = connectionId ? { connectionId } : {};
+        const grant = connectionId ? { connectionId } : {};
         return new Response(
           JSON.stringify({
             cid: "cid-new",
-            state: { status: "done", conferral },
+            state: { status: "done", grant },
             reattached: false,
           }),
           { status: 200 },

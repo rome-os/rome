@@ -11,7 +11,6 @@ import {
 import { sql } from "drizzle-orm";
 import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DeviceFolder } from "@rome/api-types/devices";
-import type { OutboxMessage } from "@rome/api-types/people";
 import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
@@ -95,32 +94,72 @@ export const persons = sqliteTable("persons", {
 });
 
 /**
- * Which person each account belongs to — a channel mapping is a
- * [link](docs/concepts/people.md#link), and `channel_user_id` is the account's
- * own [address](docs/concepts/people.md#address).
- *
- * The table, its columns, and its index keep the older names: renaming any of
- * them needs a migration, and `channelMappings` is also the wire field
- * `@rome-os/app-runtime` publishes on `PersonRecord`.
+ * Which person each account belongs to: a
+ * [link](docs/domains/people.md#link). It names the account the way Chats
+ * does, by the platform and the platform's own id for it
+ * (docs/domains/chats.md#account), so one account is one row whichever of
+ * Rome's accounts met it.
  */
-export const channelMappings = sqliteTable(
-  "channel_mappings",
+export const links = sqliteTable(
+  "links",
   {
     id: text("id").primaryKey(),
     personId: text("person_id")
       .references(() => persons.id)
       .notNull(),
-    channel: text("channel").notNull(),
-    channelUserId: text("channel_user_id").notNull(),
-    displayName: text("display_name"),
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+    /** A [delegate link](docs/domains/people.md#delegate-link): the account is
+     *  an agent's, acting for the person it is linked to. */
+    delegate: integer("delegate", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     // One account belongs to exactly one person. Held in the database rather
     // than checked before each write: two concurrent placements of the same
     // waiting sender both read "unlinked" and both insert, and the People page
     // would then show that account under two people at once.
-    uniqueIndex("idx_channel_mappings_identity").on(table.channel, table.channelUserId),
+    uniqueIndex("idx_links_account").on(table.platform, table.accountId),
   ],
+);
+
+/**
+ * The accounts the guardian dismissed: decided to belong to nobody they track
+ * (docs/domains/people.md#account). A dismissal is a decision about an
+ * account, not a person, so it is keyed by the account the way a link is and
+ * names no one. An account is linked or dismissed, never both: every write
+ * that links an account deletes its dismissal in the same transaction.
+ */
+export const dismissedAccounts = sqliteTable(
+  "dismissed_accounts",
+  {
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
+);
+
+/**
+ * What a platform says about an account: its display name, handle and avatar
+ * (docs/domains/chats.md#account-profile). A cache Chats keeps, keyed by the
+ * account itself, the platform and the platform's own id. It has no id of its
+ * own and nothing points at it, so a row can be dropped and learned again from
+ * the platform without losing anything else.
+ */
+export const accountProfiles = sqliteTable(
+  "account_profiles",
+  {
+    platform: text("platform").notNull(),
+    accountId: text("account_id").notNull(),
+    displayName: text("display_name"),
+    handle: text("handle"),
+    avatarUrl: text("avatar_url"),
+    // Where the row was learned. A platform's address book outranks the name a
+    // sender put on a message, so a message never overwrites a row the address
+    // book wrote.
+    source: text("source", { enum: ["address_book", "message"] }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.platform, table.accountId] })],
 );
 
 // A durable mirror of the WhatsApp contact list, chats, and recent message
@@ -146,59 +185,6 @@ export const waContacts = sqliteTable("wa_contacts", {
   firstSyncedAt: integer("first_synced_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
-
-/**
- * Messages Rome is still trying to deliver — the
- * [outbox](docs/concepts/people.md).
- *
- * Not a message store, and deliberately not part of the timeline. A row here
- * is a send that has not happened yet and may never; a timeline entry is one
- * that did. Keeping them apart is what lets `Message`'s `ref` stay unique
- * and its ordering stay total — a cursor cannot be written across rows that may
- * still be withdrawn — and what keeps each account owned by exactly one message
- * store rather than two that disagree.
- *
- * A row leaves by being delivered: once `provider_message_id` names a message
- * the channel's own store holds, the entry is on the timeline and the row is
- * redundant. Nothing has to remember to clear it, because the read derives
- * that (`src/people/outbox.ts`).
- *
- * Addressed by the account rather than by the person, because that is what a
- * send names. A merge moves the link, and this row keeps pointing at the
- * address it was sent to, which stays true whoever ends up holding it.
- */
-export const outboundMessages = sqliteTable(
-  "outbound_messages",
-  {
-    id: text("id").primaryKey(),
-    channel: text("channel").notNull(),
-    channelUserId: text("channel_user_id").notNull(),
-    /** The chat the channel resolved the address to, kept so a retry does
-     *  not have to ask again. */
-    chatId: text("chat_id").notNull(),
-    text: text("text").notNull(),
-    state: text("state", { enum: ["sending", "unconfirmed", "failed"] }).notNull(),
-    /** The channel's own id for the message, once it has taken it. Null while
-     *  sending and after a failure. Half of the ref the delivered entry
-     *  carries, which is how the read knows the row has landed. */
-    providerMessageId: text("provider_message_id"),
-    error: text("error"),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
-  },
-  (table) => [index("idx_outbound_account").on(table.channel, table.channelUserId)],
-);
-
-/** Outbox removal retains the response for the retry window in docs/concepts/people.md#outbox. */
-export const outboundSendReceipts = sqliteTable(
-  "outbound_send_receipts",
-  {
-    id: text("id").primaryKey(),
-    response: text("response", { mode: "json" }).$type<OutboxMessage>().notNull(),
-    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-  },
-  (table) => [index("idx_outbound_send_receipts_expiry").on(table.expiresAt)],
-);
 
 export const waChats = sqliteTable("wa_chats", {
   jid: text("jid").primaryKey(),
@@ -312,7 +298,7 @@ export const linkedinMessages = sqliteTable(
 // stored once, not once per thread the person appears in.
 export const linkedinParticipants = sqliteTable("linkedin_participants", {
   // LinkedIn member id, bare (`ACoAA…`) — no urn: prefix and no profile URL —
-  // so it matches `channel_mappings.channel_user_id` for `channel = "linkedin"`
+  // so it matches `links.account_id` for `platform = "linkedin"`
   // and a mirrored participant can be promoted into `persons` with no
   // translation step.
   participantId: text("participant_id").primaryKey(),
@@ -352,7 +338,11 @@ export const linkedinThreadParticipants = sqliteTable(
 export const sentinelLog = sqliteTable("sentinel_log", {
   id: text("id").primaryKey(),
   messageId: text("message_id").notNull(),
+  /** The channel the message arrived on, as it was named then. */
   channel: text("channel").notNull(),
+  /** The sender's account: this platform and `channel_user_id`, its id there.
+   *  Written when the entry is, so nothing reads `channel` to find it. */
+  platform: text("platform").notNull(),
   channelUserId: text("channel_user_id").notNull(),
   displayName: text("display_name"),
   threadId: text("thread_id"),
@@ -427,6 +417,17 @@ export const guardianAuth = sqliteTable("guardian_auth", {
   avatarUrl: text("avatar_url"),
   onboardingComplete: integer("onboarding_complete", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+// The last Rome Cloud profile each visitor signed in with, kept so other
+// dashboard people see who sent a chat message. A visitor's own session holds
+// the same fields, but only in their cookie. Display only, never used for
+// authentication; a sign-in overwrites the row.
+export const visitorProfiles = sqliteTable("visitor_profiles", {
+  accountId: text("account_id").primaryKey(),
+  email: text("email").notNull(),
+  avatarUrl: text("avatar_url"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
 export const oauthPendingAttempts = sqliteTable(
@@ -729,6 +730,21 @@ export const romeAgentMessages = sqliteTable(
   ],
 );
 
+// The platform messages a message row stands for besides its own
+// platform_message_id. A reply the platform shows as several messages is one
+// row, and a quote of any of them reaches it. Not a FK, as with the trace
+// blocks below: session-scoped deletes remove these rows explicitly.
+export const romeAgentMessagePlatformIds = sqliteTable(
+  "rome_agent_message_platform_ids",
+  {
+    sessionId: text("session_id").notNull(),
+    platformMessageId: text("platform_message_id").notNull(),
+    // The rome_agent_messages row the platform message belongs to.
+    messageId: text("message_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.platformMessageId] })],
+);
+
 // Append-only storage for trace content, avoiding the O(N²) cost of storing
 // the whole trace as one JSON array on the role='trace' rome_agent_messages
 // row and re-serializing it after every agent event — that multi-megabyte
@@ -869,9 +885,90 @@ export const executionJournal = sqliteTable(
   ],
 );
 
-// One row per minted Connection. A connection kind may hold several. The many-to-many
-// grant ledger lives in `connection_grants` below, keyed by custody (the
-// connectionId).
+export const appConnectionAccess = sqliteTable(
+  "app_connection_access",
+  {
+    appId: text("app_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    identity: text("identity").notNull(),
+    operation: text("operation").notNull(),
+    sideEffects: text("side_effects", { enum: ["read-only", "write"] }).notNull(),
+    approval: text("approval", { enum: ["required", "not_required"] }).notNull(),
+    constraints: text("constraints", { mode: "json" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }),
+    grantEpoch: text("grant_epoch").notNull(),
+    revision: integer("revision").notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.appId, table.connectionId, table.identity, table.operation],
+    }),
+    index("idx_app_connection_access_app").on(table.appId, table.connectionId),
+  ],
+);
+
+export const appConnectionInvocations = sqliteTable(
+  "app_connection_invocations",
+  {
+    id: text("id").primaryKey(),
+    appId: text("app_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    identity: text("identity").notNull(),
+    operation: text("operation").notNull(),
+    requestIdHash: text("request_id_hash"),
+    inputHash: text("input_hash").notNull(),
+    input: text("input", { mode: "json" }),
+    sideEffects: text("side_effects", { enum: ["read-only", "write"] }).notNull(),
+    accessRevision: integer("access_revision").notNull(),
+    status: text("status", {
+      enum: [
+        "ready",
+        "pending_approval",
+        "running",
+        "succeeded",
+        "failed",
+        "rejected",
+        "outcome_unknown",
+      ],
+    }).notNull(),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_app_connection_invocation_request")
+      .on(table.appId, table.requestIdHash)
+      .where(sql`${table.requestIdHash} IS NOT NULL`),
+    index("idx_app_connection_invocation_retention").on(table.updatedAt),
+  ],
+);
+
+export const appConnectionAudit = sqliteTable(
+  "app_connection_audit",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    appId: text("app_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    identity: text("identity").notNull(),
+    operation: text("operation").notNull(),
+    accessRevision: integer("access_revision"),
+    approval: text("approval", {
+      enum: ["not_required", "pending", "approved", "rejected"],
+    }).notNull(),
+    executionId: text("execution_id").notNull(),
+    requestIdHash: text("request_id_hash"),
+    status: text("status").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [index("idx_app_connection_audit_app").on(table.appId, table.seq)],
+);
+
+// One row per minted Connection. A connection kind may hold several. Its one
+// grant lives in `connection_grants` below, keyed by custody (the connectionId).
+
 export const connections = sqliteTable("connections", {
   id: text("id").primaryKey(),
   connectionKind: text("connection_kind").notNull(),
@@ -881,13 +978,14 @@ export const connections = sqliteTable("connections", {
 
 // One row per channel a Connection backs: Rome's presence on a platform, with
 // an id minted once and never changed. The first channel of a connection kind takes
-// the connection kind's name as its id, and later ones get an opaque id. A row
+// the connection kind's name as its id, and later ones get an opaque id. A linkable
+// connection kind's account connected through setup always gets an opaque id, and only
+// its account from before channels were recorded keeps the name. A row
 // outlives its Connection, unbacked and unlinked, so its id is never minted
 // again: a linkable connection kind's next Connection gets a channel of its own, and
-// another connection kind's takes the row back. `agent` is the canonical id of the
-// account's agent, and one agent may be the agent of any number of channels,
-// several on one platform included. `platform` is the platform the row was
-// minted on, and the row keeps it.
+// another connection kind's takes the row back. `agent` is no longer written
+// or read: an account's agent lives on `connected_accounts`. `platform` is
+// the platform the row was minted on, and the row keeps it.
 export const channels = sqliteTable(
   "channels",
   {
@@ -895,29 +993,63 @@ export const channels = sqliteTable(
     connectionKind: text("connection_kind").notNull(),
     platform: text("platform").notNull(),
     connectionId: text("connection_id"),
+    // The platform's own id for the account. With `platform` it is the
+    // account's identity, so at most one record holds a pair. Vocabulary:
+    // docs/domains/chats.md#account.
+    platformAccountId: text("platform_account_id"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     agent: text("agent"),
   },
-  (table) => [uniqueIndex("channels_connection_unique").on(table.connectionId)],
+  (table) => [
+    uniqueIndex("channels_connection_unique").on(table.connectionId),
+    uniqueIndex("uq_channels_platform_account")
+      .on(table.platform, table.platformAccountId)
+      .where(sql`${table.platformAccountId} IS NOT NULL`),
+  ],
 );
+
+// Chats' record of a connected account: one row per connection that lets
+// Rome chat, keyed by that connection and holding the agent that speaks
+// through the account, null for none. It lives exactly as long as its
+// connection. Vocabulary: docs/domains/chats.md#connected-account.
+export const connectedAccounts = sqliteTable("connected_accounts", {
+  connectionId: text("connection_id")
+    .primaryKey()
+    .references(() => connections.id, { onDelete: "cascade" }),
+  agent: text("agent"),
+});
 
 // The grant ledger. Rows record outcomes only — never step/flow state
 // or scheme-specific columns. `credential` is a PersistedCredential envelope
 // stored as plain JSON (encryption was deliberately dropped); the envelope
 // shape is kept so encryption can return later. A grant row is present in "unauthorized" from
-// connection creation; conferral fills it. One grant = one credential row.
+// connection creation; giving a grant fills it. One grant = one credential row.
 export const connectionGrants = sqliteTable(
   "connection_grants",
   {
-    custody: text("custody").notNull(), // connectionId
-    name: text("name").notNull(),
+    // The connection that holds the grant. A connection holds exactly one.
+    // Vocabulary: docs/domains/connections.md#grant.
+    custody: text("custody").primaryKey(),
     state: text("state").notNull(), // unauthorized | authorized | degraded
     credential: text("credential", { mode: "json" }), // PersistedCredential | null
-    profile: text("profile", { mode: "json" }), // ProfileRecord | null — non-secret conferral outcome
-    conferredAt: integer("conferred_at", { mode: "timestamp" }),
+    profile: text("profile", { mode: "json" }), // ProfileRecord | null — non-secret grant outcome
+    grantedAt: integer("granted_at", { mode: "timestamp" }),
+    grantEpoch: text("grant_epoch"),
     lastRenewedAt: integer("last_renewed_at", { mode: "timestamp" }),
     degradedAt: integer("degraded_at", { mode: "timestamp" }),
     degradedReason: text("degraded_reason"),
+    // The account the grant reaches, read from its profile: the platform and
+    // the platform's own id for the account. Null when the profile names none.
+    platform: text("platform"),
+    accountId: text("account_id"),
   },
-  (table) => [primaryKey({ columns: [table.custody, table.name] })],
+  (table) => [
+    // At most one connection reaches an account at a time, across every kind of
+    // connection on its platform. A broken (degraded) grant still counts, so a
+    // broken connection keeps its account. Vocabulary:
+    // docs/domains/connections.md#connection.
+    uniqueIndex("uq_connection_grants_account")
+      .on(table.platform, table.accountId)
+      .where(sql`${table.accountId} IS NOT NULL AND ${table.state} != 'unauthorized'`),
+  ],
 );

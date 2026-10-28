@@ -212,6 +212,35 @@ export function createNodeClient(config: NodeConfig, options: NodeClientOptions 
       throw error;
     }
   }
+  /** Sends a device management request. Failures throw DeviceActionError. */
+  async function manage(method: "devices.rename" | "devices.remove", params: unknown) {
+    assertOpen();
+    let value: unknown;
+    try {
+      value = await call(method, params);
+    } catch (error) {
+      if (error instanceof RpcError && error.code === -32601) throw new DaemonVersionError();
+      if (error instanceof DaemonRequestError)
+        throw new DeviceActionError({
+          type: "response",
+          ok: false,
+          error: { code: error.code, message: error.message },
+        });
+      if (error instanceof RpcError)
+        throw new DeviceActionError({
+          type: "response",
+          ok: false,
+          error: {
+            code: error.code === -32602 ? "invalid_request" : "cloud_unavailable",
+            message: error.message,
+          },
+        });
+      throw error;
+    }
+    const response = parseResponse(value);
+    if (!response) throw new Error("Invalid device management response.");
+    if (!response.ok) throw new DeviceActionError(response);
+  }
   async function runBinary(
     deviceId: string,
     action: string,
@@ -379,6 +408,13 @@ export function createNodeClient(config: NodeConfig, options: NodeClientOptions 
         throw new Error("Invalid device list response.");
       return body as unknown as DeviceList;
     },
+    /** Renames a device of the account. Cloud trims the name and accepts 1 to 80 characters. */
+    renameDevice: (deviceId: string, name: string) => manage("devices.rename", { deviceId, name }),
+    /**
+     * Revokes a device of the account and deletes it from the list. The code
+     * `revocation_pending` means the device is revoked but still listed; remove it again later.
+     */
+    removeDevice: (deviceId: string) => manage("devices.remove", { deviceId }),
     run,
     /**
      * Runs an action with `body` as input bytes and returns its output bytes, for example exec

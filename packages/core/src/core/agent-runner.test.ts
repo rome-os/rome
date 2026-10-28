@@ -4045,13 +4045,14 @@ describe("AgentRunner", () => {
     });
 
     it("does not inject into a resumed session (the block is already in its history)", async () => {
-      // Pre-create the DB session so findReusableSession resolves it → isNewSession=false.
+      // A row whose provider thread the provider resumes already holds the block.
       const repo = new SessionsRepository(testDb.db);
-      await repo.create({
+      const id = await repo.create({
         agentName: "test-main",
         channelThreadKey: "webchat:tc-resumed",
         status: "active",
       });
+      await repo.setProviderInfo(id, "mock", "mock-thread-1", "mock-model");
       const runner = createRunner(alwaysResultProvider());
 
       const messages = await collectMessages(
@@ -4065,6 +4066,30 @@ describe("AgentRunner", () => {
       );
 
       expect(initUserPrompt(messages)).not.toContain("<thread_context>");
+    });
+
+    it("injects into a session whose row never recorded a provider thread", async () => {
+      // The provider resumes only a recorded thread, so this one starts new
+      // and has not seen the block.
+      const repo = new SessionsRepository(testDb.db);
+      await repo.create({
+        agentName: "test-main",
+        channelThreadKey: "webchat:tc-unthreaded",
+        status: "active",
+      });
+      const runner = createRunner(alwaysResultProvider());
+
+      const messages = await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "Continue",
+          channelThreadKey: "webchat:tc-unthreaded",
+          threadContext: webchatThreadContext,
+          workingDir: projectWorkingDir,
+        }),
+      );
+
+      expect(initUserPrompt(messages)).toContain("<thread_context>");
     });
 
     it("does not inject into subagent sessions", async () => {
@@ -4985,12 +5010,12 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("a Fable-pinned session keeps running Fable after the setting is turned off", async () => {
+    it("a pinned session keeps its model after the tier mapping changes", async () => {
       const state = {
         codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
         claude: { loggedIn: true, quotaExhausted: false },
       };
-      let enableFable = true;
+      let tierModelMappings: unknown = { anthropic: { large: FABLE_MODEL } };
       const opens: ModelSessionParams[] = [];
       const claude: ModelProvider = {
         id: "anthropic",
@@ -5012,7 +5037,7 @@ describe("AgentRunner", () => {
         aiToolState: { get: () => state, refresh: async () => state },
         settingsRepo: {
           get: async <T = unknown>(key: string): Promise<T | null> =>
-            key === "enableFable" ? (enableFable as T) : null,
+            key === "tierModelMappings" ? (tierModelMappings as T) : null,
         },
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
@@ -5020,15 +5045,15 @@ describe("AgentRunner", () => {
       });
       const session = await manager.acquire({
         agentName: "test-main",
-        channelThreadKey: "webchat:fable-pin",
+        channelThreadKey: "webchat:mapping-pin",
       });
 
       await collectMessages(session.sendTurn({ prompt: "first" }).events);
       expect(opens[0].model).toBe(FABLE_MODEL);
 
-      // The toggle is a Rome-side preference, not an entitlement: it governs
-      // new resolutions only. The pinned session stays on Fable.
-      enableFable = false;
+      // A mapping is a Rome-side preference, not an entitlement: it governs
+      // new resolutions only. The pinned session stays on the mapped model.
+      tierModelMappings = null;
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
 
       expect(second.find((message) => message.type === "result")).toMatchObject({

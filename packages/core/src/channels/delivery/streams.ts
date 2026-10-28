@@ -1,4 +1,5 @@
-import type { ChatRepository, StreamAgentEvent } from "@rome-os/app-runtime";
+import type { StreamAgentEvent } from "@rome-os/app-runtime";
+import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { Clock } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
 import type { ChannelReplies } from "../channel.js";
@@ -8,12 +9,14 @@ import type { DeliveryPolicy } from "./types.js";
 
 const log = createLogger("reply-streams");
 
-/** Edit about once a second, the pace Telegram allows in one chat. */
+/** Edit about once a second, the pace Telegram allows in one chat. A long
+ *  answer arrives about a paragraph to a message. */
 const DEFAULT_POLICY: DeliveryPolicy = {
   mode: "edit",
   editIntervalMs: 1000,
   blockWaitMs: 1500,
   maxPendingChars: 200_000,
+  softPartLength: 100,
 };
 
 /** Where a run's reply goes. */
@@ -43,7 +46,7 @@ export interface ReplyStreamsDeps {
   /** The channel's reply port, read when a reply opens. */
   replies(channel: string): ChannelReplies | null | undefined;
   clock: Clock;
-  chats?: Pick<ChatRepository, "recordOutboundMessage">;
+  chats?: Pick<WebChatRepository, "recordOutboundConversationMessage">;
   policy?: DeliveryPolicy;
 }
 
@@ -97,22 +100,26 @@ export class ReplyStreams {
     // likely landed, and nothing sends it again.
     const shown = outcome.parts;
     if (!this.deps.chats || shown.length === 0) return;
-    // A block's parts split its text, and each block is a message of its own.
+    // A block's parts split its source, and each block is a message of its own.
     const text = shown
-      .map((part, i) => (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.text)
+      .map((part, i) => (i > 0 && part.block !== shown[i - 1]!.block ? "\n\n" : "") + part.source)
       .join("");
-    // A row holds one message id. A quote names it to reach the row, and the
-    // message quoted is most often the answer, which the last block starts.
+    // The row's own id is the message that starts the answer, the last block.
     // A message whose create is unknown has no id, so the last block with one
-    // stands in.
+    // stands in. The reply's other messages are kept beside it, so a quote of
+    // any message the reply wrote reaches the row.
     const receipted = shown.filter((part) => part.receipt);
     const lastBlock = receipted.at(-1)?.block;
     const quoted = receipted.find((part) => part.block === lastBlock)?.receipt;
+    const others = receipted.flatMap(({ receipt }) =>
+      receipt && receipt !== quoted ? [receipt.messageId] : [],
+    );
     try {
-      await this.deps.chats.recordOutboundMessage({
+      await this.deps.chats.recordOutboundConversationMessage({
         sessionId: target.romeSessionId,
         content: JSON.stringify([{ type: "text", content: text }]),
         ...(quoted ? { platformMessageId: quoted.messageId } : {}),
+        ...(others.length > 0 ? { otherPlatformMessageIds: others } : {}),
         senderId: "rome",
         senderName: "Rome",
         ...(target.replyToMessageId ? { replyToPlatformMessageId: target.replyToMessageId } : {}),
