@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { ChatPendingCardJump } from "./ChatPendingCardJump";
@@ -8,6 +8,7 @@ import { RoutineDraftCard } from "./entries/RoutineDraftCard";
 import { AiToolsCard } from "./entries/AiToolsCard";
 import { QuestionCard } from "./entries/QuestionCard";
 import { createRoutine, listRoutineRefs } from "@/lib/chat-api";
+import { render } from "@/test/query-render";
 import i18n from "@/i18n";
 
 rs.mock("@/lib/chat-api", () => ({

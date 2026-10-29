@@ -66,6 +66,8 @@ import { randomUUID } from "@/lib/random-uuid";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
 
+import { UsageMenu } from "./composer/UsageMenu";
+
 export interface ChatComposerSnapshot {
   text: string;
   uploads: PendingUpload[];
@@ -139,6 +141,9 @@ export interface ChatComposerProps {
   // and sends carry no selection: the chat stores it. A draft leaves it unset,
   // so the picker edits the default for new chats.
   chatModelSelection?: { value: string; onChange: (next: string) => void };
+  // The open chat's model pick and session pin, which decide whose usage the
+  // usage menu shows. A draft leaves it unset and uses the draft pick.
+  usageModel?: { selection: string; pinnedModel?: string | null };
   // Seed for the draft project name. Honored once at mount and again when it
   // changes from undefined → defined (i.e., transitioning into a new draft).
   initialProjectName?: string;
@@ -227,6 +232,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     showProjectSelector = false,
     showModelSelector = false,
     chatModelSelection,
+    usageModel,
     initialProjectName,
     initialDeviceFolder,
     pinnedAgentMention = null,
@@ -1392,6 +1398,17 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 disabled={uploadInFlight}
               />
             )}
+            {/* Last, so a narrow toolbar scrolls it off before the controls a send uses. */}
+            <UsageMenu
+              enabled={settings !== undefined && settings.showAiToolUsage !== false}
+              selection={
+                usageModel?.selection ??
+                chatModelSelection?.value ??
+                (modelSelectorEnabled ? largeModelSelection : "auto")
+              }
+              pinnedModel={usageModel?.pinnedModel}
+              disabled={uploadInFlight}
+            />
           </div>
           {/* Stop sits just left of Send. */}
           <div className="flex items-center gap-2 self-end [grid-area:send]">

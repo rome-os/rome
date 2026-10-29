@@ -1,3 +1,6 @@
+import { streamSSE } from "hono/streaming";
+import { resolveGuardianSession } from "../../lib/guardian-session.js";
+import { buildAiToolsStatus, subscribeAiToolsStatus } from "../ai-tools-status.js";
 import { execFile } from "node:child_process";
 import { Hono } from "hono";
 import { createLogger } from "../../logger.js";
@@ -38,28 +41,35 @@ function logoutClaude(): Promise<{ ok: boolean; error?: string }> {
 }
 
 export function aiToolsRoutes(
-  deps: Pick<ApiDeps, "settingsRepo" | "aiToolState" | "codexAccountService">,
+  deps: Pick<ApiDeps, "settingsRepo" | "aiToolState" | "codexAccountService" | "db">,
 ): Hono {
   const app = new Hono();
 
-  app.get("/ai-tools/status", (c) => {
-    const state = deps.aiToolState.get();
-    const login = deps.codexAccountService.getLoginState();
-    return c.json({
-      claude: state.claude,
-      codex: state.codex,
-      codexLogin: {
-        running: login.running && login.mode === "browser",
-        lastExit: null,
-        lastError: login.lastError,
-      },
-      codexDeviceLogin: {
-        running: login.running && login.mode === "device",
-        userCode: login.mode === "device" ? login.userCode : null,
-        verificationUrl: login.mode === "device" ? login.verificationUrl : null,
-        lastError: login.lastError,
-      },
-      anthropicCompatible: state.claude.anthropicCompatible ?? null,
+  app.get("/ai-tools/status", (c) => c.json(buildAiToolsStatus(deps)));
+
+  app.get("/ai-tools/events", async (c) => {
+    if (!(await resolveGuardianSession(c, deps.db)))
+      return c.json({ error: "Not authenticated" }, 401);
+    return streamSSE(c, async (sse) => {
+      let close!: () => void;
+      const closed = new Promise<void>((resolve) => {
+        close = resolve;
+      });
+      let unsubscribe = () => {};
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
+      const finish = () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+        close();
+      };
+      unsubscribe = subscribeAiToolsStatus(deps, (event, data) => {
+        void sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
+      });
+      heartbeat = setInterval(() => {
+        void sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
+      }, 20_000);
+      sse.onAbort(finish);
+      await closed;
     });
   });
 

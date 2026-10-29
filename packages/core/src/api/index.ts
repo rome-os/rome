@@ -10,6 +10,7 @@ import { renderAppIdentity, renderSocialMeta } from "../lib/social-meta.js";
 import { buildAppIdentity } from "./app-home-screen.js";
 import { buildAppSocialCard } from "./app-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
+import { subscribeAiToolsStatus } from "./ai-tools-status.js";
 import { attachLiveEventsServer } from "../live-events-server.js";
 import { attachNodeConsoleServer } from "../node-console-server.js";
 import { attachDesktopProxy } from "../desktop-proxy-server.js";
@@ -339,6 +340,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           hasChatSession: (sessionId) => webchatRuntime.hasStoredSession(sessionId),
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
+          subscribeAiToolsStatus: (emit) => subscribeAiToolsStatus(deps, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
         },
       );

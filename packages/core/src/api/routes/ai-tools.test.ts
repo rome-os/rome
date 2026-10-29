@@ -1,3 +1,4 @@
+import { createSession } from "../../lib/auth.js";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,6 +68,42 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<voi
 }
 
 describe("AI tools status API", () => {
+  it("guards the SSE counterpart and replays the same cache as HTTP before pushing changes", async () => {
+    const testDb = createTestDb();
+    try {
+      const deps = await buildTestDeps(testDb.db);
+      const app = new Hono().route("/", aiToolsRoutes(deps));
+      expect((await app.request("/ai-tools/events")).status).toBe(401);
+      const response = await app.request("/ai-tools/events", {
+        headers: { cookie: `rome_session=${createSession("guardian-1")}` },
+      });
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      const decode = (value: Uint8Array | undefined) => {
+        const frame = new TextDecoder().decode(value);
+        expect(frame).toContain("event: status");
+        return JSON.parse(frame.split("data: ")[1].trim());
+      };
+      try {
+        expect(decode((await reader.read()).value)).toEqual(
+          await (await app.request("/ai-tools/status")).json(),
+        );
+        deps.aiToolState.applyLiveUsage("anthropic", {
+          checkedAt: new Date().toISOString(),
+          source: "event",
+          fiveHour: { usedPercent: 29 },
+        });
+        expect(decode((await reader.read()).value)).toEqual(
+          await (await app.request("/ai-tools/status")).json(),
+        );
+      } finally {
+        await reader.cancel();
+      }
+    } finally {
+      testDb.close();
+    }
+  });
+
   it("refreshes the process state through the explicit refresh endpoint", async () => {
     const testDb = createTestDb();
     try {

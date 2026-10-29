@@ -1,3 +1,4 @@
+import { useAiToolStatus } from "@/hooks/use-ai-tool-status";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, ArrowRight, RotateCcw, ShieldCheck, Sparkles } from "lucide-react";
@@ -14,7 +15,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
 const VNC_URL = "/desktop-vnc.html?resize=scale&path=desktop-proxy/websockify";
-const STATUS_POLL_INTERVAL_MS = 2000;
 
 type Step = "login" | "authorize";
 
@@ -22,15 +22,6 @@ interface ChatGPTLoginModalProps {
   open: boolean;
   onClose: () => void;
   onConnected: () => void;
-}
-
-interface AiToolsStatus {
-  codex?: { loggedIn?: boolean };
-  codexLogin?: {
-    running?: boolean;
-    lastExit?: { code: number | null; signal: string | null } | null;
-    lastError?: string | null;
-  };
 }
 
 export function ChatGPTLoginModal({ open, onClose, onConnected }: ChatGPTLoginModalProps) {
@@ -114,47 +105,23 @@ export function ChatGPTLoginModal({ open, onClose, onConnected }: ChatGPTLoginMo
     }
   }, [t]);
 
-  // Step 2 — poll AI status until codex reports loggedIn. We no longer surface a
-  // "waiting" spinner; the user drives the flow with Retry/Back buttons, but we
-  // still need to fire onConnected the moment codex finishes.
-  // Deliberately leaves callbacks out of deps (we read them through refs) so
-  // the effect doesn't tear down + immediately re-fire on every parent render.
+  const { data: aiStatus } = useAiToolStatus({
+    enabled: open && step === "authorize",
+    loginPolling: open && step === "authorize",
+  });
   useEffect(() => {
-    if (!open || step !== "authorize") return;
-    let cancelled = false;
-
-    async function checkOnce() {
-      if (cancelled || completedRef.current) return;
-      try {
-        const res = await fetch("/api/ai-tools/status");
-        if (cancelled || !res.ok) return;
-        const data = (await res.json()) as AiToolsStatus;
-        if (cancelled || completedRef.current) return;
-        if (data.codex?.loggedIn) {
-          completedRef.current = true;
-          cancelled = true;
-          // Tidy up any ChatGPT/OpenAI tabs we opened during the flow before
-          // handing control back to the parent.
-          fetch("/api/desktop/close-auth-tabs", { method: "POST" }).catch(() => {});
-          onConnectedRef.current();
-          return;
-        }
-        if (data.codexLogin?.lastError) {
-          codexStartedRef.current = false;
-          setError(data.codexLogin.lastError);
-        }
-      } catch {
-        /* ignore — keep polling */
-      }
+    if (!open || step !== "authorize" || completedRef.current || !aiStatus) return;
+    if (aiStatus.codex?.loggedIn) {
+      completedRef.current = true;
+      fetch("/api/desktop/close-auth-tabs", { method: "POST" }).catch(() => {});
+      onConnectedRef.current();
+      return;
     }
-
-    checkOnce();
-    const timer = setInterval(checkOnce, STATUS_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [open, step]);
+    if (aiStatus.codexLogin?.lastError) {
+      codexStartedRef.current = false;
+      setError(aiStatus.codexLogin.lastError);
+    }
+  }, [open, step, aiStatus]);
 
   const cancelCodexLogin = useCallback(() => {
     if (!codexStartedRef.current) return;

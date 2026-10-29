@@ -1,3 +1,5 @@
+import { autoModelProvider } from "@rome/api-types/ai-tools";
+
 import type { ModelProvider, ModelTier, ProviderId } from "./agent-runner.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import {
@@ -358,10 +360,14 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
 
       const claude = providers.get("anthropic");
       const codex = providers.get("openai");
-      if (codex && providerUsable("openai", accountState.codex)) {
+      const autoProvider = autoModelProvider(
+        codex ? accountState.codex : null,
+        claude ? state.claude : null,
+      );
+      if (codex && autoProvider === "openai") {
         return { modelProvider: codex, model: resolveTierModel(codex) };
       }
-      if (claude && providerUsable("anthropic", state.claude)) {
+      if (claude && autoProvider === "anthropic") {
         return { modelProvider: claude, model: resolveTierModel(claude) };
       }
       // Rome credits pay only when no subscription can serve the tier, and only

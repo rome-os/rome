@@ -1,3 +1,4 @@
+import { useAiToolStatus } from "@/hooks/use-ai-tool-status";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import {
@@ -25,7 +26,6 @@ import { Safari } from "@/components/ui/safari";
 import { Stepper } from "@/components/ui/stepper";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-const STATUS_POLL_INTERVAL_MS = 2000;
 // Hold the success state on screen briefly so the user sees a confirmed
 // "signed in" before the modal auto-closes, rather than it just vanishing.
 const CONNECTED_DISPLAY_MS = 1400;
@@ -44,16 +44,6 @@ interface CodexDeviceLoginModalProps {
   open: boolean;
   onClose: () => void;
   onConnected: () => void;
-}
-
-interface AiToolsStatus {
-  codex?: { loggedIn?: boolean };
-  codexDeviceLogin?: {
-    running?: boolean;
-    userCode?: string | null;
-    verificationUrl?: string | null;
-    lastError?: string | null;
-  };
 }
 
 /**
@@ -149,50 +139,22 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
     void start();
   }, [open, start]);
 
-  // Poll AI status until codex reports loggedIn, and surface any failure the
-  // backend recorded (expired / declined). Callbacks are read through refs so
-  // the effect doesn't re-fire on every parent render.
+  const { data: aiStatus } = useAiToolStatus({ enabled: open, loginPolling: open });
   useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-
-    async function checkOnce() {
-      if (cancelled || completedRef.current) return;
-      try {
-        const res = await fetch("/api/ai-tools/status");
-        if (cancelled || !res.ok) return;
-        const data = (await res.json()) as AiToolsStatus;
-        if (cancelled || completedRef.current) return;
-        if (data.codex?.loggedIn) {
-          completedRef.current = true;
-          cancelled = true;
-          // Show the success confirmation, then hand back to the parent (which
-          // closes the modal) after a short beat.
-          setConnected(true);
-          setTimeout(() => onConnectedRef.current(), CONNECTED_DISPLAY_MS);
-          return;
-        }
-        const deviceLogin = data.codexDeviceLogin;
-        // Mirror the backend's error state exactly — null clears a stale error
-        // so it never lingers beside a freshly issued code.
-        setStatusError(deviceLogin?.lastError ?? null);
-        // Recover the code if our local copy is gone (modal reopened mid-flow).
-        if (deviceLogin?.userCode && deviceLogin.verificationUrl) {
-          setUserCode((prev) => prev ?? deviceLogin.userCode ?? null);
-          setVerificationUrl((prev) => prev ?? deviceLogin.verificationUrl ?? null);
-        }
-      } catch {
-        /* ignore — keep polling */
-      }
+    if (!open || completedRef.current || !aiStatus) return;
+    if (aiStatus.codex?.loggedIn) {
+      completedRef.current = true;
+      setConnected(true);
+      setTimeout(() => onConnectedRef.current(), CONNECTED_DISPLAY_MS);
+      return;
     }
-
-    checkOnce();
-    const timer = setInterval(checkOnce, STATUS_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [open]);
+    const deviceLogin = aiStatus.codexDeviceLogin;
+    setStatusError(deviceLogin?.lastError ?? null);
+    if (deviceLogin?.userCode && deviceLogin.verificationUrl) {
+      setUserCode((prev) => prev ?? deviceLogin.userCode ?? null);
+      setVerificationUrl((prev) => prev ?? deviceLogin.verificationUrl ?? null);
+    }
+  }, [open, aiStatus]);
 
   const cancel = useCallback(() => {
     // Fire even while the initial `/start` is still in flight: the backend

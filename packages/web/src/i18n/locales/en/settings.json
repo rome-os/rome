@@ -655,7 +655,14 @@
       "unavailable": "Usage is unavailable right now.",
       "fiveHour": "5H USED",
       "sevenDay": "7D USED",
-      "resetsIn": "Resets in <1>{{time}}</1>"
+      "resetsIn": "Resets in <1>{{time}}</1>",
+      "remaining": "Usage remaining",
+      "shortFiveHour": "5h",
+      "weekly": "Weekly",
+      "manage": "Manage in AI Tools",
+      "updatedJustNow": "Updated just now",
+      "updatedHours": "Updated {{count}} h ago",
+      "updated": "Updated {{count}} min ago"
     },
     "logIn": "Log In",
     "logOut": "Log Out",

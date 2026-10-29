@@ -1,7 +1,8 @@
 // @rstest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { render } from "@/test/query-render";
 import i18n from "@/i18n";
 import { ChatGPTLoginModal } from "./chatgpt-login-modal";
 
@@ -15,6 +16,19 @@ afterEach(() => {
 });
 
 describe("ChatGPTLoginModal", () => {
+  it("keeps detecting a completed browser login through the shared cache poll", async () => {
+    let loggedIn = false;
+    const onConnected = rs.fn();
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "/api/ai-tools/status") return Response.json({ codex: { loggedIn } });
+      return Response.json({ ok: true, started: true });
+    });
+    render(<ChatGPTLoginModal open onClose={() => {}} onConnected={onConnected} />);
+    await userEvent.click(await screen.findByRole("button", { name: "I've logged in" }));
+    loggedIn = true;
+    await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1), { timeout: 3500 });
+  });
+
   it("shows an asynchronous browser-login failure returned by AI tool status", async () => {
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);

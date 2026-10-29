@@ -1,7 +1,8 @@
 // @rstest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { render } from "@/test/query-render";
 import i18n from "@/i18n";
 import { AiToolsPanel } from "@/components/ai-tools-panel";
 
@@ -24,16 +25,19 @@ describe("AI Tools refresh", () => {
     const refreshResponse = new Promise<Response>((resolve) => {
       resolveRefresh = resolve;
     });
+    let refreshed: unknown;
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
-        return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+        return ok(refreshed ?? { claude: { loggedIn: false }, codex: { loggedIn: false } });
       }
       if (url === "/api/ai-tools/anthropic-compatible-providers") {
         return ok({ providers: [], configured: null });
       }
       if (url === "/api/ai-tools/refresh" && init?.method === "POST") {
-        return await refreshResponse;
+        const response = await refreshResponse;
+        refreshed = await response.json();
+        return response;
       }
       return ok({});
     }) as typeof fetch);
@@ -77,7 +81,18 @@ describe("AI Tools refresh", () => {
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
-        return ok({ claude: { loggedIn: true, usage: snapshot(100) }, codex });
+        return ok({
+          claude: {
+            loggedIn: true,
+            usage:
+              refreshCount === 0
+                ? snapshot(100)
+                : refreshCount === 1
+                  ? { ...snapshot(100), error: "Claude usage request failed with HTTP 429" }
+                  : snapshot(2),
+          },
+          codex,
+        });
       }
       if (url === "/api/ai-tools/refresh") {
         refreshCount += 1;

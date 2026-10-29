@@ -987,3 +987,106 @@ describe("AIToolState", () => {
     });
   });
 });
+
+describe("AI tool state change subscription", () => {
+  it("publishes refresh, live usage, failures, expiry-on-read and auth revocation, until unsubscribed", async () => {
+    const state = createAIToolState({
+      probes: probes(),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    const observed: ReturnType<typeof state.get>[] = [];
+    const unsubscribe = state.subscribe(() => observed.push(state.get()));
+    await state.refresh();
+    expect(observed.at(-1)?.claude.loggedIn).toBe(true);
+    state.applyLiveUsage("anthropic", {
+      checkedAt: new Date().toISOString(),
+      source: "event",
+      fiveHour: { usedPercent: 100, resetsAt: new Date(Date.now() - 1).toISOString() },
+    });
+    expect(state.get().claude.quotaExhausted).toBe(false);
+    expect(observed.at(-1)?.claude.quotaExhausted).toBe(false);
+    state.markQuotaExhausted("anthropic");
+    expect(observed.at(-1)?.claude.quotaExhausted).toBe(true);
+    await state.markAuthRevoked("anthropic");
+    expect(observed.at(-1)?.claude.loggedIn).toBe(false);
+    const count = observed.length;
+    unsubscribe();
+    await state.refresh();
+    expect(observed).toHaveLength(count);
+    state.close();
+  });
+
+  it.each([
+    "environment",
+    "stored-compatible",
+  ])("ignores subscription events for %s auth", async (authMethod) => {
+    const state = createAIToolState({
+      probes: probes({ claudeStatus: async () => ({ loggedIn: true, authMethod }) }),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    await state.refresh();
+    const changed = rs.fn();
+    state.subscribe(changed);
+    state.applyLiveUsage("anthropic", {
+      checkedAt: "now",
+      source: "event",
+      fiveHour: { usedPercent: 100 },
+    });
+    expect(state.get().claude.usage).toBeUndefined();
+    expect(state.get().claude.quotaExhausted).toBe(false);
+    expect(changed).not.toHaveBeenCalled();
+    state.close();
+  });
+
+  it("keeps a live event newer than an in-flight OAuth probe", async () => {
+    let resolve!: (usage: AIToolUsageStatus) => void;
+    const state = createAIToolState({
+      probes: probes({
+        claudeUsage: () =>
+          new Promise((done) => {
+            resolve = done;
+          }),
+      }),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    const refresh = state.refresh("anthropic");
+    const usage = {
+      checkedAt: new Date().toISOString(),
+      source: "event",
+      fiveHour: { usedPercent: 75 },
+    };
+    state.applyLiveUsage("anthropic", usage);
+    resolve({ ...usage, source: "old probe", fiveHour: { usedPercent: 20 } });
+    await refresh;
+    expect(state.get().claude.usage).toEqual(usage);
+    state.close();
+  });
+});
+
+it("applies live exhaustion and recovery without another usage probe", async () => {
+  const claudeUsage = rs.fn(async () => null);
+  const state = createAIToolState({
+    probes: probes({ claudeUsage }),
+    startRefresh: false,
+    refreshIntervalMs: null,
+  });
+  await state.refresh("anthropic");
+  const reset = new Date(Date.now() + 60_000).toISOString();
+  state.applyLiveUsage("anthropic", {
+    checkedAt: new Date().toISOString(),
+    source: "event",
+    fiveHour: { usedPercent: 100, resetsAt: reset },
+  });
+  expect(state.get().claude).toMatchObject({ quotaExhausted: true, quotaExhaustedUntil: reset });
+  state.applyLiveUsage("anthropic", {
+    checkedAt: new Date().toISOString(),
+    source: "event",
+    fiveHour: { usedPercent: 29, resetsAt: reset },
+  });
+  expect(state.get().claude.quotaExhausted).toBe(false);
+  expect(claudeUsage).toHaveBeenCalledTimes(1);
+  state.close();
+});

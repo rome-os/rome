@@ -1,3 +1,4 @@
+import { claudeUsesApiKey } from "@rome/api-types/ai-tools";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
 import {
@@ -20,6 +21,7 @@ const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 // the resolver sends none to an exhausted provider.
 const QUOTA_FALLBACK_MS = 5 * 60 * 60 * 1000;
 
+export { claudeUsesApiKey } from "@rome/api-types/ai-tools";
 export type AIToolProviderId = "openai" | "anthropic";
 
 export interface ProviderState
@@ -46,11 +48,14 @@ export interface AIToolStateValue {
 }
 
 export interface AIToolState {
-  /** Reports quotaExhausted as false once its quotaExhaustedUntil has passed. */
+  /** Clears expired quota on read and publishes that change. */
   get(): AIToolStateValue;
   refresh(provider?: AIToolProviderId): Promise<AIToolStateValue>;
   markAuthRevoked(provider: AIToolProviderId): Promise<void>;
   markQuotaExhausted(provider: AIToolProviderId): void;
+  applyLiveUsage(provider: AIToolProviderId, usage: AIToolUsageStatus): void;
+  /** Runs synchronously after mutations. Does not replay a snapshot. */
+  subscribe(listener: () => void): () => void;
   close(): void;
 }
 
@@ -165,11 +170,6 @@ function applyStatus(target: ProviderState, status: AIToolStatusProbeResult): vo
   target.anthropicCompatible = status.anthropicCompatible;
 }
 
-/** Claude API-key-backed providers do not participate in subscription usage limits. */
-export function claudeUsesApiKey(state: ProviderState): boolean {
-  return state.authMethod === "stored-compatible" || state.authMethod === "environment";
-}
-
 export function createAIToolState(options: CreateAIToolStateOptions): AIToolState {
   const probes: AIToolStateProbes = {
     claudeStatus: () => getClaudeStatus(options.settingsRepo),
@@ -180,6 +180,17 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     codex: { quotaExhausted: false, solAccess: false, lunaAccess: false },
     claude: { quotaExhausted: false },
   };
+  const listeners = new Set<() => void>();
+  const notify = (): void => {
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch (error) {
+        log.warn("AI tool state listener failed", { error: getErrorMessage(error) });
+      }
+    }
+  };
+  const usageRevision: Record<AIToolProviderId, number> = { openai: 0, anthropic: 0 };
   // The hourly probe and every failed run re-confirm an exhausted provider, so
   // only a change from the last logged state is logged.
   const loggedQuotaExhausted: Record<AIToolProviderId, boolean> = {
@@ -222,6 +233,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     return true;
   };
   const refreshProvider = async (provider: AIToolProviderId): Promise<void> => {
+    const revision = usageRevision[provider];
     if (provider === "anthropic") {
       const [status, usage] = await Promise.allSettled([
         probes.claudeStatus(),
@@ -234,7 +246,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         delete value.claude.quotaExhaustedUntil;
         delete value.claude.usage;
       } else {
-        applyUsage(value.claude, usage);
+        if (revision === usageRevision[provider]) applyUsage(value.claude, usage);
       }
       return;
     }
@@ -248,6 +260,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       const previousCodexLogin = value.codex.loggedIn;
       applyStatus(value.codex, status.value);
       Object.assign(value.codex, deriveCodexModelAccess(status.value));
+      notify();
       // A login change can restart Codex under the usage probe above, so ask
       // the process that serves the new login. The first observation at boot
       // has no earlier probe result to replace.
@@ -256,7 +269,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       }
     }
     const [usage] = await usageProbe;
-    applyUsage(value.codex, usage);
+    if (revision === usageRevision[provider]) applyUsage(value.codex, usage);
     options.onCodexRefreshed?.();
   };
 
@@ -272,6 +285,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     logExpiry(provider);
     const pending = refreshProvider(provider).finally(() => {
       logQuotaChange(provider, "usage check");
+      notify();
       if (refreshesInFlight.get(provider) === pending) {
         refreshesInFlight.delete(provider);
       }
@@ -287,6 +301,18 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       logExpiry("openai");
       logExpiry("anthropic");
       const now = Date.now();
+      let expired = false;
+      for (const target of [value.codex, value.claude]) {
+        if (
+          target.quotaExhausted &&
+          target.quotaExhaustedUntil &&
+          Date.parse(target.quotaExhaustedUntil) <= now
+        ) {
+          target.quotaExhausted = false;
+          expired = true;
+        }
+      }
+      if (expired) notify();
       return {
         codex: readProviderState(value.codex, now),
         claude: readProviderState(value.claude, now),
@@ -314,6 +340,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         value.codex.lunaAccess = false;
       }
       notifyCodexLoginChanged(previousCodexLogin);
+      notify();
     },
     markQuotaExhausted(provider) {
       // A failure before the usage reset agrees with the snapshot, so the
@@ -340,6 +367,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       logExpiry(provider);
       if (!applyRuntimeSignal()) return;
       logQuotaChange(provider, "failed run");
+      notify();
 
       // Keep this newer runtime signal after any older probe settles.
       const olderRefresh = refreshesInFlight.get(provider);
@@ -349,10 +377,27 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         pendingReplays[provider] -= 1;
         const applied = applyRuntimeSignal();
         logQuotaChange(provider, applied ? "failed run" : "usage check");
+        notify();
       };
       void olderRefresh.then(replay, replay);
     },
+    applyLiveUsage(provider, usage) {
+      const target = provider === "openai" ? value.codex : value.claude;
+      if (provider === "anthropic" && claudeUsesApiKey(target)) return;
+      // A probe started before this event must not replace its newer usage.
+      usageRevision[provider] += 1;
+      applyUsage(target, { status: "fulfilled", value: usage });
+      logQuotaChange(provider, usage.source);
+      notify();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     close() {
+      listeners.clear();
       if (timer) clearInterval(timer);
     },
   };
