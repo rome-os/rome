@@ -397,7 +397,9 @@ export function ConnectionsSection({
           </ListCollection>
         ) : null}
 
+        {/* Keyed by service, so each opens fresh, never mid-confirmation. */}
         <ComposioServiceDialog
+          key={openService ?? "none"}
           row={composioServices.rows.connected.find((row) => row.slug === openService) ?? null}
           busy={busySlug !== null}
           onReconnect={(row) => void connectComposio(row)}

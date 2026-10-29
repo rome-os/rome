@@ -198,12 +198,13 @@ class ComposioApiHandler implements RomeAppApiHandler {
    *  connections, so it leaves out their catalog entries and the accounts
    *  core bridges into Composio for them. */
   private handleCatalog(): Response {
-    const items = CATALOG.map(({ slug, name, scope, glyph, romeManaged }) => ({
+    const items = CATALOG.map(({ slug, name, scope, glyph }) => ({
       slug,
       name,
       scope,
       glyph,
-      romeManaged: romeManaged === true,
+      // The same set the connect and disconnect routes guard on.
+      romeManaged: isRomeManagedToolkit(slug),
     }));
     return Response.json({ items });
   }

@@ -583,11 +583,13 @@ describe("ConnectionsSection — Composio services", () => {
     { id: "c", toolkitSlug: "github", status: "ACTIVE" },
   ];
   let failAccounts = false;
+  let gmailGone = false;
   let calls: { url: string; method: string }[] = [];
 
   beforeEach(() => {
     calls = [];
     failAccounts = false;
+    gmailGone = false;
     rs.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
@@ -596,7 +598,9 @@ describe("ConnectionsSection — Composio services", () => {
       if (url === "/api/apps/connector/connectors" && method === "GET")
         return failAccounts
           ? Response.json({ error: "composio_unavailable" }, { status: 502 })
-          : Response.json({ items: accounts });
+          : Response.json({
+              items: accounts.filter((account) => !(gmailGone && account.toolkitSlug === "gmail")),
+            });
       if (url === "/api/apps/connector/connectors" && method === "POST")
         return Response.json({ authorizationUrl: "https://composio.example/auth/linear" });
       if (url.startsWith("/api/apps/connector/connectors/") && method === "DELETE")
@@ -688,5 +692,36 @@ describe("ConnectionsSection — Composio services", () => {
     failAccounts = false;
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByRole("button", { name: "Open Gmail" })).toBeTruthy();
+  });
+
+  it("shows no Composio row while the catalog has not loaded", async () => {
+    rs.mocked(globalThis.fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/apps/connector/catalog")
+        return Response.json({ error: "unavailable" }, { status: 503 });
+      if (url === "/api/apps/connector/connectors") return Response.json({ items: accounts });
+      return new Response(url === "/api/approvals" ? "[]" : "{}", { status: 200 });
+    });
+    renderSection([oauth("github", "authorized")], signedIn());
+    expect(await screen.findByText("Couldn't load the Composio services.")).toBeTruthy();
+    // Without the catalog, the bridged GitHub account could pass for a service.
+    expect(screen.queryByRole("button", { name: "Open github" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open Gmail" })).toBeNull();
+  });
+
+  it("opens the next service fresh after one vanishes mid-confirmation", async () => {
+    renderSection([oauth("github", "authorized")], signedIn());
+    fireEvent.click(await screen.findByRole("button", { name: "Open Gmail" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
+    expect(within(screen.getByRole("dialog")).getByText(/Disconnect Gmail\?/)).toBeTruthy();
+    // Gmail is disconnected elsewhere; the refetch on return drops its row,
+    // which closes the dialog without going through its Close button.
+    gmailGone = true;
+    fireEvent(window, new Event("visibilitychange"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(await screen.findByRole("button", { name: "Open Notion" }));
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Reconnect" }),
+    ).toBeTruthy();
   });
 });

@@ -48,7 +48,11 @@ export function useComposioServices({
     // back, however soon, so focus always refetches.
     staleTime: 0,
   });
-  const rows = composioServiceRows(catalog.data ?? [], signedIn ? (accounts.data ?? []) : []);
+  // The catalog says which toolkits Rome manages, so no row shows before it
+  // loads: an account read without it could be a bridged GitHub one.
+  const rows = catalog.data
+    ? composioServiceRows(catalog.data, signedIn ? (accounts.data ?? []) : [])
+    : { connected: [], available: [] };
   return {
     rows,
     error: catalog.error ?? (signedIn ? accounts.error : null),
